@@ -27,6 +27,7 @@
     "check:action-pin-drift": "node scripts/check-action-pin-drift.mjs",
     "check:merge-gate-identities": "node scripts/check-merge-gate-identities.mjs",
     "check:dependabot-ignore-shape": "node scripts/check-dependabot-ignore-shape.mjs",
+    "check:dependabot-pin-coverage": "node scripts/check-dependabot-pin-coverage.mjs",
     "check:brace-expansion-override": "node scripts/check-brace-expansion-override.mjs",
     "check:routetree": "node scripts/check-routetree-fresh.mjs",
     "check:release-version": "node scripts/check-release-version.mjs",

@@ -28,17 +28,26 @@ updates:
           - "node-forge"
           - "ssh2"
           - "ssh2-sftp-client"
-      # The WebRTC stack is grouped (not batched into non-critical) because the
-      # web inbound bound drives peerjs internals and parses the peerjs-js-binarypack
-      # wire format past their public APIs, so every bump must re-verify that coupling
-      # before it merges -- see the "Upgrading the PeerJS Stack" checklist in
+      # The WebRTC stack is grouped (not batched into non-critical) because
+      # every member is reached past its public API, so each bump must
+      # re-verify that coupling before it merges: the web inbound bound drives
+      # peerjs internals and parses the peerjs-js-binarypack wire format, and
+      # the CLI transport drives werift's RTCPeerConnection and reads its SCTP
+      # send queues. The two halves speak one data channel to each other, so a
+      # bump on either side is reviewed against both -- see the "Upgrading the
+      # PeerJS Stack" and "Upgrading the CLI WebRTC peer" checklists in
       # docs/spec/DEPENDENCY_PINS.md, mirroring the SFTP stack's exact-pin +
       # review treatment.
       webrtc-stack:
         patterns:
           - "peerjs"
           - "peerjs-js-binarypack"
-      # Batch routine dependency bumps to reduce noise.
+          - "werift"
+      # Batch routine dependency bumps to reduce noise. A package whose upgrade
+      # carries a checklist in docs/spec/DEPENDENCY_PINS.md is excluded below,
+      # or its bump rides this batch and is skimmed as routine instead;
+      # scripts/check-dependabot-pin-coverage.mjs holds that pairing rather than
+      # this comment.
       non-critical:
         update-types:
           - "minor"
@@ -51,6 +60,7 @@ updates:
           - "ssh2-sftp-client"
           - "peerjs"
           - "peerjs-js-binarypack"
+          - "werift"
           # Exact-pinned, matching-critical: both parties' runtime behavior for
           # these must stay byte-identical or PSI key derivation silently
           # diverges. Excluded so each bump is an individual, reviewable PR

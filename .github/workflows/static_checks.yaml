@@ -141,6 +141,14 @@ jobs:
       # it could receive.
       - name: Dependabot ignore shape
         run: npm run check:dependabot-ignore-shape
+      # A dependency reached past its public API carries an upgrade checklist in
+      # docs/spec/DEPENDENCY_PINS.md, which only fires if a bump is read rather
+      # than skimmed as one of a batch. This reads the packages those checklists
+      # name and fails on any the npm Dependabot groups would swallow into a
+      # batched pull request without excluding -- the drift where a checklist is
+      # written and the config never hears about it.
+      - name: Dependabot pin coverage
+        run: npm run check:dependabot-pin-coverage
       # The root brace-expansion override answers an advisory no bump on the
       # dependency path can reach, and its exit condition is an upstream release
       # rather than anything in this repo. This fails once the committed lockfile
