@@ -812,6 +812,78 @@ test("a record the run was asked for and could not write warns on fd 3 and exits
   expect(fs.existsSync(path.join(tmpDir, "rec-b.json"))).toBe(true);
 });
 
+// The fixed text runProtocol reports when records were asked for and runExchange
+// returned no audit. It names no destination -- none was ever resolved -- so it
+// says instead that nothing was written and that the run must not be re-run.
+const NO_RECORD_BUILT_WARNING =
+  "no audit record could be built for this exchange, so none was written; " +
+  "the exchange and its results succeeded and need not be re-run";
+
+test(
+  "a record that could not be built warns and exits non-zero",
+  { timeout: 10_000 },
+  async () => {
+    // The other missing-artifact shape: records are enabled, the exchange and its
+    // results succeed, and runExchange returns no audit at all -- the record could
+    // not be BUILT, warned with its cause inside runExchange, which a supervisor
+    // that discards stderr never sees. The default runExchange mock returns
+    // exactly that shape. Party B is asked for no record, so the single warning
+    // and the non-zero exit are provably party A's.
+    const recordA = path.join(tmpDir, "rec-a.json");
+    const exitCodeBefore = process.exitCode;
+    mockFd3Open();
+    try {
+      await Promise.all([
+        runProtocol(
+          {
+            channel: "filedrop",
+            path: dropDir,
+            options: { pollIntervalMs: 1 },
+          },
+          null,
+          minimalPrepared,
+          undefined,
+          -1,
+          "test-a",
+          { recordFile: recordA },
+          undefined,
+          undefined,
+          { eventStream: true },
+        ),
+        runProtocol(
+          {
+            channel: "filedrop",
+            path: dropDir,
+            options: { pollIntervalMs: 1 },
+          },
+          null,
+          minimalPrepared,
+          undefined,
+          -1,
+          "test-b",
+        ),
+      ]);
+      expect(process.exitCode).toBe(69);
+    } finally {
+      process.exitCode = exitCodeBefore;
+      vi.mocked(fs.fstatSync).mockRestore();
+    }
+
+    const lines = takeFd3Lines();
+    expect(lines.map((l) => l.type)).toEqual([
+      "stages",
+      "warning",
+      "metrics",
+      "result",
+    ]);
+    expect(lines[1].message).toBe(NO_RECORD_BUILT_WARNING);
+    expect(lines[3].resultWritten).toBe(true);
+    // What the warning asserts: neither the record nor its keys reached disk.
+    expect(fs.existsSync(recordA)).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, "rec-a.keys.json"))).toBe(false);
+  },
+);
+
 // --- One-sided result withholding via runProtocol ----------------------------
 
 test("writes no result file for a non-receiving party when the exchange withholds the table", async () => {

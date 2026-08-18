@@ -71,7 +71,7 @@ Emitted when a protocol stage completes, carrying how long it ran so a superviso
 
 ### `warning`
 
-Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWarning`, the cross-party host-key divergence notice -- a security signal a supervisor that discards stderr would otherwise never see -- and one per audit artifact the run was asked for and could not produce (the self-attested exchange record, or the dual-signed receipt), naming the destination it could not be written to. A warning does not end the run.
+Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWarning`, the cross-party host-key divergence notice -- a security signal a supervisor that discards stderr would otherwise never see -- and one per audit artifact the run was asked for and could not produce (the self-attested exchange record, or the dual-signed receipt). An audit-artifact warning takes one of two shapes: an artifact that was built but could not be written names the destination it could not be written to, while an exchange record that could not be built at all names no destination and states that none was written and that the run need not be re-run. A warning does not end the run.
 
 An audit-artifact warning is the one warning that also moves the exit code: the run exits `EX_UNAVAILABLE` (69) while its terminal event stays `result`, so a supervisor reads "the exchange succeeded and must not be re-run, and the artifact it was asked for is missing" from the pair. Every other warning leaves the exit code alone.
 
