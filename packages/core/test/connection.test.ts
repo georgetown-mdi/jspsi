@@ -940,6 +940,10 @@ test("file-sync-only options do not survive a webrtc parse", () => {
       lockless_rendezvous: true,
       peer_id: "party-a",
       retain_files: true,
+      // timestamp_in_filename satisfies FileSyncOptions' cross-field refines,
+      // so under the swap this fixture parses and the keys below survive to
+      // fail the assertions -- rather than tripping an unrelated refine first.
+      timestamp_in_filename: true,
     },
   });
   expect(result.channel).toBe("webrtc");
@@ -947,6 +951,7 @@ test("file-sync-only options do not survive a webrtc parse", () => {
   expect(result.options).not.toHaveProperty("locklessRendezvous");
   expect(result.options).not.toHaveProperty("peerId");
   expect(result.options).not.toHaveProperty("retainFiles");
+  expect(result.options).not.toHaveProperty("timestampInFilename");
 });
 
 // --- STUN URI format ---------------------------------------------------------

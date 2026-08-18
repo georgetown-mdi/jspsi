@@ -19,9 +19,11 @@ import { ConnectionError } from "./connection/messageConnection";
  *
  * The walk follows `cause` on any non-null object link, not only an `Error`, so
  * a plain object interposed in the chain does not truncate it; a predicate that
- * cares narrows with its own `instanceof`. A seen-set guards against a
- * pathological `cause` cycle, so a hostile or malformed chain terminates rather
- * than spinning.
+ * cares narrows with its own `instanceof`. A seen-set stops a `cause` cycle
+ * from being revisited; it does not bound a chain of distinct links, and a
+ * throwing `cause` accessor propagates to the caller. Rendering an arbitrary
+ * chain is {@link sanitizeErrorForDisplay}'s job, which carries the depth
+ * bound and the guarded read this helper deliberately does not.
  */
 export function causeChainSome(
   error: unknown,

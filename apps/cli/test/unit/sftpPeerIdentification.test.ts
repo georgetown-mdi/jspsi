@@ -234,6 +234,15 @@ describe("isPreIdentificationDialFailure gates on the stack's own wording", () =
     expect(isPreIdentificationDialFailure(wrapped)).toBe(true);
   });
 
+  test("walks through a non-Error link interposed in the chain", () => {
+    const rejection = new Error(
+      "getConnection: connect ECONNRESET 10.0.0.4:22",
+    );
+    const interposed = { cause: rejection };
+    const outer = new Error("the SFTP dial failed", { cause: interposed });
+    expect(isPreIdentificationDialFailure(outer)).toBe(true);
+  });
+
   test("recognizes a reset at accept", () => {
     expect(
       isPreIdentificationDialFailure(
