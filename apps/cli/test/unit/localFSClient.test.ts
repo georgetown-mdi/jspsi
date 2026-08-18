@@ -463,6 +463,37 @@ test("a short writev past a whole chunk drops that chunk from the rest", async (
   );
 });
 
+test("a writev that stops making progress is surfaced, not looped on", async () => {
+  // The re-offer loop above is what a short write costs; a handle that takes
+  // NOTHING while bytes remain is what it must not pay forever. Zero bytes
+  // written is not a short write to complete -- re-offering the identical list
+  // to a handle that just refused it makes no progress -- so the loop stops and
+  // says so rather than spinning on a live file handle. Driven with a spy that
+  // reports 0 of 7 bytes taken, exactly once: a second call would BE the spin.
+  const dest = path.join(dir, "writev-no-progress.bin");
+  const handle = await fs.open(dest, "w");
+  let calls = 0;
+  const writevSpy = vi
+    .spyOn(handle, "writev")
+    .mockImplementation(async (buffers: readonly NodeJS.ArrayBufferView[]) => {
+      calls += 1;
+      return { bytesWritten: 0, buffers: buffers as Uint8Array[] };
+    });
+  const openSpy = vi.spyOn(fs, "open").mockResolvedValue(handle);
+  try {
+    const header = Buffer.from([0x01, 0x02, 0x03, 0x04]);
+    const payload = new Uint8Array([0xde, 0xad, 0xbe]);
+    await expect(client.put([header, payload], dest)).rejects.toThrow(
+      "stopped making progress",
+    );
+  } finally {
+    openSpy.mockRestore();
+    writevSpy.mockRestore();
+    await handle.close().catch(() => {});
+  }
+  expect(calls).toBe(1);
+});
+
 test("chunk-list put surfaces the writev error even when close also fails", async () => {
   // On the chunk-list path a failing close() must not replace (mask) the writev
   // failure: the caller should see WHY the write failed, not an incidental close

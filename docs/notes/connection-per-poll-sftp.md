@@ -69,8 +69,9 @@ budget -- whose operative default is **three** retries (a fast-fail in seconds),
 not the seven-day sanity ceiling that bounds only the config field -- and the op
 then rejects, poll's catch emits an error, and the connection bridge makes that
 terminal. A vanished or silent peer trips the receive-inactivity deadline, which is
-set to `peer_timeout_ms` (default one hour). A stalled send is bounded by its
-time-to-live (also `peer_timeout_ms`). These bounds terminate a dead channel
+set to `peer_timeout_ms` (default one hour). A stalled send is bounded by the same
+peer-inactivity budget, armed afresh for each send's wait on the peer (see
+[FILE_SYNC.md](../spec/FILE_SYNC.md)). These bounds terminate a dead channel
 independently of the mid-exchange reconnection budget; the budget is what
 additionally bounds the *succeeding-but-thrashing* case -- a server that re-dials
 cleanly every cycle yet keeps capping the session -- which none of them catches.

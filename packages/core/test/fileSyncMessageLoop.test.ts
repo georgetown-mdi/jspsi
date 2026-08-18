@@ -714,6 +714,95 @@ describe("FileSyncMessageLoop counter commit points", () => {
     }
   });
 
+  test("retain: each send arms its own ack-wait budget, so a long exchange is not failed by an earlier one", async () => {
+    // The retain-mode half of the same property, on the other wait: in retain
+    // mode the peer never deletes the message, so the send gate is the ack
+    // marker's appearance rather than the message's disappearance. That wait is
+    // re-armed per send too -- here two consecutive waits each spend most of the
+    // budget and their sum passes it, which one absolute deadline would fail.
+    const files = new Map<string, Buffer>();
+    const f = makeLoop(
+      { retainFiles: true, timestampInFilename: true, pollingFrequency: 1 },
+      {},
+      files,
+    );
+    f.budget.ms = 1_000;
+    const clock = virtualClock(f, 400);
+    try {
+      // The peer acks on the SECOND listing of each wait -- 800 virtual ms,
+      // inside one budget but not inside two. (Second, where the delete-mode
+      // pair above says third, for the same number of in-loop iterations: that
+      // wait spends one extra listing on the pre-check before its loop.) Each
+      // call REPLACES the previous wrapper over the clock's list() rather than
+      // nesting on top of it: a nested wrapper carries its counter over from the
+      // earlier wait, so it would fire on the next wait's very FIRST listing and
+      // that wait would never reach a second listing of its own.
+      const clockList = f.client.list.bind(f.client);
+      const ackedOnListing: number[] = [];
+      const ackOnSecondList = () => {
+        let listings = 0;
+        let acked = false;
+        f.client.list = async (dir: string) => {
+          listings += 1;
+          if (listings >= 2 && f.loop.lastSentFile !== undefined) {
+            if (!acked) {
+              acked = true;
+              ackedOnListing.push(listings);
+            }
+            const ackName = ackMarkerName(
+              PEER,
+              f.loop.lastSentFile.slice(0, -".json".length),
+            );
+            files.set(`${DIR}/${ackName}`, Buffer.alloc(0));
+          }
+          return clockList(dir);
+        };
+      };
+
+      await expect(f.loop.send({ a: 1 })).resolves.toBeUndefined();
+      ackOnSecondList();
+      await expect(f.loop.send({ a: 2 })).resolves.toBeUndefined();
+      ackOnSecondList();
+      await expect(f.loop.send({ a: 3 })).resolves.toBeUndefined();
+      expect(f.loop.seq).toBe(3);
+      // Both waits ran to their OWN second listing, which is what makes the two
+      // waits above two full waits rather than one plus a short-circuit.
+      expect(ackedOnListing).toEqual([2, 2]);
+      // The exchange outlived one budget, which is the case an absolute deadline
+      // fails and this one must not.
+      expect(clock.elapsedMs()).toBeGreaterThan(f.budget.ms);
+    } finally {
+      clock.restore();
+    }
+  });
+
+  test("retain: a peer that never acks still times out inside one budget", async () => {
+    // The other half of the per-send ack budget: re-arming it must not make the
+    // wait unbounded. A peer that writes no ack is refused within one budget
+    // plus the poll step in flight when it expires.
+    const files = new Map<string, Buffer>();
+    const f = makeLoop(
+      { retainFiles: true, timestampInFilename: true, pollingFrequency: 1 },
+      {},
+      files,
+    );
+    f.budget.ms = 1_000;
+    const clock = virtualClock(f, 400);
+    try {
+      await expect(f.loop.send({ a: 1 })).resolves.toBeUndefined();
+      const expectedAck = ackMarkerName(
+        PEER,
+        f.loop.lastSentFile!.slice(0, -".json".length),
+      );
+      await expect(f.loop.send({ a: 2 })).rejects.toThrow(
+        `timed out waiting for ack ${expectedAck} from ${PEER}`,
+      );
+      expect(clock.elapsedMs()).toBeLessThanOrEqual(f.budget.ms + 400 * 2);
+    } finally {
+      clock.restore();
+    }
+  });
+
   test("retain: writeAck then lastAckedNNN then emit(data) then recvSeq++", async () => {
     const files = new Map<string, Buffer>();
     const f = makeLoop(

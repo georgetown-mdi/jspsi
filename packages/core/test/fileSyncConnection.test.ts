@@ -1819,7 +1819,11 @@ test("send removes the .tmp file in-process when the rename fails", async () => 
 
 test("send waits for a previous unconsumed message before writing the next", async () => {
   const { client, files } = makeMockClient();
-  const conn = await makeConnectedConn(client);
+  // A peer budget well clear of the 50 ms consumption delay below. The wait is
+  // armed with that budget at send() entry, so leaving the helper's 50 ms
+  // default in place would race the wait against the very delay it must sit
+  // through and fail the send with a spurious timeout on a slow run.
+  const conn = await makeConnectedConn(client, { peerTimeoutMs: 2_000 });
   conn.peerId = "stub-peer";
 
   // Simulate a message this connection sent that is still on disk (the peer's
@@ -2686,8 +2690,11 @@ test("poll() stops the poller on a stalled retain-mode ack-write, not advanced-a
 // promise) -- it does NOT throw -- so the failure can only come from the
 // consumer-layer budget, not from any per-op adapter wrapper (none of these tests
 // name one), which is what makes the backstop op-agnostic. A short peerTimeoutMs
-// keeps the wall-clock wait small; timeToLiveMs is left large so the rendezvous /
-// send-wait loops never fire first and the budget race is the sole cause.
+// keeps the wall-clock wait small; timeToLiveMs is left large so the rendezvous
+// loop never fires first and the budget race is the sole cause. The send-path
+// waits do not compete: no connection here has an outstanding message or a
+// pending ack, so send() reaches the transport call without entering one -- and
+// a wait it did enter would be armed from this same peer budget, not the TTL.
 
 test("send() fails within the peer budget when the server withholds the put callback", async () => {
   const { client } = makeMockClient();
@@ -4919,7 +4926,9 @@ test("send() completes without spinning on a foreign <thisId>-<digits>.json (sit
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, {
     pollingFrequency: 10,
-    timeToLiveMs: 200, // a regression fails fast here instead of hanging the run
+    // The budget a send arms for its wait, so a regression that counted the
+    // foreign file as outstanding fails fast here instead of hanging the run.
+    peerTimeoutMs: 200,
   });
   conn.peerId = "stub-peer";
 
@@ -5282,11 +5291,12 @@ test("synchronize() transport failure is not a UsageError", async () => {
 });
 
 test("send() message timeout throws UsageError", async () => {
-  // A stale unconsumed message that outlasts the TTL is a send-timeout usage
-  // error: the caller is responsible for ensuring the peer is polling.
+  // A stale unconsumed message that outlasts the peer-inactivity budget this
+  // send armed is a send-timeout usage error: the caller is responsible for
+  // ensuring the peer is polling.
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, {
-    timeToLiveMs: 150,
+    peerTimeoutMs: 150,
     pollingFrequency: 10,
   });
   conn.peerId = "stub-peer";
@@ -6184,11 +6194,10 @@ function makeRetainConn(
   client: FileTransportClient,
   id: string,
   peerId: string,
-  timeToLiveMs = 5_000,
 ): FileSyncConnection {
   const conn = new FileSyncConnection(client, {
     pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + timeToLiveMs),
+    timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
     locklessRendezvous: true,
     timestampInFilename: true,
@@ -6988,23 +6997,27 @@ test("I8: send() whose rename throws -- seq unchanged, temp file cleaned up", as
 test("I8: retain send() ack-gate list throws -- send rejects rather than spinning", async () => {
   // Rule (a) + gateway liveness: when list() throws inside the ack-gate loop
   // (waiting for the peer's ack after the first send), send() must surface the
-  // error rather than looping silently. Without this, a broken list() path would
-  // spin until the TTL expires, which takes too long for a unit test.
+  // error rather than looping silently.
   const { client } = makeMockClient();
   const id = "sender-me";
   const peerId = "peer-receiver";
 
   const conn = new FileSyncConnection(client, {
     pollingFrequency: 10,
-    // Short TTL so a spin would be caught by the test runner.
-    timeToLive: new Date(Date.now() + 5_000),
     verbose: -1,
     locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
-  conn.connected = true;
-  conn.path = "/test";
+  // Opened with a short peer budget so a swallowed list error surfaces as a
+  // prompt send timeout rather than spinning: what bounds this wait is the
+  // budget the send arms, which an un-opened connection takes as the one-hour
+  // default.
+  await conn.open({
+    channel: "filedrop",
+    path: "/test",
+    options: { peerTimeoutMs: 200 },
+  });
   conn.id = id;
   conn.peerId = peerId;
 
@@ -7017,7 +7030,7 @@ test("I8: retain send() ack-gate list throws -- send rejects rather than spinnin
     throw new Error("synthetic list failure");
   };
 
-  // Second send must reject (not spin to TTL expiry).
+  // Second send must reject with the list failure, not spin out its budget.
   await expect(conn.send({ second: true })).rejects.toThrow(
     "synthetic list failure",
   );
@@ -8095,38 +8108,65 @@ test("poll() terminal: a message envelope seq above MAX_SAFE_INTEGER is rejected
   expect((errors[0] as Error).message).toContain("exceeds safe range");
 });
 
-test("retain mode: send() honors an ack already on disk even when the TTL has elapsed", async () => {
-  // Regression guard for the ack-gate ordering: the loop checks for the
-  // qualifying ack BEFORE the deadline, so an ack present when send() is entered
-  // is honored rather than discarded as a spurious timeout.
+test("retain mode: send() honors an ack already on disk even when its peer budget is spent", async () => {
+  // Regression guard for the ack-gate ordering: the wait checks for the
+  // qualifying ack BEFORE its deadline, so an ack the peer has already written
+  // is honored rather than discarded as a spurious timeout. What bounds this
+  // wait is the peer-inactivity budget armed at THIS send (peerTimeoutMs, hence
+  // open() rather than a hand-flagged connection) -- the connection's timeToLive
+  // does not, so the elapsed condition has to be armed through that budget.
+  //
+  // It is armed by a clock that jumps two budgets on every reading: whatever
+  // value the wait arms its deadline from, every LATER reading is already past
+  // it. The real ordering never takes a later reading -- it lists, finds the
+  // ack, and breaks -- while a loop that consulted the deadline first would read
+  // a spent budget and throw before ever listing.
   const { client, files } = makeMockClient();
   const id = "sender-me";
   const peerId = "peer-receiver";
+  const PEER_BUDGET_MS = 100;
   const conn = new FileSyncConnection(client, {
     pollingFrequency: 10,
-    // TTL already in the past: a deadline-first loop would throw immediately.
-    timeToLive: new Date(Date.now() - 1),
     verbose: -1,
     locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
   });
-  conn.connected = true;
-  conn.path = "/test";
+  await conn.open({
+    channel: "filedrop",
+    path: "/test",
+    options: { peerTimeoutMs: PEER_BUDGET_MS },
+  });
   conn.id = id;
   conn.peerId = peerId;
 
-  // First send (seq=0) proceeds without the gate even with an elapsed TTL, and
-  // records the sent message as lastSentFile. Plant the ack of that message so
-  // the next send's gate finds it on its first check.
+  // First send (seq=0) passes the gate without waiting and records the sent
+  // message as lastSentFile. Plant the ack of that message so the next send's
+  // gate finds it on its first check.
   await conn.send({ n: 1 });
   const stem = lastSentStem(files, "/test", id);
   files.set(`/test/${peerId}-${stem}-ack.json`, Buffer.alloc(0));
 
-  // Must not throw a timeout: the ack is present, so send() proceeds and writes
-  // the next message even though the TTL has already elapsed.
-  await expect(conn.send({ n: 2 })).resolves.toBeUndefined();
-  expect(conn.seq).toBe(2);
+  const realNow = Date.now.bind(Date);
+  const origin = realNow();
+  let readings = 0;
+  Date.now = () => origin + readings++ * PEER_BUDGET_MS * 2;
+  let listings = 0;
+  const realList = client.list.bind(client);
+  client.list = async (p: string) => {
+    listings += 1;
+    return realList(p);
+  };
+
+  try {
+    await expect(conn.send({ n: 2 })).resolves.toBeUndefined();
+    expect(conn.seq).toBe(2);
+    // One listing: the ack was honored on the wait's first check, before the
+    // spent deadline could be consulted at all.
+    expect(listings).toBe(1);
+  } finally {
+    Date.now = realNow;
+  }
 });
 
 // --- unified ack marker: determinism, grammar routing, construct-and-match ---
@@ -8187,9 +8227,10 @@ test("delete mode: hasOutstandingMessage ignores a `<id>-...-ack.json` file (num
   // The delete-mode sender's outstanding-message scan uses the grammar
   // discriminant, so a marker this party wrote -- whose embedded byte count (42)
   // is all digits but whose terminal segment is `ack` -- is not mistaken for an
-  // unconsumed message. send() proceeds rather than spinning to the TTL.
+  // unconsumed message. send() proceeds rather than spinning out the budget it
+  // armed for the wait.
   const { client, files } = makeMockClient();
-  const conn = await makeConnectedConn(client, { timeToLiveMs: 300 });
+  const conn = await makeConnectedConn(client, { peerTimeoutMs: 300 });
   conn.id = "me";
   conn.peerId = "peer";
   files.set(`/test/me-peer-20260101T000000-000-42-ack.json`, Buffer.alloc(0));
@@ -8736,8 +8777,25 @@ test("poll(): an ack-shaped foreign file whose target is not a real protocol fil
 
 test("close() cancels an in-flight retain ack-wait promptly (site 4)", async () => {
   const { client } = makeMockClient();
-  const HUGE_TTL = 60_000;
-  const conn = makeRetainConn(client, "me", "peer", HUGE_TTL);
+  // The deadline cancellation has to beat is the peer-inactivity budget this
+  // send arms, so it is set through open() (a hand-flagged connection would
+  // silently take the one-hour default) and set large: retain mode skips
+  // close()'s terminal-frame drain, so a large budget costs the test nothing.
+  const HUGE_BUDGET_MS = 60_000;
+  const conn = new FileSyncConnection(client, {
+    pollingFrequency: 10,
+    verbose: -1,
+    locklessRendezvous: true,
+    timestampInFilename: true,
+    retainFiles: true,
+  });
+  await conn.open({
+    channel: "filedrop",
+    path: "/shared",
+    options: { peerTimeoutMs: HUGE_BUDGET_MS },
+  });
+  conn.id = "me";
+  conn.peerId = "peer";
   // seq>0 with a recorded lastSentFile drives send() into the ack-wait loop; the
   // peer never writes the ack, so it parks in this.wait (site 4).
   conn.seq = 1;
@@ -8766,16 +8824,19 @@ test("close() cancels an in-flight retain ack-wait promptly (site 4)", async () 
   const err = await outcome;
   expect(err).toBeInstanceOf(ConnectionClosedError);
   // Cancellation, not the deadline, unblocked the wait.
-  expect(Date.now() - start).toBeLessThan(HUGE_TTL / 2);
+  expect(Date.now() - start).toBeLessThan(HUGE_BUDGET_MS / 2);
 });
 
 test("close() cancels an in-flight delete-mode consume-wait promptly (site 5)", async () => {
   const { client, files } = makeMockClient();
-  const HUGE_TTL = 60_000;
+  // The same deadline cancellation must beat, on the delete-mode wait. It is
+  // kept modest rather than huge because this mode DOES run close()'s
+  // terminal-frame drain, whose own budget is min(fixed drain, this) and which
+  // this planted-and-never-consumed message makes spend the whole of it.
+  const PEER_BUDGET_MS = 500;
   const conn = await makeConnectedConn(client, {
     pollingFrequency: 10,
-    timeToLiveMs: HUGE_TTL,
-    peerTimeoutMs: 50,
+    peerTimeoutMs: PEER_BUDGET_MS,
   });
   conn.peerId = "peer";
   // An outstanding message nobody consumes drives send() into the consume-wait.
@@ -8794,9 +8855,16 @@ test("close() cancels an in-flight delete-mode consume-wait promptly (site 5)", 
   };
 
   const start = Date.now();
+  // Timed at the rejection rather than after close(): close()'s own drain spends
+  // the rest of the budget here, and it is the WAIT that cancellation had to
+  // unblock.
+  let rejectedAt = 0;
   const outcome = conn.send({ blocked: true }).then(
     () => null,
-    (err: unknown) => err,
+    (err: unknown) => {
+      rejectedAt = Date.now();
+      return err;
+    },
   );
 
   await reachedWait;
@@ -8804,7 +8872,7 @@ test("close() cancels an in-flight delete-mode consume-wait promptly (site 5)", 
 
   const err = await outcome;
   expect(err).toBeInstanceOf(ConnectionClosedError);
-  expect(Date.now() - start).toBeLessThan(HUGE_TTL / 2);
+  expect(rejectedAt - start).toBeLessThan(PEER_BUDGET_MS / 2);
 });
 
 test("close() cancels a parked rendezvous wait promptly (site 3)", async () => {
