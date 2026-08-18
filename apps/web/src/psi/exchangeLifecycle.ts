@@ -23,6 +23,27 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 const log = getLogger("exchangeLifecycle");
 
+/**
+ * The operator-facing notice for a clean close whose wait for the peer ended on
+ * its ceiling: every frame is out of this side's hands, but the signal that says
+ * the peer took the final one never came, so the exchange succeeded here without
+ * that being true of the partner.
+ *
+ * Composed here rather than in the transport because this is the layer that owns
+ * the run's operator vocabulary; the transport reports the fact
+ * (`onFinalFrameUnconfirmed`) and knows nothing about how a run words it.
+ * Composed RAW, like every warning this app raises itself: the seat that renders
+ * it escapes what it folds, once, at its display boundary (see
+ * `apps/web/src/bench/runWarnings.ts`). It names no duration -- the ceiling is a
+ * constant the operator did not set and cannot see -- and it names the check
+ * that resolves it, since this party's own result is not what is in doubt.
+ */
+export const FINAL_FRAME_UNCONFIRMED_WARNING =
+  "your partner did not confirm taking the final message before the wait " +
+  "for them ran out, so their exchange may have ended without it. Your own " +
+  "results are complete; check with your partner that their exchange " +
+  "finished before either of you relies on their copy.";
+
 /** A single rendered stage in the progress UI (a superset of core's
  * `ExchangeStageDefinition`, adding the UI {@link ProcessState}). */
 export interface StageDefinition {
@@ -209,6 +230,13 @@ export interface RunExchangeLifecycleOptions<
     category: ExchangeErrorCategory;
     error: unknown;
   }) => void;
+  /** A non-fatal, operator-relevant notice raised mid-run -- today only the
+   * clean close ending on its ceiling rather than on the peer's delivery signal
+   * ({@link FINAL_FRAME_UNCONFIRMED_WARNING}). Optional: an owner with no
+   * warning surface omits it and the notice is dropped. Never a terminal; the
+   * run still ends in exactly one `onResult`/`onError`, and a notice raised
+   * during teardown arrives after that one. */
+  onWarning?: (message: string) => void;
 }
 
 /**
@@ -251,6 +279,7 @@ export async function runExchangeLifecycle<
     onStage,
     onResult,
     onError,
+    onWarning,
   } = options;
 
   // Every owner-driven React seam is a no-op once the signal aborts, so an
@@ -265,6 +294,11 @@ export async function runExchangeLifecycle<
   const emitStage = ifLive(onStage);
   const emitResult = ifLive(onResult);
   const emitError = ifLive(onError);
+  // Warnings take the same live gate as every other seam, which on this one
+  // also means a cancelled run raises none: the teardown a cancellation drives
+  // reaches the close's ceiling exactly as a finished exchange can, and a
+  // partner notice on a run the operator stopped is noise.
+  const emitWarning = ifLive((message: string) => onWarning?.(message));
 
   let acquired: AcquiredExchange;
   try {
@@ -315,7 +349,9 @@ export async function runExchangeLifecycle<
       if (mc !== undefined) {
         // Flushing close: waits for the peer to take the final outbound frame
         // and detaches the channel listeners. This is the teardown-exclusive
-        // effect.
+        // effect. A wait that ends on its ceiling raises the operator warning
+        // through emitWarning (see openPeerMessageConnection), which is why
+        // teardown can emit after the run's terminal event.
         await mc.close();
       } else {
         // The wrapper never materialized (abort/timeout before the open await
@@ -359,7 +395,11 @@ export async function runExchangeLifecycle<
     // listener-first guarantee, F6), so the initiator's unprompted first frame --
     // now its first handshake frame -- is buffered rather than dropped no matter
     // how long this side then takes to read it.
-    mc = await openPeerMessageConnection(conn);
+    mc = await openPeerMessageConnection(conn, {
+      onFinalFrameUnconfirmed: () => {
+        emitWarning(FINAL_FRAME_UNCONFIRMED_WARNING);
+      },
+    });
     // Authenticate the peer before any PSI frame is sent: the P-256 key exchange
     // fails closed on a wrong secret or tampered/malformed frame, so an
     // unauthenticated peer never reaches runExchange. Its 32-byte session key is

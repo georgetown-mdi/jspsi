@@ -82,10 +82,12 @@ async function receiveUntilClosed(
 }
 
 /** Both parties' view of one send-then-close: when the peer actually read the
- * final frame, and when the sender's close resolved. */
+ * final frame, when the sender's close resolved, and how many times the sender
+ * reported the final frame unconfirmed over it. */
 interface CloseTiming {
   received: Array<ReceivedFrame>;
   closeResolvedAt: number;
+  unconfirmed: number;
 }
 
 async function sendThenClose(options: {
@@ -94,9 +96,11 @@ async function sendThenClose(options: {
 }): Promise<CloseTiming> {
   const { inviterPeer, acceptorPeer, inviterConn, acceptorConn } =
     await connectRendezvousPair(generateSharedSecret(), addressInfo);
+  let unconfirmed = 0;
   try {
     const senderMc = await openPeerMessageConnection(acceptorConn, {
       closeDrainTimeoutMs: options.closeDrainTimeoutMs,
+      onFinalFrameUnconfirmed: () => (unconfirmed += 1),
     });
     const receiverMc = await openPeerMessageConnection(inviterConn);
     const origin = performance.now();
@@ -113,7 +117,7 @@ async function sendThenClose(options: {
 
     const received = await receiving;
     await receiverMc.close();
-    return { received, closeResolvedAt };
+    return { received, closeResolvedAt, unconfirmed };
   } finally {
     inviterPeer.destroy();
     acceptorPeer.destroy();
@@ -132,7 +136,7 @@ function expectFinalFrame(frame: ReceivedFrame | undefined, size: number) {
 test("a clean close resolves only once the peer has read the final frame", async (ctx) => {
   if (!(await canReachServer(hostString)))
     return ctx.skip(serverUnreachableNote);
-  const { received, closeResolvedAt } = await sendThenClose({
+  const { received, closeResolvedAt, unconfirmed } = await sendThenClose({
     finalFrameSize: FINAL_FRAME_BYTES,
   });
 
@@ -141,6 +145,11 @@ test("a clean close resolves only once the peer has read the final frame", async
   // Both parties run in this one page, so the stamps share a clock: the close
   // resolving no earlier than the peer's read is the delivery guarantee itself.
   expect(closeResolvedAt).toBeGreaterThanOrEqual(received[1].at);
+  // A real peer's close against a real stack IS the delivery signal, so nothing
+  // is reported unconfirmed. Only the real stack can pin that direction, and it
+  // is the one that matters: a notice here would tell the operator of a healthy
+  // exchange to distrust it.
+  expect(unconfirmed).toBe(0);
 }, 120_000);
 
 test("the wait is what orders it: an unwaited close returns with the frame in flight", async (ctx) => {
@@ -150,7 +159,7 @@ test("the wait is what orders it: an unwaited close returns with the frame in fl
   // transport does not rely on. The frame still arrives here -- nothing tears
   // the page's peer connection down -- but the close no longer says so, which
   // is what the guarantee above is worth.
-  const { received, closeResolvedAt } = await sendThenClose({
+  const { received, closeResolvedAt, unconfirmed } = await sendThenClose({
     finalFrameSize: FINAL_FRAME_BYTES,
     closeDrainTimeoutMs: 0,
   });
@@ -158,4 +167,8 @@ test("the wait is what orders it: an unwaited close returns with the frame in fl
   expect(received.length).toBe(2);
   expectFinalFrame(received.at(-1), FINAL_FRAME_BYTES);
   expect(closeResolvedAt).toBeLessThan(received[1].at);
+  // The close ended on its ceiling with the frame in flight, which is exactly
+  // the state the operator has to be told about -- once: the frame arrived here
+  // only because nothing tore this page's stack down behind it.
+  expect(unconfirmed).toBe(1);
 }, 120_000);

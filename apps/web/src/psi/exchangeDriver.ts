@@ -42,9 +42,12 @@ export interface ExchangeDriverEvents<
   /** A non-fatal, operator-relevant notice raised mid-run -- the server-job
    * driver forwards each relay `warning` event's message here (e.g. the CLI's
    * cross-party host-key divergence notice, which the operator must be able to
-   * see). Optional: a consumer with no warning surface omits it and a driver
-   * then drops the message. Never a terminal -- the run continues to exactly
-   * one `onResult`/`onError`. The in-browser WebRTC driver emits none. */
+   * see), and the in-browser driver raises the transport's own (its clean close
+   * ending on the ceiling rather than on the peer's delivery signal). Optional:
+   * a consumer with no
+   * warning surface omits it and a driver then drops the message. Never a
+   * terminal -- the run continues to exactly one `onResult`/`onError`, though a
+   * notice raised while tearing down arrives after it. */
   onWarning?: (message: string) => void;
 }
 
@@ -79,7 +82,7 @@ export interface BrowserExchangeDriverConfig<
 }
 
 /** Build the in-browser WebRTC {@link ExchangeDriver} by wrapping
- * {@link runExchangeLifecycle}: `run` forwards the run's signal and the four
+ * {@link runExchangeLifecycle}: `run` forwards the run's signal and the
  * lifecycle events straight through alongside the construction-time WebRTC
  * pieces, so its behavior is identical to calling `runExchangeLifecycle`
  * directly. */
@@ -89,7 +92,7 @@ export function createBrowserExchangeDriver<
   const { acquire, exchangeRole, sharedSecret, expires, generateOutput } =
     config;
   return {
-    run: ({ signal, onStages, onStage, onResult, onError }) =>
+    run: ({ signal, onStages, onStage, onResult, onError, onWarning }) =>
       runExchangeLifecycle<TOutputs>({
         acquire,
         exchangeRole,
@@ -101,6 +104,7 @@ export function createBrowserExchangeDriver<
         onStage,
         onResult,
         onError,
+        onWarning,
       }),
   };
 }

@@ -188,6 +188,12 @@ ceiling. For the web that is the peer connection reaching `failed` or `closed`;
 a transient `disconnected` is not terminal, because the frame is still in flight
 while ICE recovers.
 
+A wait that ends on its ceiling carries no delivery signal, and the exchange
+itself has already succeeded, so the web app raises a non-fatal warning on that
+exit: the run's result stands, and the operator is told the partner may not have
+taken the final frame and to check that their exchange finished. The exit that
+ends on the peer's close raises none -- that close is the delivery signal.
+
 What no close can cover is a sender whose stack goes away before its bytes do:
 tearing the peer connection down as the close returns delivered nothing at all
 -- measured at zero frames of two received, four rounds out of four -- and a

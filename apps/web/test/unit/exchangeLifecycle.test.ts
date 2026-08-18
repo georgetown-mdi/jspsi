@@ -10,9 +10,12 @@ import {
   runExchange,
 } from "@psilink/core";
 
+import {
+  FINAL_FRAME_UNCONFIRMED_WARNING,
+  runExchangeLifecycle,
+} from "../../src/psi/exchangeLifecycle.js";
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
-import { runExchangeLifecycle } from "../../src/psi/exchangeLifecycle.js";
 
 import type {
   Acquire,
@@ -152,6 +155,7 @@ function seams() {
     onStage: vi.fn(),
     onResult: vi.fn(),
     onError: vi.fn(),
+    onWarning: vi.fn(),
     generateOutput: vi.fn(() => OUTPUTS),
   };
 }
@@ -206,6 +210,55 @@ describe("runExchangeLifecycle", () => {
     // was disconnected.
     expect(close).toHaveBeenCalledTimes(1);
     expect(peer.disconnect).toHaveBeenCalled();
+  });
+
+  test("words the transport's unconfirmed final frame for the operator", async () => {
+    // The transport reports only the fact, so this is where a close that ended
+    // without the peer's delivery signal becomes something an operator reads --
+    // and the run has already reported success by then, making it the only sign
+    // the partner may never have taken the final frame.
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { acquired, conn } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(mockedOpen).toHaveBeenCalledWith(conn, {
+      onFinalFrameUnconfirmed: expect.any(Function),
+    });
+    expect(s.onWarning).not.toHaveBeenCalled();
+    mockedOpen.mock.calls[0][1]?.onFinalFrameUnconfirmed?.();
+    expect(s.onWarning.mock.calls).toEqual([[FINAL_FRAME_UNCONFIRMED_WARNING]]);
+  });
+
+  test("drops an unconfirmed-frame notice raised once the run has aborted", async () => {
+    // The close's wait can end on its ceiling long after an unmount aborts the
+    // run, and the seam it would set state through is gone by then -- the same
+    // live gate every other seam takes.
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { acquired } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+    const controller = new AbortController();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: controller.signal,
+      ...s,
+    });
+    controller.abort();
+    mockedOpen.mock.calls[0][1]?.onFinalFrameUnconfirmed?.();
+
+    expect(s.onWarning).not.toHaveBeenCalled();
   });
 
   test("an acquire failure is category 'exchange' and needs no owner teardown", async () => {

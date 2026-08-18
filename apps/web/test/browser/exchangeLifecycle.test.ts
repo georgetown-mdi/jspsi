@@ -67,6 +67,8 @@ interface CapturedRun {
   results: Array<ExchangeOutputs>;
   /** onError failures (none on success). */
   errors: Array<{ category: ExchangeErrorCategory; error: unknown }>;
+  /** onWarning messages (none on a run whose close reaches the peer). */
+  warnings: Array<string>;
   /** The ExchangeResult generateOutput was handed, captured to verify linkage. */
   result?: ExchangeResult;
 }
@@ -84,7 +86,12 @@ async function driveRole(
   psiLibrary: PSILibrary,
   sharedSecret: string,
 ): Promise<CapturedRun> {
-  const captured: CapturedRun = { stages: [], results: [], errors: [] };
+  const captured: CapturedRun = {
+    stages: [],
+    results: [],
+    errors: [],
+    warnings: [],
+  };
   // Never aborted: let the exchange run to completion; the lifecycle's own
   // finally-latch tears the connection down before it resolves.
   const controller = new AbortController();
@@ -107,6 +114,7 @@ async function driveRole(
     onStage: (id) => captured.stages.push(id),
     onResult: (outputs) => captured.results.push(outputs),
     onError: (failure) => captured.errors.push(failure),
+    onWarning: (message) => captured.warnings.push(message),
   });
   return captured;
 }
@@ -171,6 +179,11 @@ test("both roles complete with a result and no error", (ctx) => {
   // exchange rather than a stub.
   expect(responder.errors).toEqual([]);
   expect(initiator.errors).toEqual([]);
+  // And no warning: each side's teardown waited out a real peer's close, which
+  // is the delivery signal, so a healthy exchange must not tell either operator
+  // to go and check that their partner got the last frame.
+  expect(responder.warnings).toEqual([]);
+  expect(initiator.warnings).toEqual([]);
   expect(responder.results).toHaveLength(1);
   expect(initiator.results).toHaveLength(1);
   expect(responder.results[0]?.resultsUrl).toBe("blob:results-responder");
