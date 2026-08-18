@@ -388,12 +388,11 @@ describe("hardenUpgradeSurface", () => {
   });
 
   test("leaves no bound of its own on a keep-alive-reaped socket", async () => {
-    // A response in flight re-arms the bound for as long as it takes, so the
-    // window after Node's keep-alive reap is the one place re-arming would be
-    // wrong: there is nothing left to weigh, and a bound put back on a reaped
-    // socket would outlive it. The bound here sits far above the keep-alive
-    // window, so the value left on the socket says which of the two armed it
-    // last.
+    // The reap lets the windows of a request in hand pass rather than putting a
+    // bound back on the socket, so once Node's keep-alive reap has taken the
+    // connection there is nothing of this module's left to outlive it. The bound
+    // here sits far above the keep-alive window, so the value left on the socket
+    // says which of the two armed it last.
     const idleMs = 30_000;
     const server = http.createServer((_req, res) => res.end("ok"));
     server.keepAliveTimeout = 400;
@@ -465,39 +464,50 @@ describe("hardenUpgradeSurface", () => {
     }
   });
 
-  test("reaps a connection that stops taking the response it asked for", async () => {
-    // The client's half of a request in hand: the server owes it a response and
-    // is writing one, but the client stops reading, so the bytes queue and the
-    // connection stops draining. Pacing the response is the server's, taking it
-    // is the client's, and a client that does neither is reaped rather than
-    // holding the socket (and the queued bytes) for as long as it pleases.
-    const idleMs = 300;
-    // Larger than the send and receive buffers an unread loopback connection can
-    // absorb, so the write queue cannot simply drain into the kernel.
-    const body = Buffer.alloc(16 * 1024 * 1024, "x");
-    const server = http.createServer((_req, res) => {
-      res.writeHead(200, { "Content-Type": "application/octet-stream" });
-      res.end(body);
-    });
-    hardenUpgradeSurface(server, { preHandshakeIdleMs: idleMs });
-    // Watched server-side: a client holding an unread response never sees its own
-    // socket close, since a paused stream sitting on buffered bytes has no `end`
-    // to reach and so is not destroyed.
-    const closedMs = serverSideTimeToClose(server, "connection", 3_000);
+  test("adds no per-request socket listener to a reused connection", async () => {
+    // The reap subscribes to the socket's `timeout` event for the life of the
+    // connection while the request hook fires once per request, so a connection
+    // carrying request after request is where a per-request subscription would
+    // pile up on one long-lived socket. Counted on the server's own socket, which
+    // every request here shares; the idle bound sits far above the run so nothing
+    // reaps the connection mid-test.
+    const server = http.createServer((_req, res) => res.end("ok"));
+    hardenUpgradeSurface(server, { preHandshakeIdleMs: 30_000 });
+    const acceptedSockets: Array<net.Socket> = [];
+    server.on("connection", (socket: net.Socket) =>
+      acceptedSockets.push(socket),
+    );
     await new Promise<void>((resolve) =>
       server.listen(0, "127.0.0.1", resolve),
     );
     const { port } = server.address() as AddressInfo;
-    const client = net.connect(port, "127.0.0.1", () => {
-      client.write("GET /big HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
-      client.pause();
-    });
-    client.on("error", () => {});
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    // Resolved a turn after the response ends, so the agent has taken the socket
+    // back into its pool before the next request asks for one.
+    const fetchOnce = (): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const req = http.get(
+          { host: "127.0.0.1", port, path: "/", agent },
+          (res) => {
+            res.resume();
+            res.on("end", () => setTimeout(resolve, 5));
+          },
+        );
+        req.on("error", reject);
+      });
     try {
-      expect(await closedMs).not.toBeNull();
-      expect(await closedMs).toBeLessThan(2_500);
+      await fetchOnce();
+      expect(acceptedSockets).toHaveLength(1);
+      const socket = acceptedSockets[0];
+      const listenersAfterFirstRequest = socket.listenerCount("timeout");
+      expect(listenersAfterFirstRequest).toBeGreaterThan(0);
+      for (let request = 0; request < 4; request += 1) await fetchOnce();
+      // One connection carried all five, so the count is read off the socket the
+      // repeats went over rather than a fresh one.
+      expect(acceptedSockets).toHaveLength(1);
+      expect(socket.listenerCount("timeout")).toBe(listenersAfterFirstRequest);
     } finally {
-      client.destroy();
+      agent.destroy();
       server.closeAllConnections();
       server.close();
     }
@@ -581,34 +591,6 @@ describe.skipIf(loopbackTlsCert === null)(
         expect(closedMs).not.toBeNull();
         expect(closedMs).toBeLessThan(1_500);
       } finally {
-        server.closeAllConnections();
-        server.close();
-      }
-    });
-
-    test("reaps a TLS connection that stops taking its response", async () => {
-      // The queued bytes sit on the TLSSocket rather than the connection it
-      // wraps, so the response-phase half of the bound is only reached at all if
-      // the bound rides the socket the HTTP layer writes to.
-      const body = Buffer.alloc(16 * 1024 * 1024, "x");
-      const { server, port } = await startHardenedTlsServer((_req, res) => {
-        res.writeHead(200, { "Content-Type": "application/octet-stream" });
-        res.end(body);
-      });
-      const closedMs = serverSideTimeToClose(server, "secureConnection", 3_000);
-      const client = tls.connect(
-        { host: "127.0.0.1", port, rejectUnauthorized: false },
-        () => {
-          client.write("GET /big HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
-          client.pause();
-        },
-      );
-      client.on("error", () => {});
-      try {
-        expect(await closedMs).not.toBeNull();
-        expect(await closedMs).toBeLessThan(2_500);
-      } finally {
-        client.destroy();
         server.closeAllConnections();
         server.close();
       }
