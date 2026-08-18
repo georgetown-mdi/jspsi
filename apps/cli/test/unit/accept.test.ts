@@ -4107,3 +4107,54 @@ test("handler: online accept forwards its own outbound consent to runOnlineBoots
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("handler: online accept whose config write failed exits 69 and says so", async () => {
+  // The unattended half of the outcome: a wrapper gating on exit status must not
+  // read a rotated key with no configuration as a completed setup, so the
+  // handler's own process.exitCode is asserted here rather than only
+  // logOnlineBootstrapOutcome's return value. runOnlineBootstrap is mocked to
+  // report the swallowed write failure (its own tests cover raising it) so no
+  // connection is opened; --log-level error is the level the summary is written
+  // at, and the level the underlying error it points back to is shown at.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockResolvedValue({
+    configWriteError: new Error("permission denied"),
+  });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  const previousExitCode = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: ["sftp://host/drop", encoded, input],
+      "consent-to-terms": true,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "error",
+      record: false,
+    } as unknown as Arguments);
+    // Read before the finally block restores the exit code and the stdio spies.
+    const exitCode = process.exitCode;
+    const stderr = stdio.stderrWrites.join("");
+    expect(exit).not.toHaveBeenCalled();
+    expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
+    expect(exitCode).toBe(69);
+    // The operator is told which half landed, at error level: the key is saved,
+    // the config is not.
+    expect(stderr).toContain("[ERROR] [accept] ");
+    expect(stderr).toContain(`could not be written to ${configFile}`);
+    expect(stderr).toContain(`rotated key was saved to ${keyFile}`);
+  } finally {
+    process.exitCode = previousExitCode;
+    stdio.restore();
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
