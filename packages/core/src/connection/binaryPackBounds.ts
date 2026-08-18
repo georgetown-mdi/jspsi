@@ -14,7 +14,8 @@
 // `peerjs-js-binarypack`'s `Unpacker.unpack`: fixint/fixraw/fixstr/fixarray/fixmap
 // and the 0xc0-0xdf markers, with maps declaring two child values per pair -- never
 // the library's API, so it carries a dependency premise on that marker table and one
-// more on how `unpack` allocates: a container's store sized from its declared count
+// more on how `unpack` allocates: a container's store sized from its declared count,
+// and a `bin`/`raw` value decoded into a retained per-value copy of its own
 // (docs/spec/DEPENDENCY_PINS.md). A misparse cannot silently disable the bound: it
 // either over-charges (rejecting early, fail-closed) or runs the cursor off the end,
 // which is treated as a malformed frame and delegated to the real unpacker.
@@ -112,17 +113,13 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
  *   count (`new Array(N)`) before reading any element, so the scan likewise charges
  *   a container's slots at its header rather than as each child is read. A value
  *   that allocates nothing beyond that slot -- an integer, boolean, null, or
- *   undefined -- therefore adds nothing of its own. A `bin`/`raw` value is charged
- *   that slot and nothing further: its payload is ~1x its wire bytes and so already
- *   bounded by {@link MAX_WEBRTC_FRAME_BYTES}, not by this structural budget, while
- *   what `unpack` retains per decoded `bin`/`raw` value beyond that payload is NOT
- *   modelled by this weight -- a known gap in the model, not an exact mirror of
- *   the allocation. (The number markers that unpack to a HeapNumber rather than a
- *   SMI -- `float`, `double`, `uint32`/`int32` past the SMI range,
- *   `uint64`/`int64` -- retain ~24 bytes incl. their slot, more than the 8 charged
- *   here. A homogeneous numeric array stores them unboxed at ~8 bytes, matching
- *   the charge; but a peer can force per-element boxing by mixing in one
- *   non-number to make the array general-elements kind, reaching ~24 bytes/value.
+ *   undefined -- therefore adds nothing of its own. (The number markers that unpack
+ *   to a HeapNumber rather than a SMI -- `float`, `double`, `uint32`/`int32` past
+ *   the SMI range, `uint64`/`int64` -- retain ~24 bytes incl. their slot, more than
+ *   the 8 charged here. A homogeneous numeric array stores them unboxed at ~8
+ *   bytes, matching the charge; but a peer can force per-element boxing by mixing
+ *   in one non-number to make the array general-elements kind, reaching ~24
+ *   bytes/value.
  *   Each such value costs >= 5 wire bytes, so the wire-byte cap -- not this
  *   structure budget -- is the binding control for a number-heavy frame, bounding
  *   even an all-boxed one to ~1.2 GiB: on the order of, and slightly above, this
@@ -133,6 +130,16 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
  *   units (~2 bytes each), so `stringBase + 2 * declaredWireBytes` upper-bounds its
  *   resident size. (A string's *build* transient -- a per-code-point cons-string
  *   tree -- is bounded separately by {@link MAX_WEBRTC_STRING_BYTES}, not here.)
+ * - `binary` (256): the per-value overhead a decoded `bin`/`raw` value retains
+ *   beyond its container's slot, charged on top of that slot. `unpack_raw` returns
+ *   a per-value copy sliced from its input -- a `Uint8Array` over a buffer of its
+ *   own when the frame arrives as one (the chunked-completion path and the CLI),
+ *   a bare `ArrayBuffer` on the browser's unchunked path -- whose fixed cost
+ *   measures ~232 bytes resident at its view-shape worst (~104 as a bare buffer)
+ *   even for a one-byte payload, the view shape sharing its floor with the
+ *   retained chunk {@link MIN_CHUNK_RESIDENT_BYTES} charges. The payload itself is
+ *   charged nothing here: it is ~1x the value's wire bytes and so bounded by
+ *   {@link MAX_WEBRTC_FRAME_BYTES} rather than by this structural budget.
  *
  * A map key needs no weight of its own: the scan refuses any frame whose map key
  * is not a string on the wire (see {@link structureOverBudget}), and a string key
@@ -154,6 +161,7 @@ export const WEBRTC_VALUE_WEIGHTS = {
   scalar: 8,
   stringBase: 16,
   stringPerByte: 2,
+  binary: 256,
 } as const;
 
 /**
@@ -192,9 +200,14 @@ export const WEBRTC_VALUE_WEIGHTS = {
  * filling the 256 MiB wire cap carries about 7.67 million elements, whose
  * mapped-element frame would reach about 1.24 GiB and be rejected here.
  * Residual: the per-frame worst case for the kinds this budget charges in full is
- * the budget itself. A frame of the heaviest such kind (~16.7M empty objects)
- * reaches ~1 GiB and is rejected there, and reaching even that requires ~16 MiB
- * of proportional wire (the per-container byte check ties cost to wire), freed
+ * the budget itself. A frame of the heaviest such kind (~4.07M declared
+ * empty-payload `bin` views at 264 charged bytes each with their array slot)
+ * meets the refusal at ~4 MB of proportional wire while retaining ~0.79x the
+ * budget; the same count with 60-63-byte payloads is equally admitted and
+ * retains ~1.09x, its payload bytes the ~1x-wire addition the spec residual
+ * states (docs/spec/CHANNEL_SECURITY.md), held by the wire cap rather than
+ * here. An all-empty-object frame needs ~16.7M elements and ~16 MiB of wire to
+ * meet the same refusal (the per-container byte check ties cost to wire), freed
  * once the schema layer rejects the frame. A tighter budget is available only by
  * making the weights less conservative (e.g. crediting key-string
  * internalization); that aggressiveness is a security-review judgment (see
@@ -354,13 +367,21 @@ function containerValue(
 }
 
 /** A value charged nothing beyond the backing slot its container already charged:
- * an integer, boolean, null, or undefined, which allocate nothing of their own, and
- * a `bin`/`raw` payload, whose retention past its wire-bounded payload this weight
- * model does not fully capture -- a known gap rather than an exact mirror of the
- * allocation (see {@link WEBRTC_VALUE_WEIGHTS}). */
+ * an integer, boolean, null, or undefined, which allocate nothing of their own
+ * (see {@link WEBRTC_VALUE_WEIGHTS}). */
 const SCALAR: ValueHeader = {
   children: 0,
   weight: 0,
+  kind: "plain",
+};
+
+/** A `bin`/`raw` value: the fixed per-value overhead the `Uint8Array` `unpack_raw`
+ * returns retains beyond its container's slot. Its payload is charged nothing, being
+ * ~1x its wire bytes and so bounded by {@link MAX_WEBRTC_FRAME_BYTES}
+ * (see {@link WEBRTC_VALUE_WEIGHTS}). */
+const BINARY: ValueHeader = {
+  children: 0,
+  weight: WEBRTC_VALUE_WEIGHTS.binary,
   kind: "plain",
 };
 
@@ -370,10 +391,10 @@ const SCALAR: ValueHeader = {
  * kind the map-key rule dispatches on; `weight = -1` for a string whose declared
  * length exceeds `maxStringBytes`). Mirrors `peerjs-js-binarypack`'s
  * `Unpacker.unpack` marker dispatch: a map of K pairs declares 2K children (K keys
- * + K values). A `bin`/`raw` value is charged nothing beyond its parent's slot, its
- * payload being ~1x wire and so bounded by the wire-byte cap and what it retains
- * past that payload being outside this model (see {@link SCALAR}). An unknown marker
- * yields the same and 0 children (BinaryPack returns `undefined` for it without
+ * + K values). A `bin`/`raw` value is charged the decoded view's fixed overhead on
+ * top of its parent's slot, its payload alone being ~1x wire and so bounded by the
+ * wire-byte cap (see {@link BINARY}). An unknown marker is charged nothing of its
+ * own and declares 0 children (BinaryPack returns `undefined` for it without
  * consuming a payload). */
 function readValueHeader(
   cursor: ByteCursor,
@@ -384,7 +405,7 @@ function readValueHeader(
   if ((type ^ 0xe0) < 0x20) return SCALAR; // negative fixint
   if ((type ^ 0xa0) <= 0x0f) {
     cursor.skip(type ^ 0xa0); // fixraw (binary), payload bounded by the wire cap
-    return SCALAR;
+    return BINARY;
   }
   if ((type ^ 0xb0) <= 0x0f)
     return stringValue(cursor, type ^ 0xb0, maxStringBytes); // fixstr (<= 15 bytes)
@@ -426,10 +447,10 @@ function readValueHeader(
       return SCALAR;
     case 0xda: // raw16
       cursor.skip(cursor.u16()); // unpack_raw copies `size` bytes (~1x wire),
-      return SCALAR; // bounded by the wire-byte cap; charged the scalar slot only
+      return BINARY; // bounded by the wire-byte cap; the view itself charged here
     case 0xdb: // raw32
       cursor.skip(cursor.u32());
-      return SCALAR;
+      return BINARY;
     case 0xd8:
       // str16: unpack_string builds a JS string of the declared length, ~2x its
       // wire size and with a large transient cons-string tree, so the per-string
