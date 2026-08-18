@@ -1,5 +1,8 @@
 import { errorMessage } from "../connection/messageConnection";
-import { sanitizeForDisplay } from "./sanitizeForDisplay";
+import {
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  sanitizeForDisplay,
+} from "./sanitizeForDisplay";
 import type {
   Displayable,
   SanitizeForDisplayOptions,
@@ -13,6 +16,40 @@ import type {
  * this caps a long acyclic one.
  */
 export const MAX_ERROR_CAUSE_DEPTH = 8;
+
+/**
+ * Marker {@link sanitizeErrorForDisplay} appends to the last link it renders
+ * when the walk stops at {@link MAX_ERROR_CAUSE_DEPTH} with the chain still
+ * running: the depth cutoff says so rather than shortening the chain silently,
+ * the same way {@link DISPLAY_TRUNCATION_MARKER} marks a link the per-link cap
+ * cut. An operator reading a chain that ends here can tell "this is the whole
+ * failure" from "there was more", which is what decides whether the detail they
+ * need is missing.
+ *
+ * It carries no count. Counting the remainder means walking the rest of the
+ * chain -- the walk this bound exists to not perform, and unbounded in exactly
+ * the adversarial case the bound is defensive against. A composition site that
+ * knows its own link count states it in the last link it composes, where the
+ * number is free (`checkLinkageSatisfiability` in
+ * `apps/cli/src/commands/linkagePreflight.ts`), and this marker stays the
+ * generic backstop for a chain nobody counted.
+ *
+ * Plain ASCII, and appended AFTER the per-link escape and cap, so the marker
+ * itself can neither reintroduce a control character nor be cut off the link it
+ * marks.
+ *
+ * Being plain ASCII also means it is not authenticated and cannot be: the escape
+ * passes the marker's own text through unchanged, so a link whose message ends
+ * with that text renders byte-identically to one this renderer marked. That is
+ * the same open class {@link DISPLAY_TRUNCATION_MARKER} carries, where a
+ * first-party fragment (an over-long filename's preview) already ends with the
+ * marker by construction. What bounds the cost is the asymmetry: a copy claims a
+ * loss that did not happen, and cannot conceal one that did, since the append
+ * below runs after the escape whatever the link carried. So the marker's ABSENCE
+ * is what an operator can rely on -- no marker means the walk dropped nothing --
+ * while its presence says detail MAY be missing rather than that it is.
+ */
+export const CAUSE_DEPTH_ELISION_MARKER = "...[further causes elided]";
 
 /**
  * Separator placed between an error's message and each chained `cause` message.
@@ -172,8 +209,15 @@ export function redactAndSanitizeForDisplay(
  *   credential-bearing field is ever rendered;
  * - it is cycle-safe (a chain that revisits a link stops) and depth-bounded (at
  *   most {@link MAX_ERROR_CAUSE_DEPTH} links, each capped by
- *   {@link sanitizeForDisplay}), so a malformed or hostile chain cannot loop or
- *   flood -- the whole output is bounded without a separate total-length cap;
+ *   {@link sanitizeForDisplay} at {@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH},
+ *   the budget for a whole composed message rather than the per-value default),
+ *   so a malformed or hostile chain cannot loop or flood -- the whole output is
+ *   bounded without a separate total-length cap;
+ * - a chain that outruns the depth bound is marked rather than shortened in
+ *   silence: the last rendered link carries {@link CAUSE_DEPTH_ELISION_MARKER},
+ *   so an operator can tell a complete chain from a cut one (a chain that ends
+ *   on its own, or stops on the cycle guard having already rendered the link it
+ *   revisits, carries no marker);
  * - it suppresses a link whose raw message repeats the link before it -- the
  *   common case, since `asConnectionError` sets a wrapper's message to its
  *   cause's message -- so the same text is not printed twice;
@@ -182,15 +226,16 @@ export function redactAndSanitizeForDisplay(
  *   renders as `[unreadable error]` rather than propagating, since a renderer at
  *   a last-resort catch boundary must not become a second failure.
  *
- * An error with no `cause` renders exactly as
- * `sanitizeForDisplay(errorMessage(err))`, and a non-`Error` value (including
- * `null`/`undefined`) renders its `String(...)` form, matching
+ * An error with no `cause` renders exactly as `errorMessage(err)` escaped at
+ * {@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH}, and a non-`Error` value
+ * (including `null`/`undefined`) renders its `String(...)` form, matching
  * {@link errorMessage}.
  */
 export function sanitizeErrorForDisplay(err: unknown): string {
   const rawMessages: string[] = [];
   const seen = new Set<unknown>();
   let current: unknown = err;
+  let elided = false;
   for (let depth = 0; depth < MAX_ERROR_CAUSE_DEPTH; depth++) {
     // Read each link defensively. This is a last-resort display path, so a
     // hostile or malformed error -- a `.message` getter or `toString` that
@@ -224,9 +269,25 @@ export function sanitizeErrorForDisplay(err: unknown): string {
       next = undefined;
     }
     if (next === undefined || next === null || seen.has(next)) break;
+    // The bound is spent and a further link is still there to read. Record that
+    // rather than falling out of the loop, so the cut is marked on the rendered
+    // output instead of deleting the rest of the chain in silence.
+    if (depth === MAX_ERROR_CAUSE_DEPTH - 1) {
+      elided = true;
+      break;
+    }
     current = next;
   }
-  return rawMessages
-    .map((message) => sanitizeForDisplay(redactPrivateKeyMaterial(message)))
-    .join(CAUSE_SEPARATOR);
+  const links: string[] = rawMessages.map((message) =>
+    sanitizeForDisplay(redactPrivateKeyMaterial(message), {
+      maxLength: COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+    }),
+  );
+  // Appended after the escape and the cap, like the truncation marker inside
+  // sanitizeForDisplay: the marker is this module's own fixed ASCII, and a link
+  // that spent its whole budget must still be able to say the chain went on.
+  if (elided)
+    links[links.length - 1] =
+      `${links[links.length - 1]} ${CAUSE_DEPTH_ELISION_MARKER}`;
+  return links.join(CAUSE_SEPARATOR);
 }

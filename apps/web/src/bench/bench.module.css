@@ -983,6 +983,16 @@
   font-weight: 600;
 }
 
+/* A configuration row's value list: one entry per line, so a name carrying a
+   list separator cannot read as two entries. Unbulleted and unindented, so it
+   sits in the row exactly where a single value would. */
+.dlValueList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 220px;
+}
+
 .keepPrivate {
   color: var(--bench-danger);
   font-weight: 700;

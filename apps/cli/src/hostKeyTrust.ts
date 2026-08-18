@@ -52,13 +52,13 @@ export interface HostKeyTrustDeps {
  * own, in order.
  *
  * The split is what the display boundary forces. `sanitizeErrorForDisplay` caps
- * EVERY link at `DEFAULT_MAX_DISPLAY_LENGTH` independently, so a link that mixes
- * first-party text with a fragment somebody else chose lets that chooser spend
- * the whole budget and delete the step the operator has to act on. Partitioning
- * by WHO CHOSE THE BYTES -- first-party copy on its own links, then one labelled
- * link per chooser -- bounds the cap to a chooser's own bytes. It does not
- * remove the cap: fixed copy that outgrows a budget truncates just the same, so
- * what each link measures at the rendered boundary is pinned by test.
+ * EVERY link at `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH` independently, so a link
+ * that mixes first-party text with a fragment somebody else chose lets that
+ * chooser spend the whole budget and delete the step the operator has to act on.
+ * Partitioning by WHO CHOSE THE BYTES -- first-party copy on its own links, then
+ * one labelled link per chooser -- bounds the cap to a chooser's own bytes. It
+ * does not remove the cap: fixed copy that outgrows a budget truncates just the
+ * same, so what each link measures at the rendered boundary is pinned by test.
  *
  * Each link installs its `cause` with `Object.defineProperty` rather than the
  * two-argument `Error` constructor -- this app's emit target predates

@@ -87,14 +87,25 @@ export function ManagedExchangeDetail({
   );
 }
 
-/** Render one read-only configuration row: a term and its value, its value list,
- * or its muted empty state. */
+/**
+ * Render one read-only configuration row: a term and its value, its value list,
+ * or its muted empty state.
+ *
+ * A value list renders one entry per item, never joined: every list this view
+ * carries holds partner- or operator-authored names, and a name containing the
+ * separator would read as two entries in joined text. Keyed by index because a
+ * name is not unique across entries and the derivation's order is fixed.
+ */
 function ConfigRowItem({ row }: { row: ConfigRow }) {
   return (
     <div className={styles.dlRow}>
       <span className={styles.dlLabel}>{row.label}</span>
       {row.values !== undefined ? (
-        <span>{row.values.join(", ")}</span>
+        <ul className={styles.dlValueList}>
+          {row.values.map((entry, index) => (
+            <li key={index}>{entry}</li>
+          ))}
+        </ul>
       ) : row.muted !== undefined ? (
         <span className={styles.sub}>{row.muted}</span>
       ) : (

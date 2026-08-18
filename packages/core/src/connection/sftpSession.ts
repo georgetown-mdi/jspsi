@@ -67,7 +67,7 @@ interface SftpSessionDeps {
 /**
  * A refused host key, partitioned by WHO CHOSE THE BYTES of each fragment.
  * {@link sanitizeErrorForDisplay} caps every cause-chain link at
- * {@link DEFAULT_MAX_DISPLAY_LENGTH} independently, so a link that mixes
+ * {@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH} independently, so a link that mixes
  * first-party text with an adversary-chosen fragment lets the adversary spend
  * the whole budget and delete the text the operator has to act on. The
  * `summary` therefore carries first-party text plus format-validated values

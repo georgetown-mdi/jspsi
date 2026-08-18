@@ -11,6 +11,7 @@ import {
   getDefaultLinkageTerms,
   getLogger,
   prepareForExchange,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
@@ -1430,7 +1431,12 @@ test("prepareDataset: blocks (UsageError) naming the field when the CSV satisfie
   expect((err as Error).message).toMatch(
     /cannot satisfy any of the configuration's linkage keys/,
   );
-  expect((err as Error).message).toContain("ssn (ssn)");
+  // The field is named on a labelled link of its own -- terms content is
+  // partner-chosen on the sibling accept path -- so it is the rendered chain the
+  // operator reads that has to carry it, not the summary.
+  expect(sanitizeErrorForDisplay(err)).toContain(
+    "unsatisfied field: ssn (ssn)",
+  );
 });
 
 test("prepareDataset: warns naming the unsatisfied field and proceeds when only some keys are satisfiable", async () => {

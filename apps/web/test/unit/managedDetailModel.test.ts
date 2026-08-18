@@ -67,6 +67,71 @@ describe("connectionRows", () => {
   });
 });
 
+// Every value on this view is authored by somebody else -- the partner, through
+// the accepted document, or this operator -- and it is the surface a compliance
+// user reads to confirm the agreed terms. The class that matters is the one JSX
+// escaping does not touch: a bidi override, a zero-width joiner, or a homoglyph
+// renders as the term the reader expects while being another string. The model
+// is where the display boundary sits, so the escaping is pinned here rather than
+// on the component.
+describe("the configuration rows escape what somebody else authored", () => {
+  // Written as escapes rather than literals: a raw bidi override in a source file
+  // is itself the hazard these deliveries measure.
+  const RLO = "\u202e";
+  const ZWJ = "\u200d";
+
+  test("a hostile identity, key name, and legal reference are escaped", () => {
+    const hostileTerms = {
+      ...linkageTerms,
+      identity: `County${RLO} Health`,
+      linkageKeys: [
+        {
+          name: `SSN${ZWJ} + DOB`,
+          elements: linkageTerms.linkageKeys[0].elements,
+        },
+      ],
+      legalAgreement: {
+        reference: `MOU${RLO}-001`,
+        purpose: "Care coordination",
+        expirationDate: "2027-01-01",
+      },
+    };
+    const rows = linkageTermsRows(
+      composeManagedExchangeFile({
+        connection: webrtcLocator,
+        linkageTerms: hostileTerms,
+      }),
+    );
+    const rendered = rows
+      .flatMap((row) => [row.value ?? "", ...(row.values ?? [])])
+      .join(" ");
+    expect(rendered).not.toContain(RLO);
+    expect(rendered).not.toContain(ZWJ);
+    expect(rendered).toContain("\\u202e");
+    expect(rendered).toContain("\\u200d");
+  });
+
+  test("a hostile rendezvous host and path are escaped, each on its own budget", () => {
+    const rows = connectionRows(
+      composeManagedExchangeFile({
+        connection: {
+          ...webrtcLocator,
+          host: `signaling${RLO}.example.org`,
+          path: `/api${ZWJ}/`,
+        },
+        linkageTerms,
+      }),
+    );
+    const server = rows.find((row) => row.label === "Rendezvous server");
+    expect(server?.value).not.toContain(RLO);
+    expect(server?.value).not.toContain(ZWJ);
+    // Both halves survive: the path is not what a padded host spends, because
+    // each crosses the boundary on a budget of its own before they compose.
+    expect(server?.value).toContain("\\u202e");
+    expect(server?.value).toContain("\\u200d");
+  });
+});
+
 describe("linkageTermsRows renders configuration for both sides", () => {
   test("the inviter's terms render from its own perspective", () => {
     const rows = linkageTermsRows(record("inviter").exchangeFile);

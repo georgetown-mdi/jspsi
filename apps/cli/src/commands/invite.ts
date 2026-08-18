@@ -941,9 +941,33 @@ export function offlineAbandonNotice(keyPath: string): string {
 }
 
 /**
+ * How the accept templates name the invitation: a placeholder the operator fills
+ * in from the line stdout carries, never the invitation itself.
+ *
+ * The invitation encodes the setup shared secret, and every template below is a
+ * DIAGNOSTIC line -- routed through the process-wide sink an operator points at a
+ * file with `--log-file`, and re-emitted by anything that captures stderr. A
+ * template that interpolated the invitation would put the secret wherever that
+ * routing leads, for as long as the file lives, while the invitation's own
+ * delivery is the stdout line below (which the operator directs, and which the
+ * diagnostic routing never sees). It stands beside `<INPUT_FILE>`, which is a
+ * placeholder for the same reason of shape: the template is a recipe to fill in,
+ * not a line to paste unchanged.
+ *
+ * {@link ../../test/unit/invite.test.ts} holds the runtime half -- the invite
+ * command's diagnostic output is asserted to carry no substring of the invitation
+ * it prints -- since a comment cannot fail when a later template interpolates it
+ * again.
+ */
+const INVITATION_PLACEHOLDER = "<INVITATION>";
+
+/**
  * Print the invitation string (to stdout, so it is captured even at a quiet log
- * level) with copy/pasteable usage instructions. When `online.url` is present,
- * the accept template references the shared server.
+ * level) with the usage instructions for the partner. When `online.url` is
+ * present, the accept template references the shared server.
+ *
+ * The templates name the invitation by {@link INVITATION_PLACEHOLDER} rather than
+ * carrying it.
  */
 function printInvitation(
   invitation: string,
@@ -962,11 +986,15 @@ function printInvitation(
     // supplies their own, and a password must not reach the terminal or logs.
     log.info(
       `Your partner accepts and runs the exchange with:\n  psilink accept ` +
-        `${redactUrlCredentials(online.url)} ${invitation} <INPUT_FILE>`,
+        `${redactUrlCredentials(online.url)} ${INVITATION_PLACEHOLDER} ` +
+        `<INPUT_FILE>\nwhere ${INVITATION_PLACEHOLDER} is the invitation ` +
+        "printed above.",
     );
   } else {
     log.info(
-      `Your partner accepts with:\n  psilink accept ${invitation} <INPUT_FILE>`,
+      `Your partner accepts with:\n  psilink accept ` +
+        `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nwhere ` +
+        `${INVITATION_PLACEHOLDER} is the invitation printed above.`,
     );
   }
 }

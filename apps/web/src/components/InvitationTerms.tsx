@@ -19,6 +19,7 @@ import {
   COUNT_ONLY_DISCLOSURE_STATEMENT,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
+  UNRECOGNIZED_TRANSFORM_NOTE,
   sanitizeForDisplay,
   summarizeInvitation,
 } from "@psilink/core";
@@ -254,23 +255,22 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
               <Stack key={ti} gap={0} pl="md">
                 {/* Lead with the plain matching consequence: the literal slice
                     phrase when faithful, else the glossary description, else --
-                    for a function core does not recognize -- the bare sanitized
-                    name. All are fixed/sanitized copy, not raw partner free text. */}
+                    for a function core does not recognize -- the shared note
+                    saying so. All are fixed/sanitized copy, not raw partner free
+                    text; the note is the CLI accept prompt's own wording, read
+                    from core so the two consent surfaces cannot drift on what an
+                    unexplained rule is called. */}
                 <Text size="xs" c="dimmed">
                   {transform.effect !== undefined
                     ? `Matches on ${transform.effect}`
-                    : transform.description !== undefined
-                      ? transform.description
-                      : `Applies ${transform.function}`}
+                    : (transform.description ?? UNRECOGNIZED_TRANSFORM_NOTE)}
                 </Text>
-                {/* The raw function name as secondary detail when a plainer lead
-                    replaced it, so the technical identity stays available. */}
-                {(transform.effect !== undefined ||
-                  transform.description !== undefined) && (
-                  <Text size="xs" c="dimmed" pl="md" fs="italic">
-                    {transform.function}
-                  </Text>
-                )}
+                {/* The function name as secondary detail under whichever lead ran,
+                    so the technical identity stays available while never standing
+                    where the matching consequence goes. */}
+                <Text size="xs" c="dimmed" pl="md" fs="italic">
+                  {transform.function}
+                </Text>
                 {transform.params.map((param, pi) => (
                   <Text key={pi} size="xs" c="dimmed" pl="md">
                     {param}

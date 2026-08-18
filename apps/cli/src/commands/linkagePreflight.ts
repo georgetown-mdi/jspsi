@@ -1,8 +1,10 @@
 import {
   assessLinkageSatisfiability,
+  chainDetailCauses,
   disclosedColumnNames,
   getLogger,
   inferMetadata,
+  MAX_ERROR_CAUSE_DEPTH,
   redactAndSanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -24,6 +26,16 @@ export interface LinkagePreflightMessaging {
    * the committed exchange. */
   blockRemedy: string;
 }
+
+/**
+ * How many cause links the block's unsatisfied-field enumeration may occupy. The
+ * display boundary walks at most {@link MAX_ERROR_CAUSE_DEPTH} links of a
+ * rendered chain, and this refusal spends two of them before any name: the
+ * summary on the error's own message, and the remedy chained ahead of the names.
+ * A name beyond this budget would be walked past and never rendered, so the last
+ * of these links reports the overflow instead of naming one more field.
+ */
+const UNSATISFIED_FIELD_LINK_BUDGET = MAX_ERROR_CAUSE_DEPTH - 2;
 
 /**
  * Pre-flight a CSV's `columns` against the linkage `terms` it will be exchanged
@@ -82,35 +94,70 @@ export function checkLinkageSatisfiability(
   // collapse. satisfiableKeyCount accounts for both.
   if (satisfiableKeyCount === terms.linkageKeys.length) return;
 
-  // The enumeration reaches the operator down two routes with different escape
-  // points, so each branch below builds it with the escape its own route needs:
-  // raw for the UsageError, whose display boundary escapes the rendered message
-  // once, and escaped for the log.warn, whose call site is the sink. f.type is a
-  // schema-validated enum literal but takes the same path as f.name, so no future
-  // edit leaves a raw token beside an escaped one. The detail is omitted when no
-  // DECLARED field is unproducible (the keys are unsatisfiable only by
-  // referencing undeclared fields), leaving the block/warn itself as the signal.
-  const detail = (shown: (token: string) => string): string =>
+  // The block partitions by WHO CHOSE THE BYTES rather than composing one
+  // sentence: the field names are terms content -- partner-authored on the accept
+  // path -- and the display boundary caps each cause link independently, so names
+  // sharing the operative sentence's link can spend its budget and delete the step
+  // the operator has to act on. Each name gets a labelled link of its own, raw,
+  // since the boundary that renders the chain is the one altitude that escapes it.
+  // The remedy is chained ahead of the names for the reason the transport refusals
+  // chain theirs first: the renderer's depth bound reaches it before any detail.
+  // With no DECLARED field unproducible -- the keys are unsatisfiable only by
+  // referencing undeclared fields -- there is no name link at all, and the summary
+  // and its remedy stand alone.
+  //
+  // The number of names is the terms' to choose and is bounded only at
+  // MAX_LINKAGE_ENTRIES, so the enumeration can ask for more links than the
+  // renderer walks. What overflows is stated here rather than left to the
+  // renderer's generic elision marker: this is where the count is known, and the
+  // count is what tells the operator how much of the mismatch they are not
+  // reading.
+  if (satisfiableKeyCount === 0) {
+    const fieldDetails = unsatisfied.map(
+      (field) => `unsatisfied field: ${field.name} (${field.type})`,
+    );
+    const shown =
+      fieldDetails.length > UNSATISFIED_FIELD_LINK_BUDGET
+        ? UNSATISFIED_FIELD_LINK_BUDGET - 1
+        : fieldDetails.length;
+    throw new UsageError(
+      `the CSV cannot satisfy any of the ${messaging.source}'s linkage keys; ` +
+        "running would produce a silent empty result.",
+      {
+        cause: chainDetailCauses([
+          `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
+          ...fieldDetails.slice(0, shown),
+          ...(shown < fieldDetails.length
+            ? [
+                `and ${fieldDetails.length - shown} more unsatisfied fields ` +
+                  `(${fieldDetails.length} in total)`,
+              ]
+            : []),
+        ]),
+      },
+    );
+  }
+
+  // The warn route escapes at its own call site, because a log.warn IS the sink.
+  // `type` is a schema-validated enum literal but takes the same path as `name`,
+  // so no later edit leaves a raw token beside an escaped one. The enumeration is
+  // omitted on the same no-declared-field condition as the block above, leaving
+  // the warning itself as the signal.
+  const detail =
     unsatisfied.length > 0
       ? " (unsatisfied fields: " +
         unsatisfied
-          .map((f) => `${shown(f.name)} (${shown(f.type)})`)
+          .map(
+            (field) =>
+              `${redactAndSanitizeForDisplay(field.name)} ` +
+              `(${redactAndSanitizeForDisplay(field.type)})`,
+          )
           .join(", ") +
         ")"
       : "";
-
-  if (satisfiableKeyCount === 0)
-    throw new UsageError(
-      `the CSV cannot satisfy any of the ${messaging.source}'s linkage keys` +
-        detail((token) => token) +
-        "; running would produce a silent empty result. Provide a CSV that " +
-        "covers the required field types, " +
-        messaging.blockRemedy,
-    );
-
   log.warn(
     `the CSV cannot satisfy all of the ${messaging.source}'s linkage fields` +
-      detail((token) => redactAndSanitizeForDisplay(token)) +
+      detail +
       "; keys that require those fields will be inactive for this exchange.",
   );
 }

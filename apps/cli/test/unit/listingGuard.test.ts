@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  DEFAULT_MAX_DISPLAY_LENGTH,
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DirectoryListingBoundsError,
   DISPLAY_TRUNCATION_MARKER,
   MAX_ERROR_CAUSE_DEPTH,
@@ -29,7 +29,7 @@ const linksOf = (rendered: string): string[] => rendered.split(CAUSE_SEPARATOR);
 // a link of its own, so this is the whole of what any one of them can spend, and
 // the renderer's depth bound is what bounds their sum.
 const MAX_RENDERED_LINK_LENGTH =
-  DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length;
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length;
 
 const expectEveryLinkBounded = (rendered: string): void => {
   const links = linksOf(rendered);
