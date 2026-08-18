@@ -1640,8 +1640,9 @@ export async function runProtocol(
     // as a warning and leave a non-zero exit behind, so both channels report it.
     // EX_UNAVAILABLE (69) is the code every other local output failure exits
     // with; process.exitCode rather than process.exit so the caller's own
-    // remaining work (a bootstrap's config write) still runs, and a later failure
-    // there still replaces this code with its own.
+    // remaining work (a bootstrap's config write) still runs and still reports
+    // its own failure -- the caller raises this code rather than replacing it,
+    // so its success cannot erase what was lost here.
     for (const missing of missingArtifacts) emit((e) => e.warning(missing));
     if (missingArtifacts.length > 0) process.exitCode = 69;
 

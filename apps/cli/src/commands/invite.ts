@@ -779,11 +779,18 @@ export async function handler(argv: Arguments): Promise<void> {
           // from the token, so its online path does not request this.)
           persistObservedReceivedPayload: true,
         });
-        process.exitCode = logOnlineBootstrapOutcome(log, {
+        const bootstrapExitCode = logOnlineBootstrapOutcome(log, {
           configFile: options.configFile,
           keyFile: options.keyFile,
           configWriteError,
         });
+        // The exchange this bootstrap ran may already have left a failure code
+        // behind (an audit artifact it could not produce), so the outcome of the
+        // config write only ever raises the exit code: assigning it
+        // unconditionally would report a clean 0 for a run that lost its record.
+        if (process.exitCode === undefined || process.exitCode === 0) {
+          process.exitCode = bootstrapExitCode;
+        }
         return;
       }
 

@@ -4157,3 +4157,51 @@ test("handler: online accept whose config write failed exits 69 and says so", as
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("handler: a clean config write leaves the exchange's own exit 69 in place", async () => {
+  // The exchange completed but could not write an audit artifact, so runProtocol
+  // left 69 behind; the config write that followed then succeeded. The bootstrap
+  // outcome only raises the exit code, so the run an unattended supervisor sees
+  // still reports the lost record rather than a clean 0. runOnlineBootstrap
+  // stands in for that exchange, setting the exit code the way runProtocol does
+  // and reporting a written config.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockImplementation(async () => {
+    process.exitCode = 69;
+    return { configWriteError: undefined };
+  });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  const previousExitCode = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: ["sftp://host/drop", encoded, input],
+      "consent-to-terms": true,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "info",
+      record: true,
+    } as unknown as Arguments);
+    // Read before the finally block restores the exit code and the stdio spies.
+    const exitCode = process.exitCode;
+    const stderr = stdio.stderrWrites.join("");
+    expect(exit).not.toHaveBeenCalled();
+    expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
+    expect(exitCode).toBe(69);
+    // The setup summary is still reported; only the clean exit code is withheld.
+    expect(stderr).toContain(`saved config to ${configFile}`);
+  } finally {
+    process.exitCode = previousExitCode;
+    stdio.restore();
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
