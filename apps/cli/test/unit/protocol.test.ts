@@ -4651,67 +4651,91 @@ test("logs no reconnect or per-cycle boundary summary of any kind on a clean run
   );
 });
 
-test("an aborted run under --event-stream reports metrics then the classified reason", async () => {
-  // A mid-run fault after a stage started: the completed stage's timing is
-  // already on the stream, and the terminal sequence is the metrics summary
-  // followed by the classified error -- the machine-readable abort reason,
-  // distinct from the free-text stderr log. No stageEnd fires for the in-flight
-  // stage (only completed stages are timed).
-  const preparedWithRows = { rowCount: 4 } as unknown as PreparedExchange;
-  vi.mocked(runExchange).mockImplementation((async (...args: unknown[]) => {
-    const options = args[3] as { onStage?: (id: string) => void };
-    options.onStage?.("stage 1 / 1");
-    throw new Error("simulated mid-run transport fault");
-  }) as never);
+test(
+  "an aborted run under --event-stream reports metrics then the classified reason",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    // A mid-run fault after a stage started: the completed stage's timing is
+    // already on the stream, and the terminal sequence is the metrics summary
+    // followed by the classified error -- the machine-readable abort reason,
+    // distinct from the free-text stderr log. No stageEnd fires for the in-flight
+    // stage (only completed stages are timed).
+    const preparedWithRows = { rowCount: 4 } as unknown as PreparedExchange;
+    vi.mocked(runExchange).mockImplementation((async (...args: unknown[]) => {
+      // Hold both parties here before either fault fires: the lock winner reaches
+      // runExchange the moment it creates the lock, while the loser is still
+      // between its EEXIST and the exists(lock) check that tells a live winner
+      // from a departed one. Without the barrier the winner's teardown deletes
+      // the lock inside that gap, and the loser -- which may be party A, the one
+      // asserted below -- fails with "peer appears to have abandoned the
+      // handshake" instead of the fault this test injects.
+      await awaitBothArmed();
+      const options = args[3] as { onStage?: (id: string) => void };
+      options.onStage?.("stage 1 / 1");
+      throw new Error("simulated mid-run transport fault");
+    }) as never);
 
-  // Two parties complete the real rendezvous before either reaches the mocked
-  // runExchange, where both then throw. Only party A is flag-on; its outcome is
-  // the one asserted (party B's is not).
-  mockFd3Open();
-  let resA: PromiseSettledResult<unknown>;
-  try {
-    [resA] = await Promise.allSettled([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
-        null,
-        preparedWithRows,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
-        null,
-        preparedWithRows,
-        undefined,
-        -1,
-        "test-b",
-      ),
+    // Two parties complete the real rendezvous before either reaches the mocked
+    // runExchange, where both then throw. Only party A is flag-on; its outcome is
+    // the one asserted (party B's is not). Each carries an explicit peer wait: it
+    // bounds every pre-exchange wait, and the default (one hour) would let a party
+    // left waiting on a peer that failed its own rendezvous run past this test's
+    // budget and be killed by vitest with a generic message instead of the core
+    // layer's own diagnosable timeout.
+    const partyOptions = {
+      pollIntervalMs: 1,
+      peerTimeoutMs: PEER_WAIT_HANG_BACKSTOP_MS,
+    };
+    mockFd3Open();
+    let resA: PromiseSettledResult<unknown>;
+    try {
+      [resA] = await Promise.allSettled([
+        runProtocol(
+          { channel: "filedrop", path: dropDir, options: partyOptions },
+          null,
+          preparedWithRows,
+          undefined,
+          -1,
+          "test-a",
+          undefined,
+          undefined,
+          undefined,
+          { eventStream: true },
+        ),
+        runProtocol(
+          { channel: "filedrop", path: dropDir, options: partyOptions },
+          null,
+          preparedWithRows,
+          undefined,
+          -1,
+          "test-b",
+        ),
+      ]);
+    } finally {
+      vi.mocked(fs.fstatSync).mockRestore();
+    }
+    // Both parties reached the mocked runExchange, so the barrier above held
+    // rather than expiring: a run where one party never arrives still reports the
+    // injected fault on the other, which would read green without this.
+    expect(mockState.runExchangeEntries).toBe(2);
+    expect(resA.status).toBe("rejected");
+    expect(String((resA as PromiseRejectedResult).reason)).toContain(
+      "simulated mid-run transport fault",
+    );
+
+    const lines = takeFd3Lines();
+    // stages, stage(1) -- no stageEnd for the aborted in-flight stage -- metrics,
+    // then the classified terminal error.
+    expect(lines.map((l) => l.type)).toEqual([
+      "stages",
+      "stage",
+      "metrics",
+      "error",
     ]);
-  } finally {
-    vi.mocked(fs.fstatSync).mockRestore();
-  }
-  expect(resA.status).toBe("rejected");
-  expect(String((resA as PromiseRejectedResult).reason)).toContain(
-    "simulated mid-run transport fault",
-  );
-
-  const lines = takeFd3Lines();
-  // stages, stage(1) -- no stageEnd for the aborted in-flight stage -- metrics,
-  // then the classified terminal error.
-  expect(lines.map((l) => l.type)).toEqual([
-    "stages",
-    "stage",
-    "metrics",
-    "error",
-  ]);
-  const metrics = lines.find((l) => l.type === "metrics")!;
-  expect(metrics.recordsProcessed).toBe(4);
-  const errorLine = lines.find((l) => l.type === "error")!;
-  expect(errorLine.category).toBe("exchange");
-  expect(String(errorLine.message)).toContain("simulated mid-run transport");
-});
+    const metrics = lines.find((l) => l.type === "metrics")!;
+    expect(metrics.recordsProcessed).toBe(4);
+    const errorLine = lines.find((l) => l.type === "error")!;
+    expect(errorLine.category).toBe("exchange");
+    expect(String(errorLine.message)).toContain("simulated mid-run transport");
+  },
+);
