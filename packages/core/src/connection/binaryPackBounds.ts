@@ -332,9 +332,12 @@ function stringValue(
 }
 
 /** A container of `children` declared child values: its own base weight plus the
- * backing slot it reserves for each of those children, charged here at the header
- * because `unpack_array`/`unpack_map` size the store from the declared count
- * before reading a single element (see {@link WEBRTC_VALUE_WEIGHTS}). */
+ * backing slot each of those children occupies, charged here at the header.
+ * `unpack_array` sizes its store from the declared count (`new Array(size)`)
+ * before reading a single element; `unpack_map` grows a plain object by
+ * per-entry assignment, so for it the header-time charge is a conservative
+ * bound on the store, not the reservation itself
+ * (see {@link WEBRTC_VALUE_WEIGHTS}). */
 function containerValue(
   children: number,
   base: number,
@@ -463,11 +466,13 @@ function readValueHeader(
  * amplification, the `new Array(N)`-from-a-tiny-header case, and the giant-string
  * case where `unpack_string` builds a JS string far larger than its slot).
  *
- * A container's backing slots are charged where `unpack` allocates them rather than
- * where the wire spends bytes: at the container's own header, from its declared
- * count, because `unpack_array`/`unpack_map` reserve the whole store up front and
- * read past the end of the buffer as zero rather than throwing -- so a declared
- * child that no wire byte backs still costs its slot.
+ * A container's backing slots are charged at the container's own header, from its
+ * declared count, rather than where the wire spends bytes: `unpack_array` reserves
+ * its whole store up front (`new Array(size)`) and reads past the end of the
+ * buffer as zero rather than throwing, so a declared child that no wire byte
+ * backs still costs its slot; `unpack_map` grows a plain object by per-entry
+ * assignment, so its header-time charge is a conservative bound on the store
+ * rather than a mirror of the allocation.
  *
  * A map key that is not a string on the wire is REFUSED rather than costed. The
  * `pack` side of this dependency emits a map only for a plain JS object, whose own
