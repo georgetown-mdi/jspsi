@@ -13,7 +13,8 @@
 // The scan reads only the BinaryPack wire format -- the marker dispatch in
 // `peerjs-js-binarypack`'s `Unpacker.unpack`: fixint/fixraw/fixstr/fixarray/fixmap
 // and the 0xc0-0xdf markers, with maps declaring two child values per pair -- never
-// the library's API, so it carries a dependency premise on that marker table
+// the library's API, so it carries a dependency premise on that marker table and one
+// more on how `unpack` allocates: a container's store sized from its declared count
 // (docs/spec/DEPENDENCY_PINS.md). A misparse cannot silently disable the bound: it
 // either over-charges (rejecting early, fail-closed) or runs the cursor off the end,
 // which is treated as a malformed frame and delegated to the real unpacker.
@@ -103,23 +104,29 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
  *   the dominant amplifier the byte budget exists to charge honestly: one wire
  *   byte (a `fixmap` of zero pairs) unpacks to ~64 bytes.
  * - `array` (40): an empty JS array (`new Array(0)`), measured ~40 bytes (the
- *   JSArray plus an empty backing store). A non-empty array's per-element backing
- *   slot is attributed to each element via `scalar` below, so this is the base.
- * - `scalar` (8): an integer, boolean, null, or undefined -- stored as a tagged
- *   SMI/oddball in the one machine word (8 bytes) of its parent container's
- *   backing slot, with no separate heap allocation. A `bin`/`raw` value is also
- *   charged `scalar`: its payload is ~1x its wire bytes and so already bounded by
- *   {@link MAX_WEBRTC_FRAME_BYTES}, not by this structural budget. (The number
- *   markers that unpack to a HeapNumber rather than a SMI -- `float`, `double`,
- *   `uint32`/`int32` past the SMI range, `uint64`/`int64` -- retain ~24 bytes
- *   incl. their slot, more than the 8 charged here. A homogeneous numeric array
- *   stores them unboxed at ~8 bytes, matching the charge; but a peer can force
- *   per-element boxing by mixing in one non-number to make the array
- *   general-elements kind, reaching ~24 bytes/value. Each such value costs >= 5
- *   wire bytes, so the wire-byte cap -- not this structure budget -- is the
- *   binding control for a number-heavy frame, bounding even an all-boxed one to
- *   ~1.2 GiB: on the order of, and slightly above, this budget, a fixed transient
- *   freed once the schema layer rejects the frame.)
+ *   JSArray plus an empty backing store). A non-empty container's backing slots
+ *   are charged on top of this base, `scalar` per declared child.
+ * - `scalar` (8): one machine word of a container's backing store, the slot every
+ *   declared child occupies whether or not the wire carries that child's bytes.
+ *   `unpack_array` reserves the whole backing store from the container's declared
+ *   count (`new Array(N)`) before reading any element, so the scan likewise charges
+ *   a container's slots at its header rather than as each child is read. A value
+ *   that allocates nothing beyond that slot -- an integer, boolean, null, or
+ *   undefined -- therefore adds nothing of its own. A `bin`/`raw` value is charged
+ *   that slot and nothing further: its payload is ~1x its wire bytes and so already
+ *   bounded by {@link MAX_WEBRTC_FRAME_BYTES}, not by this structural budget, while
+ *   what `unpack` retains per decoded `bin`/`raw` value beyond that payload is NOT
+ *   modelled by this weight -- a known gap in the model, not an exact mirror of
+ *   the allocation. (The number markers that unpack to a HeapNumber rather than a
+ *   SMI -- `float`, `double`, `uint32`/`int32` past the SMI range,
+ *   `uint64`/`int64` -- retain ~24 bytes incl. their slot, more than the 8 charged
+ *   here. A homogeneous numeric array stores them unboxed at ~8 bytes, matching
+ *   the charge; but a peer can force per-element boxing by mixing in one
+ *   non-number to make the array general-elements kind, reaching ~24 bytes/value.
+ *   Each such value costs >= 5 wire bytes, so the wire-byte cap -- not this
+ *   structure budget -- is the binding control for a number-heavy frame, bounding
+ *   even an all-boxed one to ~1.2 GiB: on the order of, and slightly above, this
+ *   budget, a fixed transient freed once the schema layer rejects the frame.)
  * - `string` (`stringBase` 16 + `stringPerByte` 2 per declared wire byte): a
  *   SeqString header (~16 bytes) plus its characters. `unpack_string` decodes the
  *   declared UTF-8 wire length into a JS string of at most that many UTF-16 code
@@ -127,14 +134,19 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
  *   resident size. (A string's *build* transient -- a per-code-point cons-string
  *   tree -- is bounded separately by {@link MAX_WEBRTC_STRING_BYTES}, not here.)
  *
- * The model is deliberately a *conservative* upper bound: e.g. it charges every
- * object key string in full, though V8 internalizes repeated property keys to one
- * shared string, so the real retained peak of a key-heavy frame is lower. A true
- * memory envelope is simpler for a security reviewer to audit than one resting on
- * V8 interning/representation choices an engine update could change; the cost of
- * conservatism is a budget sized above the realistic legitimate frame rather than
- * hugging it (see {@link MAX_WEBRTC_FRAME_STRUCTURE_BYTES}). Fixed, not
- * configurable, for the same reason as the budget itself.
+ * A map key needs no weight of its own: the scan refuses any frame whose map key
+ * is not a string on the wire (see {@link structureOverBudget}), and a string key
+ * IS the property name, already charged in full by the `string` weight.
+ *
+ * The model is deliberately a *conservative* upper bound for the kinds it charges
+ * in full: e.g. it charges every object key string in full, though V8 internalizes
+ * repeated property keys to one shared string, so the real retained peak of a
+ * key-heavy frame is lower. A true memory envelope is simpler for a security
+ * reviewer to audit than one resting on V8 interning/representation choices an
+ * engine update could change; the cost of conservatism is a budget sized above the
+ * realistic legitimate frame rather than hugging it (see
+ * {@link MAX_WEBRTC_FRAME_STRUCTURE_BYTES}). Fixed, not configurable, for the same
+ * reason as the budget itself.
  */
 export const WEBRTC_VALUE_WEIGHTS = {
   object: 64,
@@ -159,24 +171,26 @@ export const WEBRTC_VALUE_WEIGHTS = {
  * association-table and mapped-element frames are arrays of numbers/objects --
  * could deserialize to many GiB. A structural pre-scan (see
  * {@link structureOverBudget}, run at the unpack chokepoint) sums each declared
- * value's per-kind weight and rejects the frame *before* `unpack` allocates if the
- * running cost would exceed this budget, fail-closed. The scan also bounds each
- * declared container by the bytes that follow it (each element needs at least one
- * byte to encode), which ties the value count to the wire size and closes the
- * zero-filled-array vector.
+ * value's per-kind weight -- a container's backing slots at its own header, so an
+ * ancestor's reserved store is charged whether or not its children are on the wire
+ * -- and rejects the frame *before* `unpack` allocates if the running cost would
+ * exceed this budget, fail-closed. The scan also bounds each declared container by
+ * the bytes that follow it (each element needs at least one byte to encode), which
+ * ties the value count to the wire size.
  *
  * Value: 1,073,741,824 (2^30, 1 GiB), derived from the largest legitimate frame's
  * *retained* cost. That is the mapped-element frame -- `Array<{theirIndex,
  * iteration}>`, one entry per matched record -- which `unpack`s, per record, to
- * one object (64) + two key strings ("theirIndex" 16+20, "iteration" 16+18) + two
- * integer values (8 each) ~= 150 bytes under the weights above, a per-record cost
- * the unit tests pin against the real frame shape; 2^30 therefore admits a
- * mapped-element frame of about 7.1 million matched records. This path enforces
- * that budget and {@link MAX_WEBRTC_FRAME_BYTES}, and no element-count ceiling:
- * the two are independent bounds, with no headroom relation between them at the
- * 35 bytes an encrypted element occupies on the wire (see docs/spec/PROTOCOL.md).
- * A set frame filling the 256 MiB wire cap carries about 7.67 million elements,
- * whose mapped-element frame would reach about 1.07 GiB and be rejected here.
+ * one object (64) + its slot in the root array (8) + the object's four declared
+ * slots (8 each) + two key strings ("theirIndex" 16+20, "iteration" 16+18) ~= 174
+ * bytes under the weights above, a per-record cost the unit tests pin against the
+ * real frame shape; 2^30 therefore admits a mapped-element frame of about 6.17
+ * million matched records. This path enforces that budget and
+ * {@link MAX_WEBRTC_FRAME_BYTES}, and no element-count ceiling: the two are
+ * independent bounds, with no headroom relation between them at the 35 bytes an
+ * encrypted element occupies on the wire (see docs/spec/PROTOCOL.md). A set frame
+ * filling the 256 MiB wire cap carries about 7.67 million elements, whose
+ * mapped-element frame would reach about 1.24 GiB and be rejected here.
  * Residual: the per-frame worst case for the kinds this budget charges in full is
  * the budget itself. A frame of the heaviest such kind (~16.7M empty objects)
  * reaches ~1 GiB and is rejected there, and reaching even that requires ~16 MiB
@@ -272,14 +286,21 @@ class ByteCursor {
   }
 }
 
+/** What the scan needs to know about one BinaryPack value, beyond its cost: a
+ * `map` alternates key and value children, so the scan must test what kind sits at
+ * each key position, and `string` is the only kind a map key may be (see
+ * {@link structureOverBudget}). */
+type ValueKind = "map" | "string" | "plain";
+
 /** One BinaryPack value's contribution to the structural scan: `children` is the
  * number of child values a container declares (0 for a scalar or string), and
- * `weight` is the approximate retained bytes this single value allocates (see
- * {@link WEBRTC_VALUE_WEIGHTS}). A string over the per-string byte cap signals
- * `weight = -1`, the reject sentinel. */
+ * `weight` is the approximate retained bytes this value allocates, a container's
+ * declared backing slots included (see {@link WEBRTC_VALUE_WEIGHTS}). A string over
+ * the per-string byte cap signals `weight = -1`, the reject sentinel. */
 interface ValueHeader {
   children: number;
   weight: number;
+  kind: ValueKind;
 }
 
 /** Resident-byte weight of a string of `declaredBytes` wire bytes: a SeqString
@@ -303,25 +324,57 @@ function stringValue(
   declaredBytes: number,
   maxStringBytes: number,
 ): ValueHeader {
-  if (declaredBytes > maxStringBytes) return { children: 0, weight: -1 };
+  if (declaredBytes > maxStringBytes)
+    return { children: 0, weight: -1, kind: "string" };
   cursor.skip(declaredBytes);
-  return { children: 0, weight: stringWeight(declaredBytes) };
+  return {
+    children: 0,
+    weight: stringWeight(declaredBytes),
+    kind: "string",
+  };
 }
 
+/** A container of `children` declared child values: its own base weight plus the
+ * backing slot each of those children occupies, charged here at the header.
+ * `unpack_array` sizes its store from the declared count (`new Array(size)`)
+ * before reading a single element; `unpack_map` grows a plain object by
+ * per-entry assignment, so for it the header-time charge is a conservative
+ * bound on the store, not the reservation itself
+ * (see {@link WEBRTC_VALUE_WEIGHTS}). */
+function containerValue(
+  children: number,
+  base: number,
+  kind: ValueKind,
+): ValueHeader {
+  return {
+    children,
+    weight: base + children * WEBRTC_VALUE_WEIGHTS.scalar,
+    kind,
+  };
+}
+
+/** A value charged nothing beyond the backing slot its container already charged:
+ * an integer, boolean, null, or undefined, which allocate nothing of their own, and
+ * a `bin`/`raw` payload, whose retention past its wire-bounded payload this weight
+ * model does not fully capture -- a known gap rather than an exact mirror of the
+ * allocation (see {@link WEBRTC_VALUE_WEIGHTS}). */
 const SCALAR: ValueHeader = {
   children: 0,
-  weight: WEBRTC_VALUE_WEIGHTS.scalar,
+  weight: 0,
+  kind: "plain",
 };
 
 /** Reads one BinaryPack value's header at the cursor, skipping a scalar's
- * payload, and returns the value's {@link ValueHeader} (its declared child count
- * and its per-kind retained-byte weight; `weight = -1` for a string whose declared
+ * payload, and returns the value's {@link ValueHeader} (its declared child count,
+ * its retained-byte weight including a container's declared backing slots, and the
+ * kind the map-key rule dispatches on; `weight = -1` for a string whose declared
  * length exceeds `maxStringBytes`). Mirrors `peerjs-js-binarypack`'s
  * `Unpacker.unpack` marker dispatch: a map of K pairs declares 2K children (K keys
- * + K values), each weighted as it is read. A `bin`/`raw` value is charged the
- * scalar slot weight, its payload being ~1x wire and so bounded by the wire-byte
- * cap. An unknown marker yields a scalar weight and 0 children (BinaryPack returns
- * `undefined` for it without consuming a payload). */
+ * + K values). A `bin`/`raw` value is charged nothing beyond its parent's slot, its
+ * payload being ~1x wire and so bounded by the wire-byte cap and what it retains
+ * past that payload being outside this model (see {@link SCALAR}). An unknown marker
+ * yields the same and 0 children (BinaryPack returns `undefined` for it without
+ * consuming a payload). */
 function readValueHeader(
   cursor: ByteCursor,
   maxStringBytes: number,
@@ -336,9 +389,13 @@ function readValueHeader(
   if ((type ^ 0xb0) <= 0x0f)
     return stringValue(cursor, type ^ 0xb0, maxStringBytes); // fixstr (<= 15 bytes)
   if ((type ^ 0x90) <= 0x0f)
-    return { children: type ^ 0x90, weight: WEBRTC_VALUE_WEIGHTS.array }; // fixarray
+    return containerValue(type ^ 0x90, WEBRTC_VALUE_WEIGHTS.array, "plain"); // fixarray
   if ((type ^ 0x80) <= 0x0f)
-    return { children: (type ^ 0x80) * 2, weight: WEBRTC_VALUE_WEIGHTS.object }; // fixmap
+    return containerValue(
+      (type ^ 0x80) * 2,
+      WEBRTC_VALUE_WEIGHTS.object,
+      "map",
+    ); // fixmap
   switch (type) {
     case 0xc0: // null
     case 0xc1: // undefined
@@ -382,19 +439,21 @@ function readValueHeader(
     case 0xd9: // str32
       return stringValue(cursor, cursor.u32(), maxStringBytes);
     case 0xdc: // array16
-      return { children: cursor.u16(), weight: WEBRTC_VALUE_WEIGHTS.array };
+      return containerValue(cursor.u16(), WEBRTC_VALUE_WEIGHTS.array, "plain");
     case 0xdd: // array32
-      return { children: cursor.u32(), weight: WEBRTC_VALUE_WEIGHTS.array };
+      return containerValue(cursor.u32(), WEBRTC_VALUE_WEIGHTS.array, "plain");
     case 0xde: // map16
-      return {
-        children: cursor.u16() * 2,
-        weight: WEBRTC_VALUE_WEIGHTS.object,
-      };
+      return containerValue(
+        cursor.u16() * 2,
+        WEBRTC_VALUE_WEIGHTS.object,
+        "map",
+      );
     case 0xdf: // map32
-      return {
-        children: cursor.u32() * 2,
-        weight: WEBRTC_VALUE_WEIGHTS.object,
-      };
+      return containerValue(
+        cursor.u32() * 2,
+        WEBRTC_VALUE_WEIGHTS.object,
+        "map",
+      );
     default:
       return SCALAR;
   }
@@ -403,20 +462,43 @@ function readValueHeader(
 /**
  * Whether the BinaryPack value in `buf` would deserialize to a structure whose
  * approximate retained-byte cost exceeds `maxStructureBytes`, nest deeper than
- * `maxDepth`, contain a string longer than `maxStringBytes`, or declare any
- * container with more elements than the bytes that follow it can encode. Walks the
- * structure reading only container headers and scalar lengths -- never
- * materializing the payload -- and charges each declared value its per-kind weight
+ * `maxDepth`, contain a string longer than `maxStringBytes`, declare any container
+ * with more elements than the bytes that follow it can encode, or key a map with
+ * anything but a string. Walks the structure reading only container headers and
+ * scalar lengths -- never materializing the payload -- and charges each declared
+ * value its per-kind weight
  * (see {@link WEBRTC_VALUE_WEIGHTS}), rejecting as soon as the running cost
  * breaches the budget, a container over-declares, or a string over-declares, so an
  * over-budget frame is caught before `unpack` allocates (the empty-object/array
- * amplification, the `new Array(N)`-from-a-tiny-header case where each declared
- * element must be backed by at least one wire byte, and the giant-string case
- * where `unpack_string` builds a JS string far larger than its slot). A read past
- * the end (a malformed/truncated frame) returns `false`: every value it passed was
- * within both the byte budget and the bytes-that-follow check, so the structure it
- * commits `unpack` to is already bounded, and PeerJS's own unpack handles the
- * malformation downstream.
+ * amplification, the `new Array(N)`-from-a-tiny-header case, and the giant-string
+ * case where `unpack_string` builds a JS string far larger than its slot).
+ *
+ * A container's backing slots are charged at the container's own header, from its
+ * declared count, rather than where the wire spends bytes: `unpack_array` reserves
+ * its whole store up front (`new Array(size)`) and reads past the end of the
+ * buffer as zero rather than throwing, so a declared child that no wire byte
+ * backs still costs its slot; `unpack_map` grows a plain object by per-entry
+ * assignment, so its header-time charge is a conservative bound on the store
+ * rather than a mirror of the allocation.
+ *
+ * A map key that is not a string on the wire is REFUSED rather than costed. The
+ * `pack` side of this dependency emits a map only for a plain JS object, whose own
+ * keys are strings by construction (and refuses a `Map` or `Set` outright), so no
+ * legitimate frame carries one -- a premise the differential suite holds the real
+ * packer to. Refusing is what makes the cost model total: `unpack_map`
+ * assigns `map[key] = value`, retaining the key's *coerced* string form as the
+ * property name, and a container key coerces to the joined forms of everything
+ * beneath it -- a cost that grows with the declared descendants `unpack` zero-fills
+ * past the end of the buffer, not with the bytes the wire actually spends, so no
+ * charge taken as the scan walks can bound it.
+ *
+ * A read past the end (a malformed/truncated frame) returns `false`: every value it
+ * passed was within the byte budget, the bytes past the end unpack as zero-valued
+ * integers into slots this scan has already charged, so the structure it commits
+ * `unpack` to is already bounded, and PeerJS's own unpack handles the malformation
+ * downstream. The key rule is decided on the key's own marker byte, before the scan
+ * descends into it, so an underrun deeper in the frame cannot carry a non-string key
+ * past this point.
  */
 export function structureOverBudget(
   buf: Uint8Array,
@@ -427,21 +509,35 @@ export function structureOverBudget(
   const cursor = new ByteCursor(buf);
   // remaining[d] = child values still to read at nesting level d; one root value.
   const remaining: Array<number> = [1];
+  // mapLevel[d] = whether level d is a map's children, which alternate key, value,
+  // key, ... so an even count still to read is a key position.
+  const mapLevel: Array<boolean> = [false];
   // Running sum of the approximate retained bytes the structure has committed
-  // `unpack` to allocate (every value's per-kind weight: the root plus every
-  // container's children).
+  // `unpack` to allocate: every value's per-kind weight, a container's declared
+  // backing slots included.
   let cost = 0;
   try {
     while (remaining.length > 0) {
       const top = remaining.length - 1;
       if (remaining[top] === 0) {
         remaining.pop();
+        mapLevel.pop();
         continue;
       }
+      // A map's children alternate key, value, key, ...; the keys are the ones
+      // read at an even count still to read.
+      const atKeyPosition = mapLevel[top] && remaining[top] % 2 === 0;
       remaining[top]--;
-      const { children, weight } = readValueHeader(cursor, maxStringBytes);
+      const { children, weight, kind } = readValueHeader(
+        cursor,
+        maxStringBytes,
+      );
       // A string over the per-string byte cap (`weight = -1`) is refused outright.
       if (weight < 0) return true;
+      // A map key must be a string on the wire; anything else is refused before the
+      // scan descends into it, since the property name `map[key] = value` coerces it
+      // to is not bounded by what the frame spends to declare it.
+      if (atKeyPosition && kind !== "string") return true;
       cost += weight;
       if (cost > maxStructureBytes) return true;
       if (children > 0) {
@@ -450,6 +546,7 @@ export function structureOverBudget(
         if (children > cursor.remaining()) return true;
         if (remaining.length >= maxDepth) return true;
         remaining.push(children);
+        mapLevel.push(kind === "map");
       }
     }
   } catch {

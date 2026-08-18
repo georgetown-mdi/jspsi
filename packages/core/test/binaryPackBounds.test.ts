@@ -81,15 +81,16 @@ function stringWeightOf(byteLen: number): number {
 }
 
 /** The charged retained cost of an `n`-record mapped-element frame under the cost
- * model: a root array, plus per record one object, two key strings, two integers.
- * This is the derivation the production budget is sized against. */
+ * model: a root array, plus per record its slot in that array, one object, the
+ * object's four declared slots, and two key strings. This is the derivation the
+ * production budget is sized against. */
 function expectedMappedCost(n: number): number {
   const perRecord =
-    WEBRTC_VALUE_WEIGHTS.object +
-    stringWeightOf("theirIndex".length) +
     WEBRTC_VALUE_WEIGHTS.scalar +
-    stringWeightOf("iteration".length) +
-    WEBRTC_VALUE_WEIGHTS.scalar;
+    WEBRTC_VALUE_WEIGHTS.object +
+    4 * WEBRTC_VALUE_WEIGHTS.scalar +
+    stringWeightOf("theirIndex".length) +
+    stringWeightOf("iteration".length);
   return WEBRTC_VALUE_WEIGHTS.array + n * perRecord;
 }
 
@@ -185,17 +186,77 @@ describe("structureOverBudget: the per-value cost model", () => {
     atBoundary(new Uint8Array([0x90]), WEBRTC_VALUE_WEIGHTS.array); // fixarray(0)
   });
 
-  test("charges an integer the scalar weight", () => {
-    atBoundary(new Uint8Array([0x01]), WEBRTC_VALUE_WEIGHTS.scalar); // fixint
+  test("charges an integer the one backing slot its container reserves", () => {
+    // fixarray(1) of a fixint: the element allocates nothing of its own, so the
+    // array's base weight plus its single declared slot is the whole cost.
+    atBoundary(
+      new Uint8Array([0x91, 0x01]),
+      WEBRTC_VALUE_WEIGHTS.array + WEBRTC_VALUE_WEIGHTS.scalar,
+    );
   });
 
-  test("charges a wide number marker (double) the scalar weight", () => {
+  test("charges a wide number marker (double) the same one slot", () => {
     // double (0xcb + 8 payload bytes) is a HeapNumber at runtime but is charged
-    // the scalar slot here; this pins the documented under-count -- the wire-byte
-    // cap, not the structure budget, is the backstop for a number-heavy frame.
+    // only its container's slot here; this pins the documented under-count -- the
+    // wire-byte cap, not the structure budget, is the backstop for a number-heavy
+    // frame.
     atBoundary(
-      new Uint8Array([0xcb, 0, 0, 0, 0, 0, 0, 0, 0]),
-      WEBRTC_VALUE_WEIGHTS.scalar,
+      new Uint8Array([0x91, 0xcb, 0, 0, 0, 0, 0, 0, 0, 0]),
+      WEBRTC_VALUE_WEIGHTS.array + WEBRTC_VALUE_WEIGHTS.scalar,
+    );
+  });
+
+  test("charges a container's declared slots at its own header", () => {
+    // An array16 of 40 elements backed by 40 wire bytes: the backing store is
+    // charged from the DECLARED count at the header, so the same total is reached
+    // whether or not the scan goes on to read every element.
+    atBoundary(
+      arrayOfFixints(40),
+      WEBRTC_VALUE_WEIGHTS.array + 40 * WEBRTC_VALUE_WEIGHTS.scalar,
+    );
+  });
+
+  test("charges every ancestor's declared slots in a nest, not only the innermost", () => {
+    // Three array16 headers each declaring 40 elements, with 40 wire bytes behind
+    // the innermost. Every level reserves its own 40-slot backing store, so the
+    // charge is three arrays and 120 slots even though only the innermost level's
+    // elements are on the wire.
+    const nested = new Uint8Array([
+      0xdc,
+      0x00,
+      40,
+      0xdc,
+      0x00,
+      40,
+      ...arrayOfFixints(40),
+    ]);
+    atBoundary(
+      nested,
+      3 * WEBRTC_VALUE_WEIGHTS.array + 120 * WEBRTC_VALUE_WEIGHTS.scalar,
+    );
+  });
+
+  test("charges a string map key nothing beyond the string itself", () => {
+    // fixmap(1) keyed by "abc": the property name IS that string, charged in full
+    // by the string weight and by nothing else.
+    atBoundary(
+      new Uint8Array([0x81, ...fixstr("abc"), 0x08]),
+      WEBRTC_VALUE_WEIGHTS.object +
+        2 * WEBRTC_VALUE_WEIGHTS.scalar +
+        stringWeightOf(3),
+    );
+  });
+
+  test("charges a non-string value at a map's VALUE position nothing extra", () => {
+    // fixmap(1) keyed by "a" with a fixarray(2) VALUE: only keys are refused, so a
+    // container on the value side is charged exactly what it would cost anywhere.
+    atBoundary(
+      new Uint8Array([0x81, ...fixstr("a"), 0x92, 0x01, 0x02]),
+      WEBRTC_VALUE_WEIGHTS.object +
+        2 * WEBRTC_VALUE_WEIGHTS.scalar +
+        stringWeightOf(1) +
+        WEBRTC_VALUE_WEIGHTS.array +
+        2 * WEBRTC_VALUE_WEIGHTS.scalar,
     );
   });
 
@@ -227,5 +288,68 @@ describe("structureOverBudget: the per-value cost model", () => {
     expect(expectedMappedCost(4_194_304)).toBeLessThan(
       MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
     );
+  });
+});
+
+describe("structureOverBudget: the map-key rule", () => {
+  // A map key that is not a string on the wire is refused rather than costed: the
+  // property name `map[key] = value` coerces it to grows with the descendants
+  // `unpack` zero-fills past the end of the buffer, not with the bytes the frame
+  // spends declaring them, so no charge taken during the walk can bound it. The
+  // real packer emits a map only for a plain JS object, whose keys are strings, so
+  // no legitimate frame is refused here -- the differential suite holds that
+  // premise to the real packer.
+  const refuses = (frame: Uint8Array): boolean =>
+    structureOverBudget(frame, Number.MAX_SAFE_INTEGER, 256, 1 << 20);
+
+  test("refuses a map keyed by an integer, at any budget", () => {
+    expect(refuses(new Uint8Array([0x81, 0x07, 0x08]))).toBe(true); // fixmap(1), fixint key
+  });
+
+  test("refuses a map keyed by a container", () => {
+    // fixmap(1) whose key is a fixarray(2): the coerced name is the joined form of
+    // everything below it, so the whole subtree is refused at the key's marker.
+    expect(refuses(new Uint8Array([0x81, 0x92, 0x01, 0x02, 0x08]))).toBe(true);
+  });
+
+  test("refuses a map keyed by a nested map", () => {
+    expect(
+      refuses(new Uint8Array([0x81, 0x81, ...fixstr("a"), 0x01, 0x08])),
+    ).toBe(true);
+  });
+
+  test("refuses a map keyed by bin/raw, null, and a boolean alike", () => {
+    expect(refuses(new Uint8Array([0x81, 0xa1, 0x41, 0x08]))).toBe(true); // fixraw(1)
+    expect(refuses(new Uint8Array([0x81, 0xc0, 0x08]))).toBe(true); // null
+    expect(refuses(new Uint8Array([0x81, 0xc3, 0x08]))).toBe(true); // true
+    expect(
+      refuses(new Uint8Array([0x81, 0xcb, 0, 0, 0, 0, 0, 0, 0, 0, 0x08])),
+    ).toBe(true); // double
+  });
+
+  test("accepts every string marker at a key position", () => {
+    // fixstr and str16 both name a property directly; neither is refused.
+    expect(refuses(new Uint8Array([0x81, ...fixstr("abc"), 0x08]))).toBe(false);
+    expect(
+      refuses(new Uint8Array([0x81, 0xd8, 0x00, 0x03, 0x61, 0x62, 0x63, 0x08])),
+    ).toBe(false);
+  });
+
+  test("refuses a key nested in a map that is itself a map's value", () => {
+    // The rule follows the key positions of every map, not only the root's: an
+    // integer-keyed map buried on a value side is refused just the same.
+    expect(
+      refuses(new Uint8Array([0x81, ...fixstr("a"), 0x81, 0x07, 0x08])),
+    ).toBe(true);
+  });
+
+  test("leaves a map's values free to be any kind", () => {
+    // Every non-string kind that is refused at a key position passes at a value
+    // position, so the rule is scoped to keys rather than to kinds.
+    expect(refuses(new Uint8Array([0x81, ...fixstr("a"), 0x07]))).toBe(false);
+    expect(refuses(new Uint8Array([0x81, ...fixstr("a"), 0xc0]))).toBe(false);
+    expect(
+      refuses(new Uint8Array([0x81, ...fixstr("a"), 0x92, 0x01, 0x02])),
+    ).toBe(false);
   });
 });
