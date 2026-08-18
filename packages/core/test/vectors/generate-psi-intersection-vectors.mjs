@@ -114,6 +114,7 @@ async function runLink(cardinality, starterKeys, joinerKeys) {
       makeParticipant("starter"),
       starterConn,
       starterKeys,
+      joinerKeys[0].length,
       -1,
     ),
     linkViaPSI(
@@ -121,6 +122,7 @@ async function runLink(cardinality, starterKeys, joinerKeys) {
       makeParticipant("joiner"),
       joinerConn,
       joinerKeys,
+      starterKeys[0].length,
       -1,
     ),
   ]);

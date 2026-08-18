@@ -32,6 +32,7 @@ export async function runLink(
       server,
       serverConn,
       serverData,
+      clientData[0].length,
       -1,
     ),
     linkViaPSI(
@@ -39,6 +40,7 @@ export async function runLink(
       client,
       clientConn,
       clientData,
+      serverData[0].length,
       -1,
     ),
   ]);

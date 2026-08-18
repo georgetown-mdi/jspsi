@@ -980,6 +980,7 @@ export async function runExchange(
             participant,
             conn,
             linkageKeyIterables,
+            partnerRecordCount,
             verbosity,
             onStage,
           );
