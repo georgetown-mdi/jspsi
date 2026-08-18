@@ -7,8 +7,11 @@
 //
 // Every bound passed in is derived locally (an array this party built) or from
 // authenticated session state (a count carried on the terms exchange), never from
-// the frame being checked. The wire schemas upstream (participant.ts
-// associationTableMessage / numberArrayMessage, link.ts
+// the frame being checked. Where one half of a received table must instead match
+// the length of the other, the two-half form below range-checks the anchoring
+// half first, so the count the second half is held to is pinned to one of those
+// quantities rather than chosen by the partner. The wire schemas upstream
+// (participant.ts associationTableMessage / numberArrayMessage, link.ts
 // associationAndIterationArray) accept any FINITE number, so integrality is
 // checked here too: a fractional index addresses nothing and would read as
 // `undefined`.
@@ -33,6 +36,10 @@ export function partnerProtocolError(
   );
 }
 
+function entryCount(count: number): string {
+  return `${count} ${count === 1 ? "entry" : "entries"}`;
+}
+
 /**
  * Requires a partner-supplied list to carry exactly the number of entries this
  * party's own state implies.
@@ -40,7 +47,10 @@ export function partnerProtocolError(
  * @param participantId - This party's participant id.
  * @param what - Names the list, for the error message.
  * @param count - The received entry count.
- * @param expected - The count this party derived locally.
+ * @param expected - The count this party derived locally. The length of a list
+ *   read out of the frame under check is not one of those, since the partner
+ *   chooses it; the two-half form is {@link assertPartnerIndexTable}, which
+ *   pins the anchoring half to a local bound before its length is used here.
  * @throws A `"protocol"` {@link ConnectionError} on any other count.
  */
 export function assertPartnerIndexCount(
@@ -52,8 +62,43 @@ export function assertPartnerIndexCount(
   if (count !== expected)
     throw partnerProtocolError(
       participantId,
-      `${what} carries ${count} entries, expected ${expected}`,
+      `${what} carries ${entryCount(count)}, expected ${expected}`,
     );
+}
+
+// V8 holds a Set entry in roughly 32 bytes (measured: 2M integer entries against
+// a 62.8 MB heap delta), where a Uint8Array bitmap costs one byte per addressable
+// slot however short the list is. Below this ratio the bitmap allocates less.
+const SET_ENTRY_BYTES = 32;
+
+// Duplicate detection over `[0, exclusiveBound)`, backed by whichever of the two
+// forms allocates less for the list at hand: the bitmap wins at the seams whose
+// bound is one of this party's own counts, which are the seams whose honest lists
+// run to millions of entries. The ratio is load-bearing rather than a tuning
+// choice: a bound may be the partner's row count or a per-message element bound,
+// authenticated but as large as MAX_RECORD_COUNT, and a bitmap sized by that
+// unconditionally would let a three-entry frame demand a terabyte -- which V8
+// answers by aborting the process, not by throwing. Choosing by ratio caps the
+// allocation at min(exclusiveBound, SET_ENTRY_BYTES * length) bytes, never more
+// than the frame's own already-materialized entries imply.
+function createRepeatDetector(
+  length: number,
+  exclusiveBound: number,
+): (index: number) => boolean {
+  if (exclusiveBound <= length * SET_ENTRY_BYTES) {
+    const seen = new Uint8Array(exclusiveBound);
+    return (index) => {
+      const repeated = seen[index] === 1;
+      seen[index] = 1;
+      return repeated;
+    };
+  }
+  const seen = new Set<number>();
+  return (index) => {
+    const repeated = seen.has(index);
+    seen.add(index);
+    return repeated;
+  };
 }
 
 /**
@@ -63,8 +108,7 @@ export function assertPartnerIndexCount(
  * Distinctness is the protocol invariant on all three matching paths -- one-to-one
  * matching pairs each row at most once -- and it is what caps the list's LENGTH at
  * `exclusiveBound`, since a longer list cannot hold distinct in-range entries. The
- * length is therefore not a separate argument. Duplicate detection holds at most
- * that many entries, so its cost is bounded by the same authenticated quantity.
+ * length is therefore not a separate argument.
  *
  * @param participantId - This party's participant id.
  * @param what - Names the list, for the error message.
@@ -83,18 +127,77 @@ export function assertPartnerIndices(
   if (indices.length > exclusiveBound)
     throw partnerProtocolError(
       participantId,
-      `${what} carries ${indices.length} entries, more than the ` +
+      `${what} carries ${entryCount(indices.length)}, more than the ` +
         `${exclusiveBound} this side can address`,
     );
-  const seen = new Set<number>();
+  const repeats = createRepeatDetector(indices.length, exclusiveBound);
   for (const index of indices) {
-    if (!Number.isInteger(index) || index < 0 || index >= exclusiveBound)
+    if (!Number.isInteger(index))
+      throw partnerProtocolError(
+        participantId,
+        `${what} carries an entry that is not a whole number`,
+      );
+    if (index < 0 || index >= exclusiveBound)
       throw partnerProtocolError(
         participantId,
         `${what} carries an index outside [0, ${exclusiveBound})`,
       );
-    if (seen.has(index))
+    if (repeats(index))
       throw partnerProtocolError(participantId, `${what} repeats an index`);
-    seen.add(index);
   }
+}
+
+/** One half of a partner-supplied association table, with what bounds it. */
+export interface PartnerIndexTableHalf {
+  /** Names the half, for the error message. */
+  what: string;
+  /** The partner-supplied entries, in received order. */
+  indices: ReadonlyArray<number>;
+  /** The count of slots this half addresses. See {@link assertPartnerIndices}. */
+  exclusiveBound: number;
+}
+
+/**
+ * Requires both halves of a partner-supplied association table to hold whole,
+ * in-range, non-repeating indices, and to pair up: one entry of each half per
+ * matched record.
+ *
+ * The halves are checked in this order for a reason the callers cannot enforce
+ * themselves: the pairing is expressed as the partner half carrying as many
+ * entries as the local half, and that expected count is only a local quantity
+ * once the local half has been range-checked -- which caps its length at
+ * `localHalf.exclusiveBound`. Running the halves through this one entry point
+ * keeps the order out of the callers' hands.
+ *
+ * @param participantId - This party's participant id.
+ * @param localHalf - The half addressing state this party owns, whose bound is
+ *   therefore one of its own counts.
+ * @param partnerHalf - The half addressing the partner's rows or masked-set
+ *   elements, bounded by a count carried on the authenticated terms exchange.
+ * @throws A `"protocol"` {@link ConnectionError} on a bad entry in either half,
+ *   or on halves of unequal length.
+ */
+export function assertPartnerIndexTable(
+  participantId: string,
+  localHalf: PartnerIndexTableHalf,
+  partnerHalf: PartnerIndexTableHalf,
+): void {
+  assertPartnerIndices(
+    participantId,
+    localHalf.what,
+    localHalf.indices,
+    localHalf.exclusiveBound,
+  );
+  assertPartnerIndexCount(
+    participantId,
+    partnerHalf.what,
+    partnerHalf.indices.length,
+    localHalf.indices.length,
+  );
+  assertPartnerIndices(
+    participantId,
+    partnerHalf.what,
+    partnerHalf.indices,
+    partnerHalf.exclusiveBound,
+  );
 }

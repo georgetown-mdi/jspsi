@@ -88,7 +88,7 @@ The reference implementation is `linkViaSinglePassPSI` (`packages/core/src/link.
 
 #### Partner-supplied index tables are checked against local state
 
-Both strategies exchange lists of indices, and every such list a party RECEIVES addresses positions that party owns: its own rows, the per-round candidate set it just encrypted, or the partner's rows as counted on the terms exchange. Each is validated before it drives the match set, the payload columns this party discloses, or its [self-attested record](#self-attested-record). The checks, all of them:
+Both strategies exchange association tables and mapped-element lists, and every index one of those carries addresses a position the RECEIVING party owns or counts: its own rows, the per-round candidate set it just encrypted, or the partner's rows as counted on the terms exchange. Each such list is validated before it drives the match set, the payload columns this party discloses, or its [self-attested record](#self-attested-record). The checks, all of them:
 
 - the two halves of an association table must carry the same number of entries;
 - every entry must be a whole number within the range its side authenticates -- this party's own row count, the size of the set it encrypted for that round, the element bound derived for the partner's masked set, or the partner's row count carried on the terms exchange -- and no entry may repeat, which is what caps a list's length at the count of positions it can address;

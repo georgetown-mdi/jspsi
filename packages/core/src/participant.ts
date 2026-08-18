@@ -18,6 +18,7 @@ import { singleIssueArray } from "./utils/singleIssueArray";
 import {
   assertPartnerIndexCount,
   assertPartnerIndices,
+  assertPartnerIndexTable,
 } from "./utils/partnerIndices";
 import { InProcessPsiEngine, type PsiEngine } from "./psiEngine";
 
@@ -413,23 +414,18 @@ export class PSIParticipant {
       // derived from the agreed key count and the exchanged record counts). Both
       // are checked before the remap below turns our half into this party's
       // matched set for the round.
-      assertPartnerIndexCount(
+      assertPartnerIndexTable(
         this.id,
-        "the round's association table, partner half",
-        partnerIndices.length,
-        localIndices.length,
-      );
-      assertPartnerIndices(
-        this.id,
-        "the round's association table, local half",
-        localIndices,
-        permutation.length,
-      );
-      assertPartnerIndices(
-        this.id,
-        "the round's association table, partner half",
-        partnerIndices,
-        this.elementBounds.request,
+        {
+          what: "the round's association table, local half",
+          indices: localIndices,
+          exclusiveBound: permutation.length,
+        },
+        {
+          what: "the round's association table, partner half",
+          indices: partnerIndices,
+          exclusiveBound: this.elementBounds.request,
+        },
       );
 
       for (let i = 0; i < localIndices.length; ++i) {

@@ -13,6 +13,7 @@ import { singleIssueArray } from "./utils/singleIssueArray";
 import {
   assertPartnerIndexCount,
   assertPartnerIndices,
+  assertPartnerIndexTable,
   partnerProtocolError,
 } from "./utils/partnerIndices";
 
@@ -628,23 +629,18 @@ export async function linkViaSinglePassPSI(
     // two halves against them before the table becomes this party's match set,
     // its payload row selection, and its attested record.
     const table = await receiveParsed(conn, associationTableMessage);
-    assertPartnerIndexCount(
+    assertPartnerIndexTable(
       participant.id,
-      "the resolved association table's partner half",
-      table[1].length,
-      table[0].length,
-    );
-    assertPartnerIndices(
-      participant.id,
-      "the resolved association table's local half",
-      table[0],
-      numRecords,
-    );
-    assertPartnerIndices(
-      participant.id,
-      "the resolved association table's partner half",
-      table[1],
-      partnerRecordCount,
+      {
+        what: "the resolved association table's local half",
+        indices: table[0],
+        exclusiveBound: numRecords,
+      },
+      {
+        what: "the resolved association table's partner half",
+        indices: table[1],
+        exclusiveBound: partnerRecordCount,
+      },
     );
     stage("done");
     return [table[0], table[1]];

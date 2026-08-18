@@ -4,7 +4,11 @@ import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../src/participant";
 import { linkViaPSI, linkViaSinglePassPSI } from "../src/link";
-import { psiElementBounds } from "../src/connection/frameSize";
+import {
+  MAX_RECORD_COUNT,
+  psiElementBounds,
+} from "../src/connection/frameSize";
+import { assertPartnerIndices } from "../src/utils/partnerIndices";
 import {
   createMessagePipe,
   ConnectionError,
@@ -14,10 +18,11 @@ import {
 // Every index list a party receives from its partner addresses rows or per-round
 // candidate positions the RECEIVING party owns, so each is checked against that
 // party's own authenticated state before it drives the match set, the payload it
-// discloses, or the attested record. These drive an otherwise honest two-party
-// exchange and deviate exactly one inbound frame, so what is asserted is the check
-// under test rather than a crypto or framing failure: the deviating frame is
-// refused as a classified protocol error, and an untouched run stays green.
+// discloses, or the attested record. The deviation tests here drive an otherwise
+// honest two-party exchange and alter exactly one inbound frame, so what is
+// asserted is the check under test rather than a crypto or framing failure: the
+// deviating frame is refused as a classified protocol error, and an untouched run
+// stays green.
 
 const psiLibrary = await PSI();
 
@@ -220,7 +225,24 @@ test("single-pass sender refuses a resolved table whose halves disagree in lengt
   const err = await singlePassWithDeviation(
     onIndexTable((table) => [table[0], table[1].slice(1)]),
   );
-  expectProtocolRefusal(err, /partner half carries 1 entries, expected 2/);
+  expectProtocolRefusal(err, /partner half carries 1 entry, expected 2/);
+});
+
+test("single-pass sender refuses a resolved table with a fractional index", async () => {
+  const err = await singlePassWithDeviation(
+    onIndexTable((table) => [table[0].map(() => 1.5), table[1]]),
+  );
+  expectProtocolRefusal(
+    err,
+    /local half carries an entry that is not a whole number/,
+  );
+});
+
+test("single-pass sender refuses a resolved table with a negative index", async () => {
+  const err = await singlePassWithDeviation(
+    onIndexTable((table) => [table[0], [-1, ...table[1].slice(1)]]),
+  );
+  expectProtocolRefusal(err, /partner half carries an index outside \[0, 3\)/);
 });
 
 test("single-pass sender refuses a resolved table that claims one of its rows twice", async () => {
@@ -285,7 +307,40 @@ test("cascade starter refuses a round table with a fractional index", async () =
   );
   expectProtocolRefusal(
     err,
-    /round's association table, local half carries an index outside \[0, 3\)/,
+    /round's association table, local half carries an entry that is not a whole number/,
+  );
+});
+
+test("cascade starter refuses a round table with a negative index", async () => {
+  const err = await cascadeWithDeviation(
+    onIndexTable((table) => [[-1, ...table[0].slice(1)], table[1]]),
+  );
+  expectProtocolRefusal(
+    err,
+    /round's association table, partner half carries an index outside \[0, 3\)/,
+  );
+});
+
+test("cascade starter refuses a round table claiming one of its indices twice", async () => {
+  const err = await cascadeWithDeviation(
+    onIndexTable((table) => [table[0], table[1].map(() => table[1][0])]),
+  );
+  expectProtocolRefusal(
+    err,
+    /round's association table, local half repeats an index/,
+  );
+});
+
+test("cascade starter refuses a round table longer than the set it encrypted", async () => {
+  const err = await cascadeWithDeviation(
+    onIndexTable((table) => [
+      [...table[0], 0, 0],
+      [...table[1], 0, 0],
+    ]),
+  );
+  expectProtocolRefusal(
+    err,
+    /round's association table, local half carries 4 entries, more than the 3/,
   );
 });
 
@@ -303,6 +358,32 @@ test("cascade joiner refuses an original-index list naming an element beyond its
     err,
     /original-index list carries an index outside \[0, 3\)/,
   );
+});
+
+test("cascade joiner refuses an original-index list with a fractional entry", async () => {
+  const err = await cascadeWithJoinerDeviation((list) => list.map(() => 1.5));
+  expectProtocolRefusal(
+    err,
+    /original-index list carries an entry that is not a whole number/,
+  );
+});
+
+test("cascade joiner refuses an original-index list with a negative entry", async () => {
+  const err = await cascadeWithJoinerDeviation((list) => [
+    -1,
+    ...list.slice(1),
+  ]);
+  expectProtocolRefusal(
+    err,
+    /original-index list carries an index outside \[0, 3\)/,
+  );
+});
+
+test("cascade joiner refuses an original-index list naming one element twice", async () => {
+  const err = await cascadeWithJoinerDeviation((list) =>
+    list.map(() => list[0]),
+  );
+  expectProtocolRefusal(err, /original-index list repeats an index/);
 });
 
 // --- The cascade's mapped-element translation ---------------------------------
@@ -323,6 +404,27 @@ test("cascade refuses a mapped-element entry naming a position outside the round
   const err = await cascadeWithDeviation(
     onMappedElementList(1, (list) =>
       list.map((e) => ({ ...e, theirIndex: 99 })),
+    ),
+  );
+  expectProtocolRefusal(
+    err,
+    /names a position outside that round's candidate set/,
+  );
+});
+
+test("cascade refuses a mapped-element entry naming a fractional key round", async () => {
+  const err = await cascadeWithDeviation(
+    onMappedElementList(1, (list) =>
+      list.map((e) => ({ ...e, iteration: 0.5 })),
+    ),
+  );
+  expectProtocolRefusal(err, /names a key round this exchange did not run/);
+});
+
+test("cascade refuses a mapped-element entry naming a negative candidate position", async () => {
+  const err = await cascadeWithDeviation(
+    onMappedElementList(1, (list) =>
+      list.map((e) => ({ ...e, theirIndex: -1 })),
     ),
   );
   expectProtocolRefusal(
@@ -391,8 +493,67 @@ test("cascade refuses a returned mapped-element list of the wrong length", async
   );
   expectProtocolRefusal(
     err,
-    /returned mapped-element list carries 1 entries, expected 2/,
+    /returned mapped-element list carries 1 entry, expected 2/,
   );
+});
+
+test("cascade refuses a returned mapped-element list with a fractional partner row", async () => {
+  const err = await cascadeWithDeviation(
+    onMappedElementList(2, (list) =>
+      list.map((e) => ({ ...e, theirIndex: 1.5 })),
+    ),
+  );
+  expectProtocolRefusal(
+    err,
+    /returned mapped-element list carries an entry that is not a whole number/,
+  );
+});
+
+test("cascade refuses a returned mapped-element list with a negative partner row", async () => {
+  const err = await cascadeWithDeviation(
+    onMappedElementList(2, (list) => [
+      { ...list[0], theirIndex: -1 },
+      ...list.slice(1),
+    ]),
+  );
+  expectProtocolRefusal(
+    err,
+    /returned mapped-element list carries an index outside \[0, 3\)/,
+  );
+});
+
+// --- Duplicate detection at either bound scale --------------------------------
+// The detector picks its backing by the ratio of the bound to the list length, and
+// every seam above runs at fixture scale, where the bitmap is always the smaller
+// allocation. The widest bound a partner may declare is exercised here instead:
+// the refusal must be the same classified protocol error, which it cannot be if
+// the allocation is ever sized by that bound. A bitmap of MAX_RECORD_COUNT bytes
+// does not fail cleanly -- V8 aborts the process rather than throwing -- so this
+// test's failure, should the ratio guard ever go away, is unmissable.
+
+test("a repeated index is refused at either bound scale", () => {
+  const refusalFor = (exclusiveBound: number): unknown => {
+    try {
+      assertPartnerIndices("me", "the list", [1, 1], exclusiveBound);
+    } catch (err) {
+      return err;
+    }
+    return undefined;
+  };
+  expectProtocolRefusal(refusalFor(ROWS), /the list repeats an index/);
+  expectProtocolRefusal(
+    refusalFor(MAX_RECORD_COUNT),
+    /the list repeats an index/,
+  );
+});
+
+test("a distinct in-range list is accepted at either bound scale", () => {
+  expect(() =>
+    assertPartnerIndices("me", "the list", [0, 2], ROWS),
+  ).not.toThrow();
+  expect(() =>
+    assertPartnerIndices("me", "the list", [0, 2], MAX_RECORD_COUNT),
+  ).not.toThrow();
 });
 
 // --- The untouched run --------------------------------------------------------
