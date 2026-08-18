@@ -16,6 +16,16 @@ complement -- the premises and the procedure. What the two container images
 freeze, pin, and install on top of that tree is in
 [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md).
 
+**The upgrade-checklist headings are machine-read.** Each `Upgrading ...`
+heading below ends in a parenthesised list of the npm packages that section
+covers, separated by ` / ` (the spaces keep a scoped name's own slash intact).
+`npm run check:dependabot-pin-coverage` reads those names and fails when one of
+them is not held out of the batched dependency groups in
+`.github/dependabot.yml`, so a package that earns a checklist here cannot ride a
+routine batch where the checklist is skimmed rather than worked through. A new
+section follows the same heading form; the check's header states what else it
+reads and what it does not.
+
 ## Why these are exact-pinned
 
 - **SFTP stack (`ssh2` / `ssh2-sftp-client`).** The CLI's SFTP adapter
@@ -49,7 +59,11 @@ freeze, pin, and install on top of that tree is in
   werift's published API does not state -- and its flushing close reaches past
   that API into the SCTP association's send queues, because nothing public
   reports what the peer has actually received. Exact-pinned in
-  `apps/cli/package.json`; the premises and the re-verification procedure are in
+  `apps/cli/package.json`, and pulled out of the routine Dependabot batch into
+  the same reviewed `webrtc-stack` group (`.github/dependabot.yml`) as the
+  browser half it exchanges with, because the two ends speak one data channel
+  and a bump on either is reviewed against both. The premises and the
+  re-verification procedure are in
   [Upgrading the CLI WebRTC peer (werift)](#upgrading-the-cli-webrtc-peer-werift).
 - **PSI crypto addon (`@openmined/psi.js`).** Pinned by construction: a psilink
   fork vendored as a local `file:` tarball
