@@ -224,7 +224,7 @@ const EXPECTED_NPMRC_COPY = "COPY .npmrc package.json package-lock.json ./";
 // rather than of anything in this repository, which
 // docs/spec/DEPENDENCY_PINS.md records.
 const DEFAULT_BASE =
-  "node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66";
+  "node:26-alpine@sha256:aadf416b2cdce311a8811ba3f0608a61b77dbf997500e2eafe781b51f6a0b019";
 // The variant's base rootfs is coupled to the release snapshot its dnf lines
 // pin: the two are the same Amazon Linux release, not merely compatible ones.
 const FIPS_BASE =
