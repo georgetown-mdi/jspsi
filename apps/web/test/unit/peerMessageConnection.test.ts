@@ -468,6 +468,27 @@ describe("openPeerMessageConnection", () => {
     expect(onFinalFrameUnconfirmed).not.toHaveBeenCalled();
   });
 
+  test("a flushing close over a channel already out of open reports nothing", async () => {
+    // PeerJS's `open` flag is its own bookkeeping rather than the channel's
+    // state, so the flush branch can run over a channel that can carry neither
+    // the sentinel nor the frames behind it. That exit has no delivery signal,
+    // exactly as the ceiling has none, and still reports nothing.
+    const { fake, conn } = makeConn();
+    const onFinalFrameUnconfirmed = vi.fn();
+    const mc = await openPeerMessageConnection(conn, {
+      closeDrainTimeoutMs: 5,
+      onFinalFrameUnconfirmed,
+    });
+
+    fake.dataChannel.readyState = "closing";
+    await mc.close();
+
+    // Pins that the flush branch is the one that ran: the else branch has no
+    // wait at all, so the assertion below would pass there vacuously.
+    expect(fake.close).toHaveBeenCalledWith({ flush: true });
+    expect(onFinalFrameUnconfirmed).not.toHaveBeenCalled();
+  });
+
   test("an error teardown reports nothing", async () => {
     // fail() closes without flush, so there is no wait to end on a ceiling and
     // nothing to report: the failure itself is what the operator sees.

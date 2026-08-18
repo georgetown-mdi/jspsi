@@ -49,8 +49,9 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  * tell its operator rather than let a run report success with the partner's
  * copy in doubt: it is the exit a finished exchange reaches with the peer still
  * live and the channel still open, so nothing else would tell them anything.
- * The dead-peer and already-not-open exits mean the link itself went, which a
- * run normally ends on with its own terminal error.
+ * The dead-peer and already-not-open exits stay silent, so a partner whose stack
+ * dies during the drain of a run that already reported success is never
+ * reported to anyone; docs/spec/WEBRTC_TRANSPORT.md records that limit.
  *
  * The inbound path is byte-bounded against a hostile or buggy peer: PeerJS chunk
  * reassembly is capped so an oversized PSI set frame or a flood of
@@ -167,8 +168,10 @@ export async function openPeerMessageConnection(
               options?.closeDrainTimeoutMs,
             );
             conn.close({ flush: true });
-            // Only the ceiling: the other signal-less exits mean the link went,
-            // which a run normally ends on with its own terminal error.
+            // Only the ceiling reports: the peer-gone and channel-not-open
+            // exits stay silent even where the run itself succeeded, so a
+            // partner whose stack dies during this drain reaches no one. The
+            // limit is recorded in docs/spec/WEBRTC_TRANSPORT.md.
             if ((await peerClosed) === "ceiling")
               options?.onFinalFrameUnconfirmed?.();
           } else {

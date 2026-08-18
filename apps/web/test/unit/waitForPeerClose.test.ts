@@ -65,6 +65,25 @@ async function isSettled(promise: Promise<unknown>): Promise<boolean> {
   return settled;
 }
 
+type ListenerCall = [
+  type: string,
+  handler: EventListenerOrEventListenerObject | null,
+  ...rest: Array<unknown>,
+];
+
+/** The handler a spied add/removeEventListener was given for `event`, asserted
+ * present so comparing two absent handlers cannot pass as identity. */
+function handlerFor(
+  calls: ReadonlyArray<ListenerCall>,
+  event: string,
+): EventListenerOrEventListenerObject {
+  const handler = calls.find(([type]) => type === event)?.[1];
+  expect(typeof handler, `no listener recorded for "${event}"`).toBe(
+    "function",
+  );
+  return handler as EventListenerOrEventListenerObject;
+}
+
 describe("waitForPeerClose", () => {
   test("reports the peer's close, the one exit that means delivered", async () => {
     const { conn, channel } = makeConn();
@@ -165,11 +184,16 @@ describe("waitForPeerClose", () => {
     await expect(waitForPeerClose(conn, 5)).resolves.toBe("ceiling");
   });
 
-  test("leaves no listener or timer behind on any settle path", async () => {
+  test("removes the handlers it added, by identity, on any settle path", async () => {
     const { conn, channel, peerConnection } = makeConn();
+    const channelAdd = vi.spyOn(channel as FakeDataChannel, "addEventListener");
     const channelRemove = vi.spyOn(
       channel as FakeDataChannel,
       "removeEventListener",
+    );
+    const peerAdd = vi.spyOn(
+      peerConnection as FakePeerConnection,
+      "addEventListener",
     );
     const peerRemove = vi.spyOn(
       peerConnection as FakePeerConnection,
@@ -182,9 +206,16 @@ describe("waitForPeerClose", () => {
       "close",
       "closing",
     ]);
-    expect(peerRemove).toHaveBeenCalledWith(
-      "connectionstatechange",
-      expect.anything(),
+    // The handler reference, not just the event name: removing a function that
+    // was never added leaves the added one attached for the lifetime of a
+    // channel this wait no longer holds, and an event-name assertion alone
+    // cannot see that.
+    for (const event of ["close", "closing"])
+      expect(handlerFor(channelRemove.mock.calls, event)).toBe(
+        handlerFor(channelAdd.mock.calls, event),
+      );
+    expect(handlerFor(peerRemove.mock.calls, "connectionstatechange")).toBe(
+      handlerFor(peerAdd.mock.calls, "connectionstatechange"),
     );
     // A second peer event after the settle must not re-enter the resolved
     // promise's teardown.
