@@ -1850,6 +1850,9 @@ export async function runProtocol(
       // (see docs/spec/CLI_EVENTS.md). Emitting one only on this in-flight-error
       // subpath -- but not on the far more common clean interrupt -- would give an
       // inconsistent signal, so both interrupt paths deliberately emit nothing.
+      // test/unit/protocolInterruptEvents.test.ts drives a real interrupt
+      // against a live fd-3 capture and holds that as a check rather than
+      // leaving it to prose.
       return { onAuthenticatedError };
     }
     // The single failure terminal event for an organic (non-signal) fault,

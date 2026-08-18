@@ -1442,7 +1442,13 @@ function runAbortParty(keyFilePath: string, name: string): Promise<unknown> {
       // Bound peerTimeoutMs: when a party fails it tears down without consuming a
       // trailing handshake frame the peer may have left, so the peer's teardown
       // drain would otherwise wait a full (default, very long) peerTimeoutMs.
-      options: { pollIntervalMs: 1, peerTimeoutMs: 200 },
+      // The bound is a backstop for that drain, not a budget for the rendezvous
+      // and handshake it also bounds: every wait before runExchange is capped by
+      // this value, so a bound sized near the happy path (tens of milliseconds)
+      // fails BOTH parties on a loaded machine before either reaches the barrier
+      // -- for the scheduling rather than for the fault the test injects, and
+      // reported as the runExchangeEntries assertion below.
+      options: { pollIntervalMs: 1, peerTimeoutMs: 2_000 },
     },
     { sharedSecret: TOKEN_A, keyFilePath },
     minimalPrepared,
