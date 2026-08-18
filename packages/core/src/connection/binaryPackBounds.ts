@@ -198,10 +198,12 @@ export const WEBRTC_VALUE_WEIGHTS = {
  * filling the 256 MiB wire cap carries about 7.67 million elements, whose
  * mapped-element frame would reach about 1.24 GiB and be rejected here.
  * Residual: the per-frame worst case for the kinds this budget charges in full is
- * the budget itself. A frame of the heaviest such kind (~16.7M empty objects)
- * reaches ~1 GiB and is rejected there, and reaching even that requires ~16 MiB
- * of proportional wire (the per-container byte check ties cost to wire), freed
- * once the schema layer rejects the frame. A tighter budget is available only by
+ * the budget itself. A frame of the heaviest such kind (~4.07M declared `bin`
+ * views at 264 charged bytes each with their array slot) meets the refusal at
+ * ~4 MB of proportional wire while retaining ~0.79x the budget, the charge
+ * exceeding the view's measured cost; an all-empty-object frame needs ~16.7M
+ * elements and ~16 MiB of wire to meet the same refusal (the per-container byte
+ * check ties cost to wire), freed once the schema layer rejects the frame. A tighter budget is available only by
  * making the weights less conservative (e.g. crediting key-string
  * internalization); that aggressiveness is a security-review judgment (see
  * docs/spec/CHANNEL_SECURITY.md). Fixed, not configurable: a configurable bound
