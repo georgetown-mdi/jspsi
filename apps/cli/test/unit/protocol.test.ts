@@ -254,6 +254,7 @@ import {
   type RunProtocolResult,
   type SigningPersist,
 } from "../../src/protocol";
+import type { EventStreamEmitter } from "../../src/eventStream";
 import { runOrExit } from "../../src/util/cli";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { LocalFSClient } from "../../src/connection/localFSClient";
@@ -3655,16 +3656,26 @@ test("runProtocol without onAuthenticated runs a normal authenticated exchange (
 // capture with takeFd3Lines() and accounts for every line, so the afterEach
 // empty-capture assertion doubles as an exactly-one-terminal-event check.
 
-/** Make fstatSync succeed for fd 3 (pass every other target through). */
-function mockFd3Open(): void {
+/**
+ * Make fstatSync succeed for fd 3 (pass every other target through), and count
+ * the fd-3 probes in the returned live state. The probe is the observable half
+ * of opening the stream -- the fail-closed preflight -- so a test that hands
+ * runProtocol an already-open emitter asserts the count stayed at zero.
+ */
+function mockFd3Open(): { preflightProbes: number } {
+  const state = { preflightProbes: 0 };
   const realFstatSync = fs.fstatSync;
   vi.spyOn(fs, "fstatSync").mockImplementation(((
     fd: number,
     ...rest: unknown[]
   ) => {
-    if (fd === EVENT_STREAM_FD) return {} as fs.Stats;
+    if (fd === EVENT_STREAM_FD) {
+      state.preflightProbes += 1;
+      return {} as fs.Stats;
+    }
     return (realFstatSync as (...a: unknown[]) => fs.Stats)(fd, ...rest);
   }) as typeof fs.fstatSync);
+  return state;
 }
 
 test("an expired shared secret under --event-stream emits exactly one terminal error event", async () => {
@@ -3744,6 +3755,68 @@ test("a main-try failure under --event-stream emits exactly one terminal error e
   expect(lines[1].type).toBe("error");
   expect(lines[1].category).toBe("exchange");
   expect(lines[1].v).toBe(1);
+});
+
+test("an emitter passed instead of the flag carries every event, and no second stream is opened", async () => {
+  // The object-reuse branch, which the online bootstrap takes: that caller opens
+  // the stream itself (it emits persistence warnings from outside this frame)
+  // and hands the emitter over. runProtocol must drive THAT object -- opening
+  // one of its own would take a second fail-closed preflight and build a second
+  // writer, splitting one run's events across two streams. Both halves of the
+  // second open are observable here: this emitter goes nowhere near fd 3, so a
+  // preflight probe or a captured fd-3 line could only come from a writer
+  // runProtocol built for itself.
+  const emitted: Array<{ event: string; args: unknown[] }> = [];
+  const record =
+    (event: string) =>
+    (...args: unknown[]): void => {
+      emitted.push({ event, args });
+    };
+  const emitter: EventStreamEmitter = {
+    stages: record("stages"),
+    stage: record("stage"),
+    stageEnd: record("stageEnd"),
+    warning: record("warning"),
+    metrics: record("metrics"),
+    result: record("result"),
+    error: record("error"),
+  };
+
+  const fd3 = mockFd3Open();
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: emitter },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  // The whole run reported through the caller's object, terminal event included.
+  expect(emitted.map((e) => e.event)).toEqual(["stages", "metrics", "result"]);
+  expect(emitted[2].args).toEqual([true]);
+  // Nothing re-ran the preflight and nothing reached the descriptor: the
+  // already-preflighted emitter was reused rather than re-opened.
+  expect(fd3.preflightProbes).toBe(0);
+  expect(takeFd3Lines()).toHaveLength(0);
 });
 
 // --- Stage/warning stderr sanitization -----------------------------------------

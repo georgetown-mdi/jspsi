@@ -63,6 +63,7 @@ import {
   openInputSource,
   runOrExit,
 } from "../../src/util/cli";
+import { openEventStream } from "../../src/eventStream";
 import { runProtocol } from "../../src/protocol";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
@@ -73,6 +74,15 @@ import { streamOf, ttyStream, withStdin } from "../stdinStream";
 vi.mock("../../src/protocol", () => ({
   runProtocol: vi.fn(),
 }));
+
+// The event-stream module stays REAL -- the preflight and the emitter it builds
+// are what the fd-3 tests below exercise -- with openEventStream wrapped in a spy
+// so one test can compare the emitter it returned against the object the
+// bootstrap then handed runProtocol.
+vi.mock("../../src/eventStream", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/eventStream")>();
+  return { ...actual, openEventStream: vi.fn(actual.openEventStream) };
+});
 
 // runOrExit creates its error logger by name; silence that name so the
 // error-path tests below don't print to the console.
@@ -1636,6 +1646,18 @@ function soleFunctionArg(callArgs: unknown[]): () => void | Promise<void> {
   return fnArgs[0] as () => void | Promise<void>;
 }
 
+/** Locate the trailing FileSyncRuntimeOptions among runProtocol's call arguments
+ *  by the key under test rather than by position, and assert it is the only
+ *  argument carrying one. */
+function runtimeOptionsArg(callArgs: unknown[]): { eventStream?: unknown } {
+  const runtimeArgs = callArgs.filter(
+    (a): a is Record<string, unknown> =>
+      typeof a === "object" && a !== null && "eventStream" in a,
+  );
+  expect(runtimeArgs).toHaveLength(1);
+  return runtimeArgs[0];
+}
+
 test("runOnlineBootstrap writes the config from the hook even when the exchange then fails", async () => {
   // Handshake succeeds (runProtocol invokes onAuthenticated -> saveConfig), then
   // the data exchange fails. The config must already be on disk so the
@@ -1902,6 +1924,41 @@ test("runOnlineBootstrap reports a lost observed-payload write on fd 3 and in th
     // message exactly once, so pre-rendered error text would reach a supervisor
     // double-escaped.
     expect(String(lines[0].message)).not.toContain("EISDIR");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap hands runProtocol the emitter it opened itself, not the flag", async () => {
+  // The other side of the fusion the warning above depends on: this bootstrap
+  // opens the stream because it reports persistence it loses from outside
+  // runProtocol's frame, and runProtocol must then reuse that emitter so both
+  // sources ride one channel. Forwarding params.eventStream instead would still
+  // produce a working stream -- a second one, from a second preflight -- so
+  // object IDENTITY is what pins it, not the presence of a stream.
+  mockSuccessfulExchange(undefined);
+  vi.mocked(openEventStream).mockClear();
+  vi.mocked(runProtocol).mockClear();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    const { lines } = await captureFd3(() =>
+      runOnlineBootstrap({
+        ...onlineBootstrapParams(configPath),
+        eventStream: true,
+      }),
+    );
+    // The bootstrap opened exactly one stream, from the flag it was given.
+    expect(vi.mocked(openEventStream).mock.calls).toEqual([[true]]);
+    const emitter = vi.mocked(openEventStream).mock.results[0];
+    expect(emitter.type).toBe("return");
+    expect(emitter.value).toBeDefined();
+    // ...and that very object is what runProtocol received.
+    const runtime = runtimeOptionsArg(vi.mocked(runProtocol).mock.calls[0]);
+    expect(runtime.eventStream).toBe(emitter.value);
+    // A clean run loses no persistence, so the stream carries nothing of the
+    // bootstrap's own here (runProtocol, which owns the run's events, is mocked).
+    expect(lines).toEqual([]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
