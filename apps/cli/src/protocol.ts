@@ -12,6 +12,7 @@ import {
   deriveAbortToken,
   PeerAbortError,
   ReceiptVerificationError,
+  causeChainSome,
   isPeerWaitTimeout,
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
@@ -1695,47 +1696,23 @@ export async function runProtocol(
     // handshake timed out") are NOT tagged and DO get the generic advisory,
     // which adds useful "retry first; if it fails, re-invite" context.
     //
-    // The walker follows `cause` so a future wrap (e.g. `new Error('outer: '
+    // The walk follows `cause` so a future wrap (e.g. `new Error('outer: '
     // + inner.message, { cause: inner })`) still suppresses the generic
-    // advisory when an inner error already carries the recovery hint. A seen
-    // set guards against `cause` cycles in pathological inputs.
-    const isHintTagged = (e: unknown): boolean => {
-      const seen = new Set<unknown>();
-      let cursor: unknown = e;
-      while (
-        typeof cursor === "object" &&
-        cursor !== null &&
-        !seen.has(cursor)
-      ) {
-        seen.add(cursor);
-        if (
-          (cursor as { psilinkRecoveryHintEmitted?: unknown })
-            .psilinkRecoveryHintEmitted === true
-        )
-          return true;
-        cursor = (cursor as { cause?: unknown }).cause;
-      }
-      return false;
-    };
-    // Walks the `cause` chain for a PeerAbortError (mirroring isHintTagged), so
-    // the echo gate below still recognizes one even behind a future wrap. The
-    // load-bearing barrier is actually the sticky first-error latch in the bridge
-    // and AEAD layers (a later admin-induced error cannot supersede the
-    // PeerAbortError that reaches here); this cause-walk is cheap insurance.
-    const errIsPeerAbort = (e: unknown): boolean => {
-      const seen = new Set<unknown>();
-      let cursor: unknown = e;
-      while (
-        typeof cursor === "object" &&
-        cursor !== null &&
-        !seen.has(cursor)
-      ) {
-        seen.add(cursor);
-        if (cursor instanceof PeerAbortError) return true;
-        cursor = (cursor as { cause?: unknown }).cause;
-      }
-      return false;
-    };
+    // advisory when an inner error already carries the recovery hint.
+    const isHintTagged = (e: unknown): boolean =>
+      causeChainSome(
+        e,
+        (link) =>
+          (link as { psilinkRecoveryHintEmitted?: unknown })
+            .psilinkRecoveryHintEmitted === true,
+      );
+    // Walks the `cause` chain for a PeerAbortError, so the echo gate below still
+    // recognizes one even behind a future wrap. The load-bearing barrier is
+    // actually the sticky first-error latch in the bridge and AEAD layers (a
+    // later admin-induced error cannot supersede the PeerAbortError that reaches
+    // here); this cause-walk is cheap insurance.
+    const errIsPeerAbort = (e: unknown): boolean =>
+      causeChainSome(e, (link) => link instanceof PeerAbortError);
 
     // Non-signing-partner observability: this side configured a signed receipt but
     // the exchange failed before runExchange returned (exchangeComplete false), and
@@ -1746,23 +1723,10 @@ export async function runProtocol(
     // timeout -- a drop otherwise indistinguishable from a generic peer-silence.
     // Surface that context so the operator can check whether the partner was
     // configured to sign at all, rather than chasing a transport fault.
-    // Walks the `cause` chain for a ReceiptVerificationError (mirroring
-    // isHintTagged/errIsPeerAbort above), so a future wrap of the security
-    // failure cannot downgrade it to this softer warn.
-    const isReceiptVerificationFailure = (e: unknown): boolean => {
-      const seen = new Set<unknown>();
-      let cursor: unknown = e;
-      while (
-        typeof cursor === "object" &&
-        cursor !== null &&
-        !seen.has(cursor)
-      ) {
-        seen.add(cursor);
-        if (cursor instanceof ReceiptVerificationError) return true;
-        cursor = (cursor as { cause?: unknown }).cause;
-      }
-      return false;
-    };
+    // Walks the `cause` chain for a ReceiptVerificationError, so a future wrap
+    // of the security failure cannot downgrade it to this softer warn.
+    const isReceiptVerificationFailure = (e: unknown): boolean =>
+      causeChainSome(e, (link) => link instanceof ReceiptVerificationError);
     if (
       signing !== null &&
       !exchangeComplete &&

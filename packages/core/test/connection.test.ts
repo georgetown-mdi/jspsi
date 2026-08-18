@@ -923,6 +923,32 @@ test("iceProvision with turn is rejected", () => {
   expect(messages.some((m) => m.includes("iceProvision"))).toBe(true);
 });
 
+// --- WebRTC: the file-sync-only options are outside its union member ---------
+
+test("file-sync-only options do not survive a webrtc parse", () => {
+  // A webrtc connection's `options` parses through SharedOptionsSchema, which
+  // declares none of the file-sync fields, so an authored one is dropped rather
+  // than refused -- the same warn-and-ignore treatment the CLI gives the
+  // matching flags (warnUnsupportedFileSyncFlags). This pins that premise: if
+  // the webrtc member of the union ever took FileSyncOptions, these keys would
+  // survive the parse and this fails, so the channel gates that read them
+  // (retain mode, the rendezvous flags) are revisited rather than silently
+  // inheriting a file-sync setting.
+  const result = parseConnectionConfig({
+    ...webrtcBase,
+    options: {
+      lockless_rendezvous: true,
+      peer_id: "party-a",
+      retain_files: true,
+    },
+  });
+  expect(result.channel).toBe("webrtc");
+  if (result.channel !== "webrtc") return;
+  expect(result.options).not.toHaveProperty("locklessRendezvous");
+  expect(result.options).not.toHaveProperty("peerId");
+  expect(result.options).not.toHaveProperty("retainFiles");
+});
+
 // --- STUN URI format ---------------------------------------------------------
 
 test.each([

@@ -27,7 +27,11 @@
 
 import net from "node:net";
 
-import { chainDetailCauses, redactPrivateKeyMaterial } from "@psilink/core";
+import {
+  causeChainSome,
+  chainDetailCauses,
+  redactPrivateKeyMaterial,
+} from "@psilink/core";
 
 /**
  * The port ssh2 dials when connect options carry none. Core omits `port` from
@@ -131,20 +135,14 @@ const PRE_IDENTIFICATION_FAILURE_FRAGMENTS = [
  * @internal
  */
 export function isPreIdentificationDialFailure(error: unknown): boolean {
-  const seen = new Set<unknown>();
-  let current: unknown = error;
-  while (current instanceof Error && !seen.has(current)) {
-    seen.add(current);
-    const message = current.message;
-    if (
+  return causeChainSome(
+    error,
+    (link) =>
+      link instanceof Error &&
       PRE_IDENTIFICATION_FAILURE_FRAGMENTS.some((fragment) =>
-        message.includes(fragment),
-      )
-    )
-      return true;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return false;
+        link.message.includes(fragment),
+      ),
+  );
 }
 
 /**

@@ -1,6 +1,7 @@
 import {
   ConnectionError,
   authenticateConnection,
+  causeChainSome,
   errorMessage,
 } from "@psilink/core";
 
@@ -156,19 +157,13 @@ export async function authenticateExchange(
  * `transport` ConnectionError as its cause, hence the walk rather than a direct
  * check. A `true` here means the caller passes the failure through unchanged; a
  * trust failure (a plain kex auth Error with no such cause, or a `protocol`
- * ConnectionError) returns `false` and is re-tagged as a security failure. A
- * seen-set guards against a pathological `cause` cycle.
+ * ConnectionError) returns `false` and is re-tagged as a security failure.
  */
 function hasNonTrustConnectionError(error: unknown): boolean {
-  const seen = new Set<unknown>();
-  let cursor: unknown = error;
-  while (typeof cursor === "object" && cursor !== null && !seen.has(cursor)) {
-    seen.add(cursor);
-    if (cursor instanceof ConnectionError && NON_TRUST_KINDS.has(cursor.kind))
-      return true;
-    cursor = (cursor as { cause?: unknown }).cause;
-  }
-  return false;
+  return causeChainSome(
+    error,
+    (link) => link instanceof ConnectionError && NON_TRUST_KINDS.has(link.kind),
+  );
 }
 
 /** Whether `error` carries authenticateConnection's `psilinkRecoveryHintEmitted`

@@ -77,10 +77,8 @@ import {
   serializeEnvelope,
   type HelloEnvelope,
 } from "./controlEnvelope";
+import { errorMessage } from "./messageConnection";
 import type { FileInfo, FileTransportClient } from "./fileSyncConnection";
-
-const errMessage = (err: unknown) =>
-  err instanceof Error ? err.message : String(err);
 
 // The path/display locals a single synchronize() call computes once at entry
 // (from this.path/this.outbound, narrowed by the connected guard) and threads
@@ -704,7 +702,7 @@ export class FileSyncRendezvous {
       await deps.client().rename(tempPath, helloPath);
     } catch (err: unknown) {
       await deps.client().safeDelete(tempPath);
-      throw err instanceof Error ? err : new Error(errMessage(err));
+      throw err instanceof Error ? err : new Error(errorMessage(err));
     }
   }
 
@@ -912,7 +910,7 @@ export class FileSyncRendezvous {
       result.status === "rejected"
         ? [
             `${redactPrivateKeyMaterial(toDelete[i].name)} ` +
-              `(${redactPrivateKeyMaterial(errMessage(result.reason))})`,
+              `(${redactPrivateKeyMaterial(errorMessage(result.reason))})`,
           ]
         : [],
     );
@@ -945,7 +943,7 @@ export class FileSyncRendezvous {
     try {
       files = await deps.client().list(inboundPath);
     } catch (err: unknown) {
-      throw err instanceof Error ? err : new Error(errMessage(err));
+      throw err instanceof Error ? err : new Error(errorMessage(err));
     }
     const fileNames = files.map((file) => file.name);
     deps
@@ -1387,7 +1385,7 @@ export class FileSyncRendezvous {
               .debug(
                 `[joiner] advertise-hello write failed (attempt ` +
                   `${attempt}/${ADVERTISE_HELLO_RETRY_ATTEMPTS}); retrying: ` +
-                  `${redactAndSanitizeForDisplay(errMessage(writeErr))}`,
+                  `${redactAndSanitizeForDisplay(errorMessage(writeErr))}`,
               );
             try {
               await deps.wait(deps.options().pollingFrequency);
@@ -1421,7 +1419,7 @@ export class FileSyncRendezvous {
               .debug(
                 `[joiner] could not advertise hello on mismatch after ` +
                   `${ADVERTISE_HELLO_RETRY_ATTEMPTS} attempts; peer may time out ` +
-                  `instead of fast-failing: ${redactAndSanitizeForDisplay(errMessage(writeErr))}`,
+                  `instead of fast-failing: ${redactAndSanitizeForDisplay(errorMessage(writeErr))}`,
               );
           }
         }
@@ -1493,7 +1491,7 @@ export class FileSyncRendezvous {
       // this.handshakeRole, and the sequence counters are all committed only
       // after this try/catch (see below), so a throw leaves the connection in
       // its pre-synchronize state with nothing to reset.
-      throw err instanceof Error ? err : new Error(errMessage(err));
+      throw err instanceof Error ? err : new Error(errorMessage(err));
     }
 
     // Commit role and peerId only after both writes have succeeded. If
@@ -2352,7 +2350,7 @@ export class FileSyncRendezvous {
       deps.setHandshakeRole(undefined);
       deps.clearAbortMarker();
       deps.resetSessionState();
-      throw err instanceof Error ? err : new Error(errMessage(err));
+      throw err instanceof Error ? err : new Error(errorMessage(err));
     }
   }
 }

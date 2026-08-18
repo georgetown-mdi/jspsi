@@ -76,6 +76,11 @@ export const associationTableMessage = z.tuple([
 
 const DEFAULT_VERBOSITY = 1;
 
+/**
+ * How far along one step of an exchange is, for a progress display. The list of
+ * steps belongs to the surface showing it -- each labels its own stages with one
+ * of these states -- so this enum is the shared vocabulary, not a stage model.
+ */
 export enum ProcessState {
   BeforeStart,
   Waiting,
@@ -83,97 +88,9 @@ export enum ProcessState {
   Done,
 }
 
-function defineProtocol<
-  const T extends Array<{ id: string; label: string; state: ProcessState }>,
->(stages: T) {
-  return stages;
-}
-type ProtocolStageId<T extends Array<{ id: string }>> = T[number]["id"];
-
-export const starterProtocolStages = defineProtocol([
-  {
-    id: "sending startup message",
-    label: "Sending my encrypted data",
-    state: ProcessState.Working,
-  },
-  {
-    id: "waiting for client request",
-    label: "Waiting for partner's encrypted data",
-    state: ProcessState.Working,
-  },
-  {
-    id: "processing client request",
-    label: "Doubly-encrypting partner's data",
-    state: ProcessState.Working,
-  },
-  {
-    id: "sending response",
-    label: "Sending partner's doubly-encrypted data",
-    state: ProcessState.Working,
-  },
-  {
-    id: "waiting for association table",
-    label: "Waiting for shared elements",
-    state: ProcessState.Working,
-  },
-  {
-    id: "processing association table",
-    label: "Cleaning result",
-    state: ProcessState.Working,
-  },
-  { id: "done", label: "Done", state: ProcessState.Done },
-] as const);
-
-export const joinerProtocolStages = defineProtocol([
-  {
-    id: "waiting for startup message",
-    label: "Waiting for partner's encrypted data",
-    state: ProcessState.Working,
-  },
-  {
-    id: "processing startup message",
-    label: "Encrypting my data",
-    state: ProcessState.Working,
-  },
-  {
-    id: "sending client request",
-    label: "Sending my encrypted data",
-    state: ProcessState.Working,
-  },
-  {
-    id: "waiting for response",
-    label: "Waiting for my doubly-encrypted data",
-    state: ProcessState.Working,
-  },
-  {
-    id: "creating association table",
-    label: "Identifying shared elements",
-    state: ProcessState.Working,
-  },
-  {
-    id: "sending association table",
-    label: "Sending results",
-    state: ProcessState.Working,
-  },
-  {
-    id: "waiting for permutation",
-    label: "Waiting for clean result",
-    state: ProcessState.Working,
-  },
-  { id: "done", label: "Done", state: ProcessState.Done },
-] as const);
-
-type StarterProtocolStageId = ProtocolStageId<typeof starterProtocolStages>;
-type JoinerProtocolStageId = ProtocolStageId<typeof joinerProtocolStages>;
-
-type ProtocolId = StarterProtocolStageId | JoinerProtocolStageId;
-
 export class PSIParticipant {
   id: string;
   config: Config;
-  private setStage: (id: ProtocolId) => void;
-  private stages:
-    typeof joinerProtocolStages | typeof starterProtocolStages | undefined;
   private log: ReturnType<typeof getLoggerForVerbosity>;
   private elementBounds: PsiElementBounds;
   private engine: PsiEngine;
@@ -189,7 +106,6 @@ export class PSIParticipant {
     // fail-open default would silently drop the amplification guard on a caller
     // that forgot it.
     elementBounds: PsiElementBounds,
-    setStage?: (id: ProtocolId) => void,
     // The crypto engine backing this participant. Defaults to an in-process engine
     // built from `library` -- today's behavior, with the masking running on the
     // calling thread. The CLI injects a worker-backed engine so the masking runs
@@ -200,7 +116,6 @@ export class PSIParticipant {
     this.id = id;
     this.config = config;
     this.elementBounds = elementBounds;
-    this.setStage = setStage ? setStage : () => {};
 
     if (this.config.verbose === undefined) {
       this.config.verbose = DEFAULT_VERBOSITY;
@@ -210,20 +125,6 @@ export class PSIParticipant {
 
     this.engine =
       engine ?? new InProcessPsiEngine(library, this.config.role, this.id);
-
-    this.setStages();
-  }
-
-  private setStages() {
-    if (this.config.role === "starter") {
-      this.stages = starterProtocolStages;
-    } else {
-      this.stages = joinerProtocolStages;
-    }
-  }
-
-  getStages() {
-    return this.stages;
   }
 
   /**
@@ -376,15 +277,12 @@ export class PSIParticipant {
         `${this.id}: starting identify-intersection protocol; sending server ` +
           " data encrypted by server",
       );
-      this.setStage("sending startup message");
       await conn.send(setup);
 
       this.log.debug(`${this.id}: waiting for client request`);
-      this.setStage("waiting for client request");
 
       const clientRequestRaw = await conn.receive();
       this.log.debug(`${this.id}: received client data encrypted by client`);
-      this.setStage("processing client request");
 
       const serverResponse = await this.processClientRequest(
         clientRequestRaw as Uint8Array,
@@ -393,11 +291,8 @@ export class PSIParticipant {
       this.log.debug(
         `${this.id}: sending client data encrypted by both server and client`,
       );
-      this.setStage("sending response");
 
       await conn.send(serverResponse);
-
-      this.setStage("waiting for association table");
 
       // The partner sends [theirIndices, ourIndices]; the swapped names restore our-first order.
       const [partnerIndices, localIndices] = await receiveParsed(
@@ -405,7 +300,6 @@ export class PSIParticipant {
         associationTableMessage,
       );
       this.log.debug(`${this.id}: received association table`);
-      this.setStage("processing association table");
 
       // The round's matches, as computed by the partner: our half indexes the
       // set we just encrypted (so `permutation` bounds it exactly), the partner
@@ -438,16 +332,12 @@ export class PSIParticipant {
       this.log.debug(`${this.id}: waiting for status completed`);
       await receiveParsed(conn, statusCompletedMessage);
 
-      this.setStage("done");
-
       return [localIndices, partnerIndices];
     } else {
-      this.setStage("waiting for startup message");
       this.log.debug(`${this.id}: starting identify-intersection protocol`);
 
       const serverSetupRaw = await conn.receive();
       this.log.debug(`${this.id}: receiving server data encrypted by server`);
-      this.setStage("processing startup message");
 
       // Validate and hold the server setup the instant it arrives -- a fail-fast
       // before we send our own request -- while the response we match it against
@@ -457,18 +347,14 @@ export class PSIParticipant {
       const clientRequest = await this.createClientRequest(set);
 
       this.log.debug(`${this.id}: sending client data encrypted by client`);
-      this.setStage("sending client request");
 
       await conn.send(clientRequest);
-
-      this.setStage("waiting for response");
 
       const serverResponseRaw = await conn.receive();
       this.log.debug(
         `${this.id}: receiving server data encrypted by both by server and ` +
           "client",
       );
-      this.setStage("creating association table");
 
       // Association table: indices into client data mapped to the (likely permuted)
       // indices given by the server, matched against the setup held above.
@@ -480,18 +366,14 @@ export class PSIParticipant {
       this.log.debug(
         `${this.id}: sending association table with permuted server indices`,
       );
-      this.setStage("sending association table");
 
       await conn.send(associationTable);
-
-      this.setStage("waiting for permutation");
 
       // Send-before-parse: receive the partner's original indices, acknowledge
       // with status:completed, then parse. Sending the acknowledgement before
       // validating ensures a malformed final frame does not strand the partner.
       const rawData = await conn.receive();
       this.log.debug(`${this.id}: receiving original server indices`);
-      this.setStage("done");
 
       this.log.debug(`${this.id}: sending status completed`);
       await conn.send({ status: "completed" });

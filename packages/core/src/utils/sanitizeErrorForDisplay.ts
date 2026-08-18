@@ -255,10 +255,12 @@ export function sanitizeErrorForDisplay(err: unknown): string {
       rawMessages.push(message);
     }
     seen.add(current);
-    // Follow `.cause` on any object link (mirrors the cause walker in the CLI
-    // protocol layer); a non-object link has no chain to follow. typeof null is
-    // "object", so the null guard is load-bearing. A throwing `.cause` getter
-    // ends the chain rather than propagating.
+    // Follow `.cause` on any object link, like {@link causeChainSome}; a
+    // non-object link has no chain to follow. typeof null is "object", so the
+    // null guard is load-bearing. This walk stays its own rather than delegating
+    // to that helper: it renders every link under a depth bound and an elision
+    // marker instead of stopping at a match, and reads each one defensively. A
+    // throwing `.cause` getter ends the chain rather than propagating.
     let next: unknown;
     try {
       next =

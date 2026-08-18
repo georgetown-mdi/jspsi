@@ -66,10 +66,8 @@ import {
   isProtocolTempName,
   isExpectedAbortName,
 } from "./fileSyncNames";
+import { errorMessage } from "./messageConnection";
 import type { FileInfo, FileTransportClient } from "./fileSyncConnection";
-
-const errMessage = (err: unknown) =>
-  err instanceof Error ? err.message : String(err);
 
 // The single remedy for a message publish the transport could not settle, shared
 // by the two places send() prescribes it -- the publish's own rejection and the
@@ -635,7 +633,7 @@ export class FileSyncMessageLoop {
       // so the unconditional sweep is correct; the call on an unwritten temp is
       // a harmless no-op (the abort case is new, the timeout case pre-existing).
       await deps.client().safeDelete(tempPath);
-      throw err instanceof Error ? err : new Error(errMessage(err));
+      throw err instanceof Error ? err : new Error(errorMessage(err));
     }
   }
 
@@ -717,7 +715,7 @@ export class FileSyncMessageLoop {
         this.pollerActive = false;
         deps.emit(
           "error",
-          dialErr instanceof Error ? dialErr : new Error(errMessage(dialErr)),
+          dialErr instanceof Error ? dialErr : new Error(errorMessage(dialErr)),
         );
         return;
       }
@@ -1024,7 +1022,7 @@ export class FileSyncMessageLoop {
                 `message file ${redactPrivateKeyMaterial(messageFile.name)} ` +
                   `from ${redactPrivateKeyMaterial(peerId)} is fully ` +
                   `synced but has a malformed envelope: ` +
-                  `${errMessage(parseErr)}`,
+                  `${errorMessage(parseErr)}`,
               );
             }
             if (envelope.type === MESSAGE_TYPE_BINARY)
@@ -1046,7 +1044,7 @@ export class FileSyncMessageLoop {
               throw new UsageError(
                 `message file ${redactPrivateKeyMaterial(messageFile.name)} ` +
                   `from ${redactPrivateKeyMaterial(peerId)} is fully ` +
-                  `synced but is not valid JSON: ${errMessage(parseErr)}`,
+                  `synced but is not valid JSON: ${errorMessage(parseErr)}`,
               );
             }
             return { seq: envelope.seq, type: envelope.type, data: value };
@@ -1178,7 +1176,7 @@ export class FileSyncMessageLoop {
                     "please notify the administrator that manual cleanup " +
                     // The delete error's message re-embeds the peer filename via
                     // the operation path; escape it like the name above it.
-                    `may be required: ${redactAndSanitizeForDisplay(errMessage(deleteErr))}`,
+                    `may be required: ${redactAndSanitizeForDisplay(errorMessage(deleteErr))}`,
                 );
               }
             }
@@ -1225,7 +1223,7 @@ export class FileSyncMessageLoop {
           this.pollerActive = false;
           deps.emit(
             "error",
-            err instanceof Error ? err : new Error(errMessage(err)),
+            err instanceof Error ? err : new Error(errorMessage(err)),
           );
         } else {
           deps
@@ -1265,7 +1263,7 @@ export class FileSyncMessageLoop {
         if (err instanceof UsageError) this.pollerActive = false;
         deps.emit(
           "error",
-          err instanceof Error ? err : new Error(errMessage(err)),
+          err instanceof Error ? err : new Error(errorMessage(err)),
         );
       }
     } finally {
@@ -1289,7 +1287,7 @@ export class FileSyncMessageLoop {
             .log()
             .debug(
               `[${deps.role()}] idle-boundary session release failed: ` +
-                redactAndSanitizeForDisplay(errMessage(releaseErr)),
+                redactAndSanitizeForDisplay(errorMessage(releaseErr)),
             );
         }
         this.poller = setTimeout(

@@ -50,7 +50,6 @@ function workerParticipant(
     psiLibrary,
     { role, verbose: -1 },
     UNBOUNDED_PSI_ELEMENTS,
-    undefined,
     inProcessWorkerEngine(role, id),
   );
 }
