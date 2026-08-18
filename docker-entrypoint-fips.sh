@@ -64,7 +64,7 @@ case "$fips_enabled" in
   echo "[psilink] host kernel FIPS mode: enabled" >&2
   ;;
 0)
-  echo "[psilink] WARNING: the host kernel is not in FIPS mode (/proc/sys/crypto/fips_enabled is 0). The validated module is loaded and serving, but the deployment does not meet the module's own operating conditions. Enable FIPS mode on the host, or treat this run as carrying no FIPS claim." >&2
+  echo "[psilink] WARNING: the host kernel is not in FIPS mode (/proc/sys/crypto/fips_enabled is 0). Whatever the provider report above says, a deployment outside host FIPS mode does not meet the module's own operating conditions. Enable FIPS mode on the host, or treat this run as carrying no FIPS claim." >&2
   ;;
 *)
   echo "[psilink] WARNING: the host kernel's FIPS mode could not be read (/proc/sys/crypto/fips_enabled is absent or unreadable), so this container cannot tell whether the host is in FIPS mode. A kernel built without CONFIG_CRYPTO_FIPS has no such file. Treat this run as carrying no FIPS claim unless you know otherwise." >&2

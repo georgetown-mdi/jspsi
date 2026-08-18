@@ -505,17 +505,20 @@ const withinWritableTree = (path) =>
 // chown`, `find ... -exec chgrp`). Neither stage runs any of these, so they are
 // refused outright rather than modeled: a build that needs one has to extend
 // this test, where the review reads the argv rather than a verdict about it.
-const ANY_OWNERSHIP_VERB = /\b(?:chown|chgrp|chmod|install|setfacl)\b/;
-// `install` above is coreutils' install(1), whose -o/-g/-m hand a path to an
+const OWNERSHIP_PROPER_VERB = /\b(?:chown|chgrp|chmod|setfacl)\b/;
+const INSTALL_VERB = /\binstall\b/;
+// `install` is coreutils' install(1), whose -o/-g/-m hand a path to an
 // account. A package manager's `install` subcommand is a different program's
-// argument and reaches nothing, so it is excluded by the command's LEADING word
-// rather than by the position of the word: `dnf -y install tar` passes, while
-// `xargs install -o node /app/x` is still refused.
+// argument and reaches nothing, so the LEADING-word exemption below releases
+// the `install` word alone: `dnf -y install tar` passes, `xargs install -o
+// node /app/x` is still refused, and a proper ownership verb is refused even
+// under a package manager's leading word (`npm exec -- chown ...`).
 const PACKAGE_MANAGER_COMMAND = /^(?:apk|apt|apt-get|dnf|microdnf|yum|npm)\b/;
+const reachesAnyOwnershipVerb = (command) =>
+  OWNERSHIP_PROPER_VERB.test(command) ||
+  (INSTALL_VERB.test(command) && !PACKAGE_MANAGER_COMMAND.test(command));
 const reachesOwnershipOutsideTheParse = (command) =>
-  !PACKAGE_MANAGER_COMMAND.test(command) &&
-  ANY_OWNERSHIP_VERB.test(command) &&
-  !PARSED_OWNERSHIP_VERB.test(command);
+  reachesAnyOwnershipVerb(command) && !PARSED_OWNERSHIP_VERB.test(command);
 // The dash-leading tokens that parse reads on one of those verbs: -R (or
 // --recursive), and --reference=FILE, which is what moves the first operand from
 // an owner or a mode to a path. Any other is refused rather than classified,
@@ -524,6 +527,18 @@ const reachesOwnershipOutsideTheParse = (command) =>
 // the mode, takes /app for the mode instead, and hands the guard below an empty
 // path set. The stage passes -R alone.
 const READ_OWNERSHIP_FLAGS = /^(?:-R|--recursive|--reference=\S+)$/;
+
+describe("the ownership-verb predicate the refusals above share", () => {
+  it("releases only the install word under a package manager's leading word", () => {
+    expect(reachesAnyOwnershipVerb("dnf -y install tar && dnf clean all")).toBe(
+      false,
+    );
+    expect(reachesAnyOwnershipVerb("xargs install -o node /app/x")).toBe(true);
+    expect(
+      reachesAnyOwnershipVerb("npm exec -- chown -R 1000:1000 /build/x"),
+    ).toBe(true);
+  });
+});
 
 for (const { file, modeChangesOutside, image } of IMAGES) {
   describe(`the unprivileged account ${file} runs as`, () => {
@@ -589,11 +604,7 @@ for (const { file, modeChangesOutside, image } of IMAGES) {
       // model. The route is closed instead: the builder assigns no ownership at
       // all, so nothing crosses the stage boundary already handed to an account.
       expect(
-        image.builderShellCommands.filter((command) =>
-          PACKAGE_MANAGER_COMMAND.test(command)
-            ? false
-            : ANY_OWNERSHIP_VERB.test(command),
-        ),
+        image.builderShellCommands.filter(reachesAnyOwnershipVerb),
       ).toEqual([]);
       expect(
         image.builder

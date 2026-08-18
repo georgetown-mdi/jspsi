@@ -120,6 +120,7 @@ jobs:
       # request already built.
       - name: Build the FIPS variant image for scanning (amd64, load into local Docker)
         id: fips_build
+        if: ${{ !cancelled() }}
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -138,11 +139,11 @@ jobs:
       # One gate per published image, and both ahead of the login below, so a
       # fixable HIGH or CRITICAL in either package closure stops the whole
       # release rather than publishing the other artifact and withholding this
-      # one. Each scan is keyed to its own build, so a build failure skips only
-      # that image's scan while the sibling's gate still runs and reports --
-      # the variant's leg runs even when the default image's gate already
-      # failed, so a blocked release reports what both images carry and the
-      # maintainer bumps both pins in one pass instead of one per attempt.
+      # one. Each scan is keyed to its own build, and the variant's build runs
+      # even after a default-build failure, so a failure in either build or
+      # either gate still lets the surviving sibling build, scan, and report --
+      # a blocked release reports what both images carry and the maintainer
+      # bumps both pins in one pass instead of one per attempt.
       - name: Scan the release image for OS-layer vulnerabilities
         id: vulnerability_scan
         if: ${{ !cancelled() && steps.default_build.outcome == 'success' }}

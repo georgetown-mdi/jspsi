@@ -67,7 +67,7 @@ Both `--certificate-` arguments are required and each carries its own weight; [V
 docker run --rm vdorie/psi-link:X.Y.Z-fips --help
 ```
 
-A run whose crypto is being served by the module reports `FIPS provider active` and names the module version; anything else is a warning naming what the startup probe found instead. The host kernel's FIPS-mode line is separate and is reported the same way. Neither line is parsed from `openssl list`: the probe is a Node process making PSI-Link's own call shapes under the image's configuration, and its exit status is the whole verdict.
+A run whose crypto is being served by the module reports `FIPS provider active`, naming the baked-in module version when `FIPS_MODULE_VERSION` is intact in the container's environment and saying plainly that it cannot name one when that variable was cleared or overridden at start; anything else is a warning naming what the startup probe found instead. The host kernel's FIPS-mode line is separate and is reported the same way. Neither line is parsed from `openssl list`: the probe is a Node process making PSI-Link's own call shapes under the image's configuration, and its exit status is the whole verdict.
 
 What the variant is, what may and may not be said about it, the three deployment tiers a claim has to keep apart, and the measured list of what does not work in it are in [fips-variant-image.md](notes/fips-variant-image.md); its pins and the checks that hold them are in [CONTAINER_IMAGES.md](spec/CONTAINER_IMAGES.md).
 
