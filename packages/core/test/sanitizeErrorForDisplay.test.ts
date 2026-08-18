@@ -4,10 +4,13 @@ import {
   sanitizeErrorForDisplay,
   redactAndSanitizeForDisplay,
   redactPrivateKeyMaterial,
+  CAUSE_DEPTH_ELISION_MARKER,
   MAX_ERROR_CAUSE_DEPTH,
 } from "../src/utils/sanitizeErrorForDisplay";
 import {
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
   sanitizeForDisplay,
 } from "../src/utils/sanitizeForDisplay";
 import {
@@ -120,7 +123,58 @@ describe("sanitizeErrorForDisplay", () => {
     const links = out.split("\ncaused by: ");
     expect(links.length).toBe(MAX_ERROR_CAUSE_DEPTH);
     expect(links[0]).toBe("link19");
-    expect(links[links.length - 1]).toBe(`link${20 - MAX_ERROR_CAUSE_DEPTH}`);
+    // The cut is disclosed on the link it falls after, not left for the operator
+    // to infer: the chain that stops here still had 12 links to go.
+    expect(links[links.length - 1]).toBe(
+      `link${20 - MAX_ERROR_CAUSE_DEPTH} ${CAUSE_DEPTH_ELISION_MARKER}`,
+    );
+  });
+
+  test("marks nothing when the chain ends exactly at the depth bound", () => {
+    // The bound is spent and there is no further link: every link is rendered, so
+    // an elision marker would assert a loss that did not happen.
+    let err = new Error("link0");
+    for (let i = 1; i < MAX_ERROR_CAUSE_DEPTH; i++)
+      err = new Error(`link${i}`, { cause: err });
+    const links = sanitizeErrorForDisplay(err).split("\ncaused by: ");
+    expect(links.length).toBe(MAX_ERROR_CAUSE_DEPTH);
+    expect(links[links.length - 1]).toBe("link0");
+  });
+
+  test("marks nothing when the cycle guard stops a chain at the depth bound", () => {
+    // The revisited link was already rendered, so the walk stopping on it drops
+    // nothing the operator has not read.
+    const head = new Error("link0");
+    let err: Error = head;
+    for (let i = 1; i < MAX_ERROR_CAUSE_DEPTH; i++)
+      err = new Error(`link${i}`, { cause: err });
+    head.cause = err;
+    expect(sanitizeErrorForDisplay(err)).not.toContain(
+      CAUSE_DEPTH_ELISION_MARKER,
+    );
+  });
+
+  test("marks an elided remainder even on a link that spent its whole budget", () => {
+    // The marker rides after the per-link cap, so a link that truncates can still
+    // report that the chain went on: the two markers are independent losses and
+    // both are stated.
+    // Each link carries a distinct message, so none is suppressed as a repeat of
+    // the one before it and the walk spends its whole depth budget.
+    let err = new Error("innermost");
+    for (let i = 1; i < 20; i++)
+      err = new Error(
+        `${i}` + "w".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH * 2),
+        { cause: err },
+      );
+    const links = sanitizeErrorForDisplay(err).split("\ncaused by: ");
+    expect(links.length).toBe(MAX_ERROR_CAUSE_DEPTH);
+    const cut = `${20 - MAX_ERROR_CAUSE_DEPTH}`;
+    expect(links[links.length - 1]).toBe(
+      cut +
+        "w".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - cut.length) +
+        DISPLAY_TRUNCATION_MARKER +
+        ` ${CAUSE_DEPTH_ELISION_MARKER}`,
+    );
   });
 
   test("walks a non-Error cause and neutralizes its bytes", () => {

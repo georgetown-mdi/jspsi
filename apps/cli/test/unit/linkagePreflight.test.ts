@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 import {
+  CAUSE_DEPTH_ELISION_MARKER,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   inferMetadata,
+  MAX_ERROR_CAUSE_DEPTH,
   MAX_NAME_LENGTH,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
@@ -229,3 +231,87 @@ test.each([
     expect(nameLink).toContain("w".repeat(64));
   },
 );
+
+// Terms whose every declared field is unsatisfiable against a CSV holding none
+// of them, one key per field, so no key is countable and the pre-flight blocks
+// with `fieldCount` names to enumerate.
+function unsatisfiableTerms(fieldCount: number): LinkageTerms {
+  const fields = Array.from({ length: fieldCount }, (_, index) => ({
+    name: `field${index}`,
+    type: "ssn" as const,
+  }));
+  return {
+    ...dobTerms(),
+    linkageFields: fields,
+    linkageKeys: fields.map((field) => ({
+      name: `KEY_${field.name}`,
+      elements: [{ field: field.name }],
+    })),
+  };
+}
+
+// Render the block this terms set raises, as the operator reads it.
+function blockedLinks(terms: LinkageTerms): string[] {
+  const { log } = makeLogger();
+  const err = (() => {
+    try {
+      checkLinkageSatisfiability(["other_column"], terms, log, messaging);
+    } catch (e: unknown) {
+      return e;
+    }
+    throw new Error("the pre-flight did not block");
+  })();
+  return sanitizeErrorForDisplay(err).split("\ncaused by: ");
+}
+
+// linkageFields is bounded only at MAX_LINKAGE_ENTRIES, so the enumeration can
+// ask for more cause links than the renderer walks. What the operator must not
+// get is a list that reads as complete while the rest was dropped past the depth
+// bound, so the last link the renderer reaches reports the overflow and the
+// total instead of naming one more field.
+test("the block reports the fields it could not name, with the total", () => {
+  const total = 20;
+  const links = blockedLinks(unsatisfiableTerms(total));
+
+  expect(links.length).toBe(MAX_ERROR_CAUSE_DEPTH);
+  expect(links[0]).toContain("cannot satisfy any of the invitation's");
+  expect(links[1]).toBe(
+    `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
+  );
+
+  const named = links.slice(2, -1);
+  expect(named.length).toBeGreaterThan(0);
+  named.forEach((link, index) =>
+    expect(link).toBe(`unsatisfied field: field${index} (ssn)`),
+  );
+  expect(links[links.length - 1]).toBe(
+    `and ${total - named.length} more unsatisfied fields (${total} in total)`,
+  );
+
+  // The fields past the enumeration are accounted for by that count, not by a
+  // name the operator would search the output for.
+  const rendered = links.join("\n");
+  for (let index = named.length; index < total; index++)
+    expect(rendered).not.toContain(`field${index} (ssn)`);
+  // The composition fits the depth bound, so the renderer's generic marker --
+  // which cannot report a count -- never has to stand in for it.
+  expect(rendered).not.toContain(CAUSE_DEPTH_ELISION_MARKER);
+});
+
+test("the block names every field when they all fit the link budget", () => {
+  // One name per link the renderer reaches after the summary and the remedy: the
+  // widest enumeration that needs no overflow link at all.
+  const total = MAX_ERROR_CAUSE_DEPTH - 2;
+  const links = blockedLinks(unsatisfiableTerms(total));
+
+  expect(links.length).toBe(MAX_ERROR_CAUSE_DEPTH);
+  expect(links.slice(2)).toEqual(
+    Array.from(
+      { length: total },
+      (_, index) => `unsatisfied field: field${index} (ssn)`,
+    ),
+  );
+  const rendered = links.join("\n");
+  expect(rendered).not.toContain("more unsatisfied fields");
+  expect(rendered).not.toContain(CAUSE_DEPTH_ELISION_MARKER);
+});

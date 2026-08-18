@@ -18,6 +18,29 @@ import type {
 export const MAX_ERROR_CAUSE_DEPTH = 8;
 
 /**
+ * Marker {@link sanitizeErrorForDisplay} appends to the last link it renders
+ * when the walk stops at {@link MAX_ERROR_CAUSE_DEPTH} with the chain still
+ * running: the depth cutoff says so rather than shortening the chain silently,
+ * the same way {@link DISPLAY_TRUNCATION_MARKER} marks a link the per-link cap
+ * cut. An operator reading a chain that ends here can tell "this is the whole
+ * failure" from "there was more", which is what decides whether the detail they
+ * need is missing.
+ *
+ * It carries no count. Counting the remainder means walking the rest of the
+ * chain -- the walk this bound exists to not perform, and unbounded in exactly
+ * the adversarial case the bound is defensive against. A composition site that
+ * knows its own link count states it in the last link it composes, where the
+ * number is free (`checkLinkageSatisfiability` in
+ * `apps/cli/src/commands/linkagePreflight.ts`), and this marker stays the
+ * generic backstop for a chain nobody counted.
+ *
+ * Plain ASCII, and appended AFTER the per-link escape and cap, so the marker
+ * itself can neither reintroduce a control character nor be cut off the link it
+ * marks.
+ */
+export const CAUSE_DEPTH_ELISION_MARKER = "...[further causes elided]";
+
+/**
  * Separator placed between an error's message and each chained `cause` message.
  * The leading newline is the one control character in the assembled output, and
  * it is deliberate: a fixed formatting byte this module emits (so each cause
@@ -179,6 +202,11 @@ export function redactAndSanitizeForDisplay(
  *   the budget for a whole composed message rather than the per-value default),
  *   so a malformed or hostile chain cannot loop or flood -- the whole output is
  *   bounded without a separate total-length cap;
+ * - a chain that outruns the depth bound is marked rather than shortened in
+ *   silence: the last rendered link carries {@link CAUSE_DEPTH_ELISION_MARKER},
+ *   so an operator can tell a complete chain from a cut one (a chain that ends
+ *   on its own, or stops on the cycle guard having already rendered the link it
+ *   revisits, carries no marker);
  * - it suppresses a link whose raw message repeats the link before it -- the
  *   common case, since `asConnectionError` sets a wrapper's message to its
  *   cause's message -- so the same text is not printed twice;
@@ -196,6 +224,7 @@ export function sanitizeErrorForDisplay(err: unknown): string {
   const rawMessages: string[] = [];
   const seen = new Set<unknown>();
   let current: unknown = err;
+  let elided = false;
   for (let depth = 0; depth < MAX_ERROR_CAUSE_DEPTH; depth++) {
     // Read each link defensively. This is a last-resort display path, so a
     // hostile or malformed error -- a `.message` getter or `toString` that
@@ -229,13 +258,25 @@ export function sanitizeErrorForDisplay(err: unknown): string {
       next = undefined;
     }
     if (next === undefined || next === null || seen.has(next)) break;
+    // The bound is spent and a further link is still there to read. Record that
+    // rather than falling out of the loop, so the cut is marked on the rendered
+    // output instead of deleting the rest of the chain in silence.
+    if (depth === MAX_ERROR_CAUSE_DEPTH - 1) {
+      elided = true;
+      break;
+    }
     current = next;
   }
-  return rawMessages
-    .map((message) =>
-      sanitizeForDisplay(redactPrivateKeyMaterial(message), {
-        maxLength: COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
-      }),
-    )
-    .join(CAUSE_SEPARATOR);
+  const links: string[] = rawMessages.map((message) =>
+    sanitizeForDisplay(redactPrivateKeyMaterial(message), {
+      maxLength: COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+    }),
+  );
+  // Appended after the escape and the cap, like the truncation marker inside
+  // sanitizeForDisplay: the marker is this module's own fixed ASCII, and a link
+  // that spent its whole budget must still be able to say the chain went on.
+  if (elided)
+    links[links.length - 1] =
+      `${links[links.length - 1]} ${CAUSE_DEPTH_ELISION_MARKER}`;
+  return links.join(CAUSE_SEPARATOR);
 }

@@ -4,6 +4,7 @@ import {
   disclosedColumnNames,
   getLogger,
   inferMetadata,
+  MAX_ERROR_CAUSE_DEPTH,
   redactAndSanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -25,6 +26,16 @@ export interface LinkagePreflightMessaging {
    * the committed exchange. */
   blockRemedy: string;
 }
+
+/**
+ * How many cause links the block's unsatisfied-field enumeration may occupy. The
+ * display boundary walks at most {@link MAX_ERROR_CAUSE_DEPTH} links of a
+ * rendered chain, and this refusal spends two of them before any name: the
+ * summary on the error's own message, and the remedy chained ahead of the names.
+ * A name beyond this budget would be walked past and never rendered, so the last
+ * of these links reports the overflow instead of naming one more field.
+ */
+const UNSATISFIED_FIELD_LINK_BUDGET = MAX_ERROR_CAUSE_DEPTH - 2;
 
 /**
  * Pre-flight a CSV's `columns` against the linkage `terms` it will be exchanged
@@ -94,19 +105,38 @@ export function checkLinkageSatisfiability(
   // With no DECLARED field unproducible -- the keys are unsatisfiable only by
   // referencing undeclared fields -- there is no name link at all, and the summary
   // and its remedy stand alone.
-  if (satisfiableKeyCount === 0)
+  //
+  // The number of names is the terms' to choose and is bounded only at
+  // MAX_LINKAGE_ENTRIES, so the enumeration can ask for more links than the
+  // renderer walks. What overflows is stated here rather than left to the
+  // renderer's generic elision marker: this is where the count is known, and the
+  // count is what tells the operator how much of the mismatch they are not
+  // reading.
+  if (satisfiableKeyCount === 0) {
+    const fieldDetails = unsatisfied.map(
+      (field) => `unsatisfied field: ${field.name} (${field.type})`,
+    );
+    const shown =
+      fieldDetails.length > UNSATISFIED_FIELD_LINK_BUDGET
+        ? UNSATISFIED_FIELD_LINK_BUDGET - 1
+        : fieldDetails.length;
     throw new UsageError(
       `the CSV cannot satisfy any of the ${messaging.source}'s linkage keys; ` +
         "running would produce a silent empty result.",
       {
         cause: chainDetailCauses([
           `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
-          ...unsatisfied.map(
-            (field) => `unsatisfied field: ${field.name} (${field.type})`,
-          ),
+          ...fieldDetails.slice(0, shown),
+          ...(shown < fieldDetails.length
+            ? [
+                `and ${fieldDetails.length - shown} more unsatisfied fields ` +
+                  `(${fieldDetails.length} in total)`,
+              ]
+            : []),
         ]),
       },
     );
+  }
 
   // The warn route escapes at its own call site, because a log.warn IS the sink.
   // `type` is a schema-validated enum literal but takes the same path as `name`,
