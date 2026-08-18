@@ -106,6 +106,19 @@ export const NO_ICE_SERVERS_WARNING =
   "unreachable `stun` entry to gather host candidates only, which costs about " +
   "five seconds of gathering and works only where both parties share a network.";
 
+/** The warning line emitted when the signaling socket is plaintext (see below). */
+export const PLAINTEXT_SIGNALING_WARNING =
+  "this webrtc connection sets `secure: false`, so signaling runs over a " +
+  "plain `ws:` socket: the rendezvous ids derived from the invitation " +
+  "secret, both parties' session descriptions, and the candidate addresses " +
+  "they gather all cross the network in the clear, disclosing each party's " +
+  "network location to anything on the path and letting it disrupt the " +
+  "rendezvous. No exchange content is disclosed -- the two parties " +
+  "authenticate each other directly and the data channel is encrypted end " +
+  "to end regardless. Omit `secure` or set it to true to use TLS, which is " +
+  "the default; leave it false only for a broker you reach without a " +
+  "network in between, such as one on the same machine.";
+
 /** A peer session: the open channel, and the teardown for everything under it. */
 export interface WebRtcPeerSession {
   /** The open, reliable, ordered data channel. */
@@ -304,11 +317,19 @@ const PATH_AUTHORITY_DELIMITERS = /[@?#\\]|\s/;
  * it cannot appear on an invitation endpoint (whose schema is a strict
  * host/port/path allowlist) and it is encoded as a query parameter.
  *
+ * A location that resolves to plaintext warns rather than refuses, and warns
+ * here because this is the one place the choice becomes a socket the run will
+ * dial. The choice is the operator's own -- the invitation endpoint schema
+ * carries no `secure`, so no partner-supplied content can select it -- and a
+ * broker reached without a network in between is its legitimate use, so the run
+ * proceeds past the line.
+ *
  * @throws {UsageError} if the configured port is not a dialable 1-65535 value,
  *   or if `host` or `path` carries a shape that could move the authority.
  */
 export function brokerLocationFromConnection(
   server: WebRTCConnectionConfig["server"],
+  warn: (message: string) => void = (message) => log.warn(message),
 ): BrokerLocation {
   const secure = server.secure ?? true;
   // The connection schema admits port 0 (an OS-assigned ephemeral port) because
@@ -325,6 +346,9 @@ export function brokerLocationFromConnection(
   const path = server.path ?? "/";
   if (!path.startsWith("/") || PATH_AUTHORITY_DELIMITERS.test(path))
     throw new UsageError(WEBRTC_BROKER_PATH_REFUSED);
+  // Past the refusals, so a connection that fails to resolve at all gets its
+  // refusal alone rather than a warning about a socket nothing will dial.
+  if (!secure) warn(PLAINTEXT_SIGNALING_WARNING);
   return {
     host: server.host,
     port: server.port ?? (secure ? 443 : 80),

@@ -4,6 +4,8 @@ import { UsageError } from "@psilink/core";
 
 import {
   NO_ICE_SERVERS_WARNING,
+  PLAINTEXT_SIGNALING_WARNING,
+  brokerLocationFromConnection,
   buildPeerConfiguration,
   iceServersFromConnection,
 } from "../../src/connection/webrtc/weriftPeer";
@@ -104,4 +106,64 @@ test("the warning names the default, what it discloses, and how to override", ()
   expect(NO_ICE_SERVERS_WARNING).toContain("unreachable");
   // And it must not overstate the disclosure: connection metadata, not content.
   expect(NO_ICE_SERVERS_WARNING).toContain("no exchange content is");
+});
+
+// --- plaintext signaling ----------------------------------------------------
+
+test("a plaintext broker warns and still resolves to a dialable location", () => {
+  const warnings: Array<string> = [];
+  const location = brokerLocationFromConnection(
+    { host: "127.0.0.1", port: 9000, secure: false },
+    (message) => warnings.push(message),
+  );
+  // Warn and guide: plaintext is the operator's own choice, and a broker on the
+  // same machine is what it is for, so the location is still returned whole.
+  expect(location).toEqual({
+    host: "127.0.0.1",
+    port: 9000,
+    path: "/",
+    key: "peerjs",
+    secure: false,
+  });
+  expect(warnings).toEqual([PLAINTEXT_SIGNALING_WARNING]);
+});
+
+test.each([
+  ["secure: true", true],
+  ["an omitted secure", undefined],
+])("%s resolves to TLS with no warning", (_label, secure) => {
+  const warnings: Array<string> = [];
+  const location = brokerLocationFromConnection(
+    { host: "peers.example.org", ...(secure !== undefined && { secure }) },
+    (message) => warnings.push(message),
+  );
+  expect(location.secure).toBe(true);
+  expect(warnings).toEqual([]);
+});
+
+test("a connection refused for shape warns about nothing", () => {
+  // The refusal is the whole outcome: nothing will be dialed, so a warning about
+  // the socket's scheme would only compete with the line the operator acts on.
+  const warnings: Array<string> = [];
+  expect(() =>
+    brokerLocationFromConnection(
+      { host: "broker.example@attacker.example", secure: false },
+      (message) => warnings.push(message),
+    ),
+  ).toThrow(UsageError);
+  expect(warnings).toEqual([]);
+});
+
+test("the warning names what is disclosed, the remedy, and the legitimate use", () => {
+  expect(PLAINTEXT_SIGNALING_WARNING).toContain("`secure: false`");
+  expect(PLAINTEXT_SIGNALING_WARNING).toContain("ws:");
+  expect(PLAINTEXT_SIGNALING_WARNING).toContain("rendezvous ids");
+  expect(PLAINTEXT_SIGNALING_WARNING).toContain("session descriptions");
+  expect(PLAINTEXT_SIGNALING_WARNING).toContain("candidate addresses");
+  expect(PLAINTEXT_SIGNALING_WARNING).toContain("TLS");
+  expect(PLAINTEXT_SIGNALING_WARNING).toContain("the default");
+  expect(PLAINTEXT_SIGNALING_WARNING).toContain("same machine");
+  // And it must not overstate the disclosure: the parties authenticate each
+  // other over the data channel, which a plaintext signaling path does not reach.
+  expect(PLAINTEXT_SIGNALING_WARNING).toContain("No exchange content");
 });
