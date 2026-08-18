@@ -908,6 +908,12 @@ test("the locator rejection's guidance survives the display boundary whole", asy
   // through the real schema and the real renderer, over the composition the CLI's
   // decode wrapper makes, so a copy edit that outgrows the link budget fails here
   // rather than silently landing cut in front of an operator.
+  //
+  // The prefix below is core's restatement of that wrapper -- core cannot import
+  // the CLI -- so it holds the guidance against THIS budget and not against a
+  // later edit to what the CLI composes ahead of it. That half is driven from the
+  // side that can call it: apps/cli/test/unit/invitationDecodeBudget.test.ts runs
+  // the real decodeAndValidateInvitation over the same rejection.
   const encoded = await encodeRaw({
     ...baseToken,
     connectionEndpoint: { ...CHANNEL_SHAPES.sftp.minimal, username: "alice" },

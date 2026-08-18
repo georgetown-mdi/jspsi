@@ -26,10 +26,35 @@ describe("sanitizeErrorForDisplay", () => {
     );
   });
 
-  test("renders a no-cause error exactly as sanitizeForDisplay(errorMessage(err))", () => {
-    const err = new Error("MOU-2025-0042 failed");
+  test("renders a no-cause error at the composed-message budget, not the per-value default", () => {
+    // A single link is still a COMPOSITION, so the budget it is charged to is
+    // COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH. Driven past the per-value default,
+    // where the two budgets disagree: a fixture short enough for them to agree
+    // measures neither.
+    const err = new Error(
+      `MOU-2025-0042 failed: ${"d".repeat(DEFAULT_MAX_DISPLAY_LENGTH)}`,
+    );
     expect(sanitizeErrorForDisplay(err)).toBe(
-      sanitizeForDisplay(errorMessage(err)),
+      sanitizeForDisplay(errorMessage(err), {
+        maxLength: COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+      }),
+    );
+    // Not vacuous: at the per-value default this same message loses its tail.
+    expect(sanitizeForDisplay(errorMessage(err))).toContain(
+      DISPLAY_TRUNCATION_MARKER,
+    );
+    expect(sanitizeErrorForDisplay(err)).not.toContain(
+      DISPLAY_TRUNCATION_MARKER,
+    );
+  });
+
+  test("caps a no-cause error at COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH", () => {
+    // The other side of the budget: it is a cap, not a removal, and it falls
+    // exactly where the composed-message constant puts it.
+    const flooded = "x".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH + 1);
+    expect(sanitizeErrorForDisplay(new Error(flooded))).toBe(
+      "x".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH) +
+        DISPLAY_TRUNCATION_MARKER,
     );
   });
 
@@ -175,6 +200,69 @@ describe("sanitizeErrorForDisplay", () => {
         DISPLAY_TRUNCATION_MARKER +
         ` ${CAUSE_DEPTH_ELISION_MARKER}`,
     );
+  });
+
+  test("passes a message carrying the elision marker's text through as content", () => {
+    // The marker is plain printable ASCII, so a partner-controlled message that
+    // carries its text meets the escape and the cap as any other content does:
+    // nothing about the text is privileged, and nothing marks it as the
+    // renderer's own.
+    const forged = `partner failure ${CAUSE_DEPTH_ELISION_MARKER}`;
+    expect(sanitizeErrorForDisplay(new Error(forged))).toBe(forged);
+    // Capped like any other content too: past the budget the marker's text is
+    // what the cut takes.
+    const flooded = `${"z".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH)}${CAUSE_DEPTH_ELISION_MARKER}`;
+    expect(sanitizeErrorForDisplay(new Error(flooded))).toBe(
+      "z".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH) +
+        DISPLAY_TRUNCATION_MARKER,
+    );
+  });
+
+  test("cannot distinguish a copied elision marker from a cut it made itself", () => {
+    // The measured limit of the marker: a chain that ends on its own, whose last
+    // message ends with the marker's text, renders byte-for-byte as a chain the
+    // depth bound really cut. An operator cannot tell the two apart, and no
+    // check downstream can either.
+    const chain = (messages: string[], tail?: unknown): unknown =>
+      messages.reduceRight<unknown>(
+        (cause, message) =>
+          cause === undefined
+            ? new Error(message)
+            : new Error(message, { cause }),
+        tail,
+      );
+    const head = Array.from(
+      { length: MAX_ERROR_CAUSE_DEPTH - 1 },
+      (_unused, index) => `link${index}`,
+    );
+
+    const cut = sanitizeErrorForDisplay(
+      chain([...head, "partner failure"], new Error("beyond the bound")),
+    );
+    const forged = sanitizeErrorForDisplay(
+      chain([...head, `partner failure ${CAUSE_DEPTH_ELISION_MARKER}`]),
+    );
+    expect(forged).toBe(cut);
+    // Not vacuous: the delivery really did spend the whole depth budget and
+    // really was marked.
+    expect(cut.split("\ncaused by: ")).toHaveLength(MAX_ERROR_CAUSE_DEPTH);
+    expect(cut.endsWith(CAUSE_DEPTH_ELISION_MARKER)).toBe(true);
+
+    // The forgery runs one way only. A copied marker on a chain the bound DOES
+    // cut cannot suppress the renderer's own, which is appended after the escape
+    // whatever the link carried -- so the marker's absence stays load-bearing
+    // even though its presence is not.
+    const both = sanitizeErrorForDisplay(
+      chain(
+        [...head, `partner failure ${CAUSE_DEPTH_ELISION_MARKER}`],
+        new Error("beyond the bound"),
+      ),
+    );
+    expect(
+      both.endsWith(
+        `${CAUSE_DEPTH_ELISION_MARKER} ${CAUSE_DEPTH_ELISION_MARKER}`,
+      ),
+    ).toBe(true);
   });
 
   test("walks a non-Error cause and neutralizes its bytes", () => {

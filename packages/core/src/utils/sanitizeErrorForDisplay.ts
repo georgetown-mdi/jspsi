@@ -37,6 +37,17 @@ export const MAX_ERROR_CAUSE_DEPTH = 8;
  * Plain ASCII, and appended AFTER the per-link escape and cap, so the marker
  * itself can neither reintroduce a control character nor be cut off the link it
  * marks.
+ *
+ * Being plain ASCII also means it is not authenticated and cannot be: the escape
+ * passes the marker's own text through unchanged, so a link whose message ends
+ * with that text renders byte-identically to one this renderer marked. That is
+ * the same open class {@link DISPLAY_TRUNCATION_MARKER} carries, where a
+ * first-party fragment (an over-long filename's preview) already ends with the
+ * marker by construction. What bounds the cost is the asymmetry: a copy claims a
+ * loss that did not happen, and cannot conceal one that did, since the append
+ * below runs after the escape whatever the link carried. So the marker's ABSENCE
+ * is what an operator can rely on -- no marker means the walk dropped nothing --
+ * while its presence says detail MAY be missing rather than that it is.
  */
 export const CAUSE_DEPTH_ELISION_MARKER = "...[further causes elided]";
 
