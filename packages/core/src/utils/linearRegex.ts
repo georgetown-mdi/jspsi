@@ -77,8 +77,8 @@ function compileCached(pattern: string): RE2JS {
  * standardization factories need, each matching the JavaScript `RegExp`
  * operation it replaced for every in-dialect pattern (pinned by the cross-engine
  * equivalence tests). The equivalence covers the PATTERN dialect; the
- * replacement string {@link CompiledLinearRegex.replaceAll} takes resolves under
- * the engine's own rules, which diverge -- see there. Compile once via
+ * replacement string that {@link CompiledLinearRegex.replaceAll} takes resolves
+ * under the engine's own rules, which diverge -- see there. Compile once via
  * {@link compileLinearRegex}; call per row.
  */
 export interface CompiledLinearRegex {

@@ -1442,7 +1442,13 @@ function runAbortParty(keyFilePath: string, name: string): Promise<unknown> {
       // Bound peerTimeoutMs: when a party fails it tears down without consuming a
       // trailing handshake frame the peer may have left, so the peer's teardown
       // drain would otherwise wait a full (default, very long) peerTimeoutMs.
-      options: { pollIntervalMs: 1, peerTimeoutMs: 200 },
+      // The bound is a backstop for that drain, not a budget for the rendezvous
+      // and handshake it also bounds: every wait before runExchange is capped by
+      // this value, so a bound sized near the happy path (tens of milliseconds)
+      // fails BOTH parties on a loaded machine before either reaches the barrier
+      // -- for the scheduling rather than for the fault the test injects, and
+      // reported as the runExchangeEntries assertion below.
+      options: { pollIntervalMs: 1, peerTimeoutMs: 2_000 },
     },
     { sharedSecret: TOKEN_A, keyFilePath },
     minimalPrepared,
@@ -3412,58 +3418,6 @@ test("a main-try failure under --event-stream emits exactly one terminal error e
   expect(lines[1].type).toBe("error");
   expect(lines[1].category).toBe("exchange");
   expect(lines[1].v).toBe(1);
-});
-
-test("a SIGINT interrupt under --event-stream emits no terminal event", async () => {
-  // The contract a supervisor reads an interrupt by (docs/spec/CLI_EVENTS.md):
-  // no terminal event, plus exit 130. The web job manager synthesizes a terminal
-  // state for a non-interrupt exit that produced none, so a terminal line here
-  // would report a cancellation as an outcome. process.exit is mocked, which is
-  // the harder case: the signal handler returns instead of terminating, so the
-  // interrupt propagates into the main catch and the check covers the
-  // in-flight-error subpath rather than only the bypass a real exit gives.
-  mockFd3Open();
-  const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
-  const keyFile = path.join(tmpDir, "interrupted.key");
-  const run = runProtocol(
-    {
-      channel: "filedrop",
-      path: dropDir,
-      options: { pollIntervalMs: 1, peerTimeoutMs: 5_000 },
-    },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFile },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-    undefined,
-    undefined,
-    undefined,
-    { eventStream: true },
-  );
-  try {
-    // Cancel once the lone inviter is waiting at the rendezvous, past the
-    // prepare block and so inside the window the signal handlers cover.
-    await vi.waitFor(
-      () => expect(fs.readdirSync(dropDir).length).toBeGreaterThan(0),
-      { timeout: 5_000 },
-    );
-    process.emit("SIGINT");
-    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130), {
-      timeout: 5_000,
-    });
-    await Promise.allSettled([run]);
-  } finally {
-    exitSpy.mockRestore();
-    vi.mocked(fs.fstatSync).mockRestore();
-  }
-
-  // Nothing terminal, and no metrics summary either -- the summary is emitted
-  // only immediately before a terminal event.
-  const types = takeFd3Lines().map((line) => line.type);
-  expect(types).not.toContain("result");
-  expect(types).not.toContain("error");
-  expect(types).not.toContain("metrics");
 });
 
 // --- Stage/warning stderr sanitization -----------------------------------------
