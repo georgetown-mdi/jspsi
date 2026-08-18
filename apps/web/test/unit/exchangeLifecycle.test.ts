@@ -238,6 +238,42 @@ describe("runExchangeLifecycle", () => {
     expect(s.onWarning.mock.calls).toEqual([[FINAL_FRAME_UNCONFIRMED_WARNING]]);
   });
 
+  test("a failed run whose close then ends on the ceiling raises no notice", async () => {
+    // The handshake fails closed without the connection ever reaching a terminal
+    // state, so teardown's close is still the real flushing one and its wait can
+    // end on the ceiling after onError has fired. The notice speaks for a run
+    // that succeeded ("Your own results are complete"), so this one must drain
+    // that close and say nothing.
+    const { mc, close } = makeFakeMc();
+    close.mockImplementation(() => {
+      mockedOpen.mock.calls[0][1]?.onFinalFrameUnconfirmed?.();
+      return Promise.resolve();
+    });
+    mockedOpen.mockResolvedValue(mc);
+    mockedAuthenticate.mockRejectedValue(
+      new ConnectionError("key exchange authentication failed", "security"),
+    );
+    const { acquired } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledWith({
+      category: "security",
+      error: expect.any(ConnectionError),
+    });
+    // The drain still ran, exactly as it does on the success path; only the
+    // operator notice is withheld.
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(s.onWarning).not.toHaveBeenCalled();
+  });
+
   test("drops an unconfirmed-frame notice raised once the run has aborted", async () => {
     // The close's wait can end on its ceiling long after an unmount aborts the
     // run, and the seam it would set state through is gone by then -- the same

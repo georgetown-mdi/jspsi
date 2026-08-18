@@ -24,10 +24,10 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 const log = getLogger("exchangeLifecycle");
 
 /**
- * The operator-facing notice for a clean close whose wait for the peer ended on
- * its ceiling: every frame is out of this side's hands, but the signal that says
- * the peer took the final one never came, so the exchange succeeded here without
- * that being true of the partner.
+ * The operator-facing notice for a run that reported its result and whose clean
+ * close then waited for the peer up to its ceiling: every frame is out of this
+ * side's hands, but the signal that says the peer took the final one never came,
+ * so the exchange succeeded here without that being true of the partner.
  *
  * Composed here rather than in the transport because this is the layer that owns
  * the run's operator vocabulary; the transport reports the fact
@@ -232,10 +232,11 @@ export interface RunExchangeLifecycleOptions<
   }) => void;
   /** A non-fatal, operator-relevant notice raised mid-run -- today only the
    * clean close ending on its ceiling rather than on the peer's delivery signal
-   * ({@link FINAL_FRAME_UNCONFIRMED_WARNING}). Optional: an owner with no
-   * warning surface omits it and the notice is dropped. Never a terminal; the
-   * run still ends in exactly one `onResult`/`onError`, and a notice raised
-   * during teardown arrives after that one. */
+   * ({@link FINAL_FRAME_UNCONFIRMED_WARNING}), and only on a run that reported
+   * its result. Optional: an owner with no warning surface omits it and the
+   * notice is dropped. Never a terminal; the run still ends in exactly one
+   * `onResult`/`onError`, and a notice raised during teardown arrives after
+   * that one. */
   onWarning?: (message: string) => void;
 }
 
@@ -292,13 +293,25 @@ export async function runExchangeLifecycle<
     };
   const emitStages = ifLive(onStages);
   const emitStage = ifLive(onStage);
-  const emitResult = ifLive(onResult);
+  let reportedResult = false;
+  const emitResult = ifLive((outputs: TOutputs) => {
+    reportedResult = true;
+    onResult(outputs);
+  });
   const emitError = ifLive(onError);
-  // Warnings take the same live gate as every other seam, which on this one
-  // also means a cancelled run raises none: the teardown a cancellation drives
-  // reaches the close's ceiling exactly as a finished exchange can, and a
-  // partner notice on a run the operator stopped is noise.
-  const emitWarning = ifLive((message: string) => onWarning?.(message));
+  // Two gates, both load-bearing on the one seam that can fire during teardown.
+  // The live gate every other seam takes, which here also silences a cancelled
+  // run: the teardown a cancellation drives reaches the close's ceiling exactly
+  // as a finished exchange can, and a partner notice on a run the operator
+  // stopped is noise. And this side's success terminal, because the notice
+  // speaks for a completed exchange ("Your own results are complete"): a run
+  // that failed -- including one whose failure never put the connection in a
+  // terminal state, leaving teardown's close the real flushing one -- drains
+  // that close exactly the same way, but has already told the operator
+  // something stronger through onError.
+  const emitWarning = ifLive((message: string) => {
+    if (reportedResult) onWarning?.(message);
+  });
 
   let acquired: AcquiredExchange;
   try {
@@ -349,9 +362,11 @@ export async function runExchangeLifecycle<
       if (mc !== undefined) {
         // Flushing close: waits for the peer to take the final outbound frame
         // and detaches the channel listeners. This is the teardown-exclusive
-        // effect. A wait that ends on its ceiling raises the operator warning
-        // through emitWarning (see openPeerMessageConnection), which is why
-        // teardown can emit after the run's terminal event.
+        // effect. On a run that reported its result, a wait that ends on its
+        // ceiling raises the operator warning through emitWarning (see
+        // openPeerMessageConnection), which is why teardown can emit after the
+        // run's terminal event; a failed or cancelled run drains the same close
+        // silently.
         await mc.close();
       } else {
         // The wrapper never materialized (abort/timeout before the open await

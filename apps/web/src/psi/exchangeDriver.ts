@@ -44,10 +44,10 @@ export interface ExchangeDriverEvents<
    * cross-party host-key divergence notice, which the operator must be able to
    * see), and the in-browser driver raises the transport's own (its clean close
    * ending on the ceiling rather than on the peer's delivery signal). Optional:
-   * a consumer with no
-   * warning surface omits it and a driver then drops the message. Never a
-   * terminal -- the run continues to exactly one `onResult`/`onError`, though a
-   * notice raised while tearing down arrives after it. */
+   * a consumer with no warning surface omits it and a driver then drops the
+   * message. Never a terminal -- the run continues to exactly one
+   * `onResult`/`onError`, though a notice raised while tearing down arrives
+   * after it. */
   onWarning?: (message: string) => void;
 }
 
