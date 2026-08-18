@@ -14,7 +14,7 @@ claim waits on are in
 [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) and
 [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md); the pins,
 the inventory and the checks are in
-[DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md). See
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md). See
 [docs/notes/README.md](README.md).*
 
 Read the ceiling first, because it bounds every sentence below. **The PSI
@@ -508,7 +508,7 @@ Alpine's busybox and musl do not have (`bash`, `coreutils-single`, `diffutils`,
 `gnutls`) and the LGPL-3.0 samba record stores. Whether that breadth changes
 this project's distribution posture is a licensing call, not a measurement, and
 it is open. The per-package inventory and the caveats on those figures are in
-[DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md).
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#measured-inventories).
 
 The Node runtime is the other cost, and it is a supply-chain one rather than a
 size one. Amazon Linux 2023 packages nodejs20, nodejs22 and nodejs24 only, so
@@ -522,7 +522,8 @@ which needs a keyring and a key-rotation story inside the image, or committing
 the per-architecture tarball sha256 into the Dockerfile, which is the same trust
 model as the base-image digest pin and needs neither. The second is what the
 build does, and the values are in
-[DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md); what vouches for the tarball is
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#the-fips-variant-images-pins);
+what vouches for the tarball is
 then this repository rather than the host that served it. The provider does not
 share this gap either way: `dnf` verifies the vendor's RPM signatures against the
 key the base image carries.
@@ -600,8 +601,8 @@ reading -- Docker Hub is not reachable from the development container and no
 - [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) and
   [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md) -- the two
   algorithm migrations behind what a claim about this image may say.
-- [DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md) -- the variant's pins, its OS
-  package inventory beside the Alpine image's, and the checks that hold both.
+- [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md) -- the variant's pins, its
+  OS package inventory beside the Alpine image's, and the checks that hold both.
 - [COMPLIANCE.md](../COMPLIANCE.md#fips-140) -- the FIPS claims an agency
   reviewer reads.
 - [CLI.md](../CLI.md#configuration) -- `connection.provider_options`, the

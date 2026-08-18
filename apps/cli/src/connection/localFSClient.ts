@@ -58,6 +58,30 @@ function openNoFollow(filePath: string, flag: keyof typeof OPEN_FLAGS) {
   return fs.open(filePath, OPEN_FLAGS[flag] | (fs.constants.O_NOFOLLOW ?? 0));
 }
 
+/**
+ * What is left of a `writev` chunk list after `bytesWritten` of its bytes have
+ * landed: whole chunks the write consumed are dropped, and the one straddling
+ * the boundary is advanced past its written prefix (a view, never a copy). Every
+ * returned chunk is non-empty, so an empty result means exactly that the whole
+ * list is written -- which is what lets the caller loop on the list's length.
+ */
+function chunksAfter(
+  chunks: readonly Uint8Array[],
+  bytesWritten: number,
+): Uint8Array[] {
+  const remaining: Uint8Array[] = [];
+  let consumed = bytesWritten;
+  for (const chunk of chunks) {
+    if (consumed >= chunk.byteLength) {
+      consumed -= chunk.byteLength;
+      continue;
+    }
+    remaining.push(consumed > 0 ? chunk.subarray(consumed) : chunk);
+    consumed = 0;
+  }
+  return remaining;
+}
+
 /** Pulls a stream source fully into one Buffer before any file is opened. */
 async function drainStream(src: NodeJS.ReadableStream): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -362,14 +386,31 @@ export class LocalFSClient implements FileTransportClient {
     const handle = await openNoFollow(dest, flag);
     try {
       if (Array.isArray(payload)) {
-        // A [header, payload] chunk list: write the parts back-to-back with one
-        // positional writev so the 10-byte header is prepended WITHOUT
-        // concatenating the payload into a fresh buffer (the send-path
-        // peak-shaving this mirrors -- for a binary frame the payload is never
-        // copied). The resulting on-disk bytes are the parts joined,
-        // byte-identical to writing their concatenation. encoding does not apply
-        // to a raw chunk list and is deliberately not passed.
-        await handle.writev(payload);
+        // A [header, payload] chunk list: write the parts back-to-back with
+        // writev so the 10-byte header is prepended WITHOUT concatenating the
+        // payload into a fresh buffer (the send-path peak-shaving this mirrors --
+        // for a binary frame the payload is never copied). The resulting on-disk
+        // bytes are the parts joined, byte-identical to writing their
+        // concatenation. encoding does not apply to a raw chunk list and is
+        // deliberately not passed.
+        //
+        // A SHORT write is not a failure and does not reject: the kernel may
+        // take fewer bytes than were offered, and what it did not take would
+        // otherwise publish as a truncated frame that the peer waits out its
+        // whole budget on before blaming the partner. So re-offer what is left
+        // until nothing is, the way get() loops its reads. No position is passed
+        // on any pass, so each write continues at the handle's own position and
+        // an `a` (append) flag keeps its meaning.
+        let remaining = payload;
+        while (remaining.length > 0) {
+          const { bytesWritten } = await handle.writev(remaining);
+          if (bytesWritten === 0)
+            throw new Error(
+              `LocalFSClient.put: the write of ${dest} stopped making ` +
+                "progress with bytes still unwritten",
+            );
+          remaining = chunksAfter(remaining, bytesWritten);
+        }
       } else {
         await handle.writeFile(payload, { encoding });
       }

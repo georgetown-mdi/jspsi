@@ -69,8 +69,9 @@ budget -- whose operative default is **three** retries (a fast-fail in seconds),
 not the seven-day sanity ceiling that bounds only the config field -- and the op
 then rejects, poll's catch emits an error, and the connection bridge makes that
 terminal. A vanished or silent peer trips the receive-inactivity deadline, which is
-set to `peer_timeout_ms` (default one hour). A stalled send is bounded by its
-time-to-live (also `peer_timeout_ms`). These bounds terminate a dead channel
+set to `peer_timeout_ms` (default one hour). A stalled send is bounded by the same
+peer-inactivity budget, armed afresh for each send's wait on the peer (see
+[FILE_SYNC.md](../spec/FILE_SYNC.md)). These bounds terminate a dead channel
 independently of the mid-exchange reconnection budget; the budget is what
 additionally bounds the *succeeding-but-thrashing* case -- a server that re-dials
 cleanly every cycle yet keeps capping the session -- which none of them catches.
@@ -362,9 +363,13 @@ release. Past its bound the release closes the transport from this side, so ever
 idle boundary ends with the session gone and every cycle begins by dialing a fresh
 one. Inside the poll loop that silence costs one release bound per cycle, an
 operator warning on the same rate-escalated cadence a chronic mid-exchange re-dial
-gets, and a total in the end-of-run summary -- rather than the exchange. A forced
-release is still this side's own deliberate boundary, so the re-dial that follows
-is neither counted as a reconnection nor reported as a dropped session.
+gets, and a total in the end-of-run summary -- rather than the exchange. Forcing
+says how the boundary concluded, not who ended the transport beneath it, so it
+does not by itself make the loss this side's: a boundary forced over a partner
+drop this side had already observed is still counted and warned as that drop,
+while one forced over an ordinary deliberate release is exempt as any release is
+([CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#sftp-mid-exchange-session-recovery)
+carries the per-outcome rule).
 
 The same partner silence at TEARDOWN is a defect of the SFTP transport itself,
 which this mode neither causes nor escapes, so it is bounded where it lives

@@ -722,13 +722,18 @@ function stdoutIsRedirectedFile(): boolean {
  * umask default.
  *
  * The file path is owned end to end: the returned promise resolves on the
- * stream's `'finish'` (all rows flushed) and rejects on any `'error'`. Awaiting it
- * is what makes a mid-write or close failure (a full disk, a revoked mount)
- * recoverable -- without an `'error'` listener that failure would be emitted on a
- * listener-free stream and crash the process with no diagnostic; rejecting instead
- * lets the caller's error boundary map it to a non-zero exit with a sanitized
- * message, and the `'finish'` resolution lets the caller order a later write (the
- * secondary exchange record) after the result file is durable.
+ * stream's `'close'` (all rows flushed AND the descriptor closed) and rejects on
+ * any `'error'`. Awaiting it is what makes a mid-write or close failure (a full
+ * disk, a revoked mount) recoverable -- without an `'error'` listener that failure
+ * would be emitted on a listener-free stream and crash the process with no
+ * diagnostic; rejecting instead lets the caller's error boundary map it to a
+ * non-zero exit with a sanitized message, and the `'close'` resolution lets the
+ * caller order a later write (the secondary exchange record) after the result file
+ * is durable. Resolving on `'close'` rather than `'finish'` is what makes the
+ * close-time failure recoverable at all: a networked or userspace filesystem
+ * (NFS/CIFS/FUSE) and a full disk both defer their error to the `close(2)` that
+ * follows the last flushed write, which arrives after `'finish'` -- so a
+ * `'finish'` resolution would report a truncated result CSV as a written one.
  *
  * The stdout branch (no path given) writes to `process.stdout` -- a long-lived
  * stream the CLI neither owns nor closes, whose write errors stay with Node's
@@ -777,7 +782,7 @@ export function writeOutput(
     // rather than throwing past it -- the caller sees one failure channel.
     const out = createOwnerOnlyWriteStream(output);
     out.on("error", reject);
-    out.on("finish", () => resolve());
+    out.on("close", () => resolve());
     out.write(headers.join(",") + "\n");
     for (const row of rows) out.write(row.join(",") + "\n");
     out.end();

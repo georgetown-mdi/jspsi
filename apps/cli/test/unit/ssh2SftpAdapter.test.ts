@@ -4,6 +4,7 @@ import { Readable, Writable } from "node:stream";
 
 import { describe, expect, test, vi, beforeEach } from "vitest";
 import {
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   DirectoryListingBoundsError,
   FileTransportClient,
@@ -3703,12 +3704,12 @@ describe("session recovery", () => {
   test("the undetermined publish's operative sentence outlives a destination that spends the display budget", async () => {
     // The rendering boundary, not the raw message: sanitizeErrorForDisplay is the
     // only path a terminal CLI error takes to a terminal, and it caps each link of
-    // the cause chain at DEFAULT_MAX_DISPLAY_LENGTH. The sentence the operator
-    // must act on -- that the publish MAY have arrived -- has to clear that cap
-    // even against an ack name long enough to spend the whole budget, since a
-    // truncation reaching it would leave prose asserting the opposite.
+    // the cause chain at COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH. The sentence the
+    // operator must act on -- that the publish MAY have arrived -- has to clear
+    // that cap even against an ack name long enough to spend the whole budget,
+    // since a truncation reaching it would leave prose asserting the opposite.
     const rendered = await renderUndeterminedPublish(
-      `/remote/${"a".repeat(200)}-ack.json`,
+      `/remote/${"a".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH)}-ack.json`,
     );
     const [publishLink, ...causeLinks] = rendered.split("\ncaused by: ");
     expect(publishLink).toContain(

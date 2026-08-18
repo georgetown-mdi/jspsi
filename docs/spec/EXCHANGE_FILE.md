@@ -396,10 +396,14 @@ refused rather than adapted.
 The drivable set is not a property of "browser versus CLI" but of the tool and,
 for the web application, its deployment profile:
 
-- **CLI.** `sftp` and `filedrop`. `psilink accept` seeds the endpoint into the
-  acceptor's connection through the single consumer `connectionFromEndpoint`
-  (`apps/cli`), which also applies the mirror swap for a split-directory
-  endpoint. The CLI has no WebRTC transport.
+- **CLI.** `sftp`, `filedrop`, and `webrtc`. `psilink accept` seeds the endpoint
+  into the acceptor's connection through the single consumer
+  `connectionFromEndpoint` (`apps/cli`), which also applies the mirror swap for a
+  split-directory endpoint. A seeded `webrtc` connection carries the locator
+  only; the accept path stamps `role: acceptor` onto it (`withWebRTCPeerRole`),
+  and the channel needs the shared secret both parties derive their rendezvous
+  ids from, so `psilink exchange` refuses a webrtc run that reaches it without a
+  secret or without a stamped `role`.
 - **Browser, hosted profile.** `webrtc` only. A file-sync endpoint names a
   directory or an SFTP host the browser cannot reach.
 - **Browser, console profile.** `webrtc`, `filedrop`, and `sftp`. The console

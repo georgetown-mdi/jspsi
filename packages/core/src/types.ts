@@ -5,8 +5,11 @@ import { z } from "zod";
  *
  * `[0]` contains our (local) row indices; `[1]` contains the corresponding
  * partner row indices. The entries in `[0]` are in strictly ascending order --
- * a guaranteed invariant of {@link linkViaPSI} relied upon by payload
- * reconstruction.
+ * a structural invariant of the cascade in {@link linkViaPSI} relied upon by
+ * payload reconstruction. The single-pass sender receives its table from the
+ * partner, whose checks cover range, distinctness, and pairing but not
+ * ordering -- the stated limit in docs/spec/PROTOCOL.md's index-validation
+ * subsection.
  */
 export type AssociationTable = [Array<number>, Array<number>];
 

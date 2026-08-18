@@ -23,7 +23,7 @@ import type { LinkageKey } from "../src/config/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import {
   DISPLAY_TRUNCATION_MARKER,
-  DEFAULT_MAX_DISPLAY_LENGTH,
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   sanitizeForDisplay,
 } from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
@@ -1877,7 +1877,10 @@ test("a partner value with bidi-override / zero-width characters is neutralized"
 });
 
 test("an over-long partner value is truncated with the marker", () => {
-  const hostile = "B".repeat(DEFAULT_MAX_DISPLAY_LENGTH + 100);
+  // Sized past the budget the RENDERER charges a composed message, which is
+  // where this value meets a cap: the composition site interpolates it raw and
+  // the display boundary escapes and caps the whole link once.
+  const hostile = "B".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH + 100);
   const { errors } = validateCompatibility(
     withAgreement(termsA, "MOU-001", "Care coordination"),
     withAgreement(termsB, hostile, "Care coordination"),

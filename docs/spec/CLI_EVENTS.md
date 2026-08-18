@@ -71,7 +71,11 @@ Emitted when a protocol stage completes, carrying how long it ran so a superviso
 
 ### `warning`
 
-Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWarning`, the cross-party host-key divergence notice -- a security signal a supervisor that discards stderr would otherwise never see -- and the post-authentication persistence failure of an online `invite`/`accept`, whose run completes and writes its result while the configuration a later recurring `psilink exchange` needs does not reach disk (that run also exits 69; see [Exit codes](../CLI.md#exit-codes)). A warning does not end the run.
+Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWarning`, the cross-party host-key divergence notice -- a security signal a supervisor that discards stderr would otherwise never see -- one per audit artifact the run was asked for and could not produce (the self-attested exchange record, or the dual-signed receipt), and the post-authentication persistence failure of an online `invite`/`accept`, whose run completes and writes its result while the configuration a later recurring `psilink exchange` needs does not reach disk. A warning does not end the run.
+
+An audit-artifact warning takes one of two shapes: an artifact that was built but could not be written names the destination it could not be written to, while an exchange record that could not be built at all names no destination and states that none was written and that the run need not be re-run.
+
+Those two -- a missing audit artifact and a failed configuration write -- are the warnings that also move the exit code: the run exits `EX_UNAVAILABLE` (69) while its terminal event stays `result`, so a supervisor reads "the exchange succeeded and must not be re-run, and what the run was asked to persist is missing" from the pair (see [Exit codes](../CLI.md#exit-codes)). Every other warning leaves the exit code alone.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
@@ -97,7 +101,7 @@ The per-run operational-counter summary. Emitted exactly once, immediately befor
 
 ### `result`
 
-The success **terminal event**. Emitted exactly once, after the exchange completed and the local output stage (result CSV plus the non-fatal audit record) finished.
+The success **terminal event**. Emitted exactly once, after the exchange completed and the local output stage (result CSV plus the non-fatal audit record) finished. It is emitted for a run whose audit artifact could not be written too -- the exchange itself succeeded -- so a `result` beside a non-zero exit code is read with the preceding [`warning`](#warning), which names what is missing.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
@@ -141,7 +145,7 @@ The process exit code cannot distinguish a `security` failure from an ordinary o
 
 Exactly one terminal event -- a `result` when the exchange and the local output stage completed, or one classified `error` on an organic failure -- is emitted per run. It is the last event on the stream. The `stages`, `stage`, `stageEnd`, `warning`, and `metrics` events that precede it are progress and summary, not outcome. The one `metrics` event is emitted immediately before the terminal event, so a supervisor reads the run's operational counters on the line just above the outcome.
 
-A `result` says the exchange completed, which is not the same as a zero exit: an online `invite`/`accept` whose post-exchange configuration write failed emits a `warning` for that failure, then its `result`, and exits 69 (see [Exit codes](../CLI.md#exit-codes)). The pair is the signal -- the exit code alone cannot separate that run from a transport failure, and the terminal event alone cannot separate it from a fully provisioned success -- so a supervisor keying success off the terminal event reads the exit code with it.
+A `result` says the exchange completed, which is not the same as a zero exit. A run that could not produce an audit artifact it was asked for, and an online `invite`/`accept` whose post-exchange configuration write failed, each emit a `warning` for that failure, then their `result`, and exit 69 (see [Exit codes](../CLI.md#exit-codes)). The pair is the signal -- the exit code alone cannot separate such a run from a transport failure, and the terminal event alone cannot separate it from a fully persisted success -- so a supervisor keying success off the terminal event reads the exit code with it.
 
 The classified terminal `error` category is the machine-readable abort reason: it names a `security`, `output`, `config`, or `exchange` failure independently of the free-text `message` (the same text stderr logs) and of the exit code. A supervisor keys the abort decision off that category, not off the human log line.
 

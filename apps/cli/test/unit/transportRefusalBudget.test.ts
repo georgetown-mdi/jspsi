@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import {
-  DEFAULT_MAX_DISPLAY_LENGTH,
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DirectoryListingBoundsError,
   DISPLAY_TRUNCATION_MARKER,
   FrameSizeExceededError,
@@ -53,11 +53,13 @@ const linksOf = (rendered: string): string[] => rendered.split(CAUSE_SEPARATOR);
 // the marker by construction and would read as a truncation that never happened.
 // The two are equivalent: sanitizeForDisplay appends a code point only when its
 // whole escape fits, an escape runs to at most ten characters, so a truncated
-// link retains more than DEFAULT_MAX_DISPLAY_LENGTH - 10 characters and then
-// carries the marker on top -- longer than the cap in every case, while an
+// link retains more than COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - 10 characters and
+// then carries the marker on top -- longer than the cap in every case, while an
 // untruncated link is within it by definition.
 const truncatedLinks = (rendered: string): string[] =>
-  linksOf(rendered).filter((link) => link.length > DEFAULT_MAX_DISPLAY_LENGTH);
+  linksOf(rendered).filter(
+    (link) => link.length > COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  );
 
 // The class-uniform recovery step, read off a minimal construction of the class
 // rather than restated here: what each site is asserted to deliver is then the

@@ -163,15 +163,16 @@ function stringWeightOf(byteLen: number): number {
 }
 
 /** The charged retained cost of an `n`-record mapped-element frame under the cost
- * model: a root array, plus per record one object, two key strings, two integers.
- * This is the derivation the production budget is sized against. */
+ * model: a root array, plus per record its slot in that array, one object, the
+ * object's four declared slots, and two key strings. This is the derivation the
+ * production budget is sized against. */
 function expectedMappedCost(n: number): number {
   const perRecord =
-    WEBRTC_VALUE_WEIGHTS.object +
-    stringWeightOf("theirIndex".length) +
     WEBRTC_VALUE_WEIGHTS.scalar +
-    stringWeightOf("iteration".length) +
-    WEBRTC_VALUE_WEIGHTS.scalar;
+    WEBRTC_VALUE_WEIGHTS.object +
+    4 * WEBRTC_VALUE_WEIGHTS.scalar +
+    stringWeightOf("theirIndex".length) +
+    stringWeightOf("iteration".length);
   return WEBRTC_VALUE_WEIGHTS.array + n * perRecord;
 }
 

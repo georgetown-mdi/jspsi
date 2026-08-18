@@ -3,6 +3,7 @@ import net from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
 
 import {
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   sanitizeErrorForDisplay,
@@ -344,8 +345,9 @@ describe("explainPeerIdentificationFailure partitions the peer's bytes", () => {
   test.each(["http", "tls-alert", "unrecognized"] as const)(
     "the first-party text survives a maximally long peer excerpt (%s)",
     (shape) => {
-      // Every byte escaping to four display characters, at the excerpt bound: the
-      // longest a peer's link can render, and the excerpt is what truncates.
+      // Every byte escaping to four display characters, at the excerpt bound:
+      // the widest a peer's link can ever render, since the read that fills it
+      // stops at that bound.
       const excerpt = "\x00".repeat(PEER_EXCERPT_MAX_BYTES);
       const links = rendered(
         explainPeerIdentificationFailure(
@@ -378,13 +380,14 @@ describe("explainPeerIdentificationFailure partitions the peer's bytes", () => {
       expect(peerLink).toBeDefined();
       expect(peerLink).toContain("\\x00");
       expect(peerLink?.length).toBeLessThanOrEqual(
-        DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
+        COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
       );
-      // The peer's own link is the ONLY one its bytes can spend: every link the
-      // operator has to act on renders whole beside a peer flooding its own.
+      // The peer's bytes sit on a link of their own, so the widest excerpt the
+      // read can deliver spends only that link -- and at this width it fits, so
+      // nothing the operator has to act on is cut and neither is the excerpt.
       expect(
         links.filter((link) => link.includes(DISPLAY_TRUNCATION_MARKER)),
-      ).toEqual([peerLink]);
+      ).toEqual([]);
     },
   );
 

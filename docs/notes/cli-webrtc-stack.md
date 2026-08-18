@@ -19,8 +19,9 @@ The web application conducts peer-to-peer WebRTC exchanges through PeerJS.
 Letting the CLI take part in those exchanges needs a Node WebRTC library, and
 both the library and the way it is wired underneath PeerJS are load-bearing
 enough that a hands-on spike was scoped to settle them rather than research
-alone. That spike ran. This note is its decision record: what was chosen, what
-the evidence showed, and what the transport work has to carry.
+alone. That spike ran, and the transport it settled is built. This note is the
+decision record: what was chosen, what the evidence showed, and what the
+transport carries.
 
 ## The decision
 
@@ -28,9 +29,9 @@ the evidence showed, and what the transport work has to carry.
   was current when the decision was taken. Installs run with
   `--ignore-scripts`; nothing in werift's tree needs an install script, and the
   tree carries no native or compiled content at all. The exact pin and its
-  internal premises join the other reached-past-their-API stacks in
-  [DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#why-these-are-exact-pinned)
-  when the transport lands.
+  internal premises sit with the other reached-past-their-API stacks in
+  [DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#why-these-are-exact-pinned),
+  which carries the per-bump re-verification checklist.
 - **Architecture: drive werift's native API directly.** No PeerJS runs in Node.
   The CLI speaks the PeerJS broker's WebSocket protocol through a hand-written
   signaling client, and speaks PeerJS-compatible DataConnection framing on the
@@ -183,11 +184,14 @@ other side. Every third-party package involved was installed with
   `RTCPeerConnection`, which is exactly what PeerJS-in-Node would supply.
 
 The framing and signaling the spike hand-wrote came to 456 non-comment lines
-across a broker client, a wire/framing module, and the peer negotiation. That is
-an honest measure of the shape, not of the work: it omits reconnection,
-`LEAVE`/`EXPIRE` handling, the `peer-unavailable` dial retry the web rendezvous
-implements, peer-id redaction in logs, and any error taxonomy. Budget the
-production implementation at a multiple of it.
+across a broker client, a wire/framing module, and the peer negotiation -- an
+honest measure of the shape, not of the work. What the spike left out is most of
+what the shipped transport (`apps/cli/src/connection/webrtc/`) had to carry:
+`LEAVE`/`EXPIRE` handling, the dial retry for a peer that has not registered
+yet, peer-id redaction in logs, the inbound bounds, and an error taxonomy that
+names a cause -- a symmetric role misconfiguration reads as one, rather than as
+a rendezvous that never completes. A spike's line count is a floor on a
+transport, not an estimate of one.
 
 ## The PeerJS wire the CLI speaks
 

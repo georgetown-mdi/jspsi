@@ -43,6 +43,39 @@ export const DISPLAY_TRUNCATION_MARKER = "...[truncated]";
 export const DEFAULT_MAX_DISPLAY_LENGTH = 256;
 
 /**
+ * Cap on the output characters {@link sanitizeErrorForDisplay} emits for one
+ * link of a rendered error chain, above the per-value
+ * {@link DEFAULT_MAX_DISPLAY_LENGTH}.
+ *
+ * A link is a COMPOSITION, not a value: an error message is first-party
+ * explanation and recovery text with fragments interpolated into it, and by the
+ * single-altitude escaping rule those fragments compose RAW and are escaped
+ * where the chain is rendered (CONTRIBUTING.md, Operator-facing escaping). The
+ * per-value default is sized for one fragment, so charging a whole link to it
+ * cuts the first-party sentence the operator has to act on -- and it does so
+ * with no fragment involved at all, since fixed guidance alone runs past 256
+ * characters (the connection-endpoint locator rejection in
+ * `config/invitation.ts` is 348 before its prefix and its key list).
+ *
+ * It does NOT relieve a call site of keeping one chooser's bytes off another's
+ * link. The budget bounds what any single link can spend; WHOSE bytes spend it
+ * is decided by how the site partitions its chain, and a link that mixes
+ * first-party copy with a fragment somebody else chose still lets that chooser
+ * spend the whole of this. Sites that carry a chooser's bytes therefore give
+ * each one a labelled link of its own (the transport refusals, the host-key
+ * refusals, and the linkage pre-flight block), which is what makes this a budget
+ * for composed first-party text rather than a wider flood allowance.
+ *
+ * Sized to admit the longest fixed guidance psilink composes into a single
+ * message, together with the bounded values that message names, and left well
+ * under {@link WARNING_MESSAGE_MAX_DISPLAY_LENGTH}, whose four re-escaped
+ * fragments crossing three boundaries are a different and larger shape. The
+ * whole rendered chain stays bounded without a separate total-length cap: at
+ * most {@link MAX_ERROR_CAUSE_DEPTH} links at this budget each.
+ */
+export const COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH = 1024;
+
+/**
  * Cap on the output characters a boundary emits for a whole composed WARNING,
  * above the per-value {@link DEFAULT_MAX_DISPLAY_LENGTH}.
  *

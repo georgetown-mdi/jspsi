@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { afterEach, expect, test, vi } from "vitest";
 
 import {
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   sanitizeErrorForDisplay,
   UsageError,
@@ -39,8 +40,12 @@ afterEach(() => {
 // is the sink rendering the whole chain. Synthesized rather than raised from a
 // flow that composes this shape: the subject here is the sinks.
 
-// The fragment somebody else chose, wide enough to overrun its own link.
-const REMOTE_CHOSEN_FRAGMENT = `sftp.${"partner-chosen-label.".repeat(20)}example`;
+// The fragment somebody else chose, sized off the renderer's own link budget so
+// it overruns that link whatever the budget is.
+const REMOTE_CHOSEN_LABEL = "partner-chosen-label.";
+const REMOTE_CHOSEN_FRAGMENT = `sftp.${REMOTE_CHOSEN_LABEL.repeat(
+  Math.ceil(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH / REMOTE_CHOSEN_LABEL.length),
+)}example`;
 
 const REFUSAL_SUMMARY =
   "the server's identity could not be confirmed, so no connection was made " +

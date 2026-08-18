@@ -107,12 +107,14 @@ test("receiptPathFor uses an explicit path verbatim, else the timestamped defaul
 
 test("writeDualSignedRecord writes a parseable owner-only file", () => {
   const target = path.join(dir, "receipt.json");
-  writeDualSignedRecord(
-    { receiptFile: target },
-    record,
-    "2026-01-01T00:00:00Z",
-    "test",
-  );
+  expect(
+    writeDualSignedRecord(
+      { receiptFile: target },
+      record,
+      "2026-01-01T00:00:00Z",
+      "test",
+    ),
+  ).toBeUndefined();
   expect(fs.existsSync(target)).toBe(true);
   // The written file round-trips through the parser.
   const parsed = parseDualSignedRecord(
@@ -133,14 +135,20 @@ test("writeDualSignedRecord warns rather than throws on a write failure", () => 
   const fileAsParent = path.join(dir, "afile");
   fs.writeFileSync(fileAsParent, "x");
   const target = path.join(fileAsParent, "receipt.json");
-  expect(() =>
-    writeDualSignedRecord(
+  let failure: string | undefined;
+  expect(() => {
+    failure = writeDualSignedRecord(
       { receiptFile: target },
       record,
       "2026-01-01T00:00:00Z",
       "test",
-    ),
-  ).not.toThrow();
+    );
+  }).not.toThrow();
   expect(logCapture.warnings.length).toBeGreaterThan(0);
   expect(logCapture.warnings[0]).toMatch(/could not be written/);
+  // The returned message is the machine-interface half of the same failure: a
+  // supervisor that reads only fd 3 and the exit code learns the receipt is
+  // missing from it. It names the destination and no cause.
+  expect(failure).toContain("the dual-signed record could not be written to");
+  expect(failure).toContain(target);
 });

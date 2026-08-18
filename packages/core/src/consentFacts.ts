@@ -471,3 +471,24 @@ export const PROPOSED_NOT_APPLIED_NOTES = {
     "without deduplication.",
   fuzzyComparisons: "(proposed; not yet applied)",
 } as const;
+
+/**
+ * The line a consent surface renders in place of a transform's matching
+ * consequence when this version recognizes neither the function's literal slice
+ * phrase nor a glossary description for it -- the two sources
+ * {@link summarizeInvitation} fills `effect` and `description` from.
+ *
+ * The function name is partner free text: an invitation may declare any name the
+ * schema admits, so a surface that renders the name inside a sentence of its own
+ * ("applies <name>") states an effect on matching that this version cannot know
+ * and does not perform, and a name chosen to read as an effect is then indistinguishable
+ * from one. The name still belongs on the surface as technical identity; what it
+ * must not do is stand where the consequence goes.
+ *
+ * Shared so the two consent surfaces state the same thing about the same
+ * invitation: a rule this version cannot explain reads as explicitly unexplained
+ * on the CLI accept prompt and on the web consent screen alike. Fixed first-party
+ * copy naming no value, so a surface may render it verbatim.
+ */
+export const UNRECOGNIZED_TRANSFORM_NOTE =
+  "Not recognized by this version; its effect on matching is not shown.";

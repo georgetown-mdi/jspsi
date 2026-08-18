@@ -385,9 +385,20 @@ const RELAY_EVENT_TYPES = new Set<RelayEventType>([
  * differ by field: a `warning` event's own `message` is a whole composition the
  * CLI fitted to {@link WARNING_MESSAGE_MAX_DISPLAY_LENGTH}, so this pass takes
  * that same budget and the console seat receives the explanation and the
- * recovery instruction the CLI put in it. Every other string -- a stage label, a
- * terminal error message, a nested value anywhere, this event's own keys --
- * carries one value and keeps the per-value default.
+ * recovery instruction the CLI put in it. Every other string keeps the per-value
+ * default: a stage label, a nested value anywhere, and this event's own keys are
+ * each one value.
+ *
+ * A terminal `error` event's `message` takes that default too, and it is not one
+ * value: the CLI renders it through `sanitizeErrorForDisplay`, so what crosses
+ * is a whole cause chain -- up to `MAX_ERROR_CAUSE_DEPTH` links at
+ * `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH` each, joined by the renderer's own
+ * framing. Re-capping that at the per-value default cuts it wherever 256
+ * characters fall, which on a refusal composed as a partition by chooser is
+ * inside the first link or two, so the first-party recovery step the partition
+ * deliberately moves onto a later link does not reach the console seat that
+ * renders this field (`errorMessageOf` in `../psi/serverJobExchangeDriver.ts`).
+ * What a console operator loses there is the next step, not the failure itself.
  */
 export function validateAndSanitizeEvent(value: unknown): RelayEvent | null {
   if (value === null || typeof value !== "object" || Array.isArray(value))

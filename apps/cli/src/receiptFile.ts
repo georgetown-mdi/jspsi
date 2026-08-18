@@ -77,14 +77,18 @@ export function receiptPathFor(
  * exchange and the signature swap have already succeeded by the time this runs, so
  * a write failure is logged as a warning rather than thrown -- the operator is
  * never told to re-run a successful exchange because an audit artifact could not
- * be saved.
+ * be saved. The failure is returned as a message for the caller to put on the
+ * machine-readable event stream and to leave a non-zero exit behind, so an
+ * unattended run whose stderr is discarded still reports the lost receipt; it
+ * names the destination but not the cause, and is composed RAW for that stream's
+ * own escape.
  */
 export function writeDualSignedRecord(
   output: ReceiptOutput,
   record: DualSignedRecord,
   createdAt: string,
   loggerName: string,
-): void {
+): string | undefined {
   const log = getLogger(loggerName);
   const receiptFilePath = receiptPathFor(output, createdAt);
   try {
@@ -94,11 +98,17 @@ export function writeDualSignedRecord(
         `certificates over the agreed terms and data commitments) to ` +
         `${receiptFilePath}`,
     );
+    return undefined;
   } catch (err) {
     log.warn(
       "the exchange and signature swap succeeded but the dual-signed record " +
         `could not be written (${sanitizeErrorForDisplay(err)}); ` +
         "the results above are unaffected and the exchange need not be re-run",
+    );
+    return (
+      `the dual-signed record could not be written to ${receiptFilePath}; the ` +
+      "exchange and its signature swap succeeded and need not be re-run, so " +
+      "this exchange has no receipt file"
     );
   }
 }

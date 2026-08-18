@@ -639,6 +639,16 @@ class Negotiation {
       this.settle = { resolve, reject };
       if (this.failure !== undefined) reject(this.failure);
     });
+    // Keep the rejection handled from the instant the promise exists, before the
+    // acceptor's `await this.offer()` below yields the turn. A broker socket
+    // drop, a terminal broker ERROR, a peer LEAVE, or connectionState "failed"
+    // in that window all latch a failure through fail(), which rejects `opened`
+    // while nothing is awaiting it yet -- an unhandled rejection, which
+    // terminates the process at exit 1 past runProtocol's catch, its cleanup,
+    // and any classified fd-3 error. This handler changes nothing else: the
+    // `await opened` below is still what surfaces the latched failure, and it
+    // reads an already-rejected promise on that path.
+    opened.catch(() => {});
 
     if (role === "acceptor") {
       const channel = peer.createDataChannel(this.connectionId, {

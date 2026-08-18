@@ -389,6 +389,111 @@ test("put with a chunk list and flags: 'a' appends the joined parts", async () =
   );
 });
 
+test("a short writev is completed rather than published truncated", async () => {
+  // writev is not obliged to take every byte offered. What it leaves behind is
+  // the tail of a protocol frame, and the send path treats the put as complete,
+  // so the truncated frame publishes as a finished message: the peer never sees
+  // the byte count its filename promises and waits out its whole budget before
+  // blaming the partner. The remainder must be re-offered until it lands. The
+  // first call here takes 3 bytes of a 7-byte list -- a boundary INSIDE the
+  // first chunk, the 4-byte header, so the continuation must resume mid-chunk,
+  // not re-send it.
+  const dest = path.join(dir, "short-writev.bin");
+  const handle = await fs.open(dest, "w");
+  const realWritev = handle.writev.bind(handle);
+  let calls = 0;
+  const writevSpy = vi
+    .spyOn(handle, "writev")
+    .mockImplementation(async (buffers: readonly NodeJS.ArrayBufferView[]) => {
+      calls += 1;
+      if (calls > 1) return realWritev(buffers as Uint8Array[]);
+      const head = (buffers[0] as Uint8Array).subarray(0, 3);
+      return realWritev([head]);
+    });
+  const openSpy = vi.spyOn(fs, "open").mockResolvedValue(handle);
+  try {
+    const header = Buffer.from([0x01, 0x02, 0x03, 0x04]);
+    const payload = new Uint8Array([0xde, 0xad, 0xbe]);
+    await client.put([header, payload], dest);
+  } finally {
+    openSpy.mockRestore();
+    writevSpy.mockRestore();
+    await handle.close().catch(() => {});
+  }
+  expect(calls).toBeGreaterThan(1);
+  expect(await fs.readFile(dest)).toEqual(
+    Buffer.from([0x01, 0x02, 0x03, 0x04, 0xde, 0xad, 0xbe]),
+  );
+});
+
+test("a short writev past a whole chunk drops that chunk from the rest", async () => {
+  // The other boundary: the first call takes the whole 4-byte header and 2 of
+  // the 3 payload bytes. A fully written chunk must be DROPPED from what is
+  // re-offered -- re-sending it would put a second copy of the header inside the
+  // frame whose byte count the filename already promised -- so the second call
+  // sees only the payload's 1 unwritten byte.
+  const dest = path.join(dir, "short-writev-whole-chunk.bin");
+  const handle = await fs.open(dest, "w");
+  const realWritev = handle.writev.bind(handle);
+  const offeredBytes: number[] = [];
+  const writevSpy = vi
+    .spyOn(handle, "writev")
+    .mockImplementation(async (buffers: readonly NodeJS.ArrayBufferView[]) => {
+      offeredBytes.push(
+        buffers.reduce((total, chunk) => total + chunk.byteLength, 0),
+      );
+      if (offeredBytes.length > 1) return realWritev(buffers as Uint8Array[]);
+      const head = buffers[0] as Uint8Array;
+      const partialTail = (buffers[1] as Uint8Array).subarray(0, 2);
+      return realWritev([head, partialTail]);
+    });
+  const openSpy = vi.spyOn(fs, "open").mockResolvedValue(handle);
+  try {
+    const header = Buffer.from([0x01, 0x02, 0x03, 0x04]);
+    const payload = new Uint8Array([0xde, 0xad, 0xbe]);
+    await client.put([header, payload], dest);
+  } finally {
+    openSpy.mockRestore();
+    writevSpy.mockRestore();
+    await handle.close().catch(() => {});
+  }
+  expect(offeredBytes).toEqual([7, 1]);
+  expect(await fs.readFile(dest)).toEqual(
+    Buffer.from([0x01, 0x02, 0x03, 0x04, 0xde, 0xad, 0xbe]),
+  );
+});
+
+test("a writev that stops making progress is surfaced, not looped on", async () => {
+  // The re-offer loop above is what a short write costs; a handle that takes
+  // NOTHING while bytes remain is what it must not pay forever. Zero bytes
+  // written is not a short write to complete -- re-offering the identical list
+  // to a handle that just refused it makes no progress -- so the loop stops and
+  // says so rather than spinning on a live file handle. Driven with a spy that
+  // reports 0 of 7 bytes taken, exactly once: a second call would BE the spin.
+  const dest = path.join(dir, "writev-no-progress.bin");
+  const handle = await fs.open(dest, "w");
+  let calls = 0;
+  const writevSpy = vi
+    .spyOn(handle, "writev")
+    .mockImplementation(async (buffers: readonly NodeJS.ArrayBufferView[]) => {
+      calls += 1;
+      return { bytesWritten: 0, buffers: buffers as Uint8Array[] };
+    });
+  const openSpy = vi.spyOn(fs, "open").mockResolvedValue(handle);
+  try {
+    const header = Buffer.from([0x01, 0x02, 0x03, 0x04]);
+    const payload = new Uint8Array([0xde, 0xad, 0xbe]);
+    await expect(client.put([header, payload], dest)).rejects.toThrow(
+      "stopped making progress",
+    );
+  } finally {
+    openSpy.mockRestore();
+    writevSpy.mockRestore();
+    await handle.close().catch(() => {});
+  }
+  expect(calls).toBe(1);
+});
+
 test("chunk-list put surfaces the writev error even when close also fails", async () => {
   // On the chunk-list path a failing close() must not replace (mask) the writev
   // failure: the caller should see WHY the write failed, not an incidental close

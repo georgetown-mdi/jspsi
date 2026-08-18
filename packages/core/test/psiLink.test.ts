@@ -72,6 +72,7 @@ let [serverResult, clientResult] = await (async () => {
       server,
       serverConn,
       serverData,
+      clientData[0].length,
       -1,
     ),
     linkViaPSI(
@@ -79,6 +80,7 @@ let [serverResult, clientResult] = await (async () => {
       client,
       clientConn,
       clientData,
+      serverData[0].length,
       -1,
     ),
   ]);
@@ -123,6 +125,7 @@ test("many-to-one is accepted and runs the identical one-to-one matching", async
       mServer,
       mServerConn,
       serverData,
+      clientData[0].length,
       -1,
     ),
     linkViaPSI(
@@ -130,6 +133,7 @@ test("many-to-one is accepted and runs the identical one-to-one matching", async
       mClient,
       mClientConn,
       clientData,
+      serverData[0].length,
       -1,
     ),
   ]);
@@ -248,7 +252,7 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
   };
 
   const [cascadeSender, cascadeReceiver] = await run((protocol, p, c, d) =>
-    linkViaPSI(protocol, p, c, d, -1),
+    linkViaPSI(protocol, p, c, d, 2, -1),
   );
   // Both sender rows match -- reachable only under survivor-relative uniqueness.
   expect(cascadeSender).toStrictEqual([

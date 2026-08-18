@@ -16,6 +16,7 @@ import {
   reconcileReceivedPayload,
   sanitizeForDisplay,
   summarizeInvitation,
+  UNRECOGNIZED_TRANSFORM_NOTE,
   UsageError,
 } from "@psilink/core";
 import {
@@ -2449,16 +2450,14 @@ test("displayInvitation: a transform this version cannot explain is marked as un
 
   const unrecognized = render([{ function: "org_internal_rule" }]);
   expect(unrecognized).toContain("          transform: org_internal_rule");
-  expect(unrecognized).toContain(
-    "            not recognized by this version; its effect on matching is not shown",
-  );
+  expect(unrecognized).toContain(`            ${UNRECOGNIZED_TRANSFORM_NOTE}`);
   // A recognized function carries its plain-language consequence and no marker, so
   // the marker tells the two apart rather than decorating both.
   const recognized = render([{ function: "to_upper_case" }]);
   expect(recognized).toContain(
     "            Upper-cases the value before matching, so values differing only in letter case can match.",
   );
-  expect(recognized).not.toContain("not recognized by this version");
+  expect(recognized).not.toContain(UNRECOGNIZED_TRANSFORM_NOTE);
 });
 
 test("displayInvitation: a coerced transform parameter names the parameter and the value it runs as", () => {
