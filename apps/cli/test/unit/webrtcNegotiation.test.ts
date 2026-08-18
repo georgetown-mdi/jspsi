@@ -701,9 +701,15 @@ test("broker signaling after the channel opens is ignored", async () => {
  * broker socket is closed, releasing the derived id the run registered, and the
  * peer connection with it. Both are asserted against the real session rather
  * than a mocked transport, which is the only place the wiring exists.
+ *
+ * A webrtc open is two phases -- registering with the signaling server, then
+ * waiting for the partner -- and each reports its own cancellation, which is why
+ * the wording is pinned below rather than left to whichever listener happens to
+ * be installed first. The three tests are the three windows an abort can land
+ * in, so neither phase's message can go unreachable unnoticed.
  */
 
-test("an abort after registration tears down the socket and the peer connection", async () => {
+test("an abort after registration names the rendezvous and tears both down", async () => {
   const controller = new AbortController();
   const { socket, peer, session } = await startRendezvous({
     role: "acceptor",
@@ -715,14 +721,41 @@ test("an abort after registration tears down the socket and the peer connection"
   expect(peer.closeCalls).toBe(0);
 
   controller.abort();
-  // The registration's own abort listener is installed first and latches the
-  // failure, so its wording is the one that reaches the caller even here, where
-  // the socket is registered and the negotiation is what is waiting.
-  await expect(session).rejects.toThrow(
-    /connecting to the signaling server was cancelled/,
-  );
+  // The registration released the signal when the broker confirmed it, so what
+  // reaches the operator names the phase they actually interrupted -- the wait
+  // for the partner, not a connection to the signaling server that succeeded
+  // minutes ago.
+  await expect(session).rejects.toThrow(/the WebRTC rendezvous was cancelled/);
   // Exactly once each: an abandoned rendezvous leaves no registered id on the
   // broker and no half-open peer connection behind.
+  expect(socket.closeCalls).toBe(1);
+  expect(peer.closeCalls).toBe(1);
+});
+
+test("an abort inside the dialer's offer does not wait out the rendezvous", async () => {
+  // The window between the two phases' listeners: the registration has released
+  // the signal, and the negotiation cannot install its own until the acceptor's
+  // offer resolves -- werift gathers as it describes, so that offer spans timer
+  // turns. An abort landing here reaches no listener at all, and only the
+  // negotiation's re-check keeps the run from sitting out its whole rendezvous
+  // budget after the operator has already interrupted it.
+  const controller = new AbortController();
+  const { socket, peer, session } = await startRendezvous({
+    role: "acceptor",
+    signal: controller.signal,
+    confirmRegistration: false,
+    // Short enough that a missed abort fails as a timeout here rather than
+    // spending the suite's own ceiling on it.
+    rendezvousTimeoutMs: 500,
+  });
+  peer.createOffer = async () => {
+    controller.abort();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return { type: "offer", sdp: "v=0\r\noffer\r\n" };
+  };
+  socket.register();
+
+  await expect(session).rejects.toThrow(/the WebRTC rendezvous was cancelled/);
   expect(socket.closeCalls).toBe(1);
   expect(peer.closeCalls).toBe(1);
 });
@@ -768,10 +801,10 @@ test("a broker failure inside the acceptor's offer rejects rather than going unh
 });
 
 test("an abort before registration tears down the same, having sent nothing", async () => {
-  // The other half of the window: the socket exists but the broker has not
-  // confirmed it, so the abort is caught by the registration rather than by the
-  // negotiation. The peer connection is already built by this point, and is what
-  // would be left running if only the registration unwound itself.
+  // The earliest window: the socket exists but the broker has not confirmed it,
+  // so the abort is the registration's, and its wording is what the operator
+  // gets. The peer connection is already built by this point, and is what would
+  // be left running if only the registration unwound itself.
   const controller = new AbortController();
   const { socket, peer, session } = await startRendezvous({
     role: "acceptor",

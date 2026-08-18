@@ -137,7 +137,10 @@ export interface BrokerConnectOptions {
   handlers: BrokerHandlers;
   openTimeoutMs?: number;
   heartbeatIntervalMs?: number;
-  /** Cancels a registration in flight. */
+  /**
+   * Cancels a registration in flight. Released once the registration is
+   * confirmed; see {@link connectToBroker} for what the caller owns past that.
+   */
   signal?: AbortSignal;
   /**
    * Constructs the socket; injected so the unit tests drive the client's whole
@@ -410,6 +413,10 @@ function terminalErrorFor(message: BrokerMessage): ConnectionError | undefined {
  * socket ending reaches `handlers.onClose`. A frame that breaches a bound, and a
  * terminal broker message, both close the socket and report through `onClose`;
  * the handlers are the only path, so nothing arrives after a close.
+ *
+ * `signal` cancels the REGISTRATION and nothing beyond it: the listener is
+ * released the moment the broker confirms, leaving the caller's own cancellation
+ * to report an abort that lands later and to close the socket it now owns.
  */
 export function connectToBroker(
   options: BrokerConnectOptions,
@@ -532,6 +539,13 @@ export function connectToBroker(
         opened = true;
         if (openTimer !== undefined) clearTimeout(openTimer);
         openTimer = undefined;
+        // The signal cancels the registration, which is now over. Past this
+        // point the socket is the caller's, and the caller's own cancellation is
+        // what should report an abort and tear down what it built; this listener
+        // is registered before any of the caller's, so leaving it installed
+        // would latch a registration's wording onto every later abort and make
+        // the caller's own unreachable.
+        signal?.removeEventListener("abort", onAbort);
         resolve({ localId: id, send: sendRaw, close: () => end(undefined) });
         return;
       }
