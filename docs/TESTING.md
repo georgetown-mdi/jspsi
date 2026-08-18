@@ -119,18 +119,40 @@ as a test driven by this harness -- not left in `scratch/`. The premise is
 load-bearing once a change is built on it, and a premise no suite re-checks goes
 stale silently at the next pinned bump of either package.
 
-The CLI's WebRTC transport has a second harness in the same suite,
-`apps/cli/test/signaling/`. It starts the repository's own vendored PeerJS
-broker as a child PROCESS rather than importing it, because the broker lives in
-`apps/web` and `apps/cli` may not import that app; the process entry point it
-spawns is `apps/web/test/signaling/standaloneBroker.ts`, which is why
-`.github/workflows/cli_build_and_test.yaml` filters on that path as well as on
-`apps/cli`. Starting it per file rather than from `globalSetup` keeps the broker
-out of every unrelated integration run. The same measurement discipline applies
-here as to the SFTP tree: what the CLI's hand-written signaling client and PeerJS
-framing rest on was established by driving the real broker and the real
-`peerjs`/`peerjs-js-binarypack` packages, and the premises that follow are held
-as checks -- see
+The CLI's WebRTC transport is a project of its own, `webrtc`, holding the files
+under `apps/cli/test/integration/webrtc/`:
+
+```sh
+npm run test:integration:webrtc -w apps/cli
+```
+
+It is separate because it is transport-agnostic to everything the SFTP suite
+sets up -- two loopback werift peers meeting through the vendored broker, with
+no SFTP server involved -- while `test:integration` is run repeatedly per pull
+request, once per SFTP backend and once per hardened-`sshd` profile. As its own
+project it runs exactly once (see `.github/workflows/cli_build_and_test.yaml`,
+and the ship-gate step in `release.yaml`), and a new file joins it by being
+written in that directory rather than by matching a naming convention. Its
+project skips the SFTP `globalSetup` entirely, so no server is started for it.
+
+`broker.test.ts` holds one deliberately slow check -- that a registered CLI peer
+is still registered and routable after the broker's silent-socket reap window
+has passed, which takes a real 25-second wait. It is kept rather than trimmed:
+it is the only place the CLI client's own heartbeat cadence is joined to the
+vendored broker's reap window over the real wire, and the two constants live in
+different apps, so no unit check on either side can stand in for it. It runs in
+its own worker process alongside the longer transport file.
+
+Its broker harness is `apps/cli/test/signaling/`. It starts the repository's own
+vendored PeerJS broker as a child PROCESS rather than importing it, because the
+broker lives in `apps/web` and `apps/cli` may not import that app; the process
+entry point it spawns is `apps/web/test/signaling/standaloneBroker.ts`, which is
+why `.github/workflows/cli_build_and_test.yaml` filters on that path as well as
+on `apps/cli`. Each file starts a broker of its own. The same measurement
+discipline applies here as to the SFTP tree: what the CLI's hand-written
+signaling client and PeerJS framing rest on was established by driving the real
+broker and the real `peerjs`/`peerjs-js-binarypack` packages, and the premises
+that follow are held as checks -- see
 [docs/spec/DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#upgrading-the-cli-webrtc-peer-werift).
 
 One premise the live suite cannot hold, and where it lives instead: werift
@@ -141,7 +163,7 @@ in the field. It is pinned in `apps/cli/test/unit/webrtcNegotiation.test.ts`,
 which drives the negotiation against a scripted broker and peer connection and
 asserts the ORDER of what goes on the wire.
 
-A standing console sentinel guards the CLI integration suite: it wraps `console`
+A standing console sentinel guards both CLI projects above: it wraps `console`
 directly and fails a test file at `afterAll` on any `console.log`/`warn`/`error`
 that no allowlist matcher accepts (the inverse of blanket silencing, and the one
 check that sees third-party `console.*` which the loglevel-based
@@ -150,7 +172,10 @@ output, the fix is to eliminate it at the source -- route it through the logger
 or assert it under `withCapturedLogs`; accept it as intended only by adding a
 matcher to the allowlist in `apps/cli/test/integration/consoleAllowlist.ts`, a
 visible edit a reviewer sees. A matcher that never fires across a run is reported
-at teardown so the allowlist cannot accumulate dead entries.
+at teardown so the allowlist cannot accumulate dead entries. That report is
+advisory (a warning, never a failure) and is produced by the `integration`
+project's `globalSetup`, so it sees only that project's files: a matcher fired
+solely by a `webrtc` file reads as dead there.
 
 Web (dev server managed automatically -- same pattern as the CLI integration tests):
 
@@ -309,8 +334,10 @@ and writes a text summary to the terminal plus a browsable HTML report and an
 The denominator is scoped to product source under each `src/` tree, with the
 generated route tree and vendored `apps/web/src/contrib` excluded, so the numbers
 reflect hand-written product code. The report runs `core` unit, `cli`
-unit and integration (the SFTP adapter is exercised only by the integration
-suite), and `web` unit plus `web` browser (real Chromium via Playwright). The web
+unit, integration, and webrtc (the SFTP adapter is exercised only by the
+integration suite and the WebRTC transport only by the webrtc suite, so dropping
+either would read its adapter as near-uncovered), and `web` unit plus `web`
+browser (real Chromium via Playwright). The web
 unit and browser projects run together and their coverage is merged, so the
 component, live-exchange, and consent-gate paths exercised only in the browser
 are reflected instead of reading as near-zero; running `npm run coverage` for the

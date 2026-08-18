@@ -82,14 +82,15 @@ self-managing -- it starts and stops the server it needs -- so no manual setup
 beyond the builds above is required:
 
 ```sh
-npm run test:integration -w apps/cli   # SFTP adapter driven over a loopback server
+npm run test:integration -w apps/cli         # SFTP adapter driven over a loopback server
+npm run test:integration:webrtc -w apps/cli  # WebRTC transport over loopback werift peers
 npm run test:integration -w apps/web
-npm run test:browser     -w apps/web   # cross-impl vectors + live exchange, real Chromium
+npm run test:browser     -w apps/web         # cross-impl vectors + live exchange, real Chromium
 ```
 
-The native SFTP backends and hardened profiles, the console sentinel, the
-warm-server inner loop, and the browser-suite plumbing are in
-[docs/TESTING.md](docs/TESTING.md).
+The native SFTP backends and hardened profiles, why the WebRTC suite is a
+project of its own, the console sentinel, the warm-server inner loop, and the
+browser-suite plumbing are in [docs/TESTING.md](docs/TESTING.md).
 
 ### Coverage
 

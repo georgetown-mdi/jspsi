@@ -84,4 +84,11 @@ and stops it after):
 npm run test:integration -w apps/cli
 ```
 
+The WebRTC transport is a project of its own, driving two loopback werift peers
+through the vendored PeerJS broker with no SFTP server involved:
+
+```sh
+npm run test:integration:webrtc -w apps/cli
+```
+
 See [docs/TESTING.md](../../docs/TESTING.md#integration-tests) for details.

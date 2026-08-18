@@ -158,6 +158,7 @@ npm run lint
 npm run typecheck
 npm run test:integration -w apps/cli                          # in-process SFTP
 PSILINK_SFTP_BACKEND=native npm run test:integration -w apps/cli   # native sshd
+npm run test:integration:webrtc -w apps/cli                   # loopback WebRTC transport
 npm run dev -w apps/web            # web dev server on localhost:3000
 ```
 

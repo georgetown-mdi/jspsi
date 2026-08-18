@@ -16,7 +16,7 @@ import type { RTCDataChannel } from "werift";
 
 /**
  * A data channel stand-in with the surface the binding uses. The real channel is
- * driven end to end in test/integration/webrtcTransport.test.ts; this exists to
+ * driven end to end in test/integration/webrtc/transport.test.ts; this exists to
  * exercise the orderings that are hard to provoke on a live channel -- a close
  * sentinel arriving with a frame still queued, a peer that vanishes, a drain
  * that never settles.

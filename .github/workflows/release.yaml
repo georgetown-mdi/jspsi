@@ -33,6 +33,12 @@ jobs:
       - name: Integration tests (CLI)
         run: npm run test:integration -w apps/cli
 
+      # The WebRTC transport is a vitest project of its own, so the SFTP-backed
+      # `integration` project above does not carry it; the ship gate runs it too,
+      # or a publish would go out with the WebRTC channel untested.
+      - name: WebRTC integration tests (CLI)
+        run: npm run test:integration:webrtc -w apps/cli
+
   publish:
     name: Publish Docker image
     needs: test
