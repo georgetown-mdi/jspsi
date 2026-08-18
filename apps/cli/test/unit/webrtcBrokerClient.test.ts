@@ -109,6 +109,7 @@ async function register(options?: {
   onMessage?: (message: BrokerMessage) => void;
   onClose?: (error?: ConnectionError) => void;
   id?: string;
+  signal?: AbortSignal;
 }): Promise<{
   client: BrokerClient;
   socket: FakeSocket;
@@ -131,6 +132,7 @@ async function register(options?: {
       },
     },
     socketFactory,
+    signal: options?.signal,
   });
   const socket = sockets[sockets.length - 1];
   socket.open();
@@ -533,6 +535,19 @@ test("a close after teardown does not deliver another inbound frame", async () =
   socket.drop();
   socket.deliver({ type: BROKER_MESSAGE.answer, src: REMOTE_ID });
   expect(messages).toHaveLength(0);
+});
+
+test("an abort after registration is not the registration's to act on", async () => {
+  // The signal cancels the registration; once the broker has confirmed it, the
+  // socket belongs to the caller, whose own cancellation reports the phase the
+  // abort landed in and closes what it built. This client is the FIRST abort
+  // listener on that signal, so a listener left installed here would latch a
+  // registration's wording onto every later abort.
+  const controller = new AbortController();
+  const { socket, closes } = await register({ signal: controller.signal });
+  controller.abort();
+  expect(closes).toHaveLength(0);
+  expect(socket.closed).toBe(false);
 });
 
 test("an abort before registration rejects and closes the socket", async () => {

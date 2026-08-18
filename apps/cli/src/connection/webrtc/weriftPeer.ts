@@ -685,6 +685,13 @@ class Negotiation {
       peer.ondatachannel = ({ channel }) => this.watchChannel(channel);
     }
 
+    // The rendezvous owns the signal from here: the broker client releases its
+    // own abort listener the moment the registration is confirmed, so this is
+    // the only thing watching it and this is the phase an abort is now reported
+    // as. The re-check runs first because the acceptor's offer above yields the
+    // turn -- werift gathers as it describes -- and an abort landing in that
+    // window reaches no listener at all; without it that run would sit out the
+    // whole rendezvous budget after the operator had already interrupted it.
     const abort = (): void =>
       this.fail(
         new ConnectionError("the WebRTC rendezvous was cancelled", "closed"),
