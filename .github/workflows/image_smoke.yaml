@@ -1,11 +1,10 @@
 name: Image Smoke
 
 # Smoke test for the container images this repository ships: the default CLI +
-# web-console appliance image (the same Dockerfile release.yaml ships) and the
-# FIPS variant (Dockerfile.fips, which is built and smoked here but published
-# nowhere). Release builds the default image only at a version tag, so this is
-# the sole pre-merge check that either image actually builds and that both of
-# its roles run: the headless CLI and the `serve` web console.
+# web-console appliance image and the FIPS variant (Dockerfile.fips), both of
+# which release.yaml builds, scans, signs, and publishes at a version tag. This
+# is the sole pre-merge check that either image actually builds and that both
+# of its roles run: the headless CLI and the `serve` web console.
 #
 # It builds single-arch (native amd64, no QEMU) and loads each image into the
 # runner's Docker so it can run it -- deliberately faster and simpler than the

@@ -92,13 +92,7 @@ The FIPS variant image (`vdorie/psi-link:X.Y.Z-fips`) does. It builds on Amazon 
 
 **Which module, exactly.** The claim names one certificate and one build, because a package name proves nothing: ten builds share the provider package name upstream and only one of them is the certified one, so the image asserts both facts at build time and fails the build on either mismatch.
 
-| What | Value |
-| --- | --- |
-| Certificate | CMVP 5021, "Amazon Linux 2023 OpenSSL FIPS Provider", vendor Amazon Web Services, Inc. |
-| Standard | FIPS 140-3, Overall Security Level 1 |
-| Status | Active; validated 5/26/2025 by atsec information security corporation, sunset 5/25/2030 |
-| Module version | `3.0.8-d694bfa693b76001` |
-| Distribution in the image | `openssl-fips-provider-certified` and `-certified-so` at `3.0.8-1.amzn2023.0.1`, installed with `dnf` from a pinned Amazon Linux release snapshot |
+The certificate is CMVP 5021, "Amazon Linux 2023 OpenSSL FIPS Provider" (vendor Amazon Web Services, Inc.; FIPS 140-3, Overall Security Level 1; active, validated 5/26/2025 by atsec information security corporation, sunset 5/25/2030). The module version and the certified package NVRs the image installs -- the two values the build asserts and fails on -- are pinned once in [CONTAINER_IMAGES.md](spec/CONTAINER_IMAGES.md#what-certificate-5021-attests), which this page cites rather than copies, so a certificate or package rotation is edited in one place.
 
 The certificate's own Caveat, verbatim: "When operated in approved mode. No assurance of minimum security of SSPs (e.g., keys, bit strings) that are externally loaded, or of SSPs established with externally loaded SSPs." (An SSP is a sensitive security parameter; the Caveat's provenance is in [CONTAINER_IMAGES.md](spec/CONTAINER_IMAGES.md#the-caveat).) PSI-Link's key schedule mixes a pre-shared secret that the module did not generate, so that sentence speaks directly to this composition: the module makes no assurance about the pre-shared secret's strength, and neither does this document. What stands behind that secret is how it was generated and exchanged, which is [SECURITY_DESIGN.md](SECURITY_DESIGN.md#bootstrapping-a-shared-secret)'s subject rather than the certificate's.
 

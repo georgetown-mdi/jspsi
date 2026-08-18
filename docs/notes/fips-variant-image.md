@@ -4,7 +4,7 @@ title: "The FIPS Variant Container Image"
 
 # The FIPS variant container image: a second artifact, a vendor's validated module, and a host the operator provides
 
-*Status: decided, and built. This note records the choice to ship a separate
+*Status: decided, built, and published. This note records the choice to ship a separate
 `Dockerfile.fips` image on Amazon Linux 2023 carrying the CMVP-validated OpenSSL
 FIPS provider AWS publishes for that distribution, the alternatives weighed
 against it and rejected, what the arrangement does and does not support a claim

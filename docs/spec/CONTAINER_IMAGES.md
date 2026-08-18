@@ -5,7 +5,7 @@ title: "Container Image Composition and Pins"
 # Container image composition
 
 Two container images are built from this repository: the shipped CLI image
-(`Dockerfile`) and the unpublished FIPS variant (`Dockerfile.fips`). Both
+(`Dockerfile`) and the FIPS variant (`Dockerfile.fips`), published beside it under `-fips` tags. Both
 freeze their npm tree to the committed lockfile, pin their base image by digest,
 and install one reviewed set of OS packages each. This document records what
 each pins, what holds the pin, what those installs bring into the image, and the

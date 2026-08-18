@@ -103,6 +103,7 @@ jobs:
       # ships on the other; a vulnerability in an architecture-specific binary
       # alone is outside it.
       - name: Build the release image for scanning (amd64, load into local Docker)
+        id: default_build
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -118,6 +119,7 @@ jobs:
       # matches image_smoke.yaml's variant leg so a release reuses what the pull
       # request already built.
       - name: Build the FIPS variant image for scanning (amd64, load into local Docker)
+        id: fips_build
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -136,11 +138,14 @@ jobs:
       # One gate per published image, and both ahead of the login below, so a
       # fixable HIGH or CRITICAL in either package closure stops the whole
       # release rather than publishing the other artifact and withholding this
-      # one. The variant's leg runs even when the default image's gate already
+      # one. Each scan is keyed to its own build, so a build failure skips only
+      # that image's scan while the sibling's gate still runs and reports --
+      # the variant's leg runs even when the default image's gate already
       # failed, so a blocked release reports what both images carry and the
       # maintainer bumps both pins in one pass instead of one per attempt.
       - name: Scan the release image for OS-layer vulnerabilities
         id: vulnerability_scan
+        if: ${{ !cancelled() && steps.default_build.outcome == 'success' }}
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
@@ -156,7 +161,7 @@ jobs:
 
       - name: Scan the release FIPS variant image for OS-layer vulnerabilities
         id: fips_vulnerability_scan
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.fips_build.outcome == 'success' }}
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
@@ -176,7 +181,7 @@ jobs:
       # the same summary is the record that both images were scanned before they
       # went out.
       - name: Record the scans in the run summary
-        if: ${{ !cancelled() && steps.vulnerability_scan.outcome != 'skipped' }}
+        if: ${{ !cancelled() && (steps.vulnerability_scan.outcome != 'skipped' || steps.fips_vulnerability_scan.outcome != 'skipped') }}
         env:
           SCAN_OUTCOME: ${{ steps.vulnerability_scan.outcome }}
           FIPS_SCAN_OUTCOME: ${{ steps.fips_vulnerability_scan.outcome }}
