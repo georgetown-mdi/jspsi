@@ -91,6 +91,7 @@ A persistence loss is a local write a completed run was asked to make and could 
 - The post-authentication configuration write of an online `invite`/`accept`, whose run completes and writes its result while the configuration a later recurring `psilink exchange` needs does not reach disk.
 - Either machine-managed consent record an online `accept` refreshes in place on a configuration it reuses: the received-payload lock-in, or the outbound-payload confirmation. The reused configuration stands as it is; what is lost is this acceptance's record of what the operator consented to, so the next recurring exchange reconciles against the previous one's.
 - The observed received-payload set an online `invite` crystallizes into the configuration it just wrote, after the exchange has revealed what the partner transmits. The configuration is on disk; the next recurring exchange reconciles its received payload lazily rather than fail-closed against the observed set.
+- The catch-all for a post-exchange persistence step that itself failed before it could name a specific loss: the run reports that a post-exchange persistence step did not complete, with the cause on the human log.
 
 A persistence-loss `warning` carries no rendered error text: the cause of the failed write goes to the human log, where it is escaped once at its own sink, so a supervisor reading this field is not handed a double-escaped copy of it.
 
