@@ -1035,6 +1035,116 @@ describe("createFetchJobApiClient over an injected fetch", () => {
   });
 });
 
+describe("createFetchJobApiClient event-stream reconnect limits", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A fetch whose first `/events` call streams one non-terminal frame and then
+   * closes, and whose later `/events` calls answer with `later`. */
+  function droppingEventsFetch(later: () => Promise<Response>) {
+    const calls: Array<RequestInit | undefined> = [];
+    const fetchImpl = ((
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      if (!String(input).endsWith("/events"))
+        return Promise.resolve(new Response(null, { status: 404 }));
+      calls.push(init);
+      if (calls.length > 1) return later();
+      return Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode(
+                  'id: 1\ndata: {"v":1,"type":"stage","id":"one"}\n\n',
+                ),
+              );
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+    }) as typeof fetch;
+    return { fetchImpl, calls };
+  }
+
+  /** Drain the client's event stream, resolving the events it delivered or the
+   * error it ended on. */
+  async function drain(
+    client: ReturnType<typeof createFetchJobApiClient>,
+  ): Promise<{ events: Array<RelayEvent>; error: unknown }> {
+    const events: Array<RelayEvent> = [];
+    try {
+      for await (const event of client.openEventStream(
+        "job-1",
+        new AbortController().signal,
+      ))
+        events.push(event);
+      return { events, error: undefined };
+    } catch (error) {
+      return { events, error };
+    }
+  }
+
+  test("an unrecoverable drop ends as a stream-lost state, not a failed run", async () => {
+    // Every reconnect is refused, so the client runs out of attempts. The
+    // console's exchange is not known to have failed -- only to be unobservable
+    // from here -- so the operator is told to reload and re-attach.
+    vi.useFakeTimers();
+    const { fetchImpl, calls } = droppingEventsFetch(() =>
+      Promise.reject(new TypeError("network error")),
+    );
+    const outcome = drain(createFetchJobApiClient(fetchImpl));
+    await vi.advanceTimersByTimeAsync(60000);
+    const { events, error } = await outcome;
+
+    expect(events.map((event) => event.type)).toEqual(["stage"]);
+    expect((error as Error).message).toContain("reload to re-attach");
+    // Bounded, not forever: the connect plus one attempt per backoff step.
+    expect(calls).toHaveLength(6);
+  });
+
+  test("each reconnect resumes from the last id delivered", async () => {
+    vi.useFakeTimers();
+    const { fetchImpl, calls } = droppingEventsFetch(() =>
+      Promise.reject(new TypeError("network error")),
+    );
+    const outcome = drain(createFetchJobApiClient(fetchImpl));
+    await vi.advanceTimersByTimeAsync(60000);
+    await outcome;
+
+    const resumeHeaders = calls.map(
+      (init) =>
+        (init?.headers as Record<string, string> | undefined)?.[
+          "Last-Event-ID"
+        ],
+    );
+    // The first connect asks for the whole history; every later one resumes past
+    // the frame already delivered.
+    expect(resumeHeaders[0]).toBeUndefined();
+    expect(resumeHeaders.slice(1).every((value) => value === "1")).toBe(true);
+  });
+
+  test("a 404 while resuming stops the retries: the job is gone", async () => {
+    // The appliance no longer has the exchange (deleted, or forgotten by a
+    // restart). Retrying cannot bring it back, so the client surfaces it at once.
+    vi.useFakeTimers();
+    const { fetchImpl, calls } = droppingEventsFetch(() =>
+      Promise.resolve(new Response(null, { status: 404 })),
+    );
+    const outcome = drain(createFetchJobApiClient(fetchImpl));
+    await vi.advanceTimersByTimeAsync(60000);
+    const { error } = await outcome;
+
+    expect(error).toBeInstanceOf(JobApiRequestError);
+    expect((error as JobApiRequestError).status).toBe(404);
+    expect(calls).toHaveLength(2);
+  });
+});
+
 describe("createServerJobZeroSetupDriver intent", () => {
   /** A base zero-setup config (filedrop transport, inline input) tests override. */
   function zeroSetupConfig(): ServerJobZeroSetupDriverConfig {

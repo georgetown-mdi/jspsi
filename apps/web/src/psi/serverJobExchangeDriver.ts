@@ -114,7 +114,9 @@ export interface JobApiClient {
   createJob: (intent: JobCreateIntent, signal: AbortSignal) => Promise<string>;
   /** `GET /api/jobs/:id/events` as an async iterable of already-validated
    * {@link RelayEvent}s; the iterator completes when the server closes the
-   * stream after the terminal event (or when `signal` aborts). */
+   * stream after the terminal event (or when `signal` aborts). A stream dropped
+   * before its terminal is re-opened from the last id delivered, so the caller
+   * sees one continuous run across a cut connection. */
   openEventStream: (
     jobId: string,
     signal: AbortSignal,
@@ -441,17 +443,109 @@ export function sftpConnectionProjectionOf(
   return connection;
 }
 
+/**
+ * The waits before each successive reconnect attempt, and by its length the
+ * attempt budget. The budget resets whenever a connection carries the stream
+ * forward (a frame with an id past the last one delivered), so a long run
+ * survives repeated drops while a server that answers but never progresses is
+ * still bounded.
+ */
+const EVENT_STREAM_RECONNECT_DELAYS_MS = [250, 500, 1000, 2000, 4000];
+
+/** What the operator is told when the reconnects are exhausted: the console's
+ * run is not known to have failed, only unobservable from here. */
+const EVENT_STREAM_LOST_MESSAGE =
+  "the connection to the exchange event stream was lost; the run may still be in progress on the console -- reload to re-attach";
+
+/** One connection's frames: the SSE id that carried each (null for a keepalive
+ * or any frame without an `id:` line) alongside the parsed event (null for a
+ * frame that is not a relay event). */
+interface SseFrame {
+  id: number | null;
+  event: RelayEvent | null;
+}
+
 /** Open the SSE event stream and yield each parsed frame as a {@link RelayEvent}.
  * A frame that is not a JSON object with the relay-event shape is skipped rather
- * than yielded, mirroring the server's own fail-safe validation. */
+ * than yielded, mirroring the server's own fail-safe validation.
+ *
+ * A stream that ends before its terminal event has been dropped rather than
+ * completed -- a proxy restart, a network blip, a tab the browser suspended -- so
+ * the connection is re-opened from the last id delivered and the run's events
+ * continue where the operator left off. The server retains the full history, so
+ * the resume loses nothing and starts nothing: the exchange itself never
+ * restarts. A failure on the FIRST connect is not retried -- nothing has been
+ * established to resume, so a non-2xx or a network fault surfaces at once -- and
+ * a confirmed 404 (the job is gone from the appliance) stops the retries whenever
+ * it lands. */
 async function* streamJobEvents(
   fetchImpl: typeof fetch,
   jobId: string,
   signal: AbortSignal,
 ): AsyncIterable<RelayEvent> {
+  let lastEventId = 0;
+  let attempt = 0;
+  let established = false;
+
+  for (;;) {
+    let response: Response;
+    try {
+      response = await requestEventStream(
+        fetchImpl,
+        jobId,
+        signal,
+        lastEventId,
+      );
+    } catch (error) {
+      if (signal.aborted) return;
+      const fatal =
+        !established ||
+        (error instanceof JobApiRequestError && error.status === 404);
+      if (fatal) throw error;
+      if (!(await waitBeforeReconnect(attempt++, signal)))
+        throw new Error(EVENT_STREAM_LOST_MESSAGE);
+      continue;
+    }
+    established = true;
+
+    const idBefore = lastEventId;
+    try {
+      for await (const frame of readEventStreamFrames(response)) {
+        if (frame.id !== null) lastEventId = frame.id;
+        if (frame.event === null) continue;
+        yield frame.event;
+        // The server closes the stream once the terminal event is delivered, so
+        // this close is the run ending rather than a drop to reconnect from.
+        if (frame.event.type === "result" || frame.event.type === "error")
+          return;
+      }
+    } catch {
+      // A fault mid-body is a drop like a premature end: fall through and
+      // reconnect from the last id delivered.
+    }
+
+    if (signal.aborted) return;
+    if (lastEventId > idBefore) attempt = 0;
+    if (!(await waitBeforeReconnect(attempt++, signal)))
+      throw new Error(EVENT_STREAM_LOST_MESSAGE);
+  }
+}
+
+/** Request the job's event stream, resuming from `lastEventId` when the client
+ * has already been delivered events. `Last-Event-ID` is the SSE-native resume
+ * header the route reads; it is omitted on a first connect, whose offset is 0
+ * (replay from the start) either way. */
+async function requestEventStream(
+  fetchImpl: typeof fetch,
+  jobId: string,
+  signal: AbortSignal,
+  lastEventId: number,
+): Promise<Response> {
+  const headers: Record<string, string> = { Accept: "text/event-stream" };
+  if (lastEventId > 0) headers["Last-Event-ID"] = String(lastEventId);
   const response = await fetchImpl(`/api/jobs/${jobId}/events`, {
     method: "GET",
-    headers: { Accept: "text/event-stream" },
+    headers,
     signal,
   });
   if (!response.ok)
@@ -459,6 +553,15 @@ async function* streamJobEvents(
       response.status,
       `GET /api/jobs/${jobId}/events failed with status ${response.status}`,
     );
+  return response;
+}
+
+/** Split one response body into SSE frames, yielding each frame's id and parsed
+ * event. Returns when the body ends -- whether that is the server closing after
+ * the terminal event or the connection being cut. */
+async function* readEventStreamFrames(
+  response: Response,
+): AsyncGenerator<SseFrame> {
   const body = response.body;
   if (body === null) return;
   const reader = body.getReader();
@@ -473,14 +576,50 @@ async function* streamJobEvents(
       while (boundary !== -1) {
         const frame = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
-        const event = parseSseFrame(frame);
-        if (event !== null) yield event;
+        yield { id: sseFrameId(frame), event: parseSseFrame(frame) };
         boundary = buffer.indexOf("\n\n");
       }
     }
   } finally {
     reader.cancel().catch(() => {});
   }
+}
+
+/** Wait out this attempt's backoff, resolving true when another reconnect is
+ * left in the budget and false when it is spent. The wait ends early on abort so
+ * an unmounting consumer is not held for the remaining delay. */
+function waitBeforeReconnect(
+  attempt: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (attempt >= EVENT_STREAM_RECONNECT_DELAYS_MS.length)
+    return Promise.resolve(false);
+  const delay = EVENT_STREAM_RECONNECT_DELAYS_MS[attempt];
+  // An already-aborted signal fires no abort listener, so return straight to the
+  // caller's own abort check rather than arming a wait nothing would end.
+  if (signal.aborted) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, delay);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** Read the monotonic event id off an SSE frame's `id:` line, or null when the
+ * frame carries none (a keepalive comment) or carries an unparseable one. */
+function sseFrameId(frame: string): number | null {
+  for (const line of frame.split("\n")) {
+    if (!line.startsWith("id:")) continue;
+    const parsed = Number.parseInt(line.slice(3).trim(), 10);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+  }
+  return null;
 }
 
 const RELAY_EVENT_TYPES = new Set<RelayEventType>([
