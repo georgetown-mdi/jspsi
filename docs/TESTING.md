@@ -196,7 +196,7 @@ opt-out, and it is the only way an absent build is not an error.
 PSILINK_ALLOW_MISSING_WEB_BUILD=1 npm run test:integration -w apps/web
 ```
 
-The dev-server-backed specs (`backendRemoved`, `securityHeaders`) run either
+The dev-server-backed specs (`signalingIdRoute`, `securityHeaders`) run either
 way. Neither root `npm run test` nor `test:browser` runs this project, so
 neither is affected by the build requirement; `test:integration:browser` does
 run it, and so needs the build.

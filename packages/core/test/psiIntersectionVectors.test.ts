@@ -12,16 +12,17 @@ import { sortAssociationTable } from "../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
 // Resolved intersection-and-association known-answer anchor for the vendored
-// @openmined/psi.js engine. psi-intersection-vectors.json
-// consolidates the toStrictEqual KATs otherwise inline in psiParticipant.test.ts,
-// psiLink.test.ts, psiLinkForLinkageKeys.test.ts, psiLinkEmptyRound.test.ts, and
-// psiLinkEmptyKey.test.ts into one portable fork-bump gate: this test replays each
-// scenario against the vendored engine and pins both the intersection membership
-// and the association/permutation mapping back to original input rows, so a fork
-// re-roll or an accidental engine swap that silently permutes or corrupts the
-// mapping fails here deterministically. This is the CORRECTNESS anchor; the
-// byte-for-byte anchor lives in psiEngineWireVectors.test.ts. Regenerate the
-// fixture with generate-psi-intersection-vectors.mjs in the vectors directory.
+// @openmined/psi.js engine. psi-intersection-vectors.json holds every scenario
+// the matching cascade has to get right -- the empty-round and empty-key cases,
+// which live here alone, alongside the projections psiParticipant.test.ts,
+// psiLink.test.ts, and psiLinkForLinkageKeys.test.ts exercise from the API side
+// -- in one portable fork-bump gate: this test replays each scenario against the
+// vendored engine and pins both the intersection membership and the
+// association/permutation mapping back to original input rows, so a fork re-roll
+// or an accidental engine swap that silently permutes or corrupts the mapping
+// fails here deterministically. This is the CORRECTNESS anchor; the byte-for-byte
+// anchor lives in psiEngineWireVectors.test.ts. Regenerate the fixture with
+// generate-psi-intersection-vectors.mjs in the vectors directory.
 //
 // This gate runs against the default WASM engine only; a native-backend replay
 // is intentionally omitted because the projection is data-defined -- any correct
@@ -139,9 +140,9 @@ async function runLink(
   ];
 }
 
-test("the fixture covers every consolidated source", () => {
-  // A guard against a silently truncated regeneration: each source inline KAT is
-  // represented, so dropping a scenario from the generator fails here rather than
+test("the fixture covers every scenario", () => {
+  // A guard against a silently truncated regeneration: every scenario is
+  // represented, so dropping one from the generator fails here rather than
   // quietly narrowing the anchor.
   expect(vectors.map((v) => v.name)).toStrictEqual([
     "identify-intersection-names",
@@ -174,8 +175,7 @@ for (const vector of vectors) {
 
     // The live starter and joiner agree: the starter's local indices are the
     // joiner's partner indices and vice versa -- the "server and client yield
-    // identical results" invariant the source tests pin on freshly computed
-    // results (e.g. psiParticipant.test.ts). Asserted on the live tables, not the
+    // identical results" invariant, asserted on the live tables rather than the
     // committed fixture, so a broken engine that desyncs the two sides fails here.
     expect(starter[0]).toStrictEqual(joiner[1]);
     expect(starter[1]).toStrictEqual(joiner[0]);

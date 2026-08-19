@@ -900,53 +900,53 @@ test("persistHostKeyFingerprint throws (not silently) on a malformed config", ()
   expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(UsageError);
 });
 
-test("persistHostKeyFingerprint does not echo an inline credential on a malformed config", () => {
-  // parseDocument collects a syntax error in doc.errors, whose message embeds a
-  // snippet of the offending source; the path-only guard must not echo it, or an
-  // inline credential near the malformed line leaks into the (logged) error.
-  const SECRET = "S3cr3tSFTPPassw0rd";
-  const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(
-    configPath,
-    `connection:\n  server:\n\t  password: ${SECRET}\n`,
-  );
-  let caught: unknown;
-  try {
-    persistHostKeyFingerprint(configPath, FP_A);
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught).toBeInstanceOf(UsageError);
-  expect((caught as Error).message).toContain("could not be parsed as YAML");
-  expect((caught as Error).message).not.toContain(SECRET);
-});
+// The two source-bearing leak channels an in-place config edit can hit, each with
+// an inline credential on the offending line. A syntax error is collected in
+// doc.errors before the edit, its message embedding a snippet of the source; an
+// unresolved alias leaves doc.errors empty and setIn succeeds, so the failure
+// surfaces only when doc.toString() materializes the document, echoing the alias
+// token. Both are guarded inside the one sensitive-file chokepoint that every
+// persist* routes its parse/edit/serialize through, so the battery runs once over
+// its inputs here rather than once per caller; each other caller's own
+// malformed-config test pins that it still routes through that chokepoint, whose
+// path-only UsageError a raw parseDocument would never produce.
+const CREDENTIAL_LEAK_CHANNELS = [
+  {
+    channel: "a syntax error collected before the edit",
+    source: (secret: string) =>
+      `connection:\n  server:\n\t  password: ${secret}\n`,
+    expected: "could not be parsed as YAML",
+  },
+  {
+    channel: "an unresolved alias surfacing at serialization",
+    source: (secret: string) =>
+      `connection:\n  channel: sftp\n  server:\n    password: *${secret}\n`,
+    expected: "could not be serialized as YAML",
+  },
+] as const;
 
-test("persistHostKeyFingerprint does not echo an inline credential via an unresolved alias", () => {
-  // parseDocument defers alias resolution, so an unresolved alias leaves
-  // doc.errors empty and setIn succeeds; the failure surfaces only when
-  // doc.toString() materializes the document, throwing an error whose message
-  // echoes the alias token. The path-only guard at serialization must not echo
-  // it, or an inline credential written as an alias leaks into the error.
-  const SECRET = "S3cr3tSFTPPassw0rd";
-  const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(
-    configPath,
-    `connection:\n  channel: sftp\n  server:\n    password: *${SECRET}\n`,
-  );
-  let caught: unknown;
-  try {
-    persistHostKeyFingerprint(configPath, FP_A);
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught).toBeInstanceOf(UsageError);
-  expect((caught as Error).message).toContain(
-    "could not be serialized as YAML",
-  );
-  expect((caught as Error).message).not.toContain(SECRET);
-  // The original file is left untouched (the throw precedes the write).
-  expect(fs.readFileSync(configPath, "utf8")).toContain(`*${SECRET}`);
-});
+test.each(CREDENTIAL_LEAK_CHANNELS)(
+  "persistHostKeyFingerprint reports the path only, never the source: $channel",
+  ({ source, expected }) => {
+    const SECRET = "S3cr3tSFTPPassw0rd";
+    const configPath = path.join(dir, "psilink.yaml");
+    const original = source(SECRET);
+    fs.writeFileSync(configPath, original);
+    let caught: unknown;
+    try {
+      persistHostKeyFingerprint(configPath, FP_A);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toContain(expected);
+    // The credential must not appear anywhere in the surfaced (and logged) error.
+    expect((caught as Error).message).not.toContain(SECRET);
+    // The operator's file is left byte-for-byte intact (the throw precedes the
+    // write), so a failed persist neither leaks the credential nor mangles it.
+    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+  },
+);
 
 test("persistHostKeyFingerprint raises a UsageError when connection.server is not a mapping", () => {
   // A sftp config that PARSES (so it clears the channel guard) but whose
@@ -1266,58 +1266,16 @@ test("persistDisclosedPayloadColumns writes the config owner-read-only (0600)", 
 
 test("persistDisclosedPayloadColumns throws (not silently) on a malformed config", () => {
   const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(configPath, "connection: [unbalanced\n");
-  // Classified as a local usage error (exit 64), like persistHostKeyFingerprint,
-  // not a bare Error that would fall through to the generic exit code.
+  const original = "connection: [unbalanced\n";
+  fs.writeFileSync(configPath, original);
+  // Routed through the same sensitive-file chokepoint as persistHostKeyFingerprint,
+  // so the parse failure is classified as a local usage error (exit 64) rather than
+  // a bare Error that would fall through to the generic exit code -- and, being a
+  // path-only failure raised before the write, leaves the file intact.
   expect(() => persistDisclosedPayloadColumns(configPath, ["notes"])).toThrow(
     UsageError,
   );
-});
-
-test("persistDisclosedPayloadColumns does not echo an inline credential on a malformed config", () => {
-  // Parity with persistHostKeyFingerprint: a syntax error's message embeds a
-  // snippet of the offending source; the shared path-only guard must not echo it,
-  // or an inline credential near the malformed line leaks into the (logged) error.
-  const SECRET = "S3cr3tSFTPPassw0rd";
-  const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(
-    configPath,
-    `connection:\n  server:\n\t  password: ${SECRET}\n`,
-  );
-  let caught: unknown;
-  try {
-    persistDisclosedPayloadColumns(configPath, ["notes"]);
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught).toBeInstanceOf(UsageError);
-  expect((caught as Error).message).toContain("could not be parsed as YAML");
-  expect((caught as Error).message).not.toContain(SECRET);
-});
-
-test("persistDisclosedPayloadColumns does not echo an inline credential via an unresolved alias", () => {
-  // Parity with persistHostKeyFingerprint: an unresolved alias clears doc.errors
-  // and setIn succeeds; the failure surfaces only at doc.toString(), whose message
-  // echoes the alias token. The path-only guard at serialization must not echo it,
-  // and the original file must be left untouched (the throw precedes the write).
-  const SECRET = "S3cr3tSFTPPassw0rd";
-  const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(
-    configPath,
-    `connection:\n  channel: sftp\n  server:\n    password: *${SECRET}\n`,
-  );
-  let caught: unknown;
-  try {
-    persistDisclosedPayloadColumns(configPath, ["notes"]);
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught).toBeInstanceOf(UsageError);
-  expect((caught as Error).message).toContain(
-    "could not be serialized as YAML",
-  );
-  expect((caught as Error).message).not.toContain(SECRET);
-  expect(fs.readFileSync(configPath, "utf8")).toContain(`*${SECRET}`);
+  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
 });
 
 // --- persistExpectedPayloadColumns -------------------------------------------
@@ -1428,59 +1386,15 @@ test("persistExpectedPayloadColumns writes the config owner-read-only (0600)", (
 
 test("persistExpectedPayloadColumns throws (not silently) on a malformed config", () => {
   const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(configPath, "connection: [unbalanced\n");
-  // Classified as a local usage error (exit 64), like persistDisclosedPayloadColumns,
-  // not a bare Error that would fall through to the generic exit code.
+  const original = "connection: [unbalanced\n";
+  fs.writeFileSync(configPath, original);
+  // Same chokepoint routing as persistDisclosedPayloadColumns: a local usage error
+  // (exit 64) rather than a bare Error, raised before the write so the file is
+  // left intact.
   expect(() =>
     persistExpectedPayloadColumns(configPath, ["diagnosis"]),
   ).toThrow(UsageError);
-});
-
-test("persistExpectedPayloadColumns does not echo an inline credential on a malformed config", () => {
-  // Parity with persistDisclosedPayloadColumns: a syntax error's message embeds a
-  // snippet of the offending source; the shared path-only guard must not echo it,
-  // or an inline credential near the malformed line leaks into the (logged) error.
-  const SECRET = "S3cr3tSFTPPassw0rd";
-  const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(
-    configPath,
-    `connection:\n  server:\n\t  password: ${SECRET}\n`,
-  );
-  let caught: unknown;
-  try {
-    persistExpectedPayloadColumns(configPath, ["diagnosis"]);
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught).toBeInstanceOf(UsageError);
-  expect((caught as Error).message).toContain("could not be parsed as YAML");
-  expect((caught as Error).message).not.toContain(SECRET);
-});
-
-test("persistExpectedPayloadColumns does not echo an inline credential via an unresolved alias", () => {
-  // Parity with persistDisclosedPayloadColumns: an unresolved alias clears
-  // doc.errors and setIn succeeds; the failure surfaces only at doc.toString(),
-  // whose message echoes the alias token. The path-only guard at serialization must
-  // not echo it, and the original file must be left untouched (the throw precedes
-  // the write).
-  const SECRET = "S3cr3tSFTPPassw0rd";
-  const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(
-    configPath,
-    `connection:\n  channel: sftp\n  server:\n    password: *${SECRET}\n`,
-  );
-  let caught: unknown;
-  try {
-    persistExpectedPayloadColumns(configPath, ["diagnosis"]);
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught).toBeInstanceOf(UsageError);
-  expect((caught as Error).message).toContain(
-    "could not be serialized as YAML",
-  );
-  expect((caught as Error).message).not.toContain(SECRET);
-  expect(fs.readFileSync(configPath, "utf8")).toContain(`*${SECRET}`);
+  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
 });
 
 // --- diffLinkageTerms / formatReconcileDiffs ---------------------------------
@@ -2136,45 +2050,25 @@ test("loadConfigLinkageSource rejects an invalid standardization block", () => {
 test("loadConfigLinkageSource rejects malformed YAML", () => {
   const configPath = path.join(dir, "psilink.yaml");
   fs.writeFileSync(configPath, "linkage_terms: [unclosed\n");
+  // The path-only message only the sensitive-parse chokepoint produces, so this is
+  // also what pins that this reader routes through it rather than a raw parser --
+  // and so inherits the source-bearing channels it closes (both of them exercised
+  // with a credential in place against the same chokepoint's other CLI caller, in
+  // exchange.test.ts).
   expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
   expect(() => loadConfigLinkageSource(configPath)).toThrow(
     "could not be parsed as YAML",
   );
 });
 
-// A YAML parse failure embeds a snippet of the offending source in its message,
-// which can carry an inline credential; the path-only guard must close both a
-// syntax error (a YAMLParseError reproducing the malformed line) and an
-// unresolved alias (a plain ReferenceError echoing the alias name). Mirrors the
-// exchange-side guard (exchange.test.ts).
-test.each([
-  ["syntax error (tab indentation)", (s: string) => `\t  password: ${s}\n`],
-  ["unresolved alias", (s: string) => `connection:\n  password: *${s}\n`],
-])(
-  "loadConfigLinkageSource does not echo an inline credential: %s",
-  (_, mk) => {
-    const SECRET = "S3cr3tSFTPPassw0rd";
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(configPath, mk(SECRET));
-    let caught: unknown;
-    try {
-      loadConfigLinkageSource(configPath);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(UsageError);
-    expect((caught as Error).message).toContain("could not be parsed as YAML");
-    expect((caught as Error).message).not.toContain(SECRET);
-  },
-);
-
 // The schema-validation error branches (linkage_terms / standardization /
 // metadata) interpolate the Zod issue message, which under Zod v4 names only the
 // expected literals, never the rejected input value. That is what keeps a secret
 // mistakenly placed in one of these blocks out of the error; Zod v3's enum error
 // echoed the received value ("...received '<value>'") and would have leaked it.
-// The YAML-parse leak test above does not cover this branch, so pin it directly:
-// embed a secret as an invalid enum value and assert it never reaches the message.
+// The sensitive-parse chokepoint sits upstream of this branch and so does not
+// cover it, hence pinning it directly here: embed a secret as an invalid enum
+// value and assert it never reaches the message.
 // A future Zod that re-embeds the rejected value turns this red instead of
 // silently leaking. Both blocks share the one path-only interpolation; the two
 // cases cover the enum fields that would carry an attacker/operator string. The

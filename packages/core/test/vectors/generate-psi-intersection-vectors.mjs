@@ -1,30 +1,31 @@
 // Regenerates psi-intersection-vectors.json: the resolved intersection-and-
 // association known-answer vectors for the vendored @openmined/psi.js engine as
-// psilink drives it (item 207302520). Run from the repo root:
+// psilink drives it. Run from the repo root:
 //
 //   npm run build -w packages/core   # the generator imports the built dist below
 //   node packages/core/test/vectors/generate-psi-intersection-vectors.mjs
 //   npm run format                   # apply the repo's JSON layout
 //
-// Purpose: consolidate into one explicit, portable fixture the intersection
-// membership and the association/permutation mapping back to original input rows
-// that are otherwise pinned inline as toStrictEqual assertions scattered across
-// psiParticipant.test.ts, psiLink.test.ts, psiLinkForLinkageKeys.test.ts,
-// psiLinkEmptyRound.test.ts, and psiLinkEmptyKey.test.ts. A fork re-roll or an
-// accidental engine swap that silently permutes or corrupts the association
-// mapping flips these projections and fails psiIntersectionVectors.test.ts
-// deterministically in CI (no network, no nightly-only run).
+// Purpose: hold in one explicit, portable fixture the intersection membership and
+// the association/permutation mapping back to original input rows for every
+// scenario psilink's matching cascade has to get right -- the empty-round and
+// empty-key scenarios pinned nowhere else, plus the projections
+// psiParticipant.test.ts, psiLink.test.ts, and psiLinkForLinkageKeys.test.ts
+// exercise from the API side. A fork re-roll or an accidental engine swap that
+// silently permutes or corrupts the association mapping flips these projections
+// and fails psiIntersectionVectors.test.ts deterministically in CI (no network,
+// no nightly-only run).
 //
 // This is a CORRECTNESS anchor, distinct from the BYTE-stability anchor in
 // psi-engine-wire-vectors.json. The resolved projection is defined by the DATA
 // (which local row matches which partner row), not by the engine's random per-
 // exchange key, so a correct engine always reproduces it. The raw association
 // table row ORDER is engine-permutation-dependent, so every projection is
-// normalized by sorting on the local-index array before it is pinned -- exactly
-// what the inline tests do via sortAssociationTable: the starter (PSI sender) is
-// sorted ascending by its own local index, the joiner (receiver) is sorted
-// ascending by its partner index (the starter's local index), so the two align
-// and starter[0] === joiner[1], starter[1] === joiner[0].
+// normalized by sorting on the local-index array before it is pinned -- the
+// sortAssociationTable normalization: the starter (PSI sender) is sorted
+// ascending by its own local index, the joiner (receiver) is sorted ascending by
+// its partner index (the starter's local index), so the two align and
+// starter[0] === joiner[1], starter[1] === joiner[0].
 
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -255,9 +256,10 @@ const multiKeyJoinerKeys = makeIterables(multiKeyClientRows).map((it) => [
 ]);
 
 // -- Scenario table ------------------------------------------------------------
-// Each scenario names its source inline test so the two stay discoverably in
-// step. `inputs` are the exact engine inputs; `expect` (starter, joiner) is
-// filled in by running the scenario below.
+// A scenario an API-side test also exercises names that test, so the two stay
+// discoverably in step; the rest are pinned here alone. `inputs` are the exact
+// engine inputs; `expect` (starter, joiner) is filled in by running the scenario
+// below.
 const scenarios = [
   {
     name: "identify-intersection-names",
@@ -331,8 +333,9 @@ const scenarios = [
     description:
       "linkViaPSI one-to-one: the joiner is fully matched on key 0 (its key-1 " +
       "set is empty) while the starter still holds an unmatched record. The " +
-      "matching loop must still run key 1 for both parties. Source: " +
-      "psiLinkEmptyRound.test.ts (joiner fully matched early).",
+      "matching loop must still run key 1 for both parties -- skipping a " +
+      "locally-empty round drops a send/receive the partner still performs and " +
+      "deadlocks the lockstep exchange, so a regression hangs this vector.",
     method: "linkViaPSI",
     cardinality: "one-to-one",
     starterKeys: [
@@ -348,8 +351,8 @@ const scenarios = [
     name: "empty-round-starter-fully-matched",
     description:
       "Mirror of the above: the starter's key-1 set is empty while the joiner " +
-      "still has an unmatched record. Source: psiLinkEmptyRound.test.ts " +
-      "(starter fully matched early).",
+      "still has an unmatched record, exercising the same desync in the " +
+      "opposite role direction.",
     method: "linkViaPSI",
     cardinality: "one-to-one",
     starterKeys: [
@@ -365,7 +368,7 @@ const scenarios = [
     name: "empty-round-both-fully-matched",
     description:
       "linkViaPSI one-to-one: both parties fully match on key 0, so key 1 is a " +
-      "no-op on both sides. Source: psiLinkEmptyRound.test.ts (both-empty round).",
+      "no-op on both sides and must still be run by both.",
     method: "linkViaPSI",
     cardinality: "one-to-one",
     starterKeys: [
@@ -382,8 +385,7 @@ const scenarios = [
     description:
       "linkViaPSI one-to-one: '' is a present, matchable key distinct from " +
       "undefined (the no-key sentinel). The lone '' on each side is unique within " +
-      "its dataset and matches; undefined and non-matching named rows do not. " +
-      "Source: psiLinkEmptyKey.test.ts (singleton '' matches).",
+      "its dataset and matches; undefined and non-matching named rows do not.",
     method: "linkViaPSI",
     cardinality: "one-to-one",
     starterKeys: [[undefined, "", "Alice"]],
@@ -394,8 +396,8 @@ const scenarios = [
     description:
       "linkViaPSI one-to-one: the starter has two '' values, so every '' is a " +
       "within-dataset duplicate and is dropped from the round; the joiner's " +
-      "singleton '' therefore matches nothing. Source: psiLinkEmptyKey.test.ts " +
-      "('' duplicated within a dataset is dropped).",
+      "singleton '' therefore matches nothing, even though a singleton-vs-" +
+      "singleton '' would match.",
     method: "linkViaPSI",
     cardinality: "one-to-one",
     starterKeys: [["", "", "Alice"]],
@@ -405,8 +407,7 @@ const scenarios = [
     name: "empty-key-all-empty-column-no-match",
     description:
       "linkViaPSI one-to-one: every '' on both sides is a within-dataset " +
-      "duplicate, so the round drops them all and produces no match. Source: " +
-      "psiLinkEmptyKey.test.ts (all-'' column matches nothing).",
+      "duplicate, so the round drops them all and produces no match.",
     method: "linkViaPSI",
     cardinality: "one-to-one",
     starterKeys: [["", ""]],
@@ -417,8 +418,8 @@ const scenarios = [
     description:
       "linkViaPSI one-to-one: row 0 matches on key 0 ('A') and is removed; row 1 " +
       "does not match on key 0 and carries forward to key 1, where both sides' " +
-      "value is '' -- so the carried-forward '' matches like any other value. " +
-      "Source: psiLinkEmptyKey.test.ts ('' matches in a later round).",
+      "value is '' -- so the carried-forward '' matches like any other value, " +
+      "rather than being treated as already matched or dropped.",
     method: "linkViaPSI",
     cardinality: "one-to-one",
     starterKeys: [
@@ -434,10 +435,9 @@ const scenarios = [
     name: "empty-key-duplicate-dropped-unique-still-matches",
     description:
       "linkViaPSI one-to-one: the starter's two '' rows are dropped as " +
-      "within-dataset duplicates while its unique 'Alice' still matches -- " +
-      "dropping the duplicated '' does not poison the rest of the round. Source: " +
-      "psiLinkEmptyKey.test.ts (duplicated '' dropped, unique value still " +
-      "matches).",
+      "within-dataset duplicates while its unique 'Alice' still matches -- the " +
+      "uniqueness rule treats '' exactly like any other value, and dropping it " +
+      "does not poison the rest of the round.",
     method: "linkViaPSI",
     cardinality: "one-to-one",
     starterKeys: [["", "", "Alice"]],
