@@ -7,9 +7,10 @@ import { z } from "zod";
  * partner row indices. The entries in `[0]` are in strictly ascending order --
  * a structural invariant of the cascade in {@link linkViaPSI} relied upon by
  * payload reconstruction. The single-pass sender receives its table from the
- * partner, whose checks cover range, distinctness, and pairing but not
- * ordering -- the stated limit in docs/spec/PROTOCOL.md's index-validation
- * subsection.
+ * partner rather than producing it, so there the order is enforced at the seam
+ * that consumes it, beside the range, distinctness, and pairing checks
+ * (utils/partnerIndices.ts; docs/spec/PROTOCOL.md's index-validation
+ * subsection).
  */
 export type AssociationTable = [Array<number>, Array<number>];
 

@@ -954,22 +954,27 @@ test("a result file that could not be written fails with the persistence-loss ex
 
 test("a partner-shaped output-phase fault exits 69, not the local write-loss code", async () => {
   // The other half of the same boundary. buildOutputTable's integrity checks run
-  // in the output phase but refuse PARTNER-controlled shapes -- here duplicate
-  // row indices in the received payload, thrown by the real core function -- and
-  // 73's published meaning is that what failed is a local write on this machine.
-  // Such a fault stays 69; only the result file failing to reach disk is stamped.
-  // The terminal event's `output` category still covers it, since the exchange
-  // did complete and must not be re-run.
+  // in the output phase but refuse PARTNER-controlled shapes -- here a payload
+  // carrying no row for a record the association table matched, thrown by the real
+  // core function -- and 73's published meaning is that what failed is a local
+  // write on this machine. Such a fault stays 69; only the result file failing to
+  // reach disk is stamped. The terminal event's `output` category still covers it,
+  // since the exchange did complete and must not be re-run.
   const { buildOutputTable: coreBuildOutputTable } =
     await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
-  const duplicatedRowIndices: PartnerPayload = {
+  const payloadMissingAMatchedRow: PartnerPayload = {
     columns: ["dob"],
-    rowIndices: [5, 5],
-    rows: [["1990-01-02"], ["1991-02-03"]],
+    rowIndices: [5],
+    rows: [["1990-01-02"]],
   };
-  const emptyAssociation: AssociationTable = [[], []];
+  const associationNamingAnotherRow: AssociationTable = [[0], [7]];
   vi.mocked(buildOutputTable).mockImplementation(() =>
-    coreBuildOutputTable(emptyAssociation, [], [], duplicatedRowIndices),
+    coreBuildOutputTable(
+      associationNamingAnotherRow,
+      [],
+      [],
+      payloadMissingAMatchedRow,
+    ),
   );
 
   mockFd3Open();
@@ -1007,7 +1012,9 @@ test("a partner-shaped output-phase fault exits 69, not the local write-loss cod
     exitCode?: number;
   };
   // The real core refusal, not a stand-in shaped like one.
-  expect(reason.message).toContain("duplicate indices");
+  expect(reason.message).toContain(
+    "missing rows for association table indices",
+  );
   expect(reason.exitCode).toBeUndefined();
   expect(exitCodeForError(reason)).toBe(69);
 

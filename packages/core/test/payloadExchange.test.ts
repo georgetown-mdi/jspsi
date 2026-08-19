@@ -1054,6 +1054,78 @@ test("exchangePayloads: rowIndices/rows length mismatch rejects the receiver", a
   await expect(initiatorPromise).rejects.toThrow();
 });
 
+test("exchangePayloads: a frame failing length parity is refused on parity alone, not the repeat scan", async () => {
+  // Parity is checked before distinctness, so a mismatched frame is refused
+  // without walking its indices -- the refusal names only the parity fault.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["patient_id"],
+    rowIndices: [0, 0],
+    rows: [["P0"]],
+  });
+  const err = await initiatorPromise.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect(String((err as ConnectionError).cause)).toMatch(
+    /rowIndices and rows must have the same length/,
+  );
+  expect(String((err as ConnectionError).cause)).not.toMatch(
+    /must not repeat a row index/,
+  );
+});
+
+test("exchangePayloads: a repeated row index is refused at parse, as a protocol fault", async () => {
+  // `rowIndices` pairs one of the sender's rows with the payload row at the same
+  // position, so a repeat names two rows for one record. The wire schema refuses
+  // it where the message is parsed, with the classification every other malformed
+  // partner frame gets, so the receive rejects rather than returning a payload for
+  // a later stage to refuse.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["patient_id"],
+    rowIndices: [2, 2],
+    rows: [["P2"], ["P2"]],
+  });
+  const err = await initiatorPromise.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect(String((err as ConnectionError).cause)).toMatch(
+    /rowIndices must not repeat a row index/,
+  );
+});
+
+test("exchangePayloads: distinct row indices parse whatever order they arrive in", async () => {
+  // The other half of the refusal above: only repetition is refused, so an honest
+  // message still parses -- including one whose indices do not ascend, which the
+  // schema has never required.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["patient_id"],
+    rowIndices: [2, 0],
+    rows: [["P2"], ["P0"]],
+  });
+  await expect(initiatorPromise).resolves.toEqual({
+    columns: ["patient_id"],
+    rowIndices: [2, 0],
+    rows: [["P2"], ["P0"]],
+  });
+});
+
 test("exchangePayloads: send rejection rejects the initiator", async () => {
   const sendError = new Error("send failed");
   const conn: MessageConnection = {
