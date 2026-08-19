@@ -36,6 +36,12 @@ import type { CSVRow } from "./file.js";
 import { isCalendarDateValid } from "./utils/calendarDate.js";
 import { expandFuzzyComparisons } from "./fuzzyComparisons.js";
 import { APPLIED_SETTINGS } from "./appliedSettings.js";
+import {
+  FAN_OUT_FUNCTION_NAMES,
+  isListedFanOutFunction,
+} from "./fanOutFunctions.js";
+
+export { FAN_OUT_FUNCTION_NAMES } from "./fanOutFunctions.js";
 
 const logger = getLogger("cleaning");
 
@@ -656,31 +662,6 @@ export const STANDARDIZATION_FUNCTION_NAMES: readonly string[] = [
   "coalesce",
 ];
 
-/**
- * The standardization functions that expand ONE value into several match
- * candidates -- the multi-value {@link FieldValue} case. Matching on a candidate
- * set is not implemented, so an exchange whose transforms declare one of these is
- * refused rather than run with the narrower matching it would actually deliver;
- * see {@link assertFanOutImplemented}.
- *
- * Hand-listed, because whether a factory can return a multi-value `Set` is not
- * derivable from the registry. A fan-out function added to
- * {@link STANDARDIZING_FUNCTIONS} without an entry here is not left to narrow
- * silently: {@link buildKeyStrings} carries every candidate through to the
- * record's candidate set, and the strategy that consumes it refuses a record
- * carrying more than one ({@link fanOutReachedMatchingRefusal}). That refusal is
- * the point of harm rather than a pre-run gate: it fires as a round is built,
- * which is after the terms exchange, so it is the DECLARED step this list carries
- * that is refused before anything reaches the wire.
- *
- * The list is also what the width-bound drop binds: multiplicity produced by a
- * function named here is dropped when it exceeds the bound, and multiplicity from
- * any other function is carried through to that refusal instead
- * ({@link buildKeyStrings}), so an unlisted producer stays fail-closed at every
- * width.
- */
-export const FAN_OUT_FUNCTION_NAMES: readonly string[] = ["split_on"];
-
 const quotedFanOutFunctionNames = FAN_OUT_FUNCTION_NAMES.map(
   (name) => `"${name}"`,
 ).join(", ");
@@ -1189,7 +1170,7 @@ function compileStep(step: {
   return {
     kind: "fn",
     fn: factory(params),
-    isListedFanOutFunction: FAN_OUT_FUNCTION_NAMES.includes(step.function),
+    isListedFanOutFunction: isListedFanOutFunction(step.function),
   };
 }
 
@@ -1739,15 +1720,22 @@ const MAX_KEY_STRINGS_PER_ROW = 1024;
 
 // The value is local row data and the key name is partner-authored free text, so
 // neither is interpolated; the count is a derived integer and names no value.
+//
+// Both openings the refusal covers are named, because the operator cannot tell
+// them apart from the count: fuzzy comparisons, and a standardization or element
+// step that expands one value into several candidates without being a declared
+// fan-out producer (which is what routes it here rather than to the drop).
 function keyStringFanOutCapRefusal(projected: number): UsageError {
   return new UsageError(
     `a linkage key expands one row into ${projected} key strings, above the ` +
-      `${MAX_KEY_STRINGS_PER_ROW} this exchange builds per row. Fuzzy ` +
-      "comparisons multiply across a key's elements, so a key declaring " +
-      "several of them over long values fans out far enough to exhaust " +
-      "memory. The exchange is refused instead. Declare fuzzy comparisons on " +
-      "fewer of the key's elements, or shorten the expanded fields with an " +
-      "element transform.",
+      `${MAX_KEY_STRINGS_PER_ROW} this exchange builds per row. Every ` +
+      "element's candidates multiply across the key, so a key whose elements " +
+      "expand -- through fuzzy comparisons declared on several of them, or a " +
+      "standardization or element-transform step that turns one value into " +
+      "several candidates -- fans out far enough to exhaust memory. The " +
+      "exchange is refused instead. Declare fuzzy comparisons on fewer of the " +
+      "key's elements, drop the expanding step from the transforms, or " +
+      "shorten the expanded fields with an element transform.",
   );
 }
 
@@ -1824,11 +1812,17 @@ export function buildKeyStrings(
     if (field?.fanOutFromUnlistedFunction(index))
       provenance.fromUnlistedFunction = true;
 
+    // Candidates are appended one at a time, never spread into push: a spread
+    // passes them as arguments, and one cell can realize more of them than the
+    // engine accepts (measured between 125,000 and 150,000 here, fewer wherever
+    // the stack is smaller), which raises a RangeError in place of the assembly
+    // cap's refusal below -- fail-closed, but reporting a fault the row does not
+    // have.
     const transformed: string[] = [];
-    for (const v of raw)
-      transformed.push(
-        ...applyElementTransform(v, element.transform, provenance),
-      );
+    for (const v of raw) {
+      const realized = applyElementTransform(v, element.transform, provenance);
+      for (const candidate of realized) transformed.push(candidate);
+    }
     if (transformed.length === 0) return null;
 
     // A record contributes each DISTINCT candidate once, so duplicates collapse

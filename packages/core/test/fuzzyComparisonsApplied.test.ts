@@ -235,6 +235,10 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
     });
     expect(() => buildKeyStrings(key, dataset, 0)).toThrow(UsageError);
     expect(() => buildKeyStrings(key, dataset, 0)).toThrow(/2401 key strings/);
+    // The cap has two openings and the count tells them apart for nobody, so the
+    // message names both. This row's is fuzzy expansion; the other opening, an
+    // unlisted producer, is pinned in standardization.test.ts.
+    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(/fuzzy comparisons/);
   });
 
   test("the cap refusal names no local value", () => {
