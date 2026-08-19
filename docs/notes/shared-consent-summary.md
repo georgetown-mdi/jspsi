@@ -407,6 +407,11 @@ remedy is the actionable refusal ahead of them, which does not wait on
 it is parsed, and an input-metadata payload column wherever a surface holds this
 party's own metadata beside the agreed algorithm -- at the mint and at the accept.
 An operator meets the rule and what to change about it, not a raw render error.
+The mint half of that is inert until `APPLIED_SETTINGS.psiC` flips: while the
+flag is false the web surface's own terms-building step clamps the algorithm to
+`psi` before a `psi-c` document exists at the mint for the rule to catch, so
+"refused where the terms are authored" describes the post-flip build, while the
+parse and accept points, the CLI's among them, are live today.
 
 The payload refusal is not the only one the tier's copy presupposes. The
 spec's remaining `psi-c` shape refusals are held on the same footing: more than
@@ -415,9 +420,10 @@ copy -- the round-disclosure note speaks of one key's exactly-once values, and
 the result note denies any record-by-record pairing -- and `deduplicate` is
 refused twice over, by the count-only rule that outlives the flag flip and by
 `assertDeduplicateImplemented`, which refuses it under every algorithm while no
-run honors it. None of the four has a render backstop, by decision rather than
-omission: the refusals reach them at parse and at accept, which is where a
-document that breaks one is stopped.
+run honors it. None of those three -- more than one linkage key, single-pass,
+and deduplicate -- has a render backstop, by decision rather than omission: the
+refusals reach them at parse and at accept, which is where a document that
+breaks one is stopped.
 
 That the CLI puts the whole tier in its twice-printed decision block, where it
 prints the algorithm and its caveat today, is the same judgment read from the
