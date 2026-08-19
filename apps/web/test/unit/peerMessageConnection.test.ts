@@ -415,69 +415,67 @@ describe("openPeerMessageConnection", () => {
     await expect(mc.close()).resolves.toBeUndefined();
   });
 
-  test("a clean close that ends on its ceiling reports the final frame unconfirmed", async () => {
-    // The run reports success either way, so the ceiling -- the exit with no
-    // delivery signal that a finished exchange reaches -- is the only sign the
-    // partner may never have taken the final frame.
+  test("a clean close that ends on its ceiling reports that exit", async () => {
+    // The run reports success either way, so this exit -- the peer still live
+    // and the channel still open, with the sentinel never taken -- is the only
+    // sign the partner may never have taken the final frame.
     const { conn } = makeConn();
-    const onFinalFrameUnconfirmed = vi.fn();
+    const onCloseOutcome = vi.fn();
     const mc = await openPeerMessageConnection(conn, {
       closeDrainTimeoutMs: 5,
-      onFinalFrameUnconfirmed,
+      onCloseOutcome,
     });
 
     await mc.close();
-    // A repeated close is a no-op on a connection already torn down, so the
-    // operator hears about the one wait once rather than per call.
+    // A repeated close is a no-op on a connection already torn down, so the one
+    // wait is reported once rather than per call.
     await mc.close();
 
-    expect(onFinalFrameUnconfirmed).toHaveBeenCalledTimes(1);
+    expect(onCloseOutcome.mock.calls).toEqual([["ceiling"]]);
   });
 
-  test("a clean close the peer ends reports nothing", async () => {
-    // The peer closing the channel IS the delivery signal, so a run that got it
-    // must not carry a notice telling the operator to go and check.
+  test("a clean close the peer ends reports the peer's close", async () => {
+    // The peer closing the channel IS the delivery signal; reporting it as such
+    // is what lets the caller stay silent on a healthy exchange.
     const { fake, conn } = makeConn();
-    const onFinalFrameUnconfirmed = vi.fn();
-    const mc = await openPeerMessageConnection(conn, {
-      onFinalFrameUnconfirmed,
-    });
+    const onCloseOutcome = vi.fn();
+    const mc = await openPeerMessageConnection(conn, { onCloseOutcome });
 
     const closing = mc.close();
     await drainTaskQueue();
     fake.dataChannel.closeFromPeer();
     await closing;
 
-    expect(onFinalFrameUnconfirmed).not.toHaveBeenCalled();
+    expect(onCloseOutcome.mock.calls).toEqual([["peer-closed"]]);
   });
 
-  test("a close with no live peer left reports nothing", async () => {
-    // A peer that vanished has already failed the run its own way; a delivery
-    // notice on top of that is noise, not news.
+  test("a close with no live peer left reports the dead peer", async () => {
+    // The link died under the drain: whatever was still buffered went with it,
+    // and no delivery signal is coming.
     const { fake, conn } = makeConn();
-    const onFinalFrameUnconfirmed = vi.fn();
-    const mc = await openPeerMessageConnection(conn, {
-      onFinalFrameUnconfirmed,
-    });
+    const onCloseOutcome = vi.fn();
+    const mc = await openPeerMessageConnection(conn, { onCloseOutcome });
 
     const closing = mc.close();
     await drainTaskQueue();
     fake.peerConnection.enter("failed");
     await closing;
 
-    expect(onFinalFrameUnconfirmed).not.toHaveBeenCalled();
+    expect(onCloseOutcome.mock.calls).toEqual([["peer-gone"]]);
   });
 
-  test("a flushing close over a channel already out of open reports nothing", async () => {
+  test("a flushing close over a channel already out of open reports that exit", async () => {
     // PeerJS's `open` flag is its own bookkeeping rather than the channel's
     // state, so the flush branch can run over a channel that can carry neither
-    // the sentinel nor the frames behind it. That exit has no delivery signal,
-    // exactly as the ceiling has none, and still reports nothing.
+    // the sentinel nor the frames behind it. It carries no delivery signal
+    // either, and is reported as its own exit rather than folded into the
+    // ceiling: the caller distinguishes a wait that ran out from a link that
+    // was not there.
     const { fake, conn } = makeConn();
-    const onFinalFrameUnconfirmed = vi.fn();
+    const onCloseOutcome = vi.fn();
     const mc = await openPeerMessageConnection(conn, {
       closeDrainTimeoutMs: 5,
-      onFinalFrameUnconfirmed,
+      onCloseOutcome,
     });
 
     fake.dataChannel.readyState = "closing";
@@ -486,24 +484,24 @@ describe("openPeerMessageConnection", () => {
     // Pins that the flush branch is the one that ran: the else branch has no
     // wait at all, so the assertion below would pass there vacuously.
     expect(fake.close).toHaveBeenCalledWith({ flush: true });
-    expect(onFinalFrameUnconfirmed).not.toHaveBeenCalled();
+    expect(onCloseOutcome.mock.calls).toEqual([["channel-not-open"]]);
   });
 
   test("an error teardown reports nothing", async () => {
-    // fail() closes without flush, so there is no wait to end on a ceiling and
-    // nothing to report: the failure itself is what the operator sees.
+    // fail() closes without flush, so there is no wait to end at all and no
+    // outcome to report: the failure itself is what the operator sees.
     const { fake, conn } = makeConn();
-    const onFinalFrameUnconfirmed = vi.fn();
+    const onCloseOutcome = vi.fn();
     const mc = await openPeerMessageConnection(conn, {
       closeDrainTimeoutMs: 5,
-      onFinalFrameUnconfirmed,
+      onCloseOutcome,
     });
 
     fake.emit("error", new Error("boom"));
     await mc.receive().catch(() => undefined);
     await drainTaskQueue();
 
-    expect(onFinalFrameUnconfirmed).not.toHaveBeenCalled();
+    expect(onCloseOutcome).not.toHaveBeenCalled();
   });
 
   test("an error teardown closes the channel without flushing", async () => {

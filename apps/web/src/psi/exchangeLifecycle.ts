@@ -12,6 +12,7 @@ import { openPeerMessageConnection } from "./peerMessageConnection";
 
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
+import type { PeerCloseOutcome } from "./waitForPeerClose";
 
 import type {
   ExchangeResult,
@@ -30,19 +31,59 @@ const log = getLogger("exchangeLifecycle");
  * so the exchange succeeded here without that being true of the partner.
  *
  * Composed here rather than in the transport because this is the layer that owns
- * the run's operator vocabulary; the transport reports the fact
- * (`onFinalFrameUnconfirmed`) and knows nothing about how a run words it.
- * Composed RAW, like every warning this app raises itself: the seat that renders
- * it escapes what it folds, once, at its display boundary (see
+ * the run's operator vocabulary; the transport reports how its wait ended
+ * (`onCloseOutcome`) and knows nothing about how a run words it. Composed RAW,
+ * like every warning this app raises itself: the seat that renders it escapes
+ * what it folds, once, at its display boundary (see
  * `apps/web/src/bench/runWarnings.ts`). It names no duration -- the ceiling is a
  * constant the operator did not set and cannot see -- and it names the check
  * that resolves it, since this party's own result is not what is in doubt.
  */
-export const FINAL_FRAME_UNCONFIRMED_WARNING =
+export const FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING =
   "your partner did not confirm taking the final message before the wait " +
   "for them ran out, so their exchange may have ended without it. Your own " +
   "results are complete; check with your partner that their exchange " +
   "finished before either of you relies on their copy.";
+
+/**
+ * The operator-facing notice for the same run when the close ended because the
+ * link went instead: the peer connection died under it, or the channel was
+ * already out of `open` when the wait began.
+ *
+ * A separate sentence rather than a reuse of the one above, because the two say
+ * different things about the partner's copy. A wait that ran out means the
+ * partner was still reachable and never confirmed; a link that went can equally
+ * have carried the message and died after the partner read it, or lost whatever
+ * was still buffered -- and nothing on this side can tell those apart. The
+ * wording therefore claims neither, and keeps the same closing instruction,
+ * since the check that resolves it is the same one.
+ */
+export const FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING =
+  "the connection closed before your partner could confirm taking the final " +
+  "message, so they may or may not have received it. Your own results are " +
+  "complete; check with your partner that their exchange finished before " +
+  "either of you relies on their copy.";
+
+/**
+ * What a run tells its operator about each way the clean close's wait for the
+ * peer can end ({@link PeerCloseOutcome}); `undefined` is the deliberate
+ * silence. The peer's own close is the delivery signal, so a run that got it has
+ * nothing to report; every other exit ends with no such signal, so the partner's
+ * copy is in doubt and the operator hears which kind of doubt it is.
+ *
+ * A total map rather than a chain of comparisons: a new outcome fails to compile
+ * here until this layer has decided what a run says about it, instead of
+ * defaulting into silence the way an unmatched branch would.
+ */
+export const CLOSE_OUTCOME_WARNINGS: Record<
+  PeerCloseOutcome,
+  string | undefined
+> = {
+  "peer-closed": undefined,
+  ceiling: FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
+  "peer-gone": FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
+  "channel-not-open": FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
+};
 
 /** A single rendered stage in the progress UI (a superset of core's
  * `ExchangeStageDefinition`, adding the UI {@link ProcessState}). */
@@ -231,10 +272,10 @@ export interface RunExchangeLifecycleOptions<
     error: unknown;
   }) => void;
   /** A non-fatal, operator-relevant notice raised mid-run -- today only the
-   * clean close ending on its ceiling rather than on the peer's delivery signal
-   * ({@link FINAL_FRAME_UNCONFIRMED_WARNING}), and only on a run that reported
-   * its result. Optional: an owner with no warning surface omits it and the
-   * notice is dropped. Never a terminal; the run still ends in exactly one
+   * clean close ending on any exit that carries no delivery signal rather than
+   * on the peer's close ({@link CLOSE_OUTCOME_WARNINGS}), and only on a run that
+   * reported its result. Optional: an owner with no warning surface omits it and
+   * the notice is dropped. Never a terminal; the run still ends in exactly one
    * `onResult`/`onError`, and a notice raised during teardown arrives after
    * that one. */
   onWarning?: (message: string) => void;
@@ -301,9 +342,9 @@ export async function runExchangeLifecycle<
   const emitError = ifLive(onError);
   // Two gates, both load-bearing on the one seam that can fire during teardown.
   // The live gate every other seam takes, which here also silences a cancelled
-  // run: the teardown a cancellation drives reaches the close's ceiling exactly
-  // as a finished exchange can, and a partner notice on a run the operator
-  // stopped is noise. And this side's success terminal, because the notice
+  // run: the teardown a cancellation drives ends its close without a delivery
+  // signal exactly as a finished exchange can, and a partner notice on a run the
+  // operator stopped is noise. And this side's success terminal, because the notice
   // speaks for a completed exchange ("Your own results are complete"): a run
   // that failed -- including one whose failure never put the connection in a
   // terminal state, leaving teardown's close the real flushing one -- drains
@@ -362,11 +403,11 @@ export async function runExchangeLifecycle<
       if (mc !== undefined) {
         // Flushing close: waits for the peer to take the final outbound frame
         // and detaches the channel listeners. This is the teardown-exclusive
-        // effect. On a run that reported its result, a wait that ends on its
-        // ceiling raises the operator warning through emitWarning (see
-        // openPeerMessageConnection), which is why teardown can emit after the
-        // run's terminal event; a failed or cancelled run drains the same close
-        // silently.
+        // effect. On a run that reported its result, a wait that ends on
+        // anything but the peer's close raises the matching operator warning
+        // through emitWarning (see openPeerMessageConnection), which is why
+        // teardown can emit after the run's terminal event; a failed or
+        // cancelled run drains the same close silently.
         await mc.close();
       } else {
         // The wrapper never materialized (abort/timeout before the open await
@@ -411,8 +452,9 @@ export async function runExchangeLifecycle<
     // now its first handshake frame -- is buffered rather than dropped no matter
     // how long this side then takes to read it.
     mc = await openPeerMessageConnection(conn, {
-      onFinalFrameUnconfirmed: () => {
-        emitWarning(FINAL_FRAME_UNCONFIRMED_WARNING);
+      onCloseOutcome: (outcome) => {
+        const warning = CLOSE_OUTCOME_WARNINGS[outcome];
+        if (warning !== undefined) emitWarning(warning);
       },
     });
     // Authenticate the peer before any PSI frame is sent: the P-256 key exchange

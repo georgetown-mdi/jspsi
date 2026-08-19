@@ -4,12 +4,19 @@ import { expect, inject, test } from "vitest";
 
 import { generateSharedSecret } from "@psilink/core";
 
+import {
+  CLOSE_OUTCOME_WARNINGS,
+  FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
+  FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
+} from "../../src/psi/exchangeLifecycle.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
 
 import { canReachServer } from "../utils/pspiFixtures.js";
 import { connectRendezvousPair } from "../utils/rendezvousPair.js";
 
 import type { MessageConnection } from "@psilink/core";
+import type { PeerCloseOutcome } from "../../src/psi/waitForPeerClose.js";
+import type { RendezvousPair } from "../utils/rendezvousPair.js";
 
 /**
  * The web transport's clean close against the real stack: a real PeerJS pair
@@ -82,25 +89,29 @@ async function receiveUntilClosed(
 }
 
 /** Both parties' view of one send-then-close: when the peer actually read the
- * final frame, when the sender's close resolved, and how many times the sender
- * reported the final frame unconfirmed over it. */
+ * final frame, when the sender's close resolved, and how the sender's wait for
+ * the peer ended over it. */
 interface CloseTiming {
   received: Array<ReceivedFrame>;
   closeResolvedAt: number;
-  unconfirmed: number;
+  outcomes: Array<PeerCloseOutcome>;
 }
 
 async function sendThenClose(options: {
   finalFrameSize: number;
   closeDrainTimeoutMs?: number;
+  /** Breaks the link between the two sends and the sender's close, in the tick
+   * the close begins: a receiver still on the other end of a working channel is
+   * the default. */
+  breakLink?: (pair: RendezvousPair) => void;
 }): Promise<CloseTiming> {
-  const { inviterPeer, acceptorPeer, inviterConn, acceptorConn } =
-    await connectRendezvousPair(generateSharedSecret(), addressInfo);
-  let unconfirmed = 0;
+  const pair = await connectRendezvousPair(generateSharedSecret(), addressInfo);
+  const { inviterPeer, acceptorPeer, inviterConn, acceptorConn } = pair;
+  const outcomes: Array<PeerCloseOutcome> = [];
   try {
     const senderMc = await openPeerMessageConnection(acceptorConn, {
       closeDrainTimeoutMs: options.closeDrainTimeoutMs,
-      onFinalFrameUnconfirmed: () => (unconfirmed += 1),
+      onCloseOutcome: (outcome) => outcomes.push(outcome),
     });
     const receiverMc = await openPeerMessageConnection(inviterConn);
     const origin = performance.now();
@@ -108,6 +119,11 @@ async function sendThenClose(options: {
 
     await senderMc.send(frameOfBytes(64, 1));
     await senderMc.send(frameOfBytes(options.finalFrameSize, 7));
+    // No await between the break and the close. Left a turn to react to it,
+    // PeerJS marks the connection closed, the close takes its non-flushing
+    // branch and no wait runs at all -- measured: a 100 ms gap here reports no
+    // outcome whatsoever on either of the link-break tests below.
+    options.breakLink?.(pair);
     // The production teardown's order (exchangeLifecycle.ts): the flushing
     // close, then the broker id is freed. `disconnect` deliberately leaves the
     // data channel standing.
@@ -117,7 +133,7 @@ async function sendThenClose(options: {
 
     const received = await receiving;
     await receiverMc.close();
-    return { received, closeResolvedAt, unconfirmed };
+    return { received, closeResolvedAt, outcomes };
   } finally {
     inviterPeer.destroy();
     acceptorPeer.destroy();
@@ -136,7 +152,7 @@ function expectFinalFrame(frame: ReceivedFrame | undefined, size: number) {
 test("a clean close resolves only once the peer has read the final frame", async (ctx) => {
   if (!(await canReachServer(hostString)))
     return ctx.skip(serverUnreachableNote);
-  const { received, closeResolvedAt, unconfirmed } = await sendThenClose({
+  const { received, closeResolvedAt, outcomes } = await sendThenClose({
     finalFrameSize: FINAL_FRAME_BYTES,
   });
 
@@ -145,11 +161,12 @@ test("a clean close resolves only once the peer has read the final frame", async
   // Both parties run in this one page, so the stamps share a clock: the close
   // resolving no earlier than the peer's read is the delivery guarantee itself.
   expect(closeResolvedAt).toBeGreaterThanOrEqual(received[1].at);
-  // A real peer's close against a real stack IS the delivery signal, so nothing
-  // is reported unconfirmed. Only the real stack can pin that direction, and it
-  // is the one that matters: a notice here would tell the operator of a healthy
-  // exchange to distrust it.
-  expect(unconfirmed).toBe(0);
+  // A real peer's close against a real stack IS the delivery signal, so the run
+  // tells its operator nothing. Only the real stack can pin that direction, and
+  // it is the one that matters: a notice here would tell the operator of a
+  // healthy exchange to distrust it.
+  expect(outcomes).toEqual(["peer-closed"]);
+  expect(CLOSE_OUTCOME_WARNINGS[outcomes[0]]).toBeUndefined();
 }, 120_000);
 
 test("the wait is what orders it: an unwaited close returns with the frame in flight", async (ctx) => {
@@ -159,7 +176,7 @@ test("the wait is what orders it: an unwaited close returns with the frame in fl
   // transport does not rely on. The frame still arrives here -- nothing tears
   // the page's peer connection down -- but the close no longer says so, which
   // is what the guarantee above is worth.
-  const { received, closeResolvedAt, unconfirmed } = await sendThenClose({
+  const { received, closeResolvedAt, outcomes } = await sendThenClose({
     finalFrameSize: FINAL_FRAME_BYTES,
     closeDrainTimeoutMs: 0,
   });
@@ -170,5 +187,51 @@ test("the wait is what orders it: an unwaited close returns with the frame in fl
   // The close ended on its ceiling with the frame in flight, which is exactly
   // the state the operator has to be told about -- once: the frame arrived here
   // only because nothing tore this page's stack down behind it.
-  expect(unconfirmed).toBe(1);
+  expect(outcomes).toEqual(["ceiling"]);
+  expect(CLOSE_OUTCOME_WARNINGS[outcomes[0]]).toBe(
+    FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
+  );
+}, 120_000);
+
+test("a link that dies before the peer confirms tells the operator so", async (ctx) => {
+  if (!(await canReachServer(hostString)))
+    return ctx.skip(serverUnreachableNote);
+  // The link-death exit against the real stack: the peer connection carrying
+  // the final frame is gone when the close's wait looks, so no delivery signal
+  // is coming and the operator hears the wording for a link that went rather
+  // than for a partner who never confirmed.
+  //
+  // The break is this side's own half of the link, which is the half a browser
+  // test can take away: the exit is defined by this peer connection reaching a
+  // dead state, and an in-page teardown of the REMOTE half does not produce one
+  // -- it resets the stream gracefully and arrives here as the peer's close
+  // (pinned by the test below, which is why a rewrite to break the other half
+  // would stop covering this exit).
+  const { outcomes } = await sendThenClose({
+    finalFrameSize: FINAL_FRAME_BYTES,
+    breakLink: ({ acceptorConn }) => acceptorConn.peerConnection.close(),
+  });
+
+  expect(outcomes).toEqual(["peer-gone"]);
+  expect(CLOSE_OUTCOME_WARNINGS[outcomes[0]]).toBe(
+    FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
+  );
+}, 120_000);
+
+test("a peer torn down in this page still closes its stream, and reads as delivered", async (ctx) => {
+  if (!(await canReachServer(hostString)))
+    return ctx.skip(serverUnreachableNote);
+  // What a partner disappearing looks like from here when both peers share a
+  // renderer: Chromium tears the remote peer connection down through a graceful
+  // stream reset, so this side gets the same channel close a peer that read the
+  // sentinel would send, and reports delivery. The limit that leaves -- a close
+  // signal is not proof the partner's application read what was behind it -- is
+  // recorded in docs/spec/WEBRTC_TRANSPORT.md; a stack that stopped resetting
+  // the stream would redden here rather than quietly change what a close means.
+  const { outcomes } = await sendThenClose({
+    finalFrameSize: FINAL_FRAME_BYTES,
+    breakLink: ({ inviterConn }) => inviterConn.peerConnection.close(),
+  });
+
+  expect(outcomes).toEqual(["peer-closed"]);
 }, 120_000);
