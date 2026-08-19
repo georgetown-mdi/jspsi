@@ -4,6 +4,7 @@ import fs from "node:fs";
 import {
   computeCertificateFingerprint,
   computeTermsHash,
+  decideSignedReceiptVerdict,
   deriveOurIdColumn,
   EXCHANGE_KEYS_VERSION,
   EXCHANGE_RECORD_VERSION,
@@ -23,8 +24,9 @@ import {
   verifyExchangeRecord,
 } from "@psilink/core";
 import type {
+  AnchoredCertificateSlot,
+  AnchoredCertificateStatus,
   AssertedIdentityStatus,
-  CertificateAnchorStatus,
   CertificateBindingStatus,
   CommitmentStatus,
   DualSignedRecord,
@@ -38,7 +40,10 @@ import type {
   RecordVerificationReport,
   RunBindingStatus,
   SignedReceiptPartyReport,
+  SignedReceiptVerdictGuidance,
+  SignedReceiptVerdictParty,
   TermsHashStatus,
+  UnanchoredCertificateClause,
   VerificationKeys,
 } from "@psilink/core";
 
@@ -470,47 +475,36 @@ const RECEIPT_SIGNATURE_WORD: Record<ReceiptSignatureStatus, string> = {
   verified: "verifies over this receipt's content, bound to this party",
   failed: "DOES NOT VERIFY",
 };
-const ANCHORED_CERTIFICATE_WORD: Record<
-  Exclude<CertificateAnchorStatus, "unanchored">,
-  string
-> = {
+const ANCHORED_CERTIFICATE_WORD: Record<AnchoredCertificateStatus, string> = {
   "partner-pin": "matches a fingerprint you pinned out-of-band",
   "local-identity": "is your own signing identity's certificate",
 };
 
-/**
- * What an unanchored slot says, in the clauses the report supports and no others:
- * a check that did not run, or one that ran and matched this very certificate,
- * must not be narrated as a check this certificate failed.
- *
- * A pinned value that matches this certificate and no other would have anchored
- * this slot, so while the other slot carries a different certificate the report
- * does support "no pinned value matches it". When both slots carry one
- * certificate it does not: the value that anchored the other slot matches this
- * one too, and what leaves the slot unanchored is that each value claims a single
- * slot. The verifier's own certificate is ruled out only when an identity was
- * actually compared and reached neither slot.
- */
+// What an unanchored slot says, one clause per finding the verdict states. Which
+// of them a run supports is core's decision: a check that did not run, or one
+// that ran and matched this very certificate, is not narrated here as a check
+// this certificate failed.
+const UNANCHORED_CLAUSE_WORD: Record<UnanchoredCertificateClause, string> = {
+  "no-pinned-value-matches": "no pinned value matches it",
+  "not-your-own-certificate": "it is not your own certificate",
+};
+
 function unanchoredCertificateWord(
-  party: SignedReceiptPartyReport,
-  other: SignedReceiptPartyReport,
-  report: DualSignedRecordVerificationReport,
+  clauses: readonly UnanchoredCertificateClause[],
 ): string {
-  const clauses: string[] = [];
-  if (
-    report.pinnedFingerprints !== "not-supplied" &&
-    other.fingerprint !== party.fingerprint
-  )
-    clauses.push("no pinned value matches it");
-  if (report.localIdentity === "unmatched")
-    clauses.push("it is not your own certificate");
-  const supported = clauses.length === 0 ? "" : ` -- ${clauses.join(", and ")}`;
+  const supported =
+    clauses.length === 0
+      ? ""
+      : ` -- ${clauses
+          .map((clause) => UNANCHORED_CLAUSE_WORD[clause])
+          .join(", and ")}`;
   return `not anchored (nothing you supplied anchors it${supported})`;
 }
 
-// How the verdict's own sentence names each anchor. An unanchored slot has no
-// entry: it is the case the sentence must not claim.
-const ANCHOR_SOURCE_PHRASE: Partial<Record<CertificateAnchorStatus, string>> = {
+// How the verdict's own sentence names each anchor. The verdict's verified
+// headline carries only slots something anchored, so there is no unanchored case
+// to leave unnamed.
+const ANCHOR_SOURCE_PHRASE: Record<AnchoredCertificateStatus, string> = {
   "partner-pin": "a fingerprint you pinned out-of-band",
   "local-identity": "your own signing identity",
 };
@@ -561,106 +555,80 @@ function assertedIdentityWord(
 }
 
 function signedPartyLines(
-  party: SignedReceiptPartyReport,
-  other: SignedReceiptPartyReport,
-  report: DualSignedRecordVerificationReport,
+  party: SignedReceiptVerdictParty,
   supplied: SuppliedVerificationInputs,
 ): string[] {
+  const anchor = party.certificateAnchor;
   const anchorWord =
-    party.certificateAnchor === "unanchored"
-      ? unanchoredCertificateWord(party, other, report)
-      : ANCHORED_CERTIFICATE_WORD[party.certificateAnchor];
+    anchor.status === "unanchored"
+      ? unanchoredCertificateWord(anchor.unanchoredClauses)
+      : ANCHORED_CERTIFICATE_WORD[anchor.status];
+  // A certificate whose canonical bytes cannot be produced has no fingerprint to
+  // print, so the line says so rather than leaving a blank where one belongs.
+  const fingerprintWord =
+    party.fingerprint === null
+      ? "certificate fingerprint could not be computed"
+      : `certificate fingerprint ${party.fingerprint}`;
   return [
     // The identity is free text the certificate's holder chose, so it is escaped
     // at this display sink; the fingerprint beside it is recomputed by the
     // verifier rather than carried by the record.
     `  ${party.role}: ${sanitizeForDisplay(party.identity)}`,
-    `    certificate fingerprint ${party.fingerprint}: ${anchorWord}`,
+    `    ${fingerprintWord}: ${anchorWord}`,
     `    certificate identity binding: ` +
-      CERTIFICATE_BINDING_WORD[party.certificateBinding],
-    `    receipt signature: ${RECEIPT_SIGNATURE_WORD[party.signature]}`,
+      CERTIFICATE_BINDING_WORD[party.certificateBinding.status],
+    `    receipt signature: ${RECEIPT_SIGNATURE_WORD[party.signature.status]}`,
     `    asserted identity: ` +
-      assertedIdentityWord(party.assertedIdentity, supplied),
+      assertedIdentityWord(party.assertedIdentity.status, supplied),
   ];
 }
 
 /** Name what anchored each certificate, for the verified verdict's sentence. */
-function anchorsPhrase(parties: SignedReceiptPartyReport[]): string {
-  return parties
-    .map((party) => {
-      const source = ANCHOR_SOURCE_PHRASE[party.certificateAnchor];
-      // A verified verdict means every certificate was anchored, and the verifier
-      // withholds that verdict while either slot is unanchored. An unanchored slot
-      // here would leave the sentence claiming an anchor that does not exist --
-      // evidence overstated -- so it is refused rather than phrased.
-      if (source === undefined)
-        throw new Error(
-          `a verified dual-signed record leaves the ${party.role}'s certificate ` +
-            "unanchored: the verdict would claim both certificates were " +
-            "anchored when one was not",
-        );
-      return `the ${party.role}'s by ${source}`;
-    })
+function anchorsPhrase(slots: readonly AnchoredCertificateSlot[]): string {
+  return slots
+    .map((slot) => `the ${slot.role}'s by ${ANCHOR_SOURCE_PHRASE[slot.anchor]}`)
     .join(", and ");
 }
 
 // What to do about a certificate nothing outside the record vouches for, and what
-// a supplied anchor that reached neither certificate means. Each line stands on
-// its own: the run may be short one anchor, or hold one that belongs to another
-// exchange entirely.
-function anchoringLines(
-  report: DualSignedRecordVerificationReport,
-  supplied: SuppliedVerificationInputs,
-  unanchored: SignedReceiptPartyReport[],
-): string[] {
-  const lines: string[] = [];
-  if (report.pinnedFingerprints === "unmatched")
-    lines.push(
-      "  a pinned fingerprint matches NEITHER certificate in this record: " +
-        "this is not the record of the party you pinned.",
-    );
-  if (
-    report.localIdentity === "unmatched" &&
-    supplied.localIdentity === "named"
-  )
-    lines.push(
-      "  the signing identity you named is neither certificate in this record: " +
-        "this is not a receipt you signed.",
-    );
-  else if (
-    report.localIdentity === "unmatched" &&
-    supplied.localIdentity === "resolved" &&
-    unanchored.length > 0
-  )
-    lines.push(
-      "  note: your own signing identity is neither certificate here, so it " +
+// a supplied anchor that reached neither certificate means, in this command's
+// vocabulary. Which of them a run has earned, and in what order, is the verdict's
+// decision.
+function guidanceLine(guidance: SignedReceiptVerdictGuidance): string {
+  switch (guidance.kind) {
+    case "pinned-fingerprint-unmatched":
+      return (
+        "  a pinned fingerprint matches NEITHER certificate in this record: " +
+        "this is not the record of the party you pinned."
+      );
+    case "named-local-identity-unmatched":
+      return (
+        "  the signing identity you named is neither certificate in this " +
+        "record: this is not a receipt you signed."
+      );
+    case "resolved-local-identity-unmatched":
+      return (
+        "  note: your own signing identity is neither certificate here, so it " +
         "anchors nothing -- you were not a party to this exchange, or you have " +
-        "regenerated your identity since.",
-    );
-  // How to reach a verified verdict, but only while the anchors the run does
-  // hold are sound: a value that reached neither certificate is answered by the
-  // line above it, and telling the operator to supply more would talk past it.
-  const anchorContradicted =
-    report.pinnedFingerprints === "unmatched" ||
-    (report.localIdentity === "unmatched" &&
-      supplied.localIdentity === "named");
-  if (anchorContradicted) return lines;
-  if (unanchored.length === parties(report).length)
-    lines.push(
-      "  certificate fingerprint trust not established (no pinned value " +
-        "supplied): nothing ties the record's certificates to the partner you " +
-        "know. Pass --partner-fingerprint, or --config-file with " +
-        "signing.partner_fingerprint set.",
-    );
-  else if (unanchored.length > 0)
-    lines.push(
-      `  the ${unanchored[0]?.role}'s certificate is anchored by nothing ` +
+        "regenerated your identity since."
+      );
+    case "no-certificate-anchored":
+      return (
+        "  certificate fingerprint trust not established" +
+        (guidance.pinnedValueSupplied ? "" : " (no pinned value supplied)") +
+        ": nothing ties the record's certificates to the partner you know. " +
+        "Pass --partner-fingerprint, or --config-file with " +
+        "signing.partner_fingerprint set."
+      );
+    case "certificate-unanchored":
+      return (
+        `  the ${guidance.role}'s certificate is anchored by nothing ` +
         "outside this record, which is what holds the verdict short of " +
         "VERIFIED: pin that party's fingerprint (--partner-fingerprint, " +
         "repeatable), or name your own signing identity with --identity-file " +
-        "when that slot is yours.",
-    );
-  return lines;
+        "when that slot is yours."
+      );
+  }
 }
 
 function parties(
@@ -675,55 +643,52 @@ export function formatSignedRecordReport(
   report: DualSignedRecordVerificationReport,
   supplied: SuppliedVerificationInputs = NOTHING_SUPPLIED,
 ): { lines: string[]; exitCode: number } {
+  const verdict = decideSignedReceiptVerdict(report, {
+    localIdentitySource: supplied.localIdentity,
+  });
+  const headline = verdict.headline;
   const lines: string[] = [];
-  // The record carries two certificates and a verdict speaks for both, so the
-  // verdict states what anchored each of them -- and names the slot nothing
-  // outside the record reaches, rather than speaking past it.
-  const unanchored = parties(report).filter(
-    (party) => party.certificateAnchor === "unanchored",
-  );
-  const unanchoredSentences = unanchored
-    .map(
-      (party) =>
-        ` Nothing outside the record anchors the ${party.role}'s certificate.`,
-    )
-    .join("");
-  if (report.outcome === "failed")
+  if (headline.tone === "failed")
     lines.push(
       "SIGNED RECEIPT VERIFICATION FAILED: a check did not match -- the " +
         "dual-signed record may have been altered, or it is not the exchange " +
         "or the partner it is being checked against.",
     );
-  else if (report.outcome === "incomplete")
+  else if (headline.tone === "incomplete")
+    // The record carries two certificates and a verdict speaks for both, so the
+    // headline names the slot nothing outside the record reaches rather than
+    // speaking past it.
     lines.push(
       "SIGNED RECEIPT INCOMPLETE: nothing contradicted the dual-signed record, " +
         "but not everything could be checked (see below)." +
-        unanchoredSentences,
+        headline.unanchoredRoles
+          .map(
+            (role) =>
+              ` Nothing outside the record anchors the ${role}'s certificate.`,
+          )
+          .join(""),
     );
   else
     lines.push(
       "SIGNED RECEIPT VERIFIED: both signatures verify, and both certificates " +
-        `are anchored outside the record -- ${anchorsPhrase(parties(report))}.`,
+        "are anchored outside the record -- " +
+        `${anchorsPhrase(headline.anchoredSlots)}.`,
     );
 
+  for (const party of verdict.parties)
+    lines.push(...signedPartyLines(party, supplied));
   lines.push(
-    ...signedPartyLines(report.initiator, report.responder, report, supplied),
-  );
-  lines.push(
-    ...signedPartyLines(report.responder, report.initiator, report, supplied),
-  );
-  lines.push(
-    `  agreed-terms hash: ${signedTermsWord(report.termsHash, supplied)}`,
+    `  agreed-terms hash: ${signedTermsWord(verdict.termsHash.status, supplied)}`,
   );
   const configNote = configTermsNote(supplied);
   if (configNote !== undefined) lines.push(configNote);
   lines.push(
-    `  receipt-record pairing: ${RUN_BINDING_WORD[report.runBinding]}.`,
+    `  receipt-record pairing: ${RUN_BINDING_WORD[verdict.runBinding.status]}.`,
   );
-  // Where to look when the pairing failed: the two artifacts of one exchange are
-  // written together, so the likely cause is two files from different runs rather
-  // than an altered artifact.
-  if (report.runBinding === "mismatch" || report.runBinding === "unpaired")
+  // Where to look when the record in hand contradicts the pairing: the two
+  // artifacts of one exchange are written together, so the likely cause is two
+  // files from different runs rather than an altered artifact.
+  if (verdict.runBinding.pairByStamp)
     lines.push(
       "  note: an exchange writes its record and its receipt together, under one " +
         "timestamp stamp by default (psilink-record-<stamp>.json and " +
@@ -736,12 +701,12 @@ export function formatSignedRecordReport(
   // detectable only during the live exchange, where each party derives it
   // independently.
   lines.push(
-    `  per-exchange binder ${sanitizeForDisplay(report.binder)}: covered by ` +
+    `  per-exchange binder ${sanitizeForDisplay(verdict.binder)}: covered by ` +
       "both signatures, never recomputed (deriving it needs the exchange " +
       "session key, which only the two parties held).",
   );
-  lines.push(...anchoringLines(report, supplied, unanchored));
-  return { lines, exitCode: report.outcome === "failed" ? 1 : 0 };
+  lines.push(...verdict.guidance.map(guidanceLine));
+  return { lines, exitCode: headline.tone === "failed" ? 1 : 0 };
 }
 
 // --- Handler -----------------------------------------------------------------

@@ -384,6 +384,24 @@ describe("formatSignedRecordReport", () => {
     );
   });
 
+  test("a certificate with no computable fingerprint says so rather than leaving a blank", () => {
+    // The verdict reports no fingerprint for a certificate whose canonical bytes
+    // cannot be produced, so the line states that instead of printing a label
+    // with nothing after it where a fingerprint belongs.
+    const { lines } = formatSignedRecordReport(
+      report({
+        outcome: "failed",
+        initiator: party("initiator", {
+          fingerprint: "",
+          certificateBinding: "failed",
+        }),
+      }),
+    );
+    const out = lines.join("\n");
+    expect(out).toContain("certificate fingerprint could not be computed:");
+    expect(out).not.toContain("certificate fingerprint :");
+  });
+
   test("a failed outcome carries no note asserting the signatures verified", () => {
     const failed = report();
     failed.outcome = "failed";

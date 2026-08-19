@@ -7,7 +7,10 @@ import {
   parseDualSignedRecord,
   signReceiptContent,
 } from "../src/signedReceipt";
-import { verifyDualSignedRecord } from "../src/signedReceiptVerification";
+import {
+  decideSignedReceiptVerdict,
+  verifyDualSignedRecord,
+} from "../src/signedReceiptVerification";
 import {
   computeCertificateFingerprint,
   generateSigningIdentity,
@@ -18,7 +21,14 @@ import type {
   ReceiptContent,
   SignedReceiptParty,
 } from "../src/signedReceipt";
+import type {
+  DualSignedRecordVerificationReport,
+  SignedReceiptPartyReport,
+  SignedReceiptVerdict,
+  SignedReceiptVerdictInputs,
+} from "../src/signedReceiptVerification";
 import type { P256PrivateJwk, SigningIdentity } from "../src/signingIdentity";
+import type { HandshakeRole } from "../src/types";
 
 // The verification consumer for the dual-signed record: what a party (or an
 // auditor) can establish from the stored artifact alone, and what it cannot. The
@@ -616,6 +626,356 @@ describe("verifyDualSignedRecord", () => {
     expect(report.initiator.signature).toBe("verified");
   });
 });
+
+// --- The verdict decision ----------------------------------------------------
+
+// What a report MEANS, decided once for every surface. Each case here runs the
+// real verification first and decides the verdict over the report it produced, so
+// a tier or a remediation is asserted against a pairing that can actually occur;
+// the hand-built reports at the end are for the two contradictions a signable
+// record cannot be made to produce on demand.
+
+describe("decideSignedReceiptVerdict", () => {
+  const verdictFor = async (
+    inputs: Parameters<typeof verifyDualSignedRecord>[1],
+    decision: SignedReceiptVerdictInputs = {},
+  ): Promise<SignedReceiptVerdict> =>
+    decideSignedReceiptVerdict(
+      await verifyDualSignedRecord(await signedRecord(), inputs),
+      decision,
+    );
+
+  test("a fully verified record names what anchored each certificate", async () => {
+    const verdict = await verdictFor(fullyAnchored, {
+      localIdentitySource: "resolved",
+    });
+    expect(verdict.headline.tone).toBe("verified");
+    // The verified headline carries both slots and what anchored each, which is
+    // what lets a surface state it without re-deriving the assignment.
+    if (verdict.headline.tone !== "verified") throw new Error("unreachable");
+    expect(verdict.headline.anchoredSlots).toEqual([
+      { role: "initiator", anchor: "local-identity" },
+      { role: "responder", anchor: "partner-pin" },
+    ]);
+    for (const party of verdict.parties) {
+      expect(party.certificateAnchor.tone).toBe("verified");
+      expect(party.certificateAnchor.unanchoredClauses).toEqual([]);
+      expect(party.certificateBinding.tone).toBe("verified");
+      expect(party.signature.tone).toBe("verified");
+      expect(party.assertedIdentity.tone).toBe("verified");
+    }
+    expect(verdict.termsHash.tone).toBe("verified");
+    expect(verdict.runBinding.tone).toBe("verified");
+    expect(verdict.runBinding.pairByStamp).toBe(false);
+    // Nothing to remediate: every certificate is anchored and every value the
+    // verifier supplied reached one.
+    expect(verdict.guidance).toEqual([]);
+    expect(verdict.binder).toBe(BINDER);
+    expect(verdict.parties[0].identity).toBe("Party A");
+    expect(verdict.parties[0].fingerprint).toBe(fingerprintA);
+  });
+
+  test("no anchoring value at all is incomplete and states that none was supplied", async () => {
+    // The third-party auditor holding the receipt alone: every check the record
+    // can make on itself passes, and nothing ties either certificate to a party
+    // known outside it.
+    const verdict = await verdictFor({
+      expectedIdentities: ["Party A", "Party B"],
+      expectedTermsHash: TERMS_HASH,
+      recordReceiptBinder: BINDER,
+    });
+    expect(verdict.headline).toEqual({
+      tone: "incomplete",
+      unanchoredRoles: ["initiator", "responder"],
+    });
+    for (const party of verdict.parties) {
+      expect(party.certificateAnchor.status).toBe("unanchored");
+      expect(party.certificateAnchor.tone).toBe("incomplete");
+      // Nothing was compared against either certificate, so neither clause is
+      // supported: an unanchored slot must not read as a check it was put to and
+      // failed.
+      expect(party.certificateAnchor.unanchoredClauses).toEqual([]);
+      expect(party.signature.tone).toBe("verified");
+    }
+    expect(verdict.guidance).toEqual([
+      { kind: "no-certificate-anchored", pinnedValueSupplied: false },
+    ]);
+  });
+
+  test("one unanchored slot is incomplete, named in the headline and in the guidance", async () => {
+    const verdict = await verdictFor({
+      pinnedFingerprints: [fingerprintB],
+      expectedIdentities: ["Party A", "Party B"],
+      expectedTermsHash: TERMS_HASH,
+      recordReceiptBinder: BINDER,
+    });
+    expect(verdict.headline).toEqual({
+      tone: "incomplete",
+      unanchoredRoles: ["initiator"],
+    });
+    // A pin was supplied and reached the other certificate, so the report does
+    // support saying no pinned value matches this one -- and says nothing about an
+    // own-certificate comparison that never ran.
+    expect(verdict.parties[0].certificateAnchor.unanchoredClauses).toEqual([
+      "no-pinned-value-matches",
+    ]);
+    expect(verdict.parties[1].certificateAnchor.status).toBe("partner-pin");
+    expect(verdict.guidance).toEqual([
+      { kind: "certificate-unanchored", role: "initiator" },
+    ]);
+  });
+
+  test("an unanchored slot a pinned value does match is not narrated as one it missed", async () => {
+    // Both slots carry one certificate, so the pin that anchored the responder's
+    // slot matches the initiator's too: what leaves that slot unanchored is each
+    // value claiming a single slot, not a pin that missed.
+    const oneCertificate = await signedRecord(content(), {
+      initiator: identityA,
+      responder: identityA,
+    });
+    const verdict = decideSignedReceiptVerdict(
+      await verifyDualSignedRecord(oneCertificate, {
+        pinnedFingerprints: [fingerprintA],
+        expectedTermsHash: TERMS_HASH,
+        recordReceiptBinder: BINDER,
+      }),
+    );
+    const unanchored = verdict.parties.filter(
+      (party) => party.certificateAnchor.status === "unanchored",
+    );
+    expect(unanchored).toHaveLength(1);
+    expect(unanchored[0]?.certificateAnchor.unanchoredClauses).toEqual([]);
+  });
+
+  test("a signature failure grades every row it did not touch as it found them", async () => {
+    const tampered = await signedRecord();
+    const verdict = decideSignedReceiptVerdict(
+      await verifyDualSignedRecord(
+        { ...tampered, content: content({ binder: "b3RoZXJCaW5kZXI" }) },
+        { ...fullyAnchored, recordReceiptBinder: "b3RoZXJCaW5kZXI" },
+      ),
+      { localIdentitySource: "resolved" },
+    );
+    expect(verdict.headline).toEqual({ tone: "failed" });
+    for (const party of verdict.parties) {
+      expect(party.signature.status).toBe("failed");
+      expect(party.signature.tone).toBe("failed");
+      // The checks that did pass are still reported as passing: a failed verdict
+      // states which check failed rather than condemning the whole artifact.
+      expect(party.certificateBinding.tone).toBe("verified");
+      expect(party.certificateAnchor.tone).toBe("verified");
+    }
+    expect(verdict.termsHash.tone).toBe("verified");
+    expect(verdict.guidance).toEqual([]);
+  });
+
+  test("a pinned value reaching neither certificate ends the guidance at that line", async () => {
+    // The run is not short an anchor; it holds one that belongs to another
+    // exchange, and telling the verifier to supply more would talk past it.
+    const verdict = await verdictFor({
+      pinnedFingerprints: [fingerprintC],
+      expectedIdentities: ["Party A", "Party B"],
+      expectedTermsHash: TERMS_HASH,
+      recordReceiptBinder: BINDER,
+    });
+    expect(verdict.headline).toEqual({ tone: "failed" });
+    expect(verdict.guidance).toEqual([
+      { kind: "pinned-fingerprint-unmatched" },
+    ]);
+  });
+
+  test("a named signing identity reaching neither certificate contradicts the record", async () => {
+    const verdict = await verdictFor(
+      {
+        pinnedFingerprints: [fingerprintB],
+        localIdentity: { fingerprint: fingerprintC, source: "named" },
+        expectedIdentities: ["Party A", "Party B"],
+        expectedTermsHash: TERMS_HASH,
+        recordReceiptBinder: BINDER,
+      },
+      { localIdentitySource: "named" },
+    );
+    expect(verdict.headline).toEqual({ tone: "failed" });
+    expect(verdict.guidance).toEqual([
+      { kind: "named-local-identity-unmatched" },
+    ]);
+    // The slot the pin did anchor is not recast by the failure beside it.
+    expect(verdict.parties[1].certificateAnchor.status).toBe("partner-pin");
+  });
+
+  test("an identity resolved without being asked anchors nothing and contradicts nothing", async () => {
+    const verdict = await verdictFor(
+      {
+        localIdentity: { fingerprint: fingerprintC, source: "resolved" },
+        expectedIdentities: ["Party A", "Party B"],
+        expectedTermsHash: TERMS_HASH,
+        recordReceiptBinder: BINDER,
+      },
+      { localIdentitySource: "resolved" },
+    );
+    expect(verdict.headline.tone).toBe("incomplete");
+    // Stated, and still followed by how to reach a verified verdict: nothing the
+    // verifier asserted was contradicted.
+    expect(verdict.guidance).toEqual([
+      { kind: "resolved-local-identity-unmatched" },
+      { kind: "no-certificate-anchored", pinnedValueSupplied: false },
+    ]);
+    for (const party of verdict.parties)
+      expect(party.certificateAnchor.unanchoredClauses).toEqual([
+        "not-your-own-certificate",
+      ]);
+  });
+
+  test("an unmatched identity with no stated source is refused rather than graded", async () => {
+    // Named or resolved is the difference between a contradiction and a note, and
+    // the report does not carry it: deciding without it would grade one as the
+    // other.
+    const report = await verifyDualSignedRecord(await signedRecord(), {
+      localIdentity: { fingerprint: fingerprintC, source: "resolved" },
+    });
+    expect(() => decideSignedReceiptVerdict(report)).toThrow(
+      /how it reached the verification was not stated/,
+    );
+  });
+
+  test("a record and a receipt from one run are paired, with nothing to advise", async () => {
+    const verdict = await verdictFor(fullyAnchored, {
+      localIdentitySource: "resolved",
+    });
+    expect(verdict.runBinding.status).toBe("verified");
+    expect(verdict.runBinding.tone).toBe("verified");
+    expect(verdict.runBinding.pairByStamp).toBe(false);
+  });
+
+  test("a record from another run of this partnership fails, and earns the stamp advice", async () => {
+    const verdict = await verdictFor(
+      { ...fullyAnchored, recordReceiptBinder: "b3RoZXJSdW5CaW5kZXI" },
+      { localIdentitySource: "resolved" },
+    );
+    expect(verdict.headline).toEqual({ tone: "failed" });
+    expect(verdict.runBinding.status).toBe("mismatch");
+    expect(verdict.runBinding.tone).toBe("failed");
+    expect(verdict.runBinding.pairByStamp).toBe(true);
+    // Distinguishable from every other failure class: each signature, identity,
+    // and anchor row still reads as verified.
+    for (const party of verdict.parties) {
+      expect(party.signature.tone).toBe("verified");
+      expect(party.certificateAnchor.tone).toBe("verified");
+      expect(party.assertedIdentity.tone).toBe("verified");
+    }
+  });
+
+  test("a record of an exchange that produced no receipt fails, and earns it too", async () => {
+    // The record in hand states there is no receipt for it at all, which the
+    // receipt beside it contradicts -- answered by the same advice as a cross-run
+    // pairing, since both are resolved by finding the record written beside this
+    // receipt.
+    const verdict = await verdictFor(
+      { ...fullyAnchored, recordReceiptBinder: null },
+      { localIdentitySource: "resolved" },
+    );
+    expect(verdict.headline).toEqual({ tone: "failed" });
+    expect(verdict.runBinding.status).toBe("unpaired");
+    expect(verdict.runBinding.tone).toBe("failed");
+    expect(verdict.runBinding.pairByStamp).toBe(true);
+  });
+
+  test("a receipt held with no record at all is incomplete, with nothing to pair by", async () => {
+    const { recordReceiptBinder: _unpaired, ...withoutRecord } = fullyAnchored;
+    const verdict = await verdictFor(withoutRecord, {
+      localIdentitySource: "resolved",
+    });
+    expect(verdict.headline.tone).toBe("incomplete");
+    expect(verdict.runBinding.status).toBe("not-checked");
+    expect(verdict.runBinding.tone).toBe("incomplete");
+    // Short of verified is not a contradiction: the holder of one artifact is
+    // accused of nothing, and there is no pairing to advise on.
+    expect(verdict.runBinding.pairByStamp).toBe(false);
+  });
+
+  test("a certificate with no computable fingerprint is stated as having none", async () => {
+    const verdict = decideSignedReceiptVerdict(
+      await verifyDualSignedRecord(
+        withUnevaluableResponder(await signedRecord()),
+        { pinnedFingerprints: [fingerprintA] },
+      ),
+    );
+    // Null rather than an empty string: a surface states that the fingerprint
+    // could not be computed instead of rendering a blank where one belongs.
+    expect(verdict.parties[1].fingerprint).toBeNull();
+    expect(verdict.parties[1].certificateBinding.status).toBe("failed");
+    expect(verdict.parties[0].fingerprint).toBe(fingerprintA);
+  });
+
+  test("a verified verdict over an unanchored slot is refused, not phrased", () => {
+    // The verifier reaches `verified` only once both certificates are anchored, so
+    // the headline always has a source to name for each slot. Were that to stop
+    // holding, every surface's sentence would claim an anchor that does not exist:
+    // the decision fails loudly here instead, once for all of them.
+    expect(() =>
+      decideSignedReceiptVerdict(
+        handBuiltReport({
+          responder: {
+            ...handBuiltParty("responder"),
+            certificateAnchor: "unanchored",
+          },
+        }),
+      ),
+    ).toThrow(/leaves the responder's certificate unanchored/);
+  });
+
+  test("a pinned value that was supplied is stated as such where none anchored a slot", () => {
+    // A report the verification does not produce -- pins that matched while both
+    // slots stayed unanchored -- so the guidance carries whether a pinned value
+    // reached the run rather than a surface asserting it did not.
+    const verdict = decideSignedReceiptVerdict(
+      handBuiltReport({
+        outcome: "incomplete",
+        initiator: {
+          ...handBuiltParty("initiator"),
+          certificateAnchor: "unanchored",
+        },
+        responder: {
+          ...handBuiltParty("responder"),
+          certificateAnchor: "unanchored",
+        },
+      }),
+    );
+    expect(verdict.guidance).toEqual([
+      { kind: "no-certificate-anchored", pinnedValueSupplied: true },
+    ]);
+  });
+});
+
+// A report assembled by hand, for the states a signable record cannot be made to
+// produce: a verdict inconsistent with the slots under it.
+function handBuiltParty(role: HandshakeRole): SignedReceiptPartyReport {
+  return {
+    role,
+    identity: role === "initiator" ? "Party A" : "Party B",
+    fingerprint: role === "initiator" ? fingerprintA : fingerprintB,
+    certificateBinding: "verified",
+    signature: "verified",
+    certificateAnchor: role === "initiator" ? "local-identity" : "partner-pin",
+    assertedIdentity: "verified",
+  };
+}
+
+function handBuiltReport(
+  overrides: Partial<DualSignedRecordVerificationReport> = {},
+): DualSignedRecordVerificationReport {
+  return {
+    outcome: "verified",
+    initiator: handBuiltParty("initiator"),
+    responder: handBuiltParty("responder"),
+    pinnedFingerprints: "matched",
+    localIdentity: "matched",
+    termsHash: "verified",
+    runBinding: "verified",
+    binder: BINDER,
+    ...overrides,
+  };
+}
 
 // --- Cross-implementation bundle ---------------------------------------------
 
