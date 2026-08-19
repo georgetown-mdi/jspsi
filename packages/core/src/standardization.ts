@@ -49,12 +49,30 @@ const logger = getLogger("cleaning");
  *   references this field.
  * - `Set<string>` -- multiple candidate values produced by a fan-out step such
  *   as `split_on`. `Set` enforces uniqueness: duplicate values from splitting or
- *   subsequent element-wise steps are automatically deduplicated. Matching each
- *   candidate independently is not implemented, so a record that reaches the key
- *   builder with more than one candidate is refused rather than dropped from the
- *   round; see {@link assertFanOutImplemented}.
+ *   subsequent element-wise steps are automatically deduplicated.
+ *   {@link buildKeyStrings} crosses these candidates into the key's candidate
+ *   set; what is not implemented is MATCHING on that set, which the linkage
+ *   strategies refuse (see {@link fanOutReachedMatchingRefusal}).
  */
 export type FieldValue = string | null | Set<string>;
+
+/**
+ * One record's realized value for ONE linkage key -- the per-row element of the
+ * surface `linkViaPSI` / `linkViaSinglePassPSI` consume, produced by
+ * {@link StandardizedKeyIterable}.
+ *
+ * - `undefined` -- the record has no value for this key (a `NULL`/absent
+ *   realization, or a realization the width bound dropped) and sits the key's
+ *   round out. The record-excluded sentinel.
+ * - `string` -- the record's single candidate value. A singleton is ALWAYS the
+ *   bare string, never a one-element set, so the overwhelming case costs no
+ *   allocation and a consumer needs one type test rather than a size test.
+ *   `""` is a real, matchable value here (docs/spec/PROTOCOL.md, Key input data).
+ * - `ReadonlySet<string>` -- two or more distinct candidate values, each of which
+ *   enters the round as its own PSI entry once fan-out matching runs
+ *   (docs/spec/PROTOCOL.md, Fan-out matching). Never empty and never a singleton.
+ */
+export type KeyCandidates = string | ReadonlySet<string> | undefined;
 
 // --- Standardizing functions -------------------------------------------------
 
@@ -640,21 +658,20 @@ export const STANDARDIZATION_FUNCTION_NAMES: readonly string[] = [
 
 /**
  * The standardization functions that expand ONE value into several match
- * candidates -- the multi-value {@link FieldValue} case. Matching runs on a single
- * value per record, so an exchange whose transforms declare one of these is
+ * candidates -- the multi-value {@link FieldValue} case. Matching on a candidate
+ * set is not implemented, so an exchange whose transforms declare one of these is
  * refused rather than run with the narrower matching it would actually deliver;
  * see {@link assertFanOutImplemented}.
  *
  * Hand-listed, because whether a factory can return a multi-value `Set` is not
  * derivable from the registry. A fan-out function added to
  * {@link STANDARDIZING_FUNCTIONS} without an entry here is not left to narrow
- * silently: {@link buildKeyStrings} refuses a row carrying more than one candidate
- * for any element -- tested before a later step or the key-string `Set` can
- * collapse the candidates back to one -- and an element transform that expands a
- * value is refused where it expands. Those refusals are the point of harm rather
- * than a pre-run gate: they fire as keys are built, which is after the terms
- * exchange, so it is the DECLARED step this list carries that is refused before
- * anything reaches the wire.
+ * silently: {@link buildKeyStrings} carries every candidate through to the
+ * record's candidate set, and the strategy that consumes it refuses a record
+ * carrying more than one ({@link fanOutReachedMatchingRefusal}). That refusal is
+ * the point of harm rather than a pre-run gate: it fires as a round is built,
+ * which is after the terms exchange, so it is the DECLARED step this list carries
+ * that is refused before anything reaches the wire.
  */
 export const FAN_OUT_FUNCTION_NAMES: readonly string[] = ["split_on"];
 
@@ -687,12 +704,20 @@ function fanOutDeclaredMessage(functionName: string): string {
   );
 }
 
-// Refusal for a fan-out that REACHED the key builder -- the point of harm, where
-// the alternative is the silent narrowing itself. Unreachable while
-// assertFanOutImplemented gates every run path, and deliberately a check rather
-// than a comment saying so: it also covers a fan-out function that never made it
-// into FAN_OUT_FUNCTION_NAMES.
-function fanOutReachedKeyBuilderRefusal(): UsageError {
+/**
+ * Refusal for a candidate set that REACHED a linkage strategy -- the point of
+ * harm, where the alternative is the silent narrowing itself. Key realization
+ * carries every candidate ({@link buildKeyStrings}), so this is the one place
+ * left that cannot honor them: `linkViaPSI` and `linkViaSinglePassPSI` run one
+ * value per record.
+ *
+ * Unreachable while {@link assertFanOutImplemented} gates every run path, and
+ * deliberately a check rather than a comment saying so: it also covers a fan-out
+ * function that never made it into {@link FAN_OUT_FUNCTION_NAMES}, and the
+ * standardization-authored half that gate cannot see on a prepared exchange
+ * assembled outside `prepareForExchange`.
+ */
+export function fanOutReachedMatchingRefusal(): UsageError {
   return new UsageError(
     "fan-out matching is not yet implemented, but a transform expanded a " +
       "record into several match candidates: matching runs on a single value " +
@@ -1244,9 +1269,9 @@ function toValueSet(result: FieldValue): string[] {
  *
  * An empty array indicates that the record has no valid value for this field and
  * is excluded from any linkage key that references it. More than one value is a
- * fan-out, which an exchange refuses rather than matches (see
- * {@link assertFanOutImplemented}); a consumer that measures the field's own
- * pipeline, rather than building keys from it, still reads every value.
+ * fan-out: {@link buildKeyStrings} crosses every value into the key's candidate
+ * set, and an exchange declaring one is refused because matching on that set is
+ * not implemented (see {@link assertFanOutImplemented}).
  */
 export class StandardizedField {
   readonly name: string;
@@ -1523,38 +1548,33 @@ const compiledElementTransforms = new WeakMap<
   CompiledStep[]
 >();
 
-// Element-level transforms must produce a single string. A step that actually
-// expands a value into SEVERAL candidates is refused here rather than collapsed
-// into one joined string: joining matches on a value neither party's data holds,
-// which is not the several-independent-candidates behavior the terms declare. A
-// fan-out step that did not split -- split_on emits a one-element set when its
-// delimiter is absent -- carries a single candidate, so it is unwrapped and flows
-// on, the same size test StandardizedKeyIterable.valueAt applies. See
-// assertFanOutImplemented, which refuses the same step from the declared
-// transforms before any row runs.
+// One element's candidate values for one row: an element-level fan-out step
+// contributes its candidates to that element's position in the key's
+// cross-product, exactly as a fan-out on the field feeding the element does, so
+// one semantics and one width bound cover both authoring surfaces
+// (docs/spec/PROTOCOL.md, Fan-out matching). Joining the candidates into one
+// string instead would match on a value neither party's data holds. An empty
+// array is the null realization: the record has no value for this element.
+//
+// The steps run through applyStep, which is what applies each later step
+// element-wise across the candidates and drops a candidate a null-producing step
+// filters -- the same execution the field-level pipeline uses, so the two
+// surfaces cannot drift.
 function applyElementTransform(
   value: string,
   steps: TransformStep[] | undefined,
-): string | null {
+): string[] {
   // No steps: the value passes through unchanged (the empty-pipeline identity),
   // and nothing is compiled or memoized.
-  if (steps === undefined || steps.length === 0) return value;
+  if (steps === undefined || steps.length === 0) return [value];
   let compiled = compiledElementTransforms.get(steps);
   if (compiled === undefined) {
     compiled = compileSteps(steps);
     compiledElementTransforms.set(steps, compiled);
   }
-  let current: string | null = value;
-  for (const step of compiled) {
-    const next = applyStep(current, step);
-    if (next instanceof Set) {
-      if (next.size > 1) throw fanOutReachedKeyBuilderRefusal();
-      current = next.values().next().value ?? null;
-    } else {
-      current = next;
-    }
-  }
-  return current;
+  let current: FieldValue = value;
+  for (const step of compiled) current = applyStep(current, step);
+  return toValueSet(current);
 }
 
 function swapElements(
@@ -1573,34 +1593,46 @@ function swapElements(
 }
 
 /**
- * The key-string count at which one row's cross-product earns an operator
- * warning: a wide fan-out in a dual-party-output exchange weakens the privacy
- * guarantee the protocol otherwise gives, which is the operator's call to make
- * rather than a refusal. Advisory only -- {@link MAX_KEY_STRINGS_PER_ROW} is the
- * resource bound underneath it that does refuse.
+ * The normative per-(record, key) fan-out width bound: one record contributes at
+ * most this many candidate values to one linkage key's round
+ * (docs/spec/PROTOCOL.md, The width bound). Not operator-configurable -- it is
+ * what a partner-supplied frame's element and byte bounds are derived from, so
+ * changing it re-derives those.
  *
- * Both expansions this measures are gated: {@link assertFanOutImplemented}
- * refuses a declared fan-out step, and `APPLIED_SETTINGS.fuzzyComparisons` holds
- * the fuzzy expansion inert. The threshold is kept through that rather than
- * retired alongside them, because the fan-out matching work reconciles its own
- * per-row width bound against this advisory: retiring it would mean re-deriving
- * both the number and the privacy rationale behind it. What those gates leave
- * the warning unable to reach is pinned by a test, which fails when either
- * opens.
+ * A record realizing more candidates than this contributes NONE of them to that
+ * key's round: {@link buildKeyStrings} drops it exactly as an absent (`NULL`)
+ * realization is dropped, warns the operator, and leaves the record eligible for
+ * later keys. Deliberately not a run refusal -- the transforms are
+ * partner-authored while the values expanded are this party's own rows, so
+ * failing the run would let a partner end an exchange by authoring a delimiter
+ * that shatters one local value.
+ *
+ * It binds `split_on`, the fan-out producer, and it is also the count at which a
+ * cross-product earns an operator advisory: a wide expansion weakens the
+ * guarantee a dual-party-output exchange otherwise gives, because each candidate
+ * can independently reveal co-possession. Past the bound that width is not the
+ * operator's call to make per row, and the consequence of an authored fan-out
+ * within the bound is surfaced where the operator consents to the terms. For the
+ * other candidate producer, `generateFuzzyComparisons`, the number is the
+ * advisory alone -- its own width factor is that feature's to set when its
+ * matching lands.
  */
-const KEY_STRING_WARN_THRESHOLD = 20;
+export const MAX_KEY_CANDIDATES_PER_ROW = 20;
 
 /**
  * The hard cap on the key strings ONE row may contribute to a single key round.
  *
- * {@link KEY_STRING_WARN_THRESHOLD} is advisory -- it tells an operator the
- * fan-out is wide enough to weaken the privacy of a dual-party-output exchange
- * but lets the run proceed. This cap is the resource bound underneath it: the
- * cross-product multiplies each element's candidate count, and the decision to
- * expand an element comes from the partner-authored linkage terms while the
- * values expanded are local rows, so the product is not something the local
- * operator alone controls. Set well above any honest fuzzy key (three fuzzy
- * elements over canonical dates produce a few hundred candidates). The cap
+ * {@link MAX_KEY_CANDIDATES_PER_ROW} bounds the record's candidate set for a key
+ * and drops a record above it. This cap sits well above that one and is the
+ * resource bound underneath the cross-product itself: the product multiplies each
+ * element's candidate count, and the decision to expand an element comes from the
+ * partner-authored linkage terms while the values expanded are local rows, so the
+ * product is not something the local operator alone controls. A fan-out never
+ * REFUSES on it -- a row whose product is too wide to assemble is dropped like
+ * any other over-width row -- so the refusal binds only the other candidate
+ * producer, `generateFuzzyComparisons` (docs/spec/PROTOCOL.md, The width bound).
+ * Set well above any honest fuzzy key (three fuzzy elements over canonical dates
+ * produce a few hundred candidates). The cap
  * bounds the COUNT of key strings, not their bytes: a fuzzy element's value is
  * bounded by MAX_FUZZY_EXPANSION_INPUT_LENGTH, but a non-fuzzy element in the
  * same key carries its full local cell, which the product replicates, so the
@@ -1623,20 +1655,33 @@ function keyStringFanOutCapRefusal(projected: number): UsageError {
   );
 }
 
+// A record whose candidate set for one key is too wide contributes nothing to
+// that key's round and stays eligible for later keys, exactly as a record with no
+// value for the key does. The row index and the derived counts name no value; the
+// key name is partner-authored free text, so it is escaped at this sink.
+function dropRowFromKeyRound(
+  key: LinkageKey,
+  index: number,
+  reason: string,
+): null {
+  logger.warn(
+    `row ${index}, key "${redactAndSanitizeForDisplay(key.name)}": ${reason}, ` +
+      "so the record contributes no value to this key's round and remains " +
+      "eligible for later keys",
+  );
+  return null;
+}
+
 /**
- * Build all key strings for one linkage key round given a standardized dataset
- * and a row index.
+ * Build the candidate key strings one record contributes to one linkage key
+ * round, given a standardized dataset and a row index.
  *
- * Returns `null` if any element's field value set is empty (the record is
- * excluded from this key round). Otherwise returns the cross-product across the
- * elements' values, one key string per combination.
- *
- * A row whose field carries more than one candidate value is refused rather than
- * built from: matching runs on a single value per record, so a cross-product over
- * several candidates cannot be honored (see {@link assertFanOutImplemented}). The
- * refusal runs before the element transforms and before the deduplicating result
- * `Set`, either of which can collapse several candidates into one key string and
- * so hide the fan-out from a test on the assembled key.
+ * Returns `null` when the record contributes nothing to the round: an element's
+ * field value set is empty (the `NULL`/absent realization), or the candidate set
+ * exceeds {@link MAX_KEY_CANDIDATES_PER_ROW}, which is dropped the same way and
+ * warned. Otherwise it returns the deduplicated cross-product across the
+ * elements' candidate values -- one entry per distinct combination, and a set of
+ * more than one entry is a fan-out (docs/spec/PROTOCOL.md, Fan-out matching).
  *
  * All returned strings belong to the same original row at `index`; the caller
  * is responsible for preserving that association when adding entries to the PSI
@@ -1650,8 +1695,8 @@ function keyStringFanOutCapRefusal(projected: number): UsageError {
  * element multiplies the row's key strings by its candidate count. The expansion
  * runs on the element's TRANSFORMED value (see the note at the expansion site),
  * every candidate flows through the same final NFC pass, and the assembled count
- * is what both the {@link KEY_STRING_WARN_THRESHOLD} warning and the
- * {@link MAX_KEY_STRINGS_PER_ROW} cap measure. It is gated on
+ * is what {@link MAX_KEY_CANDIDATES_PER_ROW} measures, under the
+ * {@link MAX_KEY_STRINGS_PER_ROW} assembly cap. It is gated on
  * `APPLIED_SETTINGS.fuzzyComparisons`: while that is false a fuzzy element builds
  * the same single key string as an element without one.
  */
@@ -1667,27 +1712,29 @@ export function buildKeyStrings(
       : key.elements;
 
   const elementValues: string[][] = [];
+  // Whether any element contributed several candidates before fuzzy expansion --
+  // the fan-out signature, and what decides whether an unassemblable
+  // cross-product drops the row or refuses the run below.
+  let fansOut = false;
 
   for (const element of elements) {
     const field = dataset.getField(element.field);
     const raw = field ? field.get(index) : [];
     if (raw.length === 0) return null;
-    // Multiplicity is the fan-out signature, and it is tested HERE, before any
-    // later step can collapse it: a pipeline with no Set-producing step yields
-    // exactly one candidate, so a longer list is a fan-out whatever survives
-    // downstream. Testing only the assembled key would miss the collapsing shapes
-    // -- an element transform that filters all but one candidate, or two
-    // candidates that transform to the same string, both of which the key-string
-    // Set below reduces to a single innocuous-looking key while the row matched on
-    // less than the terms declare.
-    if (raw.length > 1) throw fanOutReachedKeyBuilderRefusal();
 
     const transformed: string[] = [];
-    for (const v of raw) {
-      const t = applyElementTransform(v, element.transform);
-      if (t !== null) transformed.push(t);
-    }
+    for (const v of raw)
+      transformed.push(...applyElementTransform(v, element.transform));
     if (transformed.length === 0) return null;
+
+    // A record contributes each DISTINCT candidate once, so duplicates collapse
+    // here rather than multiplying the cross-product the width bound measures:
+    // two raw values can transform to the same string, and two splits can share
+    // a part. The single-candidate case -- every element of a row that does not
+    // fan out -- keeps its array and allocates nothing.
+    const candidates =
+      transformed.length === 1 ? transformed : [...new Set(transformed)];
+    if (candidates.length > 1) fansOut = true;
 
     // Fuzzy expansion runs AFTER the element transform, on the value that would
     // otherwise have been hashed. The transform is what puts a value in the
@@ -1696,38 +1743,47 @@ export function buildKeyStrings(
     // only a parse_date transform guarantees, and expanding first would then feed
     // each candidate back through a pipeline free to collapse several to one
     // string or filter one to null -- shrinking the declared candidate set
-    // silently. Expanding last also leaves applyElementTransform's
-    // single-value-in, single-value-out contract, and its fan-out refusal,
-    // untouched.
+    // silently.
     //
     // Gated on APPLIED_SETTINGS.fuzzyComparisons, the single source of truth both
-    // consent surfaces annotate this term from. The PSI round downstream consumes
-    // ONE value per record: StandardizedKeyIterable refuses a multi-candidate row
-    // outright, so expanding ahead of that round would convert the no-op the
-    // consent copy describes into an aborted exchange. Flipping the flag belongs
-    // with the round that consumes a candidate set.
+    // consent surfaces annotate this term from. Flipping the flag belongs with
+    // the round that consumes a candidate set: a fuzzy row would otherwise reach
+    // a linkage strategy carrying several candidates, which is refused, turning
+    // the no-op the consent copy describes into an aborted exchange.
     const fuzzy = element.generateFuzzyComparisons;
     elementValues.push(
       fuzzy === undefined || !APPLIED_SETTINGS.fuzzyComparisons
-        ? transformed
-        : transformed.flatMap((value) => expandFuzzyComparisons(value, fuzzy)),
+        ? candidates
+        : candidates.flatMap((value) => expandFuzzyComparisons(value, fuzzy)),
     );
   }
 
-  // Bound the fan-out BEFORE materializing it: the cross-product multiplies each
-  // element's candidate count, so a handful of fuzzy elements over long values
-  // multiplies into a per-row set large enough to exhaust memory as it is built.
-  // The count is a product of array lengths, so it is known without allocating
-  // the product itself. Only the fuzzy path can reach the cap -- a row carrying
-  // more than one candidate for an element is already refused above, so without
-  // fuzzy expansion every element contributes exactly one value and the product
-  // is 1.
+  // Bound the cross-product BEFORE materializing it: it multiplies each element's
+  // candidate count, so a few wide elements multiply into a per-row set large
+  // enough to exhaust memory as it is built. The count is a product of array
+  // lengths, so it is known without allocating the product itself.
+  //
+  // A row this wide is over MAX_KEY_CANDIDATES_PER_ROW too, once assembled, in
+  // every case but one: distinct combinations that concatenate to the same string
+  // could in principle collapse a large product into a small candidate set. That
+  // collapse is not measurable without the allocation this cap exists to prevent,
+  // so a fan-out row is dropped on the projected count -- the same treatment an
+  // over-width row gets, and never the run refusal, which the fan-out path
+  // deliberately does not take (docs/spec/PROTOCOL.md, The width bound). Fuzzy
+  // expansion, whose own bound is that feature's to set, keeps the refusal.
   const projectedKeyStrings = elementValues.reduce(
     (count, values) => count * values.length,
     1,
   );
-  if (projectedKeyStrings > MAX_KEY_STRINGS_PER_ROW)
-    throw keyStringFanOutCapRefusal(projectedKeyStrings);
+  if (projectedKeyStrings > MAX_KEY_STRINGS_PER_ROW) {
+    if (!fansOut) throw keyStringFanOutCapRefusal(projectedKeyStrings);
+    return dropRowFromKeyRound(
+      key,
+      index,
+      `expands into ${projectedKeyStrings} key-string combinations, more than ` +
+        `the ${MAX_KEY_STRINGS_PER_ROW} this exchange assembles for one row`,
+    );
+  }
 
   // Final NFC pass on the assembled key. Each part is already NFC, but this is
   // the one chokepoint every PSI key string flows through, so it also covers the
@@ -1740,11 +1796,26 @@ export function buildKeyStrings(
     ),
   );
 
-  if (result.size > KEY_STRING_WARN_THRESHOLD) {
+  // The width bound is measured on the assembled, DEDUPLICATED candidate set,
+  // which is what a record contributes to the round, and it binds the fan-out
+  // producer: a row that fans out at all takes the drop, including one that also
+  // expands fuzzily, whose combined width the fuzzy work settles when it sets its
+  // own factor. For a row that only expands fuzzily the same number stays the
+  // advisory it has been -- that producer is inert here, and pre-empting its
+  // width behavior would decide it from the wrong side.
+  if (result.size > MAX_KEY_CANDIDATES_PER_ROW) {
+    if (fansOut)
+      return dropRowFromKeyRound(
+        key,
+        index,
+        `realizes ${result.size} candidate values, more than the ` +
+          `${MAX_KEY_CANDIDATES_PER_ROW} one record may contribute to one key`,
+      );
     logger.warn(
-      `row ${index}, key "${redactAndSanitizeForDisplay(key.name)}": cross-product produced ` +
-        `${result.size} key strings (>${KEY_STRING_WARN_THRESHOLD}); fan-out ` +
-        "in dual-party-output exchanges may degrade privacy guarantees",
+      `row ${index}, key "${redactAndSanitizeForDisplay(key.name)}": ` +
+        `cross-product produced ${result.size} key strings ` +
+        `(>${MAX_KEY_CANDIDATES_PER_ROW}); a wide per-record expansion in ` +
+        "dual-party-output exchanges may degrade privacy guarantees",
     );
   }
 
@@ -1756,20 +1827,20 @@ export function buildKeyStrings(
 /**
  * An {@link IndexableIterable} over a single {@link LinkageKey} round,
  * bridging the {@link StandardizedDataset} + {@link buildKeyStrings} pipeline
- * to the `Array<IndexableIterable<string | undefined>>` interface required by
- * `linkViaPSI`.
+ * to the `Array<IndexableIterable<KeyCandidates>>` interface required by
+ * `linkViaPSI` and `linkViaSinglePassPSI`.
  *
- * Per-row behaviour:
- * - `null` from {@link buildKeyStrings} -> `undefined` (record excluded).
- * - Singleton `Set<string>` -> the one string.
- * - Multi-value `Set<string>` -> refused: fan-out matching is not implemented,
- *   and dropping the record from the round instead would narrow matching while
- *   the terms declare each candidate matches independently. Refused before the
- *   exchange runs by {@link assertFanOutImplemented}; this is the same refusal at
- *   the point of harm, for a fan-out that reached the key builder anyway.
+ * Per-row behaviour, the three {@link KeyCandidates} cases:
+ * - `null` from {@link buildKeyStrings} -> `undefined` (record excluded from
+ *   this round, and eligible for later keys).
+ * - Singleton `Set<string>` -> the one string, unwrapped.
+ * - Multi-value `Set<string>` -> the whole set, every candidate the record
+ *   realized. Narrowing it here would match on less than the terms declare;
+ *   matching on the set is what is not implemented, and the strategy consuming it
+ *   refuses ({@link fanOutReachedMatchingRefusal}) rather than narrowing.
  */
 export class StandardizedKeyIterable {
-  [index: number]: string | undefined;
+  [index: number]: KeyCandidates;
 
   readonly length: number;
   private readonly key: LinkageKey;
@@ -1799,25 +1870,28 @@ export class StandardizedKeyIterable {
     });
   }
 
-  private valueAt(index: number): string | undefined {
+  private valueAt(index: number): KeyCandidates {
     const result = buildKeyStrings(
       this.key,
       this.dataset,
       index,
       this.isReceiver,
     );
+    // An empty set is the record-excluded sentinel like `null`, and a singleton
+    // is unwrapped, so a set that survives to a consumer always carries two or
+    // more candidates. `""` is a real value and reaches the round as one.
     if (result === null || result.size === 0) return undefined;
-    if (result.size > 1) throw fanOutReachedKeyBuilderRefusal();
-    return result.values().next().value as string;
+    if (result.size === 1) return result.values().next().value as string;
+    return result;
   }
 
-  *[Symbol.iterator](): Iterator<string | undefined> {
+  *[Symbol.iterator](): Iterator<KeyCandidates> {
     for (let i = 0; i < this.length; i++) {
       yield this.valueAt(i);
     }
   }
 
-  at(index: number): string | undefined {
+  at(index: number): KeyCandidates {
     if (index < 0 || index >= this.length) return undefined;
     return this.valueAt(index);
   }
@@ -1916,21 +1990,22 @@ function declaredFanOutFunction(
  * matching begins.
  *
  * Matching runs on a single value per record: a record whose value expands into
- * several match candidates contributes no key at all, so a fan-out term would
- * silently match FEWER records while the consent surface states each candidate
- * matches independently. That is the disclosure-fidelity gap this refusal closes,
- * the fan-out sibling of `assertAlgorithmImplemented` and
+ * several match candidates has no round to enter, so a fan-out term reaches the
+ * wire only to abort the run at its first splitting row -- and with no refusal at
+ * all it would match FEWER records while the consent surface states each
+ * candidate matches independently. That is the disclosure-fidelity gap this
+ * refusal closes, the fan-out sibling of `assertAlgorithmImplemented` and
  * `assertDeduplicateImplemented` in `exchange.ts`.
  *
  * Both authoring surfaces a fan-out step can reach are checked, because both
- * narrow: a standardization transformation feeds {@link StandardizedField}, whose
- * multi-value rows drop out of the key round, and a linkage-key element transform
- * feeds {@link buildKeyStrings}, which cannot fan out at all. `standardization` is
- * omitted where the caller no longer holds one (the run boundary reads a prepared
- * exchange, which retains the built dataset rather than the spec); what covers
- * that half there is {@link buildKeyStrings}'s own refusal, which fires as keys
- * are built -- at the narrowing, but after this party's terms have gone on the
- * wire.
+ * realize a candidate set no strategy can consume: a standardization
+ * transformation feeds {@link StandardizedField}, and a linkage-key element
+ * transform feeds {@link buildKeyStrings}; either way the candidates cross into
+ * the key's candidate set. `standardization` is omitted where the caller no longer
+ * holds one (the run boundary reads a prepared exchange, which retains the built
+ * dataset rather than the spec); what covers that half there is
+ * {@link fanOutReachedMatchingRefusal}, which fires as a round is built -- at the
+ * point of harm, but after this party's terms have gone on the wire.
  *
  * The two surfaces carry the same message under DIFFERENT error classes, because
  * they differ in whose content the fault is. A `standardization` is only ever this

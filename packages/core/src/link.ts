@@ -9,6 +9,10 @@ import {
   singlePassExchangeExceedsCap,
   singlePassReplyByteCap,
 } from "./connection/frameSize";
+import {
+  fanOutReachedMatchingRefusal,
+  type KeyCandidates,
+} from "./standardization";
 import { singleIssueArray } from "./utils/singleIssueArray";
 import {
   assertPartnerIndexCount,
@@ -61,6 +65,19 @@ type IterationMap = Array<IndexIterationPair>;
 
 export interface IndexableIterable<T> extends Iterable<T> {
   [index: number]: T | undefined;
+}
+
+// Both strategies run one value per record, so a record carrying several
+// candidates has no round to enter: it is refused where it would be consumed
+// rather than narrowed to one candidate or dropped from the round, either of
+// which matches on less than the terms declare. Key realization carries the whole
+// candidate set (buildKeyStrings), so this seam is the only one that cannot honor
+// it, and it is the single point both strategies read a record's value through.
+// docs/spec/PROTOCOL.md (Fan-out matching) specifies the value-level rounds that
+// replace the refusal.
+function requireSingleCandidate(value: KeyCandidates): string | undefined {
+  if (value === undefined || typeof value === "string") return value;
+  throw fanOutReachedMatchingRefusal();
 }
 
 function getUnidentifiedIndices(
@@ -148,7 +165,10 @@ function removeDuplicatesAndUndefineds(
  * @param conn - Open connection to the exchange partner.
  * @param data - One entry per linkage key. Each entry is an iterable over all
  *   local records (indexed by row position) yielding the record's value for
- *   that key, or `undefined` if the record has no value for it.
+ *   that key, or `undefined` if the record has no value for it. A record
+ *   yielding a candidate SET is refused rather than matched on one of them:
+ *   fan-out matching runs under single-pass only, and is not implemented there
+ *   either (docs/spec/PROTOCOL.md, Fan-out matching).
  * @param partnerRecordCount - The partner's raw row count, exchanged over the
  *   encrypted channel during role resolution. It is the authenticated bound the
  *   partner-returned row indices are checked against before they reach the
@@ -167,7 +187,7 @@ export async function linkViaPSI(
   },
   participant: PSIParticipant,
   conn: MessageConnection,
-  data: Array<IndexableIterable<string | undefined>>,
+  data: Array<IndexableIterable<KeyCandidates>>,
   partnerRecordCount: number,
   verbosity: number = 0,
   setStage?: (id: string) => void,
@@ -190,7 +210,10 @@ export async function linkViaPSI(
       let dataWithDuplicatesAndUndefineds: Array<string | undefined>;
       let unidentifiedIndices: Array<number> | undefined;
       if (j === 0) {
-        dataWithDuplicatesAndUndefineds = Array.from(data[j]);
+        dataWithDuplicatesAndUndefineds = Array.from(
+          data[j],
+          requireSingleCandidate,
+        );
         indexIterationMap = Array(dataWithDuplicatesAndUndefineds.length).fill(
           undefined,
         );
@@ -200,7 +223,7 @@ export async function linkViaPSI(
       } else {
         unidentifiedIndices = getUnidentifiedIndices(indexIterationMap);
         dataWithDuplicatesAndUndefineds = unidentifiedIndices.map((i) => {
-          return data[j][i];
+          return requireSingleCandidate(data[j][i]);
         });
       }
       const [data_j, unmappedIndices] = removeDuplicatesAndUndefineds(
@@ -486,7 +509,7 @@ export async function linkViaSinglePassPSI(
   },
   participant: PSIParticipant,
   conn: MessageConnection,
-  data: Array<IndexableIterable<string | undefined>>,
+  data: Array<IndexableIterable<KeyCandidates>>,
   partnerRecordCount: number,
   withholdSenderTable: boolean = false,
   verbosity: number = 0,
@@ -821,7 +844,7 @@ export async function linkViaSinglePassPSI(
 // themselves. "" is a real value with its own index, distinct from -1
 // (docs/spec/PROTOCOL.md, Key input data).
 function getDistinctValuesAndIndices(
-  data: Array<IndexableIterable<string | undefined>>,
+  data: Array<IndexableIterable<KeyCandidates>>,
 ): {
   distinctValues: Array<string>;
   distinctValueIndexTable: Array<Array<number>>;
@@ -832,7 +855,7 @@ function getDistinctValuesAndIndices(
   const distinctValueIndexTable: Array<Array<number>> = [];
   let numRecords = 0;
   for (let j = 0; j < data.length; ++j) {
-    const column = Array.from(data[j]);
+    const column = Array.from(data[j], requireSingleCandidate);
     if (j === 0) {
       numRecords = column.length;
     } else if (column.length !== numRecords) {

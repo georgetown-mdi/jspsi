@@ -30,6 +30,7 @@ import {
   type MessageConnection,
 } from "../src/connection/messageConnection";
 import type { AssociationTable } from "../src/types";
+import { UsageError } from "../src/errors";
 import { sortAssociationTable } from "../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
@@ -262,6 +263,98 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
   );
   expect(singlePassSender).toStrictEqual(cascadeSender);
   expect(singlePassReceiver).toStrictEqual(cascadeReceiver);
+});
+
+// --- both strategies: a record carrying several candidates is refused ---------
+// Key realization carries every candidate a record realizes (buildKeyStrings),
+// and matching on that set is what is not implemented: each strategy refuses the
+// record where it would consume it rather than narrowing to one candidate or
+// dropping the record, either of which matches on less than the terms declare. A
+// declared fan-out is refused before the exchange runs (assertFanOutImplemented);
+// this is the same fail-closed behavior at the point of harm, for a candidate set
+// that reached a round anyway.
+test("a candidate set reaching either strategy is refused, not narrowed", async () => {
+  const withCandidateSet: Array<Array<string | Set<string> | undefined>> = [
+    ["A", new Set(["B", "C"])],
+  ];
+  const [conn] = createMessagePipe();
+  const participant = new PSIParticipant(
+    "server",
+    psiLibrary,
+    { role: "starter", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+
+  // Refused before any frame moves: the pipe's other end is never read, so a
+  // refusal that leaked past this point would hang rather than pass. The class is
+  // asserted too -- the CLI classifies a UsageError as a configuration fault.
+  const runs = [
+    () =>
+      linkViaPSI(
+        { cardinality: "one-to-one" },
+        participant,
+        conn,
+        withCandidateSet,
+        1,
+        -1,
+      ),
+    () =>
+      linkViaSinglePassPSI(
+        { cardinality: "one-to-one" },
+        participant,
+        conn,
+        withCandidateSet,
+        1,
+        false,
+        -1,
+      ),
+  ];
+  for (const run of runs) {
+    await expect(run()).rejects.toThrow(UsageError);
+    await expect(run()).rejects.toThrow(/fan-out/);
+  }
+});
+
+test("a single-candidate row is unaffected by that refusal", async () => {
+  // The sibling that keeps the refusal from swallowing ordinary rows: a realized
+  // singleton reaches a strategy as a bare string, and "" is a real value.
+  const senderData = [["A", ""]];
+  const receiverData = [["A", ""]];
+  const [senderConn, receiverConn] = createMessagePipe();
+  const sender = new PSIParticipant(
+    "server",
+    psiLibrary,
+    { role: "starter", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const receiver = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const [senderResult] = await Promise.all([
+    linkViaPSI(
+      { cardinality: "one-to-one" },
+      sender,
+      senderConn,
+      senderData,
+      2,
+      -1,
+    ),
+    linkViaPSI(
+      { cardinality: "one-to-one" },
+      receiver,
+      receiverConn,
+      receiverData,
+      2,
+      -1,
+    ),
+  ]);
+  expect(sortAssociationTable(senderResult)).toStrictEqual([
+    [0, 1],
+    [0, 1],
+  ]);
 });
 
 // --- linkViaSinglePassPSI: withholding the sender's table from a blind helper --

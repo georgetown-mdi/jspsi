@@ -484,9 +484,9 @@ export function prepareForExchange(
     );
 
   // Fail closed on a transform that fans one value out into several match
-  // candidates: matching runs on a single value per record, so a splitting record
-  // would contribute no key at all and match less than the terms describe. Run
-  // over the RESOLVED standardization (authored or default,
+  // candidates: matching runs on a single value per record, so a splitting
+  // record's candidate set has no round to enter and the run would abort once it
+  // reached one. Run over the RESOLVED standardization (authored or default,
   // which declares no fan-out) plus the terms' element transforms, so both
   // authoring surfaces are covered; the terms half is refused again at the run
   // boundary. See assertFanOutImplemented.
@@ -790,12 +790,12 @@ export async function runExchange(
   assertAlgorithmImplemented(linkageTerms.algorithm);
 
   // Refuse a fan-out element transform before the terms go on the wire, so a
-  // PreparedExchange built without going through prepareForExchange cannot run a
-  // key whose splitting records would silently drop out of the round. This reaches
-  // the terms half only: a PreparedExchange retains the built dataset, not the
-  // standardization spec, so a fan-out authored there and assembled outside
-  // prepareForExchange is refused when its first splitting row builds a key --
-  // at the narrowing, but after this party's terms have gone on the wire. See
+  // PreparedExchange built without going through prepareForExchange cannot start
+  // a run that aborts at its first splitting row. This reaches the terms half
+  // only: a PreparedExchange retains the built dataset, not the standardization
+  // spec, so a fan-out authored there and assembled outside prepareForExchange is
+  // refused when that row's candidate set reaches the linkage strategy -- at the
+  // point of harm, but after this party's terms have gone on the wire. See
   // assertFanOutImplemented.
   assertFanOutImplemented(linkageTerms);
 

@@ -1089,7 +1089,7 @@ A step may produce `null` to signal that the record has no valid value for this 
 
 ### Fan-out (multi-value fields)
 
-> **Not yet implemented:** matching on the values `split_on` produces is not implemented, and an exchange whose standardization or linkage-key transforms declare `split_on` is refused before it runs -- running it would drop every splitting row from the round instead of matching each value, narrowing the match where this section describes a widening. Fan-out is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). The description below is the intended design.
+> **Not yet implemented:** matching on the values `split_on` produces is not implemented, and an exchange whose standardization or linkage-key transforms declare `split_on` is refused before it runs -- a splitting row's several values have no round to enter, so running it would abort rather than match each value. Fan-out is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). The description below is the intended design.
 
 The `split_on` function produces `set<string>` instead of a single `string`. When a transformation ends with a set, the field carries multiple candidate values. Each value generates a separate PSI entry for the row, but all entries retain the original row identifier so that a match resolves back to the source row.
 

@@ -30,9 +30,9 @@
  * different reason. The expansion itself is implemented and gated on this flag
  * in `buildKeyStrings` (`standardization.ts`), which builds the whole candidate
  * set for a fuzzy element. What is missing is downstream: a PSI round consumes
- * ONE value per record (`StandardizedKeyIterable` refuses a multi-candidate row,
- * and `linkViaPSI` takes one value per row and excludes a value that recurs
- * locally), so several candidates per record have nowhere to go. Flipping this
+ * ONE value per record (`linkViaPSI` and `linkViaSinglePassPSI` refuse a
+ * multi-candidate row, and take one value per row that they exclude when it
+ * recurs locally), so several candidates per record have nowhere to go. Flipping this
  * flag must land with the round that consumes a candidate set -- including a
  * decision on how a record matching several partner records through different
  * candidates is attributed, which the current one-to-one accounting has no

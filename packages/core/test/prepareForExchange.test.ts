@@ -241,8 +241,8 @@ describe("prepareForExchange: a deduplicating term is refused", () => {
 
 describe("prepareForExchange: a fan-out transform is refused", () => {
   // Matching runs on a single value per record, so a record whose value splits
-  // contributes no key at all -- fewer matches than the terms describe. Refuse
-  // before any connection rather than run the narrower matching silently.
+  // realizes a candidate set no linkage strategy can consume. Refuse before any
+  // connection rather than abort the run once a splitting row reaches a round.
   const splittingStandardization: Standardization = [
     {
       output: "first_name",
@@ -289,8 +289,8 @@ describe("prepareForExchange: a fan-out transform is refused", () => {
   });
 
   test("a linkage-key element transform declaring split_on is refused", () => {
-    // The second authoring surface: an element transform cannot fan out at all
-    // (it would collapse to one joined value), so it is refused on the same terms.
+    // The second authoring surface: an element transform fans out into the key's
+    // cross-product like the field path, so it is refused on the same terms.
     const prepare = () =>
       prepareForExchange(
         { linkageTerms: splittingElementTerms, metadata },

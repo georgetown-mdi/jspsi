@@ -897,8 +897,9 @@ function elementBreadthMarker(
   // suppression: no matching of any breadth happens, so naming a breadth would
   // describe a run that does not occur. Fan-out is that case today -- core
   // refuses a declared `split_on` before the exchange runs
-  // (assertFanOutImplemented) rather than dropping the records whose values
-  // split -- and the glossary line for the step states the refusal.
+  // (assertFanOutImplemented) rather than matching on the candidate set a
+  // splitting record realizes -- and the glossary line for the step states the
+  // refusal.
   if (declaresFanOut(element)) return displayText`not supported`;
   // An element whose pipeline produces no value for ANY record matches nothing,
   // not more -- the opposite of a broadening, and a narrowing-to-empty the separate
