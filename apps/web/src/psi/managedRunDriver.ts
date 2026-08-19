@@ -221,9 +221,12 @@ export function runManagedExchangeInBrowser(
           // other context's run of this record -- for a duration the partner
           // picks, up to the close ceiling. The drain still runs to completion,
           // and swallows its own faults, so the failure below is what the run
-          // surfaces. Teardown runs synchronously as far as its first await, so
-          // the broker id it frees is already released when this throw releases
-          // the lock -- only the drain outlives the failure.
+          // surfaces. Teardown issues the disconnect's socket close synchronously
+          // before this throw, but the broker frees the registration only in its
+          // own socket-close handler one round trip later, so the collision
+          // window this throw leaves behind is that round trip -- milliseconds
+          // against a retry that arrives no sooner than the operator's or
+          // scheduler's next attempt.
           void teardown(peer, conn, mc);
           throw error;
         }
@@ -272,14 +275,19 @@ export function runManagedExchangeInBrowser(
  * accurate outcome, which is also what lets both the failed handshake and the
  * data exchange start it without awaiting it.
  *
- * The broker id is freed FIRST because neither call site awaits this: the run's
- * outcome surfaces -- and with it the single-writer lock over this record
- * releases -- while the drain is still parked on a wait the partner holds, up to
- * the close ceiling. A failed handshake rotates nothing, and the rendezvous peer
- * id is a pure function of the stored secret, so the record's own next attempt
- * derives the same id; a registration still standing behind the released lock
- * makes the broker refuse that attempt as taken (docs/spec/WEBRTC_TRANSPORT.md)
- * rather than let it connect. Freeing the id costs the drain nothing:
+ * The disconnect is issued FIRST because neither call site awaits this: the
+ * run's outcome surfaces -- and with it the single-writer lock over this
+ * record releases -- while the drain is still parked on a wait the partner
+ * holds, up to the close ceiling. Issuing it does not itself free the
+ * registration; the broker frees it in its own socket-close handler one round
+ * trip later, so ordering the disconnect first bounds, rather than removes,
+ * that window. A failed handshake rotates nothing, and the rendezvous peer id
+ * is a pure function of the stored secret, so the record's own next attempt
+ * derives the same id, and a registration still standing across that round
+ * trip makes the broker refuse the attempt as taken
+ * (docs/spec/WEBRTC_TRANSPORT.md) rather than let it connect -- milliseconds
+ * against a retry that arrives no sooner than the operator's or scheduler's
+ * next attempt. Issuing the disconnect costs the drain nothing:
  * `disconnect()` drops the signaling socket and deliberately leaves the data
  * channel standing, so the close behind it still waits for the peer to take the
  * final frame (pinned against the real stack in

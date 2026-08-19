@@ -95,9 +95,10 @@ interface CloseTiming {
   received: Array<ReceivedFrame>;
   closeResolvedAt: number;
   outcomes: Array<PeerCloseOutcome>;
-  /** Whether the sender's broker registration was already gone when its close
-   * resolved -- read before the default order frees it, so a `disconnect` that
-   * did nothing cannot pass for one that did. */
+  /** Whether the sender's client had already issued its broker disconnect (a
+   * client-side flag; the broker's own release happens in its socket-close
+   * handler one round trip later) -- read before the default order calls it,
+   * so a `disconnect` that did nothing cannot pass for one that did. */
   senderDisconnectedAtClose: boolean;
 }
 
