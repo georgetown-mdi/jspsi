@@ -12,6 +12,7 @@ import {
   getDefaultLinkageTerms,
   getLogger,
   inferMetadata,
+  MAX_NAME_LENGTH,
   OperatorConfigError,
   StandardizationTermsError,
   UsageError,
@@ -448,6 +449,115 @@ test("validateInvite: an all-linkage input carries an empty disclosed subset", a
   });
   const token = await decodeInvitation(ready.invitation);
   expect(token.disclosedPayloadColumns).toEqual([]);
+});
+
+// --- an over-long disclosed column name is refused pre-mint ------------------
+
+/** A scratch directory holding an input whose last column is the given name, plus
+ *  fresh (non-existent) config/key paths inside it, so a refusal can be checked to
+ *  have written neither. */
+function fixtureWithTrailingColumn(name: string): {
+  input: string;
+  options: CommonBootstrapOptions;
+} {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-name-"));
+  tmpDirs.push(dir);
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    `first_name,last_name,dob,ssn,${name}\n` +
+      "Alice,Smith,1990-01-02,123456789,vip\n",
+  );
+  return {
+    input,
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+  };
+}
+
+/** A disclosed column name one character past the carriable ceiling: inferred as
+ *  an `other` payload column, so it is transmitted and its name is carried. */
+const OVERLONG_COLUMN = "n".repeat(MAX_NAME_LENGTH + 1);
+
+test("validateInvite: online refuses an over-long disclosed column name before minting", async () => {
+  // The header is unbounded by any schema, so without the mint-boundary guard the
+  // name reaches the token's own name bound inside encodeInvitation as a raw
+  // ZodError. The operator gets the typed refusal naming the position instead.
+  const { input, options } = fixtureWithTrailingColumn(OVERLONG_COLUMN);
+  let thrown: unknown;
+  try {
+    await validateInvite({
+      resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+      options,
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  const message = String(thrown);
+  expect(message).toMatch(/metadata column 5 /);
+  expect(message).toContain(`${MAX_NAME_LENGTH}-character limit`);
+  // The offending name is located, not echoed: it is longer than any message that
+  // would carry it.
+  expect(message).not.toContain(OVERLONG_COLUMN);
+  expect(fs.existsSync(options.configFile)).toBe(false);
+  expect(fs.existsSync(options.keyFile)).toBe(false);
+});
+
+test("handler: the offline infer path refuses an over-long disclosed name, writing nothing", async () => {
+  // Driven through the handler, so the refusal is asserted where the invitation
+  // is printed and the config and key file are written -- the offline mint's
+  // commit step, which a failure in the no-commit phase never reaches.
+  const { input, options } = fixtureWithTrailingColumn(OVERLONG_COLUMN);
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: [input],
+      "config-file": options.configFile,
+      "key-file": options.keyFile,
+      "log-level": "error",
+    } as unknown as Arguments);
+    // Read before the finally block restores the spies.
+    const stdout = stdio.stdoutWrites.join("");
+    const stderr = stdio.stderrWrites.join("");
+    // Exit 64: the shared usage-error classification, not a transport or
+    // internal failure.
+    expect(exit).toHaveBeenCalledWith(64);
+    expect(fs.existsSync(options.configFile)).toBe(false);
+    expect(fs.existsSync(options.keyFile)).toBe(false);
+    // The invitation is the only thing stdout ever carries, and it was never
+    // minted.
+    expect(stdout).toBe("");
+    expect(stderr).toMatch(/metadata column 5 /);
+    expect(stderr).toContain(`${MAX_NAME_LENGTH}-character limit`);
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
+  }
+});
+
+test("validateInvite: a disclosed column name at the ceiling still mints", async () => {
+  // The boundary in the other direction, so the refusal cannot be an off-by-one
+  // that costs a legitimate header its invitation.
+  const atCeiling = "n".repeat(MAX_NAME_LENGTH);
+  const { input, options } = fixtureWithTrailingColumn(atCeiling);
+  const ready = await validateInvite({
+    resolved: { mode: "offline", input },
+    options,
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.disclosedPayloadColumns).toEqual([atCeiling]);
 });
 
 // --- linkage strategy selection ----------------------------------------------

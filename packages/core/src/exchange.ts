@@ -385,8 +385,9 @@ export function prepareForExchange(
   // column's name rides the payload frame to the partner and is written into this
   // party's own exchange record, and both bound it; metadata inferred from a CSV
   // header passes through no schema, so without this the partner's parse is the
-  // first enforcement -- reached only after the frame is sent. See
-  // assertDisclosedNamesCarriable.
+  // first enforcement -- reached only after the frame is sent. Refused again at the
+  // run boundary (runExchange), so the refusal holds even for a PreparedExchange
+  // built without going through this function. See assertDisclosedNamesCarriable.
   assertDisclosedNamesCarriable(metadata, linkageTerms.output);
 
   // Fail fast when this party can no longer produce a payload disclosure it
@@ -797,6 +798,13 @@ export async function runExchange(
   // at the narrowing, but after this party's terms have gone on the wire. See
   // assertFanOutImplemented.
   assertFanOutImplemented(linkageTerms);
+
+  // Refuse a disclosed column whose name is too long to carry before anything goes
+  // on the wire. prepareForExchange refuses it at prepare time; this holds for a
+  // PreparedExchange assembled without going through it, where the partner's parse
+  // of the payload frame would otherwise be the first enforcement -- reached only
+  // after this party has transmitted the name. See assertDisclosedNamesCarriable.
+  assertDisclosedNamesCarriable(prepared.metadata, linkageTerms.output);
 
   const { psiLibrary } = options;
   const onStage = options.onStage ?? (() => {});

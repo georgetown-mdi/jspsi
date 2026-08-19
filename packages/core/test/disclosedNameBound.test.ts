@@ -4,7 +4,7 @@ import {
   assertDisclosedNamesCarriable,
   exchangePayloads,
 } from "../src/payloadExchange";
-import { prepareForExchange } from "../src/exchange";
+import { prepareForExchange, runExchange } from "../src/exchange";
 import { overlongDisclosedColumnPositions } from "../src/config/metadata";
 import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
 import { UsageError } from "../src/errors";
@@ -13,6 +13,9 @@ import {
   ConnectionError,
 } from "../src/connection/messageConnection";
 
+import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
+
+import type { MessageConnection } from "../src/connection/messageConnection";
 import type { Metadata } from "../src/config/metadata";
 import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 
@@ -233,6 +236,76 @@ test("prepareForExchange: accepts an oversized header the metadata does not tran
       ["first_name", pastCeiling],
     ),
   ).not.toThrow();
+});
+
+// --- runExchange wiring (the bypass seat) ------------------------------------
+
+// The run boundary re-checks the bound, so a PreparedExchange assembled without
+// going through prepareForExchange is refused before anything reaches the
+// partner. Every collaborator the run would touch throws when used, so the
+// refusal is what the rejection can come from -- a connection frame or a PSI call
+// would surface as its own error, failing these assertions.
+const failIfUsed = (what: string) => (): never => {
+  throw new Error(`${what} was used past the disclosed-name refusal`);
+};
+const unusableConnection = (): MessageConnection => ({
+  send: failIfUsed("the connection"),
+  receive: failIfUsed("the connection"),
+  close: failIfUsed("the connection"),
+});
+const unusablePsiLibrary = new Proxy({} as PSILibrary, {
+  get: failIfUsed("the PSI library"),
+});
+
+test("runExchange refuses an oversized disclosed name before it connects", async () => {
+  // Built legitimately -- a carriable disclosed name -- then given metadata whose
+  // disclosed name is over the ceiling, the way a caller that skipped
+  // prepareForExchange could.
+  const prepared = prepareForExchange({ linkageTerms: terms }, "Sender", rows, [
+    "first_name",
+    atCeiling,
+  ]);
+  prepared.metadata = metadataSending(pastCeiling);
+
+  const run = runExchange(unusableConnection(), "initiator", prepared, {
+    psiLibrary: unusablePsiLibrary,
+  });
+  await expect(run).rejects.toThrow(UsageError);
+  await expect(run).rejects.toThrow(/metadata column 2 /);
+});
+
+test("runExchange reads the output declaration the run carries, not the one prepare gated on", async () => {
+  // The other half of the bypass: an oversized name prepared under terms entitling
+  // the partner to no result -- where nothing is carried, so prepare passes it --
+  // then given sharing terms, which is when the name would travel.
+  const prepared = prepareForExchange(
+    { linkageTerms: { ...terms, output: SHARES_NOTHING } },
+    "Sender",
+    rows,
+    ["first_name", pastCeiling],
+  );
+  prepared.linkageTerms = { ...terms, output: SHARES };
+
+  const run = runExchange(unusableConnection(), "initiator", prepared, {
+    psiLibrary: unusablePsiLibrary,
+  });
+  await expect(run).rejects.toThrow(UsageError);
+  await expect(run).rejects.toThrow(/metadata column 2 /);
+});
+
+test("runExchange runs past the guard for a carriable disclosed name", async () => {
+  // The sibling of the refusal: with the same unusable collaborators, a disclosed
+  // name at the ceiling reaches the terms exchange, so the failure is the
+  // connection's -- proof the refusals above fired on the name rather than on the
+  // fixtures.
+  const prepared = prepareForExchange({ linkageTerms: terms }, "Sender", rows, [
+    "first_name",
+    atCeiling,
+  ]);
+  const run = runExchange(unusableConnection(), "initiator", prepared, {
+    psiLibrary: unusablePsiLibrary,
+  });
+  await expect(run).rejects.toThrow(/the connection was used/);
 });
 
 // --- the gate and the wire agree ---------------------------------------------
