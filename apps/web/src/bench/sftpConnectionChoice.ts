@@ -1,3 +1,5 @@
+import { SPLIT_DIRECTORY_RETAIN_REQUIREMENT } from "./sftpConnectionForm";
+
 import type { SFTPEndpoint } from "@psilink/core";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
@@ -40,6 +42,29 @@ export function sftpEndpointForConnection(
         }
       : {}),
   };
+}
+
+/**
+ * Why the authored connection cannot be used with the exchange's file-handling
+ * choices as they stand right now -- a split-directory connection needs retain
+ * mode -- or undefined when the two agree.
+ *
+ * The connection and the retain choice are authored on separate cards and change
+ * independently, so the precondition the authoring form states while both are in
+ * front of the operator is re-asked wherever the two are known together. Without
+ * that, retain mode turned off after the connection was authored reaches the run
+ * as a refused job, and on the invite path only after a partner-facing accept kit
+ * was already minted for a rendezvous the run will not conduct.
+ */
+export function splitDirectoryRetainProblem(
+  connection: SftpConnectionProjection | null | undefined,
+  retainFiles: boolean,
+): string | undefined {
+  if (connection == null || retainFiles) return undefined;
+  const split =
+    connection.inboundPath !== undefined &&
+    connection.outboundPath !== undefined;
+  return split ? SPLIT_DIRECTORY_RETAIN_REQUIREMENT : undefined;
 }
 
 /** The connection's display label: its locator (`host[:port] [directories]`), so

@@ -3,7 +3,9 @@ import { describe, expect, test } from "vitest";
 import {
   sftpConnectionLabel,
   sftpEndpointForConnection,
+  splitDirectoryRetainProblem,
 } from "@bench/sftpConnectionChoice";
+import { SPLIT_DIRECTORY_RETAIN_REQUIREMENT } from "@bench/sftpConnectionForm";
 
 describe("sftpEndpointForConnection", () => {
   test("authors the endpoint from the connection's locator fields verbatim", () => {
@@ -63,6 +65,61 @@ describe("sftpEndpointForConnection", () => {
     });
     expect("inboundPath" in endpoint).toBe(false);
     expect("outboundPath" in endpoint).toBe(false);
+  });
+});
+
+describe("splitDirectoryRetainProblem", () => {
+  const split = {
+    host: "sftp.example.gov",
+    inboundPath: "/exchange/in",
+    outboundPath: "/exchange/out",
+  };
+
+  test("blocks a split connection once retain mode is turned back off", () => {
+    // The state the authoring form cannot catch: the connection was authored
+    // under retain mode, and the toggle on the other card was flipped after. The
+    // block carries the form's own requirement, so both name the same control.
+    const problem = splitDirectoryRetainProblem(split, false);
+    expect(problem).toBe(SPLIT_DIRECTORY_RETAIN_REQUIREMENT);
+    expect(problem).toContain("Keep every exchange file");
+  });
+
+  test("retain mode back on clears the block", () => {
+    expect(splitDirectoryRetainProblem(split, true)).toBeUndefined();
+  });
+
+  test("a single-directory connection is unaffected by the toggle", () => {
+    for (const retainFiles of [true, false]) {
+      expect(
+        splitDirectoryRetainProblem(
+          { host: "sftp.example.gov", path: "/exchange" },
+          retainFiles,
+        ),
+      ).toBeUndefined();
+      expect(
+        splitDirectoryRetainProblem({ host: "sftp.example.gov" }, retainFiles),
+      ).toBeUndefined();
+    }
+  });
+
+  test("no connection is no block, before the fetch resolves or with none set up", () => {
+    expect(splitDirectoryRetainProblem(null, false)).toBeUndefined();
+    expect(splitDirectoryRetainProblem(undefined, false)).toBeUndefined();
+  });
+
+  test("a half pair is not a split, the same shape the endpoint refuses to emit", () => {
+    expect(
+      splitDirectoryRetainProblem(
+        { host: "sftp.example.gov", inboundPath: "/exchange/in" },
+        false,
+      ),
+    ).toBeUndefined();
+    expect(
+      splitDirectoryRetainProblem(
+        { host: "sftp.example.gov", outboundPath: "/exchange/out" },
+        false,
+      ),
+    ).toBeUndefined();
   });
 });
 

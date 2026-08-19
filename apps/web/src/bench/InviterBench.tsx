@@ -95,6 +95,10 @@ import {
   webrtcLocatorFromEndpoint,
 } from "./manageOfferModel";
 import { downloadSampleCsvs, sampleInviterFile } from "./sampleData";
+import {
+  sftpEndpointForConnection,
+  splitDirectoryRetainProblem,
+} from "./sftpConnectionChoice";
 import { AgreementTab } from "./AgreementTab";
 import { BenchShell } from "./BenchShell";
 import { CleaningTab } from "./CleaningTab";
@@ -111,7 +115,6 @@ import { TopBar } from "./TopBar";
 import { YourFileSection } from "./YourFileSection";
 import { consoleAcquiredCsv } from "./consoleAcquiredCsv";
 import { restorableSection } from "./stepRestore";
-import { sftpEndpointForConnection } from "./sftpConnectionChoice";
 import { timelineSteps } from "./exchangeRun";
 import { useInviterExchange } from "./useInviterExchange";
 import { useStepHistory } from "./useStepHistory";
@@ -860,6 +863,17 @@ export function InviterBench() {
     let kitEndpoint: AcceptKitEndpoint | undefined;
     if (transport === "sftp") {
       if (sftpConnection == null) return;
+      // The create gate holds a split-directory connection whose retain mode was
+      // turned off after it was authored; repeated here because everything past
+      // this point is partner-facing -- the minted endpoint and the accept kit's
+      // file-handling disclosure -- for a rendezvous the run would refuse.
+      if (
+        splitDirectoryRetainProblem(
+          sftpConnection,
+          exchangeFiles.retainFiles,
+        ) !== undefined
+      )
+        return;
       const sftpEndpoint = sftpEndpointForConnection(sftpConnection);
       connectionEndpoint = sftpEndpoint;
       kitEndpoint = sftpEndpoint;

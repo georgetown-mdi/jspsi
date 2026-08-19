@@ -204,6 +204,8 @@ export function SftpAuthoringForm({
             }
             classNames={{ input: styles.mono }}
             value={values.remoteDirectory}
+            error={fieldError("remoteDirectory")}
+            errorProps={{ role: "alert" }}
             onChange={(event) =>
               update({ remoteDirectory: event.currentTarget.value })
             }

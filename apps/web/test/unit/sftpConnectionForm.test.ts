@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 
 import {
   EMPTY_SFTP_FORM,
+  SPLIT_DIRECTORY_BOTH_HALVES_REQUIREMENT,
+  SPLIT_DIRECTORY_DISTINCT_REQUIREMENT,
   SPLIT_DIRECTORY_RETAIN_REQUIREMENT,
   applyHostInput,
   buildAuthoringRequest,
@@ -211,7 +213,7 @@ describe("sftpFormError (split inbound/outbound directories)", () => {
     expect(sftpFormError(validForm(), false)).toBeUndefined();
   });
 
-  test("rejects two directories that resolve to the same one, in core's words", () => {
+  test("rejects two directories that resolve to the same one, in the console's words", () => {
     for (const outboundDirectory of [
       "/exchange/in",
       "/exchange/in/",
@@ -220,17 +222,42 @@ describe("sftpFormError (split inbound/outbound directories)", () => {
     ]) {
       const error = sftpFormError(splitForm({ outboundDirectory }), true);
       expect(error?.field).toBe("outboundDirectory");
-      expect(error?.message).toBe("inbound_path and outbound_path must differ");
+      expect(error?.message).toBe(SPLIT_DIRECTORY_DISTINCT_REQUIREMENT);
     }
   });
 
-  test("rejects an outbound directory with no inbound one, in core's words", () => {
+  test("an outbound directory with no inbound one lands on the empty inbound field", () => {
+    // The empty half is the one to fill, and it is labelled "Inbound directory"
+    // while the outbound one is set -- so the error attaches there rather than to
+    // the field the operator already filled.
     const error = sftpFormError(
       validForm({ remoteDirectory: "", outboundDirectory: "/exchange/out" }),
       true,
     );
-    expect(error?.field).toBe("outboundDirectory");
-    expect(error?.message).toContain("must be set together");
+    expect(error?.field).toBe("remoteDirectory");
+    expect(error?.message).toBe(SPLIT_DIRECTORY_BOTH_HALVES_REQUIREMENT);
+  });
+
+  test("no split-directory message shows a configuration key the form never names", () => {
+    // Core decides WHEN a pair is wrong and words its rules over `inbound_path`
+    // and `outbound_path`; the form maps each verdict to its own labels, and an
+    // unmapped one falls through in core's words. Driving every pair shape this
+    // form can compose holds that mapping complete: a core rewording lands here
+    // as a snake_case key in front of an operator.
+    const shapes: Array<Partial<SftpConnectionFormValues>> = [
+      { remoteDirectory: "", outboundDirectory: "/exchange/out" },
+      { remoteDirectory: "/exchange/in", outboundDirectory: "/exchange/in" },
+      { remoteDirectory: "/exchange/in", outboundDirectory: "/exchange/./in" },
+      { remoteDirectory: "/exchange/in", outboundDirectory: "relative/out" },
+      { remoteDirectory: "/exchange/in", outboundDirectory: "/exchange/out" },
+    ];
+    for (const shape of shapes) {
+      const message = sftpFormError(validForm(shape), true)?.message;
+      if (message === undefined) continue;
+      expect(message).not.toContain("inbound_path");
+      expect(message).not.toContain("outbound_path");
+      expect(message).not.toContain("server.path");
+    }
   });
 });
 

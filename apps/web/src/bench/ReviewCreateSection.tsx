@@ -17,6 +17,7 @@ import {
 } from "./inviterModel";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
+import { splitDirectoryRetainProblem } from "./sftpConnectionChoice";
 import styles from "./bench.module.css";
 
 import type {
@@ -161,21 +162,34 @@ export function ReviewCreateSection({
   const exchangeFilesBlocked =
     exchangeFilesOffered &&
     exchangeFilesProblems(exchangeFiles, CONFIG_EXCHANGE_FILES).length > 0;
+  // The authored connection and the retain-mode toggle are separate cards, so a
+  // split-directory connection can outlive the retain choice it required: hold
+  // the create here, where both are known, rather than minting a partner-facing
+  // accept kit for a rendezvous the run would then refuse. Read only where this
+  // console conducts the run, since the file-handling choices reach no other
+  // transport's run.
+  const splitDirectoryProblem =
+    exchangeFilesOffered && transport === "sftp"
+      ? splitDirectoryRetainProblem(sftpConnection, exchangeFiles.retainFiles)
+      : undefined;
   const canCreate =
     problems.length === 0 &&
     !minting &&
     !connectionIncomplete &&
+    splitDirectoryProblem === undefined &&
     !exchangeFilesBlocked;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
   const readiness = useDeferredAnnouncement(
     connectionIncomplete
       ? "Set up the SFTP connection above before you can create."
-      : exchangeFilesBlocked
-        ? "Resolve the file-handling settings above before you can create."
-        : problems.length === 0
-          ? "Ready to create the invitation."
-          : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
+      : splitDirectoryProblem !== undefined
+        ? splitDirectoryProblem
+        : exchangeFilesBlocked
+          ? "Resolve the file-handling settings above before you can create."
+          : problems.length === 0
+            ? "Ready to create the invitation."
+            : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
   );
   return (
     <>
@@ -347,11 +361,13 @@ export function ReviewCreateSection({
         >
           {connectionIncomplete
             ? "Set up the SFTP connection above to continue."
-            : exchangeFilesBlocked
-              ? "Resolve the file-handling settings above to continue."
-              : problems.length === 0
-                ? "Ready to create."
-                : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
+            : splitDirectoryProblem !== undefined
+              ? splitDirectoryProblem
+              : exchangeFilesBlocked
+                ? "Resolve the file-handling settings above to continue."
+                : problems.length === 0
+                  ? "Ready to create."
+                  : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
         </p>
       </div>
     </>

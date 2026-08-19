@@ -111,6 +111,7 @@ export function sftpFormFromLocator(
 export type SftpFormField =
   | "host"
   | "username"
+  | "remoteDirectory"
   | "outboundDirectory"
   | "port"
   | "hostKeyFingerprint"
@@ -202,11 +203,72 @@ export const SPLIT_DIRECTORY_RETAIN_REQUIREMENT =
   "outbound directory to use one shared directory.";
 
 /**
- * Core's own verdict on a split directory pair, as its message, or undefined
- * when the pair is coherent. The rules over the pair -- both halves set
- * together, the two resolving to different directories -- are core's single
- * statement, so this composes the connection core would parse and reports what
- * core says rather than restating any rule of its own.
+ * The one-line form of {@link SPLIT_DIRECTORY_RETAIN_REQUIREMENT}, for a
+ * connection summary that has room for a state but not for the remedy in full
+ * (which is stated where the exchange is blocked). It names the same control, so
+ * the summary and the blocked create reason cannot point in different
+ * directions.
+ */
+export const SPLIT_DIRECTORY_RETAIN_SUMMARY =
+  "Its separate inbound and outbound directories need retain mode: turn " +
+  '"Keep every exchange file" back on to use this connection.';
+
+/**
+ * What the console says when a split pair names only its outbound half. It lands
+ * on the empty INBOUND field, the one the operator has to fill, and offers the
+ * other way out of the state -- dropping back to one shared directory.
+ */
+export const SPLIT_DIRECTORY_BOTH_HALVES_REQUIREMENT =
+  "Separate directories need both halves: enter the inbound directory, or " +
+  "clear the outbound directory to use one shared directory.";
+
+/**
+ * What the console says when the two halves name one directory. Worded as
+ * NAMING a different directory rather than as differing text, because core
+ * refuses any pair that resolves to the same directory -- a trailing slash or a
+ * "." segment makes two different strings one folder.
+ */
+export const SPLIT_DIRECTORY_DISTINCT_REQUIREMENT =
+  "The outbound directory must name a different directory from the inbound " +
+  "one: your partner writes to the inbound directory and you write to the " +
+  "outbound one.";
+
+/**
+ * The console's wording for core's split-directory verdicts, keyed by the
+ * message core produces, each with the field the operator fills to resolve it.
+ * Core's refines stay the single statement of WHEN a pair is wrong; these say it
+ * in the labels this form shows, because core words its rules over
+ * `inbound_path` and `outbound_path` -- configuration keys the console never
+ * puts in front of an operator.
+ *
+ * An unmapped verdict falls through in core's own words rather than being
+ * swallowed; the form-model tests drive every pair shape this form can compose
+ * and hold each one to a mapped message.
+ */
+const SPLIT_DIRECTORY_CONSOLE_ERRORS = new Map<string, SftpFormError>([
+  [
+    "inbound_path and outbound_path must be set together; a split " +
+      "directory needs both halves",
+    {
+      field: "remoteDirectory",
+      message: SPLIT_DIRECTORY_BOTH_HALVES_REQUIREMENT,
+    },
+  ],
+  [
+    "inbound_path and outbound_path must differ",
+    {
+      field: "outboundDirectory",
+      message: SPLIT_DIRECTORY_DISTINCT_REQUIREMENT,
+    },
+  ],
+]);
+
+/**
+ * Core's own verdict on a split directory pair, in the console's words and on
+ * the field that resolves it, or undefined when the pair is coherent. The rules
+ * over the pair -- both halves set together, the two resolving to different
+ * directories -- are core's single statement, so this composes the connection
+ * core would parse and asks core rather than restating any rule of its own.
  *
  * `retain_files` is set on the composed options because the caller has already
  * decided the retain precondition; leaving it off would fire core's retain
@@ -215,11 +277,11 @@ export const SPLIT_DIRECTORY_RETAIN_REQUIREMENT =
  * directory named without an inbound one meets core's both-halves-together rule
  * instead of a min-length complaint.
  */
-function splitDirectoryIssue(
+function splitDirectoryError(
   host: string,
   inbound: string,
   outbound: string,
-): string | undefined {
+): SftpFormError | undefined {
   const parsed = ConnectionConfigSchema.safeParse({
     channel: "sftp",
     server: {
@@ -229,7 +291,14 @@ function splitDirectoryIssue(
     },
     options: withRetainModeImplications({ retainFiles: true }),
   });
-  return parsed.success ? undefined : parsed.error.issues[0]?.message;
+  if (parsed.success) return undefined;
+  const coreMessage = parsed.error.issues[0].message;
+  return (
+    SPLIT_DIRECTORY_CONSOLE_ERRORS.get(coreMessage) ?? {
+      field: "outboundDirectory",
+      message: coreMessage,
+    }
+  );
 }
 
 /**
@@ -263,8 +332,7 @@ export function sftpFormError(
       message: "Enter the username for the SFTP account.",
     };
   // Both directory rules are the split's alone: naming no outbound directory
-  // leaves the single shared remote directory exactly as unvalidated as it was,
-  // and the messages land on the outbound field, the one the operator added.
+  // leaves the single shared remote directory exactly as unvalidated as it was.
   const outboundDirectory = values.outboundDirectory.trim();
   if (outboundDirectory !== "") {
     if (!retainFiles)
@@ -272,13 +340,12 @@ export function sftpFormError(
         field: "outboundDirectory",
         message: SPLIT_DIRECTORY_RETAIN_REQUIREMENT,
       };
-    const issue = splitDirectoryIssue(
+    const splitError = splitDirectoryError(
       values.host.trim(),
       values.remoteDirectory.trim(),
       outboundDirectory,
     );
-    if (issue !== undefined)
-      return { field: "outboundDirectory", message: issue };
+    if (splitError !== undefined) return splitError;
   }
   const port = values.port.trim();
   if (port !== "") {

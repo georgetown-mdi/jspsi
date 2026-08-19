@@ -2,10 +2,16 @@ import { useState } from "react";
 
 import { Badge, Button, Group, Stack, Text } from "@mantine/core";
 
-import { EMPTY_SFTP_FORM } from "./sftpConnectionForm";
+import {
+  EMPTY_SFTP_FORM,
+  SPLIT_DIRECTORY_RETAIN_SUMMARY,
+} from "./sftpConnectionForm";
+import {
+  sftpConnectionLabel,
+  splitDirectoryRetainProblem,
+} from "./sftpConnectionChoice";
 import { SftpAuthoringForm } from "./SftpAuthoringForm";
 import { SftpCredentialWarnings } from "./SftpCredentialWarnings";
-import { sftpConnectionLabel } from "./sftpConnectionChoice";
 import styles from "./bench.module.css";
 
 import type { ProbeCeremony } from "./SftpAuthoringForm";
@@ -20,7 +26,9 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  * Two states:
  * - authored: an in-app connection -- shown with edit/clear affordances and the
  *   honest "Ready to try" label (authored, not yet verified against a real run),
- *   plus any non-blocking credential warnings.
+ *   plus any non-blocking credential warnings. A split-directory connection
+ *   whose retain mode has since been turned off is labelled as needing it back
+ *   instead, since the exchange it belongs to cannot run in that state.
  * - authoring required: no connection yet -- the empty state invites authoring, or
  *   a deliberate switch to save-a-file for the operator's own command-line tool.
  *
@@ -69,21 +77,34 @@ export function SftpConnectionCard({
 }) {
   const [formOpen, setFormOpen] = useState(false);
 
+  // The retain-mode toggle lives on a card of its own and can be turned off after
+  // this connection was authored, so the summary re-asks the split-directory
+  // precondition rather than calling a connection the run would refuse ready.
+  const retainProblem = splitDirectoryRetainProblem(connection, retainFiles);
+
   if (connection !== null && !formOpen)
     return (
       <Stack gap="xs" mt="xs">
         <Group gap="xs" align="center">
-          <Badge color="teal" variant="light">
-            Ready to try
+          <Badge
+            color={retainProblem === undefined ? "teal" : "orange"}
+            variant="light"
+          >
+            {retainProblem === undefined ? "Ready to try" : "Needs retain mode"}
           </Badge>
           <Text size="sm">
-            Runs through{" "}
+            {retainProblem === undefined
+              ? "Runs through "
+              : "Set up on this machine, through "}
             <span className={styles.mono}>
               {sftpConnectionLabel(connection)}
             </span>
-            , set up on this machine.
+            {retainProblem === undefined ? ", set up on this machine." : "."}
           </Text>
         </Group>
+        {retainProblem !== undefined && (
+          <Text size="sm">{SPLIT_DIRECTORY_RETAIN_SUMMARY}</Text>
+        )}
         <Text size="sm" c="dimmed">
           The connection is not verified until the exchange runs -- psilink
           checks the server's host key and signs in then. Credentials stay on
