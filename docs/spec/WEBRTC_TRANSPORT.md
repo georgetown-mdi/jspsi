@@ -188,16 +188,33 @@ ceiling. For the web that is the peer connection reaching `failed` or `closed`;
 a transient `disconnected` is not terminal, because the frame is still in flight
 while ICE recovers.
 
-A wait that ends on its ceiling carries no delivery signal, and the exchange
-itself has already succeeded, so the web app raises a non-fatal warning on that
-exit: the run's result stands, and the operator is told the partner may not have
-taken the final frame and to check that their exchange finished. The exit that
-ends on the peer's close raises none -- that close is the delivery signal. The
-notice is best-effort: it reaches the operator only when the drain ends while
-the run is still on screen, so an operator who leaves as the results render is
-told nothing. The exits that end on a dead peer or on a channel already out of
-`open` raise no warning either, so a partner whose stack dies during the drain
-of a locally successful run goes unreported.
+Exactly one exit of the web wait carries a delivery signal: the peer's own close.
+Every other exit leaves the partner's copy in doubt on a run whose result this
+side has already reported, so the web app raises a non-fatal warning on each of
+them. The run's result stands either way; what the operator is told is that the
+partner may not have taken the final frame, and to check that their exchange
+finished.
+
+The wording follows the exit, because the exits do not mean the same thing:
+
+| Exit | What the operator is told |
+| ---- | ------------------------- |
+| The peer closed the channel | Nothing -- that close is the delivery signal |
+| The ceiling ran out | The partner never confirmed taking the final message within the wait, so their exchange may have ended without it |
+| No live peer is left, or the channel was already out of `open` | The connection closed before the partner could confirm, so they may or may not have received it |
+
+The notice is best-effort in two ways. It reaches the operator only when the
+drain ends while the run is still on screen, so an operator who leaves as the
+results render is told nothing. And it speaks for a run that succeeded here, so a
+run that already failed or was cancelled drains the same close silently -- it has
+told the operator something stronger already.
+
+A close signal is not proof the partner's application read what was behind it: a
+peer that closes without draining its inbound queue is indistinguishable from one
+that read everything, and a peer connection torn down by the page rather than by
+reading the sentinel resets its stream gracefully -- measured in Chromium, and
+pinned in `apps/web/test/browser/webrtcCloseDelivery.test.ts` -- so that teardown
+arrives here as the same close.
 
 What no close can cover is a sender whose stack goes away before its bytes do:
 tearing the peer connection down as the close returns delivered nothing at all

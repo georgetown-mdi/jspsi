@@ -16,6 +16,7 @@ import { waitForPeerClose } from "./waitForPeerClose";
 
 import type { DataConnection } from "peerjs";
 import type { MessageConnection } from "@psilink/core";
+import type { PeerCloseOutcome } from "./waitForPeerClose";
 
 /**
  * Parked-receive inactivity budget for the WebRTC transport. Hour-scale: the
@@ -45,13 +46,10 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  * {@link waitForPeerClose}), so a resolved close means delivered rather than
  * buffered -- except on the wait's ceiling, dead-peer, and already-not-open
  * paths, where the frame can still be in flight (see {@link waitForPeerClose}).
- * The ceiling reports itself through `onFinalFrameUnconfirmed`, so a caller can
- * tell its operator rather than let a run report success with the partner's
- * copy in doubt: it is the exit a finished exchange reaches with the peer still
- * live and the channel still open, so nothing else would tell them anything.
- * The dead-peer and already-not-open exits stay silent, so a partner whose stack
- * dies during the drain of a run that already reported success is never
- * reported to anyone; docs/spec/WEBRTC_TRANSPORT.md records that limit.
+ * How the wait ended goes up whole through `onCloseOutcome`, unjudged: this
+ * layer knows which exits carry a delivery signal, but which of them a run tells
+ * its operator about, and in what words, belongs to the layer that owns the
+ * run's vocabulary (`exchangeLifecycle.ts`).
  *
  * The inbound path is byte-bounded against a hostile or buggy peer: PeerJS chunk
  * reassembly is capped so an oversized PSI set frame or a flood of
@@ -76,10 +74,11 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  *                 reassembly cap) and `closeDrainTimeoutMs` the ceiling on the
  *                 clean close's wait for the peer (see {@link waitForPeerClose}),
  *                 for tests only -- none of them is an operator-facing knob.
- *                 `onFinalFrameUnconfirmed` fires when a clean close's wait ends
- *                 on that ceiling, once per connection at most, leaving the
- *                 operator-facing wording to the caller that owns a warning
- *                 surface; omitting it makes the exit silent.
+ *                 `onCloseOutcome` reports how a clean close's wait for the peer
+ *                 ended ({@link PeerCloseOutcome}), once per connection at most,
+ *                 leaving both the reporting decision and the operator-facing
+ *                 wording to the caller; omitting it discards the outcome. A
+ *                 close that does not flush runs no wait and reports nothing.
  */
 export async function openPeerMessageConnection(
   conn: DataConnection,
@@ -89,7 +88,7 @@ export async function openPeerMessageConnection(
     maxFrameBytes?: number;
     maxConcurrentReassemblies?: number;
     closeDrainTimeoutMs?: number;
-    onFinalFrameUnconfirmed?: () => void;
+    onCloseOutcome?: (outcome: PeerCloseOutcome) => void;
   },
 ): Promise<MessageConnection> {
   const maxFrameBytes = options?.maxFrameBytes ?? MAX_WEBRTC_FRAME_BYTES;
@@ -168,12 +167,12 @@ export async function openPeerMessageConnection(
               options?.closeDrainTimeoutMs,
             );
             conn.close({ flush: true });
-            // Only the ceiling reports: the peer-gone and channel-not-open
-            // exits stay silent even where the run itself succeeded, so a
-            // partner whose stack dies during this drain reaches no one. The
-            // limit is recorded in docs/spec/WEBRTC_TRANSPORT.md.
-            if ((await peerClosed) === "ceiling")
-              options?.onFinalFrameUnconfirmed?.();
+            // Awaited on its own line, never inside the optional call below: an
+            // optional call whose callee is absent skips its arguments too, so
+            // folding the await in would drop the wait -- the delivery guarantee
+            // itself -- for every caller that passes no callback.
+            const outcome = await peerClosed;
+            options?.onCloseOutcome?.(outcome);
           } else {
             conn.close();
           }

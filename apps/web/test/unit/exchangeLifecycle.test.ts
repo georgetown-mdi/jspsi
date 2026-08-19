@@ -11,7 +11,8 @@ import {
 } from "@psilink/core";
 
 import {
-  FINAL_FRAME_UNCONFIRMED_WARNING,
+  FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
+  FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
   runExchangeLifecycle,
 } from "../../src/psi/exchangeLifecycle.js";
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
@@ -212,90 +213,118 @@ describe("runExchangeLifecycle", () => {
     expect(peer.disconnect).toHaveBeenCalled();
   });
 
-  test("words the transport's unconfirmed final frame for the operator", async () => {
-    // The transport reports only the fact, so this is where a close that ended
-    // without the peer's delivery signal becomes something an operator reads --
-    // and the run has already reported success by then, making it the only sign
-    // the partner may never have taken the final frame.
-    const { mc } = makeFakeMc();
-    mockedOpen.mockResolvedValue(mc);
-    const { acquired, conn } = makeResources();
-    const acquire: Acquire = () => Promise.resolve(acquired);
-    const s = seams();
+  test.each([
+    ["peer-closed", undefined],
+    ["ceiling", FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING],
+    ["peer-gone", FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING],
+    ["channel-not-open", FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING],
+  ] as const)(
+    "words a close that ended on %s for the operator",
+    async (outcome, expected) => {
+      // The transport reports only how its wait ended, so this is where an exit
+      // that carried no delivery signal becomes something an operator reads --
+      // and the run has already reported success by then, making it the only
+      // sign the partner may never have taken the final frame. The peer's own
+      // close IS that signal, so it alone stays silent; the other two say
+      // different things (a partner who never confirmed within the wait, versus
+      // a link that went before they could) and must not share one sentence.
+      const { mc } = makeFakeMc();
+      mockedOpen.mockResolvedValue(mc);
+      const { acquired, conn } = makeResources();
+      const acquire: Acquire = () => Promise.resolve(acquired);
+      const s = seams();
 
-    await runExchangeLifecycle({
-      acquire,
-      exchangeRole: "initiator",
-      signal: new AbortController().signal,
-      ...s,
-    });
+      await runExchangeLifecycle({
+        acquire,
+        exchangeRole: "initiator",
+        signal: new AbortController().signal,
+        ...s,
+      });
 
-    expect(mockedOpen).toHaveBeenCalledWith(conn, {
-      onFinalFrameUnconfirmed: expect.any(Function),
-    });
-    expect(s.onWarning).not.toHaveBeenCalled();
-    mockedOpen.mock.calls[0][1]?.onFinalFrameUnconfirmed?.();
-    expect(s.onWarning.mock.calls).toEqual([[FINAL_FRAME_UNCONFIRMED_WARNING]]);
-  });
+      expect(mockedOpen).toHaveBeenCalledWith(conn, {
+        onCloseOutcome: expect.any(Function),
+      });
+      expect(s.onWarning).not.toHaveBeenCalled();
+      mockedOpen.mock.calls[0][1]?.onCloseOutcome?.(outcome);
+      expect(s.onWarning.mock.calls).toEqual(
+        expected === undefined ? [] : [[expected]],
+      );
+    },
+  );
 
-  test("a failed run whose close then ends on the ceiling raises no notice", async () => {
-    // The handshake fails closed without the connection ever reaching a terminal
-    // state, so teardown's close is still the real flushing one and its wait can
-    // end on the ceiling after onError has fired. The notice speaks for a run
-    // that succeeded ("Your own results are complete"), so this one must drain
-    // that close and say nothing.
-    const { mc, close } = makeFakeMc();
-    close.mockImplementation(() => {
-      mockedOpen.mock.calls[0][1]?.onFinalFrameUnconfirmed?.();
-      return Promise.resolve();
-    });
-    mockedOpen.mockResolvedValue(mc);
-    mockedAuthenticate.mockRejectedValue(
-      new ConnectionError("key exchange authentication failed", "security"),
+  test("the two unconfirmed notices do not reuse one sentence", () => {
+    // A partner who never confirmed within the wait and a link that died before
+    // they could are different states of the partner's copy, so an operator who
+    // reads one must not be reading the other's wording.
+    expect(FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING).not.toEqual(
+      FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
     );
-    const { acquired } = makeResources();
-    const acquire: Acquire = () => Promise.resolve(acquired);
-    const s = seams();
-
-    await runExchangeLifecycle({
-      acquire,
-      exchangeRole: "initiator",
-      signal: new AbortController().signal,
-      ...s,
-    });
-
-    expect(s.onError).toHaveBeenCalledWith({
-      category: "security",
-      error: expect.any(ConnectionError),
-    });
-    // The drain still ran, exactly as it does on the success path; only the
-    // operator notice is withheld.
-    expect(close).toHaveBeenCalledTimes(1);
-    expect(s.onWarning).not.toHaveBeenCalled();
   });
 
-  test("drops an unconfirmed-frame notice raised once the run has aborted", async () => {
-    // The close's wait can end on its ceiling long after an unmount aborts the
-    // run, and the seam it would set state through is gone by then -- the same
-    // live gate every other seam takes.
-    const { mc } = makeFakeMc();
-    mockedOpen.mockResolvedValue(mc);
-    const { acquired } = makeResources();
-    const acquire: Acquire = () => Promise.resolve(acquired);
-    const s = seams();
-    const controller = new AbortController();
+  test.each(["ceiling", "peer-gone", "channel-not-open"] as const)(
+    "a failed run whose close then ends on %s raises no notice",
+    async (outcome) => {
+      // The handshake fails closed without the connection ever reaching a
+      // terminal state, so teardown's close is still the real flushing one and
+      // its wait can end without a delivery signal after onError has fired. Both
+      // notices speak for a run that succeeded ("Your own results are
+      // complete"), so this one must drain that close and say nothing.
+      const { mc, close } = makeFakeMc();
+      close.mockImplementation(() => {
+        mockedOpen.mock.calls[0][1]?.onCloseOutcome?.(outcome);
+        return Promise.resolve();
+      });
+      mockedOpen.mockResolvedValue(mc);
+      mockedAuthenticate.mockRejectedValue(
+        new ConnectionError("key exchange authentication failed", "security"),
+      );
+      const { acquired } = makeResources();
+      const acquire: Acquire = () => Promise.resolve(acquired);
+      const s = seams();
 
-    await runExchangeLifecycle({
-      acquire,
-      exchangeRole: "initiator",
-      signal: controller.signal,
-      ...s,
-    });
-    controller.abort();
-    mockedOpen.mock.calls[0][1]?.onFinalFrameUnconfirmed?.();
+      await runExchangeLifecycle({
+        acquire,
+        exchangeRole: "initiator",
+        signal: new AbortController().signal,
+        ...s,
+      });
 
-    expect(s.onWarning).not.toHaveBeenCalled();
-  });
+      expect(s.onError).toHaveBeenCalledWith({
+        category: "security",
+        error: expect.any(ConnectionError),
+      });
+      // The drain still ran, exactly as it does on the success path; only the
+      // operator notice is withheld.
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(s.onWarning).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each(["ceiling", "peer-gone", "channel-not-open"] as const)(
+    "drops a %s notice raised once the run has aborted",
+    async (outcome) => {
+      // The close's wait can end long after an unmount aborts the run, and the
+      // seam it would set state through is gone by then -- the same live gate
+      // every other seam takes.
+      const { mc } = makeFakeMc();
+      mockedOpen.mockResolvedValue(mc);
+      const { acquired } = makeResources();
+      const acquire: Acquire = () => Promise.resolve(acquired);
+      const s = seams();
+      const controller = new AbortController();
+
+      await runExchangeLifecycle({
+        acquire,
+        exchangeRole: "initiator",
+        signal: controller.signal,
+        ...s,
+      });
+      controller.abort();
+      mockedOpen.mock.calls[0][1]?.onCloseOutcome?.(outcome);
+
+      expect(s.onWarning).not.toHaveBeenCalled();
+    },
+  );
 
   test("an acquire failure is category 'exchange' and needs no owner teardown", async () => {
     const acquire: Acquire = () => Promise.reject(new Error("CSV load failed"));
