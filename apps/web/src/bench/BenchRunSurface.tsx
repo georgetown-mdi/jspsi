@@ -257,7 +257,7 @@ export function DonePanel({
 
 /** The withheld-result inset: this party contributed to the match but, by the
  * agreed terms, receives no result table, so there is nothing to download. */
-export function WithheldResultInset() {
+function WithheldResultInset() {
   return (
     <div className={styles.stateInset}>
       <p className={styles.stateLabel}>Results withheld by the terms</p>
@@ -266,6 +266,40 @@ export function WithheldResultInset() {
         no result table, so there is nothing to download here.
       </p>
     </div>
+  );
+}
+
+/** The count-only inset: a count-only exchange reports the size of the
+ * intersection and nothing else, so there is no result file for either party. */
+function CountOnlyResultInset({ count }: { count: number }) {
+  return (
+    <div className={styles.stateInset}>
+      <p className={styles.stateLabel}>Count only</p>
+      <p className={styles.small} style={{ margin: 0 }}>
+        {new Intl.NumberFormat("en-US").format(count)} record(s) matched. This
+        exchange reported the size of the overlap and nothing else, so there is
+        no result table to download.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * What stands where the result download would be when this run produced no result
+ * file: the count a count-only exchange reported, or the statement that the agreed
+ * terms withheld the result table. The two cases are distinct outcomes -- a
+ * count-only party received exactly what its terms promised -- so a surface picks
+ * between them here rather than reporting either as the other.
+ */
+export function NoResultFileInset({
+  intersectionCount,
+}: {
+  intersectionCount: number | undefined;
+}) {
+  return intersectionCount === undefined ? (
+    <WithheldResultInset />
+  ) : (
+    <CountOnlyResultInset count={intersectionCount} />
   );
 }
 

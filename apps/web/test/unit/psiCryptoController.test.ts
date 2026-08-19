@@ -10,6 +10,7 @@ import {
 
 import type {
   PsiEngine,
+  PsiEngineMode,
   PsiWorkerInit,
   PsiWorkerRequest,
   PsiWorkerResponse,
@@ -128,7 +129,11 @@ describe("createBrowserPsiEngineFactory", () => {
   // controllable worker, so the factory's spawn+wire behavior is exercised without a
   // real Worker (absent under Node).
   function wireFactory(): {
-    factory: (role: "starter" | "joiner", id: string) => PsiEngine;
+    factory: (
+      role: "starter" | "joiner",
+      id: string,
+      mode: PsiEngineMode,
+    ) => PsiEngine;
     seeds: Array<PsiWorkerInit>;
     workers: Array<FakePsiCryptoWorker>;
   } {
@@ -145,18 +150,23 @@ describe("createBrowserPsiEngineFactory", () => {
 
   test("spawns a worker seeded with the resolved role, id, and mode", () => {
     const { factory, seeds, workers } = wireFactory();
-    factory("starter", "server");
-    // The browser exchange runs the identifier-revealing `psi` construction, and the
-    // seed states it: the worker builds its engine -- and its key -- from this alone.
+    factory("starter", "server", "identifier-revealing");
+    factory("joiner", "client", "count-only");
+    // The seed is the worker's whole instruction: it builds its engine -- and its key,
+    // which is what fixes the round's disclosure -- from this alone. So the mode the
+    // exchange resolved from the agreed algorithm has to reach it rather than being
+    // assumed here, and a count-only run seeded as revealing would run the disclosure
+    // its terms refused.
     expect(seeds).toEqual([
       { role: "starter", id: "server", mode: "identifier-revealing" },
+      { role: "joiner", id: "client", mode: "count-only" },
     ]);
-    expect(workers).toHaveLength(1);
+    expect(workers).toHaveLength(2);
   });
 
   test("a crypto call posts a request the worker's reply resolves", async () => {
     const { factory, workers } = wireFactory();
-    const engine = factory("joiner", "client");
+    const engine = factory("joiner", "client", "identifier-revealing");
 
     const pending = engine.createClientRequest(["a", "b"]);
     const worker = workers[0];
@@ -173,7 +183,7 @@ describe("createBrowserPsiEngineFactory", () => {
 
   test("a worker fault fails the pending call fast instead of hanging", async () => {
     const { factory, workers } = wireFactory();
-    const engine = factory("starter", "server");
+    const engine = factory("starter", "server", "identifier-revealing");
 
     const pending = engine.createServerSetup(["x"]);
     // The worker faults (onerror) before replying: the pending call must reject with
@@ -189,7 +199,7 @@ describe("createBrowserPsiEngineFactory", () => {
   describe("dispose() terminates the worker on every terminal path", () => {
     test("success: after a resolved call", async () => {
       const { factory, workers } = wireFactory();
-      const engine = factory("joiner", "client");
+      const engine = factory("joiner", "client", "identifier-revealing");
       const pending = engine.createClientRequest(["a"]);
       workers[0].replyOkToLast(new Uint8Array());
       await pending;
@@ -200,7 +210,7 @@ describe("createBrowserPsiEngineFactory", () => {
 
     test("error: after a crypto call rejected by the worker", async () => {
       const { factory, workers } = wireFactory();
-      const engine = factory("starter", "server");
+      const engine = factory("starter", "server", "identifier-revealing");
       const pending = engine.createServerSetup(["x"]);
       workers[0].reply({
         id: workers[0].posted[0].id,
@@ -215,7 +225,7 @@ describe("createBrowserPsiEngineFactory", () => {
 
     test("abort: while a call is still in flight, the pending call rejects", async () => {
       const { factory, workers } = wireFactory();
-      const engine = factory("joiner", "client");
+      const engine = factory("joiner", "client", "identifier-revealing");
       // Post a call the worker never answers (an exchange aborted mid-round), then
       // dispose without awaiting: dispose must reject the outstanding call and
       // terminate, never leave it hanging.
@@ -227,7 +237,7 @@ describe("createBrowserPsiEngineFactory", () => {
 
     test("a repeated dispose() terminates only once", () => {
       const { factory, workers } = wireFactory();
-      const engine = factory("starter", "server");
+      const engine = factory("starter", "server", "identifier-revealing");
       engine.dispose();
       engine.dispose();
       expect(workers[0].terminations).toBe(1);

@@ -221,6 +221,7 @@ interface ReceivedExchangeOutputs extends ExchangeOutputsBase {
   /** The matched results (CSV), as an object URL the UI exposes as a download. */
   resultsUrl: string;
   resultWithheld?: false;
+  intersectionCount?: undefined;
 }
 
 /** A non-receiving helper's outputs: no results file, only the optional record
@@ -232,14 +233,27 @@ interface ReceivedExchangeOutputs extends ExchangeOutputsBase {
 interface WithheldExchangeOutputs extends ExchangeOutputsBase {
   resultWithheld: true;
   resultsUrl?: undefined;
+  intersectionCount?: undefined;
+}
+
+/** A count-only (`psi-c`) receiver's outputs: the intersection size, and no results
+ * file -- that run produces no matched pairing for anyone to download, so there is
+ * nothing withheld from this party either. The count is the run's whole result
+ * (`ExchangeResult.intersectionCount`), which is why it is its own case rather than
+ * a receiver with an empty CSV or a helper that got nothing. */
+interface CountOnlyExchangeOutputs extends ExchangeOutputsBase {
+  intersectionCount: number;
+  resultsUrl?: undefined;
+  resultWithheld?: false;
 }
 
 /** The downloadable artifacts produced after a successful exchange: each is an
  * object URL the UI exposes as a download with a timestamped filename. The matched
- * result is present XOR withheld, so the two cases are a discriminated union rather
- * than two independent optionals -- the invalid states ("both a result and
+ * result is present XOR withheld XOR counted, so the cases are a discriminated union
+ * rather than independent optionals -- the invalid states ("both a result and
  * withheld", "neither") are unrepresentable. */
-export type ExchangeOutputs = ReceivedExchangeOutputs | WithheldExchangeOutputs;
+export type ExchangeOutputs =
+  ReceivedExchangeOutputs | WithheldExchangeOutputs | CountOnlyExchangeOutputs;
 
 /** Pure output-generation step: build the local results file plus the
  * exchange-record artifacts (record + verification keys) from the exchange result

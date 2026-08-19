@@ -27,16 +27,18 @@ import { loadNativeAddonOrSkip } from "./utils/nativeAddon";
 // receiver cannot attribute, and the uniqueness filter that makes the count
 // comparable to a single-key `psi` run.
 //
-// No exchange reaches the mode: linkage terms setting `algorithm: psi-c` are
-// refused before a run begins (assertAlgorithmImplemented, src/exchange.ts, pinned
-// by its own tests), so these tests are the exercise the mode has.
+// No shipped exchange reaches the mode while APPLIED_SETTINGS.psiC is false: linkage
+// terms setting `algorithm: psi-c` are refused before a run begins
+// (assertAlgorithmImplemented, src/exchange.ts). These tests exercise the seam
+// directly; countOnlyRun.test.ts drives the exchange that sits on it.
 //
 // A refusal the library raises is asserted as a refusal wherever a WebAssembly party
-// raises it: that build surfaces the mode-mismatch and association-table conditions as
-// an opaque embind marshalling error where the native addon names them
-// (docs/notes/psi-c-count-only.md). The native-sender legs below, which do get the
-// named condition, assert it, so their refusal is pinned to the wire-enforced reveal
-// flag rather than to any throw.
+// raises it: that build surfaces the association-table condition as an opaque embind
+// marshalling error where the native addon names it
+// (docs/notes/psi-c-count-only.md). The mode mismatch is the exception, and
+// deliberately so: the engine reads the reveal flag off the request and names the
+// condition itself, so both backends give a party the same diagnosis rather than one
+// of them an error it cannot tell from a malformed frame.
 
 const wasm = await PSI();
 
@@ -367,10 +369,19 @@ describe.each([
         await mismatchedReceiver.createClientRequest(receiverValues);
 
       // The sender enforces the agreement when it processes the request: the mode
-      // rides the request, so a completed round implies the two flags agreed.
+      // rides the request, so a completed round implies the two flags agreed. The
+      // refusal NAMES the condition -- which mode the partner ran, and which this
+      // exchange runs -- rather than passing through the library's own throw, which
+      // on the WebAssembly build is an opaque marshalling error a party could not
+      // tell from a malformed frame.
       await expect(
         settled(() => mismatchedSender.processClientRequest(request)),
-      ).rejects.toThrow();
+      ).rejects.toThrow(
+        new RegExp(
+          `the partner's PSI request ran the ${receiverMode} mode, where ` +
+            `this exchange runs ${senderMode}`,
+        ),
+      );
 
       mismatchedSender.dispose();
       mismatchedReceiver.dispose();
@@ -555,21 +566,18 @@ describe.each(backendPairs)("count-only backend parity: $name", (pair) => {
       settled(() => countOnlyReceiver.computeAssociationTable(response)),
     ).rejects.toThrow();
 
+    // The refusal is pinned to the reveal flag the request carries disagreeing with
+    // the one this sender's key was generated under, on EITHER backend: the flag is
+    // read off the request and the condition named before the library is asked, which
+    // is what makes the WebAssembly sender's diagnosis as good as the addon's (the
+    // library itself surfaces this as an opaque marshalling error there).
     const revealingRequest =
       await revealingReceiver.createClientRequest(receiverValues);
-    const mismatchRefusal = expect(
+    await expect(
       settled(() => countOnlySender.processClientRequest(revealingRequest)),
-    ).rejects;
-    if (pair.sender === "native") {
-      // The addon names the condition it refused on -- the reveal flag the request
-      // carries disagreeing with the one this sender's key was generated under -- so
-      // the refusal is pinned to that flag rather than to any throw at all.
-      await mismatchRefusal.toThrow(/reveal_intersection/);
-    } else {
-      // The WebAssembly sender reports the same condition as an opaque embind
-      // marshalling error, which names nothing to assert on.
-      await mismatchRefusal.toThrow();
-    }
+    ).rejects.toThrow(
+      /the partner's PSI request ran the identifier-revealing mode, where this exchange runs count-only/,
+    );
 
     countOnlySender.dispose();
     countOnlyReceiver.dispose();

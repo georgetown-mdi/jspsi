@@ -269,6 +269,83 @@ export class PSIParticipant {
     return this.engine.computeAssociationTable(responseBytes);
   }
 
+  // The count-only leg's counterpart to the guard above: the response is
+  // partner-supplied bytes the engine deserializes, so it gets the same
+  // pre-deserialize element-count bound the association-table leg gets. Which of the
+  // two matches runs is fixed by the engine's mode, but the amplification defense is
+  // a property of the frame, not of the disclosure it resolves to.
+  private computeIntersectionCardinality(
+    responseBytes: Uint8Array,
+  ): Promise<number> {
+    this.assertInboundElementBound(
+      "response",
+      responseBytes,
+      this.elementBounds.response,
+    );
+    return this.engine.computeIntersectionCardinality(responseBytes);
+  }
+
+  /**
+   * Runs the count-only (psi-c) round and resolves to the intersection SIZE on the
+   * receiver and to `undefined` on the sender, which computes nothing and learns
+   * nothing about the count from the round (docs/spec/PROTOCOL.md, PSI-C).
+   *
+   * Three frames, against {@link identifyIntersection}'s five: the sender's setup,
+   * the receiver's request, the sender's response. There is no association-table
+   * round-trip and no completion acknowledgement, because there is no pairing for
+   * the two parties to translate into each other's row space -- the round produces
+   * no position either party could name.
+   *
+   * Requires a participant whose engine was built count-only: the identifier-
+   * revealing engine refuses the cardinality operation rather than returning one, so
+   * a round mis-built for the disclosure its terms agreed aborts instead of
+   * resolving to the other mode's answer.
+   */
+  public async countIntersection(
+    conn: MessageConnection,
+    set: Array<string>,
+  ): Promise<number | undefined> {
+    if (this.config.role === "starter") {
+      const { setup } = await this.createServerSetup(set);
+      this.log.debug(
+        `${this.id}: starting count-only protocol; sending server data ` +
+          "encrypted by server",
+      );
+      await conn.send(setup);
+
+      this.log.debug(`${this.id}: waiting for client request`);
+      const clientRequestRaw = await conn.receive();
+
+      const serverResponse = await this.processClientRequest(
+        clientRequestRaw as Uint8Array,
+      );
+      this.log.debug(
+        `${this.id}: sending client data encrypted by both server and client`,
+      );
+      await conn.send(serverResponse);
+
+      // The sender's round ends here: it holds no count, and whether one reaches it
+      // at all is the entitlement question the caller answers (see protocolSetup's
+      // count-report leg), not something this round produces.
+      return undefined;
+    }
+
+    this.log.debug(`${this.id}: starting count-only protocol`);
+    const serverSetupRaw = await conn.receive();
+    this.log.debug(`${this.id}: receiving server data encrypted by server`);
+    await this.receiveServerSetup(serverSetupRaw as Uint8Array);
+
+    const clientRequest = await this.createClientRequest(set);
+    this.log.debug(`${this.id}: sending client data encrypted by client`);
+    await conn.send(clientRequest);
+
+    const serverResponseRaw = await conn.receive();
+    this.log.debug(
+      `${this.id}: receiving server data encrypted by both server and client`,
+    );
+    return this.computeIntersectionCardinality(serverResponseRaw as Uint8Array);
+  }
+
   /**
    * Returns an association table with elements [localIndices, partnerIndices]
    */

@@ -1114,6 +1114,51 @@ test("writes no result file for a non-receiving party when the exchange withhold
   expect(vi.mocked(buildOutputTable)).not.toHaveBeenCalled();
 }, 20_000);
 
+test("reports a count-only exchange's count instead of reading as withheld", async () => {
+  // A count-only run hands back no association table for anyone, so it lands in the
+  // same no-result-file branch a withheld table does -- and must not be reported the
+  // same way: this party received exactly what its terms promised.
+  async function runExchangeCountOnly(): Promise<unknown> {
+    await defaultRunExchange();
+    return {
+      associationTable: undefined,
+      intersectionCount: 7,
+      partnerPayload: {},
+    };
+  }
+  vi.mocked(runExchange).mockImplementation(runExchangeCountOnly as never);
+  vi.mocked(buildOutputTable).mockClear();
+
+  const output = path.join(tmpDir, "count-only.csv");
+  await Promise.all([
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+      null,
+      minimalPrepared,
+      output,
+      -1,
+      "test-a",
+    ),
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+      null,
+      minimalPrepared,
+      path.join(tmpDir, "count-only-b.csv"),
+      -1,
+      "test-b",
+    ),
+  ]);
+
+  expect(fs.existsSync(output)).toBe(false);
+  expect(vi.mocked(buildOutputTable)).not.toHaveBeenCalled();
+  expect(
+    mockState.infos.some((line) => line.includes("7 record(s) matched")),
+  ).toBe(true);
+  expect(
+    mockState.infos.some((line) => line.includes("you receive no result")),
+  ).toBe(false);
+}, 20_000);
+
 // --- Expired token via runProtocol -------------------------------------------
 
 test("runProtocol rejects an expired token without rotating, and the tagged recovery hint suppresses the generic catch advisory", async () => {

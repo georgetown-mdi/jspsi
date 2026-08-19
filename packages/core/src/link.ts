@@ -20,6 +20,9 @@ import {
   assertPartnerIndexTable,
   partnerProtocolError,
 } from "./utils/partnerIndices";
+import { COUNT_ONLY_SHAPE_REFUSALS } from "./config/linkageTerms";
+import { UsageError } from "./errors";
+import { receiveCountReport, sendCountReport } from "./protocolSetup";
 
 import { getLoggerForVerbosity } from "./utils/logger";
 
@@ -394,6 +397,82 @@ export async function linkViaPSI(
       `psi for cardinality '${protocol.cardinality}' not yet implemented`,
     );
   }
+}
+
+/**
+ * The count-only (`psi-c`) counterpart to {@link linkViaPSI}: ONE PSI round over ONE
+ * linkage key, resolving to the size of the intersection and to nothing that names a
+ * match (docs/spec/PROTOCOL.md, PSI-C).
+ *
+ * Returns the count this party holds at the end of the round, or `undefined` when it
+ * holds none -- the sender of a run whose agreed terms entitle only the receiver.
+ * The receiver computes the count locally from the setup and the response; the
+ * sender computes nothing and learns nothing about it from the round itself, so the
+ * only route to the sender is the count-report frame this function runs when
+ * `reportCountToSender` is set. Both parties derive that flag from the same agreed
+ * terms ({@link ./protocolSetup.reportsCountToSender}), so the frame is sent
+ * exactly when it is awaited.
+ *
+ * The within-dataset filter is the cascade's own: a record with no value for the key
+ * sits the round out, and a value duplicated within this party's dataset is dropped
+ * entirely, so each party contributes exactly the values it holds once. That is what
+ * makes the count equal the size of the table a single-key `psi` run over the same
+ * data would produce -- the library's cardinality operation reports the MULTISET
+ * intersection and would otherwise over-count a repeated value.
+ *
+ * @param participant - Must have a resolved role and a count-only engine; the
+ *   identifier-revealing engine refuses the cardinality operation rather than
+ *   returning one.
+ * @param data - The agreed linkage keys' local values, which for a count-only run is
+ *   exactly one entry. A longer list is refused rather than narrowed to its first
+ *   key: a narrowed run would deliver a count the operator did not agree to.
+ * @param reportCountToSender - Whether this round's count-report frame is exchanged
+ *   (see {@link ./protocolSetup.reportsCountToSender}); both parties pass the same
+ *   value.
+ * @param maxCount - The largest legitimate count, for bounding the reported figure
+ *   on the sender: the smaller of the two exchanged record counts.
+ */
+export async function linkViaCountOnlyPSI(
+  participant: PSIParticipant,
+  conn: MessageConnection,
+  data: Array<IndexableIterable<KeyCandidates>>,
+  reportCountToSender: boolean,
+  maxCount: number,
+  verbosity: number = 0,
+  setStage?: (id: string) => void,
+): Promise<number | undefined> {
+  if (participant.config.role === "either")
+    throw new Error("participants role is unresolved");
+  if (data.length !== 1)
+    throw new UsageError(COUNT_ONLY_SHAPE_REFUSALS.linkageKeys);
+
+  const log = getLoggerForVerbosity("psiLink", verbosity);
+  setStage = setStage ?? (() => {});
+  setStage("stage 1 / 1");
+
+  const [values] = removeDuplicatesAndUndefineds(
+    Array.from(data[0], requireSingleCandidate),
+  );
+  log.debug(
+    `${participant.id}: counting the intersection over 1 key: ` +
+      `${values.length} unique value(s)`,
+  );
+
+  const count = await participant.countIntersection(conn, values);
+
+  if (!reportCountToSender) return count;
+  // The receiver holds the count and reports it; the sender awaits exactly the frame
+  // the receiver sends. Which side we are is the participant's resolved role, and the
+  // flag is derived from the agreed terms, so the two never diverge.
+  if (participant.config.role === "joiner") {
+    if (count === undefined)
+      throw new Error(
+        `${participant.id}: the count-only round produced no count to report`,
+      );
+    await sendCountReport(conn, count);
+    return count;
+  }
+  return receiveCountReport(conn, maxCount);
 }
 
 // Actionable guidance for a dataset that exceeds the single-pass ceiling,

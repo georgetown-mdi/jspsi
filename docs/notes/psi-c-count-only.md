@@ -4,7 +4,7 @@ title: "Count-Only Linkage (PSI-C): Construction, Narrowing, and Reporting"
 
 # Count-only linkage: why psi-c is one key, one round, and library-native
 
-*Status: decided, not built. The construction described here is normatively specified in [PROTOCOL.md](../spec/PROTOCOL.md#psi-c) and its record rows in [EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#count-only-psi-c-records); no run path implements it yet, and an exchange whose terms set `algorithm: psi-c` is still refused. This note records why the construction has that shape, what it replaced, and the alternative that was weighed and not adopted. See [docs/notes/README.md](README.md).*
+*Status: decided and built, not enabled. The construction described here is normatively specified in [PROTOCOL.md](../spec/PROTOCOL.md#psi-c) and its record rows in [EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#count-only-psi-c-records); core implements the run path behind `APPLIED_SETTINGS.psiC`, which is false, so an exchange whose terms set `algorithm: psi-c` is still refused. This note records why the construction has that shape, what it replaced, and the alternative that was weighed and not adopted. See [docs/notes/README.md](README.md).*
 
 This is design rationale. Nothing here binds an implementation; the normative rows live in the two spec documents linked above, and this note does not restate them.
 

@@ -65,8 +65,8 @@ describe("PSI crypto Web Worker (real Vite-native worker, real WASM)", () => {
   test("the exchange completes correctly with the worker in place", async () => {
     const { spawn, terminations } = trackingSpawner();
     const factory = createBrowserPsiEngineFactory(spawn);
-    const starter = factory("starter", "server");
-    const joiner = factory("joiner", "client");
+    const starter = factory("starter", "server", "identifier-revealing");
+    const joiner = factory("joiner", "client", "identifier-revealing");
 
     let table: [Array<number>, Array<number>];
     try {
@@ -98,7 +98,11 @@ describe("PSI crypto Web Worker (real Vite-native worker, real WASM)", () => {
   describe("the worker is torn down on each terminal path", () => {
     test("success: after a completed crypto call", async () => {
       const { spawn, terminations } = trackingSpawner();
-      const engine = createBrowserPsiEngineFactory(spawn)("starter", "server");
+      const engine = createBrowserPsiEngineFactory(spawn)(
+        "starter",
+        "server",
+        "identifier-revealing",
+      );
       const { setup } = await engine.createServerSetup(STARTER_VALUES);
       expect(setup.byteLength).toBeGreaterThan(0);
       engine.dispose();
@@ -107,7 +111,11 @@ describe("PSI crypto Web Worker (real Vite-native worker, real WASM)", () => {
 
     test("error: after a crypto call the worker rejects", async () => {
       const { spawn, terminations } = trackingSpawner();
-      const engine = createBrowserPsiEngineFactory(spawn)("joiner", "client");
+      const engine = createBrowserPsiEngineFactory(spawn)(
+        "joiner",
+        "client",
+        "identifier-revealing",
+      );
       // A role-guard violation (a joiner has no server key) rejects inside the worker
       // and surfaces as a rejected call over the boundary -- the error terminal path.
       await expect(
@@ -119,7 +127,11 @@ describe("PSI crypto Web Worker (real Vite-native worker, real WASM)", () => {
 
     test("abort: while a crypto call is still in flight", async () => {
       const { spawn, terminations } = trackingSpawner();
-      const engine = createBrowserPsiEngineFactory(spawn)("starter", "server");
+      const engine = createBrowserPsiEngineFactory(spawn)(
+        "starter",
+        "server",
+        "identifier-revealing",
+      );
       // Post a masking op and, without awaiting it, dispose the engine (an exchange
       // aborted mid-round): the outstanding call must reject and the worker terminate,
       // never leave the call hanging on a torn-down worker.

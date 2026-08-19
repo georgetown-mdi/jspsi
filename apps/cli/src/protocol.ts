@@ -1517,6 +1517,7 @@ export async function runProtocol(
     terminalPhase = "run";
     const {
       associationTable,
+      intersectionCount,
       partnerPayload,
       audit,
       bootstrap,
@@ -1537,7 +1538,8 @@ export async function runProtocol(
         // event-loop-owning thread responsive for the SFTP heartbeat and the
         // liveness timers. Falls back to in-process when
         // the bundled worker is absent (dev / tests); see createPsiEngine.
-        psiEngineFactory: (role, id) => createPsiEngine(psiLibrary, role, id),
+        psiEngineFactory: (role, id, mode) =>
+          createPsiEngine(psiLibrary, role, id, mode),
         verbosity,
         saveIntent,
         // Signed-receipt inputs, threaded only when a signing config was passed
@@ -1649,13 +1651,24 @@ export async function runProtocol(
     // operator must not re-run it, so the catch classifies it as "output".
     terminalPhase = "output";
 
+    // A count-only exchange produces no matched pairing for either party, so there is
+    // no result file to write and nothing was withheld from this party: its whole
+    // result is the count, reported here. Checked first, since a count-only receiver
+    // holds no association table either and would otherwise be told it receives
+    // nothing.
+    if (intersectionCount !== undefined) {
+      log.info(
+        `exchange complete: ${intersectionCount} record(s) matched. The ` +
+          "agreed terms asked for a count only, so no result file was written.",
+      );
+    }
     // The result table is withheld (associationTable undefined) when this party's
     // agreed terms give it no output -- a one-sided exchange where it is the PSI
     // sender/helper. It contributed its records to find the match but is not
     // entitled to the result, so there is nothing to write: report that plainly
     // rather than writing an empty CSV that reads like a zero-match run. The audit
     // record below is still written (the helper's record does not bind the table).
-    if (associationTable === undefined) {
+    else if (associationTable === undefined) {
       log.info(
         "exchange complete: your records contributed to the match, but by the " +
           "agreed terms you receive no result, so no result file was written.",
@@ -1800,7 +1813,8 @@ export async function runProtocol(
     // The single success terminal event: the exchange completed and the local
     // output stage (result CSV plus the non-fatal record) finished, so exactly one
     // terminal event has now fired. resultWritten is false for a helper whose
-    // agreed terms give it no output table (associationTable withheld), true when a
+    // agreed terms give it no output table (associationTable withheld) and for a
+    // count-only exchange, which writes no result file at all, and true when a
     // result CSV was produced. The metrics summary precedes it so the terminal
     // event stays last on the stream.
     emitMetrics();

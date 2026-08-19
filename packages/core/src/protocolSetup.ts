@@ -732,6 +732,68 @@ export async function exchangeBootstrapSecret(
   return msg.sharedSecret;
 }
 
+// --- Count-only report leg ---------------------------------------------------
+
+// The count-only round's report frame: the receiver's tally, carried to the sender
+// over the same channel the rest of the exchange runs on. The count is bounded like
+// every other partner-supplied integer -- a non-negative safe integer no larger than
+// the ceiling the caller derives from the two exchanged record counts, since an
+// intersection cannot exceed either party's dataset. That bound rejects an absurd
+// figure; it does not make the number checkable, which psi-c deliberately does not
+// offer (docs/spec/PROTOCOL.md, PSI-C: the sender's knowledge of the count is
+// trust-contingent).
+const countReportMessage = (maxCount: number) =>
+  z.object({ intersectionCount: recordCountField.max(maxCount) });
+
+/**
+ * Whether a count-only (`psi-c`) round's tally travels from the receiver to the
+ * sender: exactly when both parties' agreed terms entitle them to output.
+ *
+ * Symmetric in its arguments, and each party calls it with the same agreed pair (its
+ * own entitlement plus the partner's, cross-validated by `validateCompatibility`), so
+ * the receiver's decision to send and the sender's decision to await are always the
+ * same verdict -- neither blocks awaiting a frame the other will not send.
+ *
+ * In the one-sided case the entitled party IS the receiver ({@link resolveRole}), so
+ * it already holds the count and no frame is sent at all. The frame is suppressed
+ * ENTIRELY rather than sent empty, the same discipline the single-pass table
+ * withholding follows: a present-but-empty frame would still mark, by its presence,
+ * that a count existed to report (docs/spec/PROTOCOL.md, PSI-C).
+ */
+export function reportsCountToSender(
+  localExpectsOutput: boolean,
+  partnerExpectsOutput: boolean,
+): boolean {
+  return localExpectsOutput && partnerExpectsOutput;
+}
+
+/**
+ * Send the count-only round's tally to the sender. Called by the RECEIVER, and only
+ * when {@link reportsCountToSender} holds.
+ */
+export async function sendCountReport(
+  conn: MessageConnection,
+  intersectionCount: number,
+): Promise<void> {
+  await conn.send({ intersectionCount });
+}
+
+/**
+ * Receive the count-only round's tally. Called by the SENDER, and only when
+ * {@link reportsCountToSender} holds.
+ *
+ * @param maxCount The largest count this exchange could legitimately produce --
+ *   the smaller of the two parties' record counts, both authenticated session state
+ *   from the terms exchange. A larger figure is a protocol violation, not a result.
+ */
+export async function receiveCountReport(
+  conn: MessageConnection,
+  maxCount: number,
+): Promise<number> {
+  const message = await receiveParsed(conn, countReportMessage(maxCount));
+  return message.intersectionCount;
+}
+
 // --- Role resolution ---------------------------------------------------------
 
 // The work-minimizing PSI role assignment for two both-output parties, from

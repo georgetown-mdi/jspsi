@@ -7,6 +7,7 @@ import {
   associationTableMessage,
   numberArrayMessage,
 } from "../src/participant";
+import { InProcessPsiEngine } from "../src/psiEngine";
 
 import {
   createMessagePipe,
@@ -334,6 +335,52 @@ test("cascade identifyIntersection (joiner) rejects an over-declared server setu
   await expect(run).rejects.toThrow(
     /inbound PSI serverSetup declares more than 4 encrypted element\(s\)/,
   );
+});
+
+test("count-only countIntersection (joiner) rejects an over-declared response frame", async () => {
+  // The count-only leg reaches the same amplifying deserialize the association-table
+  // leg does -- partner-supplied response bytes -- so it gets the same
+  // pre-deserialize bound. Without it the guard would be present for one disclosure
+  // and absent for the other, on the same frame.
+  const [serverConn, clientConn] = createMessagePipe();
+  const joiner = new PSIParticipant(
+    "joiner",
+    psiLibrary,
+    { role: "joiner", verbose: 0 },
+    { ...UNBOUNDED_PSI_ELEMENTS, response: 4 },
+    new InProcessPsiEngine(psiLibrary, "joiner", "joiner", "count-only"),
+  );
+  const sender = new InProcessPsiEngine(
+    psiLibrary,
+    "starter",
+    "sender",
+    "count-only",
+  );
+  const { setup } = await sender.createServerSetup(["Alice", "Carol"]);
+  const overDeclared = new psiLibrary.response();
+  overDeclared.setEncryptedElementsList(tinyElements());
+  // The joiner reads the setup (1st receive), sends its request, then reads the
+  // response (2nd receive) -- the frame replaced here.
+  const run = joiner.countIntersection(
+    corruptNthReceive(clientConn, 2, overDeclared.serializeBinary()),
+    ["Carol"],
+  );
+  await serverConn.send(setup);
+  // Drain the joiner's request and unblock its 2nd receive; the over-declared
+  // response stands in for whatever this frame carries.
+  await serverConn.receive();
+  await serverConn.send(new Uint8Array([0]));
+  const deserialize = vi.spyOn(psiLibrary.response, "deserializeBinary");
+  try {
+    await expect(run).rejects.toThrow(
+      /inbound PSI response declares more than 4 encrypted element\(s\)/,
+    );
+    expect(deserialize).not.toHaveBeenCalled();
+  } finally {
+    deserialize.mockRestore();
+    joiner.dispose();
+    sender.dispose();
+  }
 });
 
 // --- Non-Raw server setup: the element-count guard cannot be bypassed ----------
