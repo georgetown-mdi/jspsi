@@ -41,6 +41,7 @@ import {
   StandardizationSchema,
   type Standardization,
 } from "../src/config/standardization";
+import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
 
 const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
   name,
@@ -2196,6 +2197,78 @@ describe("buildKeyStrings", () => {
       })),
     };
     expect(buildKeyStrings(fuzzyKey, dataset, 0)?.size).toBe(1);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // --- multiplicity no declared producer accounts for ------------------------
+  // The drop is normative for the listed producers alone, so a Set-producing
+  // function that never made it into FAN_OUT_FUNCTION_NAMES must not inherit it:
+  // dropping such a row would run the exchange to completion matching fewer
+  // records than the terms describe, where carrying the candidate set through
+  // reaches the strategy refusal that covers exactly this omission
+  // (fanOutReachedMatchingRefusal, pinned at the strategies in psiLink.test.ts).
+
+  test("an unlisted producer over the width bound is carried, not dropped", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const built = withUnlistedFanOutFunctions(() => {
+      const dataset = makeDataset({
+        last_name: Array.from(
+          { length: MAX_KEY_CANDIDATES_PER_ROW + 1 },
+          (_unused, i) => `NAME${i}`,
+        ),
+        date_of_birth: "19750716",
+      });
+      return buildKeyStrings(key, dataset, 0);
+    });
+    expect(built?.size).toBe(MAX_KEY_CANDIDATES_PER_ROW + 1);
+    expect(built?.has("NAME2019750716")).toBe(true);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /cross-product produced 21 key strings/,
+    );
+  });
+
+  test("an unlisted producer in an element transform is carried too", () => {
+    // The second authoring surface: an element transform's candidates reach the
+    // same two bounds, so the producer travels with them from there as well.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const built = withUnlistedFanOutFunctions(() => {
+      const dataset = makeDataset({
+        last_name: Array.from(
+          { length: MAX_KEY_CANDIDATES_PER_ROW + 1 },
+          (_unused, i) => `NAME${i}`,
+        ).join("-"),
+        date_of_birth: "19750716",
+      });
+      const splittingKey = {
+        name: "LN+DOB",
+        elements: [
+          {
+            field: "last_name",
+            transform: [{ function: "split_on", params: { delimiter: "-" } }],
+          },
+          { field: "date_of_birth" },
+        ],
+      };
+      return buildKeyStrings(splittingKey, dataset, 0);
+    });
+    expect(built?.size).toBe(MAX_KEY_CANDIDATES_PER_ROW + 1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /cross-product produced 21 key strings/,
+    );
+  });
+
+  test("an unlisted producer too wide to assemble refuses the run", () => {
+    // The row cannot reach a strategy at all -- assembling its cross-product is
+    // what the cap exists to prevent -- so the fail-closed answer here is the
+    // refusal the cap already raises, never the drop.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    expect(() =>
+      withUnlistedFanOutFunctions(() => {
+        const wide = Array.from({ length: 33 }, (_unused, i) => `V${i}`);
+        const dataset = makeDataset({ last_name: wide, date_of_birth: wide });
+        return buildKeyStrings(key, dataset, 0);
+      }),
+    ).toThrow(UsageError);
     expect(warn).not.toHaveBeenCalled();
   });
 });

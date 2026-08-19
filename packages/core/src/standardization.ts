@@ -672,6 +672,12 @@ export const STANDARDIZATION_FUNCTION_NAMES: readonly string[] = [
  * the point of harm rather than a pre-run gate: it fires as a round is built,
  * which is after the terms exchange, so it is the DECLARED step this list carries
  * that is refused before anything reaches the wire.
+ *
+ * The list is also what the width-bound drop binds: multiplicity produced by a
+ * function named here is dropped when it exceeds the bound, and multiplicity from
+ * any other function is carried through to that refusal instead
+ * ({@link buildKeyStrings}), so an unlisted producer stays fail-closed at every
+ * width.
  */
 export const FAN_OUT_FUNCTION_NAMES: readonly string[] = ["split_on"];
 
@@ -1145,8 +1151,13 @@ export function describeTransformCoercions(
 
 // --- Step compilation --------------------------------------------------------
 
+// `isListedFanOutFunction` records whether this step's function is one of the
+// declared fan-out producers (FAN_OUT_FUNCTION_NAMES), captured at compile time
+// because the compiled closure no longer carries its name. It is what lets a
+// realization say WHICH producer expanded a value, which the width bound binds on
+// (buildKeyStrings).
 type CompiledStep =
-  | { kind: "fn"; fn: StandardizingFn }
+  | { kind: "fn"; fn: StandardizingFn; isListedFanOutFunction: boolean }
   | { kind: "coalesce"; default: string | undefined };
 
 function compileStep(step: {
@@ -1175,7 +1186,11 @@ function compileStep(step: {
   const factory = STANDARDIZING_FUNCTIONS[step.function];
   if (!factory)
     throw new Error(`unknown standardization function: "${step.function}"`);
-  return { kind: "fn", fn: factory(params) };
+  return {
+    kind: "fn",
+    fn: factory(params),
+    isListedFanOutFunction: FAN_OUT_FUNCTION_NAMES.includes(step.function),
+  };
 }
 
 function compileSteps(
@@ -1186,9 +1201,43 @@ function compileSteps(
 
 // --- Step execution ----------------------------------------------------------
 
+/**
+ * Where a realization's multiplicity came from, threaded out of the pipeline so
+ * {@link buildKeyStrings} can bind the width bound's drop to the declared
+ * producers alone (docs/spec/PROTOCOL.md, Fan-out matching, whose every rule
+ * binds `split_on` and it alone).
+ */
+interface FanOutProvenance {
+  /**
+   * Set once any step whose function is NOT in {@link FAN_OUT_FUNCTION_NAMES}
+   * has expanded one value into several candidates.
+   */
+  fromUnlistedFunction: boolean;
+}
+
+// A step that returns several candidates for ONE input value is the producer of
+// that multiplicity, so an unlisted producer is recorded where it expands. The
+// count is read per input value rather than across the whole set because that is
+// what separates producing multiplicity from carrying it: a later step run
+// element-wise over an already-expanded set returns one candidate per value and
+// produces none of it.
+function noteFanOutProducer(
+  result: FieldValue,
+  isListedFanOutFunction: boolean,
+  provenance: FanOutProvenance | undefined,
+): void {
+  if (provenance === undefined || isListedFanOutFunction) return;
+  if (result instanceof Set && result.size > 1)
+    provenance.fromUnlistedFunction = true;
+}
+
 // `coalesce` is the only function that operates on null (or an empty array
 // produced by prior null-filtering). All other functions null-propagate.
-function applyStep(current: FieldValue, step: CompiledStep): FieldValue {
+function applyStep(
+  current: FieldValue,
+  step: CompiledStep,
+  provenance?: FanOutProvenance,
+): FieldValue {
   if (step.kind === "coalesce") {
     if (current === null || (current instanceof Set && current.size === 0)) {
       return step.default ?? null;
@@ -1204,6 +1253,7 @@ function applyStep(current: FieldValue, step: CompiledStep): FieldValue {
       const r = step.fn(v);
       if (r === null) continue;
       if (r instanceof Set) {
+        noteFanOutProducer(r, step.isListedFanOutFunction, provenance);
         for (const sv of r) out.add(sv);
       } else {
         out.add(r);
@@ -1212,12 +1262,18 @@ function applyStep(current: FieldValue, step: CompiledStep): FieldValue {
     return out.size === 0 ? null : out;
   }
 
-  return step.fn(current);
+  const result = step.fn(current);
+  noteFanOutProducer(result, step.isListedFanOutFunction, provenance);
+  return result;
 }
 
 // --- Pipeline ----------------------------------------------------------------
 
-function runCompiledPipeline(input: string, steps: CompiledStep[]): FieldValue {
+function runCompiledPipeline(
+  input: string,
+  steps: CompiledStep[],
+  provenance?: FanOutProvenance,
+): FieldValue {
   // Unicode NFC normalization is the unconditional first transform of every
   // standardized field. The cleaned string becomes the PSI set element verbatim,
   // so two parties holding the same logical value in different normalization
@@ -1229,7 +1285,7 @@ function runCompiledPipeline(input: string, steps: CompiledStep[]): FieldValue {
   // remove_accents step that is not guaranteed to run.
   let current: FieldValue = input.normalize("NFC");
   for (const step of steps) {
-    current = applyStep(current, step);
+    current = applyStep(current, step, provenance);
   }
   return current;
 }
@@ -1263,6 +1319,19 @@ function toValueSet(result: FieldValue): string[] {
 
 // --- Standardized field ------------------------------------------------------
 
+// One row's standardized values plus the provenance of any multiplicity among
+// them, cached together because the pipeline produces both in one pass.
+interface RealizedFieldValues {
+  readonly values: string[];
+  readonly fanOutFromUnlistedFunction: boolean;
+}
+
+// The no-value realization. Built fresh per call rather than shared, because
+// `values` is handed to callers as a mutable array.
+function noRealizedValues(): RealizedFieldValues {
+  return { values: [], fanOutFromUnlistedFunction: false };
+}
+
 /**
  * A lazily-evaluated, cached mapping from a raw dataset row index to the set
  * of standardized string values for one linkage field.
@@ -1278,7 +1347,7 @@ export class StandardizedField {
   private readonly inputColumn: string;
   private readonly compiledSteps: CompiledStep[];
   private readonly rawRows: ReadonlyArray<CSVRow>;
-  private readonly cache = new Map<number, string[]>();
+  private readonly cache = new Map<number, RealizedFieldValues>();
 
   constructor(
     name: string,
@@ -1306,9 +1375,7 @@ export class StandardizedField {
    * so the two drivers cannot diverge.
    */
   evaluateRow(row: CSVRow): string[] {
-    const raw = readRowColumn(row, this.inputColumn);
-    if (raw === undefined) return [];
-    return toValueSet(runCompiledPipeline(raw, this.compiledSteps));
+    return this.realizeRow(row).values;
   }
 
   /**
@@ -1318,13 +1385,41 @@ export class StandardizedField {
    * An empty array signals that the record has no valid value for this field.
    */
   get(index: number): string[] {
+    return this.realize(index).values;
+  }
+
+  /**
+   * Whether the row at `index` realized several values through a standardizing
+   * function OUTSIDE {@link FAN_OUT_FUNCTION_NAMES}.
+   *
+   * The width bound's drop is normative for the declared fan-out producers alone
+   * (docs/spec/PROTOCOL.md, Fan-out matching), so {@link buildKeyStrings} reads
+   * this to keep multiplicity from any other producer fail-closed: carried
+   * through to the strategy that refuses it rather than dropped.
+   */
+  fanOutFromUnlistedFunction(index: number): boolean {
+    return this.realize(index).fanOutFromUnlistedFunction;
+  }
+
+  private realizeRow(row: CSVRow): RealizedFieldValues {
+    const raw = readRowColumn(row, this.inputColumn);
+    if (raw === undefined) return noRealizedValues();
+    const provenance: FanOutProvenance = { fromUnlistedFunction: false };
+    const result = runCompiledPipeline(raw, this.compiledSteps, provenance);
+    return {
+      values: toValueSet(result),
+      fanOutFromUnlistedFunction: provenance.fromUnlistedFunction,
+    };
+  }
+
+  private realize(index: number): RealizedFieldValues {
     const cached = this.cache.get(index);
     if (cached !== undefined) return cached;
 
     const row = this.rawRows[index];
-    const values = row ? this.evaluateRow(row) : [];
-    this.cache.set(index, values);
-    return values;
+    const realized = row ? this.realizeRow(row) : noRealizedValues();
+    this.cache.set(index, realized);
+    return realized;
   }
 }
 
@@ -1563,6 +1658,7 @@ const compiledElementTransforms = new WeakMap<
 function applyElementTransform(
   value: string,
   steps: TransformStep[] | undefined,
+  provenance: FanOutProvenance,
 ): string[] {
   // No steps: the value passes through unchanged (the empty-pipeline identity),
   // and nothing is compiled or memoized.
@@ -1573,7 +1669,7 @@ function applyElementTransform(
     compiledElementTransforms.set(steps, compiled);
   }
   let current: FieldValue = value;
-  for (const step of compiled) current = applyStep(current, step);
+  for (const step of compiled) current = applyStep(current, step, provenance);
   return toValueSet(current);
 }
 
@@ -1677,11 +1773,12 @@ function dropRowFromKeyRound(
  * round, given a standardized dataset and a row index.
  *
  * Returns `null` when the record contributes nothing to the round: an element's
- * field value set is empty (the `NULL`/absent realization), or the candidate set
- * exceeds {@link MAX_KEY_CANDIDATES_PER_ROW}, which is dropped the same way and
- * warned. Otherwise it returns the deduplicated cross-product across the
- * elements' candidate values -- one entry per distinct combination, and a set of
- * more than one entry is a fan-out (docs/spec/PROTOCOL.md, Fan-out matching).
+ * field value set is empty (the `NULL`/absent realization), or a candidate set a
+ * function in {@link FAN_OUT_FUNCTION_NAMES} expanded exceeds
+ * {@link MAX_KEY_CANDIDATES_PER_ROW}, which is dropped the same way and warned.
+ * Otherwise it returns the deduplicated cross-product across the elements'
+ * candidate values -- one entry per distinct combination, and a set of more than
+ * one entry is a fan-out (docs/spec/PROTOCOL.md, Fan-out matching).
  *
  * All returned strings belong to the same original row at `index`; the caller
  * is responsible for preserving that association when adding entries to the PSI
@@ -1713,18 +1810,25 @@ export function buildKeyStrings(
 
   const elementValues: string[][] = [];
   // Whether any element contributed several candidates before fuzzy expansion --
-  // the fan-out signature, and what decides whether an unassemblable
-  // cross-product drops the row or refuses the run below.
+  // the fan-out signature -- and, with the provenance beside it, what decides
+  // whether an over-width or unassemblable row is dropped or refused below.
   let fansOut = false;
+  // Which producer realized that multiplicity, accumulated across the row's
+  // elements: the drop binds the DECLARED producers alone (see the drop sites).
+  const provenance: FanOutProvenance = { fromUnlistedFunction: false };
 
   for (const element of elements) {
     const field = dataset.getField(element.field);
     const raw = field ? field.get(index) : [];
     if (raw.length === 0) return null;
+    if (field?.fanOutFromUnlistedFunction(index))
+      provenance.fromUnlistedFunction = true;
 
     const transformed: string[] = [];
     for (const v of raw)
-      transformed.push(...applyElementTransform(v, element.transform));
+      transformed.push(
+        ...applyElementTransform(v, element.transform, provenance),
+      );
     if (transformed.length === 0) return null;
 
     // A record contributes each DISTINCT candidate once, so duplicates collapse
@@ -1758,6 +1862,15 @@ export function buildKeyStrings(
     );
   }
 
+  // Dropping on exceedance is normative for the DECLARED fan-out producers and
+  // for them alone -- every rule of docs/spec/PROTOCOL.md (Fan-out matching)
+  // binds `split_on`. Multiplicity any other function realized is outside that
+  // rule and stays fail-closed at both bounds below: it is never traded for a
+  // completed run that matches fewer records than the terms describe, but carried
+  // to the strategy, which refuses it (fanOutReachedMatchingRefusal), or refused
+  // here when the row cannot be assembled at all.
+  const dropsOnExceedance = fansOut && !provenance.fromUnlistedFunction;
+
   // Bound the cross-product BEFORE materializing it: it multiplies each element's
   // candidate count, so a few wide elements multiply into a per-row set large
   // enough to exhaust memory as it is built. The count is a product of array
@@ -1770,13 +1883,15 @@ export function buildKeyStrings(
   // so a fan-out row is dropped on the projected count -- the same treatment an
   // over-width row gets, and never the run refusal, which the fan-out path
   // deliberately does not take (docs/spec/PROTOCOL.md, The width bound). Fuzzy
-  // expansion, whose own bound is that feature's to set, keeps the refusal.
+  // expansion, whose own bound is that feature's to set, keeps the refusal, as
+  // does multiplicity from a function outside FAN_OUT_FUNCTION_NAMES.
   const projectedKeyStrings = elementValues.reduce(
     (count, values) => count * values.length,
     1,
   );
   if (projectedKeyStrings > MAX_KEY_STRINGS_PER_ROW) {
-    if (!fansOut) throw keyStringFanOutCapRefusal(projectedKeyStrings);
+    if (!dropsOnExceedance)
+      throw keyStringFanOutCapRefusal(projectedKeyStrings);
     return dropRowFromKeyRound(
       key,
       index,
@@ -1797,14 +1912,14 @@ export function buildKeyStrings(
   );
 
   // The width bound is measured on the assembled, DEDUPLICATED candidate set,
-  // which is what a record contributes to the round, and it binds the fan-out
-  // producer: a row that fans out at all takes the drop, including one that also
-  // expands fuzzily, whose combined width the fuzzy work settles when it sets its
-  // own factor. For a row that only expands fuzzily the same number stays the
-  // advisory it has been -- that producer is inert here, and pre-empting its
-  // width behavior would decide it from the wrong side.
+  // which is what a record contributes to the round, and it binds the declared
+  // fan-out producers: a row that fans out through one at all takes the drop,
+  // including one that also expands fuzzily, whose combined width the fuzzy work
+  // settles when it sets its own factor. For a row that only expands fuzzily the
+  // same number stays the advisory it has been -- that producer is inert here,
+  // and pre-empting its width behavior would decide it from the wrong side.
   if (result.size > MAX_KEY_CANDIDATES_PER_ROW) {
-    if (fansOut)
+    if (dropsOnExceedance)
       return dropRowFromKeyRound(
         key,
         index,

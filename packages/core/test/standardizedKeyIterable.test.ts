@@ -8,6 +8,7 @@ import {
 } from "../src/standardization";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
+import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
 
 // Pre-cleaned rows (SSNs without dashes, DOBs in YYYYMMDD).
 const rawRows: ReadonlyArray<Record<string, string>> = [
@@ -235,6 +236,38 @@ describe("StandardizedKeyIterable — a row whose value fans out", () => {
     ]);
     const wideIter = new StandardizedKeyIterable(key, wideDataset, 1);
     expect(wideIter.at(0)).toBeUndefined();
+  });
+
+  test("an over-width row an unlisted producer expanded reaches the strategy", () => {
+    // The same row, expanded by a function that is not one of the declared
+    // producers the drop binds: it surfaces as the candidate set rather than the
+    // excluded sentinel, so the strategy consuming it refuses the exchange
+    // instead of matching fewer records than the terms describe.
+    const wideIter = withUnlistedFanOutFunctions(() => {
+      const wideRows = [
+        {
+          ssn: "559811301",
+          last_name: Array.from({ length: 21 }, (_unused, i) => `N${i}`).join(
+            "-",
+          ),
+          date_of_birth: "19750716",
+        },
+      ];
+      const wideDataset = new StandardizedDataset([
+        new StandardizedField("ssn", "ssn", [], wideRows),
+        new StandardizedField(
+          "lastName",
+          "last_name",
+          [{ function: "split_on", params: { delimiter: "-" } }],
+          wideRows,
+        ),
+        new StandardizedField("dateOfBirth", "date_of_birth", [], wideRows),
+      ]);
+      return new StandardizedKeyIterable(key, wideDataset, 1);
+    });
+    const candidates = wideIter.at(0);
+    expect(candidates).toBeInstanceOf(Set);
+    expect((candidates as ReadonlySet<string>).size).toBe(21);
   });
 });
 
