@@ -221,7 +221,9 @@ export function runManagedExchangeInBrowser(
           // other context's run of this record -- for a duration the partner
           // picks, up to the close ceiling. The drain still runs to completion,
           // and swallows its own faults, so the failure below is what the run
-          // surfaces.
+          // surfaces. Teardown runs synchronously as far as its first await, so
+          // the broker id it frees is already released when this throw releases
+          // the lock -- only the drain outlives the failure.
           void teardown(peer, conn, mc);
           throw error;
         }
@@ -263,26 +265,42 @@ export function runManagedExchangeInBrowser(
   );
 }
 
-/** Tear down the run's live resources: drain and close the message connection (or
- * hard-close the raw channel when the wrapper never materialized), then free the
- * broker id. Mirrors the one-shot lifecycle's teardown, never throwing -- a
- * teardown fault must not clobber a more accurate outcome, which is also what
- * lets both the failed handshake and the data exchange start it without awaiting
- * it. */
+/**
+ * Tear down the run's live resources: free the broker id, then drain and close
+ * the message connection (or hard-close the raw channel when the wrapper never
+ * materialized). It never throws -- a teardown fault must not clobber a more
+ * accurate outcome, which is also what lets both the failed handshake and the
+ * data exchange start it without awaiting it.
+ *
+ * The broker id is freed FIRST because neither call site awaits this: the run's
+ * outcome surfaces -- and with it the single-writer lock over this record
+ * releases -- while the drain is still parked on a wait the partner holds, up to
+ * the close ceiling. A failed handshake rotates nothing, and the rendezvous peer
+ * id is a pure function of the stored secret, so the record's own next attempt
+ * derives the same id; a registration still standing behind the released lock
+ * makes the broker refuse that attempt as taken (docs/spec/WEBRTC_TRANSPORT.md)
+ * rather than let it connect. Freeing the id costs the drain nothing:
+ * `disconnect()` drops the signaling socket and deliberately leaves the data
+ * channel standing, so the close behind it still waits for the peer to take the
+ * final frame (pinned against the real stack in
+ * test/browser/webrtcCloseDelivery.test.ts). Do NOT reach for `peer.destroy()`
+ * here: it routes through the abrupt `RTCPeerConnection.close()`, which discards
+ * buffered outbound data and would drop that frame.
+ */
 async function teardown(
   peer: Peer,
   conn: DataConnection,
   mc: MessageConnection | undefined,
 ): Promise<void> {
   try {
+    peer.disconnect();
+  } catch (error) {
+    log.error("managed re-run teardown: disconnecting the peer failed:", error);
+  }
+  try {
     if (mc !== undefined) await mc.close();
     else conn.close();
   } catch (error) {
     log.error("managed re-run teardown: closing the connection failed:", error);
-  }
-  try {
-    peer.disconnect();
-  } catch (error) {
-    log.error("managed re-run teardown: disconnecting the peer failed:", error);
   }
 }

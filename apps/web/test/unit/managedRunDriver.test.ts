@@ -32,6 +32,13 @@ import type { RunOutputs } from "@bench/runOutputs";
  * context's run of this record -- for the partner-chosen duration too. A phase
  * that rejects while the drain is still in flight is what releases it promptly.
  *
+ * That is also what fixes the teardown's own order here: with the outcome out in
+ * front of the drain on both paths, the broker id has to be freed before the
+ * drain rather than after it, or a failed run's retry -- deriving the same
+ * rendezvous id from the secret it did not rotate -- meets its own still-live
+ * registration at the broker. The premise that the drain survives the freeing is
+ * the real stack's, pinned in test/browser/webrtcCloseDelivery.test.ts.
+ *
  * The orchestration this driver injects into (the lock, the persist ordering, the
  * bookkeeping) is `runManagedRerun`'s, tested in managedRun.test.ts and against
  * real Chromium in test/browser/managedRun.test.ts; it is replaced here by a fake
@@ -117,14 +124,16 @@ const URLS = { create: () => "blob:artifact", revoke: () => {} };
  * not settled after this one is genuinely parked. */
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-/** A message connection whose clean close parks until `release` is called --
- * the peer that keeps the link up without ever reading the close sentinel. */
+/** A message connection whose clean close parks until `release` (the peer takes
+ * the final frame) or `failDrain` (the wait ends badly) is called -- the peer
+ * that keeps the link up without ever reading the close sentinel. */
 function makeParkedCloseMc() {
-  let release: (() => void) | undefined;
+  let settle:
+    { resolve: () => void; reject: (error: Error) => void } | undefined;
   const close = vi.fn(
     () =>
-      new Promise<void>((resolve) => {
-        release = resolve;
+      new Promise<void>((resolve, reject) => {
+        settle = { resolve, reject };
       }),
   );
   return {
@@ -134,7 +143,8 @@ function makeParkedCloseMc() {
       send: vi.fn(),
     } as unknown as MessageConnection,
     close,
-    release: () => release?.(),
+    release: () => settle?.resolve(),
+    failDrain: (error: Error) => settle?.reject(error),
   };
 }
 
@@ -175,15 +185,17 @@ describe("runManagedExchangeInBrowser", () => {
 
     expect(result.exchange).toBe(OUTPUTS);
     // The drain did start, and is still in flight: the outputs came out from in
-    // front of it rather than after it.
+    // front of it rather than after it. The broker id is already freed, since
+    // the teardown frees it ahead of the drain it does not wait on.
     expect(close).toHaveBeenCalledTimes(1);
-    expect(peer.disconnect).not.toHaveBeenCalled();
+    expect(peer.disconnect).toHaveBeenCalledTimes(1);
   });
 
   test("completes the teardown once the drain ends", async () => {
-    // Not awaiting the drain must not mean abandoning it: the broker id is still
-    // freed when the close finally resolves.
-    const { mc, release } = makeParkedCloseMc();
+    // Not awaiting the drain must not mean abandoning it: the close the run left
+    // parked is still the teardown's to finish, and the id freed ahead of it is
+    // not disturbed when it ends.
+    const { mc, close, release } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
     const { peer } = acquireResources();
 
@@ -191,6 +203,7 @@ describe("runManagedExchangeInBrowser", () => {
     release();
     await tick();
 
+    expect(close).toHaveBeenCalledTimes(1);
     expect(peer.disconnect).toHaveBeenCalledTimes(1);
   });
 
@@ -247,10 +260,12 @@ describe("runManagedExchangeInBrowser", () => {
     await expect(running).resolves.toMatchObject({ exchange: OUTPUTS });
   });
 
-  test("reports a handshake failure while its teardown is still draining", async () => {
-    // The defect this pins: the failed handshake's teardown drains the same
-    // close, and a phase that awaits it settles -- releasing the single-writer
-    // lock over this record -- only once the partner lets go.
+  test("frees the broker id before a handshake failure surfaces", async () => {
+    // The two halves the teardown's order buys, in the one moment they are both
+    // visible: the lock is released (the failure is out) with the record's
+    // rendezvous id already free, so the retry that derives the same id from the
+    // unrotated secret is not refused as taken -- and the drain that the id
+    // would otherwise have waited on is still in flight.
     const { mc, close } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
     const { peer } = acquireResources();
@@ -260,28 +275,29 @@ describe("runManagedExchangeInBrowser", () => {
       "handshake refused",
     );
 
-    // The drain did start, and is still in flight: the handshake failure came
-    // out from in front of it rather than after it.
+    expect(peer.disconnect).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
-    expect(peer.disconnect).not.toHaveBeenCalled();
   });
 
-  test("completes a failed handshake's teardown once the drain ends", async () => {
-    // Not awaiting the drain must not mean abandoning it: the guarantee the
-    // handshake's catch exists for is that a failed run leaves neither an open
-    // channel nor a registered peer behind.
-    const { mc, release } = makeParkedCloseMc();
+  test("finishes a failed handshake's drain after the failure surfaces", async () => {
+    // Freeing the id first must not mean abandoning the drain behind it: the
+    // parked close is still the teardown's to finish, so a fault it raises once
+    // the failure is already out lands in the teardown's own handler rather than
+    // escaping as an unhandled rejection.
+    const { mc, failDrain } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
-    const { peer } = acquireResources();
+    acquireResources();
     mockedAuthenticate.mockRejectedValueOnce(new Error("handshake refused"));
+    const logged = vi.spyOn(log, "error").mockImplementation(() => {});
 
     await expect(runDriver(new AbortController().signal)).rejects.toThrow(
       "handshake refused",
     );
-    release();
+    failDrain(new Error("close failed"));
     await tick();
 
-    expect(peer.disconnect).toHaveBeenCalledTimes(1);
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
   });
 
   test("tears a never-opened channel down before the failure propagates", async () => {
