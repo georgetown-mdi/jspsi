@@ -92,6 +92,10 @@ const localPayloadSent: CommittedPayload = {
   columns: ["dose"],
   rows: [["10mg"]],
 };
+// The run binder the record fixture and the dual-signed record fixture below both
+// carry, so the two artifacts pair as one run. One constant, so a fixture cannot
+// drift into an accidental cross-run pair.
+const RECEIPT_BINDER = "YmluZGVy";
 const baseInputs: ExchangeRecordInputs = {
   localTerms: {
     version: "1.0.0",
@@ -119,13 +123,14 @@ const baseInputs: ExchangeRecordInputs = {
   localPayloadSent,
   partnerPayloadReceived: { columns: [], rows: [] },
   createdAt: "2026-01-02T03:04:05.000Z",
+  receiptBinder: RECEIPT_BINDER,
 };
 
 const receiptContent: ReceiptContent = {
   termsHash: "dGVybXNIYXNo",
   initiatorToResponderPayload: "aTJyUGF5bG9hZA",
   responderToInitiatorPayload: "cjJpUGF5bG9hZA",
-  binder: "YmluZGVy",
+  binder: RECEIPT_BINDER,
 };
 
 /** A dual-signed record between Party A (initiator) and Party B (responder),
@@ -278,6 +283,7 @@ describe("formatSignedRecordReport", () => {
     pinnedFingerprints: "matched",
     localIdentity: "matched",
     termsHash: "verified",
+    runBinding: "verified",
     binder: "YmluZGVy",
     ...overrides,
   });
@@ -455,11 +461,70 @@ describe("formatSignedRecordReport", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("the binder is reported as covered but not recomputed", () => {
+  test("the binder is reported as covered but never recomputed", () => {
     const { lines } = formatSignedRecordReport(report());
     expect(lines.join("\n")).toContain(
-      "per-exchange binder YmluZGVy: covered by both signatures, not recomputed",
+      "per-exchange binder YmluZGVy: covered by both signatures, never " +
+        "recomputed",
     );
+  });
+
+  test("a paired receipt and record are reported as the same run", () => {
+    const { lines, exitCode } = formatSignedRecordReport(report());
+    expect(lines.join("\n")).toContain(
+      "receipt-record pairing: this receipt and this exchange record are the " +
+        "same run",
+    );
+    expect(exitCode).toBe(0);
+  });
+
+  test("a cross-run pairing failure names itself, not a signature or an anchor", () => {
+    // The distinguishing requirement: an operator reading this must not confuse it
+    // with a bad signature, a wrong identity, or a certificate nothing anchors.
+    const { lines, exitCode } = formatSignedRecordReport(
+      report({ outcome: "failed", runBinding: "mismatch" }),
+    );
+    const out = lines.join("\n");
+    expect(out).toContain(
+      "receipt-record pairing: DOES NOT MATCH the exchange record's run binder",
+    );
+    expect(out).toContain("the receipt and the record are from different runs");
+    // The checks that did pass are still reported as passing.
+    expect(out).toContain("receipt signature: verifies over this receipt's");
+    expect(out).toContain("asserted identity: matches an identity expected");
+    expect(out).toContain("matches a fingerprint you pinned out-of-band");
+    // And the operator is told how to pair them.
+    expect(out).toContain("so pair them by that stamp");
+    expect(exitCode).toBe(1);
+  });
+
+  test("a record of an unsigned run says so rather than reporting a mismatch", () => {
+    const { lines, exitCode } = formatSignedRecordReport(
+      report({ outcome: "failed", runBinding: "unpaired" }),
+    );
+    const out = lines.join("\n");
+    expect(out).toContain(
+      "receipt-record pairing: the exchange record carries no run binder",
+    );
+    expect(out).toContain("produced no signed receipt");
+    expect(exitCode).toBe(1);
+  });
+
+  test("a receipt verified with no record names the invocation that pairs it", () => {
+    const { lines, exitCode } = formatSignedRecordReport(
+      report({ outcome: "incomplete", runBinding: "not-checked" }),
+    );
+    const out = lines.join("\n");
+    expect(out).toContain("receipt-record pairing: not checked");
+    expect(out).toContain(
+      "name this exchange's record as the positional and pass this file with " +
+        "--signed-record",
+    );
+    // Short of verified, but not a failure: the holder of one artifact is not
+    // accused of anything.
+    expect(lines[0]).toMatch(/^SIGNED RECEIPT INCOMPLETE/);
+    expect(out).not.toContain("so pair them by that stamp");
+    expect(exitCode).toBe(0);
   });
 
   test("a run anchoring neither certificate is incomplete and says trust is not established", () => {
@@ -639,7 +704,7 @@ describe("reading a dual-signed record", () => {
     writeFileSync(path, JSON.stringify({ version: "something-else/v1" }));
     expect(() => readVerifiableArtifact(path)).toThrow(UsageError);
     expect(() => readVerifiableArtifact(path)).toThrow(
-      /recognizes psilink-exchange-record\/v1 .* and psilink-signed-receipt\/v2/,
+      /recognizes psilink-exchange-record\/v2 .* and psilink-signed-receipt\/v2/,
     );
   });
 });
@@ -739,14 +804,17 @@ describe("readExchangeRecordFile / readVerificationKeysFile", () => {
   });
 
   test("reject an unrecognized record version with a clear error", async () => {
+    // The version a record written before the run binder carries: refused here,
+    // naming the version this build recognizes, rather than read as a record whose
+    // absent binder leaves a receipt unpaired.
     const dir = tmp();
     const { record } = await buildExchangeRecord(baseInputs);
-    const bumped = { ...record, version: "psilink-exchange-record/v2" };
+    const bumped = { ...record, version: "psilink-exchange-record/v1" };
     const recPath = join(dir, "rec.json");
     writeFileSync(recPath, JSON.stringify(bumped, null, 2));
     expect(() => readExchangeRecordFile(recPath)).toThrow(UsageError);
     expect(() => readExchangeRecordFile(recPath)).toThrow(
-      /unrecognized version/,
+      /unrecognized version \(psilink-exchange-record\/v1\); this build recognizes psilink-exchange-record\/v2/,
     );
   });
 
@@ -807,7 +875,9 @@ describe("handler", () => {
    * the responder's fingerprint (the pin a verifier holds for its partner), the
    * initiator's (what an auditor holding both would pin), and the path to the
    * initiator's own signing identity, which anchors its own slot. */
-  async function exchangeArtifacts(): Promise<{
+  async function exchangeArtifacts(
+    recordOverrides: Partial<ExchangeRecordInputs> = {},
+  ): Promise<{
     recordPath: string;
     signedPath: string;
     identityPath: string;
@@ -815,7 +885,10 @@ describe("handler", () => {
     ownFingerprint: string;
   }> {
     const dir = tmp();
-    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const { record, keys } = await buildExchangeRecord({
+      ...baseInputs,
+      ...recordOverrides,
+    });
     const recordPath = join(dir, "rec.json");
     writeFileSync(recordPath, serializeExchangeRecord(record));
     writeFileSync(join(dir, "rec.keys.json"), serializeVerificationKeys(keys));
@@ -1075,10 +1148,70 @@ describe("handler", () => {
     expect(stdout).toContain(
       "partner receipt signatures: checked separately below",
     );
-    // Naming the exchange record is what supplies the identities and the
-    // agreed-terms hash the signature checks are anchored to, so the signed half
-    // reaches verified rather than incomplete.
+    // Naming the exchange record is what supplies the identities, the
+    // agreed-terms hash, and the run binder the signature checks are anchored to,
+    // so the signed half reaches verified rather than incomplete.
     expect(stdout).toContain("SIGNED RECEIPT VERIFIED");
+    expect(stdout).toContain(
+      "receipt-record pairing: this receipt and this exchange record are the " +
+        "same run",
+    );
+    expect(exitCode).toBe(0);
+  });
+
+  test("a record from another run of this partnership fails the pairing", async () => {
+    // Both artifacts are genuine and the agreed terms are the same, so the run
+    // binder is the only thing that separates them -- the failure the pairing
+    // exists to catch, and the one an operator holding a recurring exchange's
+    // artifacts can actually make.
+    const { recordPath, signedPath, identityPath, pin } =
+      await exchangeArtifacts({ receiptBinder: "b3RoZXJSdW5CaW5kZXI" });
+    const { stdout, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "signed-record": signedPath,
+      "partner-fingerprint": pin,
+      "identity-file": identityPath,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("SIGNED RECEIPT VERIFICATION FAILED");
+    expect(stdout).toContain(
+      "receipt-record pairing: DOES NOT MATCH the exchange record's run binder",
+    );
+    // Distinguishable from the other failure classes: every signature, identity,
+    // and anchor in this record still checks out.
+    expect(stdout).toContain("receipt signature: verifies over this receipt's");
+    expect(stdout).toContain("asserted identity: matches an identity expected");
+    expect(stdout).toContain("agreed-terms hash: matches the terms");
+    expect(exitCode).toBe(1);
+  });
+
+  test("a record of an exchange that produced no receipt is reported as unpaired", async () => {
+    const { recordPath, signedPath, identityPath, pin } =
+      await exchangeArtifacts({ receiptBinder: undefined });
+    const { stdout, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "signed-record": signedPath,
+      "partner-fingerprint": pin,
+      "identity-file": identityPath,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain(
+      "receipt-record pairing: the exchange record carries no run binder",
+    );
+    expect(exitCode).toBe(1);
+  });
+
+  test("a dual-signed record verified alone leaves the pairing unchecked", async () => {
+    // The third party handed one artifact: the pairing is reported as not checked
+    // rather than failed, and that alone holds the verdict short of verified.
+    const { signedPath, pin, ownFingerprint } = await exchangeArtifacts();
+    const { stdout, exits, exitCode } = await runVerify({
+      record: signedPath,
+      "partner-fingerprint": [pin, ownFingerprint],
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("receipt-record pairing: not checked");
+    expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
     expect(exitCode).toBe(0);
   });
 

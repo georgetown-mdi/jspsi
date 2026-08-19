@@ -717,7 +717,7 @@ test("authentication=null runs the exchange without authentication and without e
 // --- Self-attested record persistence via runProtocol ------------------------
 
 const sampleRecord: ExchangeRecord = {
-  version: "psilink-exchange-record/v1",
+  version: "psilink-exchange-record/v2",
   createdAt: "2026-01-02T03:04:05.000Z",
   termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
   localIdentity: "Party A",

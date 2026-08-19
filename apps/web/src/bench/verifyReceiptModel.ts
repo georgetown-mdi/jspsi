@@ -31,6 +31,7 @@ import type {
   LinkageTerms,
   ReceiptSignatureStatus,
   RecordVerificationReport,
+  RunBindingStatus,
   SignedReceiptPartyReport,
   SigningCertificate,
   TermsHashStatus,
@@ -439,8 +440,9 @@ const SIGNATURE_NOTE =
 // partner; what changes when a dual-signed record was verified in the same run is
 // where the evidence against the partner is, not whether this section carries it.
 // The note names the document the reader supplied rather than "this exchange's
-// receipt": nothing available on this page ties a receipt to a record, so the
-// sentence must not imply a provenance no check here established.
+// receipt": whether the two artifacts are one run is the signed verdict's pairing
+// row, which may equally report that they are not, so this sentence must not
+// presume the answer.
 const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
   "Partner receipt signatures are checked separately below, against the " +
   "dual-signed record you loaded.";
@@ -510,12 +512,14 @@ export interface SignedRecordAnchors {
 }
 
 /**
- * Where the two identities the certificates must authorize and the agreed-terms
- * hash the receipt content must carry come from. The exchange record holds both
- * already, so a party checking its own exchange supplies them by loading it; a
- * verifier without the record restates them from both parties' linkage terms.
- * With neither, both checks are reported as not performed rather than assumed --
- * which also holds the verdict short of verified.
+ * Where the two identities the certificates must authorize, the agreed-terms hash
+ * the receipt content must carry, and the run binder that pairs the receipt to one
+ * exchange come from. The exchange record holds all three already, so a party
+ * checking its own exchange supplies them by loading it; a verifier without the
+ * record restates the first two from both parties' linkage terms, and pairs
+ * nothing -- terms belong to a partnership, not to one run of it. With neither,
+ * every check is reported as not performed rather than assumed -- which also holds
+ * the verdict short of verified.
  */
 export interface SignedRecordExpectationSources {
   record?: ExchangeRecord;
@@ -528,7 +532,7 @@ async function signedRecordExpectations(
 ): Promise<
   Pick<
     DualSignedRecordVerificationInputs,
-    "expectedIdentities" | "expectedTermsHash"
+    "expectedIdentities" | "expectedTermsHash" | "recordReceiptBinder"
   >
 > {
   const { record, localTerms, partnerTerms } = sources;
@@ -536,6 +540,10 @@ async function signedRecordExpectations(
     return {
       expectedIdentities: [record.localIdentity, record.partnerIdentity],
       expectedTermsHash: record.termsHash,
+      // An explicit null for a record that carries no run binder, so a record of
+      // an exchange that produced no receipt is reported as contradicting the
+      // receipt loaded beside it rather than as a pairing nobody could check.
+      recordReceiptBinder: record.receiptBinder ?? null,
     };
   if (localTerms === undefined || partnerTerms === undefined) return {};
   return {
@@ -606,6 +614,8 @@ export interface SignedVerdictViewModel {
   headline: VerdictHeadline;
   parties: Array<SignedPartyViewModel>;
   termsHash: VerdictRow;
+  /** Whether this receipt is the run whose exchange record was loaded beside it. */
+  runBinding: VerdictRow;
   /** What to do about a slot nothing outside the record anchors, and what an
    * anchoring value that reached neither certificate means. Empty when neither
    * applies. */
@@ -712,6 +722,48 @@ const SIGNED_TERMS_ROWS: Record<
     explanation:
       "Nothing outside the record states the terms this exchange agreed. " +
       EXPECTATIONS_REMEDIATION,
+  },
+};
+
+// What pairing this receipt to one run says. Only the exchange record supplies the
+// pairing, so a remediation here names it alone -- unlike the rows above, whose
+// EXPECTATIONS_REMEDIATION offers linkage terms as the other route: terms belong to
+// a partnership and repeat across every run of it.
+const RUN_BINDING_ROWS: Record<
+  RunBindingStatus,
+  { status: string; tone: VerdictTone; explanation: string }
+> = {
+  verified: {
+    status: "This receipt and this record are the same run",
+    tone: "verified",
+    explanation:
+      "Both carry one run's binder, which is what tells one run of a " +
+      "partnership from the next.",
+  },
+  mismatch: {
+    status: "Does not match the record's run binder",
+    tone: "failed",
+    explanation:
+      "The receipt and the record you loaded are from different runs, not from " +
+      "one exchange. An exchange writes both artifacts together, under one " +
+      "timestamp stamp by default, so pair them by that stamp.",
+  },
+  unpaired: {
+    status: "The record carries no run binder",
+    tone: "failed",
+    explanation:
+      "The record you loaded is of an exchange that produced no signed receipt, " +
+      "so this receipt is not that run's. Load the record written alongside " +
+      "this receipt.",
+  },
+  "not-checked": {
+    status: "Not checked",
+    tone: "incomplete",
+    explanation:
+      "Load the exchange record for this run to pair the receipt to it. " +
+      "Without it, the signed values that can be checked here repeat across " +
+      "each run of this partnership under these terms, so which run this " +
+      "receipt attests stays open.",
   },
 };
 
@@ -929,10 +981,17 @@ export function signedVerdictViewModel(
       signedPartyViewModel(report.responder, report.initiator, report),
     ],
     termsHash: { label: "The agreed-terms hash", ...termsRow },
+    runBinding: {
+      label: "The receipt-record pairing",
+      ...RUN_BINDING_ROWS[report.runBinding],
+    },
     guidance: anchoringGuidance(report),
+    // Never RECOMPUTED: deriving the binder needs the exchange session key. What
+    // is checked against it is the pairing row above -- that it is the value the
+    // run's own record carries.
     binderNote:
       `The per-exchange binder ${sanitizeForDisplay(report.binder)} is covered ` +
-      "by both signatures and is not recomputed here: deriving it needs the " +
+      "by both signatures and is never recomputed here: deriving it needs the " +
       "exchange session key, which only the two parties held.",
   };
 }

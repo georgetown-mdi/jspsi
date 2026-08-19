@@ -64,7 +64,12 @@ const associationTable: AssociationTable = [
 const INPUT_CSV = "pid,dose\nP0,10mg\nP1,20mg\n";
 const RESULT_CSV = "pid,their_row_id,clinic\nP0,1,south\nP1,0,north\n";
 
-async function buildFixture(): Promise<{
+// The run binder this fixture's record and the dual-signed record below both carry,
+// so the two artifacts pair as one run. A caller passes another value to stand in
+// for a different run of the same exchange.
+const RECEIPT_BINDER = "YmluZGVy";
+
+async function buildFixture(receiptBinder = RECEIPT_BINDER): Promise<{
   record: ExchangeRecord;
   keys: VerificationKeys;
 }> {
@@ -76,6 +81,7 @@ async function buildFixture(): Promise<{
     partnerPayloadReceived,
     associationTable,
     createdAt: "2026-01-02T03:04:05.000Z",
+    receiptBinder,
   });
 }
 
@@ -94,7 +100,7 @@ async function buildSignedFixture(record: ExchangeRecord): Promise<{
     termsHash: record.termsHash,
     initiatorToResponderPayload: "aTJyUGF5bG9hZA",
     responderToInitiatorPayload: "cjJpUGF5bG9hZA",
-    binder: "YmluZGVy",
+    binder: RECEIPT_BINDER,
   };
   return {
     signed: {
@@ -882,15 +888,16 @@ describe("verify receipt bench", () => {
     await expectBothVerdictsGone();
   });
 
-  // The recurring case: the same two parties run the same exchange again. Every
-  // value the receipt is checked against -- both identities and the agreed-terms
-  // hash -- is byte-identical across those runs, and the values that differ (the
-  // binder and the two payload MACs) are reported rather than compared, so the
-  // previous run's receipt would be consumed beside this run's record with
-  // nothing on the page to contradict it. It is dropped instead.
+  // The recurring case: the same two parties run the same exchange again. Both
+  // identities and the agreed-terms hash are byte-identical across those runs, so
+  // what separates them is the run binder the two artifacts carry -- which the
+  // verdict does compare. This is the UI half of that defense: the previous run's
+  // receipt is dropped when this run's record is loaded, rather than left to be
+  // verified beside it and reported as a mismatch.
   test("a record from the next run of the same exchange drops the previous receipt", async () => {
     await verifyRecordAndSignedRecord();
-    const { record: nextRecord, keys: nextKeys } = await buildFixture();
+    const { record: nextRecord, keys: nextKeys } =
+      await buildFixture("bmV4dFJ1bkJpbmRlcg");
 
     await userEvent.upload(
       page.elementLocator(fileInputAt(0)),

@@ -2,7 +2,7 @@
   "vectors": [
     {
       "name": "both-output-with-payloads",
-      "description": "Both parties learn the result size and hold the association table, and each records its own input row count (recordsExposed); each sends and receives one payload column under a named data-sharing agreement. Exercises the full governance block -- a legal-agreement reference, purpose, and expiration, payload columns with data-dictionary descriptions sent and received, the psi algorithm, and the matching basis (the ssn linkage field, recorded as name + type) -- alongside the commitments. Fixed salts and binding nonce make the build deterministic so any implementation must reproduce these bytes.",
+      "description": "Both parties learn the result size and hold the association table, and each records its own input row count (recordsExposed); each sends and receives one payload column under a named data-sharing agreement. Exercises the full governance block -- a legal-agreement reference, purpose, and expiration, payload columns with data-dictionary descriptions sent and received, the psi algorithm, and the matching basis (the ssn linkage field, recorded as name + type) -- alongside the commitments, plus the run binder a signed exchange carries so its placement in the record is pinned across implementations. Fixed salts and binding nonce make the build deterministic so any implementation must reproduce these bytes.",
       "inputs": {
         "localTerms": {
           "version": "1.0.0",
@@ -112,7 +112,8 @@
           "rows": [["active"], [null]]
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "recordsExposed": 5
+        "recordsExposed": 5,
+        "receiptBinder": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk"
       },
       "randomness": {
         "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -123,7 +124,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v1",
+        "version": "psilink-exchange-record/v2",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
         "localIdentity": "Party A",
@@ -157,6 +158,7 @@
         "recordsExposed": 5,
         "resultSize": 2,
         "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "receiptBinder": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
         "commitments": {
           "localPayloadSent": "5DIqg3FyqiU2oxNIYdWkMDGRvu8qzBJJoAvwDTyC55Q",
           "partnerPayloadReceived": "4yBUQu5WM_InXqX-6onNlNpYxmPjh-nJG1qr-3y_6kc",
@@ -254,7 +256,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v1",
+        "version": "psilink-exchange-record/v2",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "1pgvorgQseW486XCURs3KAcOP_YN3bnIhVndGsrHHwc",
         "localIdentity": "Party A",
@@ -383,7 +385,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v1",
+        "version": "psilink-exchange-record/v2",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "0mw2vkRK9EL4_K_3ZPpnmToLl2eyDBS3zGfoxqOlOTc",
         "localIdentity": "Party A",
@@ -519,7 +521,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v1",
+        "version": "psilink-exchange-record/v2",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "0mw2vkRK9EL4_K_3ZPpnmToLl2eyDBS3zGfoxqOlOTc",
         "localIdentity": "Party B",
@@ -683,7 +685,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v1",
+        "version": "psilink-exchange-record/v2",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "eZBA72rLn0xaADBj7BGC0mWHe_7s0pwED7tzDaUVjWk",
         "localIdentity": "Party A",
@@ -854,7 +856,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v1",
+        "version": "psilink-exchange-record/v2",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "AzJi5GLcAEIuLecddIrltTqEXxzN35jvu9OPcLpZ910",
         "localIdentity": "Party A",
@@ -1023,7 +1025,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v1",
+        "version": "psilink-exchange-record/v2",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
         "localIdentity": "Party A",

@@ -31,6 +31,16 @@ import type { HandshakeRole } from "./types.js";
 // consistency. The two artifacts are separate files (see
 // docs/spec/EXCHANGE_RECORD.md) and a caller may hold either or both.
 //
+// Beside the per-party checks it makes two whole-record ones: the agreed-terms
+// hash against the value the caller holds, and the receipt's per-exchange binder
+// against the `receiptBinder` of the exchange record for the run it is being read
+// beside. That pairing is what ties a receipt to ONE run rather than to a
+// partnership: across recurring runs under one set of terms every signed value a
+// verifier can otherwise check repeats byte for byte (the terms hash and both
+// certificates), and the directional payload MACs, which do vary per run, are
+// reported rather than recomputed -- no verifier holds the session key they are
+// keyed under.
+//
 // What "verified" costs here: a dual-signed record is self-consistent by
 // construction, so signature verification alone proves only that whoever holds the
 // two certificates' private keys signed this content -- an attacker who mints two
@@ -124,6 +134,27 @@ export interface LocalIdentityAnchor {
  */
 export type AssertedIdentityStatus = "verified" | "mismatch" | "not-checked";
 
+/**
+ * Whether this receipt belongs to the one exchange run the verifier is reading it
+ * beside, decided by comparing the receipt's per-exchange binder against the
+ * `receiptBinder` the exchange record for that run carries. Both parties derive
+ * that value from the run's session key, and every run derives a different one, so
+ * it is what separates one run of a recurring partnership from the next -- the
+ * agreed-terms hash, the identities, and the certificates all repeat byte for byte
+ * across such runs.
+ *
+ * - `verified`: the record and the receipt carry the same run's binder.
+ * - `mismatch`: they carry different ones, so they are not the same run.
+ * - `unpaired`: the record carries no binder at all. It records an exchange that
+ *   produced no signed receipt (no signing identity, or a path with no session
+ *   key), so no receipt belongs to it -- a contradiction, not an unchecked box.
+ * - `not-checked`: no record was supplied. A holder of the receipt alone has
+ *   nothing to pair it to, which holds the verdict short of `verified` without
+ *   failing it.
+ */
+export type RunBindingStatus =
+  "verified" | "mismatch" | "unpaired" | "not-checked";
+
 /** One party's slot (`initiator` or `responder`) in a verified dual-signed
  * record. */
 export interface SignedReceiptPartyReport {
@@ -171,12 +202,21 @@ export interface DualSignedRecordVerificationReport {
   /** Whether the record's agreed-terms hash matches the one the caller supplied. */
   termsHash: TermsHashStatus;
   /**
+   * Whether this receipt belongs to the exchange run whose record the caller
+   * supplied. This is what a receipt's signatures alone cannot establish: every
+   * other value they cover that a verifier can check repeats across recurring runs
+   * of one partnership under one set of terms.
+   */
+  runBinding: RunBindingStatus;
+  /**
    * The per-exchange binder both signatures cover, verbatim from the record. It is
    * derived from the exchange's session key, which only the two parties ever held
    * and neither retains, so a verifier confirms that the signers signed a receipt
-   * carrying THIS binder and does not recompute it: a swapped binder is detectable
-   * only during the live exchange, where both parties derive it independently. It
-   * is reported rather than checked for exactly that reason.
+   * carrying THIS binder and does not recompute it: what an offline verifier can
+   * check is that it is the value the run's own record carries ({@link
+   * runBinding}), not that it derives from that run's session key. A binder
+   * substituted into BOTH artifacts is detectable only during the live exchange,
+   * where each party derives it independently.
    */
   binder: string;
 }
@@ -212,6 +252,21 @@ export interface DualSignedRecordVerificationInputs {
   /** The agreed-terms hash the caller holds (from its own exchange record, or
    * re-derived from both parties' terms), compared against the record's. */
   expectedTermsHash?: string;
+  /**
+   * The `receiptBinder` of the exchange record this receipt is being read beside,
+   * which is what pairs the receipt to one run: the value when that record carries
+   * one, or `null` when the record is in hand and carries NONE (an exchange that
+   * produced no signed receipt, which no receipt belongs to). Absent when no
+   * record is in hand at all, which leaves the pairing unchecked rather than
+   * contradicted. The distinction is load-bearing: passing `undefined` for a
+   * record that carries no binder would report a contradiction as an unchecked
+   * box.
+   *
+   * A verifier holding both parties' terms but no record supplies the agreed-terms
+   * hash by re-deriving it and still pairs nothing: terms belong to a partnership,
+   * not to one run of it.
+   */
+  recordReceiptBinder?: string | null;
 }
 
 // A per-party evaluation that could not be completed at all -- a certificate whose
@@ -413,8 +468,10 @@ function identityStatuses(
  * certificate the record carries, check that certificate's identity binding (its
  * self-signature), check what anchors its certificate outside the record (a
  * pinned fingerprint, or the caller's own signing identity), and check the
- * identity it authorizes when the caller supplies the expected pair. Read-only;
- * it never mutates or re-signs the record.
+ * identity it authorizes when the caller supplies the expected pair. Beside those,
+ * check the agreed-terms hash and -- against the exchange record for the run, when
+ * the caller holds it -- that this receipt is that run's. Read-only; it never
+ * mutates or re-signs the record.
  *
  * Returns a {@link DualSignedRecordVerificationReport} on the same tri-state as
  * the unsigned record's report, so "not checked" is never reported as "verified".
@@ -423,7 +480,10 @@ function identityStatuses(
  * identity: signature verification alone proves only that the holders of the two
  * embedded certificates' keys signed this content, which anyone can arrange with
  * two certificates of their own. A run that anchors one certificate, and the
- * third-party auditor's run that anchors neither, are both `incomplete`.
+ * third-party auditor's run that anchors neither, are both `incomplete`. A run
+ * that pairs the receipt to no exchange record is `incomplete` for the same
+ * reason: which of a recurring partnership's runs the receipt attests is open
+ * until the record for one of them is beside it.
  *
  * Fail-safe over field values: given a record of the shape
  * `parseDualSignedRecord` produces, every check yields a status rather than an
@@ -462,9 +522,27 @@ export async function verifyDualSignedRecord(
         ? "verified"
         : "mismatch";
 
+  // Both values are public (the record publishes its binder, and the receipt is
+  // signed over it), so this is an equality check like the terms hash above and
+  // not a secret comparison.
+  const runBinding: RunBindingStatus =
+    inputs.recordReceiptBinder === undefined
+      ? "not-checked"
+      : inputs.recordReceiptBinder === null
+        ? "unpaired"
+        : inputs.recordReceiptBinder === record.content.binder
+          ? "verified"
+          : "mismatch";
+
   const parties = [initiator, responder];
   const anyMismatch =
     termsHash === "mismatch" ||
+    // A receipt that does not pair with the record beside it is contradicted, not
+    // merely unverified: whatever it attests, it does not attest that run. An
+    // `unpaired` record states there is no receipt for it at all, which the
+    // receipt in hand contradicts just as flatly.
+    runBinding === "mismatch" ||
+    runBinding === "unpaired" ||
     // A pinned value matching neither certificate says this record is not the
     // pinned party's. A resolved local identity matching neither says only that
     // the verifier was not a party to this exchange, so it is reported rather
@@ -483,6 +561,10 @@ export async function verifyDualSignedRecord(
   // whoever assembled the record could have minted.
   const anyUnverified =
     termsHash === "not-checked" ||
+    // Without the run's record there is nothing to pair the receipt to, so which
+    // run it attests is open -- every value its signatures cover that a verifier
+    // can check repeats across runs of one partnership under one set of terms.
+    runBinding === "not-checked" ||
     parties.some(
       (party) =>
         party.certificateAnchor === "unanchored" ||
@@ -501,6 +583,7 @@ export async function verifyDualSignedRecord(
     pinnedFingerprints: anchoring.pinnedFingerprints,
     localIdentity: anchoring.localIdentity,
     termsHash,
+    runBinding,
     binder: record.content.binder,
   };
 }

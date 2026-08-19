@@ -54,11 +54,15 @@ import type { Algorithm, AssociationTable } from "./types.js";
 // --- Versions ----------------------------------------------------------------
 
 /**
- * The one recognized format version for a v1 {@link ExchangeRecord}. A reader
- * (the verification item) rejects an unrecognized version rather than migrating
- * it; this literal is the schema's only accepted value.
+ * The one recognized format version for an {@link ExchangeRecord}. A reader (the
+ * verification item) rejects an unrecognized version rather than migrating it;
+ * this literal is the schema's only accepted value. It moves with the record's
+ * field set, so a record written before {@link ExchangeRecord.receiptBinder} --
+ * whose absence a reader cannot distinguish from an exchange that produced no
+ * signed receipt -- is refused on this discriminant rather than paired against a
+ * receipt it has no value to pair with.
  */
-export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v1";
+export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v2";
 
 /** The one recognized format version for v1 {@link VerificationKeys}. */
 export const EXCHANGE_KEYS_VERSION = "psilink-exchange-keys/v1";
@@ -385,9 +389,21 @@ export interface ExchangeRecord {
    * entirely when absent -- its absence is explicit, never an empty string. */
   retentionDisposition?: string;
   /** Per-exchange CSPRNG binder (base64url, >= 128 bits) so two runs with
-   * identical terms still produce distinct records. Distinct from the
-   * per-commitment salts; not a hiding secret. */
+   * identical terms still produce distinct records. Generated locally, so the two
+   * parties' records for one run carry DIFFERENT nonces -- it distinguishes runs
+   * within one holder's own log and pairs nothing across artifacts. Distinct from
+   * the per-commitment salts; not a hiding secret. */
   bindingNonce: string;
+  /** The signed receipt's per-exchange binder (base64url), repeated here so a
+   * verifier handed this record and a receipt separately can tell whether they
+   * are the same run: both parties derive the identical value from the exchange's
+   * session key, and a different run derives a different one. Present exactly
+   * when this run produced a signed receipt, so its absence states that no
+   * receipt belongs to this record -- which is why an unpaired receipt beside it
+   * is a mismatch and not merely unchecked. Carries no secret: it is a one-way
+   * HKDF output the signed receipt already publishes (see
+   * `deriveReceiptBinder`). */
+  receiptBinder?: string;
   commitments: ExchangeRecordCommitments;
 }
 
@@ -438,12 +454,12 @@ export interface VerificationKeys {
 // defense-in-depth ceilings, not semantic limits.
 
 // Length cap for the fixed-size base64url crypto values a record and its keys
-// carry (termsHash, bindingNonce, each commitment, each salt): every one is a
-// 32-byte value -- 43 unpadded base64url characters -- so 256 is far above any
-// legitimate value yet refuses a megabyte-scale hostile string. Bounds the field
-// for the untrusted reader without length-locking the exact byte count (a reader
-// still verifies by recomputing the commitment, so the exact length is not
-// pinned).
+// carry (termsHash, bindingNonce, receiptBinder, each commitment, each salt):
+// every one is a 32-byte value -- 43 unpadded base64url characters -- so 256 is
+// far above any legitimate value yet refuses a megabyte-scale hostile string.
+// Bounds the field for the untrusted reader without length-locking the exact
+// byte count (a reader still verifies by recomputing the commitment, so the
+// exact length is not pinned).
 const MAX_BASE64URL_LENGTH = 256;
 
 // Base64url without padding (the binary encoding used throughout receipts; see
@@ -569,6 +585,7 @@ const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
   resultSize: resultSizeSchema.optional(),
   retentionDisposition: retentionDispositionSchema.optional(),
   bindingNonce: base64UrlSchema,
+  receiptBinder: base64UrlSchema.optional(),
   commitments: ExchangeRecordCommitmentsSchema,
 });
 
@@ -652,6 +669,13 @@ export interface ExchangeRecordInputs {
   /** Local wall-clock timestamp (ISO 8601); supplied by the caller so the build
    * is otherwise deterministic and testable. */
   createdAt: string;
+  /** The signed receipt's per-exchange binder for this run, when the run produces
+   * one. Supply it exactly when the signed-receipt step runs -- the caller derives
+   * it once and passes the same value here and into the receipt content, so the
+   * two artifacts carry one shared per-run value. Omit it on every path that
+   * produces no receipt (no session key, or no signing identity), where the
+   * record's absent field is the honest statement that no receipt belongs to it. */
+  receiptBinder?: string;
 }
 
 /**
@@ -870,6 +894,15 @@ export async function buildExchangeRecord(
         }
       : {}),
     bindingNonce: toBase64Url(bindingNonce),
+    // The receipt's shared per-run binder, passed in by the caller that also
+    // signs it into the receipt content. Omit the key entirely when absent (an
+    // absent field and a null/undefined field are distinct in the canonical
+    // encoding), and validate with the same schema the parser uses so a value
+    // that is not base64url throws here rather than producing a record the
+    // parser would later reject.
+    ...(inputs.receiptBinder !== undefined
+      ? { receiptBinder: base64UrlSchema.parse(inputs.receiptBinder) }
+      : {}),
     commitments: recordCommitments as ExchangeRecordCommitments,
   };
   const keys: VerificationKeys = {
