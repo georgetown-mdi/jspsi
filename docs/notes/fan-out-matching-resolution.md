@@ -89,7 +89,7 @@ So each party advertises one integer, its effective key count, on the terms-exch
 
 A fan-out-free exchange advertises its plain key count, so every derived bound is numerically what it is today. That was a hard requirement: this work must not move a single number for the exchanges that do not use it.
 
-**A derivation that tightens.** Bounding the advertised value at twenty times the key count means the product with the maximum record count is about 5.1 x 10^15 -- still exact in a double, but with the headroom against 2^53 falling from roughly 35x to roughly 1.8x. The invariant that pins that headroom is therefore pinned against the effective key count rather than the raw key count. It is a live constraint on any future raise of either the candidate cap or the maximum linkage-entry count, which is why the spec carries the arithmetic rather than the conclusion.
+**A derivation that tightens.** Bounding the advertised value at a multiple of the key count keeps the single-pass gate's product exact in a double, but leaves materially less headroom than the raw key count does. The invariant that pins that headroom is therefore pinned against the effective key count rather than the raw key count, and it is a live constraint on any future raise of either the candidate cap or the maximum linkage-entry count. The arithmetic and its figures are the spec's, under **The exact-integer premise tightens** in [the width bound](../spec/PROTOCOL.md#the-width-bound-a-per-record-key-candidate-cap).
 
 ## Why the ragged layout is chosen per sender, not per key
 
