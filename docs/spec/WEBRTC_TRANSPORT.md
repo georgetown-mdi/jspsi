@@ -201,18 +201,31 @@ peer's in-band close sentinel, in the same call, before the channel's `closing`
 fires. Both parties closing a healthy exchange therefore each reach `closing` on
 a link of their own closing, which is the signature of a teardown on the one
 ending that lost nothing -- measured on a real pair in Chromium. What separates
-the two is whether the peer's close is what took the link down: PeerJS holds a
-connection `open` until it reads that close, and a link this side loses some
-other way reaches `closing` with the connection still open. So the no-live-peer
-exit is taken for a channel that starts closing on a link already gone with no
-peer close in hand; a link the peer's own close ended is the peer's receipt.
+the two is whether the end was PeerJS's own doing: PeerJS clears `open` whenever
+it itself ends the connection -- reading the peer's close sentinel, this side's
+own close call, or its own cleanup on a signaling LEAVE naming this peer, an
+inbound OFFER echoing the live connection, ICE reaching failed or closed, or a
+send error -- so a cleared flag at `closing` means a PeerJS-mediated end and
+reads as the peer's close, exactly as every close read before this
+discrimination existed; only an end that bypasses PeerJS -- this side's raw
+peer-connection teardown -- reports the loss. A partner who ends the link
+through signaling (a relayed LEAVE) mid-drain therefore also reads as the
+receipt, the same behavior staging had before this discrimination existed; the
+close remains no proof of delivery. So the no-live-peer exit is taken for a
+channel that starts closing on a link already gone with no peer close in hand; a
+link the peer's own close ended is the peer's receipt.
 
 A completed `close` arriving with no `closing` before it is still read as the
 peer's, because a link state read after a close has completed no longer says
 whether the link died before the close or in answer to it, and a doubt invented
 about a healthy exchange is the worse error. The reading is therefore inert on a
 stack that never fires `closing`: every close reads as the peer's there, the
-pre-reading behavior -- the stated limit of this discrimination.
+pre-reading behavior -- the stated limit of this discrimination. The
+healthy-exchange reading also assumes the engine dispatches the channel's
+`closing` as a queued task after the synchronous close call, as spec-conforming
+engines do and as Chromium, the one engine the browser suite drives, measures;
+an engine dispatching it synchronously inside the peer connection's close would
+report a spurious loss on every healthy exchange there.
 
 The web wait also ends when the run itself is cancelled. Up to the ceiling the
 wait's length is the PEER's to choose -- it holds the wait simply by keeping ICE

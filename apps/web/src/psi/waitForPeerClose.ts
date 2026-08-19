@@ -75,18 +75,29 @@ function transportOf(conn: DataConnection): {
 }
 
 /**
- * Whether the peer's own close has already reached PeerJS. Reading the peer's
- * in-band close sentinel closes the connection, and closes THIS side's peer
- * connection inside that same call, so a healthy exchange whose two parties
- * both close reaches `closing` on a link this side ended -- one step behind the
- * peer's close rather than instead of it.
+ * Whether PeerJS itself has already ended this connection. PeerJS clears `open`
+ * inside `DataConnection.close()`, reached by reading the peer's in-band close
+ * sentinel, by this side's own non-flushing close, and by PeerJS's own cleanup
+ * paths -- a broker-relayed LEAVE naming this peer, an inbound OFFER echoing
+ * the live connection id, ICE reaching failed or closed, a send error, or the
+ * channel's own close. A healthy exchange whose two parties both close
+ * therefore reaches `closing` on a link this side's own read of the peer's
+ * sentinel already ended -- one step behind the peer's close rather than
+ * instead of it.
+ *
+ * A `closing` reached on a dead link with `open` still true is therefore an end
+ * that BYPASSED PeerJS -- this side's raw peer-connection teardown, the
+ * mid-drain loss this wait exists to catch. Any PeerJS-mediated end instead
+ * reads as the peer's close, matching what staging reported for every close
+ * before this discrimination existed; delivery proof remains the
+ * application-level completion, not the close itself (see
+ * docs/spec/WEBRTC_TRANSPORT.md for that limit).
  *
  * The flushing close this side runs leaves the flag alone: it only queues this
- * side's own sentinel and returns. A link this side loses some other way
- * reaches `closing` with the connection still open, PeerJS learning of that
- * loss only afterwards. Both orderings are measured on a real pair in Chromium
- * and pinned in apps/web/test/browser/webrtcCloseDelivery.test.ts, the healthy
- * one also end to end through the lifecycle in
+ * side's own sentinel and returns. Both the flushing close and the
+ * healthy-exchange reading above are measured on a real pair in Chromium and
+ * pinned in apps/web/test/browser/webrtcCloseDelivery.test.ts, the healthy one
+ * also end to end through the lifecycle in
  * apps/web/test/browser/exchangeLifecycle.test.ts.
  */
 function peerCloseAlreadyRead(conn: DataConnection): boolean {
