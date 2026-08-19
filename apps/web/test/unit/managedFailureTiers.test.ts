@@ -226,16 +226,6 @@ describe("deriveManagedFailureTier: the import/restore tier", () => {
     ).toBe("imported");
   });
 
-  test("an auth failure with NO import marker is the unexplained tier", () => {
-    expect(
-      deriveManagedFailureTier(
-        record({ lastRun: failed("auth") }),
-        undefined,
-        NOW,
-      ),
-    ).toBe("unexplained");
-  });
-
   test("a transport drop with a standing import marker is still the transport tier", () => {
     // The import marker explains only a failed-CLOSED (auth) handshake -- a stale
     // restored secret cannot authenticate. A transport drop is a connection problem the

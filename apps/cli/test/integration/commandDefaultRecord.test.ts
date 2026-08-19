@@ -54,13 +54,13 @@ import { DEFAULT_RECORD_BASENAME, keysPathFor } from "../../src/recordFile";
 //
 // filedrop only: the record-write wiring is transport-agnostic (the handler reads
 // the same `--record` default and calls the same runProtocol regardless of
-// channel), so a real SFTP container buys nothing here -- the same rationale the
-// sibling file gives for its transport-agnostic (failure-path) assertions. This
-// file therefore needs no Docker even though it lives in the integration project.
+// channel), so driving a real SFTP server buys nothing here -- the same rationale
+// the sibling file gives for its transport-agnostic (failure-path) assertions.
 //
-// CLI integration tests are Docker-backed and self-managing via a vitest
-// globalSetup (see CLAUDE.local.md); run with `npm run test:integration -w
-// apps/cli`.
+// CLI integration tests are self-managing: the integration project's vitest
+// globalSetup (test/sftpServer/globalSetup.ts) starts and stops the SFTP server
+// the suite selects, in process by default. Run with `npm run test:integration
+// -w apps/cli`.
 
 // 32 zero bytes as base64url (43 chars): a valid shared secret. Both exchange
 // parties' key files start from it so the authenticated handshake succeeds; each

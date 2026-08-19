@@ -65,10 +65,7 @@ function location(overrides?: Partial<BrokerLocation>): BrokerLocation {
 }
 
 /** Register a peer, collecting everything the broker sends it. */
-async function register(
-  id: string,
-  options?: { location?: BrokerLocation },
-): Promise<{
+async function register(id: string): Promise<{
   client: BrokerClient;
   inbox: Array<BrokerMessage>;
   closes: Array<ConnectionError>;
@@ -82,7 +79,7 @@ async function register(
     resolve: (message: BrokerMessage) => void;
   }> = [];
   const client = await connectToBroker({
-    location: options?.location ?? location(),
+    location: location(),
     id,
     handlers: {
       onMessage: (message) => {

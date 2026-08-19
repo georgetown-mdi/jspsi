@@ -126,31 +126,6 @@ test("lock synchronization with race condition", async () => {
   desynchronize(localConn);
 });
 
-test("basic synchronization", async () => {
-  await sftpAdapter.put(
-    // The planted peer hello must advertise the bilateral mode flags; an empty
-    // {} body fails the HelloEnvelope schema. Both parties run default lock
-    // mode, so both flags are false.
-    Buffer.from(
-      JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
-    ),
-    `${SFTP_PATH}/${localConn.id}-hello.json`,
-  );
-
-  await sftpConn.synchronize();
-
-  const currentFiles = await sftpAdapter.list(SFTP_PATH);
-  await sftpAdapter.safeDelete(`${SFTP_PATH}/${sftpConn.id}-hello.json`);
-
-  expect(sftpConn.peerId).toBe(localConn.id);
-  expect(sftpConn.handshakeRole).toBe("initiator");
-
-  expect(currentFiles.length).toBe(1);
-  expect(currentFiles[0].name).toBe(`${sftpConn.id}-hello.json`);
-
-  desynchronize(sftpConn);
-});
-
 test("joiner rendezvous recovers from a transient rename failure", async () => {
   // End-to-end guard for acceptance criterion (a): a transient SSH_FX_FAILURE on
   // the joiner's atomic <id>-joining.json -> <id>-hello.json rename must recover

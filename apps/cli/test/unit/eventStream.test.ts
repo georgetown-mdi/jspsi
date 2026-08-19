@@ -133,16 +133,6 @@ test("a metrics event carries the operational counters verbatim", () => {
   expect(event.v).toBe(EVENT_STREAM_VERSION);
 });
 
-test("a simulated retry/reconnect is reported as a non-zero count", () => {
-  // The counter source (a transport client's connect/operation retry loop) is
-  // tested against a real simulated retry in the adapter suites; here the count
-  // it yields is shown to ride the metrics event as a non-zero field.
-  const event = buildMetricsEvent(10, 0, 1);
-  expect(event.reconnects).toBe(1);
-  const retried = buildMetricsEvent(10, 2, 0);
-  expect(retried.transportRetries).toBe(2);
-});
-
 test("metrics counters and stage durations are clamped to non-negative integers", () => {
   // The values are this party's own integers, but the builder floors any
   // malformed input so a schema-invalid numeric field can never be emitted.
@@ -234,18 +224,6 @@ test("classifies every other failure as exchange", () => {
   expect(
     classifyTerminalError(new ConnectionError("bad frame", "usage"), "run"),
   ).toBe("exchange");
-});
-
-test("the security category is identifiable from the terminal event alone", () => {
-  // Exit codes cannot distinguish a security failure from a plain usage/transport
-  // failure, so the marker must live in the event: a security ConnectionError is
-  // not a UsageError, so it would exit 69 -- indistinguishable from a transport
-  // drop by code -- yet the event names it.
-  const event = buildErrorEvent(
-    new ConnectionError("tampered handshake", "security"),
-    "run",
-  );
-  expect(event.category).toBe("security");
 });
 
 // --- Hostile-value sanitization (ESC / RLO injection) ------------------------

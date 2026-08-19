@@ -105,12 +105,7 @@ const socketFactory = (url: string): WebSocket => {
 };
 
 /** Register a client and hand back both ends plus what it observed. */
-async function register(options?: {
-  onMessage?: (message: BrokerMessage) => void;
-  onClose?: (error?: ConnectionError) => void;
-  id?: string;
-  signal?: AbortSignal;
-}): Promise<{
+async function register(options?: { signal?: AbortSignal }): Promise<{
   client: BrokerClient;
   socket: FakeSocket;
   messages: Array<BrokerMessage>;
@@ -120,15 +115,13 @@ async function register(options?: {
   const closes: Array<ConnectionError | undefined> = [];
   const pending = connectToBroker({
     location: LOCATION,
-    id: options?.id ?? LOCAL_ID,
+    id: LOCAL_ID,
     handlers: {
       onMessage: (message) => {
         messages.push(message);
-        options?.onMessage?.(message);
       },
       onClose: (error) => {
         closes.push(error);
-        options?.onClose?.(error);
       },
     },
     socketFactory,

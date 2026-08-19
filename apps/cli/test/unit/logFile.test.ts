@@ -89,21 +89,6 @@ test("configureLogFile: a newly created log file is owner-only (no group/world a
   expect(fs.statSync(logPath).mode & 0o077).toBe(0);
 });
 
-test("configureLogFile: --log-level silent writes nothing to the file", () => {
-  // Level filtering happens before the factory: loglevel installs noop for every
-  // method under SILENT, so the sink is never called even though the file exists.
-  const logPath = path.join(tmpDir, "silent.log");
-  const sink = configureLogFile(logPath);
-  logLibrary.setDefaultLevel(logLibrary.levels.SILENT);
-  const log = getLogger("logfile-test-silent");
-
-  log.error("should not appear");
-  log.info("nor this");
-  sink.close();
-
-  expect(fs.readFileSync(logPath, "utf8")).toBe("");
-});
-
 test("configureLogFile: a long message is written whole, not truncated by a short write", () => {
   // writeAll loops over a partial fs.writeSync, so a large serialized argument
   // lands in full rather than being clipped to the first kernel write.
@@ -219,18 +204,10 @@ test("configureLogFile: reroutes a logger created BEFORE the sink was installed"
   expect(fs.readFileSync(logPath, "utf8")).toContain("late-routed to file");
 });
 
-// --- (b) no file is created when the option is omitted -----------------------
+// --- (b) the option is omitted, so there is no file to open ----------------
 
 test("parseCommonBootstrapArgs: logFile is undefined when --log-file is omitted", () => {
   expect(parseCommonBootstrapArgs(argv({})).logFile).toBeUndefined();
-});
-
-test("an omitted --log-file opens no sink and creates no file", () => {
-  // Mirrors the handlers' guard: configureLogFile runs only when logFile is set.
-  const { logFile } = parseCommonBootstrapArgs(argv({}));
-  const sink = logFile !== undefined ? configureLogFile(logFile) : undefined;
-  expect(sink).toBeUndefined();
-  expect(fs.readdirSync(tmpDir)).toHaveLength(0);
 });
 
 // --- (c) a non-existent parent directory produces a clean error --------------

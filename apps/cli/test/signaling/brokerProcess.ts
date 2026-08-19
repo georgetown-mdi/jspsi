@@ -50,23 +50,15 @@ export interface BrokerProcess {
   stop: () => Promise<void>;
 }
 
-export interface BrokerProcessOptions {
-  /** Mount path; defaults to the runner's own `/api`. */
-  path?: string;
-  /** API key; defaults to the runner's own `peerjs`. */
-  key?: string;
-}
-
 /**
  * Spawn the broker and resolve once it reports its port. Rejects (after killing
  * the child) if it exits first or does not report within
  * {@link START_TIMEOUT_MS}, so a failed start never leaves an orphan.
  */
-export function startBrokerProcess(
-  options?: BrokerProcessOptions,
-): Promise<BrokerProcess> {
-  const mountPath = options?.path ?? "/api";
-  const key = options?.key ?? "peerjs";
+export function startBrokerProcess(): Promise<BrokerProcess> {
+  // The runner's own mount path and API key.
+  const mountPath = "/api";
+  const key = "peerjs";
   const child = spawn(
     process.execPath,
     [require.resolve("tsx/cli"), runner, "--path", mountPath, "--key", key],

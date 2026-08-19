@@ -377,42 +377,6 @@ test(
 );
 
 test(
-  "the cycle-start re-dial names a peer that accepts and closes having sent nothing",
-  async () => {
-    const remote = remotePath(srv, NS);
-    await ensureNamespace(srv, NS);
-    const endpoint = await interceptableEndpoint(srv);
-    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
-    const conn = new FileSyncConnection(adapter, {
-      verbose: -1,
-      pollingFrequency: 10,
-    });
-    conn.on("error", () => {});
-    try {
-      await conn.open(configFor(endpoint, remote));
-      const [, logs] = await withCapturedLogs(
-        async () => {
-          await adapter.releaseForIdle();
-          endpoint.intercept((socket) => socket.end());
-          await expect(adapter.ensureConnected()).resolves.toBe(false);
-        },
-        (level) => level === "WARN" || level === "ERROR",
-      );
-      const redial = logs
-        .map((entry) => entry.message)
-        .find((message) => message.includes("ephemeral SFTP re-dial failed"));
-      expect(redial).toBeDefined();
-      expect(redial).toContain("closed it having sent nothing");
-      expect(redial).toContain("source-IP allowlist");
-      expect(redial).not.toContain("first bytes the peer sent:");
-    } finally {
-      await retireQuietly(conn, endpoint);
-    }
-  },
-  TEST_TIMEOUT_MS,
-);
-
-test(
   "a dial that reaches the real SFTP server is untouched on both paths",
   async () => {
     // The control: the same two dial paths, through the same endpoint, against

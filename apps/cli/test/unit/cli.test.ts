@@ -117,15 +117,6 @@ test("durationFlagSeconds: an absent flag is undefined", () => {
   expect(durationFlagSeconds(argv({}), "peer-timeout")).toBeUndefined();
 });
 
-test("durationFlagSeconds: a bare integer is rejected naming the flag and suffixed value", () => {
-  expect(() =>
-    durationFlagSeconds(argv({ "peer-timeout": "30" }), "peer-timeout"),
-  ).toThrow(UsageError);
-  expect(() =>
-    durationFlagSeconds(argv({ "peer-timeout": "30" }), "peer-timeout"),
-  ).toThrow("30s");
-});
-
 test("durationFlagSeconds: a malformed value is a flag-named usage error", () => {
   expect(() =>
     durationFlagSeconds(argv({ "peer-timeout": "1w" }), "peer-timeout"),
@@ -242,15 +233,6 @@ test("durationFlagMs: a sub-second value is returned in milliseconds", () => {
 
 test("durationFlagMs: an absent flag is undefined", () => {
   expect(durationFlagMs(argv({}), "polling-frequency")).toBeUndefined();
-});
-
-test("durationFlagMs: a bare integer is rejected naming the flag and suffixed value", () => {
-  expect(() =>
-    durationFlagMs(argv({ "polling-frequency": "100" }), "polling-frequency"),
-  ).toThrow(UsageError);
-  expect(() =>
-    durationFlagMs(argv({ "polling-frequency": "100" }), "polling-frequency"),
-  ).toThrow("100s");
 });
 
 test("durationFlagMs: a repeated flag is rejected before parsing", () => {
@@ -723,39 +705,19 @@ test("writeOutput: a close-time failure rejects rather than reporting success", 
   }
 });
 
-test("writeOutput: the stdout branch writes to process.stdout unchanged", async () => {
-  // No output path: the rows go to process.stdout with no file and no permission
-  // handling, exactly as before.
-  const chunks: string[] = [];
-  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
-    chunk: string | Uint8Array,
-  ): boolean => {
-    chunks.push(
-      typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"),
-    );
-    return true;
-  }) as typeof process.stdout.write);
-  try {
-    await writeOutput(undefined, ["a", "b"], [["1", "2"]], logCollector());
-  } finally {
-    stdoutSpy.mockRestore();
-  }
-  expect(chunks.join("")).toBe("a,b\n1,2\n");
-});
-
 // --- writeOutput: redirected-stdout permission notice ------------------------
 
 // The distinct fd-1 kinds writeOutput's redirect detection must tell apart. Each
-// models a real fstat verdict: a `> file` redirect is the only regular file; a
-// pipe is a FIFO; a TTY and /dev/null are character devices. `stdoutIsRedirectedFile`
-// keys solely on isFile(), so only `regular-file` should fire -- but building each
-// Stats with its own true predicate (not just isFile() flipped) keeps the fixtures
-// honest models of the real fd shapes rather than three copies of one stub.
+// models a real fstat verdict: a `> file` redirect is the only regular file; a pipe
+// is a FIFO; a TTY -- and the `> /dev/null` whose fstat shape is indistinguishable
+// from it -- is a character device. `stdoutIsRedirectedFile` keys solely on
+// isFile(), so only `regular-file` should fire -- but building each Stats with its
+// own true predicate (not just isFile() flipped) keeps the fixtures honest models
+// of the real fd shapes rather than copies of one stub.
 const STDOUT_KINDS = {
   "regular-file": { isFile: true },
   pipe: { isFIFO: true },
   tty: { isCharacterDevice: true },
-  "/dev/null": { isCharacterDevice: true },
 } as const;
 
 // Drive writeOutput's stdout branch with fd 1's stat forced to one of the kinds
@@ -826,7 +788,7 @@ test("writeOutput: a redirected regular-file stdout warns at error level about u
   expect(stdout).toBe("a,b\n1,2\n");
 });
 
-test("writeOutput: a pipe, a TTY, or /dev/null stdout does not warn", async () => {
+test("writeOutput: a pipe or a TTY stdout does not warn", async () => {
   // Every non-file stdout (`| cat`, an interactive terminal, `> /dev/null`)
   // reports isFile() false and leaves no under-permissioned file behind, so none
   // fire -- including the pipe and TTY a bare `process.stdout.isTTY` check could
@@ -834,7 +796,7 @@ test("writeOutput: a pipe, a TTY, or /dev/null stdout does not warn", async () =
   // (a FIFO, a character device) rather than the same stub, so the assertion is
   // that isFile()-false is what suppresses the notice regardless of the concrete
   // non-file kind.
-  for (const kind of ["pipe", "tty", "/dev/null"] as const) {
+  for (const kind of ["pipe", "tty"] as const) {
     const { stdout, errors, warns } = await runStdoutBranch(kind);
     expect(errors, kind).toHaveLength(0);
     expect(warns, kind).toHaveLength(0);

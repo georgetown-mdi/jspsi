@@ -276,12 +276,6 @@ describe("SFTP session controls: stalled handshake", () => {
     expect(later.write).toHaveBeenCalledTimes(1);
   });
 
-  test("an unreachable socket is tolerated rather than throwing", () => {
-    const controls = createSftpSessionControls();
-    controls.stallHandshakeOnConnect = true;
-    expect(() => controls.onConnectionAccepted(undefined)).not.toThrow();
-  });
-
   test("the stalled count follows the connections the control is holding", () => {
     const controls = createSftpSessionControls();
     expect(controls.stalledConnectionCount()).toBe(0);

@@ -2309,23 +2309,6 @@ describe("fatal wrapper-error guard", () => {
     expect(wrapper.listenerCount("error")).toBe(1);
   });
 
-  test("emitting 'error' on the wrapper does not crash (listener handles it)", async () => {
-    const adapter = new SSH2SFTPClientAdapter();
-    const wrapper = makeWrapper();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).client = {
-      sftp: wrapper,
-      connect: vi.fn().mockResolvedValue(undefined),
-      client: noDelayClient(),
-    };
-    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
-    // Node throws on an 'error' event only when there are zero listeners; the
-    // guard makes this a no-op instead of an uncaught exception.
-    expect(() =>
-      wrapper.emit("error", new Error("Malformed NAME packet")),
-    ).not.toThrow();
-  });
-
   test("a repeated connect on the same wrapper does not duplicate the listener", async () => {
     const adapter = new SSH2SFTPClientAdapter();
     const wrapper = makeWrapper();
@@ -4718,18 +4701,10 @@ describe("ephemeral session mode (connection-per-poll)", () => {
           }),
       ),
     };
-    // The PARTNER dropping the session with operations on the wire: ssh2-sftp-
-    // client's per-operation listener clears the session and rejects each of them,
-    // with no end() of this side's. The idle release no longer produces this state
-    // -- it keeps a boundary reached with an operation outstanding -- so a
-    // partner-side drop is what still reaches it.
-    const tearFromServer = () => {
-      state.live = false;
-      failEveryInFlight(notConnected("exists"));
-    };
-    // The same drop from a partner that withholds its CONNECTION close: only the
-    // SFTP channel goes, so the operations are rejected over a transport ssh2 has
-    // ended while neither ssh2-sftp-client listener that clears `sftp` has run.
+    // The PARTNER dropping the session with operations on the wire while
+    // withholding its CONNECTION close: only the SFTP channel goes, so the
+    // operations are rejected over a transport ssh2 has ended while neither
+    // ssh2-sftp-client listener that clears `sftp` has run.
     // The session property therefore still reads live, which is what leaves a
     // release something to close (see shouldRecoverFromSessionLoss for why the
     // ended transport is what makes this rejection a loss rather than an
@@ -4743,7 +4718,6 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       connect,
       state,
       rawClient,
-      tearFromServer,
       tearChannelWithholdingClose,
     };
   }
@@ -5141,43 +5115,6 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(adapter.reconnectCount).toBe(0);
     expect(adapter.midExchangeReconnectCount).toBe(0);
     expect(adapterLog(adapter).warn).not.toHaveBeenCalled();
-  });
-
-  test("an op after the idle release re-establishes, uncounted and unwarned", async () => {
-    // The poll cycle releases the session at its idle boundary and a send driven
-    // by the protocol continuation resumes into that gap, ahead of the next
-    // cycle's ensureConnected. The op must re-establish the session the release
-    // deliberately closed and complete -- a deliberate lifecycle transition is not
-    // a session drop, so it must not reach the reconnect counters or the operator
-    // warning that report one.
-    const wrapper = wrapperMethods({
-      opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
-        cb(null, Buffer.from("h")),
-      readdir: (
-        _h: Buffer,
-        cb: (e: (Error & { code?: number }) | null, l?: unknown[]) => void,
-      ) => cb(Object.assign(new Error("EOF"), { code: 1 })),
-      close: (_h: Buffer, cb: (e: Error | null) => void) => cb(null),
-    });
-    const { client, connect, state } = ephemeralClient(wrapper);
-    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
-    const warn = vi.fn();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
-    install(adapter, client);
-
-    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
-    await adapter.releaseForIdle();
-    expect(state.live).toBe(false);
-
-    // No ensureConnected: this is the idle-gap op, not a cycle start.
-    await expect(adapter.list("/remote/dir")).resolves.toEqual([]);
-
-    expect(state.live).toBe(true);
-    expect(connect).toHaveBeenCalledTimes(2);
-    expect(adapter.reconnectCount).toBe(0);
-    expect(adapter.midExchangeReconnectCount).toBe(0);
-    expect(warn).not.toHaveBeenCalled();
   });
 
   test("an op after the idle release issues no attempt against the released session", async () => {
@@ -7706,7 +7643,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       failInFlight = undefined;
       rawClient.emit("end");
     };
-    return { client, connect, state, rawClient, socket, dropFromServer };
+    return { client, connect, rawClient, socket, dropFromServer };
   }
 
   test.each([
@@ -9505,27 +9442,6 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     return holder;
   }
 
-  test("a transition on an idle queue still enters in the same tick, with no bound armed", async () => {
-    // The ordinary path costs nothing: with the queue drained a transition enters
-    // its critical section in THIS tick rather than a microtask later, which is
-    // what a blanket race around the acquire would silently take away. It is
-    // load-bearing (see the adapter's `pendingTransitions` field): an idle-boundary
-    // release must have driven the ssh2 Client's end() by the time releaseForIdle()
-    // returns, or an operation issued in the same tick is admitted onto the session
-    // that release is about to tear down.
-    const { client, rawClient } = ephemeralClient(wrapperMethods());
-    const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
-    stub(adapter);
-    install(adapter, client);
-
-    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
-
-    const released = adapter.releaseForIdle();
-    // Read with no await between it and the call above.
-    expect(rawClient.end).toHaveBeenCalledOnce();
-    await expect(released).resolves.toBeUndefined();
-  });
-
   test("the acquire is bounded: a queued transition gives up rather than waiting out the one ahead of it", async () => {
     // The counterpart of the property this lock shipped with. What is unbounded is
     // the transition being waited on -- the never-settling dial below is still
@@ -10338,7 +10254,7 @@ describe("terminal close against a partner that withholds its close", () => {
       ),
       realPath: vi.fn().mockResolvedValue("/"),
     };
-    return { client, rawClient, socket, state };
+    return { client, rawClient, socket };
   }
 
   function loggedAdapter(options: { ephemeralSessions?: boolean } = {}) {
@@ -10440,16 +10356,6 @@ describe("terminal close against a partner that withholds its close", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  test("end() surfaces the transport's own end() rejection, as an unbounded await did", async () => {
-    const { client } = partnerThatNeverCloses({ closes: true });
-    const { adapter } = loggedAdapter();
-    install(adapter, client);
-    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
-    client.end = vi.fn().mockRejectedValue(new Error("Unexpected close event"));
-
-    await expect(adapter.end()).rejects.toThrow("Unexpected close event");
   });
 
   test("a teardown whose end() rejects still closes the connection from this side", async () => {

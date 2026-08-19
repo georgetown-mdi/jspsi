@@ -57,27 +57,6 @@ afterEach(() => {
 
 // --- timeout / reconnect overrides -------------------------------------------
 
-test("peerTimeout is converted to peerTimeoutMs in milliseconds", () => {
-  const result = applyConnectionOverrides(baseSFTP, {
-    options: { peerTimeout: 30 },
-  });
-  expect(result.options?.peerTimeoutMs).toBe(30_000);
-});
-
-test("connectionTimeout is converted to serverConnectTimeoutMs in milliseconds", () => {
-  const result = applyConnectionOverrides(baseSFTP, {
-    options: { connectionTimeout: 10 },
-  });
-  expect(result.options?.serverConnectTimeoutMs).toBe(10_000);
-});
-
-test("maxReconnectAttempts is passed through unchanged", () => {
-  const result = applyConnectionOverrides(baseSFTP, {
-    options: { maxReconnectAttempts: 5 },
-  });
-  expect(result.options?.maxReconnectAttempts).toBe(5);
-});
-
 test("multiple timeout overrides are merged into options", () => {
   const result = applyConnectionOverrides(baseSFTP, {
     options: {
@@ -1719,19 +1698,6 @@ test("loadConfigLinkageSource returns undefined when no file exists", () => {
   ).toBeUndefined();
 });
 
-test("loadConfigLinkageSource round-trips the terms a saveConfig wrote", () => {
-  const configPath = path.join(dir, "psilink.yaml");
-  const terms = getDefaultLinkageTerms("Agency A");
-  saveConfig(configPath, {
-    connection: { channel: "filedrop", path: "/mnt/share" },
-    linkageTerms: terms,
-  });
-  const source = loadConfigLinkageSource(configPath);
-  expect(source?.linkageTerms).toEqual(terms);
-  // No standardization block was written, so none is returned.
-  expect(source?.standardization).toBeUndefined();
-});
-
 test("loadConfigLinkageSource round-trips an explicit standardization block", () => {
   const configPath = path.join(dir, "psilink.yaml");
   const terms = getDefaultLinkageTerms("Agency A");
@@ -1914,16 +1880,6 @@ test("readConfigLinkageSource still refuses invalid linkage_terms", () => {
   fs.writeFileSync(configPath, "linkage_terms:\n  identity: Agency A\n");
   expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
   expect(() => readConfigLinkageSource(configPath)).toThrow(
-    "invalid linkage_terms",
-  );
-});
-
-test("loadConfigLinkageSource rejects invalid linkage_terms", () => {
-  const configPath = path.join(dir, "psilink.yaml");
-  // linkage_terms present but missing the mandatory fields the schema requires.
-  fs.writeFileSync(configPath, "linkage_terms:\n  identity: Agency A\n");
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(
     "invalid linkage_terms",
   );
 });

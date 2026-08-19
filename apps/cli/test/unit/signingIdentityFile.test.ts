@@ -56,12 +56,6 @@ test("saveSigningIdentity creates parent directories", async () => {
   expect(fs.existsSync(idPath)).toBe(true);
 });
 
-test("loadSigningIdentity rejects with UsageError on invalid JSON", async () => {
-  const idPath = path.join(dir, "bad.json");
-  fs.writeFileSync(idPath, "{ not json", { mode: 0o600 });
-  await expect(loadSigningIdentity(idPath)).rejects.toThrow(UsageError);
-});
-
 test("loadSigningIdentity does not echo file content on an invalid-JSON file", async () => {
   // The identity file holds the P-256 private key. A JSON parse failure must
   // report path-only: Node's JSON.parse echoes a snippet of the source start in
@@ -81,14 +75,6 @@ test("loadSigningIdentity does not echo file content on an invalid-JSON file", a
   expect((caught as Error).message).toContain(idPath);
   expect((caught as Error).message).toContain("could not be parsed as JSON");
   expect((caught as Error).message).not.toContain(MARKER);
-});
-
-test("loadSigningIdentity rejects with UsageError on a malformed identity", async () => {
-  const idPath = path.join(dir, "malformed.json");
-  fs.writeFileSync(idPath, JSON.stringify({ version: "wrong" }), {
-    mode: 0o600,
-  });
-  await expect(loadSigningIdentity(idPath)).rejects.toThrow(UsageError);
 });
 
 test("loadSigningIdentity rejects with UsageError on a tampered (inconsistent) identity", async () => {

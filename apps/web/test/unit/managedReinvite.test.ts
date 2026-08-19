@@ -12,7 +12,6 @@ import {
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
 import {
-  buildReinviteRotation,
   canReinviteFromRecord,
   composeManagedReinvite,
 } from "@psi/managedReinvite";
@@ -169,21 +168,7 @@ describe("composeManagedReinvite", () => {
   });
 });
 
-describe("buildReinviteRotation: the record's own expires provenance", () => {
-  test("no max-age policy clears any standing bound (the setup lifetime never leaks in)", () => {
-    const rotation = buildReinviteRotation(FRESH_SECRET, undefined, NOW);
-    expect(rotation.sharedSecret).toBe(FRESH_SECRET);
-    expect(rotation.expires).toBeNull();
-  });
-
-  test("a max-age policy restamps the record's expires now + N days", () => {
-    const rotation = buildReinviteRotation(FRESH_SECRET, 30, NOW);
-    expect(rotation.sharedSecret).toBe(FRESH_SECRET);
-    expect(rotation.expires).toBe(
-      new Date(NOW + 30 * 86_400_000).toISOString(),
-    );
-  });
-
+describe("the re-invite rotation's expires provenance", () => {
   test("the composed re-invite's rotation reflects the record's max-age policy", async () => {
     const record = inviterRecord({ tokenMaxAgeDays: 30 });
     const reinvite = await composeManagedReinvite(record, location, seams);

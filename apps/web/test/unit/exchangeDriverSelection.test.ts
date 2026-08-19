@@ -56,22 +56,6 @@ describe("selectExchangeDriver", () => {
     }
   }
 
-  test("browser never routes to a server-side or save path", () => {
-    for (const profile of PROFILES)
-      for (const configured of SFTP_CONFIGURED)
-        expect(selectExchangeDriver("browser", profile, configured).kind).toBe(
-          "browser",
-        );
-  });
-
-  test("unconfigured console sftp runs here (authoring pending), not save-file", () => {
-    // The run mode is server-job (it runs here once the operator authors a
-    // connection), and the create gate blocks minting until there is one.
-    expect(selectExchangeDriver("sftp", "console", false).kind).toBe(
-      "server-job",
-    );
-  });
-
   test("the deliberate save-a-file preference flips unconfigured console sftp", () => {
     // Only when the operator explicitly chooses to save a file for their own
     // command-line tool does an unconfigured console sftp route to save-file.

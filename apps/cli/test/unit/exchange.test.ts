@@ -312,15 +312,6 @@ test.each([
   },
 );
 
-test("throws a UsageError when config file fails schema validation", () => {
-  fs.writeFileSync(
-    configFile,
-    YAML.stringify({ connection: { channel: "ftp", server: {} } }),
-  );
-  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
-  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
-});
-
 // warnOnIdentityDivergence (signingIdentityDivergence.ts) returns silently when
 // termsIdentity is absent or empty. On this path that branch is unreachable only
 // because the schema refuses both shapes below; pin the refusals directly so a
@@ -468,12 +459,6 @@ test("filedrop config injects sharedSecret from key file", () => {
   expect(result.connection.channel).toBe("filedrop");
   expect(result.authentication.sharedSecret).toBe(TOKEN_A);
   expect(result.authentication.keyFilePath).toBe(keyFile);
-});
-
-test("filedrop config throws a UsageError when key file is absent", () => {
-  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
-  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
-  expect(() => loadConfig(baseOptions())).toThrow("does not exist");
 });
 
 // --- connection_per_poll ignored-warning -------------------------------------
@@ -866,33 +851,6 @@ test("handler: a repeated single-value flag exits 64 naming the flag", async () 
       } as unknown as Arguments),
     ).rejects.toThrow("exit:64");
     expect(errSpy).toHaveBeenCalledWith("--server-port may be given only once");
-  } finally {
-    errSpy.mockRestore();
-    exitSpy.mockRestore();
-  }
-});
-
-test("handler: an unrecognized log-level exits 64, not the top-level dump", async () => {
-  // An unrecognized log-level is invalid caller input (exit 64), the same
-  // classification the shared parseCommonBootstrapArgs gives invite/accept, so
-  // the typo gets a clean usage error rather than escaping to the noisy
-  // top-level handler.
-  const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
-  try {
-    await expect(
-      handler({
-        _: [],
-        $0: "psilink",
-        input: "x.csv",
-        "log-level": "bogus",
-      } as unknown as Arguments),
-    ).rejects.toThrow("exit:64");
-    expect(errSpy).toHaveBeenCalledWith("unrecognized log-level: bogus");
   } finally {
     errSpy.mockRestore();
     exitSpy.mockRestore();

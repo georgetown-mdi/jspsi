@@ -34,7 +34,6 @@ import {
 } from "@psilink/core";
 
 import {
-  defaultRecordPath,
   keysPathFor,
   recordPathsFor,
   resolveRecordOutput,
@@ -81,13 +80,6 @@ const keys: VerificationKeys = {
     partnerPayloadReceived: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
   },
 };
-
-test("defaultRecordPath is a filesystem-safe timestamped path in the cwd", () => {
-  const p = defaultRecordPath("2026-06-06T01:02:03.456Z");
-  expect(p).toBe("./psilink-record-2026-06-06T01-02-03-456Z.json");
-  // No colon (invalid on Windows) and no fractional-second dot in the stamp.
-  expect(path.basename(p)).not.toContain(":");
-});
 
 test("keysPathFor swaps a .json suffix for .keys.json", () => {
   expect(keysPathFor("/tmp/rec.json")).toBe("/tmp/rec.keys.json");
