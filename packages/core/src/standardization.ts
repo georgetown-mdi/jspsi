@@ -698,9 +698,9 @@ function fanOutDeclaredMessage(functionName: string): string {
     "fan-out matching is not yet implemented, but these transforms declare a " +
     `"${functionName}" step: it expands one value into several match ` +
     "candidates, while matching runs on a single value per record. A record " +
-    "whose value actually splits would contribute no key at all rather than " +
-    "one per candidate, matching fewer records than the terms describe, so " +
-    `the exchange is refused before it runs. ${FAN_OUT_RECOVERY}`
+    "whose value actually splits would abort the run the moment it reached a " +
+    "matching strategy rather than match one key per candidate, so the " +
+    `exchange is refused up front instead. ${FAN_OUT_RECOVERY}`
   );
 }
 
