@@ -6,9 +6,9 @@ import {
   StandardizedField,
   StandardizedKeyIterable,
 } from "../src/standardization";
-import { UsageError } from "../src/errors";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
+import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
 
 // Pre-cleaned rows (SSNs without dashes, DOBs in YYYYMMDD).
 const rawRows: ReadonlyArray<Record<string, string>> = [
@@ -168,12 +168,10 @@ describe("StandardizedKeyIterable — swap (isReceiver)", () => {
 });
 
 describe("StandardizedKeyIterable — a row whose value fans out", () => {
-  // A row whose value expands into several candidates is refused, never dropped
-  // from the round: dropping it would narrow matching while the consent surface
-  // says each candidate matches independently. A declared fan-out is refused
-  // before the exchange runs (assertFanOutImplemented); this pins the same
-  // refusal at the point of harm, reached here through a dataset built directly
-  // rather than through prepare.
+  // A row realizing several candidates yields all of them: narrowing to one, or
+  // dropping the row, would match on less than the terms declare, which says each
+  // candidate matches independently. Matching on the set is what is unimplemented
+  // (the strategies refuse it), not realizing it.
   const splittingRows = [
     { ssn: "559811301", last_name: "SMITH-JONES", date_of_birth: "19750716" },
     { ssn: "322842281", last_name: "IORIO", date_of_birth: "19750817" },
@@ -195,19 +193,99 @@ describe("StandardizedKeyIterable — a row whose value fans out", () => {
     splittingRows.length,
   );
 
-  test("refuses the row rather than dropping it from the round", () => {
-    expect(() => iter.at(0)).toThrow(UsageError);
-    expect(() => iter.at(0)).toThrow(/fan-out/);
+  test("yields every candidate value the row realizes", () => {
+    expect(iter.at(0)).toEqual(
+      new Set(["559811301SMITH19750716", "559811301JONES19750716"]),
+    );
   });
 
-  test("iteration refuses too, so no round can run past the row", () => {
-    expect(() => [...iter]).toThrow(UsageError);
+  test("iteration and indexed access agree with at()", () => {
+    expect([...iter][0]).toEqual(iter.at(0));
+    expect(iter[0]).toEqual(iter.at(0));
   });
 
-  test("a row whose value does not split still yields its key", () => {
-    // split_on emits a one-element set when the delimiter does not match, which
-    // is a single matchable key and must stay unaffected by the refusal.
+  test("a row whose value does not split yields its single key as a string", () => {
+    // split_on emits a one-element set when the delimiter does not match: one
+    // candidate is the bare string, never a one-element set, so a consumer needs
+    // one type test to tell the cases apart.
     expect(iter.at(1)).toBe("322842281IORIO19750817");
+  });
+
+  test("a row over the width bound yields the record-excluded sentinel", () => {
+    // The width-bound drop reaches the surface as `undefined` -- the same
+    // sentinel a NULL realization produces -- so the record sits this key's round
+    // out and stays eligible for later keys.
+    const wideRows = [
+      {
+        ssn: "559811301",
+        last_name: Array.from({ length: 21 }, (_unused, i) => `N${i}`).join(
+          "-",
+        ),
+        date_of_birth: "19750716",
+      },
+    ];
+    const wideDataset = new StandardizedDataset([
+      new StandardizedField("ssn", "ssn", [], wideRows),
+      new StandardizedField(
+        "lastName",
+        "last_name",
+        [{ function: "split_on", params: { delimiter: "-" } }],
+        wideRows,
+      ),
+      new StandardizedField("dateOfBirth", "date_of_birth", [], wideRows),
+    ]);
+    const wideIter = new StandardizedKeyIterable(key, wideDataset, 1);
+    expect(wideIter.at(0)).toBeUndefined();
+  });
+
+  test("an over-width row an unlisted producer expanded reaches the strategy", () => {
+    // The same row, expanded by a function that is not one of the declared
+    // producers the drop binds: it surfaces as the candidate set rather than the
+    // excluded sentinel, so the strategy consuming it refuses the exchange
+    // instead of matching fewer records than the terms describe.
+    const wideIter = withUnlistedFanOutFunctions(() => {
+      const wideRows = [
+        {
+          ssn: "559811301",
+          last_name: Array.from({ length: 21 }, (_unused, i) => `N${i}`).join(
+            "-",
+          ),
+          date_of_birth: "19750716",
+        },
+      ];
+      const wideDataset = new StandardizedDataset([
+        new StandardizedField("ssn", "ssn", [], wideRows),
+        new StandardizedField(
+          "lastName",
+          "last_name",
+          [{ function: "split_on", params: { delimiter: "-" } }],
+          wideRows,
+        ),
+        new StandardizedField("dateOfBirth", "date_of_birth", [], wideRows),
+      ]);
+      return new StandardizedKeyIterable(key, wideDataset, 1);
+    });
+    const candidates = wideIter.at(0);
+    expect(candidates).toBeInstanceOf(Set);
+    expect((candidates as ReadonlySet<string>).size).toBe(21);
+  });
+});
+
+describe("StandardizedKeyIterable — a key realizing the empty string", () => {
+  // `""` is a present, matchable key value, distinct from the record-excluded
+  // sentinel a NULL/absent realization produces (docs/spec/PROTOCOL.md, Key input
+  // data). The distinction survives the multi-value surface: a singleton {""} is
+  // the string, not `undefined`.
+  const blankRows = [{ last_name: "" }];
+  const blankDataset = new StandardizedDataset([
+    new StandardizedField("lastName", "last_name", [], blankRows),
+  ]);
+  const blankKey = { name: "LN", elements: [{ field: "lastName" }] };
+  const iter = new StandardizedKeyIterable(blankKey, blankDataset, 1);
+
+  test("yields the empty string rather than the excluded sentinel", () => {
+    expect(iter.at(0)).toBe("");
+    expect(iter.at(0)).not.toBeUndefined();
   });
 });
 

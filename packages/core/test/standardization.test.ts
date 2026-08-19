@@ -9,6 +9,7 @@ import {
   assertFanOutImplemented,
   assertStandardizationMatchesTerms,
   FAN_OUT_FUNCTION_NAMES,
+  MAX_KEY_CANDIDATES_PER_ROW,
   describeTransformCoercions,
   dateFormatComponents,
   unsatisfiedLinkageFields,
@@ -40,6 +41,7 @@ import {
   StandardizationSchema,
   type Standardization,
 } from "../src/config/standardization";
+import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
 
 const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
   name,
@@ -1761,30 +1763,36 @@ describe("buildKeyStrings", () => {
     expect(buildKeyStrings(key, dataset, 0)).toBeNull();
   });
 
-  test("a field carrying several candidates is refused, not crossed", () => {
-    // Matching runs on a single value per record, so the cross-product a fan-out
-    // field would feed cannot be honored: the row is refused where its candidates
-    // are read, whether one field fans out or both.
+  test("a field carrying several candidates is crossed, one key string each", () => {
+    // Every candidate the record realizes reaches the key's candidate set: one
+    // fanning field yields one key string per candidate, and two multiply into
+    // the cross-product (docs/spec/PROTOCOL.md, Fan-out matching).
     const oneFansOut = makeDataset({
       last_name: ["SMITH", "JONES"],
       date_of_birth: "19900115",
     });
-    expect(() => buildKeyStrings(key, oneFansOut, 0)).toThrow(UsageError);
-    expect(() => buildKeyStrings(key, oneFansOut, 0)).toThrow(/fan-out/);
+    expect(buildKeyStrings(key, oneFansOut, 0)).toEqual(
+      new Set(["SMITH19900115", "JONES19900115"]),
+    );
 
     const bothFanOut = makeDataset({
       last_name: ["SMITH", "JONES"],
       date_of_birth: ["19900115", "19900116"],
     });
-    expect(() => buildKeyStrings(key, bothFanOut, 0)).toThrow(UsageError);
+    expect(buildKeyStrings(key, bothFanOut, 0)).toEqual(
+      new Set([
+        "SMITH19900115",
+        "SMITH19900116",
+        "JONES19900115",
+        "JONES19900116",
+      ]),
+    );
   });
 
-  test("a fan-out whose candidates collapse to one key string is refused too", () => {
-    // The shape a size test on the ASSEMBLED key misses: the field fans out, then
-    // an element transform filters every candidate but one, so the row emits a
-    // single innocuous-looking key string while having matched on less than the
-    // terms declare. The refusal reads the candidate count before any collapse, so
-    // this is refused exactly as an uncollapsed fan-out is.
+  test("an element transform filtering a candidate narrows the candidate set", () => {
+    // Steps after a fan-out apply element-wise, and a null-producing step drops
+    // the individual candidate it filters rather than the record: the surviving
+    // candidate builds its key.
     const dataset = makeDataset({
       last_name: ["SMITH", "JONES"],
       date_of_birth: "19750716",
@@ -1799,16 +1807,38 @@ describe("buildKeyStrings", () => {
         { field: "date_of_birth" },
       ],
     };
-    expect(() => buildKeyStrings(filteringKey, dataset, 0)).toThrow(UsageError);
-    expect(() => buildKeyStrings(filteringKey, dataset, 0)).toThrow(/fan-out/);
+    expect(buildKeyStrings(filteringKey, dataset, 0)).toEqual(
+      new Set(["SMITH19750716"]),
+    );
   });
 
-  test("a fan-out whose candidates standardize to the same string is refused too", () => {
-    // The second collapsing shape, and the one no transform drops a candidate in:
-    // both candidates survive their element transform and standardize to the SAME
-    // string, which the key-string Set reduces to one key. Counting the assembled
-    // key strings would read that row as ordinary; the candidate count read before
-    // the transform is what still refuses it.
+  test("every candidate of an element being filtered excludes the record", () => {
+    // The null realization reached through a fan-out: each candidate is filtered
+    // element-wise, leaving the element with nothing, which excludes the record
+    // from this key round exactly as an absent value does.
+    const dataset = makeDataset({
+      last_name: ["SMITH", "JONES"],
+      date_of_birth: "19750716",
+    });
+    const filteringKey = {
+      name: "LN+DOB",
+      elements: [
+        {
+          field: "last_name",
+          transform: [
+            { function: "null_if", params: { values: ["SMITH", "JONES"] } },
+          ],
+        },
+        { field: "date_of_birth" },
+      ],
+    };
+    expect(buildKeyStrings(filteringKey, dataset, 0)).toBeNull();
+  });
+
+  test("candidates that standardize to the same string count once", () => {
+    // A record contributes each DISTINCT candidate once: two candidates that
+    // survive their element transform as the SAME string are one candidate value,
+    // not two entries in the round.
     const dataset = makeDataset({
       last_name: ["Smith", "SMITH"],
       date_of_birth: "19750716",
@@ -1823,8 +1853,9 @@ describe("buildKeyStrings", () => {
         { field: "date_of_birth" },
       ],
     };
-    expect(() => buildKeyStrings(foldingKey, dataset, 0)).toThrow(UsageError);
-    expect(() => buildKeyStrings(foldingKey, dataset, 0)).toThrow(/fan-out/);
+    expect(buildKeyStrings(foldingKey, dataset, 0)).toEqual(
+      new Set(["SMITH19750716"]),
+    );
   });
 
   test("a field whose fan-out step yields one candidate builds its key", () => {
@@ -1989,13 +2020,11 @@ describe("buildKeyStrings", () => {
     );
   });
 
-  test("an element transform that fans out is refused, not joined", () => {
-    // The element-transform half of the fan-out refusal, at the point of harm:
-    // joining the parts into one string would match on a value neither party's
-    // data holds, which is not the several-independent-candidates behavior the
-    // terms declare. assertFanOutImplemented refuses the same step from the
-    // declared transforms before any row runs; this covers a fan-out that reached
-    // the key builder anyway, so the collapse cannot come back silently.
+  test("an element transform that fans out contributes each part, not a join", () => {
+    // The element-transform authoring surface fans out exactly as the field path
+    // does -- one semantics and one width bound across both. Joining the parts
+    // into one string instead would match on a value neither party's data holds,
+    // which is not the several-independent-candidates behavior the terms declare.
     const dataset = makeDataset({
       last_name: "SMITH-JONES",
       date_of_birth: "19900115",
@@ -2010,8 +2039,35 @@ describe("buildKeyStrings", () => {
         { field: "date_of_birth" },
       ],
     };
-    expect(() => buildKeyStrings(fanningKey, dataset, 0)).toThrow(UsageError);
-    expect(() => buildKeyStrings(fanningKey, dataset, 0)).toThrow(/fan-out/);
+    expect(buildKeyStrings(fanningKey, dataset, 0)).toEqual(
+      new Set(["SMITH19900115", "JONES19900115"]),
+    );
+  });
+
+  test("a step after an element-transform fan-out runs on every part", () => {
+    // Later steps apply element-wise across the parts, the same execution the
+    // field-level pipeline uses, so an element transform's fan-out is not a
+    // pipeline terminator.
+    const dataset = makeDataset({
+      last_name: "Smith-Jones",
+      date_of_birth: "19900115",
+    });
+    const fanningKey = {
+      name: "LN+DOB",
+      elements: [
+        {
+          field: "last_name",
+          transform: [
+            { function: "split_on", params: { delimiter: "-" } },
+            { function: "to_upper_case" },
+          ],
+        },
+        { field: "date_of_birth" },
+      ],
+    };
+    expect(buildKeyStrings(fanningKey, dataset, 0)).toEqual(
+      new Set(["SMITH19900115", "JONES19900115"]),
+    );
   });
 
   test("an element transform whose fan-out step does not split yields its value", () => {
@@ -2055,16 +2111,78 @@ describe("buildKeyStrings", () => {
     );
   });
 
-  test("no key this build admits reaches the cross-product warning", () => {
-    // The executable form of the claim the retained KEY_STRING_WARN_THRESHOLD
-    // rests on. Both expansions the warning measures are gated -- a row carrying
-    // several candidates is refused where they are read, and a fuzzy element does
-    // not expand while APPLIED_SETTINGS.fuzzyComparisons is false -- so every
-    // element contributes exactly one value and the cross-product is 1, however
-    // many fuzzy elements a key declares. Three edit-distance elements over
-    // eight-character values would assemble 9 x 9 x 9 = 729 key strings once
-    // either gate opens, so this fails there rather than leaving the threshold to
-    // be reconciled with the fan-out width bound unnoticed.
+  test("a row at the width bound keeps every candidate", () => {
+    // The bound's lower side: a record realizing exactly
+    // MAX_KEY_CANDIDATES_PER_ROW candidate values contributes all of them and is
+    // not warned about.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dataset = makeDataset({
+      last_name: Array.from(
+        { length: MAX_KEY_CANDIDATES_PER_ROW },
+        (_unused, i) => `NAME${i}`,
+      ),
+      date_of_birth: "19750716",
+    });
+    const built = buildKeyStrings(key, dataset, 0);
+    expect(built?.size).toBe(MAX_KEY_CANDIDATES_PER_ROW);
+    expect(built?.has("NAME019750716")).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("a row one candidate over the width bound sits the key round out", () => {
+    // The bound's upper side: the record contributes NOTHING to this key rather
+    // than a truncated candidate set, exactly as an absent value does, and the
+    // drop is warned. It is deliberately not a run refusal -- a partner-authored
+    // delimiter that shatters one local value must not end the exchange
+    // (docs/spec/PROTOCOL.md, The width bound).
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dataset = makeDataset({
+      last_name: Array.from(
+        { length: MAX_KEY_CANDIDATES_PER_ROW + 1 },
+        (_unused, i) => `NAME${i}`,
+      ),
+      date_of_birth: "19750716",
+    });
+    expect(buildKeyStrings(key, dataset, 0)).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/realizes 21 candidate values/);
+  });
+
+  test("the width bound counts the assembled set, not the raw candidates", () => {
+    // The count that decides the drop is the record's DISTINCT assembled values:
+    // a cross-product of 5 x 5 whose combinations collapse to 9 distinct strings
+    // is under the bound and contributes them all, where counting the raw
+    // per-element candidates (25) would have dropped the record.
+    const parts = ["a", "aa", "aaa", "aaaa", "aaaaa"];
+    const dataset = makeDataset({ last_name: parts, date_of_birth: parts });
+    const built = buildKeyStrings(key, dataset, 0);
+    expect(built?.size).toBe(9);
+  });
+
+  test("a fan-out too wide to assemble drops the row instead of refusing", () => {
+    // MAX_KEY_STRINGS_PER_ROW is a resource refusal on the cross-product, and it
+    // stays unreachable through fan-out: a fanning row above it is dropped and
+    // warned like any other over-width row, so a partner cannot end the exchange
+    // by authoring a delimiter that shatters one local value.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const wide = Array.from({ length: 33 }, (_unused, i) => `V${i}`);
+    const dataset = makeDataset({ last_name: wide, date_of_birth: wide });
+    expect(buildKeyStrings(key, dataset, 0)).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /expands into 1089 key-string combinations/,
+    );
+  });
+
+  test("no key this build admits reaches the width bound without a fan-out", () => {
+    // The executable form of the claim that the width bound and the assembly cap
+    // bind fan-out alone in this build: fuzzy expansion, the other candidate
+    // producer, does not expand while APPLIED_SETTINGS.fuzzyComparisons is false,
+    // so a fan-out-free row contributes exactly one key string however many fuzzy
+    // elements its key declares. Three edit-distance elements over
+    // eight-character values would assemble 9 x 9 x 9 = 729 key strings once that
+    // gate opens -- over the bound and under the cap -- so this fails there
+    // rather than leaving fuzzy's own width behavior to be settled unnoticed.
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const dataset = makeDataset({
       last_name: "ABCDEFGH",
@@ -2079,6 +2197,78 @@ describe("buildKeyStrings", () => {
       })),
     };
     expect(buildKeyStrings(fuzzyKey, dataset, 0)?.size).toBe(1);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // --- multiplicity no declared producer accounts for ------------------------
+  // The drop is normative for the listed producers alone, so a Set-producing
+  // function that never made it into FAN_OUT_FUNCTION_NAMES must not inherit it:
+  // dropping such a row would run the exchange to completion matching fewer
+  // records than the terms describe, where carrying the candidate set through
+  // reaches the strategy refusal that covers exactly this omission
+  // (fanOutReachedMatchingRefusal, pinned at the strategies in psiLink.test.ts).
+
+  test("an unlisted producer over the width bound is carried, not dropped", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const built = withUnlistedFanOutFunctions(() => {
+      const dataset = makeDataset({
+        last_name: Array.from(
+          { length: MAX_KEY_CANDIDATES_PER_ROW + 1 },
+          (_unused, i) => `NAME${i}`,
+        ),
+        date_of_birth: "19750716",
+      });
+      return buildKeyStrings(key, dataset, 0);
+    });
+    expect(built?.size).toBe(MAX_KEY_CANDIDATES_PER_ROW + 1);
+    expect(built?.has("NAME2019750716")).toBe(true);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /cross-product produced 21 key strings/,
+    );
+  });
+
+  test("an unlisted producer in an element transform is carried too", () => {
+    // The second authoring surface: an element transform's candidates reach the
+    // same two bounds, so the producer travels with them from there as well.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const built = withUnlistedFanOutFunctions(() => {
+      const dataset = makeDataset({
+        last_name: Array.from(
+          { length: MAX_KEY_CANDIDATES_PER_ROW + 1 },
+          (_unused, i) => `NAME${i}`,
+        ).join("-"),
+        date_of_birth: "19750716",
+      });
+      const splittingKey = {
+        name: "LN+DOB",
+        elements: [
+          {
+            field: "last_name",
+            transform: [{ function: "split_on", params: { delimiter: "-" } }],
+          },
+          { field: "date_of_birth" },
+        ],
+      };
+      return buildKeyStrings(splittingKey, dataset, 0);
+    });
+    expect(built?.size).toBe(MAX_KEY_CANDIDATES_PER_ROW + 1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /cross-product produced 21 key strings/,
+    );
+  });
+
+  test("an unlisted producer too wide to assemble refuses the run", () => {
+    // The row cannot reach a strategy at all -- assembling its cross-product is
+    // what the cap exists to prevent -- so the fail-closed answer here is the
+    // refusal the cap already raises, never the drop.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    expect(() =>
+      withUnlistedFanOutFunctions(() => {
+        const wide = Array.from({ length: 33 }, (_unused, i) => `V${i}`);
+        const dataset = makeDataset({ last_name: wide, date_of_birth: wide });
+        return buildKeyStrings(key, dataset, 0);
+      }),
+    ).toThrow(UsageError);
     expect(warn).not.toHaveBeenCalled();
   });
 });

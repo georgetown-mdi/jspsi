@@ -1230,8 +1230,9 @@ test("validateInvite: offline config-source refuses a deduplicating term before 
 
 test("validateInvite: offline config-source refuses a fan-out standardization before minting", async () => {
   // The mint-boundary counterpart of the run-side fan-out refusal (matching runs
-  // on a single value per record, so a splitting record contributes no key at
-  // all): a config whose hand-authored standardization declares `split_on` must
+  // on a single value per record, so a splitting record's candidate set has no
+  // round to enter): a config whose hand-authored standardization declares
+  // `split_on` must
   // be refused BEFORE the token is disclosed, so `invite` never mints an
   // invitation the config's own `psilink exchange` would then reject (exit 64).
   // The standardization is otherwise consistent with the terms, so it passes the
