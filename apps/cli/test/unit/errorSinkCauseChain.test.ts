@@ -10,11 +10,8 @@ import {
 } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
-import {
-  createEventStreamEmitter,
-  EVENT_STREAM_FD,
-  type ErrorEvent,
-} from "../../src/eventStream";
+import { EVENT_STREAM_FD, type ErrorEvent } from "../../src/eventStream";
+import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
 import { exitWithError, parseOrExit, runOrExit } from "../../src/util/cli";
 
 // src/index.ts is a module-top-level side effect -- buildCli(...).parseAsync()
@@ -202,7 +199,7 @@ const SINK_PROBES: SinkProbe[] = [
         chunks.push(Buffer.from(buffer.subarray(offset, offset + length)));
         return length;
       }) as unknown as typeof fs.writeSync);
-      createEventStreamEmitter().error(error, "prepare");
+      openEventStreamWithFdWired().error(error, "prepare");
       return Buffer.concat(chunks)
         .toString("utf8")
         .split("\n")

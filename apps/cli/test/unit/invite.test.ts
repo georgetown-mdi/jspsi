@@ -2007,20 +2007,23 @@ test("handler: the invitation reaches stdout and never a diagnostic line", async
   }
 });
 
-// --- handler: a failed config write is reported in the exit status -----------
+// --- handler: the exit status a failed config write leaves behind -----------
 
-test("handler: online invite whose config write failed exits 69 and says so", async () => {
+test("handler: online invite whose config write failed keeps exit 73 and says so", async () => {
   // The unattended half of the outcome: a wrapper gating on exit status must not
-  // read a rotated key with no configuration as a completed setup, so the
-  // handler's own process.exitCode is asserted here rather than only
-  // logOnlineBootstrapOutcome's return value. runOnlineBootstrap is mocked to
-  // report the swallowed write failure (its own tests cover raising it) so no
-  // connection is opened; --log-level error is the level the summary is written
-  // at, and the level the underlying error it points back to is shown at.
+  // read a rotated key with no configuration as a completed setup. The
+  // persistence-loss code is set where the write failed (runProtocol's hook
+  // handling), so the mocked runOnlineBootstrap stands in for that run by
+  // leaving 73 behind, and what is asserted here is that the handler carries it
+  // through untouched -- a summary that assigned the exit code itself would
+  // overwrite exactly this. No connection is opened; --log-level error is the
+  // level the summary is written at, and the level the underlying error it
+  // points back to is shown at.
   const { input, options } = onlineFixture();
   const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
-  runOnlineBootstrapMock.mockResolvedValue({
-    configWriteError: new Error("permission denied"),
+  runOnlineBootstrapMock.mockImplementation(async () => {
+    process.exitCode = 73;
+    return { configWriteError: new Error("permission denied") };
   });
   const exit = vi
     .spyOn(process, "exit")
@@ -2043,7 +2046,7 @@ test("handler: online invite whose config write failed exits 69 and says so", as
     const stderr = stdio.stderrWrites.join("");
     expect(exit).not.toHaveBeenCalled();
     expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
-    expect(exitCode).toBe(69);
+    expect(exitCode).toBe(73);
     // The operator is told which half landed, at error level: the key is saved,
     // the config is not.
     expect(stderr).toContain("[ERROR] [invite] ");
@@ -2057,17 +2060,17 @@ test("handler: online invite whose config write failed exits 69 and says so", as
   }
 });
 
-test("handler: a clean config write leaves the exchange's own exit 69 in place", async () => {
+test("handler: a clean config write leaves the exchange's own exit 73 in place", async () => {
   // The exchange completed but could not write an audit artifact, so runProtocol
-  // left 69 behind; the config write that followed then succeeded. The bootstrap
-  // outcome only raises the exit code, so the run an unattended supervisor sees
-  // still reports the lost record rather than a clean 0. runOnlineBootstrap
-  // stands in for that exchange, setting the exit code the way runProtocol does
-  // and reporting a written config.
+  // left the persistence-loss code behind; the config write that followed then
+  // succeeded. The outcome summary moves no process state, so the run an
+  // unattended supervisor sees still reports the lost record rather than a clean
+  // 0. runOnlineBootstrap stands in for that exchange, setting the exit code the
+  // way runProtocol does and reporting a written config.
   const { input, options } = onlineFixture();
   const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
   runOnlineBootstrapMock.mockImplementation(async () => {
-    process.exitCode = 69;
+    process.exitCode = 73;
     return { configWriteError: undefined };
   });
   const exit = vi
@@ -2091,7 +2094,7 @@ test("handler: a clean config write leaves the exchange's own exit 69 in place",
     const stderr = stdio.stderrWrites.join("");
     expect(exit).not.toHaveBeenCalled();
     expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
-    expect(exitCode).toBe(69);
+    expect(exitCode).toBe(73);
     // The setup summary is still reported; only the clean exit code is withheld.
     expect(stderr).toContain(`saved config to ${options.configFile}`);
   } finally {

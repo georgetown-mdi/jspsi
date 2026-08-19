@@ -7,11 +7,8 @@ import logLibrary from "loglevel";
 import { getLogger, reconcileHostKeyFingerprints } from "@psilink/core";
 import type { PresentedHostKey } from "@psilink/core";
 
-import {
-  createEventStreamEmitter,
-  EVENT_STREAM_FD,
-  type WarningEvent,
-} from "../../src/eventStream";
+import { EVENT_STREAM_FD, type WarningEvent } from "../../src/eventStream";
+import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
 import { configureLogFile, configureStderrLogging } from "../../src/util/cli";
 import {
   captureStdio,
@@ -101,7 +98,7 @@ function warnToEventStream(message: string): string {
     return length;
   }) as unknown as typeof fs.writeSync);
 
-  createEventStreamEmitter().warning(message);
+  openEventStreamWithFdWired().warning(message);
 
   const line = Buffer.concat(chunks).toString("utf8").trimEnd();
   const event = JSON.parse(line) as WarningEvent;
