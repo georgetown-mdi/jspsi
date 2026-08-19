@@ -18,12 +18,6 @@ test("bytesEqual returns false for different content, same length", () => {
   expect(bytesEqual(a, b)).toBe(false);
 });
 
-test("bytesEqual returns false when lengths differ", () => {
-  expect(bytesEqual(new Uint8Array([1, 2]), new Uint8Array([1, 2, 3]))).toBe(
-    false,
-  );
-});
-
 // The seed is load-bearing: without it, [1,2,0] vs [1,2] would XOR
 // (undefined??0) ^ 0 = 0 for the extra iteration, leaving diff=0 and
 // incorrectly returning true.

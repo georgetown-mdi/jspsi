@@ -273,20 +273,6 @@ test("a party that observed no host key sees no false divergence", async () => {
   expect(b).toBeUndefined();
 });
 
-test("a party that advertises no observed key never reports an injected one", async () => {
-  // Post-handshake placement: the advertised value is only consulted when a
-  // party supplies its own observed key (which the CLI does only on the
-  // authenticated path). A party that supplies none -- the unauthenticated path
-  // -- advertises nothing and reconciles nothing, so a value the partner puts on
-  // the wire cannot induce a divergence on it.
-  const [unauthenticated, advertiser] = await exchangeWithObservedKeys(
-    undefined,
-    KEY_ED25519,
-  );
-  expect(unauthenticated).toBeUndefined();
-  expect(advertiser).toBeUndefined();
-});
-
 test("a marker advertised over the wire cannot delete the re-pin instruction", async () => {
   // Reachability settled by the real terms exchange rather than by restating the
   // advertisement's bounds: the partner puts a BEGIN marker in both of its

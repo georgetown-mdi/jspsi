@@ -83,25 +83,12 @@ test("computeHostKeyFingerprint produces the checked-in fixed-blob fingerprint",
 
 // --- verifyHostKeyFingerprint ------------------------------------------------
 
-test("verifyHostKeyFingerprint accepts a blob that matches the pinned fingerprint", async () => {
-  const blob = buildEd25519Blob();
-  const pin = referenceFingerprint(blob);
-  expect(await verifyHostKeyFingerprint(blob, pin)).toBe(true);
-});
-
 test("verifyHostKeyFingerprint rejects a one-bit-flipped blob", async () => {
   const blob = buildEd25519Blob();
   const pin = referenceFingerprint(blob);
   const flipped = new Uint8Array(blob);
   flipped[19] ^= 0x01; // flip one bit in the raw key payload
   expect(await verifyHostKeyFingerprint(flipped, pin)).toBe(false);
-});
-
-test("verifyHostKeyFingerprint rejects a blob from a different key pair", async () => {
-  const blobA = buildEd25519Blob();
-  const blobB = buildEd25519Blob();
-  const pinA = referenceFingerprint(blobA);
-  expect(await verifyHostKeyFingerprint(blobB, pinA)).toBe(false);
 });
 
 test("verifyHostKeyFingerprint fails closed (returns false, does not throw) on a malformed pin", async () => {

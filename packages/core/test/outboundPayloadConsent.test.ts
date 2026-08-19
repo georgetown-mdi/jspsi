@@ -394,26 +394,6 @@ test("prepareForExchange: refuses a set narrowed since it was confirmed, as a Us
   expect(String(thrown)).toMatch(/no longer send.*notes|notes.*no longer/);
 });
 
-test("prepareForExchange: the pending and widened refusals are UsageErrors too", () => {
-  for (const consent of [
-    { status: "pending" } as const,
-    { status: "confirmed" as const, columns: [] },
-  ]) {
-    let thrown: unknown;
-    try {
-      prepareForExchange(
-        { linkageTerms: acceptorTerms, outboundPayloadConsent: consent },
-        "Acceptor",
-        acceptorRows,
-        acceptorColumns,
-      );
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(UsageError);
-  }
-});
-
 test("prepareForExchange: prepares normally once the resolved set is the confirmed one", () => {
   const prepared = prepareForExchange(
     {

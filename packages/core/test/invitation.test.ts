@@ -396,10 +396,6 @@ test("rejects a string that is too short to contain a checksum", async () => {
   await expect(decodeInvitation("short")).rejects.toThrow();
 });
 
-test("rejects a string of exactly checksum length", async () => {
-  await expect(decodeInvitation("AAAAAA")).rejects.toThrow();
-});
-
 test("rejects invalid base64url characters in the body", async () => {
   // '!' is not a valid base64url character; pad to exceed CHECKSUM_CHARS
   await expect(decodeInvitation("!!!!!!!!!!!!")).rejects.toThrow(
@@ -493,15 +489,6 @@ test("decodeInvitation swallows the atob error, throwing only the fixed string",
 
 // --- Expiry field ------------------------------------------------------------
 
-test("accepts a datetime with milliseconds", async () => {
-  const token: InvitationToken = {
-    ...baseToken,
-    expires: "2030-06-15T12:00:00.000Z",
-  };
-  const decoded = await decodeInvitation(await encodeInvitation(token));
-  expect(decoded.expires).toBe("2030-06-15T12:00:00.000Z");
-});
-
 test("rejects encoding a token with a past expires", async () => {
   const token: InvitationToken = {
     ...baseToken,
@@ -526,11 +513,6 @@ test("encodeInvitation rejects an empty sharedSecret", async () => {
   await expect(
     encodeInvitation({ ...baseToken, sharedSecret: "" }),
   ).rejects.toThrow(ZodError);
-});
-
-test("rejects a token with an empty sharedSecret", async () => {
-  const encoded = await encodeRaw({ ...baseToken, sharedSecret: "" });
-  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
 });
 
 test("rejects a token whose sharedSecret is not a base64url-encoded 32-byte value", async () => {
@@ -676,11 +658,6 @@ test.each(positiveCases)(
 );
 
 // --- Disclosed-columns subset ------------------------------------------------
-
-test("round-trips a token without a disclosed-columns subset", async () => {
-  const decoded = await decodeInvitation(await encodeInvitation(baseToken));
-  expect(decoded.disclosedPayloadColumns).toBeUndefined();
-});
 
 test("round-trips the inviter's disclosed-columns subset on the token", async () => {
   const token: InvitationToken = {

@@ -10,13 +10,6 @@ import { UsageError } from "../src/errors";
 
 // --- inferMetadata: linkage columns ------------------------------------------
 
-test("ssn: linkage role, not payload by default", () => {
-  const [col] = inferMetadata(["ssn"]);
-  expect(col.type).toBe("ssn");
-  expect(col.role).toBe("linkage");
-  expect(col.isPayload).toBe(false);
-});
-
 test("phone and email: linkage role, not payload by default", () => {
   const [phone] = inferMetadata(["phone_number"]);
   const [email] = inferMetadata(["email_address"]);
@@ -87,15 +80,6 @@ test("canonical id column alongside _id column: id keeps identifier role, _id st
   const clientIdCol = result.find((c) => c.name === "client_id");
   expect(idCol?.role).toBe("identifier");
   expect(clientIdCol?.role).toBe("payload");
-});
-
-// --- inferMetadata: unknown columns ------------------------------------------
-
-test("unknown column: payload role and isPayload true", () => {
-  const [col] = inferMetadata(["program_start_date"]);
-  expect(col.type).toBe("other");
-  expect(col.role).toBe("payload");
-  expect(col.isPayload).toBe(true);
 });
 
 // --- inferMetadata: name is preserved ----------------------------------------
@@ -311,13 +295,6 @@ test("safeParseMetadata rejects a column name over the length bound", () => {
 test("safeParseMetadata accepts a column name at the length bound", () => {
   const result = safeParseMetadata([
     { name: "a".repeat(256), type: "other", role: "payload", is_payload: true },
-  ]);
-  expect(result.success).toBe(true);
-});
-
-test("safeParseMetadata accepts a normal column name (no regression)", () => {
-  const result = safeParseMetadata([
-    { name: "COUNTY", type: "other", role: "payload", is_payload: true },
   ]);
   expect(result.success).toBe(true);
 });

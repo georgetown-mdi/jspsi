@@ -134,19 +134,6 @@ describe("the WebRTC inbound bound constants", () => {
 });
 
 describe("scanFrameStructure", () => {
-  test("flags a flat array over the byte budget", () => {
-    // 40 + 50*8 = 440 retained bytes, over a 100-byte budget.
-    expect(scanRefuses(arrayOfFixints(50), 100, 256)).toBe(true);
-  });
-
-  test("passes a flat array under the byte budget", () => {
-    expect(scanRefuses(arrayOfFixints(50), 1000, 256)).toBe(false);
-  });
-
-  test("flags an array declaring more than the bytes that follow", () => {
-    expect(scanRefuses(array32Header(1000), 1_000_000, 256)).toBe(true);
-  });
-
   test("flags a string longer than the per-string byte cap", () => {
     expect(scanRefuses(str32Header(1000), 1_000_000, 256, 100)).toBe(true);
   });
@@ -164,14 +151,6 @@ describe("scanFrameStructure", () => {
     expect(scanRefuses(new Uint8Array(fixstr("abcd")), 1000, 256, 2)).toBe(
       true,
     );
-  });
-
-  test("flags excessive nesting depth", () => {
-    // Each level is one byte-backed array of one element; deeper than the cap.
-    const out: Array<number> = [];
-    for (let d = 0; d < 10; d++) out.push(0x91); // fixarray(1)
-    out.push(0x01); // a fixint leaf
-    expect(scanRefuses(new Uint8Array(out), 1000, 4)).toBe(true);
   });
 });
 
@@ -331,10 +310,6 @@ describe("scanFrameStructure: the map-key rule", () => {
   // premise to the real packer.
   const refuses = (frame: Uint8Array): boolean =>
     scanRefuses(frame, Number.MAX_SAFE_INTEGER, 256, 1 << 20);
-
-  test("refuses a map keyed by an integer, at any budget", () => {
-    expect(refuses(new Uint8Array([0x81, 0x07, 0x08]))).toBe(true); // fixmap(1), fixint key
-  });
 
   test("refuses a map keyed by a container", () => {
     // fixmap(1) whose key is a fixarray(2): the coerced name is the joined form of

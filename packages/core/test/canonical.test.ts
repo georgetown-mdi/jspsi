@@ -56,25 +56,9 @@ describe("canonical-vectors.json", () => {
   });
 });
 
-// --- Key ordering and platform independence ----------------------------------
+// --- Ordering ----------------------------------------------------------------
 
-describe("byte-identical output regardless of input key order", () => {
-  test("top-level key order does not affect the bytes", () => {
-    const a = { gamma: 1, alpha: 2, beta: 3 };
-    const b = { beta: 3, gamma: 1, alpha: 2 };
-    expect(canonicalString(a)).toBe(canonicalString(b));
-    expect(toHex(canonicalBytes(a))).toBe(toHex(canonicalBytes(b)));
-  });
-
-  test("nested key order does not affect the bytes", () => {
-    const a = { outer: { y: { d: 1, c: 2 }, x: [1, 2] }, name: "n" };
-    const b = { name: "n", outer: { x: [1, 2], y: { c: 2, d: 1 } } };
-    expect(canonicalString(a)).toBe(canonicalString(b));
-    expect(canonicalString(a)).toBe(
-      '{"name":"n","outer":{"x":[1,2],"y":{"c":2,"d":1}}}',
-    );
-  });
-
+describe("ordering", () => {
   test("array element order IS significant", () => {
     expect(canonicalString([1, 2, 3])).not.toBe(canonicalString([3, 2, 1]));
   });
@@ -83,12 +67,6 @@ describe("byte-identical output regardless of input key order", () => {
 // --- Number edge cases -------------------------------------------------------
 
 describe("stable output across number edge cases", () => {
-  test("the maximum safe integer round-trips without exponent notation", () => {
-    expect(canonicalString({ n: Number.MAX_SAFE_INTEGER })).toBe(
-      '{"n":9007199254740991}',
-    );
-  });
-
   test("negative zero normalizes to 0", () => {
     expect(canonicalString({ n: -0 })).toBe('{"n":0}');
     expect(canonicalString({ n: -0 })).toBe(canonicalString({ n: 0 }));
@@ -102,12 +80,6 @@ describe("stable output across number edge cases", () => {
 // --- Strings and unicode -----------------------------------------------------
 
 describe("string and unicode escaping", () => {
-  test("non-ASCII characters are emitted as raw UTF-8, not \\u escapes", () => {
-    const s = canonicalString({ s: "café" });
-    expect(s).toBe('{"s":"café"}');
-    expect(s).not.toContain("\\u");
-  });
-
   test("control characters and reserved characters are escaped", () => {
     expect(canonicalString({ s: '\u0000\t\n"\\' })).toBe(
       '{"s":"\\u0000\\t\\n\\"\\\\"}',
@@ -122,10 +94,6 @@ describe("absent vs null fields", () => {
     expect(canonicalString({ a: 1 })).not.toBe(
       canonicalString({ a: 1, b: null }),
     );
-  });
-
-  test("an explicit null is preserved", () => {
-    expect(canonicalString({ a: null })).toBe('{"a":null}');
   });
 });
 

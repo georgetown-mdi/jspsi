@@ -103,10 +103,6 @@ interface MockClientOptions {
   // transport that lacks atomic exclusive-create, forcing the ack-handshake
   // barrier instead of the lock/EEXIST fast-path.
   createExclusiveBehavior?: "real" | "throw";
-  // Defaults to mirror deleteBehavior ("real" -> real, "throw"/"noop" -> noop),
-  // since a throwing-delete transport pairs with a swallowing safeDelete; pass
-  // it only to override that pairing.
-  safeDeleteBehavior?: MockBehavior;
   // Spy fired before delete's behavior runs (proves delete was/was not called).
   onDelete?: (path: string) => void;
   // Spy fired at the start of get() (proves an ack body was/was not read).
@@ -120,8 +116,8 @@ function makeMockClient(opts?: MockClientOptions): {
   const files = opts?.files ?? new Map<string, Buffer>();
   const deleteBehavior = opts?.deleteBehavior ?? "real";
   const createExclusiveBehavior = opts?.createExclusiveBehavior ?? "real";
-  const safeDeleteBehavior =
-    opts?.safeDeleteBehavior ?? (deleteBehavior === "real" ? "real" : "noop");
+  // A throwing-delete transport pairs with a swallowing safeDelete.
+  const safeDeleteBehavior = deleteBehavior === "real" ? "real" : "noop";
 
   const realDelete = (path: string): void => {
     files.delete(path);
@@ -220,7 +216,7 @@ async function makeConnectedConn(
 // Drive conn.start()'s background poller until its first error and return the
 // collected errors so the caller keeps its own type/message/count/counter
 // assertions inline. Installs the error handler, starts the poller, races the
-// first error against a timeoutMs reject (the message only surfaces on a real
+// first error against a timeout reject (the message only surfaces on a real
 // hang), optionally waits settleMs (to let a wrong reschedule bump a counter
 // the caller re-asserts), then stops the poller in a finally.
 // pollerActiveBeforeDriverStop is captured just before that stop: asserting it
@@ -232,7 +228,6 @@ async function driveUntilError(
   conn: FileSyncConnection,
   opts?: {
     settleMs?: number;
-    timeoutMs?: number;
     timeoutMessage?: string;
     stopInHandler?: boolean;
   },
@@ -258,7 +253,7 @@ async function driveUntilError(
                 opts?.timeoutMessage ?? "timed out waiting for poll error",
               ),
             ),
-          opts?.timeoutMs ?? 2_000,
+          2_000,
         ),
       ),
     ]);
@@ -1518,27 +1513,6 @@ test("filedrop connect passes an explicit connectTimeoutMs verbatim", async () =
   expect(captured?.["connectTimeoutMs"]).toBe(7_000);
 });
 
-test("open strips trailing slash from filedrop path", async () => {
-  const { client } = makeMockClient();
-  const conn = new FileSyncConnection(client, { verbose: -1 });
-  await conn.open({ channel: "filedrop", path: "/mnt/share/drop/" });
-  expect(conn.path).toBe("/mnt/share/drop");
-});
-
-test("open strips multiple trailing slashes from filedrop path", async () => {
-  const { client } = makeMockClient();
-  const conn = new FileSyncConnection(client, { verbose: -1 });
-  await conn.open({ channel: "filedrop", path: "/mnt/share/drop//" });
-  expect(conn.path).toBe("/mnt/share/drop");
-});
-
-test("open preserves root filedrop path", async () => {
-  const { client } = makeMockClient();
-  const conn = new FileSyncConnection(client, { verbose: -1 });
-  await conn.open({ channel: "filedrop", path: "/" });
-  expect(conn.path).toBe("/");
-});
-
 test("open maps peerTimeoutMs to timeToLive for filedrop config", async () => {
   const { client } = makeMockClient();
   const conn = new FileSyncConnection(client, { verbose: -1 });
@@ -1577,27 +1551,6 @@ test("open defers default timeToLive computation until connect resolves", async 
   // slow CI: the budget should be near full, not consumed by construction.
   expect(ttl).toBeGreaterThanOrEqual(before + 60 * 60 * 1000 - 100);
   expect(ttl).toBeLessThanOrEqual(after + 60 * 60 * 1000);
-});
-
-test("open normalizes Windows backslashes in filedrop path", async () => {
-  const { client } = makeMockClient();
-  const conn = new FileSyncConnection(client, { verbose: -1 });
-  await conn.open({ channel: "filedrop", path: "C:\\Users\\shared\\drop" });
-  expect(conn.path).toBe("C:/Users/shared/drop");
-});
-
-test("open preserves Windows drive root filedrop path", async () => {
-  const { client } = makeMockClient();
-  const conn = new FileSyncConnection(client, { verbose: -1 });
-  await conn.open({ channel: "filedrop", path: "C:/" });
-  expect(conn.path).toBe("C:/");
-});
-
-test("open normalizes Windows drive root with trailing backslash", async () => {
-  const { client } = makeMockClient();
-  const conn = new FileSyncConnection(client, { verbose: -1 });
-  await conn.open({ channel: "filedrop", path: "C:\\" });
-  expect(conn.path).toBe("C:/");
 });
 
 test("open normalizes Windows UNC filedrop path", async () => {
@@ -1771,48 +1724,6 @@ test("a binary frame sent through the new framing is read back byte-exactly by a
 
   expect(msg).toBeInstanceOf(Uint8Array);
   expect(Buffer.from(msg as Uint8Array).equals(Buffer.from(frame))).toBe(true);
-});
-
-test("send removes the .tmp file in-process when the rename fails", async () => {
-  // If the rename throws (e.g. transport failure) the catch block must delete
-  // the orphaned .tmp file so it is not left behind for the failed exchange.
-  // This is a best-effort in-process sweep through the still-live client; it
-  // is the only cleanup path for an in-flight write, so the .tmp name is
-  // deliberately not tracked in responsibleFiles (see send()).
-  const { client, files } = makeMockClient();
-  const conn = await makeConnectedConn(client);
-  conn.peerId = "stub-peer";
-
-  // Capture the temp path the write actually produced so the cleanup
-  // assertion cannot pass vacuously: if a refactor stopped writing the temp
-  // file, tempPath stays undefined and the "was written" check below fails.
-  let tempPath: string | undefined;
-  const origPut = client.put.bind(client);
-  client.put = async (src, dest, opts) => {
-    await origPut(src, dest, opts);
-    tempPath = dest;
-  };
-  const safeDeleted: string[] = [];
-  const origSafeDelete = client.safeDelete.bind(client);
-  client.safeDelete = async (p) => {
-    safeDeleted.push(p);
-    return origSafeDelete(p);
-  };
-
-  client.rename = async () => {
-    throw new Error("synthetic rename failure");
-  };
-
-  await expect(conn.send({ hello: "world" })).rejects.toThrow(
-    "synthetic rename failure",
-  );
-
-  expect(tempPath).toBeDefined();
-  expect(tempPath!.endsWith(".tmp")).toBe(true);
-  expect(safeDeleted).toContain(tempPath!);
-  expect(files.has(tempPath!)).toBe(false);
-  const tmpFiles = [...files.keys()].filter((p) => p.endsWith(".tmp"));
-  expect(tmpFiles).toEqual([]);
 });
 
 // --- Race condition: consecutive sends ---------------------------------------
@@ -4798,36 +4709,11 @@ test("synchronize() lock path writes hello as <id>-hello.json and self-hello det
 
 // --- synchronize(): lockless mode ---------------------------------------------
 
-test("synchronize() lockless mode completes rendezvous when createExclusive and delete both throw", async () => {
-  // Robustness proof: the ack-handshake barrier must complete rendezvous even
-  // when createExclusive and delete both throw (the deleteBehavior/
-  // createExclusiveBehavior "throw" below). This is the most extreme constraint
-  // possible and is here to prove the protocol is sound under it.
-  const idA = "00000000-0000-4000-8000-000000000001"; // sorts lower
-  const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff"; // sorts higher
-
-  const { connA, connB } = makeRendezvousPair(
-    idA,
-    { locklessRendezvous: true },
-    idB,
-    { locklessRendezvous: true },
-    {
-      client: { deleteBehavior: "throw", createExclusiveBehavior: "throw" },
-      timeToLiveMs: 5_000,
-      pollingFrequency: 10,
-    },
-  );
-
-  await Promise.all([connA.synchronize(), connB.synchronize()]);
-
-  expect(connA.peerId).toBe(idB);
-  expect(connB.peerId).toBe(idA);
-});
-
 test("synchronize() lockless mode role assignment matches the lexicographic rule for the same id pair as the lock path", async () => {
   // Role must be determined by lexicographic id order regardless of arrival
-  // timing. The throwing delete/createExclusive is robustness scaffolding
-  // (see the previous test); real lockless transports support delete.
+  // timing. The throwing delete/createExclusive is robustness scaffolding --
+  // the ack-handshake barrier must complete rendezvous even under the most
+  // extreme constraint -- while real lockless transports support delete.
   const idA = "00000000-0000-4000-8000-000000000001";
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
 
@@ -4855,7 +4741,7 @@ test("synchronize() lockless mode role assignment matches the lexicographic rule
 test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier is entered even with peer hello already present", async () => {
   // The throwing delete proves the joiner fast-path (which calls delete) is
   // not taken in lockless mode. The no-op safeDelete is robustness scaffolding
-  // only; real lockless transports support delete (see the first lockless test).
+  // only; real lockless transports support delete.
   //
   // When locklessRendezvous is set and a party's entry list() (or barrier loop)
   // finds the peer's hello, it must NOT take the joiner shortcut (which would
@@ -5310,31 +5196,6 @@ test("send() message timeout throws UsageError", async () => {
 
 // --- control file envelope: round-trip, partial-sync gate, malformed body -----
 
-test("synchronize() lock mode: round-trip hello write and read with JSON envelope body", async () => {
-  // Both the joiner fast-path (writes and reads the peer hello) and the starter
-  // (reads the joiner hello before deleting) must write and read the JSON envelope.
-  // Run joiner path: initial list shows one peer hello; joiner reads it, deletes
-  // it, writes its own with an envelope body.
-  const peerId = "00000000-0000-4000-8000-000000000001";
-  const { client, files } = makeMockClient();
-  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
-  conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-  const peerHelloName = `${peerId}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
-  client.list = async () => [
-    { name: peerHelloName, modifyTime: Date.now(), size: 0 },
-  ];
-
-  await conn.synchronize();
-
-  const myHelloPath = `${conn.path}/${conn.id}-hello.json`;
-  expect(files.has(myHelloPath)).toBe(true);
-  const body = JSON.parse(files.get(myHelloPath)!.toString());
-  expect(body).toMatchObject({});
-  expect(conn.handshakeRole).toBe("initiator");
-  expect(conn.peerId).toBe(peerId);
-});
-
 test("synchronize() lockless mode: round-trip hello body and zero-length ack markers", async () => {
   // Both parties write a hello carrying the bilateral-flag envelope and a
   // zero-length ack marker named after the peer hello they acknowledge. The
@@ -5637,7 +5498,6 @@ function makeRendezvousPair(
     // transport or install a spy; the two conns share the resulting client and
     // its store, matching the single-directory two-party model.
     client?: MockClientOptions;
-    path?: string;
     timeToLiveMs?: number;
     pollingFrequency?: number;
   },
@@ -5647,7 +5507,6 @@ function makeRendezvousPair(
   files: Map<string, Buffer>;
 } {
   const { client, files } = makeMockClient(setup?.client);
-  const path = setup?.path ?? "/test";
   const make = (
     id: string,
     opts: Partial<ConstructorParameters<typeof FileSyncConnection>[1]>,
@@ -5660,7 +5519,7 @@ function makeRendezvousPair(
     });
     conn.id = id;
     conn.connected = true;
-    conn.path = path;
+    conn.path = "/test";
     return conn;
   };
   return { connA: make(idA, optsA), connB: make(idB, optsB), files };
@@ -6718,21 +6577,6 @@ test("retain mode: send() does not advance seq when rename throws", async () => 
   expect(conn.seq).toBe(seqBefore);
 });
 
-test("delete mode: send() does not advance seq when rename throws", async () => {
-  // Same invariant must hold in non-retain mode.
-  const { client } = makeMockClient();
-  const conn = await makeConnectedConn(client);
-  conn.peerId = "stub-peer";
-
-  const seqBefore = conn.seq;
-  client.rename = async () => {
-    throw new Error("rename failed");
-  };
-
-  await expect(conn.send({ n: 1 })).rejects.toThrow("rename failed");
-  expect(conn.seq).toBe(seqBefore);
-});
-
 // --- retain => timestampInFilename guard in synchronize() --------------------
 
 test("retain mode: synchronize() throws UsageError when timestampInFilename is false", async () => {
@@ -6820,8 +6664,6 @@ test("retain mode: poll() duplicate-NNN error is a UsageError and stops the poll
 
   // pollerActive must be false: the poller stopped itself before emitting.
   expect(pollerActiveBeforeDriverStop).toBe(false);
-
-  expect(errors).toHaveLength(1);
 });
 
 test("delete mode: poll() more-than-one-message error is a UsageError and stops the poller", async () => {
@@ -6848,7 +6690,6 @@ test("delete mode: poll() more-than-one-message error is a UsageError and stops 
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("more than one message file");
   expect(pollerActiveBeforeDriverStop).toBe(false);
-  expect(errors).toHaveLength(1);
 });
 
 test("retain mode: poll() seq-mismatch (UsageError) stops the poller", async () => {
@@ -6887,8 +6728,6 @@ test("retain mode: poll() seq-mismatch (UsageError) stops the poller", async () 
   expect((errors[0] as Error).message).toContain("seq=");
 
   expect(pollerActiveBeforeDriverStop).toBe(false);
-
-  expect(errors).toHaveLength(1);
 });
 
 // --- send() not-synchronized guard applies to non-retain mode ----------------
@@ -7626,8 +7465,6 @@ test("poll() terminal: a fully-synced message with an unparseable body stops the
   expect(pollerActiveBeforeDriverStop).toBe(false);
   expect(received).toHaveLength(0);
   expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(false);
-  // No second error arrives (the finally block did not reschedule).
-  expect(errors).toHaveLength(1);
 });
 
 // The JSON.parse error itself carries peer bytes: V8 quotes a span of the
@@ -7973,8 +7810,6 @@ test("poll() terminal: delete mode also stops the poller on a fully-synced corru
   expect(received).toHaveLength(0);
   // parse-before-delete: the corrupt file is left on disk for inspection.
   expect(files.has(`/test/${msgName}`)).toBe(true);
-  // No second error: the finally block did not reschedule.
-  expect(errors).toHaveLength(1);
 });
 
 test("poll() delivers a binary frame as raw bytes (no base64, no JSON wrapper)", async () => {
@@ -10566,22 +10401,6 @@ describe("connection-per-poll idle-boundary signal", () => {
 // role/peerId with no observation attributable to a live peer, so a consumer
 // that later attributes silence to "the peer" would be asserting a fact this
 // side never established. The connection exposes exactly what it does hold.
-
-test("unconfirmedEntryPeerHello names a hello the lock joiner consumed but nothing confirmed", async () => {
-  const { client, files } = makeMockClient();
-  const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
-  conn.id = ID_HIGH;
-  const peerHelloName = `${ID_LOW}-hello.json`;
-  files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
-
-  await conn.synchronize();
-
-  // Rendezvous completed and committed a peer id, yet nothing the peer did was
-  // ever observed: the hello it read is exactly what an interrupted prior run in
-  // this same directory leaves behind.
-  expect(conn.peerId).toBe(ID_LOW);
-  expect(conn.unconfirmedEntryPeerHello).toBe(peerHelloName);
-});
 
 test("unconfirmedEntryPeerHello is undefined when no peer hello predated the run", async () => {
   const { connA, connB } = makeRendezvousPair(

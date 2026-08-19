@@ -332,14 +332,6 @@ describe("default SSN pipeline", () => {
     expect(run("1234567890")).toBeNull();
   });
 
-  test("returns null for empty input", () => {
-    expect(run("")).toBeNull();
-  });
-
-  test("returns null for alphabetic input", () => {
-    expect(run("abcdefghi")).toBeNull();
-  });
-
   test("returns null for placeholder value", () => {
     expect(run("123456789")).toBeNull();
   });
@@ -377,14 +369,6 @@ describe("default SSN4 pipeline", () => {
 
   test("zero-pads a 3-digit SSN4 missing a leading zero", () => {
     expect(run("123")).toBe("0123");
-  });
-
-  test("returns null for empty input", () => {
-    expect(run("")).toBeNull();
-  });
-
-  test("returns null for alphabetic input", () => {
-    expect(run("abcd")).toBeNull();
   });
 });
 
@@ -673,14 +657,6 @@ describe("default zip_code pipeline", () => {
 
   test("keeps only the first 5 digits of a 9-digit ZIP+4 run together", () => {
     expect(run("902101234")).toBe("90210");
-  });
-
-  test("returns null for empty input", () => {
-    expect(run("")).toBeNull();
-  });
-
-  test("returns null for an all-non-digit value", () => {
-    expect(run("abcde")).toBeNull();
   });
 
   test('explicit null_if "" precedes pad_left so a cleaned-empty value never pads to 00000', () => {

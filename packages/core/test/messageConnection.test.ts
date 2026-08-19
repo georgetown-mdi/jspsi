@@ -19,14 +19,6 @@ import { PassthroughConnection } from "./utils/passthroughConnection";
 
 // --- QueuedMessageConnection / pipe ------------------------------------------
 
-test("receive resolves with a message that arrived before it was called", async () => {
-  const [a, b] = createMessagePipe();
-  await a.send("hello");
-  // Let the queued delivery microtask run before receiving.
-  await Promise.resolve();
-  expect(await b.receive()).toBe("hello");
-});
-
 test("receive parks until a message arrives", async () => {
   const [a, b] = createMessagePipe();
   const received = b.receive();

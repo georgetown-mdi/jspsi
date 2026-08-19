@@ -236,14 +236,14 @@ const renderNoPinRefusal = (
 ): Promise<string> =>
   renderRefusal({ channel: "sftp", server: { host } }, keyType);
 
-// The three shapes a server can put in the type field: a benign type, one long
-// enough to have exhausted a display budget on its own, and one carrying a PEM
-// BEGIN marker. keyTypeFromBlob replaces the latter two before they are
-// composed, and under the provenance partition none of the three shares a link
-// with first-party text, so none can reach what the operator has to act on.
+// A benign type and a hostile one, so the whole presented fingerprint and the
+// instruction stay asserted under both. keyTypeFromBlob replaces a type it does
+// not recognize with a bounded placeholder before it is composed, and under the
+// provenance partition neither shares a link with first-party text, so neither
+// can reach what the operator has to act on. The placeholder itself, over every
+// rejected shape, is driven by REJECTED_KEY_TYPES below.
 const SERVER_CHOSEN_KEY_TYPES: Array<[string, string]> = [
   ["a benign key type", "ssh-ed25519"],
-  ["an over-length key type", "X".repeat(4096)],
   ["a key type carrying a PEM BEGIN marker", "-----BEGIN RSA PRIVATE KEY-----"],
 ];
 

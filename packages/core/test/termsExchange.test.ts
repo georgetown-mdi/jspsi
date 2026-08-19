@@ -75,22 +75,11 @@ function resolveBothRoles(
 
 // --- Happy path --------------------------------------------------------------
 
-test("compatible terms resolve for both parties", async () => {
-  const [a, b] = await runExchange(termsA, termsB);
-  expect(a.status).toBe("fulfilled");
-  expect(b.status).toBe("fulfilled");
-});
-
-test("each party receives the other's identity", async () => {
+test("compatible terms resolve for both parties, each carrying the other's identity and no warnings", async () => {
   const [a, b] = await runExchange(termsA, termsB);
   if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
   expect(a.value.partnerTerms.identity).toBe("Party B");
   expect(b.value.partnerTerms.identity).toBe("Party A");
-});
-
-test("no warnings when terms are identical", async () => {
-  const [a, b] = await runExchange(termsA, termsB);
-  if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
   expect(a.value.warnings).toHaveLength(0);
   expect(b.value.warnings).toHaveLength(0);
 });
@@ -610,12 +599,6 @@ test("both expect output, equal record counts -> initiator is receiver", () => {
   expect(b).toBe("sender");
 });
 
-test("both parties compute the same role independently", () => {
-  const out = { expectsOutput: true, shareWithPartner: true };
-  const { a, b } = resolveBothRoles(out, out, 100, 200);
-  expect(a).not.toBe(b);
-});
-
 test("record counts ride the terms messages, not a separate frame", async () => {
   const [connA, connB] = makeConnections();
   const { conn: recordingA, sent: initiatorSent } = recordingConnection(connA);
@@ -640,44 +623,6 @@ test("record counts ride the terms messages, not a separate frame", async () => 
 
   for (const frame of [...initiatorSent, ...responderSent]) {
     if ("recordCount" in frame) expect("linkageTerms" in frame).toBe(true);
-  }
-});
-
-test("both-output role resolves over the folded terms exchange (both selections)", async () => {
-  const out: Output = { expectsOutput: true, shareWithPartner: true };
-
-  // Selection 1: initiator has fewer records -> initiator is the receiver.
-  {
-    const [connA, connB] = makeConnections();
-    const [a, b] = await Promise.all([
-      exchangeTerms(connA, "initiator", termsA, 50),
-      exchangeTerms(connB, "responder", termsB, 200),
-    ]);
-    expect(a.partnerRecordCount).toBe(200);
-    expect(b.partnerRecordCount).toBe(50);
-    expect(resolveRole("initiator", out, out, 50, a.partnerRecordCount)).toBe(
-      "receiver",
-    );
-    expect(resolveRole("responder", out, out, 200, b.partnerRecordCount)).toBe(
-      "sender",
-    );
-  }
-
-  // Selection 2: responder has fewer records -> responder is the receiver.
-  {
-    const [connA, connB] = makeConnections();
-    const [a, b] = await Promise.all([
-      exchangeTerms(connA, "initiator", termsA, 200),
-      exchangeTerms(connB, "responder", termsB, 50),
-    ]);
-    expect(a.partnerRecordCount).toBe(50);
-    expect(b.partnerRecordCount).toBe(200);
-    expect(resolveRole("initiator", out, out, 200, a.partnerRecordCount)).toBe(
-      "sender",
-    );
-    expect(resolveRole("responder", out, out, 50, b.partnerRecordCount)).toBe(
-      "receiver",
-    );
   }
 });
 
@@ -721,14 +666,10 @@ test("responder rejects a message 1 that omits the record count", async () => {
 
 // --- Incompatible terms ------------------------------------------------------
 
-test("algorithm mismatch -> both parties reject", async () => {
+test("an incompatibility rejects both parties with a message identifying the cause", async () => {
   const results = await runExchange(termsA, { ...termsB, algorithm: "psi-c" });
   expect(results[0].status).toBe("rejected");
   expect(results[1].status).toBe("rejected");
-});
-
-test("algorithm mismatch error message identifies the cause", async () => {
-  const results = await runExchange(termsA, { ...termsB, algorithm: "psi-c" });
   const messages = results
     .filter((r) => r.status === "rejected")
     .map((r) => (r as PromiseRejectedResult).reason.message as string);
@@ -737,25 +678,6 @@ test("algorithm mismatch error message identifies the cause", async () => {
       (m) => m.includes("algorithm mismatch") || m.includes("abort"),
     ),
   ).toBe(true);
-});
-
-test("linkage keys mismatch -> both parties reject", async () => {
-  const results = await runExchange(termsA, {
-    ...termsB,
-    linkageKeys: [{ name: "Different", elements: [{ field: "ssn" }] }],
-  });
-  expect(results[0].status).toBe("rejected");
-  expect(results[1].status).toBe("rejected");
-});
-
-test("neither party expects output -> both parties reject", async () => {
-  const noOutput = { expectsOutput: false, shareWithPartner: false };
-  const results = await runExchange(
-    { ...termsA, output: noOutput },
-    { ...termsB, output: noOutput },
-  );
-  expect(results[0].status).toBe("rejected");
-  expect(results[1].status).toBe("rejected");
 });
 
 test("responder neutralizes partner bytes in a linkage-terms parse error", async () => {

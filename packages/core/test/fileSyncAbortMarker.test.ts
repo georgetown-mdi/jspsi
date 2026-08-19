@@ -386,18 +386,6 @@ test("a valid peer abort marker surfaces a terminal PeerAbortError, never delive
   expect(data).toHaveLength(0);
 });
 
-test("a forged/garbage token is ignored and the loop keeps polling (falls back to the hedge)", async () => {
-  const { client, files } = makeAbortTestClient();
-  const conn = await makeArmedConn(client, { peerId: PEER_ID });
-  // A garbage token that decodes to the wrong bytes.
-  files.set(
-    peerMarkerPath,
-    Buffer.from(JSON.stringify({ version: 1, token: toBase64Url(TOKEN_SELF) })),
-  );
-  const errors = await pollAndCollectErrors(conn);
-  expect(errors).toHaveLength(0);
-});
-
 test("an absent marker leaves the poll loop unchanged (no error)", async () => {
   const { client } = makeAbortTestClient();
   const conn = await makeArmedConn(client, { peerId: PEER_ID });

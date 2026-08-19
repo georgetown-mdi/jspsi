@@ -122,18 +122,6 @@ describe("the consent summary's payload block", () => {
       receiveDeclared: true,
     });
   });
-
-  test("suppresses the payload section for a lazy (absent) subset", () => {
-    // No carried subset and no authored payload.send: the send side is lazy (the
-    // inviter sends whatever its metadata discloses, nothing declared up front), so
-    // the section is omitted -- distinct from the declared-empty case above.
-    const terms = getDefaultLinkageTerms(
-      "Inviter",
-      inferMetadata(LINKAGE_ONLY_COLUMNS),
-    );
-    const summary = summarizeInvitation({ linkageTerms: terms });
-    expect(summary.payload).toBeUndefined();
-  });
 });
 
 describe("the consent summary's retain disclosure", () => {

@@ -525,12 +525,13 @@ const doc = {
     "@openmined/psi.js engine as psilink drives it. Each scenario fixes the " +
     "engine inputs and pins both the intersection membership and the " +
     "association/permutation mapping back to original input rows, normalized by " +
-    "sorting on the local index. These consolidate the toStrictEqual KATs " +
-    "otherwise inline in psiParticipant.test.ts, psiLink.test.ts, " +
-    "psiLinkForLinkageKeys.test.ts, psiLinkEmptyRound.test.ts, and " +
-    "psiLinkEmptyKey.test.ts into one portable fork-bump acceptance gate: a fork " +
-    "re-roll or an accidental engine swap that permutes or corrupts the " +
-    "association mapping fails psiIntersectionVectors.test.ts deterministically. " +
+    "sorting on the local index. They hold every scenario psilink's matching " +
+    "cascade has to get right -- the empty-round and empty-key scenarios pinned " +
+    "nowhere else, plus the projections psiParticipant.test.ts, psiLink.test.ts, " +
+    "and psiLinkForLinkageKeys.test.ts exercise from the API side -- in one " +
+    "portable fork-bump acceptance gate: a fork re-roll or an accidental engine " +
+    "swap that permutes or corrupts the association mapping fails " +
+    "psiIntersectionVectors.test.ts deterministically. " +
     "This is a CORRECTNESS anchor (the projection is data-defined, so a correct " +
     "engine always reproduces it), distinct from the BYTE-stability anchor in " +
     "psi-engine-wire-vectors.json. A green run confirms only that the engine still " +

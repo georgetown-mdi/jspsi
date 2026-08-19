@@ -19,20 +19,3 @@ export async function expectRejectionKind(
   expect((err as ConnectionError).kind).toBe(kind);
   return err as ConnectionError;
 }
-
-export async function expectRejection(
-  p: Promise<unknown>,
-  kind: ConnectionError["kind"],
-  messagePattern: RegExp,
-): Promise<ConnectionError> {
-  const err = await expectRejectionKind(p, kind);
-  expect(err.message).toMatch(messagePattern);
-  return err;
-}
-
-export async function expectSecurity(
-  p: Promise<unknown>,
-  messagePattern: RegExp,
-): Promise<ConnectionError> {
-  return expectRejection(p, "security", messagePattern);
-}

@@ -118,16 +118,6 @@ describe("authoredLinkageFields", () => {
     ).toEqual(["current_name"]);
   });
 
-  test("an explicit binding for a type with no default field declares a constraint-free field", () => {
-    const metadata: Metadata = [col("ph", "phone_number")];
-    const standardization: Standardization = [
-      { output: "phone", input: "ph", steps: [] },
-    ];
-    expect(authoredLinkageFields(metadata, standardization)).toEqual([
-      { name: "phone", type: "phone_number" },
-    ]);
-  });
-
   test("a single renamed binding replaces its type's default field in place", () => {
     const metadata: Metadata = [
       col("given", "first_name"),

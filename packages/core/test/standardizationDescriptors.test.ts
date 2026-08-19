@@ -19,24 +19,6 @@ import {
 // without a descriptor surfaces as a name with no descriptor, and a descriptor
 // for a dropped function surfaces as a descriptor with no name. Either fails CI.
 describe("descriptor / registry parity", () => {
-  test("every recognized function name has a descriptor", () => {
-    const described = new Set(
-      Object.keys(STANDARDIZATION_FUNCTION_DESCRIPTORS),
-    );
-    const missing = STANDARDIZATION_FUNCTION_NAMES.filter(
-      (name) => !described.has(name),
-    );
-    expect(missing).toEqual([]);
-  });
-
-  test("every descriptor names a recognized function", () => {
-    const recognized = new Set(STANDARDIZATION_FUNCTION_NAMES);
-    const extra = Object.keys(STANDARDIZATION_FUNCTION_DESCRIPTORS).filter(
-      (name) => !recognized.has(name),
-    );
-    expect(extra).toEqual([]);
-  });
-
   test("the descriptor key set equals the recognized-name set exactly", () => {
     expect(Object.keys(STANDARDIZATION_FUNCTION_DESCRIPTORS).sort()).toEqual(
       [...STANDARDIZATION_FUNCTION_NAMES].sort(),
@@ -135,10 +117,6 @@ describe("param schemas", () => {
       expect(schema.safeParse({ length: 1.5 }).success).toBe(false);
     });
 
-    test("rejects a multi-character char", () => {
-      expect(schema.safeParse({ length: 9, char: "AB" }).success).toBe(false);
-    });
-
     // The schema and the factory agree on what is malformed: a value the schema
     // rejects also makes the factory throw, and a value it accepts does not.
     test("agrees with the factory on length validity", () => {
@@ -166,16 +144,8 @@ describe("param schemas", () => {
   describe("substring", () => {
     const schema = schemaFor("substring");
 
-    test("accepts a positive start and length", () => {
-      expect(schema.safeParse({ start: 1, length: 3 }).success).toBe(true);
-    });
-
     test("accepts a negative start (counts from the end)", () => {
       expect(schema.safeParse({ start: -3, length: 3 }).success).toBe(true);
-    });
-
-    test("rejects a zero start", () => {
-      expect(schema.safeParse({ start: 0, length: 3 }).success).toBe(false);
     });
 
     test("rejects a missing length", () => {

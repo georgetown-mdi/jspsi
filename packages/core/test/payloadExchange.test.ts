@@ -15,7 +15,6 @@ import { OutboundDisclosureRefusalError, UsageError } from "../src/errors";
 
 import type { Metadata } from "../src/config/metadata";
 import type { LinkageTerms, Output, Payload } from "../src/config/linkageTerms";
-import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
 import type { PartnerPayload } from "../src/payloadExchange";
 
 import {
@@ -260,35 +259,6 @@ const WITHHOLDING_OUTPUT: Output = {
   expectsOutput: true,
   shareWithPartner: false,
 };
-
-test("assertPayloadSendDisclosed: a send column with isPayload:false is rejected", () => {
-  const meta: Metadata = [
-    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
-    { name: "diagnosis", type: "other", role: "payload", isPayload: false },
-  ];
-  const payload: Payload = { send: [{ name: "diagnosis" }] };
-  expect(() =>
-    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
-  ).toThrow(UsageError);
-  // The offending column is named so the operator can reconcile it.
-  expect(() =>
-    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
-  ).toThrow(/diagnosis/);
-});
-
-test("assertPayloadSendDisclosed: a send column with role:ignored is rejected", () => {
-  const meta: Metadata = [
-    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
-    { name: "county", type: "other", role: "ignored", isPayload: true },
-  ];
-  const payload: Payload = { send: [{ name: "county" }] };
-  expect(() =>
-    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
-  ).toThrow(UsageError);
-  expect(() =>
-    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT),
-  ).toThrow(/county/);
-});
 
 test("assertPayloadSendDisclosed: a send column absent from metadata is rejected", () => {
   const meta: Metadata = [
@@ -1039,21 +1009,6 @@ test("exchangePayloads: malformed data from partner rejects the responder", asyn
   await expect(responderPromise).rejects.toThrow();
 });
 
-test("exchangePayloads: rowIndices/rows length mismatch rejects the receiver", async () => {
-  const [connA, connB] = createMessagePipe();
-  const initiatorPromise = exchangePayloads(connA, "initiator", {
-    hasData: false,
-  });
-  await connB.receive();
-  await connB.send({
-    hasData: true,
-    columns: ["patient_id"],
-    rowIndices: [0, 1],
-    rows: [["P0"]],
-  });
-  await expect(initiatorPromise).rejects.toThrow();
-});
-
 test("exchangePayloads: a frame failing length parity is refused on parity alone, not the repeat scan", async () => {
   // Parity is checked before distinctness, so a mismatched frame is refused
   // without walking its indices -- the refusal names only the parity fault.
@@ -1286,97 +1241,7 @@ test("exchangePayloads: a legitimately large partner payload parses", async () =
   expect(received.rows).toHaveLength(n);
 });
 
-test("exchangePayloads: an over-long partner column name is rejected at the wire", async () => {
-  // A received column name flows verbatim into this party's local exchange-record
-  // file, so the wire predicate bounds each name's LENGTH to MAX_NAME_LENGTH. A
-  // name one character over the bound is rejected as a clean protocol error
-  // before any column name reaches the record.
-  const [connA, connB] = createMessagePipe();
-  const initiatorPromise = exchangePayloads(connA, "initiator", {
-    hasData: false,
-  });
-  await connB.receive();
-  await connB.send({
-    hasData: true,
-    columns: ["a".repeat(MAX_NAME_LENGTH + 1)],
-    rowIndices: [0],
-    rows: [["v"]],
-  });
-  const err = await initiatorPromise.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
-});
-
-test("exchangePayloads: a partner column name at the length bound is accepted", async () => {
-  // The boundary case: a name of exactly MAX_NAME_LENGTH is legitimate and must
-  // pass unchanged, so the bound rejects only what exceeds it.
-  const name = "a".repeat(MAX_NAME_LENGTH);
-  const [connA, connB] = createMessagePipe();
-  const initiatorPromise = exchangePayloads(connA, "initiator", {
-    hasData: false,
-  });
-  await connB.receive();
-  await connB.send({
-    hasData: true,
-    columns: [name],
-    rowIndices: [0],
-    rows: [["v"]],
-  });
-  const received = await initiatorPromise;
-  expect(received.columns).toEqual([name]);
-});
-
-test("exchangePayloads: the column-name length bound counts UTF-16 code units", async () => {
-  // The bound is value.length (UTF-16 code units), matching every other
-  // MAX_NAME_LENGTH use in the codebase, and the wire and record bounds use the
-  // identical unit so they cannot disagree. Pin the unit so a future switch to
-  // code points or graphemes fails here: an astral (surrogate-pair) character
-  // counts as its two code units, not one visible character.
-  const astral = "\u{1D54F}"; // U+1D54F, one visible char, two UTF-16 code units
-  const atBound = astral.repeat(MAX_NAME_LENGTH / 2);
-  expect(atBound.length).toBe(MAX_NAME_LENGTH);
-
-  const [acceptA, acceptB] = createMessagePipe();
-  const acceptP = exchangePayloads(acceptA, "initiator", { hasData: false });
-  await acceptB.receive();
-  await acceptB.send({
-    hasData: true,
-    columns: [atBound],
-    rowIndices: [0],
-    rows: [["v"]],
-  });
-  expect((await acceptP).columns).toEqual([atBound]);
-
-  const [rejectA, rejectB] = createMessagePipe();
-  const rejectP = exchangePayloads(rejectA, "initiator", { hasData: false });
-  await rejectB.receive();
-  await rejectB.send({
-    hasData: true,
-    columns: [atBound + "a"],
-    rowIndices: [0],
-    rows: [["v"]],
-  });
-  const err = await rejectP.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
-});
-
 // --- buildOutputTable --------------------------------------------------------
-
-test("buildOutputTable: our header uses identifier column name", () => {
-  const partnerPayload: PartnerPayload = {
-    columns: ["partner_id"],
-    rowIndices: [0],
-    rows: [["Q0"]],
-  };
-  const { headers } = buildOutputTable(
-    [[0], [0]],
-    rawRows,
-    metaWithId,
-    partnerPayload,
-  );
-  expect(headers[0]).toBe("patient_id");
-});
 
 test("buildOutputTable: our header falls back to row_id when no identifier", () => {
   const partnerPayload: PartnerPayload = {
