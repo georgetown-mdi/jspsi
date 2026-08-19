@@ -6,6 +6,7 @@ import {
   encodeInvitation,
   assertAlgorithmImplemented,
   assertDeduplicateImplemented,
+  assertDisclosedNamesCarriable,
   assertFanOutImplemented,
   assertPayloadSendDisclosed,
   assertStandardizationMatchesTerms,
@@ -391,17 +392,32 @@ export async function validateInvite(params: {
     });
     noteSinglePassSelection(linkageStrategy, log);
 
-    // The columns this party will transmit for matched records, computed over the
-    // same metadata prepareForExchange uses (dataSpec.metadata, or inferred from
-    // the input columns), so the declared set equals what preparePayload
-    // transmits. Carried on the token AND persisted into the saved config as
+    // The metadata this party's disclosure is read from: the same one
+    // prepareForExchange uses (dataSpec.metadata, or inferred from the input
+    // columns).
+    const disclosureMetadata =
+      builtDataSpec.metadata ?? inferMetadata(rows.columns);
+
+    // Fail closed, before the token is minted or any file is written, on a
+    // disclosed column whose name is too long to carry. This path infers its
+    // metadata from the input header, which passes through no schema, so the name
+    // would otherwise reach the token's own MAX_NAME_LENGTH bound inside
+    // encodeInvitation as a raw ZodError rather than an operator-facing refusal
+    // naming the offending position. The same guard prepareForExchange applies at
+    // exchange time. See assertDisclosedNamesCarriable.
+    assertDisclosedNamesCarriable(
+      disclosureMetadata,
+      builtDataSpec.linkageTerms.output,
+    );
+
+    // The columns this party will transmit for matched records, over that same
+    // metadata, so the declared set equals what preparePayload transmits. Carried
+    // on the token AND persisted into the saved config as
     // disclosedPayloadColumns, so a later recurring `psilink exchange` verifies
     // its current metadata still discloses exactly this set before any data is
     // sent (assertDisclosureMatchesCommitment) -- the send-side commitment the
     // online path would otherwise keep only on the discarded token.
-    const disclosedPayloadColumns = disclosedColumnsFor(
-      builtDataSpec.metadata ?? inferMetadata(rows.columns),
-    );
+    const disclosedPayloadColumns = disclosedColumnsFor(disclosureMetadata);
     const dataSpec: ResolvedDataSpec = {
       ...builtDataSpec,
       ...(disclosedPayloadColumns !== undefined
@@ -653,15 +669,28 @@ export async function validateInvite(params: {
   });
   noteSinglePassSelection(linkageStrategy, log);
 
-  // The disclosed-columns subset over the same metadata the inferred terms (and
-  // the eventual exchange) use, so the acceptor's consent and lock-in derive from
-  // what preparePayload will actually transmit. Carried on the token AND persisted
-  // into the written config as disclosedPayloadColumns, so a later recurring
-  // `psilink exchange` verifies its metadata still discloses exactly this set
-  // before any data is sent (assertDisclosureMatchesCommitment).
-  const disclosedPayloadColumns = disclosedColumnsFor(
-    builtDataSpec.metadata ?? inferMetadata(rows.columns),
+  // The metadata the inferred terms (and the eventual exchange) read this party's
+  // disclosure from.
+  const disclosureMetadata =
+    builtDataSpec.metadata ?? inferMetadata(rows.columns);
+
+  // Fail closed pre-mint on a disclosed column name too long to carry, for the
+  // reason the online path above does: this path's metadata comes from the input
+  // header too, so the refusal is the operator's own file's, named by position,
+  // rather than the raw ZodError of the token bound inside encodeInvitation --
+  // and it lands before the config and key file are written. See
+  // assertDisclosedNamesCarriable.
+  assertDisclosedNamesCarriable(
+    disclosureMetadata,
+    builtDataSpec.linkageTerms.output,
   );
+
+  // The disclosed-columns subset over that metadata, so the acceptor's consent and
+  // lock-in derive from what preparePayload will actually transmit. Carried on the
+  // token AND persisted into the written config as disclosedPayloadColumns, so a
+  // later recurring `psilink exchange` verifies its metadata still discloses
+  // exactly this set before any data is sent (assertDisclosureMatchesCommitment).
+  const disclosedPayloadColumns = disclosedColumnsFor(disclosureMetadata);
   const dataSpec: ResolvedDataSpec = {
     ...builtDataSpec,
     ...(disclosedPayloadColumns !== undefined
