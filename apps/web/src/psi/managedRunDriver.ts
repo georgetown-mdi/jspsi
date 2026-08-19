@@ -184,7 +184,11 @@ export function runManagedExchangeInBrowser(
         // uses.
         let mc: MessageConnection | undefined;
         try {
-          mc = await openPeerMessageConnection(conn);
+          // The signal is what lets a cancel cut the clean close's wait for the
+          // peer, on this teardown and on the data exchange's: without it the
+          // wait stands until the peer takes the final frame or the ceiling
+          // expires, a duration the peer chooses.
+          mc = await openPeerMessageConnection(conn, { signal });
           // record.expires stays enforced at the handshake (core's pre- and
           // post-handshake guards), covering a bound that lapses between the
           // pre-connection expiry check and here; the orchestration re-maps that
@@ -229,7 +233,14 @@ export function runManagedExchangeInBrowser(
           );
           return buildRunOutputs(result, carried.prepared, urls);
         } finally {
-          await teardown(carried.peer, carried.conn, carried.mc);
+          // Started, not awaited: the clean close inside it waits for the peer to
+          // take the final frame, and a peer that keeps the link up without
+          // reading the close sentinel holds that wait to its ceiling. Awaiting it
+          // would withhold this run's outputs -- and the success bookkeeping
+          // behind them -- for a duration the partner picks, so the drain runs on
+          // its own while the outputs go to the caller, exactly as the one-shot
+          // lifecycle reports its result before its own teardown.
+          void teardown(carried.peer, carried.conn, carried.mc);
         }
       },
     },
@@ -245,7 +256,8 @@ export function runManagedExchangeInBrowser(
 /** Tear down the run's live resources: drain and close the message connection (or
  * hard-close the raw channel when the wrapper never materialized), then free the
  * broker id. Mirrors the one-shot lifecycle's teardown, never throwing -- a
- * teardown fault must not clobber a more accurate outcome. */
+ * teardown fault must not clobber a more accurate outcome, which is also what
+ * lets the data exchange start it without awaiting it. */
 async function teardown(
   peer: Peer,
   conn: DataConnection,

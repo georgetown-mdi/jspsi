@@ -46,7 +46,15 @@ export type PeerCloseOutcome =
   | "peer-gone"
   /** The channel was not open when the wait began, so it could carry neither
    * the sentinel nor the frames behind it. */
-  | "channel-not-open";
+  | "channel-not-open"
+  /** The caller's signal aborted, so the wait was cut short rather than left
+   * standing to the ceiling: the peer chooses that duration, and a cancelling
+   * operator must not have to spend it. The sentinel may never have been read,
+   * so this carries no delivery signal -- and it is its own exit rather than a
+   * `peer-closed` precisely because a cancellation whose teardown reaches the
+   * local channel would otherwise arrive here as that channel's own `close`
+   * event, which is the one exit that means delivered. */
+  | "run-aborted";
 
 /** The WebRTC objects under a PeerJS connection. Read through one accessor
  * because PeerJS types both as always present while a connection that never
@@ -62,9 +70,9 @@ function transportOf(conn: DataConnection): {
 /**
  * Resolves once the peer has closed the data channel underneath `conn` - the
  * one delivery signal a browser peer gets - or once there is no live peer left
- * to deliver to, or once `timeoutMs` runs out, reporting which of those ended
- * the wait ({@link PeerCloseOutcome}). Never rejects: the caller is already
- * tearing down.
+ * to deliver to, or once `signal` aborts, or once `timeoutMs` runs out,
+ * reporting which of those ended the wait ({@link PeerCloseOutcome}). Never
+ * rejects: the caller is already tearing down.
  *
  * This is what makes a clean close mean delivery. PeerJS's flushing close only
  * queues its in-band close sentinel and returns, so the close resolves with the
@@ -100,11 +108,18 @@ function transportOf(conn: DataConnection): {
  *                   connection are read now, before PeerJS can tear either off.
  * @param timeoutMs  Ceiling on the wait
  *                   (default {@link DEFAULT_PEER_CLOSE_TIMEOUT_MS}).
+ * @param signal     The run's signal, if the caller has one: an abort ends the
+ *                   wait with `run-aborted` instead of leaving a cancelling
+ *                   operator to wait out a duration the peer chooses. Checked on
+ *                   entry as well as listened for, so a teardown driven BY the
+ *                   abort starts no wait at all.
  */
 export function waitForPeerClose(
   conn: DataConnection,
   timeoutMs: number = DEFAULT_PEER_CLOSE_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<PeerCloseOutcome> {
+  if (signal?.aborted) return Promise.resolve("run-aborted");
   const { channel, peerConnection } = transportOf(conn);
   // Nothing to wait for: a channel that is not open can carry neither the
   // sentinel nor the frames behind it, so the wait would be pure delay on a
@@ -123,10 +138,14 @@ export function waitForPeerClose(
         "connectionstatechange",
         onPeerConnectionState,
       );
+      signal?.removeEventListener("abort", onAbort);
       resolve(outcome);
     };
     const onChannelClose = () => {
       settle("peer-closed");
+    };
+    const onAbort = () => {
+      settle("run-aborted");
     };
     const onPeerConnectionState = () => {
       if (
@@ -144,6 +163,7 @@ export function waitForPeerClose(
       "connectionstatechange",
       onPeerConnectionState,
     );
+    signal?.addEventListener("abort", onAbort);
     // The peer may already have gone while this side was still sending.
     onPeerConnectionState();
   });

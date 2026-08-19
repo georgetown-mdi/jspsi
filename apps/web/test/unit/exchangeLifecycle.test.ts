@@ -11,6 +11,7 @@ import {
 } from "@psilink/core";
 
 import {
+  CLOSE_OUTCOME_WARNINGS,
   FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
   FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
   runExchangeLifecycle,
@@ -233,16 +234,21 @@ describe("runExchangeLifecycle", () => {
       const { acquired, conn } = makeResources();
       const acquire: Acquire = () => Promise.resolve(acquired);
       const s = seams();
+      const controller = new AbortController();
 
       await runExchangeLifecycle({
         acquire,
         exchangeRole: "initiator",
-        signal: new AbortController().signal,
+        signal: controller.signal,
         ...s,
       });
 
+      // The run's own signal travels alongside the outcome callback: it is the
+      // only route by which a cancel can cut the close's wait for the peer short
+      // (core's MessageConnection.close() takes no arguments).
       expect(mockedOpen).toHaveBeenCalledWith(conn, {
         onCloseOutcome: expect.any(Function),
+        signal: controller.signal,
       });
       expect(s.onWarning).not.toHaveBeenCalled();
       mockedOpen.mock.calls[0][1]?.onCloseOutcome?.(outcome);
@@ -251,6 +257,16 @@ describe("runExchangeLifecycle", () => {
       );
     },
   );
+
+  test("a cancelled wait is worded as a lost link, never as the peer's close", () => {
+    // A cancel cuts the wait rather than letting it run out, so the wait-expired
+    // sentence would name the one thing that did not happen; what the partner got
+    // is as unknowable as it is when the link dies, which is that sentence's whole
+    // point. The silent entry is the delivery signal and must not be reused here.
+    expect(CLOSE_OUTCOME_WARNINGS["run-aborted"]).toBe(
+      FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
+    );
+  });
 
   test("the two unconfirmed notices do not reuse one sentence", () => {
     // A partner who never confirmed within the wait and a link that died before
@@ -300,7 +316,12 @@ describe("runExchangeLifecycle", () => {
     },
   );
 
-  test.each(["ceiling", "peer-gone", "channel-not-open"] as const)(
+  test.each([
+    "ceiling",
+    "peer-gone",
+    "channel-not-open",
+    "run-aborted",
+  ] as const)(
     "drops a %s notice raised once the run has aborted",
     async (outcome) => {
       // The close's wait can end long after an unmount aborts the run, and the

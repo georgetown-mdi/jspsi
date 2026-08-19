@@ -44,8 +44,9 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  * the channel; and `close` detaches the listeners and closes the channel,
  * waiting on a clean close for the peer to take the final frame (see
  * {@link waitForPeerClose}), so a resolved close means delivered rather than
- * buffered -- except on the wait's ceiling, dead-peer, and already-not-open
- * paths, where the frame can still be in flight (see {@link waitForPeerClose}).
+ * buffered -- except on the wait's ceiling, dead-peer, already-not-open, and
+ * cancelled paths, where the frame can still be in flight (see
+ * {@link waitForPeerClose}).
  * How the wait ended goes up whole through `onCloseOutcome`, unjudged: this
  * layer knows which exits carry a delivery signal, but which of them a run tells
  * its operator about, and in what words, belongs to the layer that owns the
@@ -79,6 +80,11 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  *                 leaving both the reporting decision and the operator-facing
  *                 wording to the caller; omitting it discards the outcome. A
  *                 close that does not flush runs no wait and reports nothing.
+ *                 `signal` is the run's, and is the route by which a cancel cuts
+ *                 that wait short (core's `MessageConnection.close()` takes no
+ *                 arguments, so the signal is handed in here rather than at the
+ *                 close); omitting it leaves the wait bounded only by the peer
+ *                 and the ceiling.
  */
 export async function openPeerMessageConnection(
   conn: DataConnection,
@@ -89,6 +95,7 @@ export async function openPeerMessageConnection(
     maxConcurrentReassemblies?: number;
     closeDrainTimeoutMs?: number;
     onCloseOutcome?: (outcome: PeerCloseOutcome) => void;
+    signal?: AbortSignal;
   },
 ): Promise<MessageConnection> {
   const maxFrameBytes = options?.maxFrameBytes ?? MAX_WEBRTC_FRAME_BYTES;
@@ -165,6 +172,7 @@ export async function openPeerMessageConnection(
             const peerClosed = waitForPeerClose(
               conn,
               options?.closeDrainTimeoutMs,
+              options?.signal,
             );
             conn.close({ flush: true });
             // Awaited on its own line, never inside the optional call below: an
