@@ -5,12 +5,50 @@ import type { Server as PSIServer } from "@openmined/psi.js/implementation/serve
 import type { Config } from "./types";
 
 // The deserialized server setup the joiner holds between receiving it and matching
-// against it (see PsiEngine.receiveServerSetup / computeAssociationTable). A live
+// against it (see PsiEngine.receiveServerSetup and the match that consumes it). A live
 // library object, so it never crosses a worker boundary -- which is exactly why the
 // engine, not its caller, holds it.
 type DeserializedServerSetup = ReturnType<
   PSILibrary["serverSetup"]["deserializeBinary"]
 >;
+
+/**
+ * Which disclosure a {@link PsiEngine} is built for.
+ *
+ * - `identifier-revealing` -- the `psi` construction: the round resolves to
+ *   matched positions and an association table.
+ * - `count-only` -- the psi-c construction (docs/spec/PROTOCOL.md, PSI-C): the
+ *   round resolves to the intersection cardinality alone, and the operations that
+ *   would name the matches refuse.
+ *
+ * The mode is fixed when the engine is constructed, never chosen per call: it is
+ * the library's reveal-intersection flag, which rides the receiver's request and
+ * which the sender enforces agreement on, so it is a property of the round both
+ * parties ran rather than a local preference.
+ */
+export type PsiEngineMode = "identifier-revealing" | "count-only";
+
+/**
+ * The values a party contributes to a count-only round: those occurring EXACTLY
+ * ONCE in its own dataset, in input order. Every occurrence of a repeated value is
+ * dropped, not just the later ones -- an ambiguous match cannot be attributed to a
+ * single record.
+ *
+ * Normative for psi-c (docs/spec/PROTOCOL.md, PSI-C), and not a filter the library
+ * applies: its cardinality operation reports the size of the MULTISET
+ * intersection, where a value repeated on both sides contributes the smaller of
+ * the two multiplicities. A count-only round surfaces no identifier that would
+ * contradict such a figure, so the filter is applied here, at the seam that owns
+ * the contribution, rather than left to a caller.
+ */
+function valuesContributedExactlyOnce(
+  values: ReadonlyArray<string>,
+): Array<string> {
+  const occurrences = new Map<string, number>();
+  for (const value of values)
+    occurrences.set(value, (occurrences.get(value) ?? 0) + 1);
+  return values.filter((value) => occurrences.get(value) === 1);
+}
 
 /**
  * The CPU-bound PSI crypto core behind {@link ./participant.PSIParticipant}. It
@@ -22,20 +60,29 @@ type DeserializedServerSetup = ReturnType<
  * The whole surface is deliberately bytes-in / bytes-out (or value-list-in): nothing
  * that crosses it is a live library handle, so a worker-hosted implementation can
  * stand behind the same interface without the caller changing. The one piece of
- * cross-call state -- the joiner's deserialized setup
- * between {@link receiveServerSetup} and {@link computeAssociationTable} -- lives
- * INSIDE the engine for the same reason: the deserialized setup cannot cross a
- * worker boundary, so the engine holds it rather than handing it back.
+ * cross-call state -- the joiner's deserialized setup between
+ * {@link receiveServerSetup} and the match that consumes it -- lives INSIDE the
+ * engine for the same reason: the deserialized setup cannot cross a worker
+ * boundary, so the engine holds it rather than handing it back.
  *
  * The host-side, pre-deserialize element-count guards stay ABOVE this seam in
  * {@link ./participant.PSIParticipant}, which runs them on the raw wire bytes before
  * dispatching here, so the engine only ever deserializes an already-bounded frame.
+ *
+ * An engine is built for exactly one {@link PsiEngineMode}, and the operations of
+ * the other mode refuse rather than return: which disclosure a round produces is
+ * fixed with the key it is produced under, not chosen when the result is read.
  */
 export interface PsiEngine {
   /**
    * Encrypts this party's values once under the server key, returning the
    * serialized setup message and the sorting permutation (see
    * {@link ./participant.PSIParticipant.createServerSetup}). Server role.
+   *
+   * A count-only engine contributes only the values occurring exactly once in
+   * `values` and returns an EMPTY permutation: that round has no pairing to map
+   * back to rows, and the library's permutation indexes the filtered contribution
+   * rather than `values`, so it is not a correspondence a caller could use.
    */
   createServerSetup(
     values: ReadonlyArray<string>,
@@ -45,11 +92,18 @@ export interface PsiEngine {
    * server key, returning the serialized response. Server role.
    */
   processClientRequest(requestBytes: Uint8Array): Promise<Uint8Array>;
-  /** Encrypts this party's values once under the client key. Client role. */
+  /**
+   * Encrypts this party's values once under the client key. Client role. A
+   * count-only engine contributes only the values occurring exactly once in
+   * `values`, and the request carries its cleared reveal flag, which the partner's
+   * server enforces agreement on.
+   */
   createClientRequest(values: ReadonlyArray<string>): Promise<Uint8Array>;
   /**
    * Deserializes the partner's server setup, verifies it is a Raw data structure,
-   * and holds it for the matching {@link computeAssociationTable}. Client role.
+   * and holds it for the match the engine's mode allows --
+   * {@link computeAssociationTable} or {@link computeIntersectionCardinality}.
+   * Client role.
    * Split from the match so the joiner can validate the setup the instant it
    * arrives (a fail-fast before it sends its own request), while the response it
    * matches against arrives a round trip later.
@@ -60,10 +114,21 @@ export interface PsiEngine {
    * response (deserialized from `responseBytes`) and compares it against the setup
    * held by the preceding {@link receiveServerSetup}, returning
    * `[localIndices, partnerIndices]`. Client role; throws if no setup is held.
+   * Identifier-revealing mode only: a count-only engine refuses instead of
+   * returning a pairing.
    */
   computeAssociationTable(
     responseBytes: Uint8Array,
   ): Promise<[Array<number>, Array<number>]>;
+  /**
+   * Removes this party's encryption layer from the partner's doubly-encrypted
+   * response and reports the SIZE of the intersection against the setup held by the
+   * preceding {@link receiveServerSetup} -- no identifier, no pairing, no matched
+   * position. Client role; throws if no setup is held. Count-only mode only: an
+   * identifier-revealing engine refuses, so the disclosure a round produces stays
+   * the one its key was created for.
+   */
+  computeIntersectionCardinality(responseBytes: Uint8Array): Promise<number>;
   /**
    * Release engine resources. The in-process engine frees the library's server /
    * client objects -- embind wrappers over WASM-heap C++ state, including the
@@ -86,25 +151,37 @@ export interface PsiEngine {
 export class InProcessPsiEngine implements PsiEngine {
   private readonly library: PSILibrary;
   private readonly id: string;
+  private readonly mode: PsiEngineMode;
   private readonly server?: PSIServer;
   private readonly client?: PSIClient;
-  // The joiner's deserialized setup, held between receiveServerSetup and the
-  // computeAssociationTable that consumes it. Undefined outside that window.
+  // The joiner's deserialized setup, held between receiveServerSetup and the match
+  // that consumes it. Undefined outside that window.
   private pendingSetup: DeserializedServerSetup | undefined;
   // Latched by dispose() so freeing the library objects is idempotent: their
   // embind delete() is not safe to call twice.
   private disposed = false;
 
-  constructor(library: PSILibrary, role: Config["role"], id: string) {
+  constructor(
+    library: PSILibrary,
+    role: Config["role"],
+    id: string,
+    // Fixed here rather than per call: the reveal flag it sets is generated into
+    // the key objects below and rides the request on the wire, so a round's
+    // disclosure is settled with its key. Defaults to the identifier-revealing
+    // `psi` construction.
+    mode: PsiEngineMode = "identifier-revealing",
+  ) {
     this.library = library;
     this.id = id;
+    this.mode = mode;
+    const revealIntersection = mode === "identifier-revealing";
     // Generate the fresh secret key for this exchange, held inside the library's
     // server / client object. An unresolved ("either") role creates neither; the
     // role-guarded methods below then reject, exactly as before this extraction.
     if (role === "starter") {
-      this.server = library.server!.createWithNewKey(true);
+      this.server = library.server!.createWithNewKey(revealIntersection);
     } else if (role === "joiner") {
-      this.client = library.client!.createWithNewKey(true);
+      this.client = library.client!.createWithNewKey(revealIntersection);
     }
   }
 
@@ -114,15 +191,19 @@ export class InProcessPsiEngine implements PsiEngine {
     const server = this.server;
     if (!server)
       throw new Error(`${this.id}: createServerSetup requires the server role`);
-    const permutation: Array<number> = [];
+    const countOnly = this.mode === "count-only";
+    const sortingPermutation: Array<number> = [];
     const setup = server.createSetupMessage(
       0.0,
       -1,
-      values,
+      countOnly ? valuesContributedExactlyOnce(values) : values,
       this.library.dataStructure.Raw,
-      permutation,
+      sortingPermutation,
     );
-    return Promise.resolve({ setup: setup.serializeBinary(), permutation });
+    return Promise.resolve({
+      setup: setup.serializeBinary(),
+      permutation: countOnly ? [] : sortingPermutation,
+    });
   }
 
   processClientRequest(requestBytes: Uint8Array): Promise<Uint8Array> {
@@ -141,7 +222,11 @@ export class InProcessPsiEngine implements PsiEngine {
       throw new Error(
         `${this.id}: createClientRequest requires the client role`,
       );
-    return Promise.resolve(client.createRequest(values).serializeBinary());
+    const contributed =
+      this.mode === "count-only"
+        ? valuesContributedExactlyOnce(values)
+        : values;
+    return Promise.resolve(client.createRequest(contributed).serializeBinary());
   }
 
   receiveServerSetup(setupBytes: Uint8Array): Promise<void> {
@@ -163,23 +248,49 @@ export class InProcessPsiEngine implements PsiEngine {
     return Promise.resolve();
   }
 
-  computeAssociationTable(
-    responseBytes: Uint8Array,
-  ): Promise<[Array<number>, Array<number>]> {
+  // The client role, the mode, and the held setup each operation below requires,
+  // checked in that order so a call the engine's construction rules out is refused
+  // by name here rather than deep in the library -- which reports the same
+  // condition as an opaque marshalling error on the WebAssembly build.
+  private beginMatch(
+    operation: string,
+    mode: PsiEngineMode,
+  ): { client: PSIClient; setup: DeserializedServerSetup } {
     const client = this.client;
     if (!client)
+      throw new Error(`${this.id}: ${operation} requires the client role`);
+    if (this.mode !== mode)
       throw new Error(
-        `${this.id}: computeAssociationTable requires the client role`,
+        `${this.id}: ${operation} requires a ${mode} PSI engine; this one is ${this.mode}`,
       );
     const setup = this.pendingSetup;
     if (setup === undefined)
       throw new Error(
-        `${this.id}: computeAssociationTable called before receiveServerSetup`,
+        `${this.id}: ${operation} called before receiveServerSetup`,
       );
     this.pendingSetup = undefined;
+    return { client, setup };
+  }
+
+  computeAssociationTable(
+    responseBytes: Uint8Array,
+  ): Promise<[Array<number>, Array<number>]> {
+    const { client, setup } = this.beginMatch(
+      "computeAssociationTable",
+      "identifier-revealing",
+    );
     const response = this.library.response.deserializeBinary(responseBytes);
     const table = client.getAssociationTable(setup, response);
     return Promise.resolve([table[0], table[1]]);
+  }
+
+  computeIntersectionCardinality(responseBytes: Uint8Array): Promise<number> {
+    const { client, setup } = this.beginMatch(
+      "computeIntersectionCardinality",
+      "count-only",
+    );
+    const response = this.library.response.deserializeBinary(responseBytes);
+    return Promise.resolve(client.getIntersectionSize(setup, response));
   }
 
   dispose(): void {

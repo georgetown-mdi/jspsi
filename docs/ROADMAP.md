@@ -27,7 +27,7 @@ Work required before the 1.0 release.
 
 ## Version 1.1
 
-- PSI cardinality (PSI-C) for research-grade exchanges that reveal only the count of shared members (partially implemented today)
+- PSI cardinality (PSI-C) for research-grade exchanges that reveal only the count of shared members. The construction is specified in [PROTOCOL.md](spec/PROTOCOL.md#psi-c); no run path conducts it, and an exchange whose linkage terms set `algorithm: psi-c` is refused before it runs rather than revealing matched identifiers under terms that asked for a count
 - PSI-Sum
 - Splitting standardized fields via fan-out (the `split_on` standardization function), e.g. last names split on `-`. The transform and the cross-product over the values it produces are implemented; what remains is matching on those values. Because a splitting row would contribute no PSI entry at all rather than one per value -- narrowing a match where the consent surface describes a widening -- an exchange whose standardization or linkage-key transforms declare `split_on` is refused before it runs, the web app refuses to mint an invitation that declares one, and its step editor does not offer the function until matching lands
 - Synchronous protocol execution for the CLI (the web WebRTC path is already synchronous; this eliminates file-based polling latency where the channel allows)
