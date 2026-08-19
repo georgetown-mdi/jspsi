@@ -46,12 +46,16 @@ const base = {
 
 // --- Happy path --------------------------------------------------------------
 
+// Every structure the schema admits at once. `psi`, because several linkage
+// keys, `deduplicate: true`, and payload in both directions are exactly the
+// shape the count-only algorithm refuses (the psi-c section below covers that);
+// this case is about the rest of the document parsing.
 test("parses a complete valid set of terms", () => {
   const result = parseLinkageTerms({
     version: "2.1.0",
     identity: "Jane Smith, Agency A, jsmith@agency-a.gov",
     date: "2025-06-01",
-    algorithm: "psi-c",
+    algorithm: "psi",
     output: { expectsOutput: true, shareWithPartner: true },
     deduplicate: true,
     linkageFields: [
@@ -98,7 +102,7 @@ test("parses a complete valid set of terms", () => {
     },
   });
 
-  expect(result.algorithm).toBe("psi-c");
+  expect(result.algorithm).toBe("psi");
   expect(result.linkageFields).toHaveLength(5);
   expect(result.linkageKeys).toHaveLength(2);
   expect(result.legalAgreement?.reference).toBe("MOU-2025-0042");

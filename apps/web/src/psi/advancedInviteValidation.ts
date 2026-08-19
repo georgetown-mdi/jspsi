@@ -6,6 +6,8 @@ import {
   MAX_INVITATION_LIFETIME_SECONDS,
   assessLinkageSatisfiability,
   canonicalString,
+  countOnlyShapeViolation,
+  countOnlyTransmitsColumn,
   disclosedColumnNames,
   safeParseLinkageTerms,
 } from "@psilink/core";
@@ -19,7 +21,11 @@ import { buildAdvancedTerms } from "./advancedInviteTerms";
 import { isStepValid } from "./standardizationAuthoring";
 import { outputForDirection } from "./advancedInviteTypes";
 
-import type { CSVRow, LinkageTerms } from "@psilink/core";
+import type {
+  CSVRow,
+  CountOnlyShapeViolation,
+  LinkageTerms,
+} from "@psilink/core";
 
 import type {
   AdvancedField,
@@ -84,6 +90,44 @@ const FAN_OUT_MESSAGE_BODY =
   "splits one value into several values to match on. Matching on several " +
   "values per record is not built yet, so an exchange that asks for it is " +
   "refused before it runs. Remove that step before generating.";
+
+/** The control each count-only shape rule reports against. Every rule but the
+ * payload one is a property of the matching arrangement the key list holds, which
+ * is also where the fan-out and satisfiability messages land. */
+const COUNT_ONLY_FIELDS: Record<CountOnlyShapeViolation, AdvancedField> = {
+  linkageKeys: "keys",
+  linkageStrategy: "keys",
+  deduplicate: "keys",
+  payload: "payload",
+};
+
+/** The way out every count-only message offers besides fixing the setting it
+ * names: the other Matching method, quoted as the control labels it. */
+const REVEAL_IDENTIFIERS_INSTEAD =
+  'set Matching method to "Reveal the matched identifiers (standard)".';
+
+/** What a count-only document outside the specified shape tells the operator to
+ * change, in this editor's own words rather than core's refusal text -- the same
+ * split {@link messageForField} keeps for a schema failure, whose Zod message is
+ * technical. The rules themselves are core's ({@link countOnlyShapeViolation}), so
+ * only the wording lives here, and each message names the control that carries
+ * the setting it asks about. */
+const COUNT_ONLY_MESSAGES: Record<CountOnlyShapeViolation, string> = {
+  linkageKeys:
+    "A count-only exchange matches on a single linkage key. Turn off all but " +
+    `one key, or ${REVEAL_IDENTIFIERS_INSTEAD}`,
+  linkageStrategy:
+    "A count-only exchange runs one key at a time. Set Linkage strategy to " +
+    `Cascade, or ${REVEAL_IDENTIFIERS_INSTEAD}`,
+  deduplicate:
+    "A count-only exchange reports how many records match and hands neither " +
+    "party a record-by-record result, so several of your records cannot match " +
+    'one partner record. Clear "Allow several of your records to match one ' +
+    `partner record", or ${REVEAL_IDENTIFIERS_INSTEAD}`,
+  payload:
+    "A count-only exchange moves no data columns in either direction. Set " +
+    `those columns so they are not sent, or ${REVEAL_IDENTIFIERS_INSTEAD}`,
+};
 
 /**
  * Validate a draft for the Generate gate. The core schema
@@ -300,6 +344,27 @@ export function validateAdvancedInvite(
     )
   )
     errors.keys = `A linkage key's transform ${FAN_OUT_MESSAGE_BODY}`;
+
+  // The count-only shape gate, at the same altitude as the fan-out one above and
+  // read from core's own rules rather than a second web-side list, so this editor
+  // refuses exactly the documents core refuses at parse and at accept. Written
+  // last for the same reason: a count-only document outside the shape blocks
+  // generation whatever else a control reports, and bringing it into the shape
+  // (or choosing the identifier-revealing algorithm) is the only fix.
+  const countOnlyViolation = countOnlyShapeViolation(terms);
+  if (countOnlyViolation !== undefined)
+    errors[COUNT_ONLY_FIELDS[countOnlyViolation]] =
+      COUNT_ONLY_MESSAGES[countOnlyViolation];
+  // The metadata rule takes the payload control from the terms rule where both
+  // hold, which on this path is whenever either does: `buildAdvancedTerms`
+  // authors `payload.send` from the marked columns, so the declaration and the
+  // transmission are the same fact, and the marks are the half the operator
+  // clears.
+  if (countOnlyTransmitsColumn(terms.algorithm, draft.metadata))
+    errors.payload =
+      "A count-only exchange sends no data columns to your partner, but some " +
+      "columns are set to be sent. Set those columns so they are not sent, or " +
+      REVEAL_IDENTIFIERS_INSTEAD;
 
   const canGenerate =
     parsed.success && encodable && Object.keys(errors).length === 0;

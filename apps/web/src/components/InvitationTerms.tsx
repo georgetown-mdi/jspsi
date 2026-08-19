@@ -736,11 +736,12 @@ export function InvitationTerms({
   // local prepare step, and at the agreed-terms run boundary (docs/spec/PROTOCOL.md,
   // PSI-C). What this set holds is the viewer's own side of that -- the inviter's
   // authored send under "proposing", the acceptor's resolved metadata otherwise --
-  // so this throw is the render-side backstop for the accept-path refusals the
-  // count-only run path must land, unreachable once they refuse ahead of it. Until
-  // then, rendering "no data columns in either direction" over a column would take
-  // the operator's consent to a disclosure that happens. The message states the fact
-  // and names no column.
+  // and each side is refused ahead of this screen, naming what to change: the
+  // Generate gate for the inviter, the columns step's launch gate for the acceptor
+  // (both read core's countOnlyTransmitsColumn). This throw is the render-side
+  // backstop behind them. Rendering "no data columns in either direction" over a
+  // column would take the operator's consent to a disclosure that happens. The
+  // message states the fact and names no column.
   if (countOnlyApplied && viewerOutboundSend.length > 0)
     throw new Error(
       "count-only terms carry a non-empty outbound column set: a psi-c " +
@@ -752,9 +753,10 @@ export function InvitationTerms({
   // refuses, and the no-payload sentence rendered above "Your partner requests 1 data
   // column from you" would state a guarantee the same screen contradicts. The
   // invitation is partner-controlled, so this side cannot assume the authoring
-  // refusal ran; the same backstop reading applies. Read off the two counts those
-  // notices are composed from, so no declaration can reach a notice this check did
-  // not see.
+  // refusal ran -- what it can assume is its own decode, which applies the same
+  // rule (core's LinkageTermsSchema); the same backstop reading applies. Read off
+  // the two counts those notices are composed from, so no declaration can reach a
+  // notice this check did not see.
   if (countOnlyApplied && (sendCount > 0 || receiveCount > 0))
     throw new Error(
       "count-only terms declare a payload column: a psi-c exchange moves no " +

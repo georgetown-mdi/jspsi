@@ -401,22 +401,29 @@ as a surprise once the run aborts.
 Each surface backs that sentence with a render-side refusal rather than printing
 it over a contradiction: an applied `psi-c` whose viewer-side outbound set carries
 a column, or whose invitation declares payload in either direction, throws instead
-of rendering the guarantee. Those throws are a backstop and not the remedy, which
-puts one item on the ungate checklist ahead of the flag: the count-only run path
-must refuse an input-metadata payload column and a payload-declaring `psi-c`
-document actionably, at accept and at parse, BEFORE `APPLIED_SETTINGS.psiC` flips,
-or an operator meets a raw render error where an actionable refusal belongs.
+of rendering the guarantee. Those throws are a backstop and not the remedy. The
+remedy is the actionable refusal ahead of them, which does not wait on
+`APPLIED_SETTINGS.psiC`: a payload-declaring `psi-c` document is refused wherever
+it is parsed, and an input-metadata payload column wherever a surface holds this
+party's own metadata beside the agreed algorithm -- at the mint and at the accept.
+An operator meets the rule and what to change about it, not a raw render error.
+The mint half of that is inert until `APPLIED_SETTINGS.psiC` flips: while the
+flag is false the web surface's own terms-building step clamps the algorithm to
+`psi` before a `psi-c` document exists at the mint for the rule to catch, so
+"refused where the terms are authored" describes the post-flip build, while the
+parse and accept points, the CLI's among them, are live today.
 
-The payload refusal is not the only one the tier's copy presupposes. Of the
-spec's remaining `psi-c` shape refusals, `deduplicate` already fails closed
-today (`assertDeduplicateImplemented`, at invite and in core's exchange
-boundary), but more than one linkage key and `linkage_strategy: single-pass`
-have no check anywhere -- and the round-disclosure note speaks of one key's
-exactly-once values while the result note denies any record-by-record pairing,
-both of which a multi-key or single-pass document would falsify. Those two
-refusals are owed at accept and at parse by the run-path item, ahead of the
-flag, on the same footing as the payload one; no render backstop for them
-exists on this branch, by decision rather than omission.
+The payload refusal is not the only one the tier's copy presupposes. The
+spec's remaining `psi-c` shape refusals are held on the same footing: more than
+one linkage key and `linkage_strategy: single-pass` would falsify the tier's own
+copy -- the round-disclosure note speaks of one key's exactly-once values, and
+the result note denies any record-by-record pairing -- and `deduplicate` is
+refused twice over, by the count-only rule that outlives the flag flip and by
+`assertDeduplicateImplemented`, which refuses it under every algorithm while no
+run honors it. None of those three -- more than one linkage key, single-pass,
+and deduplicate -- has a render backstop, by decision rather than omission: the
+refusals reach them at parse and at accept, which is where a document that
+breaks one is stopped.
 
 That the CLI puts the whole tier in its twice-printed decision block, where it
 prints the algorithm and its caveat today, is the same judgment read from the

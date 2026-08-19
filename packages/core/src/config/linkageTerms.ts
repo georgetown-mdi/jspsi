@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AlgorithmSchema } from "../types.js";
+import { UsageError } from "../errors.js";
 import type { Algorithm } from "../types.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
@@ -1025,6 +1026,136 @@ const LinkageTermsBaseSchema = z.object({
   legalAgreement: LegalAgreementSchema.optional(),
 });
 
+// --- Count-only (psi-c) shape ------------------------------------------------
+
+/**
+ * Which of the count-only shape rules a `psi-c` terms document breaks. The
+ * terms-carried rules only: the fifth refusal the specification lists reads this
+ * party's own INPUT METADATA, which no linkage-terms document carries, and lives
+ * beside the disclosure predicate it asks
+ * ({@link countOnlyTransmitsColumn}, `config/metadata.ts`).
+ */
+export type CountOnlyShapeViolation =
+  "linkageKeys" | "linkageStrategy" | "deduplicate" | "payload";
+
+/**
+ * The refusal message for each count-only shape rule, keyed by the rule broken.
+ * One message per rule, read by every enforcement point -- the
+ * {@link LinkageTermsSchema} refines below (so every parse path refuses),
+ * {@link assertCountOnlyTermsShape} (the authoring, mint, and accept
+ * boundaries), and the surfaces' own gates -- so an operator meets the same
+ * account of what is wrong wherever the document is stopped.
+ *
+ * Each message names the rule broken and the two ways out: bring the document
+ * into the count-only shape, or ask for the identifier-revealing algorithm that
+ * admits it. Fixed literals only, never a value read off the document: a
+ * `psi-c` document can arrive on a partner's invitation, and the parse-error
+ * path is left unsanitized (see protocolSetup), which is the same reason the
+ * referential-integrity refines locate an offender by issue `path` rather than
+ * by echoing it.
+ *
+ * The rules and the reasoning behind each are docs/spec/PROTOCOL.md, PSI-C.
+ */
+export const COUNT_ONLY_SHAPE_REFUSALS: Readonly<
+  Record<CountOnlyShapeViolation | "transmittedColumns", string>
+> = {
+  linkageKeys:
+    'count-only ("psi-c") linkage terms must declare exactly one linkage ' +
+    "key: a count-only exchange is one PSI round over one key, and a " +
+    "multi-key count is not specified, so these terms are refused rather " +
+    "than narrowed to the first key. Declare a single linkage key, or set " +
+    'the algorithm to "psi" to match on several.',
+  linkageStrategy:
+    'count-only ("psi-c") linkage terms must set the linkage strategy to ' +
+    '"cascade": no count-only single-pass round is specified, so these ' +
+    "terms are refused rather than run under a strategy neither party " +
+    'agreed to. Set the linkage strategy to "cascade", or set the algorithm ' +
+    'to "psi".',
+  deduplicate:
+    'count-only ("psi-c") linkage terms must set deduplicate to false: a ' +
+    "count-only exchange reports the size of the intersection and hands " +
+    "neither party a record-by-record pairing, so there is no matching " +
+    "multiplicity for it to honor. Set deduplicate to false, or set the " +
+    'algorithm to "psi".',
+  payload:
+    'count-only ("psi-c") linkage terms must declare no payload columns in ' +
+    "either direction: a count-only exchange reveals the size of the " +
+    "intersection and nothing else, so it carries no data column whichever " +
+    "party the terms entitle to the count. Remove the payload send and " +
+    'receive columns, or set the algorithm to "psi".',
+  transmittedColumns:
+    'a count-only ("psi-c") exchange transmits no data columns, but this ' +
+    "input's metadata marks one or more columns to send to the partner. The " +
+    "algorithm carries no payload in either direction, so the exchange is " +
+    "refused rather than run over a disclosure it cannot make. Clear the " +
+    'payload marking on those columns, or set the algorithm to "psi".',
+};
+
+/**
+ * Which count-only shape rule a terms document breaks, or `undefined` when it
+ * breaks none -- including for every `psi` document, which these rules leave
+ * untouched.
+ *
+ * The single reading of the specified shape (docs/spec/PROTOCOL.md, PSI-C: one
+ * key, one round, cascade only, no deduplication, no payload), so the schema,
+ * the asserts, and the two front ends' own gates cannot come to different
+ * verdicts about the same document. Order is the specification's listing order;
+ * a document breaking several rules reports the first, and fixing it surfaces
+ * the next.
+ *
+ * A document already in the specified shape is NOT a violation here: it is
+ * refused by the algorithm gate (`assertAlgorithmImplemented`) until a
+ * count-only run path exists, which is a statement about what is implemented
+ * rather than about the document.
+ */
+export function countOnlyShapeViolation(
+  terms: LinkageTerms,
+): CountOnlyShapeViolation | undefined {
+  if (terms.algorithm !== "psi-c") return undefined;
+  if (terms.linkageKeys.length > 1) return "linkageKeys";
+  if (terms.linkageStrategy !== "cascade") return "linkageStrategy";
+  if (terms.deduplicate) return "deduplicate";
+  if (
+    (terms.payload?.send?.length ?? 0) > 0 ||
+    (terms.payload?.receive?.length ?? 0) > 0
+  )
+    return "payload";
+  return undefined;
+}
+
+/**
+ * Refuse a `psi-c` terms document outside the shape the specification admits,
+ * fail-closed: an over-broad count-only document is never narrowed to one key,
+ * never promoted off `cascade`, never partially derived, and never downgraded to
+ * a `psi` run -- narrowing would deliver a disclosure the operator did not agree
+ * to, and downgrading would reveal the matched identifiers under terms that
+ * asked for a count.
+ *
+ * Applied where a document is authored or minted into an invitation, and again
+ * where a received one is accepted ({@link deriveAcceptedLinkageTerms}); every
+ * PARSE path inherits the same rules from {@link LinkageTermsSchema}'s refines,
+ * so a document that reached a caller through a schema already met them and this
+ * is the boundary for one built or mutated without a parse.
+ *
+ * `deduplicate: true` is refused for EVERY algorithm today by
+ * `assertDeduplicateImplemented` (at the CLI mint boundary and at core's
+ * exchange boundary), because no run honors it. That refusal is to be replaced
+ * by the deduplicating run path when one lands; this rule is the count-only
+ * algorithm's own constraint, which outlives it and reaches the parse and accept
+ * boundaries the implemented-setting gate does not.
+ *
+ * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
+ * same reason as `assertAlgorithmImplemented`: on the accept side these values
+ * are adopted verbatim from the partner's invitation, so the fault is not
+ * unconditionally this operator's own content. The messages carry only fixed
+ * literals.
+ */
+export function assertCountOnlyTermsShape(terms: LinkageTerms): void {
+  const violation = countOnlyShapeViolation(terms);
+  if (violation === undefined) return;
+  throw new UsageError(COUNT_ONLY_SHAPE_REFUSALS[violation]);
+}
+
 export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
   LinkageTermsBaseSchema.refine(
     (a) => !a.deduplicate || a.output.expectsOutput,
@@ -1149,7 +1280,32 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
           "supported); it is rejected before any pattern executes",
         path: ["linkageKeys"],
       },
-    );
+    )
+    // The count-only shape, one refine per rule so a document breaking one is
+    // located by its own issue path and answered by its own message. The rules
+    // are docs/spec/PROTOCOL.md, PSI-C; placed here so EVERY parse path refuses
+    // -- parseLinkageTerms, the invitation-token decode (a partner's document),
+    // and ExchangeSpecSchema -- which puts the refusal on a received document as
+    // it is read, ahead of the prepare step the specification names. `psi` terms
+    // are untouched: each rule reads the algorithm first. The verdict comes from
+    // the one shared reading (countOnlyShapeViolation) rather than a second copy
+    // of the rule, so schema and asserts cannot diverge.
+    .refine((a) => countOnlyShapeViolation(a) !== "linkageKeys", {
+      message: COUNT_ONLY_SHAPE_REFUSALS.linkageKeys,
+      path: ["linkageKeys"],
+    })
+    .refine((a) => countOnlyShapeViolation(a) !== "linkageStrategy", {
+      message: COUNT_ONLY_SHAPE_REFUSALS.linkageStrategy,
+      path: ["linkageStrategy"],
+    })
+    .refine((a) => countOnlyShapeViolation(a) !== "deduplicate", {
+      message: COUNT_ONLY_SHAPE_REFUSALS.deduplicate,
+      path: ["deduplicate"],
+    })
+    .refine((a) => countOnlyShapeViolation(a) !== "payload", {
+      message: COUNT_ONLY_SHAPE_REFUSALS.payload,
+      path: ["payload"],
+    });
 
 // --- Parse -------------------------------------------------------------------
 
@@ -1264,6 +1420,15 @@ export function safeParseLinkageTerms(raw: unknown) {
  * fixed-message output-coherence refines, since the inviter's terms were already
  * validated at decode and only `identity`/`output` are changed here).
  *
+ * It also refuses a `psi-c` document outside the count-only shape, before the
+ * mirror is built rather than after ({@link assertCountOnlyTermsShape}): the
+ * message then names the rule the received document breaks, where the generic
+ * re-check below would report the mirror. Reading the INVITER's terms rather
+ * than the derived ones is what makes the account the partner's document: the
+ * mirror moves payload between the two directions, and the rule refuses both.
+ *
+ * @throws {UsageError} when the inviter's terms are `psi-c` outside the
+ *   count-only shape.
  * @throws {Error} when the inviter's terms cannot be coherently accepted for the
  *   mirrored output direction.
  */
@@ -1271,6 +1436,7 @@ export function deriveAcceptedLinkageTerms(
   inviterTerms: LinkageTerms,
   acceptorIdentity: string,
 ): LinkageTerms {
+  assertCountOnlyTermsShape(inviterTerms);
   const derived: LinkageTerms = {
     ...inviterTerms,
     identity: acceptorIdentity,

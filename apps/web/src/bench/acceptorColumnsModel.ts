@@ -1,5 +1,6 @@
 import {
   assessLinkageSatisfiability,
+  countOnlyTransmitsColumn,
   inferMetadata,
   overlongDisclosedColumnPositions,
   sanitizeForDisplay,
@@ -292,8 +293,11 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  * The launch gate, expressed as the sentence the step shows beside the disabled
  * button and points its `aria-describedby` at -- `undefined` exactly when nothing
  * blocks, which is what the step disables on. Ported from the legacy editor's
- * predicate: no key can match (`satisfiableKeyCount === 0`), OR the marked columns
- * disagree with the payload set the invitation declares for this party
+ * predicate: no key can match (`satisfiableKeyCount === 0`), OR a count-only
+ * invitation meets a marked column ({@link countOnlyTransmitsColumn}) -- an
+ * arrangement the algorithm forecloses whatever the declaration says -- OR the
+ * marked columns disagree with the payload set the invitation declares for this
+ * party
  * ({@link acceptorPayloadDeclarationConflict}) -- a pair the exchange refuses to run
  * on -- OR a marked column's name is too long to carry
  * ({@link acceptorOverlongDisclosedColumns}) -- a name the partner's parse refuses
@@ -310,10 +314,11 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  *
  * The chain follows the step's own reading order, so the sentence names the topmost
  * unresolved surface and an operator working down the screen is sent to the first
- * thing they meet: the verdict, then the declaration conflict, then the over-long
- * name notice, then the grid's identifier rule, then the cleaning steps, then the
- * connection and file-handling cards below them. Each names what to fix on this
- * screen, in the words of the notice it points at.
+ * thing they meet: the verdict, then the count-only refusal, then the
+ * declaration conflict, then the over-long name notice, then the grid's
+ * identifier rule, then the cleaning steps, then the connection and
+ * file-handling cards below them. Each names what to fix on this screen, in the
+ * words of the notice it points at.
  */
 export function acceptorLaunchBlockedReason(
   verdict: AcceptorVerdictViewModel,
@@ -323,6 +328,16 @@ export function acceptorLaunchBlockedReason(
 ): string | undefined {
   if (verdict.satisfiableKeyCount === 0)
     return "Set your columns to the missing field types above before you can start.";
+  // A count-only invitation answers the payload question outright, ahead of the
+  // declaration conflict below: the algorithm carries no data column in either
+  // direction whichever party the terms entitle to the count, so a marked column
+  // is refused rather than reconciled against a declaration -- and an invitation
+  // that declares no `payload.receive` at all leaves that comparison with nothing
+  // to say. Core's own refusal at accept holds the same fact
+  // (`assertCountOnlyTransmitsNoColumn`); this is the sentence that lets the
+  // operator clear it here.
+  if (countOnlyTransmitsColumn(invitationTerms.algorithm, editorState.metadata))
+    return "Unmark the columns you send above before you can start: a count-only exchange sends none.";
   const declarationConflict = acceptorPayloadDeclarationConflict(
     invitationTerms,
     editorState.metadata,

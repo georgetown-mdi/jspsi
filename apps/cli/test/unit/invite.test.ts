@@ -951,6 +951,20 @@ function withConfig(
   return { dir, configPath, keyPath: path.join(dir, ".psilink.key") };
 }
 
+// A count-only config in exactly the shape the specification admits: the default
+// terms narrowed to one linkage key, which is the only one of the five count-only
+// rules the defaults break (they are already cascade, non-deduplicating, and carry
+// no payload). The declared linkage fields are left alone -- a declared field no
+// key references is admitted.
+function countOnlyTerms(): LinkageTerms {
+  const terms = defaultTerms();
+  return {
+    ...terms,
+    algorithm: "psi-c",
+    linkageKeys: terms.linkageKeys.slice(0, 1),
+  };
+}
+
 function writeCsv(dir: string, header: string): string {
   const p = path.join(dir, "input.csv");
   fs.writeFileSync(p, `${header}\nAlice,Smith,1990-01-02,123456789\n`);
@@ -1187,7 +1201,11 @@ test("validateInvite: offline config-source refuses a psi-c algorithm before min
   // config's own `psilink exchange` would then reject (exit 64) -- the same
   // fail-fast, mint-mirrors-run posture as the payload and standardization guards
   // above. No input is passed, so it exercises the check in isolation.
-  const terms: LinkageTerms = { ...defaultTerms(), algorithm: "psi-c" };
+  //
+  // The terms are in the count-only SHAPE (one key, cascade, no deduplication, no
+  // payload), so the count-only shape rules pass them through and this exercises
+  // the algorithm gate itself rather than one of those.
+  const terms: LinkageTerms = countOnlyTerms();
   const { dir, configPath, keyPath } = withConfig(terms);
   try {
     const invite = () =>
@@ -1199,6 +1217,170 @@ test("validateInvite: offline config-source refuses a psi-c algorithm before min
       });
     await expect(invite()).rejects.toBeInstanceOf(UsageError);
     await expect(invite()).rejects.toThrow(/psi-c/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The count-only shape refusals at the CLI's authoring boundary. The four
+// terms-carried rules are refused as the config's linkage terms are read (the
+// shared schema), which is before the token is minted and is where the operator
+// meets them; the fifth reads this party's own metadata, which no linkage-terms
+// document carries, so it is refused at the mint boundary itself.
+test.each([
+  {
+    rule: "more than one linkage key",
+    edit: (terms: LinkageTerms): LinkageTerms => ({
+      ...terms,
+      linkageKeys: defaultTerms().linkageKeys.slice(0, 2),
+    }),
+    expected: /exactly one linkage key/,
+  },
+  {
+    rule: "linkage_strategy: single-pass",
+    edit: (terms: LinkageTerms): LinkageTerms => ({
+      ...terms,
+      linkageStrategy: "single-pass",
+    }),
+    expected: /linkage strategy to "cascade"/,
+  },
+  {
+    rule: "deduplicate: true",
+    edit: (terms: LinkageTerms): LinkageTerms => ({
+      ...terms,
+      deduplicate: true,
+    }),
+    expected: /set deduplicate to false/,
+  },
+  {
+    rule: "a payload column",
+    edit: (terms: LinkageTerms): LinkageTerms => ({
+      ...terms,
+      payload: { send: [{ name: "notes" }] },
+    }),
+    expected: /no payload columns in either direction/,
+  },
+])(
+  "validateInvite: offline config-source refuses a count-only config declaring $rule",
+  async ({ edit, expected }) => {
+    const { dir, configPath, keyPath } = withConfig(edit(countOnlyTerms()));
+    try {
+      const invite = () =>
+        validateInvite({
+          resolved: { mode: "offline" },
+          options: testOptions({ configFile: configPath, keyFile: keyPath }),
+          acceptTimeout: 900,
+          log: silentLog,
+        });
+      await expect(invite()).rejects.toBeInstanceOf(UsageError);
+      // The rule broken, not the generic "psi-c is not implemented yet": the
+      // operator is told what to change about the document in front of them.
+      await expect(invite()).rejects.toThrow(expected);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test("validateInvite: offline config-source refuses a count-only config whose metadata sends a column", async () => {
+  // The one count-only rule the terms cannot carry: this party's own metadata
+  // marks `notes` for transmission, which a count-only exchange makes no room
+  // for. Refused before the token is minted, and ahead of the algorithm gate, so
+  // the operator is told which marking to clear rather than only that the
+  // algorithm is not runnable yet.
+  const metadata = inferMetadata([
+    "first_name",
+    "last_name",
+    "dob",
+    "ssn",
+    "notes",
+  ]);
+  expect(disclosedColumnNames(metadata)).toEqual(["notes"]);
+  const { dir, configPath, keyPath } = withConfig(
+    countOnlyTerms(),
+    undefined,
+    metadata,
+  );
+  try {
+    const invite = () =>
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      });
+    await expect(invite()).rejects.toBeInstanceOf(UsageError);
+    await expect(invite()).rejects.toThrow(/transmits no data columns/);
+    // Named by the rule, not by the column: the same refusal is composed on the
+    // accept side beside a partner's document.
+    await expect(invite()).rejects.not.toThrow(/notes/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: an explicit empty payload pair still names the count-only rule, not the generic disclosure one", async () => {
+  // The shape rules permit an explicit `payload: {send: [], receive: []}` (both
+  // empty), so this document passes the terms-shape refine. But
+  // assertPayloadSendDisclosed's own empty-send fast path requires
+  // output.shareWithPartner: false, and these terms carry shareWithPartner:
+  // true (the default), so with metadata marking a column disclosed it would
+  // fall through to the generic "payload.send must name exactly the columns..."
+  // message unless the count-only-specific check runs first.
+  const metadata = inferMetadata([
+    "first_name",
+    "last_name",
+    "dob",
+    "ssn",
+    "notes",
+  ]);
+  expect(disclosedColumnNames(metadata)).toEqual(["notes"]);
+  const terms: LinkageTerms = {
+    ...countOnlyTerms(),
+    payload: { send: [], receive: [] },
+  };
+  const { dir, configPath, keyPath } = withConfig(terms, undefined, metadata);
+  try {
+    const invite = () =>
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      });
+    await expect(invite()).rejects.toBeInstanceOf(UsageError);
+    await expect(invite()).rejects.toThrow(/transmits no data columns/);
+    await expect(invite()).rejects.not.toThrow(
+      /payload\.send must name exactly/,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a psi config with the same metadata and shape still mints", async () => {
+  // The narrowing claim at this boundary: every refusal above reads the
+  // algorithm first, so the identical document under `psi` is untouched.
+  const metadata = inferMetadata([
+    "first_name",
+    "last_name",
+    "dob",
+    "ssn",
+    "notes",
+  ]);
+  const { dir, configPath, keyPath } = withConfig(
+    { ...defaultTerms(), deduplicate: false },
+    undefined,
+    metadata,
+  );
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -4,6 +4,7 @@ import { userInfo } from "node:os";
 import type { Argv, Arguments } from "yargs";
 
 import {
+  assertCountOnlyTransmitsNoColumn,
   describeDecodeError,
   deriveAcceptedLinkageTerms,
   deriveOutboundPayloadConsent,
@@ -357,6 +358,17 @@ export async function validateAccept(params: {
       identity: myIdentity,
       rows,
     });
+    // Fail closed on a count-only invitation this party's own columns would
+    // transmit a column under: the algorithm carries no payload in either
+    // direction, so the marked columns are neither dropped to bring the run into
+    // the count-only shape nor carried into an outbound-consent record. This is
+    // the one count-only shape rule no linkage-terms document carries -- the
+    // other four are refused as the invitation is decoded, and again by
+    // deriveAcceptedLinkageTerms above. Ahead of the prepare below, whose
+    // algorithm gate would report only that no count-only run path exists, and
+    // ahead of the consent surface, which states the same fact with no account of
+    // what to change.
+    assertCountOnlyTransmitsNoColumn(myTerms.algorithm, dataSpec.metadata);
     warnColumnsTheInvitationWillNotAccept({
       metadata: dataSpec.metadata,
       columnNames: rows.columns,
@@ -421,6 +433,10 @@ export async function validateAccept(params: {
     identity: myIdentity,
     rows,
   });
+  // The offline half of the count-only metadata refusal above. A no-op when this
+  // acceptance was given no input file, which leaves this party's transmitted set
+  // unresolved rather than empty.
+  assertCountOnlyTransmitsNoColumn(myTerms.algorithm, dataSpec.metadata);
   warnColumnsTheInvitationWillNotAccept({
     metadata: dataSpec.metadata,
     columnNames: rows?.columns,

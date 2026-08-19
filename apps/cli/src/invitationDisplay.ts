@@ -322,11 +322,11 @@ export function logDecisionFacts(
   // terms document or input metadata declaring one is refused where the terms are
   // authored, at the local prepare step, and at the agreed-terms run boundary
   // (docs/spec/PROTOCOL.md, PSI-C). This set is not the terms -- it is this party's
-  // OWN resolved metadata -- so the throw is the render-side backstop for the
-  // accept-path refusals the count-only run path must land, unreachable once they
-  // refuse ahead of it. Until then, printing "(none)" over a column would take the
-  // operator's consent to a disclosure that happens. The message states the fact and
-  // names no column.
+  // OWN resolved metadata -- and the accept path refuses that arrangement ahead of
+  // this prompt, naming what to clear (assertCountOnlyTransmitsNoColumn, applied in
+  // validateAccept); this throw is the render-side backstop behind it. Printing
+  // "(none)" over a column would take the operator's consent to a disclosure that
+  // happens. The message states the fact and names no column.
   if (countOnlyApplied && (ownOutboundSend?.length ?? 0) > 0)
     throw new Error(
       "count-only exchange resolved a non-empty outbound column set: a psi-c " +
@@ -338,8 +338,9 @@ export function logDecisionFacts(
   // refuses, and the tier's no-payload sentence printed above a block listing the
   // columns the inviting party requests from this one would state a guarantee the
   // same prompt contradicts. The invitation is partner-controlled, so this side
-  // cannot assume the authoring refusal ran. Both directions, since the sentence
-  // covers both.
+  // cannot assume the authoring refusal ran -- what it can assume is its own
+  // decode, which applies the same rule (LinkageTermsSchema). Both directions,
+  // since the sentence covers both.
   if (
     countOnlyApplied &&
     ((summary.payload?.send.length ?? 0) > 0 ||

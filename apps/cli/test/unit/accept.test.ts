@@ -654,6 +654,89 @@ function refusedDisclosureWarning(warnings: string[]): string {
   return refused[0];
 }
 
+// --- the count-only shape, at the accept boundary ----------------------------
+
+/** An invitation in exactly the count-only shape the specification admits: the
+ * default terms narrowed to one linkage key, which is the only one of the five
+ * rules the defaults break. */
+function countOnlyToken(): InvitationToken {
+  const base = sampleToken(FUTURE());
+  return {
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      algorithm: "psi-c",
+      linkageKeys: base.linkageTerms.linkageKeys.slice(0, 1),
+    },
+  };
+}
+
+test("validateAccept: refuses a count-only invitation whose own columns would send one", async () => {
+  // The count-only rule this party's own metadata carries: `diagnosis` is an
+  // unrecognized column, which inferMetadata marks for transmission, and a
+  // count-only exchange moves no data column in either direction. Refused at the
+  // accept boundary, naming what to clear -- not left to the algorithm gate,
+  // which says only that no count-only run path exists yet.
+  const { error, ready } = await acceptWarnings({
+    token: countOnlyToken(),
+    columns: [...LINKAGE_COLUMNS, "diagnosis"],
+    loggerName: "accept-count-only-transmits",
+  });
+  expect(ready).toBeUndefined();
+  expect(error).toBeInstanceOf(UsageError);
+  expect((error as Error).message).toMatch(/transmits no data columns/);
+  // Named by the rule rather than by the column, matching every other refusal
+  // composed beside a partner's document.
+  expect((error as Error).message).not.toContain("diagnosis");
+});
+
+test("validateAccept: online refuses the same arrangement, writing nothing", async () => {
+  const options = testOptions();
+  const { error } = await acceptWarnings({
+    token: countOnlyToken(),
+    columns: [...LINKAGE_COLUMNS, "diagnosis"],
+    loggerName: "accept-count-only-transmits-online",
+    mode: "online",
+    options,
+  });
+  expect(error).toBeInstanceOf(UsageError);
+  expect((error as Error).message).toMatch(/transmits no data columns/);
+  expect(fs.existsSync(options.configFile)).toBe(false);
+  expect(fs.existsSync(options.keyFile)).toBe(false);
+});
+
+test("validateAccept: a count-only invitation over a file that sends nothing is not refused here", async () => {
+  // The rule reads what this party's marks would transmit, not the algorithm
+  // alone: a file of recognized linkage columns discloses nothing, so acceptance
+  // completes and the count-only algorithm meets only the run-side gate.
+  const { error, ready } = await acceptWarnings({
+    token: countOnlyToken(),
+    columns: LINKAGE_COLUMNS,
+    loggerName: "accept-count-only-sends-nothing",
+  });
+  expect(error).toBeUndefined();
+  expect((ready as { mode: string }).mode).toBe("offline");
+});
+
+test("validateAccept: a crafted count-only invitation outside the shape is refused at the decode", async () => {
+  // The four terms-carried rules, on the partner's document: minting one is
+  // refused by the same schema, so it reaches this party only as a crafted token
+  // -- and the decode is where the acceptance meets it, before the prompt.
+  const base = countOnlyToken();
+  const crafted = await encodeRaw({
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      linkageStrategy: "single-pass",
+    },
+  });
+  const err = await decodeAndValidateInvitation(crafted).catch(
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as Error).message).toMatch(/linkage strategy to "cascade"/);
+});
+
 test("validateAccept: warns when the input discloses columns the invitation accepts none of", async () => {
   // An explicit empty receive is the inviter declaring it takes no payload column,
   // while inferMetadata defaults every unrecognized column to is_payload: true --
