@@ -464,6 +464,74 @@ describe("openPeerMessageConnection", () => {
     expect(onCloseOutcome.mock.calls).toEqual([["peer-gone"]]);
   });
 
+  test("a clean close ends on the run's cancellation, not on its ceiling", async () => {
+    // The peer holds this wait by keeping ICE alive without reading the close
+    // sentinel, so the ceiling is the peer's duration to choose: a cancel has to
+    // cut the wait itself. The ceiling here is the production one, so the close
+    // can only resolve through the abort.
+    const { conn } = makeConn();
+    const controller = new AbortController();
+    const onCloseOutcome = vi.fn();
+    const mc = await openPeerMessageConnection(conn, {
+      closeDrainTimeoutMs: 5 * 60 * 1000,
+      onCloseOutcome,
+      signal: controller.signal,
+    });
+
+    let closed = false;
+    void mc.close().then(() => (closed = true));
+    await drainTaskQueue();
+    expect(closed).toBe(false);
+
+    controller.abort();
+    await drainTaskQueue();
+
+    expect(closed).toBe(true);
+    // Not "peer-closed": nothing confirmed the partner took the final frame, and
+    // the caller's report of the exchange rests on that difference.
+    expect(onCloseOutcome.mock.calls).toEqual([["run-aborted"]]);
+  });
+
+  test("a close on an already-cancelled run still flushes and reports the cancel", async () => {
+    // The teardown a cancel drives reaches the close with the signal already
+    // aborted. It starts no wait, but it is still the flushing close -- PeerJS's
+    // flush queues the sentinel and returns, so a frame the peer is willing to
+    // read can still get there.
+    const { fake, conn } = makeConn();
+    const controller = new AbortController();
+    const onCloseOutcome = vi.fn();
+    const mc = await openPeerMessageConnection(conn, {
+      closeDrainTimeoutMs: 5 * 60 * 1000,
+      onCloseOutcome,
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(mc.close()).resolves.toBeUndefined();
+
+    expect(fake.close).toHaveBeenCalledWith({ flush: true });
+    expect(onCloseOutcome.mock.calls).toEqual([["run-aborted"]]);
+  });
+
+  test("a live run's close is unaffected by the signal it was given", async () => {
+    // The signal only cuts the wait; while the run is live the peer's close is
+    // still what ends it, and still the exit that means delivered.
+    const { fake, conn } = makeConn();
+    const controller = new AbortController();
+    const onCloseOutcome = vi.fn();
+    const mc = await openPeerMessageConnection(conn, {
+      onCloseOutcome,
+      signal: controller.signal,
+    });
+
+    const closing = mc.close();
+    await drainTaskQueue();
+    fake.dataChannel.closeFromPeer();
+    await closing;
+
+    expect(onCloseOutcome.mock.calls).toEqual([["peer-closed"]]);
+  });
+
   test("a flushing close over a channel already out of open reports that exit", async () => {
     // PeerJS's `open` flag is its own bookkeeping rather than the channel's
     // state, so the flush branch can run over a channel that can carry neither

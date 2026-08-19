@@ -47,8 +47,9 @@ export const FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING =
 
 /**
  * The operator-facing notice for the same run when the close ended because the
- * link went instead: the peer connection died under it, or the channel was
- * already out of `open` when the wait began.
+ * link went instead: the peer connection died under it, the channel was already
+ * out of `open` when the wait began, or the run was cancelled while the wait
+ * stood, which takes the link down from this side.
  *
  * A separate sentence rather than a reuse of the one above, because the two say
  * different things about the partner's copy. A wait that ran out means the
@@ -56,7 +57,9 @@ export const FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING =
  * have carried the message and died after the partner read it, or lost whatever
  * was still buffered -- and nothing on this side can tell those apart. The
  * wording therefore claims neither, and keeps the same closing instruction,
- * since the check that resolves it is the same one.
+ * since the check that resolves it is the same one. That is also why a
+ * cancellation takes this sentence rather than the one above: the wait did not
+ * run out, it was cut, and what the partner got is equally unknowable.
  */
 export const FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING =
   "the connection closed before your partner could confirm taking the final " +
@@ -69,7 +72,11 @@ export const FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING =
  * peer can end ({@link PeerCloseOutcome}); `undefined` is the deliberate
  * silence. The peer's own close is the delivery signal, so a run that got it has
  * nothing to report; every other exit ends with no such signal, so the partner's
- * copy is in doubt and the operator hears which kind of doubt it is.
+ * copy is in doubt and the operator hears which kind of doubt it is. This map
+ * says what an exit MEANS; which notices reach an operator is the emit gate's
+ * decision in {@link runExchangeLifecycle} (it withholds every notice from a
+ * failed or cancelled run), so a cancelled run's entry here is not a claim that
+ * anyone reads it.
  *
  * A total map rather than a chain of comparisons: a new outcome fails to compile
  * here until this layer has decided what a run says about it, instead of
@@ -83,6 +90,7 @@ export const CLOSE_OUTCOME_WARNINGS: Record<
   ceiling: FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
   "peer-gone": FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
   "channel-not-open": FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
+  "run-aborted": FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
 };
 
 /** A single rendered stage in the progress UI (a superset of core's
@@ -456,6 +464,10 @@ export async function runExchangeLifecycle<
         const warning = CLOSE_OUTCOME_WARNINGS[outcome];
         if (warning !== undefined) emitWarning(warning);
       },
+      // The run's signal reaches the transport only here: it is what lets a
+      // cancel cut the clean close's wait for the peer, whose duration is
+      // otherwise the peer's to choose up to the ceiling.
+      signal,
     });
     // Authenticate the peer before any PSI frame is sent: the P-256 key exchange
     // fails closed on a wrong secret or tampered/malformed frame, so an

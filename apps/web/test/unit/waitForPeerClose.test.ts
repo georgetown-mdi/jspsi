@@ -184,6 +184,38 @@ describe("waitForPeerClose", () => {
     await expect(waitForPeerClose(conn, 5)).resolves.toBe("ceiling");
   });
 
+  test("ends on the run's cancellation instead of standing to the ceiling", async () => {
+    // The peer chooses how long the ceiling takes to arrive -- it holds the wait
+    // by keeping ICE alive without reading the sentinel -- so an operator who
+    // cancels must not have to spend it. The ceiling here is the production one:
+    // the wait can only settle by the abort.
+    const { conn } = makeConn();
+    const controller = new AbortController();
+
+    const waiting = waitForPeerClose(
+      conn,
+      DEFAULT_PEER_CLOSE_TIMEOUT_MS,
+      controller.signal,
+    );
+    expect(await isSettled(waiting)).toBe(false);
+
+    controller.abort();
+
+    await expect(waiting).resolves.toBe("run-aborted");
+  });
+
+  test("does not wait at all when the run has already been cancelled", async () => {
+    // The teardown a cancel drives arrives here with the signal already aborted,
+    // so there is nothing to wait for: the operator asked for the teardown.
+    const { conn } = makeConn();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      waitForPeerClose(conn, DEFAULT_PEER_CLOSE_TIMEOUT_MS, controller.signal),
+    ).resolves.toBe("run-aborted");
+  });
+
   test("removes the handlers it added, by identity, on any settle path", async () => {
     const { conn, channel, peerConnection } = makeConn();
     const channelAdd = vi.spyOn(channel as FakeDataChannel, "addEventListener");
@@ -199,8 +231,11 @@ describe("waitForPeerClose", () => {
       peerConnection as FakePeerConnection,
       "removeEventListener",
     );
+    const controller = new AbortController();
+    const signalAdd = vi.spyOn(controller.signal, "addEventListener");
+    const signalRemove = vi.spyOn(controller.signal, "removeEventListener");
 
-    await waitForPeerClose(conn, 5);
+    await waitForPeerClose(conn, 5, controller.signal);
 
     expect(channelRemove.mock.calls.map(([event]) => event)).toEqual([
       "close",
@@ -216,6 +251,11 @@ describe("waitForPeerClose", () => {
       );
     expect(handlerFor(peerRemove.mock.calls, "connectionstatechange")).toBe(
       handlerFor(peerAdd.mock.calls, "connectionstatechange"),
+    );
+    // The run's signal outlives this wait -- one signal covers the whole run --
+    // so an abort listener left on it is a leak that grows with every close.
+    expect(handlerFor(signalRemove.mock.calls, "abort")).toBe(
+      handlerFor(signalAdd.mock.calls, "abort"),
     );
     // A second peer event after the settle must not re-enter the resolved
     // promise's teardown.

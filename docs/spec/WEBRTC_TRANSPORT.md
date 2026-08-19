@@ -188,6 +188,13 @@ ceiling. For the web that is the peer connection reaching `failed` or `closed`;
 a transient `disconnected` is not terminal, because the frame is still in flight
 while ICE recovers.
 
+The web wait also ends when the run itself is cancelled. Up to the ceiling the
+wait's length is the PEER's to choose -- it holds the wait simply by keeping ICE
+alive and never reading the sentinel -- so an operator who cancels does not spend
+it. Nor does the drain gate what the run already has: the web app reports its
+result and its downloads first and drains afterwards, so a peer that never reads
+the sentinel delays neither.
+
 Exactly one exit of the web wait carries a delivery signal: the peer's own close.
 Every other exit leaves the partner's copy in doubt on a run whose result this
 side has already reported, so the web app raises a non-fatal warning on each of
@@ -202,6 +209,7 @@ The wording follows the exit, because the exits do not mean the same thing:
 | The peer closed the channel | Nothing -- that close is the delivery signal |
 | The ceiling ran out | The partner never confirmed taking the final message within the wait, so their exchange may have ended without it |
 | No live peer is left, or the channel was already out of `open` | The connection closed before the partner could confirm, so they may or may not have received it |
+| The run was cancelled while the wait stood | The same wording as a connection that closed: the cancel cuts the wait rather than letting it run out, and what the partner got is as unknowable either way. A cancelled run's notice is withheld anyway (below), so this is what the exit means rather than what an operator reads |
 
 The notice is best-effort in two ways. It reaches the operator only when the
 drain ends while the run is still on screen, so an operator who leaves as the
@@ -214,7 +222,9 @@ peer that closes without draining its inbound queue is indistinguishable from on
 that read everything, and a peer connection torn down by the page rather than by
 reading the sentinel resets its stream gracefully -- measured in Chromium, and
 pinned in `apps/web/test/browser/webrtcCloseDelivery.test.ts` -- so that teardown
-arrives here as the same close.
+arrives here as the same close. That is also why the cancellation is an exit of
+its own rather than whatever the teardown behind it does to the channel: a cancel
+folded into the peer's close would report delivery for a wait the operator cut.
 
 What no close can cover is a sender whose stack goes away before its bytes do:
 tearing the peer connection down as the close returns delivered nothing at all
