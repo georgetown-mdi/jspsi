@@ -88,6 +88,14 @@ jobs:
       # a web-unit regression gives a clear failure signal of its own.
       - name: Web unit tests
         run: npm run test:unit -w apps/web
+      # apt applies no network timeout of its own, so a mirror connection that
+      # goes quiet hangs the --with-deps install below with nothing to time it
+      # out.
+      - name: Bound apt network stalls
+        run: |
+          echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99-ci-retry
+          echo 'Acquire::http::Timeout "15";' | sudo tee -a /etc/apt/apt.conf.d/99-ci-retry
+          echo 'Acquire::https::Timeout "15";' | sudo tee -a /etc/apt/apt.conf.d/99-ci-retry
       # The browser project (below) drives real Chromium; the stock ubuntu-latest
       # runner ships none, so provision it and the apt libraries it links against
       # here, before that project runs. --with-deps installs those apt libraries;
@@ -95,7 +103,12 @@ jobs:
       # the browser archive, microsoft/playwright#40724) -- the lockfile pins
       # >= 1.61, so do not downgrade. (The dev container provisions Chromium
       # separately and is maintained independently.)
+      #
+      # A mirror that trickles rather than falls silent keeps the timeouts set
+      # above from ever firing, so bound this step rather than letting it eat
+      # the whole job budget.
       - name: Install Playwright Chromium
+        timeout-minutes: 10
         run: npx playwright install --with-deps chromium
       # Integration and browser tests both stand up the web dev server through a
       # shared, self-managing vitest globalSetup (it spawns the server, waits for
