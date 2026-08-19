@@ -104,6 +104,9 @@ async function sendThenClose(options: {
    * the close begins: a receiver still on the other end of a working channel is
    * the default. */
   breakLink?: (pair: RendezvousPair) => void;
+  /** Breaks the link in the tick AFTER the sender's close has begun, so the
+   * break lands on a drain already standing rather than before one starts. */
+  breakLinkDuringDrain?: (pair: RendezvousPair) => void;
 }): Promise<CloseTiming> {
   const pair = await connectRendezvousPair(generateSharedSecret(), addressInfo);
   const { inviterPeer, acceptorPeer, inviterConn, acceptorConn } = pair;
@@ -127,7 +130,13 @@ async function sendThenClose(options: {
     // The production teardown's order (exchangeLifecycle.ts): the flushing
     // close, then the broker id is freed. `disconnect` deliberately leaves the
     // data channel standing.
-    await senderMc.close();
+    const closing = senderMc.close();
+    // A zero delay is enough to land inside the drain: the final frame is sized
+    // so its delivery takes hundreds of milliseconds (FINAL_FRAME_BYTES), which
+    // is the whole window the wait exists to cover.
+    if (options.breakLinkDuringDrain)
+      setTimeout(() => options.breakLinkDuringDrain?.(pair), 0);
+    await closing;
     const closeResolvedAt = performance.now() - origin;
     acceptorPeer.disconnect();
 
@@ -212,6 +221,29 @@ test("a link that dies before the peer confirms tells the operator so", async (c
     breakLink: ({ acceptorConn }) => acceptorConn.peerConnection.close(),
   });
 
+  expect(outcomes).toEqual(["peer-gone"]);
+  expect(CLOSE_OUTCOME_WARNINGS[outcomes[0]]).toBe(
+    FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
+  );
+}, 120_000);
+
+test("a link torn down under a standing drain is not reported as delivered", async (ctx) => {
+  if (!(await canReachServer(hostString)))
+    return ctx.skip(serverUnreachableNote);
+  // The same teardown as the test above, but on a drain already under way --
+  // the window the wait exists to cover. It closes this side's channel, so the
+  // wait sees the event that normally IS the delivery signal, on an exchange
+  // that delivered nothing: the partner is left with the small frame and none
+  // of the final one. Reading the link at that event is what separates the two,
+  // so this is the case that fails if a stack change (or a rewrite of the
+  // handler) puts the reading back after the close has completed.
+  const { received, outcomes } = await sendThenClose({
+    finalFrameSize: FINAL_FRAME_BYTES,
+    breakLinkDuringDrain: ({ acceptorConn }) =>
+      acceptorConn.peerConnection.close(),
+  });
+
+  expect(received.length).toBe(1);
   expect(outcomes).toEqual(["peer-gone"]);
   expect(CLOSE_OUTCOME_WARNINGS[outcomes[0]]).toBe(
     FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,

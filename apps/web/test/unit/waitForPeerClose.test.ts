@@ -27,6 +27,15 @@ class FakePeerConnection extends EventTarget {
     this.connectionState = state;
     this.dispatchEvent(new Event("connectionstatechange"));
   }
+  /** Move to `state` without the `connectionstatechange` that normally
+   * announces it. `RTCPeerConnection.close()` -- this side tearing its own link
+   * down -- fires none at all (measured in Chromium; the exit it leaves is
+   * driven end to end in apps/web/test/browser/webrtcCloseDelivery.test.ts), and
+   * an ICE failure's event can still be queued behind the channel's own. Either
+   * way the wait has not heard about the link when the channel closes. */
+  enterUnannounced(state: RTCPeerConnectionState) {
+    this.connectionState = state;
+  }
 }
 
 function makeConn(overrides?: {
@@ -97,16 +106,53 @@ describe("waitForPeerClose", () => {
   });
 
   test("resolves once the channel enters closing", async () => {
-    // The listener also settles on a LOCALLY initiated close, since PeerJS
-    // transitions its own channel through `closing` too (see the module
-    // comment) -- this is the reachable local-close case, not the peer-origin
-    // one the module exists for.
+    // The peer's close reaches this side as the channel starting to close, one
+    // event ahead of the completed one, so this is the event the delivery
+    // signal normally arrives on.
     const { conn, channel } = makeConn();
 
     const waiting = waitForPeerClose(conn);
     expect(await isSettled(waiting)).toBe(false);
 
     channel?.enterClosing();
+
+    await expect(waiting).resolves.toBe("peer-closed");
+  });
+
+  test.each(["closed", "failed"] as const)(
+    "does not read a channel closing on a %s link as the peer's receipt",
+    async (state) => {
+      // The channel goes down either way, so the event alone cannot say whether
+      // the peer took the final frame or this side's teardown discarded it. A
+      // link already gone when the channel starts closing settles that: there
+      // was nothing left to deliver over, and reporting the delivery signal
+      // would tell the operator of an exchange that lost its final frame that it
+      // landed.
+      const { conn, channel, peerConnection } = makeConn();
+
+      const waiting = waitForPeerClose(conn);
+      expect(await isSettled(waiting)).toBe(false);
+
+      peerConnection?.enterUnannounced(state);
+      channel?.enterClosing();
+
+      await expect(waiting).resolves.toBe("peer-gone");
+    },
+  );
+
+  test("still reads a completed close as the peer's, whatever the link shows", async () => {
+    // The `close` event is the fallback for a stack that never enters `closing`,
+    // and it deliberately does not repeat the reading above: a close that has
+    // completed is one this side's own stack may have answered by tearing the
+    // link down, so a dead link here would not say the link died BEFORE the
+    // close. Inventing a doubt about a healthy exchange is the worse error.
+    const { conn, channel, peerConnection } = makeConn();
+
+    const waiting = waitForPeerClose(conn);
+    expect(await isSettled(waiting)).toBe(false);
+
+    peerConnection?.enterUnannounced("closed");
+    channel?.closeFromPeer();
 
     await expect(waiting).resolves.toBe("peer-closed");
   });

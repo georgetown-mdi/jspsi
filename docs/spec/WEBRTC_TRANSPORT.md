@@ -182,11 +182,22 @@ of the delivery contract requires; "flush the local buffer" is not sufficient on
 this transport (see
 [COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown)).
 
-Every wait above also ends when there is no live peer left to deliver to, so a
+Every wait above also ends when there is nothing live left to deliver over, so a
 partner that crashed produces a teardown rather than a wait as long as the
-ceiling. For the web that is the peer connection reaching `failed` or `closed`;
-a transient `disconnected` is not terminal, because the frame is still in flight
-while ICE recovers.
+ceiling. For the web that is the peer connection reaching `failed` (ICE gave up
+on the peer) or `closed` (this side tore its own link down); a transient
+`disconnected` is not terminal, because the frame is still in flight while ICE
+recovers.
+
+A teardown on this side reaches the wait as the channel closing, not as a state
+change -- closing a peer connection fires no state event -- and the channel
+closing is otherwise the peer's receipt. The web wait therefore reads the link
+at that event rather than taking the close at face value: a channel that starts
+closing while this side's peer connection is already gone took the final frame
+down with it, and takes the no-live-peer exit. A completed `close` arriving with
+no `closing` before it is still read as the peer's, because by then this side's
+own stack may have answered the close by tearing the link down, and a doubt
+invented about a healthy exchange is the worse error.
 
 The web wait also ends when the run itself is cancelled. Up to the ceiling the
 wait's length is the PEER's to choose -- it holds the wait simply by keeping ICE
@@ -208,7 +219,7 @@ The wording follows the exit, because the exits do not mean the same thing:
 | ---- | ------------------------- |
 | The peer closed the channel | Nothing -- that close is the delivery signal |
 | The ceiling ran out | The partner never confirmed taking the final message within the wait, so their exchange may have ended without it |
-| No live peer is left, or the channel was already out of `open` | The connection closed before the partner could confirm, so they may or may not have received it |
+| Nothing live is left to deliver over -- the peer connection failed, this side tore it down, or the channel was already out of `open` | The connection closed before the partner could confirm, so they may or may not have received it |
 | The run was cancelled while the wait stood | The same wording as a connection that closed: the cancel cuts the wait rather than letting it run out, and what the partner got is as unknowable either way. A cancelled run's notice is withheld anyway (below), so this is what the exit means rather than what an operator reads |
 
 The notice is best-effort in two ways. It reaches the operator only when the
@@ -219,19 +230,25 @@ told the operator something stronger already.
 
 A close signal is not proof the partner's application read what was behind it: a
 peer that closes without draining its inbound queue is indistinguishable from one
-that read everything, and a peer connection torn down by the page rather than by
-reading the sentinel resets its stream gracefully -- measured in Chromium, and
-pinned in `apps/web/test/browser/webrtcCloseDelivery.test.ts` -- so that teardown
-arrives here as the same close. That is also why the cancellation is an exit of
+that read everything, and the PARTNER's peer connection torn down by their page
+rather than by reading the sentinel resets its stream gracefully -- measured in
+Chromium, and pinned in `apps/web/test/browser/webrtcCloseDelivery.test.ts` -- so
+that teardown arrives here as the same close. The state of the link is what
+tells a close apart from a teardown, and only this side's link is visible here:
+it separates this side's teardown (above) and can say nothing about the
+partner's. That is also why the cancellation is an exit of
 its own rather than whatever the teardown behind it does to the channel: a cancel
-folded into the peer's close would report delivery for a wait the operator cut.
+folded into an exit of the link's would report the link's story for a wait the
+operator cut.
 
 What no close can cover is a sender whose stack goes away before its bytes do:
 tearing the peer connection down as the close returns delivered nothing at all
 -- measured at zero frames of two received, four rounds out of four -- and a
 browser tab closed the instant the results appear does the same thing to a frame
 still buffered. Waiting narrows that window to the delivery itself rather than
-leaving it open for the length of the transfer.
+leaving it open for the length of the transfer, and a teardown that lands inside
+it while this page keeps running is reported as the loss it is rather than as a
+delivery.
 
 ## ICE
 
