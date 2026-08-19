@@ -10,13 +10,13 @@ import type { ChildProcess } from "node:child_process";
  * CLI's hand-written signaling client can be driven against the real wire
  * instead of a stand-in.
  *
- * Why a process and not an import: the broker is vendored inside apps/web
- * (`src/contrib/peerjs-server`), and apps/cli must not import apps/web -- the two
- * apps share code only through `@psilink/core` (eslint.boundaries.mjs). Spawning
- * a process reaches the same binary behaviour without a cross-app module edge.
- * The entry point it spawns is `apps/web/test/signaling/standaloneBroker.ts`,
- * which is why .github/workflows/cli_build_and_test.yaml filters on that path:
- * a change there must re-run this suite.
+ * Why a process and not an import: a deployed broker is a service of its own,
+ * and the CLI's WebRTC transport hand-writes a broker client
+ * (src/connection/webrtc/brokerClient.ts) against what that service does on the
+ * wire. Spawning `@psilink/peerjs-broker`'s standalone entry point exercises the
+ * same wiring a provisioned broker runs, rather than a subset assembled in this
+ * process. It is also why .github/workflows/cli_build_and_test.yaml filters on
+ * that workspace: a change there must re-run this suite.
  *
  * Why `tsx` and not plain `node`: the vendored broker uses TypeScript parameter
  * properties, which Node 26's strip-only type support refuses outright
@@ -35,8 +35,8 @@ const START_TIMEOUT_MS = 30_000;
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../../..");
-const webRoot = path.join(repoRoot, "apps/web");
-const runner = path.join(webRoot, "test/signaling/standaloneBroker.ts");
+const brokerRoot = path.join(repoRoot, "packages/peerjs-broker");
+const runner = path.join(brokerRoot, "src/standalone.ts");
 
 /** A running broker, and the handle to stop it. */
 export interface BrokerProcess {
@@ -62,7 +62,7 @@ export function startBrokerProcess(): Promise<BrokerProcess> {
   const child = spawn(
     process.execPath,
     [require.resolve("tsx/cli"), runner, "--path", mountPath, "--key", key],
-    { cwd: webRoot, stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: brokerRoot, stdio: ["ignore", "pipe", "pipe"] },
   );
 
   return new Promise<BrokerProcess>((resolve, reject) => {

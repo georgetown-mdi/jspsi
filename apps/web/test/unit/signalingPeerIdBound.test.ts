@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "vitest";
 import WebSocket from "ws";
 
-import { Errors } from "@peerjs-server/enums.ts";
-import { MAX_HANDSHAKE_PARAM_LENGTH } from "@peerjs-server/services/webSocketServer/index.ts";
+import { Errors } from "@psilink/peerjs-broker/enums";
+import { MAX_HANDSHAKE_PARAM_LENGTH } from "@psilink/peerjs-broker/services/webSocketServer/index";
 
 import {
   connectRegistered,

@@ -80,7 +80,6 @@ export default [
   {
     ignores: [
       "eslint.config.js",
-      "src/contrib/**",
       ".output/**",
       ".nitro/**",
       ".tanstack/**",

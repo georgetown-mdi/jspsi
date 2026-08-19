@@ -18,13 +18,11 @@ on:
       - "apps/cli/**"
       - "packages/core/**"
       - "lib/**"
-      # The CLI's WebRTC signaling suite drives the vendored PeerJS broker as a
-      # spawned process (apps/cli/test/signaling/brokerProcess.ts), so a change
-      # to the broker or to the runner it spawns must re-run this gate. Filtered
-      # to those two paths rather than all of apps/web: nothing else in the web
-      # app can move what the CLI's broker client is measured against.
-      - "apps/web/src/contrib/peerjs-server/**"
-      - "apps/web/test/signaling/**"
+      # The CLI's WebRTC signaling suite drives the PeerJS broker as a spawned
+      # process (apps/cli/test/signaling/brokerProcess.ts), so a change to the
+      # broker workspace or to the standalone entry point it spawns must re-run
+      # this gate.
+      - "packages/peerjs-broker/**"
       - "package-lock.json"
       - "tsconfig.base.json"
       - ".github/actions/setup/**"

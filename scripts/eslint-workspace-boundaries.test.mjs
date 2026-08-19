@@ -55,6 +55,10 @@ async function boundaryHits(filePath, source) {
 // test and build-config files are covered only by the broad boundary blocks.
 const CORE_SRC = resolve(repoRoot, "packages/core/src/boundaryFixture.ts");
 const CORE_TEST = resolve(repoRoot, "packages/core/test/boundaryFixture.ts");
+const BROKER_SRC = resolve(
+  repoRoot,
+  "packages/peerjs-broker/src/boundaryFixture.ts",
+);
 const CLI_SRC = resolve(repoRoot, "apps/cli/src/boundaryFixture.ts");
 const CLI_TEST = resolve(repoRoot, "apps/cli/test/unit/boundaryFixture.ts");
 const WEB_SRC = resolve(repoRoot, "apps/web/src/utils/serverConfig.ts");
@@ -82,6 +86,12 @@ const REFUSED = [
   ["packages/core/src", CORE_SRC, "jspsi"],
   ["packages/core/test", CORE_TEST, "../../../apps/cli/src/protocol"],
   ["packages/core/test", CORE_TEST, "psilink"],
+  [
+    "packages/peerjs-broker/src",
+    BROKER_SRC,
+    "../../../apps/web/src/psi/exchange",
+  ],
+  ["packages/peerjs-broker/src", BROKER_SRC, "jspsi"],
   ["apps/cli/src", CLI_SRC, "../../web/src/psi/exchange"],
   ["apps/cli/src", CLI_SRC, "../../web"],
   ["apps/cli/src", CLI_SRC, "../../../apps/web/src/psi/exchange"],
@@ -104,6 +114,7 @@ const REFUSED = [
 const ACCEPTED = [
   ["packages/core/src", CORE_SRC, "./utils/boundedJson"],
   ["packages/core/test", CORE_TEST, "../src/main"],
+  ["packages/peerjs-broker/src", BROKER_SRC, "./contrib/index.ts"],
   ["apps/cli/src", CLI_SRC, "@psilink/core"],
   ["apps/cli/src", CLI_SRC, "@psilink/core/testing"],
   ["apps/cli/test", CLI_TEST, "../../src/protocol"],
@@ -132,8 +143,13 @@ describe("the cross-workspace import ban", { timeout: 60_000 }, () => {
 
   it("carries the ban to every path it lints, with no type-aware rule", async () => {
     for (const [tree, filePath, expectedPatterns] of [
-      ["packages/core/src", CORE_SRC, crossWorkspaceImportBans.core],
-      ["packages/core/test", CORE_TEST, crossWorkspaceImportBans.core],
+      ["packages/core/src", CORE_SRC, crossWorkspaceImportBans.packages],
+      ["packages/core/test", CORE_TEST, crossWorkspaceImportBans.packages],
+      [
+        "packages/peerjs-broker/src",
+        BROKER_SRC,
+        crossWorkspaceImportBans.packages,
+      ],
       ["apps/cli/src", CLI_SRC, crossWorkspaceImportBans.cli],
       ["apps/cli/test", CLI_TEST, crossWorkspaceImportBans.cli],
       ["apps/web/src", WEB_SRC, crossWorkspaceImportBans.web],

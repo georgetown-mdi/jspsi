@@ -2,11 +2,11 @@ import { createServer } from "node:http";
 
 import WebSocket from "ws";
 
-import { Realm } from "@peerjs-server/models/realm.ts";
-import { WebSocketServer } from "@peerjs-server/services/webSocketServer/index.ts";
+import { Realm } from "@psilink/peerjs-broker/models/realm";
+import { WebSocketServer } from "@psilink/peerjs-broker/services/webSocketServer/index";
 
 import type { AddressInfo } from "node:net";
-import type { IRealm } from "@peerjs-server/models/realm.ts";
+import type { IRealm } from "@psilink/peerjs-broker/models/realm";
 import type { Server } from "node:http";
 
 // The signaling server's default authentication gate: the well-known PeerJS key,

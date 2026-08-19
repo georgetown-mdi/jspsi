@@ -140,14 +140,15 @@ is still registered and routable after the broker's silent-socket reap window
 has passed, which takes a real 25-second wait. It is kept rather than trimmed:
 it is the only place the CLI client's own heartbeat cadence is joined to the
 vendored broker's reap window over the real wire, and the two constants live in
-different apps, so no unit check on either side can stand in for it. It runs in
+different workspaces, so no unit check on either side can stand in for it. It runs in
 its own worker process alongside the longer transport file.
 
 Its broker harness is `apps/cli/test/signaling/`. It starts the repository's own
-vendored PeerJS broker as a child PROCESS rather than importing it, because the
-broker lives in `apps/web` and `apps/cli` may not import that app; the process
-entry point it spawns is `apps/web/test/signaling/standaloneBroker.ts`, which is
-why `.github/workflows/cli_build_and_test.yaml` filters on that path as well as
+vendored PeerJS broker as a child PROCESS rather than importing it, because a
+deployed broker is a service of its own and the CLI's client is measured against
+what that service does on the wire; the process entry point it spawns is
+`packages/peerjs-broker/src/standalone.ts`, which is why
+`.github/workflows/cli_build_and_test.yaml` filters on that workspace as well as
 on `apps/cli`. Each file starts a broker of its own. The same measurement
 discipline applies here as to the SFTP tree: what the CLI's hand-written
 signaling client and PeerJS framing rest on was established by driving the real
@@ -332,8 +333,9 @@ It uses `@vitest/coverage-v8` (first-party Vitest tooling, so no second runner)
 and writes a text summary to the terminal plus a browsable HTML report and an
 `lcov.info` (for editors/tooling) under each workspace's `coverage/` directory.
 The denominator is scoped to product source under each `src/` tree, with the
-generated route tree and vendored `apps/web/src/contrib` excluded, so the numbers
-reflect hand-written product code. The report runs `core` unit, `cli`
+generated route tree excluded, so the numbers reflect hand-written product code;
+the vendored signaling broker is a workspace of its own (`packages/peerjs-broker`)
+and runs no coverage, so it sits outside every denominator. The report runs `core` unit, `cli`
 unit, integration, and webrtc (the SFTP adapter is exercised only by the
 integration suite and the WebRTC transport only by the webrtc suite, so dropping
 either would read its adapter as near-uncovered), and `web` unit plus `web`

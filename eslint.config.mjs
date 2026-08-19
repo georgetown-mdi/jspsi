@@ -132,6 +132,9 @@ export default tseslint.config(
       "**/dist/**",
       "**/node_modules/**",
       "apps/web/eslint.config.js",
+      // The vendored PeerJS signaling server, kept as upstream wrote it so its
+      // security-review history stays traceable through the move.
+      "packages/peerjs-broker/src/contrib/**",
       "scratch/**",
       "research/**",
       ".claude/worktrees/**",
@@ -166,11 +169,11 @@ export default tseslint.config(
   // apps/web's half lives in apps/web/eslint.config.js, which is the config
   // ESLint resolves for that subtree (see eslint.boundaries.mjs).
   {
-    files: ["packages/core/**/*.{ts,tsx}"],
+    files: ["packages/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
         "error",
-        { patterns: crossWorkspaceImportBans.core },
+        { patterns: crossWorkspaceImportBans.packages },
       ],
     },
   },
@@ -295,7 +298,7 @@ export default tseslint.config(
                 "Parse operator/credential files through packages/core/src/sensitiveFile.ts; do not import yaml's raw parsers directly.",
             },
           ],
-          patterns: crossWorkspaceImportBans.core,
+          patterns: crossWorkspaceImportBans.packages,
         },
       ],
       // no-restricted-properties (a property-access ban, not a CallExpression

@@ -5,15 +5,15 @@ import {
   MAX_OUTSTANDING_QUEUES,
   MAX_QUEUE_BYTES,
   Realm,
-} from "@peerjs-server/models/realm";
-import { CheckBrokenConnections } from "@peerjs-server/services/checkBrokenConnections/index";
-import { Client } from "@peerjs-server/models/client";
-import { MessageType } from "@peerjs-server/enums";
+} from "@psilink/peerjs-broker/models/realm";
+import { CheckBrokenConnections } from "@psilink/peerjs-broker/services/checkBrokenConnections/index";
+import { Client } from "@psilink/peerjs-broker/models/client";
+import { MessageType } from "@psilink/peerjs-broker/enums";
 import { PEER_PING_INTERVAL_MS } from "@psi/rendezvous";
-import defaultConfig from "@peerjs-server/config/index";
-import { messageByteSize } from "@peerjs-server/models/messageQueue";
+import defaultConfig from "@psilink/peerjs-broker/config/index";
+import { messageByteSize } from "@psilink/peerjs-broker/models/messageQueue";
 
-import type { IMessage } from "@peerjs-server/models/message";
+import type { IMessage } from "@psilink/peerjs-broker/models/message";
 
 // Unit coverage for the two gap-2 controls that need no socket: the two-tier
 // liveness reaper (a registered-but-never-heartbeated client is cleared well

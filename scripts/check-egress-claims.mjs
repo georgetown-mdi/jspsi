@@ -118,7 +118,10 @@
 // SCANNED_ROOTS is source that ships or runs, not all TypeScript. Beside the
 // app and library trees and the web app's static assets it carries
 // apps/web/server, the Nitro entry point the deployed server boots (named by
-// apps/web/nitro.config.ts). SCANNED_FILES carries the shipped files that sit
+// apps/web/nitro.config.ts). The signaling broker's whole src is among the
+// library trees: the web build bundles it into that same server, and its
+// standalone entry point runs the identical wiring as a service of its own.
+// SCANNED_FILES carries the shipped files that sit
 // outside any scanned tree, for both images: the two entrypoints,
 // docker-entrypoint.sh and docker-entrypoint-fips.sh, which run inside the
 // container the "no other network connection" claim is about (each is its
@@ -157,6 +160,7 @@ export const SCANNED_ROOTS = [
   "apps/web/src",
   "apps/cli/src",
   "packages/core/src",
+  "packages/peerjs-broker/src",
   "apps/web/public",
   "apps/web/server",
 ];

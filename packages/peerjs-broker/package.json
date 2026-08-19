@@ -1,0 +1,33 @@
+{
+  "name": "@psilink/peerjs-broker",
+  "version": "0.1.0",
+  "description": "PeerJS-compatible WebSocket signaling broker for WebRTC rendezvous",
+  "license": "Apache-2.0",
+  "author": "Vincent Dorie <vdorie@gmail.com>",
+  "type": "module",
+  "exports": {
+    ".": "./src/contrib/index.ts",
+    "./standalone": "./src/standalone.ts",
+    "./*": "./src/contrib/*.ts"
+  },
+  "scripts": {
+    "start": "tsx src/standalone.ts",
+    "type-check": "tsc --noEmit"
+  },
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "peerjs",
+    "signaling",
+    "webrtc"
+  ],
+  "dependencies": {
+    "ws": "^8.21.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.8"
+  }
+}
