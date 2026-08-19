@@ -454,12 +454,12 @@ export interface VerificationKeys {
 // defense-in-depth ceilings, not semantic limits.
 
 // Length cap for the fixed-size base64url crypto values a record and its keys
-// carry (termsHash, bindingNonce, each commitment, each salt): every one is a
-// 32-byte value -- 43 unpadded base64url characters -- so 256 is far above any
-// legitimate value yet refuses a megabyte-scale hostile string. Bounds the field
-// for the untrusted reader without length-locking the exact byte count (a reader
-// still verifies by recomputing the commitment, so the exact length is not
-// pinned).
+// carry (termsHash, bindingNonce, receiptBinder, each commitment, each salt):
+// every one is a 32-byte value -- 43 unpadded base64url characters -- so 256 is
+// far above any legitimate value yet refuses a megabyte-scale hostile string.
+// Bounds the field for the untrusted reader without length-locking the exact
+// byte count (a reader still verifies by recomputing the commitment, so the
+// exact length is not pinned).
 const MAX_BASE64URL_LENGTH = 256;
 
 // Base64url without padding (the binary encoding used throughout receipts; see

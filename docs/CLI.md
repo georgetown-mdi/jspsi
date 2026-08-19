@@ -478,6 +478,8 @@ Recurring exchanges between the same two parties under the same terms produce re
 - **no run binder in the record** -- the record is of an exchange that produced no signed receipt at all, so this receipt is not that run's. Also a failure.
 - **not checked** -- no exchange record was named. Nothing is contradicted, so the run still exits 0, but the verdict stays `INCOMPLETE`: which run the receipt attests is open. A dual-signed record verified on its own therefore reports `INCOMPLETE` even with both certificates anchored and the terms hash checked. That is the honest reading rather than a gap -- name the run's exchange record as `RECORD` and pass the receipt to `--signed-record` to pair them.
 
+An exchange run with `--no-record` still produces its signed receipt -- that flag suppresses the record, not the receipt -- and leaves nothing for the pairing to compare against, so every verification of that receipt is the **not checked** case above: it can never rise above `INCOMPLETE`, on any verifier, and no record can be reconstructed after the run to resolve it. Keep the record whenever you keep receipts as evidence.
+
 An artifact written before psilink carried the run binder is refused on its format `version` (exit 64), naming the version this build recognizes, rather than reported as a pairing failure.
 
 #### A verified verdict needs both certificates anchored
