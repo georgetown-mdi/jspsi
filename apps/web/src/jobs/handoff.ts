@@ -96,11 +96,12 @@ const HANDOFF_OUTPUT_NAME = "results.csv";
 /**
  * Rebuild the authored SFTP server entry with every container-internal credential
  * `@path` replaced by a placeholder, keeping every portable field verbatim (host,
- * port, username, the REMOTE working directory `path`, the host-key fingerprint,
+ * port, username, the REMOTE working directories, the host-key fingerprint,
  * and the keyboard-interactive toggle). Constructed field-by-field -- never by
  * spreading the entry -- so no real credential `@path` and no future field can ride
- * along into a template. The remote `path` is the directory on the partner's SFTP
- * server, identical on any machine, so it stays; only the LOCAL credential files
+ * along into a template. The remote directories -- the shared `path`, or the split
+ * `inbound_path`/`outbound_path` pair -- are directories on the partner's SFTP
+ * server, identical on any machine, so they stay; only the LOCAL credential files
  * differ per machine and become placeholders.
  */
 function placeholderServerEntry(entry: JobSftpServerEntry): JobSftpServerEntry {
@@ -109,6 +110,12 @@ function placeholderServerEntry(entry: JobSftpServerEntry): JobSftpServerEntry {
     ...(entry.port !== undefined ? { port: entry.port } : {}),
     ...(entry.username !== undefined ? { username: entry.username } : {}),
     ...(entry.path !== undefined ? { path: entry.path } : {}),
+    ...(entry.inboundPath !== undefined
+      ? { inboundPath: entry.inboundPath }
+      : {}),
+    ...(entry.outboundPath !== undefined
+      ? { outboundPath: entry.outboundPath }
+      : {}),
     ...(entry.keyboardInteractive !== undefined
       ? { keyboardInteractive: entry.keyboardInteractive }
       : {}),

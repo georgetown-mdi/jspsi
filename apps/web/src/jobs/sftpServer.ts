@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   ConnectionConfigSchema,
   HOST_KEY_FINGERPRINT_REGEX,
+  withRetainModeImplications,
 } from "@psilink/core";
 
 import { isBareSftpHost } from "@psi/sftpHost";
@@ -31,6 +32,13 @@ export interface JobSftpServerEntry {
   port?: number;
   username?: string;
   path?: string;
+  /** The inbound (peer-written) remote directory of a split-directory
+   * connection; set together with {@link outboundPath} and never alongside
+   * {@link path}. */
+  inboundPath?: string;
+  /** The outbound (self-written) remote directory of a split-directory
+   * connection; the companion to {@link inboundPath}. */
+  outboundPath?: string;
   password?: string;
   privateKey?: string;
   privateKeyPassphrase?: string;
@@ -42,16 +50,25 @@ export interface JobSftpServerEntry {
  * The strict allowlist of fields the server block may carry. Deliberately
  * STRICTER than core's SFTP server schema, which is non-strict and admits
  * blocks the appliance must never see: `provision` (whose auth block carries
- * inline HTTP credentials), the split `inbound_path`/`outbound_path` pair, and
- * the detected-but-rejected `certificate`/`known_hosts`. Any key outside this
- * list fails validation with an error naming the key, so an operator cannot
- * smuggle -- or typo -- a field into the composed connection.
+ * inline HTTP credentials) and the detected-but-rejected
+ * `certificate`/`known_hosts`. Any key outside this list fails validation with
+ * an error naming the key, so an operator cannot smuggle -- or typo -- a field
+ * into the composed connection.
+ *
+ * The split `inbound_path`/`outbound_path` pair IS admitted: it is a remote
+ * directory layout on the partner's SFTP host, the same class of value as
+ * `path`, and it carries no credential and drives no pre-connect egress. Which
+ * of the two directory forms is coherent stays core's call -- the pair must be
+ * set together, must differ, and must not accompany `path` -- decided by the
+ * composition check below rather than restated here.
  */
 const jobSftpServerEntrySchema: z.ZodType<JobSftpServerEntry> = z.strictObject({
   host: z.string().min(1),
   port: z.int().min(0).max(65535).optional(),
   username: z.string().min(1).optional(),
   path: z.string().min(1).optional(),
+  inboundPath: z.string().min(1).optional(),
+  outboundPath: z.string().min(1).optional(),
   password: z.string().optional(),
   privateKey: z.string().optional(),
   privateKeyPassphrase: z.string().optional(),
@@ -131,12 +148,21 @@ export type AuthoredCredential =
  * materializes to a file -- rather than as a bare field, and the fingerprint is
  * mandatory and literal. `private_key_passphrase` is always an `@path`
  * reference, never a pasted value.
+ *
+ * The remote directory arrives in one of the two forms core's connection config
+ * carries: the single shared `path`, or the split `inboundPath`/`outboundPath`
+ * pair for a server with distinct drop and pickup folders. The three are
+ * modelled as optional siblings, exactly as core's `SFTPServer` models them, so
+ * the body stays a strict allowlist and the coherence rules over them stay
+ * core's single statement rather than a second one here.
  */
 export interface AuthoredSftpServerRequest {
   host: string;
   port?: number;
   username?: string;
   path?: string;
+  inboundPath?: string;
+  outboundPath?: string;
   hostKeyFingerprint: string | Array<string>;
   credential: AuthoredCredential;
   privateKeyPassphrase?: string;
@@ -179,6 +205,8 @@ const authoredConnectionFieldsSchema = z.strictObject({
   port: z.int().min(0).max(65535).optional(),
   username: z.string().min(1).optional(),
   path: z.string().min(1).optional(),
+  inboundPath: z.string().min(1).optional(),
+  outboundPath: z.string().min(1).optional(),
   hostKeyFingerprint: z.union([
     z.string(),
     z
@@ -346,6 +374,12 @@ export function validateAuthoredSftpServer(
     ...(body.port !== undefined ? { port: body.port } : {}),
     ...(body.username !== undefined ? { username: body.username } : {}),
     ...(body.path !== undefined ? { path: body.path } : {}),
+    ...(body.inboundPath !== undefined
+      ? { inboundPath: body.inboundPath }
+      : {}),
+    ...(body.outboundPath !== undefined
+      ? { outboundPath: body.outboundPath }
+      : {}),
     [credentialField]: resolved.credential.ref,
     ...(body.privateKeyPassphrase !== undefined
       ? { privateKeyPassphrase: body.privateKeyPassphrase }
@@ -689,14 +723,31 @@ function credentialContainmentWarning(
 /**
  * Run the entry through core's connection schema as `{channel: "sftp", server}`
  * so core's cross-field refines (one primary auth method, passphrase requires
- * a key, keyboard-interactive requires a password, fingerprint canonical form)
- * hold when the connection is authored, not first at exchange time inside the
- * CLI child.
+ * a key, keyboard-interactive requires a password, fingerprint canonical form,
+ * and the directory-mode rules -- `path` xor the pair, both halves together, the
+ * two directories distinct) hold when the connection is authored, not first at
+ * exchange time inside the CLI child.
+ *
+ * A split entry is composed WITH the retain-mode options block, because core's
+ * remaining directory refine -- a split requires `retain_files` -- is a rule over
+ * the JOB's tuning options, which an authored connection does not carry and this
+ * endpoint cannot know: the operator sets retain mode on the exchange, not on the
+ * connection. Composing without it would make every split connection
+ * unauthorable. The precondition itself is not dropped, it is enforced where the
+ * two are known together: the console's authoring form states it while the
+ * operator is still at the controls, `composeSftpConfigDocument` re-parses the
+ * whole spec (so a split job composed without retain mode is refused at create),
+ * and a zero-setup run meets the CLI's own `--outbound-path` guard.
  */
 function assertComposesThroughCoreSchema(entry: JobSftpServerEntry): void {
+  const split =
+    entry.inboundPath !== undefined || entry.outboundPath !== undefined;
   const composed = ConnectionConfigSchema.safeParse({
     channel: "sftp",
     server: entry,
+    ...(split
+      ? { options: withRetainModeImplications({ retainFiles: true }) }
+      : {}),
   });
   if (!composed.success)
     throw new JobApiConfigError(formatIssues(composed.error.issues));

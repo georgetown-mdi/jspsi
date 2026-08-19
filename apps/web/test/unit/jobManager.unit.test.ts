@@ -721,6 +721,62 @@ describe("the in-app authored sftp connection", () => {
     expect(configYaml).not.toContain("s3cret");
   });
 
+  test("a split-directory connection reaches the run's config as the pair", async () => {
+    const manager = makeManager({ events: [RESULT_EVENT], exitCode: 0 });
+    const dir = tempDataRoot("secrets-split");
+    roots.push(dir);
+    fs.mkdirSync(dir, { recursive: true });
+    const secretPath = path.join(dir, "password");
+    fs.writeFileSync(secretPath, "s3cret\n");
+    const projection = manager.authorSftpServer({
+      host: "authored.partner.example",
+      inboundPath: "/exchange/in",
+      outboundPath: "/exchange/out",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+    });
+    // The projection the console reads back names both halves and no shared path.
+    expect(projection.inboundPath).toBe("/exchange/in");
+    expect(projection.outboundPath).toBe("/exchange/out");
+    expect(projection.path).toBeUndefined();
+
+    const id = await manager.createJob(
+      validSftpIntent({
+        options: {
+          retainFiles: true,
+          timestampInFilename: true,
+          locklessRendezvous: true,
+        },
+      }),
+    );
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+    const server = composedServer(
+      fs.readFileSync(`${record.workdir}/psilink.yaml`, "utf8"),
+    );
+    expect(server.inbound_path).toBe("/exchange/in");
+    expect(server.outbound_path).toBe("/exchange/out");
+    expect(server.path).toBeUndefined();
+  });
+
+  test("a split-directory connection refuses a job created without retain mode", async () => {
+    const manager = makeManager({});
+    const dir = tempDataRoot("secrets-split-delete");
+    roots.push(dir);
+    fs.mkdirSync(dir, { recursive: true });
+    const secretPath = path.join(dir, "password");
+    fs.writeFileSync(secretPath, "s3cret\n");
+    manager.authorSftpServer({
+      host: "authored.partner.example",
+      inboundPath: "/exchange/in",
+      outboundPath: "/exchange/out",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+    });
+    await expect(manager.createJob(validSftpIntent())).rejects.toThrow();
+  });
+
   test("authoring resolves a mountRef against the manager's secrets mount", () => {
     const secretsDir = tempDataRoot("author-secrets");
     roots.push(secretsDir);

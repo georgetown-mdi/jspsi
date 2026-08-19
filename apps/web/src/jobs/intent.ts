@@ -800,10 +800,15 @@ const ZERO_SETUP_URL_SENTINEL_HOST = "host.invalid";
 
 /**
  * Build the `sftp://` URL a zero-setup job's CLI drives, from the authored
- * server entry's host, port, and path. The host, port, and path go through the
- * WHATWG {@link URL} object (never string concatenation) so each component is
- * encoded correctly; a bare IPv6 literal is bracketed first, since the hostname
- * setter silently rejects an unbracketed one.
+ * server entry's host, port, and remote directory. The host, port, and path go
+ * through the WHATWG {@link URL} object (never string concatenation) so each
+ * component is encoded correctly; a bare IPv6 literal is bracketed first, since
+ * the hostname setter silently rejects an unbracketed one.
+ *
+ * A split-directory entry puts its INBOUND half on the URL, because that is the
+ * half the CLI reads there: `--outbound-path` (emitted alongside by
+ * {@link zeroSetupSftpArgv}) takes the URL's path as the inbound directory and
+ * supplies the outbound one.
  *
  * The composed `url.hostname` -- the WHATWG-canonical form -- is then adopted as the
  * host, rather than requiring it to equal the input verbatim. Exact-equality
@@ -835,7 +840,8 @@ function buildZeroSetupSftpUrl(serverEntry: JobSftpServerEntry): string {
         "exchange",
     );
   if (serverEntry.port !== undefined) url.port = String(serverEntry.port);
-  if (serverEntry.path !== undefined) url.pathname = serverEntry.path;
+  const urlPath = serverEntry.inboundPath ?? serverEntry.path;
+  if (urlPath !== undefined) url.pathname = urlPath;
   return url.href;
 }
 
@@ -855,6 +861,13 @@ function buildZeroSetupSftpUrl(serverEntry: JobSftpServerEntry): string {
  * at most one -- with the optional passphrase (`@path`) and keyboard-interactive
  * toggle alongside.
  *
+ * A split-directory entry adds `--outbound-path`, the CLI's own name for the same
+ * split: the URL carries the inbound half (see {@link buildZeroSetupSftpUrl}) and
+ * this flag the outbound one. The CLI's guard on that flag then holds the run to
+ * retain mode, which {@link zeroSetupFileSyncArgv} emits from the operator's own
+ * file-handling choice -- so a split run without it is refused by the CLI rather
+ * than running with a directory layout it cannot honour.
+ *
  * The host-key fingerprint is MANDATORY and always emitted: a zero-setup run has no
  * TTY, so trust-on-first-use is impossible and the pin is the only host-key defense.
  * The CLI flag is single-valued, so a multi-fingerprint entry (an `Array`) is a
@@ -865,6 +878,8 @@ export function zeroSetupSftpArgv(
   serverEntry: JobSftpServerEntry,
 ): Array<string> {
   const argv: Array<string> = [buildZeroSetupSftpUrl(serverEntry)];
+  if (serverEntry.outboundPath !== undefined)
+    argv.push(`--outbound-path=${serverEntry.outboundPath}`);
   if (serverEntry.username !== undefined)
     argv.push(`--server-username=${serverEntry.username}`);
   if (serverEntry.password !== undefined)

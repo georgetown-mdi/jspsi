@@ -2,6 +2,9 @@ import { describe, expect, test } from "vitest";
 
 import {
   EMPTY_SFTP_FORM,
+  SPLIT_DIRECTORY_BOTH_HALVES_REQUIREMENT,
+  SPLIT_DIRECTORY_DISTINCT_REQUIREMENT,
+  SPLIT_DIRECTORY_RETAIN_REQUIREMENT,
   applyHostInput,
   buildAuthoringRequest,
   parseSftpUrl,
@@ -27,6 +30,14 @@ function validForm(
     ...overrides,
   };
 }
+
+// Retain mode is read only for the split-directory precondition, so every case
+// that does not author a split is unaffected by it. These two run with it on;
+// the split cases call the exported functions directly with their own value.
+const formError = (values: SftpConnectionFormValues) =>
+  sftpFormError(values, true);
+const authoringRequest = (values: SftpConnectionFormValues) =>
+  buildAuthoringRequest(values, true);
 
 describe("parseSftpUrl", () => {
   test("splits a full sftp URL into its fields", () => {
@@ -72,12 +83,12 @@ describe("applyHostInput", () => {
 
 describe("sftpFormError", () => {
   test("no error for a savable form", () => {
-    expect(sftpFormError(validForm())).toBeUndefined();
+    expect(formError(validForm())).toBeUndefined();
   });
 
   test("requires host and username", () => {
-    expect(sftpFormError(validForm({ host: "  " }))?.field).toBe("host");
-    expect(sftpFormError(validForm({ username: "" }))?.field).toBe("username");
+    expect(formError(validForm({ host: "  " }))?.field).toBe("host");
+    expect(formError(validForm({ username: "" }))?.field).toBe("username");
   });
 
   test("rejects a host carrying a URL, userinfo, a path, or whitespace", () => {
@@ -87,40 +98,38 @@ describe("sftpFormError", () => {
       "sftp.example.org/drop",
       "sftp .example.org",
     ]) {
-      const error = sftpFormError(validForm({ host }));
+      const error = formError(validForm({ host }));
       expect(error?.field).toBe("host");
     }
   });
 
   test("accepts a bare hostname, an IPv4, and a bracketed IPv6 literal", () => {
     for (const host of ["sftp.example.org", "10.0.0.5", "[2001:db8::1]"]) {
-      expect(sftpFormError(validForm({ host }))).toBeUndefined();
+      expect(formError(validForm({ host }))).toBeUndefined();
     }
   });
 
   test("bounds an optional port", () => {
-    expect(sftpFormError(validForm({ port: "70000" }))?.field).toBe("port");
-    expect(sftpFormError(validForm({ port: "-1" }))?.field).toBe("port");
-    expect(sftpFormError(validForm({ port: "22" }))).toBeUndefined();
+    expect(formError(validForm({ port: "70000" }))?.field).toBe("port");
+    expect(formError(validForm({ port: "-1" }))?.field).toBe("port");
+    expect(formError(validForm({ port: "22" }))).toBeUndefined();
   });
 
   test("requires a literal host-key fingerprint", () => {
-    const missing = sftpFormError(validForm({ hostKeyFingerprint: "" }));
+    const missing = formError(validForm({ hostKeyFingerprint: "" }));
     expect(missing?.field).toBe("hostKeyFingerprint");
     expect(missing?.message).toContain("identity fingerprint");
   });
 
   test("names the signing-fingerprint confusion", () => {
     // A 43-char base64url value with no SHA256: prefix is a signing fingerprint.
-    const error = sftpFormError(
-      validForm({ hostKeyFingerprint: "A".repeat(43) }),
-    );
+    const error = formError(validForm({ hostKeyFingerprint: "A".repeat(43) }));
     expect(error?.field).toBe("hostKeyFingerprint");
     expect(error?.message).toContain("signing fingerprint");
   });
 
   test("rejects a malformed fingerprint with the SHA256 format hint", () => {
-    const error = sftpFormError(
+    const error = formError(
       validForm({ hostKeyFingerprint: "SHA256:not-canonical" }),
     );
     expect(error?.field).toBe("hostKeyFingerprint");
@@ -128,23 +137,22 @@ describe("sftpFormError", () => {
   });
 
   test("requires a credential source", () => {
-    expect(sftpFormError(validForm({ source: undefined }))?.field).toBe(
+    expect(formError(validForm({ source: undefined }))?.field).toBe(
       "credential",
     );
     expect(
-      sftpFormError(validForm({ source: { kind: "mount", subPath: [] } }))
-        ?.field,
+      formError(validForm({ source: { kind: "mount", subPath: [] } }))?.field,
     ).toBe("credential");
   });
 
   test("a typed reference must be an @path", () => {
-    const error = sftpFormError(
+    const error = formError(
       validForm({ source: { kind: "path", ref: "/run/secrets/key" } }),
     );
     expect(error?.field).toBe("credential");
     expect(error?.message).toContain("@-file");
     expect(
-      sftpFormError(
+      formError(
         validForm({ source: { kind: "path", ref: "@/run/secrets/key" } }),
       ),
     ).toBeUndefined();
@@ -152,18 +160,17 @@ describe("sftpFormError", () => {
 
   test("accepts a pasted value as the credential source", () => {
     expect(
-      sftpFormError(validForm({ source: { kind: "raw", value: "hunter2" } })),
+      formError(validForm({ source: { kind: "raw", value: "hunter2" } })),
     ).toBeUndefined();
   });
 
   test("a private-key passphrase must be an @path when set", () => {
     expect(
-      sftpFormError(
-        validForm({ method: "private_key", passphrasePath: "hunter2" }),
-      )?.field,
+      formError(validForm({ method: "private_key", passphrasePath: "hunter2" }))
+        ?.field,
     ).toBe("passphrase");
     expect(
-      sftpFormError(
+      formError(
         validForm({
           method: "private_key",
           passphrasePath: "@/run/secrets/key.pass",
@@ -172,14 +179,91 @@ describe("sftpFormError", () => {
     ).toBeUndefined();
     // The passphrase is ignored under the password method.
     expect(
-      sftpFormError(validForm({ method: "password", passphrasePath: "junk" })),
+      formError(validForm({ method: "password", passphrasePath: "junk" })),
     ).toBeUndefined();
+  });
+});
+
+describe("sftpFormError (split inbound/outbound directories)", () => {
+  /** A form naming both halves of a split remote directory. */
+  const splitForm = (
+    overrides: Partial<SftpConnectionFormValues> = {},
+  ): SftpConnectionFormValues =>
+    validForm({
+      remoteDirectory: "/exchange/in",
+      outboundDirectory: "/exchange/out",
+      ...overrides,
+    });
+
+  test("accepts a split pair under retain mode", () => {
+    expect(sftpFormError(splitForm(), true)).toBeUndefined();
+  });
+
+  test("refuses a split without retain mode, naming the control to turn on", () => {
+    const error = sftpFormError(splitForm(), false);
+    expect(error?.field).toBe("outboundDirectory");
+    expect(error?.message).toBe(SPLIT_DIRECTORY_RETAIN_REQUIREMENT);
+    expect(error?.message).toContain("Keep every exchange file");
+  });
+
+  test("retain mode is read ONLY for a split; a shared directory is unaffected", () => {
+    expect(
+      sftpFormError(validForm({ remoteDirectory: "/exchange" }), false),
+    ).toBeUndefined();
+    expect(sftpFormError(validForm(), false)).toBeUndefined();
+  });
+
+  test("rejects two directories that resolve to the same one, in the console's words", () => {
+    for (const outboundDirectory of [
+      "/exchange/in",
+      "/exchange/in/",
+      "/exchange/./in",
+      "/exchange//in",
+    ]) {
+      const error = sftpFormError(splitForm({ outboundDirectory }), true);
+      expect(error?.field).toBe("outboundDirectory");
+      expect(error?.message).toBe(SPLIT_DIRECTORY_DISTINCT_REQUIREMENT);
+    }
+  });
+
+  test("an outbound directory with no inbound one lands on the empty inbound field", () => {
+    // The empty half is the one to fill, and it is labelled "Inbound directory"
+    // while the outbound one is set -- so the error attaches there rather than to
+    // the field the operator already filled.
+    const error = sftpFormError(
+      validForm({ remoteDirectory: "", outboundDirectory: "/exchange/out" }),
+      true,
+    );
+    expect(error?.field).toBe("remoteDirectory");
+    expect(error?.message).toBe(SPLIT_DIRECTORY_BOTH_HALVES_REQUIREMENT);
+  });
+
+  test("no split-directory message shows a configuration key the form never names", () => {
+    // Core decides WHEN a pair is wrong and words its rules over `inbound_path`
+    // and `outbound_path`; the form maps each verdict to its own labels, and an
+    // unmapped one falls through in core's words. Driving every pair shape this
+    // form can compose holds that mapping complete: a core rewording lands here
+    // as a snake_case key in front of an operator.
+    const shapes: Array<Partial<SftpConnectionFormValues>> = [
+      { remoteDirectory: "", outboundDirectory: "/exchange/out" },
+      { remoteDirectory: "/exchange/in", outboundDirectory: "/exchange/in" },
+      { remoteDirectory: "/exchange/in", outboundDirectory: "/exchange/./in" },
+      { remoteDirectory: "/exchange/in", outboundDirectory: "relative/out" },
+      { remoteDirectory: "/exchange/in", outboundDirectory: "/exchange/out" },
+    ];
+    for (const shape of shapes) {
+      const message = sftpFormError(validForm(shape), true)?.message;
+      if (message === undefined) continue;
+      expect(message).not.toContain("inbound_path");
+      expect(message).not.toContain("outbound_path");
+      expect(message).not.toContain("server.path");
+    }
   });
 });
 
 describe("buildAuthoringRequest", () => {
   test("builds a mountRef credential from a picked file", () => {
-    const body = buildAuthoringRequest(
+    const body = authoringRequest(
       validForm({
         port: "2022",
         remoteDirectory: "/drop",
@@ -203,7 +287,7 @@ describe("buildAuthoringRequest", () => {
   });
 
   test("builds a typed ref credential and carries a passphrase reference", () => {
-    const body = buildAuthoringRequest(
+    const body = authoringRequest(
       validForm({
         method: "private_key",
         source: { kind: "path", ref: "@/run/secrets/id" },
@@ -219,7 +303,7 @@ describe("buildAuthoringRequest", () => {
   });
 
   test("builds a raw credential from a pasted value, untrimmed", () => {
-    const body = buildAuthoringRequest(
+    const body = authoringRequest(
       validForm({ source: { kind: "raw", value: "  spaced-secret  " } }),
     );
     expect(body?.credential).toEqual({
@@ -230,14 +314,49 @@ describe("buildAuthoringRequest", () => {
   });
 
   test("omits an absent port, remote directory, and passphrase", () => {
-    const body = buildAuthoringRequest(validForm());
+    const body = authoringRequest(validForm());
     expect(body?.port).toBeUndefined();
     expect(body?.path).toBeUndefined();
     expect(body?.privateKeyPassphrase).toBeUndefined();
   });
 
   test("returns undefined for an invalid form", () => {
-    expect(buildAuthoringRequest(validForm({ host: "" }))).toBeUndefined();
+    expect(authoringRequest(validForm({ host: "" }))).toBeUndefined();
+  });
+
+  test("a named outbound directory sends the pair, never the single path", () => {
+    const body = buildAuthoringRequest(
+      validForm({
+        remoteDirectory: "/exchange/in",
+        outboundDirectory: "/exchange/out",
+      }),
+      true,
+    );
+    expect(body?.inboundPath).toBe("/exchange/in");
+    expect(body?.outboundPath).toBe("/exchange/out");
+    expect(body?.path).toBeUndefined();
+  });
+
+  test("a blank outbound directory sends the single shared path", () => {
+    const body = buildAuthoringRequest(
+      validForm({ remoteDirectory: "/exchange", outboundDirectory: "  " }),
+      true,
+    );
+    expect(body?.path).toBe("/exchange");
+    expect(body?.inboundPath).toBeUndefined();
+    expect(body?.outboundPath).toBeUndefined();
+  });
+
+  test("a split form without retain mode builds no request", () => {
+    expect(
+      buildAuthoringRequest(
+        validForm({
+          remoteDirectory: "/exchange/in",
+          outboundDirectory: "/exchange/out",
+        }),
+        false,
+      ),
+    ).toBeUndefined();
   });
 
   test("a probe-filled fingerprint flows through identically to a typed one", () => {
@@ -246,17 +365,15 @@ describe("buildAuthoringRequest", () => {
     // without a pin is unsavable, and filling it (as the probe does) produces the
     // exact request a typed pin would -- no separate submit path exists.
     const withoutPin = validForm({ hostKeyFingerprint: "" });
-    expect(sftpFormError(withoutPin)?.field).toBe("hostKeyFingerprint");
-    expect(buildAuthoringRequest(withoutPin)).toBeUndefined();
+    expect(formError(withoutPin)?.field).toBe("hostKeyFingerprint");
+    expect(authoringRequest(withoutPin)).toBeUndefined();
 
     const probeFilled = { ...withoutPin, hostKeyFingerprint: FINGERPRINT };
-    expect(sftpFormError(probeFilled)).toBeUndefined();
-    expect(buildAuthoringRequest(probeFilled)).toEqual(
-      buildAuthoringRequest(validForm()),
+    expect(formError(probeFilled)).toBeUndefined();
+    expect(authoringRequest(probeFilled)).toEqual(
+      authoringRequest(validForm()),
     );
-    expect(buildAuthoringRequest(probeFilled)?.hostKeyFingerprint).toBe(
-      FINGERPRINT,
-    );
+    expect(authoringRequest(probeFilled)?.hostKeyFingerprint).toBe(FINGERPRINT);
   });
 });
 
@@ -291,7 +408,7 @@ describe("sftpFormFromLocator (accept-side pre-fill)", () => {
     // request cannot be built from it: the accept guard rejects a launch until the
     // operator adds their own credential and fingerprint.
     const seeded = sftpFormFromLocator({ host: "sftp.partner.example" });
-    expect(buildAuthoringRequest(seeded)).toBeUndefined();
+    expect(authoringRequest(seeded)).toBeUndefined();
   });
 
   test("still rejects a submit that lacks the operator's fingerprint", () => {
@@ -303,12 +420,12 @@ describe("sftpFormFromLocator (accept-side pre-fill)", () => {
       username: "linkage",
       source: { kind: "raw" as const, value: "hunter2" },
     };
-    expect(buildAuthoringRequest(seeded)).toBeUndefined();
-    expect(sftpFormError(seeded)?.field).toBe("hostKeyFingerprint");
+    expect(authoringRequest(seeded)).toBeUndefined();
+    expect(formError(seeded)?.field).toBe("hostKeyFingerprint");
   });
 
   test("the operator's fields, added on top, produce a submittable request", () => {
-    const body = buildAuthoringRequest({
+    const body = authoringRequest({
       ...sftpFormFromLocator({
         host: "sftp.partner.example",
         port: 2022,

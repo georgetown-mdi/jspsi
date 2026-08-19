@@ -10,12 +10,13 @@ import {
   exchangeFilesOptions,
 } from "@bench/exchangeFilesModel";
 import { resolveCliBinaryPath, spawnZeroSetupJob } from "@jobs/cliDriver";
-import { zeroSetupFileSyncArgv } from "@jobs/intent";
+import { zeroSetupFileSyncArgv, zeroSetupSftpArgv } from "@jobs/intent";
 
 import {
   awaitJobTerminalState,
   captureZeroSetupArgv,
   tempDataRoot,
+  testSplitSftpServerEntry,
 } from "../utils/jobFixtures";
 
 // The console's file-handling card and the CLI's own parser, met at the one place
@@ -159,6 +160,28 @@ async function captureFiledropArgv(
   return { argv, dir };
 }
 
+/**
+ * The connection portion of a split-directory sftp zero-setup argv, built by the
+ * intent's own {@link zeroSetupSftpArgv}, plus the scratch directory it is run
+ * in. The credential `@path` points at a file written there: the CLI resolves an
+ * `@`-reference during config assembly, so an entry pointing at a missing file
+ * ends the run before the parser verdict these tests are after. The host is
+ * `.invalid` (RFC 6761) and no case reaches a transport, so nothing dials.
+ */
+function splitSftpConnection(): { dir: string; connectionArgs: Array<string> } {
+  const dir = scratchDir("zs-split");
+  const credentialPath = path.join(dir, "server-password");
+  fs.writeFileSync(credentialPath, "not-used-by-a-parse\n");
+  return {
+    dir,
+    connectionArgs: zeroSetupSftpArgv({
+      ...testSplitSftpServerEntry(),
+      host: "sftp.partner.invalid",
+      password: `@${credentialPath}`,
+    }),
+  };
+}
+
 /** Run the real CLI over `argv` and report what its parser did with it. */
 function parseWithRealCli(
   argv: Array<string>,
@@ -225,6 +248,45 @@ describe(
       const parsed = parseWithRealCli(argv, dir);
       expect(parsed.status).toBe(EXIT_USAGE);
       expect(parsed.stderr).toContain("Unknown arguments: unexpected-files");
+    });
+
+    test("a split-directory sftp argv survives a real parse under retain mode", async () => {
+      // The console's split-directory mapping, driven rather than asserted: the
+      // authored inbound directory rides the URL and the outbound one rides
+      // `--outbound-path`, which is what the CLI's own override reads them as.
+      const { dir, connectionArgs } = splitSftpConnection();
+      expect(connectionArgs[0]).toContain("/exchange/in");
+      expect(connectionArgs).toContain("--outbound-path=/exchange/out");
+
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs,
+        fileSyncArgs: retainModeFileSyncArgs(),
+        eventStream: true,
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+      const parsed = parseWithRealCli(argv, dir);
+      // The parser took every token, and the run got past the connection
+      // overrides to the input file this argv deliberately does not create.
+      expect(parsed.stderr).not.toContain("Unknown argument");
+      expect(parsed.status).not.toBe(EXIT_USAGE);
+      expect(parsed.stderr).toContain("input.csv does not exist");
+    });
+
+    test("the CLI itself refuses the same split without retain mode", async () => {
+      // Why the console states the retain precondition while the operator is
+      // still at the controls: the tool's own guard is a hard refusal, and it
+      // arrives only once the run has been launched.
+      const { dir, connectionArgs } = splitSftpConnection();
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs,
+        eventStream: true,
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+      const parsed = parseWithRealCli(argv, dir);
+      expect(parsed.status).toBe(EXIT_USAGE);
+      expect(parsed.stderr).toContain("requires retain mode");
     });
 
     test("the production driver's own spawn of the built CLI parses", async () => {

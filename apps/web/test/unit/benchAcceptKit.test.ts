@@ -20,6 +20,13 @@ const SFTP: AcceptKitEndpoint = {
   port: 2222,
   path: "/drops/psilink",
 };
+const SFTP_SPLIT: AcceptKitEndpoint = {
+  channel: "sftp",
+  host: "sftp.example.gov",
+  port: 2222,
+  inboundPath: "/exchange/from-partner",
+  outboundPath: "/exchange/from-inviter",
+};
 
 /** The sheet for an exchange in the default file-handling mode: everything
  * outside the retain and lockless suites below reads this one. */
@@ -58,7 +65,7 @@ function locklessSheet(endpoint: AcceptKitEndpoint, version = "1.4.2"): string {
 const RELEASES_URL = "https://github.com/georgetown-mdi/jspsi/releases";
 
 /** Every channel shape the console can mint a kit for. */
-const ENDPOINTS = [FILEDROP, UNNAMED_FILEDROP, SFTP];
+const ENDPOINTS = [FILEDROP, UNNAMED_FILEDROP, SFTP, SFTP_SPLIT];
 
 /** The exchange command as it stands in the default file-handling mode: the one
  * line a bilateral setting rewrites rather than adds. */
@@ -145,6 +152,20 @@ describe("accept kit, per-channel shape", () => {
   test("an sftp locator without a port or directory prints neither", () => {
     const text = sheet({ channel: "sftp", host: "sftp.example.gov" });
     expect(text).toContain("SFTP server:    sftp.example.gov\n");
+    expect(text).not.toContain("Directory:");
+  });
+
+  test("a split-directory sftp sheet states each folder from the READER's side", () => {
+    // The invitation names the pair from the inviter's side: the inviter's
+    // inbound is where its peer -- this sheet's reader -- writes.
+    const text = sheet({
+      channel: "sftp",
+      host: "sftp.example.gov",
+      inboundPath: "/exchange/from-partner",
+      outboundPath: "/exchange/from-inviter",
+    });
+    expect(text).toContain("You write to:   /exchange/from-partner");
+    expect(text).toContain("You read from:  /exchange/from-inviter");
     expect(text).not.toContain("Directory:");
   });
 
@@ -403,6 +424,21 @@ describe("accept kit, printable-ASCII enforcement", () => {
       const code = ch.charCodeAt(0);
       expect(code === 10 || (code >= 32 && code <= 126)).toBe(true);
     }
+
+    // The split-directory pair interpolates two more free-text fields, held to
+    // the same contract.
+    const splitText = sheet({
+      channel: "sftp",
+      host: "sftp.example.gov",
+      inboundPath: "héllo\nfrom-partner",
+      outboundPath: "/exchange/psi–link",
+    });
+    expect(splitText).toContain("You write to:   h?llo?from-partner");
+    expect(splitText).toContain("You read from:  /exchange/psi?link");
+    for (const ch of splitText) {
+      const code = ch.charCodeAt(0);
+      expect(code === 10 || (code >= 32 && code <= 126)).toBe(true);
+    }
   });
 });
 
@@ -430,6 +466,26 @@ describe("accept kit, retain mode", () => {
     );
     expect(sftpText).toContain("server named above");
     expect(sftpText).toContain("start from an empty directory");
+    // The split wording never crosses onto the single-path sheet.
+    expect(sftpText).not.toContain("both directories");
+
+    const splitText = retainSheet(SFTP_SPLIT);
+    expect(splitText).toContain(RETAIN_HEADING);
+    expect(splitText).toContain("permanent transcript");
+    // A split exchange leaves the transcript in BOTH named directories, so
+    // the disclosure names both directories' obligations rather than the
+    // single-directory wording above.
+    expect(splitText).toContain(
+      "The files stay in both directories above -- the one you write to",
+    );
+    expect(splitText).toContain("and the one you read from");
+    expect(splitText).toContain("server named above");
+    expect(splitText).toContain("both directories\nmust start empty");
+    // The single-path wording never crosses over onto the split sheet.
+    expect(splitText).not.toContain(
+      "The files stay in the directory the two of you meet in",
+    );
+    expect(splitText).not.toContain("start from an empty directory");
 
     for (const endpoint of [FILEDROP, UNNAMED_FILEDROP]) {
       const text = retainSheet(endpoint);

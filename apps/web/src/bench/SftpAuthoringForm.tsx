@@ -65,6 +65,7 @@ export type ProbeCeremony = "exchange" | "direct";
 export function SftpAuthoringForm({
   initial,
   isEdit,
+  retainFiles,
   reviewLocator,
   probeCeremony = "exchange",
   onAuthored,
@@ -74,6 +75,11 @@ export function SftpAuthoringForm({
   /** Editing an existing connection (its credential-free locator is prefilled),
    * as opposed to authoring a fresh one. */
   isEdit: boolean;
+  /** The exchange's retain-mode choice as it stands right now ("How files are
+   * handled", the card on the same screen). Read only for the split-directory
+   * precondition: a separate outbound directory requires retain mode, and the
+   * operator can flip that toggle without leaving this form. */
+  retainFiles: boolean;
   /** The partner-supplied locator (accept side): when present, host/port/path are
    * shown read-only and the operator authors only username, fingerprint, and
    * credential. Undefined on the invite side, where every field is editable. */
@@ -109,7 +115,7 @@ export function SftpAuthoringForm({
   // fill a pin, so the probe clears a presented result when this changes.
   const probeTarget = probeTargetOf(values, reviewLocator);
 
-  const error = sftpFormError(values);
+  const error = sftpFormError(values, retainFiles);
   const fieldError = (field: SftpFormField): string | undefined =>
     attempted && error?.field === field ? error.message : undefined;
 
@@ -119,7 +125,7 @@ export function SftpAuthoringForm({
   };
 
   async function submit(): Promise<void> {
-    const body = buildAuthoringRequest(values);
+    const body = buildAuthoringRequest(values, retainFiles);
     if (body === undefined) {
       setAttempted(true);
       // The port lives under a collapsed Advanced section; open it so a blocking
@@ -184,15 +190,32 @@ export function SftpAuthoringForm({
         onChange={(event) => update({ username: event.currentTarget.value })}
       />
       {reviewLocator === undefined && (
-        <TextInput
-          label="Remote directory"
-          description="Optional. The directory on the server both parties exchange through."
-          classNames={{ input: styles.mono }}
-          value={values.remoteDirectory}
-          onChange={(event) =>
-            update({ remoteDirectory: event.currentTarget.value })
-          }
-        />
+        <>
+          <TextInput
+            label={
+              values.outboundDirectory.trim() === ""
+                ? "Remote directory"
+                : "Inbound directory"
+            }
+            description={
+              values.outboundDirectory.trim() === ""
+                ? "Optional. The directory on the server both parties exchange through."
+                : "The directory on the server your partner writes to and you read from."
+            }
+            classNames={{ input: styles.mono }}
+            value={values.remoteDirectory}
+            error={fieldError("remoteDirectory")}
+            errorProps={{ role: "alert" }}
+            onChange={(event) =>
+              update({ remoteDirectory: event.currentTarget.value })
+            }
+          />
+          <SplitDirectoryField
+            value={values.outboundDirectory}
+            error={fieldError("outboundDirectory")}
+            onChange={(outboundDirectory) => update({ outboundDirectory })}
+          />
+        </>
       )}
       <TextInput
         ref={fingerprintRef}
@@ -305,6 +328,58 @@ function PartnerLocatorReview({ locator }: { locator: SftpEndpointLocator }) {
         </Text>
       )}
     </Alert>
+  );
+}
+
+/**
+ * The optional outbound-directory field, behind a disclosure so the ordinary
+ * single-directory connection stays a one-field decision. Opening it splits the
+ * remote directory into the inbound (peer-written) half above and the outbound
+ * (self-written) half here -- the layout a managed share or an SFTP server with
+ * distinct drop and pickup folders needs.
+ *
+ * Closing it CLEARS the value: the disclosure is the mode switch, so a collapsed
+ * control never holds a directory the operator can no longer see, and the
+ * blocking errors that attach to this field are only reachable while it is open.
+ */
+function SplitDirectoryField({
+  value,
+  error,
+  onChange,
+}: {
+  value: string;
+  error: string | undefined;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(value !== "");
+  return (
+    <div>
+      <Button
+        variant="subtle"
+        size="compact-sm"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen((current) => !current);
+          if (open) onChange("");
+        }}
+      >
+        {open
+          ? "Use one shared directory instead"
+          : "Use separate inbound and outbound directories"}
+      </Button>
+      <Collapse expanded={open}>
+        <TextInput
+          label="Outbound directory"
+          description="The directory on the server you write to and your partner reads from. It must differ from the inbound directory, and it needs retain mode."
+          classNames={{ input: styles.mono }}
+          value={value}
+          error={error}
+          errorProps={{ role: "alert" }}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          mt="xs"
+        />
+      </Collapse>
+    </div>
   );
 }
 

@@ -1,5 +1,5 @@
 import { Alert, Button, Group, Radio, Stack, Text } from "@mantine/core";
-import { IconAlertCircle } from "@tabler/icons-react";
+import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 
 import {
   ZERO_SETUP_EXCHANGE_FILES,
@@ -7,6 +7,7 @@ import {
 } from "./exchangeFilesModel";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
+import { splitDirectoryRetainProblem } from "./sftpConnectionChoice";
 import styles from "./bench.module.css";
 
 import type { DirectTransport } from "./directExchangeModel";
@@ -67,7 +68,18 @@ export function DirectServerSection({
   // it, rather than a run that fails at rendezvous.
   const exchangeFilesBlocked =
     exchangeFilesProblems(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES).length > 0;
-  const canContinue = transportReady && !exchangeFilesBlocked;
+  // The connection and the retain-mode toggle are authored on separate cards
+  // here, so the split-directory precondition is re-asked at the step's exit,
+  // where both are known, rather than only inside the authoring form the
+  // operator has already left.
+  const splitDirectoryProblem =
+    transport === "sftp"
+      ? splitDirectoryRetainProblem(sftpConnection, exchangeFiles.retainFiles)
+      : undefined;
+  const canContinue =
+    transportReady &&
+    !exchangeFilesBlocked &&
+    splitDirectoryProblem === undefined;
 
   return (
     <Stack gap="lg">
@@ -104,6 +116,7 @@ export function DirectServerSection({
         <SftpConnectionCard
           connection={sftpConnection}
           saveFilePreferred={false}
+          retainFiles={exchangeFiles.retainFiles}
           offerSaveFile={false}
           probeCeremony="direct"
           onAuthored={onAuthorConnection}
@@ -144,6 +157,16 @@ export function DirectServerSection({
         onToggleOpen={onExchangeFilesOpen}
         onChange={onExchangeFiles}
       />
+
+      {splitDirectoryProblem !== undefined && (
+        <Alert
+          color="red"
+          icon={<IconAlertTriangle aria-hidden />}
+          title="This connection needs retain mode"
+        >
+          {splitDirectoryProblem}
+        </Alert>
+      )}
 
       <Group>
         <Button onClick={onContinue} disabled={!canContinue}>

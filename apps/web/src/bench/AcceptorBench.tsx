@@ -1338,6 +1338,7 @@ export function AcceptorBench() {
                   <AcceptorSftpConnectionCard
                     locator={acceptSftpLocator}
                     connection={sftpConnection ?? null}
+                    retainFiles={exchangeFiles.retainFiles}
                     onAuthored={authorSftpConnection}
                     onCleared={clearSftpConnection}
                   />

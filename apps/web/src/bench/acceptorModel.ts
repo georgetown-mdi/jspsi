@@ -446,9 +446,12 @@ function isSingleDirectoryFiledrop(endpoint: AcceptEndpoint): boolean {
 }
 
 /** Whether an SFTP endpoint carries the inbound/outbound split the console does not
- * run: the authored connection form composes a single remote directory, so a
- * split-directory SFTP accept belongs on the command-line tool. A single-directory
- * SFTP endpoint (host plus an optional shared `path`) is runnable here. */
+ * ACCEPT. The console authors a split of its own -- the operator names both
+ * directories -- but an accept takes its directories from the partner's endpoint,
+ * which states the pair from the INVITER's side and so has to be mirror-swapped;
+ * that swap lives with the command-line tool, so a split-directory SFTP accept
+ * belongs there. A single-directory SFTP endpoint (host plus an optional shared
+ * `path`) is runnable here. */
 function isSplitDirectorySftp(endpoint: AcceptEndpoint): boolean {
   return endpoint.channel === "sftp" && endpoint.inboundPath !== undefined;
 }

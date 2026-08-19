@@ -29,6 +29,7 @@ import {
   TEST_HOST_KEY_FINGERPRINT,
   tempDataRoot,
   testSftpServerEntry,
+  testSplitSftpServerEntry,
   validIntent,
   validSftpIntent,
   validZeroSetupIntent,
@@ -107,6 +108,55 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     expect(yaml).toContain(HANDOFF_PASSPHRASE_PATH_PLACEHOLDER);
     expect(yaml).not.toContain("id_ed25519");
     expect(yaml).not.toContain("/etc/psilink/passphrase");
+  });
+
+  test("a split-directory sftp run hands off both remote directories verbatim", () => {
+    // The two remote directories are on the partner's SFTP server, identical on
+    // any machine, so they graduate as they ran -- unlike the LOCAL credential
+    // file beside them, which is placeholdered.
+    const handoff = buildJobHandoff(
+      validSftpIntent({
+        sharedSecret: DISTINCT_SECRET,
+        options: {
+          retainFiles: true,
+          timestampInFilename: true,
+          locklessRendezvous: true,
+        },
+      }),
+      testSplitSftpServerEntry(),
+      false,
+    );
+    const yaml =
+      handoff.template.kind === "config" ? handoff.template.yaml : "";
+    const doc = parseYaml(yaml) as {
+      connection: { server: Record<string, unknown> };
+    };
+    expect(doc.connection.server.inbound_path).toBe("/exchange/in");
+    expect(doc.connection.server.outbound_path).toBe("/exchange/out");
+    expect(doc.connection.server.path).toBeUndefined();
+    expect(yaml).toContain(HANDOFF_CREDENTIAL_PATH_PLACEHOLDER);
+    expect(yaml).not.toContain(CONTAINER_CREDENTIAL_PATH);
+    expect(safeParseExchangeSpec(parseYaml(yaml)).success).toBe(true);
+  });
+
+  test("a split-directory zero-setup run hands off the outbound-path flag", () => {
+    const handoff = buildJobHandoff(
+      validZeroSetupSftpIntent({
+        options: {
+          retainFiles: true,
+          timestampInFilename: true,
+          locklessRendezvous: true,
+        },
+      }),
+      testSplitSftpServerEntry(),
+      false,
+    );
+    const argv =
+      handoff.template.kind === "command" ? handoff.template.argv : [];
+    expect(argv).toContain("sftp://sftp.example.org:2222/exchange/in");
+    expect(argv).toContain("--outbound-path=/exchange/out");
+    expect(argv).toContain("--retain-files");
+    expect(argv.join(" ")).not.toContain(CONTAINER_CREDENTIAL_PATH);
   });
 
   test("a filedrop exchange placeholders the shared directory path", () => {

@@ -255,6 +255,13 @@ export interface SftpConnectionProjection {
   host: string;
   port?: number;
   path?: string;
+  /** The inbound (peer-written) remote directory of a split-directory
+   * connection; present only as a pair with {@link outboundPath}, and never
+   * alongside {@link path}. */
+  inboundPath?: string;
+  /** The outbound (self-written) remote directory of a split-directory
+   * connection. */
+  outboundPath?: string;
   credentialWarnings?: Array<string>;
 }
 
@@ -462,8 +469,9 @@ export class JobManager {
   /**
    * The credential-free projection of the authored SFTP connection for
    * `GET /api/jobs/sftp`, or null when none is authored. Explicitly mapped
-   * field-by-field (never a spread) so only {host, port, path} can ever cross
-   * the response boundary.
+   * field-by-field (never a spread) so only the locator fields {host, port, and
+   * whichever remote-directory form the entry carries} can ever cross the
+   * response boundary.
    */
   sftpProjection(): SftpConnectionProjection | null {
     const entry = this.authoredSftpServer;
@@ -471,6 +479,10 @@ export class JobManager {
     const projection: SftpConnectionProjection = { host: entry.host };
     if (entry.port !== undefined) projection.port = entry.port;
     if (entry.path !== undefined) projection.path = entry.path;
+    if (entry.inboundPath !== undefined)
+      projection.inboundPath = entry.inboundPath;
+    if (entry.outboundPath !== undefined)
+      projection.outboundPath = entry.outboundPath;
     projection.credentialWarnings = this.authoredCredentialWarnings;
     return projection;
   }
