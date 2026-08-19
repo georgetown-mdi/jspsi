@@ -18,7 +18,10 @@ on:
   # tests this gate runs via `npm run -w packages/core test`. The deploy filter
   # stays scoped to deploy-affecting sources only and omits the test/** trees.
   # The two filters cannot share a single list because of this intentional
-  # difference. packages/core/** matches the sibling cli_build_and_test.yaml.
+  # difference. packages/core/** matches the sibling cli_build_and_test.yaml,
+  # and packages/peerjs-broker/** is here because the web app consumes the
+  # signaling broker from that workspace and bundles it into the deployed
+  # server.
   pull_request:
     branches: [main, staging]
     paths:
@@ -27,6 +30,7 @@ on:
       - "tsconfig.base.json"
       - "apps/web/**"
       - "packages/core/**"
+      - "packages/peerjs-broker/**"
       - ".github/actions/setup/**"
       - ".github/workflows/eb_build_and_test.yaml"
 

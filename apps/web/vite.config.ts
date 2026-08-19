@@ -29,7 +29,6 @@ const srcAliases = {
   "@components": path.resolve(__dirname, "src/components"),
   "@jobs": path.resolve(__dirname, "src/jobs"),
   "@utils": path.resolve(__dirname, "src/utils"),
-  "@peerjs-server": path.resolve(__dirname, "src/contrib/peerjs-server"),
   "@psi": path.resolve(__dirname, "src/psi"),
   "@theme": path.resolve(__dirname, "src/theme"),
   "@": path.resolve(__dirname, "src"),
@@ -145,8 +144,6 @@ export default defineConfig((_configEnv) => {
         // test files) on top of these, so list only the code that lives inside
         // src/ but is not hand-written product code.
         exclude: [
-          // Vendored PeerJS signaling server (third-party, also eslint-ignored).
-          "src/contrib/**",
           // TanStack Router codegen (routeTree.gen.ts).
           "**/*.gen.ts",
         ],

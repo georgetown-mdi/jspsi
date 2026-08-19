@@ -1,16 +1,15 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["**/*.ts", "**/*.tsx", "nitro.config.ts", "vite.config.ts"],
+  "include": ["src/**/*.ts"],
   "exclude": ["node_modules"],
-  "references": [{ "path": "../../packages/core" }],
   "compilerOptions": {
     "target": "ES2022",
-    "jsx": "react-jsx",
     "module": "esnext",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    /* "types": ["vite/client"], // declared manually in __root.tsx */
+    "lib": ["ES2022"],
 
-    /* Bundler mode */
+    /* Bundler mode: the package ships TypeScript source, which the web app's
+       vite/nitro passes transform and the standalone entry runs under tsx, so
+       nothing here emits. */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
@@ -25,12 +24,6 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
     "strictNullChecks": true,
-    "forceConsistentCasingInFileNames": true,
-
-    "paths": {
-      "@components/*": ["./src/components/*"],
-      "@utils/*": ["./src/utils/*"],
-      "@*": ["./src/*"]
-    }
+    "forceConsistentCasingInFileNames": true
   }
 }

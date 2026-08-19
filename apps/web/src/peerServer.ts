@@ -1,10 +1,10 @@
-import { CreatePeerServerWSOnly } from "@peerjs-server/index";
+import { CreatePeerServerWSOnly } from "@psilink/peerjs-broker";
 
 import { getServer as getHttpServer } from "./httpServer";
 
 import type { AddressInfo } from "node:net";
 
-import type { PeerServerInstance } from "@peerjs-server/instance";
+import type { PeerServerInstance } from "@psilink/peerjs-broker/instance";
 
 function createPeerServer(): PeerServerInstance {
   const server = getHttpServer()!;

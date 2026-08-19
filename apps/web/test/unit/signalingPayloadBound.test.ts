@@ -6,8 +6,8 @@ import { WebSocketServer as WsServer } from "ws";
 import {
   MAX_SIGNALING_PAYLOAD_BYTES,
   WebSocketServer,
-} from "@peerjs-server/services/webSocketServer/index.ts";
-import { Realm } from "@peerjs-server/models/realm.ts";
+} from "@psilink/peerjs-broker/services/webSocketServer/index";
+import { Realm } from "@psilink/peerjs-broker/models/realm";
 
 import {
   KEY,

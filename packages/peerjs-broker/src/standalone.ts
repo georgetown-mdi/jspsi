@@ -1,26 +1,27 @@
 import { createServer } from "node:http";
 
-import { CreatePeerServerWSOnly } from "@peerjs-server/index.ts";
+import { CreatePeerServerWSOnly } from "./contrib/index.ts";
 
 import type { AddressInfo } from "node:net";
 
 /**
  * The vendored PeerJS broker on a loopback HTTP server of its own, as a process
- * entry point.
+ * entry point: `npm start -w packages/peerjs-broker`, or spawned under `tsx`.
  *
- * It exists so a test outside this app can drive the REAL signaling wire rather
- * than a stand-in: the CLI's WebRTC transport hand-writes a broker client
+ * It is what makes the broker startable without an application around it, so a
+ * consumer outside the web app drives the REAL signaling wire rather than a
+ * stand-in: the CLI's WebRTC transport hand-writes a broker client
  * (apps/cli/src/connection/webrtc/brokerClient.ts) against facts measured here,
- * and apps/cli may not import apps/web (eslint.boundaries.mjs), so the only
- * sanctioned coupling is spawning this file. The CLI harness that does so is
- * apps/cli/test/signaling/brokerProcess.ts, and it is why
- * .github/workflows/cli_build_and_test.yaml filters on this directory.
+ * and its harness (apps/cli/test/signaling/brokerProcess.ts) spawns this file.
+ * That is why .github/workflows/cli_build_and_test.yaml filters on this
+ * workspace.
  *
- * In-process consumers inside this app want `test/utils/signalingHarness.ts`
- * instead: it builds the `WebSocketServer` directly and hands back the realm.
- * This runner deliberately goes through `CreatePeerServerWSOnly`, the same entry
- * point `src/peerServer.ts` mounts, so what a spawning test sees is the wiring
- * the deployed app has rather than a subset of it.
+ * In-process consumers inside the web app want its
+ * `test/utils/signalingHarness.ts` instead: it builds the `WebSocketServer`
+ * directly and hands back the realm. This runner deliberately goes through
+ * `CreatePeerServerWSOnly`, the same entry point the web app's
+ * `src/peerServer.ts` mounts, so what a spawning test sees is the wiring the
+ * deployed app has rather than a subset of it.
  *
  * Protocol with the parent process: it prints one `psilink-broker <port>` line
  * on stdout once listening, then stays up until it is signalled. Nothing else

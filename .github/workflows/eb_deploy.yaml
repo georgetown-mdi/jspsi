@@ -27,6 +27,9 @@ on:
       - "packages/core/package.json"
       - "packages/core/rollup.config.ts"
       - "packages/core/tsconfig.json"
+      - "packages/peerjs-broker/src/**"
+      - "packages/peerjs-broker/package.json"
+      - "packages/peerjs-broker/tsconfig.json"
       - ".github/actions/setup/**"
 
   workflow_dispatch:

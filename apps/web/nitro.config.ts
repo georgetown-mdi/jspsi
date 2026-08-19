@@ -18,7 +18,6 @@ const serverAliases = {
   "@components": resolve(srcDir, "components"),
   "@jobs": resolve(srcDir, "jobs"),
   "@utils": resolve(srcDir, "utils"),
-  "@peerjs-server": resolve(srcDir, "contrib/peerjs-server"),
   "@psi": resolve(srcDir, "psi"),
   "@theme": resolve(srcDir, "theme"),
 };

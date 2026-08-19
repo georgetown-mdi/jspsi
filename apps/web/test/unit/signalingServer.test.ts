@@ -4,8 +4,8 @@ import https from "node:https";
 import { afterEach, describe, expect, test } from "vitest";
 import WebSocket from "ws";
 
-import { Realm } from "@peerjs-server/models/realm";
-import { WebSocketServer } from "@peerjs-server/services/webSocketServer/index";
+import { Realm } from "@psilink/peerjs-broker/models/realm";
+import { WebSocketServer } from "@psilink/peerjs-broker/services/webSocketServer/index";
 
 import {
   loopbackTlsCert,
@@ -14,7 +14,7 @@ import {
 import { hardenUpgradeSurface } from "../../server/upgradeHardening";
 
 import type { AddressInfo } from "node:net";
-import type { IRealm } from "@peerjs-server/models/realm";
+import type { IRealm } from "@psilink/peerjs-broker/models/realm";
 
 // Socket-level coverage for the signaling guards that need a live `ws`
 // connection: the liveness flag that gates the two-tier reaper, the

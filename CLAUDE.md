@@ -2,7 +2,7 @@
 
 psilink does Privacy Preserving Record Linkage (PPRL) via Private Set Intersection (PSI) between two parties over SFTP, file-drop, or WebRTC.
 
-It is a npm workspaces monorepo (`packages/core`, `apps/cli`, `apps/web`); apps consume packages, not the reverse.
+It is a npm workspaces monorepo (`packages/core`, `packages/peerjs-broker`, `apps/cli`, `apps/web`); apps consume packages, not the reverse.
 
 **Read `CONTRIBUTING.md` before your first edit or commit.** It holds the build/test/dev reference and every coding and commit convention (enforced by CI and review), not reproduced here in full. This file is only the complement: project operations and agent-specific rules.
 

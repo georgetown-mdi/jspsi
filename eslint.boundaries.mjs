@@ -35,8 +35,8 @@
 // text, so this is a ban on the shapes a contributor writes, not a proof that
 // the workspace graph is acyclic.
 
-const CORE_MESSAGE =
-  "packages/core must not import from an app: apps consume @psilink/core, never the reverse. Move the shared code into packages/core/src and import it from the app.";
+const PACKAGE_MESSAGE =
+  "a package must not import from an app: apps consume packages, never the reverse. Move the shared code into a packages/ workspace and import it from the app.";
 
 const CLI_MESSAGE =
   "apps/cli must not import from apps/web: the two apps share code only through @psilink/core. Move the shared code into packages/core/src.";
@@ -45,11 +45,15 @@ const WEB_MESSAGE =
   "apps/web must not import from apps/cli: the two apps share code only through @psilink/core. Move the shared code into packages/core/src.";
 
 /**
- * Cross-workspace import bans, keyed by the workspace each one guards. Every
- * value is a `no-restricted-imports` `patterns` array.
+ * Cross-workspace import bans, keyed by the tree each one guards -- `packages`
+ * covers every workspace under `packages/`, since the direction it enforces is
+ * the same for all of them. Every value is a `no-restricted-imports` `patterns`
+ * array.
  */
 export const crossWorkspaceImportBans = {
-  core: [{ group: ["**/apps/**", "psilink", "jspsi"], message: CORE_MESSAGE }],
+  packages: [
+    { group: ["**/apps/**", "psilink", "jspsi"], message: PACKAGE_MESSAGE },
+  ],
   cli: [
     {
       group: [

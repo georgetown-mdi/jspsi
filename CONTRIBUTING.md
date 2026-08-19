@@ -21,8 +21,9 @@ PSI-Link is organized as an npm workspaces monorepo. The workspaces and the supp
 | Path             | Description                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------ |
 | `packages/core/` | Shared library: PSI primitive, exchange orchestration, file-sync transport, config schemas |
+| `packages/peerjs-broker/` | The PeerJS-compatible WebRTC signaling broker: vendored server source plus a standalone entry point (`npm start -w packages/peerjs-broker`). Ships TypeScript source with no build step; the web app bundles it into its server |
 | `apps/cli/`      | Node.js CLI (`psilink`), built with Rollup, distributed as a Docker image                  |
-| `apps/web/`      | TanStack Start (React/SSR) web app with built-in PeerJS peer-coordination server           |
+| `apps/web/`      | TanStack Start (React/SSR) web app; serves the peer-coordination broker above at `/api`    |
 | `docs/`          | Documentation, three tiers: `docs/` overview (conceptual/operational), `docs/spec/` technical, `docs/notes/` design records |
 | `scripts/`       | Repository checks CI runs (doc links, PR checklist, claim and drift guards) with their tests |
 | `support/`       | [Field guides](support/README.md) for the environment around psilink -- Windows, Docker, agency networks -- plus the FIPS measurement harness |

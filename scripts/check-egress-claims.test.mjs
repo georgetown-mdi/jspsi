@@ -559,11 +559,11 @@ describe("scanned files", () => {
   it("skips license and notice files", () => {
     const attribution =
       "Copyright (c) 2013 Michelle Bu and Eric Zhang, http://peerjs.com\n";
-    expect(isScannedFile("apps/web/src/contrib/peerjs-server/LICENSE")).toBe(
+    expect(isScannedFile("packages/peerjs-broker/src/contrib/LICENSE")).toBe(
       false,
     );
     expect(
-      fileViolations("apps/web/src/contrib/peerjs-server/LICENSE", attribution),
+      fileViolations("packages/peerjs-broker/src/contrib/LICENSE", attribution),
     ).toEqual([]);
     expect(fileViolations("apps/web/src/notes.txt", attribution)).toHaveLength(
       1,

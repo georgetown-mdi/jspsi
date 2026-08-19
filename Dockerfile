@@ -15,6 +15,7 @@ WORKDIR /build
 
 COPY .npmrc package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
+COPY packages/peerjs-broker/package.json packages/peerjs-broker/
 COPY apps/cli/package.json apps/cli/
 COPY apps/web/package.json apps/web/
 COPY lib lib
@@ -27,7 +28,7 @@ COPY lib lib
 # above puts the install-script policy in force here as it is locally and in CI;
 # what that does and does not reach is in docs/spec/DEPENDENCY_PINS.md.
 RUN --mount=type=cache,target=/root/.npm \
-  npm ci -w packages/core -w apps/cli -w apps/web
+  npm ci -w packages/core -w packages/peerjs-broker -w apps/cli -w apps/web
 
 COPY tsconfig.base.json tsconfig.json ./
 COPY packages/core/*.ts packages/core/tsconfig.json packages/core/
@@ -40,7 +41,11 @@ RUN npm run build -w packages/core -w apps/cli
 
 # apps/web build inputs: its root-level config (vite/nitro/postcss/tsconfig) plus
 # the source, server entry, and static assets vite reads. There is no index.html
-# (TanStack Start generates the document), so none is copied.
+# (TanStack Start generates the document), so none is copied. The signaling
+# broker is a source-only workspace the web build bundles into its server output
+# (no build step of its own), so its source is a build input here too.
+COPY packages/peerjs-broker/tsconfig.json packages/peerjs-broker/
+COPY packages/peerjs-broker/src packages/peerjs-broker/src/
 COPY apps/web/vite.config.ts apps/web/nitro.config.ts apps/web/postcss.config.cjs apps/web/tsconfig.json apps/web/
 COPY apps/web/src apps/web/src/
 COPY apps/web/server apps/web/server/
@@ -112,6 +117,11 @@ RUN chmod g-s /usr/sbin/unix_chkpwd
 
 WORKDIR /app
 COPY --from=builder /build/node_modules node_modules
+# npm links every workspace declared in the root manifest into node_modules,
+# including packages/peerjs-broker, but this image never ships the broker's
+# source, so the copied link dangles and the containment gate below refuses
+# it. Un-forced so the build fails loudly if npm ever stops creating the link.
+RUN rm /app/node_modules/@psilink/peerjs-broker
 COPY --from=builder /build/packages/core/package.json packages/core/
 COPY --from=builder /build/packages/core/dist packages/core/dist/
 COPY --from=builder /build/apps/cli/package.json apps/cli/
