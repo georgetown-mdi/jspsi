@@ -190,14 +190,18 @@ on the peer) or `closed` (this side tore its own link down); a transient
 recovers.
 
 A teardown on this side reaches the wait as the channel closing, not as a state
-change -- closing a peer connection fires no state event -- and the channel
-closing is otherwise the peer's receipt. The web wait therefore reads the link
-at that event rather than taking the close at face value: a channel that starts
-closing while this side's peer connection is already gone took the final frame
-down with it, and takes the no-live-peer exit. A completed `close` arriving with
-no `closing` before it is still read as the peer's, because by then this side's
-own stack may have answered the close by tearing the link down, and a doubt
-invented about a healthy exchange is the worse error.
+change -- closing a peer connection fires no state event, measured on Chromium,
+the one engine the browser suite drives -- and the channel closing is otherwise
+the peer's receipt. The web wait therefore reads the link at that event rather
+than taking the close at face value: a channel that starts closing while this
+side's peer connection is already gone took the final frame down with it, and
+takes the no-live-peer exit. A completed `close` arriving with no `closing`
+before it is still read as the peer's, because a link state read after a close
+has completed no longer says whether the link died before the close or in
+answer to it, and a doubt invented about a healthy exchange is the worse error.
+The reading is therefore inert on a stack that never fires `closing`: every
+close reads as the peer's there, the pre-reading behavior -- the stated limit
+of this discrimination.
 
 The web wait also ends when the run itself is cancelled. Up to the ceiling the
 wait's length is the PEER's to choose -- it holds the wait simply by keeping ICE

@@ -163,11 +163,11 @@ export function waitForPeerClose(
     };
     const onChannelClose = () => {
       // The terminal event, kept for a stack that never enters `closing` at
-      // all. It deliberately does not repeat the reading above: a close that
-      // has already completed is one this side's own stack may have answered by
-      // tearing the link down, so a dead link here would not say that the link
-      // was dead BEFORE the close. Reporting the peer's close is the reading
-      // that cannot invent a doubt about a healthy exchange.
+      // all. It deliberately does not repeat the reading above: once a close
+      // has completed, a dead link no longer says the link was dead BEFORE the
+      // close rather than torn down in answer to it, whoever tore it. Reporting
+      // the peer's close is the reading that cannot invent a doubt about a
+      // healthy exchange.
       settle("peer-closed");
     };
     const onAbort = () => {
