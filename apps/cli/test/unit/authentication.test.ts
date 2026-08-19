@@ -297,9 +297,9 @@ test("a legacy SPAKE2-shaped reply fails a new initiator with a clean error", as
 // authenticateConnection checks `expires` twice: once synchronously before the
 // key exchange starts, and once after runKex returns, to catch a secret that
 // expires *during* the round-trip. Only the pre-handshake check is covered
-// above ("authentication throws for an expired token..."); these two tests
-// drive the post-handshake branch (auth.ts) by faking only Date: start the
-// clock just before `expires`, kick off both sides over an in-memory pipe (no
+// above ("authentication throws for an expired token..."); this test drives
+// the post-handshake branch (auth.ts) by faking only Date: start the clock
+// just before `expires`, kick off both sides over an in-memory pipe (no
 // real-timer coupling, so the handshake still completes), then advance the
 // clock past `expires` while the round-trip is in flight, so the post-handshake
 // checks -- which run only after both runKex calls resolve -- see the secret as
