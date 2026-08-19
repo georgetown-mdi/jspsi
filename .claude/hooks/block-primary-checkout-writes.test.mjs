@@ -1,0 +1,167 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it } from "vitest";
+
+const HOOK = fileURLToPath(
+  new URL("./block-primary-checkout-writes.mjs", import.meta.url),
+);
+
+// Run the hook as a real subprocess with a synthesized PreToolUse payload on
+// stdin. Exit 0 allows the write, exit 2 blocks it and feeds stderr back to
+// Claude, so both are expected outcomes and neither may throw.
+function runHook(payload) {
+  const { status, stderr } = spawnSync("node", [HOOK], {
+    input: JSON.stringify(payload),
+    encoding: "utf8",
+  });
+  return { status, stderr };
+}
+
+const write = (file_path, cwd, tool_name = "Write") =>
+  runHook({ tool_name, tool_input: { file_path, content: "x" }, cwd });
+
+// A throwaway repo carrying one tracked file, one gitignored file, and a linked
+// worktree nested under .claude/worktrees/ the way the harness places them.
+function makeRepo() {
+  const dir = mkdtempSync(join(tmpdir(), "primary-writes-"));
+  const git = (...args) =>
+    execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+  git("init", "-q", "-b", "primary");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  writeFileSync(join(dir, "tracked.ts"), "export const a = 1;\n");
+  writeFileSync(join(dir, ".gitignore"), "scratch\n.claude/worktrees/\n");
+  mkdirSync(join(dir, "scratch"), { recursive: true });
+  git("add", "tracked.ts", ".gitignore");
+  git("commit", "-q", "-m", "Base commit");
+  return dir;
+}
+
+function addWorktree(main, branch) {
+  const path = join(main, ".claude", "worktrees", `agent-${branch}`);
+  mkdirSync(join(main, ".claude", "worktrees"), { recursive: true });
+  execFileSync("git", [
+    "-C",
+    main,
+    "worktree",
+    "add",
+    "-q",
+    "-b",
+    branch,
+    path,
+  ]);
+  return path;
+}
+
+describe("block-primary-checkout-writes hook", () => {
+  const dirs = [];
+  const track = (path) => {
+    dirs.push(path);
+    return path;
+  };
+  afterEach(() => {
+    while (dirs.length > 0)
+      rmSync(dirs.pop(), { recursive: true, force: true });
+  });
+
+  it("ignores tools it does not gate", () => {
+    const dir = track(makeRepo());
+    const { status } = runHook({
+      tool_name: "Bash",
+      tool_input: { command: `echo x > ${join(dir, "tracked.ts")}` },
+      cwd: dir,
+    });
+    expect(status).toBe(0);
+  });
+
+  it("ignores an unparseable event", () => {
+    const { status } = spawnSync("node", [HOOK], {
+      input: "not json",
+      encoding: "utf8",
+    });
+    expect(status).toBe(0);
+  });
+
+  it("ignores a call that names no path", () => {
+    const dir = track(makeRepo());
+    const { status } = runHook({
+      tool_name: "Write",
+      tool_input: { content: "x" },
+      cwd: dir,
+    });
+    expect(status).toBe(0);
+  });
+
+  it("blocks every gated tool writing a tracked main-worktree file", () => {
+    const dir = track(makeRepo());
+    const tracked = join(dir, "tracked.ts");
+    for (const tool_name of ["Write", "Edit"]) {
+      const { status, stderr } = write(tracked, dir, tool_name);
+      expect(status, tool_name).toBe(2);
+      expect(stderr).toContain("tracked content of the main worktree");
+    }
+    const notebook = runHook({
+      tool_name: "NotebookEdit",
+      tool_input: { notebook_path: tracked },
+      cwd: dir,
+    });
+    expect(notebook.status).toBe(2);
+  });
+
+  it("resolves a relative path against the calling directory", () => {
+    const dir = track(makeRepo());
+    expect(write("tracked.ts", dir).status).toBe(2);
+  });
+
+  it("allows an untracked or gitignored path in the main worktree", () => {
+    const dir = track(makeRepo());
+    for (const path of [
+      join(dir, "brand-new.ts"),
+      join(dir, "scratch", "notes.md"),
+      join(dir, "scratch", "briefs", "deep", "brief.md"),
+    ]) {
+      expect(write(path, dir).status, path).toBe(0);
+    }
+  });
+
+  it("allows a tracked file inside a linked worktree nested under the main root", () => {
+    // The prefix trap: .claude/worktrees/<tree> sits under the main root's path,
+    // so a plain prefix test would refuse every fix implementer's edits.
+    const dir = track(makeRepo());
+    const tree = addWorktree(dir, "feature");
+    expect(write(join(tree, "tracked.ts"), dir).status).toBe(0);
+    expect(write(join(tree, "tracked.ts"), tree).status).toBe(0);
+  });
+
+  it("allows a path outside any repository", () => {
+    const dir = track(makeRepo());
+    const outside = track(mkdtempSync(join(tmpdir(), "primary-writes-bare-")));
+    expect(write(join(outside, "file.ts"), outside).status).toBe(0);
+    expect(write("/tmp/probe-script.mjs", dir).status).toBe(0);
+  });
+
+  it("allows the write while the override sentinel is present", () => {
+    const dir = track(makeRepo());
+    const sentinel = join(
+      dir,
+      ".claude",
+      "allow-primary-checkout-writes.local",
+    );
+    mkdirSync(join(dir, ".claude"), { recursive: true });
+    expect(write(join(dir, "tracked.ts"), dir).status).toBe(2);
+    writeFileSync(sentinel, "");
+    expect(write(join(dir, "tracked.ts"), dir).status).toBe(0);
+    rmSync(sentinel);
+    expect(write(join(dir, "tracked.ts"), dir).status).toBe(2);
+  });
+
+  it("names the sentinel and the worktree route in its refusal", () => {
+    const dir = track(makeRepo());
+    const { stderr } = write(join(dir, "tracked.ts"), dir);
+    expect(stderr).toContain(".claude/allow-primary-checkout-writes.local");
+    expect(stderr).toContain(".claude/worktrees/");
+  });
+});
