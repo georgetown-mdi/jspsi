@@ -265,6 +265,27 @@ test("single-pass sender refuses a resolved table longer than its own row count"
   expectProtocolRefusal(err, /local half carries 4 entries, more than the 3/);
 });
 
+test("single-pass sender refuses a resolved table whose local half descends", async () => {
+  // Reversing both halves keeps every entry whole, in range, distinct, and paired
+  // with the same partner row, so the only property left to fail is the ascending
+  // order the AssociationTable contract carries and the result rows are read in.
+  const err = await singlePassWithDeviation(
+    onIndexTable((table) => [[...table[0]].reverse(), [...table[1]].reverse()]),
+  );
+  expectProtocolRefusal(err, /local half is not in ascending order/);
+});
+
+test("single-pass sender accepts a resolved table whose partner half descends", async () => {
+  // The order is a property of the LOCAL half alone: the partner half's entries
+  // follow their pairing, not their own order, so requiring it there would refuse
+  // an honest table. The fixture's own halves happen to ascend together, so this
+  // is what keeps the rule from being read as covering both.
+  const err = await singlePassWithDeviation(
+    onIndexTable((table) => [table[0], [...table[1]].reverse()]),
+  );
+  expect(err).toBeUndefined();
+});
+
 // --- The cascade round's association table ------------------------------------
 // The round's matches as the partner computed them: our half indexes the set this
 // party just encrypted, the partner half the set the partner encrypted.
@@ -554,6 +575,29 @@ test("a distinct in-range list is accepted at either bound scale", () => {
   expect(() =>
     assertPartnerIndices("me", "the list", [0, 2], MAX_RECORD_COUNT),
   ).not.toThrow();
+});
+
+// --- The ascending rule -------------------------------------------------------
+// Opt-in per list, so an out-of-order list is refused only where the order is the
+// list's own property. A list that both repeats and descends is reported as the
+// repeat, the narrower of the two faults.
+
+test("a descending list is refused only under the ascending rule", () => {
+  expect(() =>
+    assertPartnerIndices("me", "the list", [2, 0], ROWS),
+  ).not.toThrow();
+  expect(() =>
+    assertPartnerIndices("me", "the list", [2, 0], ROWS, { ascending: true }),
+  ).toThrow(/the list is not in ascending order/);
+  expect(() =>
+    assertPartnerIndices("me", "the list", [0, 2], ROWS, { ascending: true }),
+  ).not.toThrow();
+});
+
+test("a repeat under the ascending rule is reported as the repeat", () => {
+  expect(() =>
+    assertPartnerIndices("me", "the list", [1, 1], ROWS, { ascending: true }),
+  ).toThrow(/the list repeats an index/);
 });
 
 // --- The untouched run --------------------------------------------------------

@@ -32,7 +32,9 @@ export interface PartnerPayload {
    * `rowIndices[i]` is the sender's row index for the record in `rows[i]`.
    * When used as a lookup key, these values correspond to element `[1]` of the
    * receiver's local {@link AssociationTable} (the partner indices stored
-   * there are the sender's row indices). Empty when partner had no data.
+   * there are the sender's row indices). Distinct: one entry addresses one of
+   * the sender's rows, so a received message repeating an index is refused at
+   * parse. Empty when partner had no data.
    */
   rowIndices: number[];
   /** Payload rows, one per matched record. Empty when partner had no data. */
@@ -58,6 +60,23 @@ const isPayloadCell = (cell: unknown): boolean =>
   typeof cell === "string" || cell === null;
 const isPayloadRow = (row: unknown): boolean =>
   Array.isArray(row) && row.every(isPayloadCell);
+
+// `rowIndices` is the lookup key the receiver reads the message by: each entry
+// names one of the sender's rows and pairs it with the row of `rows` at the same
+// position, so a repeat names two payload rows for one record and the message
+// does not say which is the record's. That is a structural property of the frame,
+// refused here alongside every other malformed shape rather than downstream. The
+// scan stops at the first repeat, and its Set is sized by the entries the frame
+// already materialized rather than by any bound the partner names, so it costs no
+// more than the array it walks.
+const hasDistinctRowIndices = (rowIndices: ReadonlyArray<number>): boolean => {
+  const seen = new Set<number>();
+  for (const rowIndex of rowIndices) {
+    if (seen.has(rowIndex)) return false;
+    seen.add(rowIndex);
+  }
+  return true;
+};
 
 const payloadWireSchema = z.discriminatedUnion("hasData", [
   z.object({ hasData: z.literal(false) }),
@@ -111,6 +130,10 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
     .refine(
       (v) => v.rowIndices.length === v.rows.length,
       "rowIndices and rows must have the same length",
+    )
+    .refine(
+      (v) => hasDistinctRowIndices(v.rowIndices),
+      "rowIndices must not repeat a row index",
     ),
 ]);
 
@@ -933,6 +956,10 @@ export function buildOutputTable(
     partnerPayload.rowIndices.map((rowIdx, pos) => [rowIdx, pos]),
   );
 
+  // The wire schema refuses a repeated index at parse, so a received message
+  // cannot reach here carrying one -- but this is an exported entry point taking
+  // a plain PartnerPayload, whose argument no type ties to a parsed frame. The
+  // invariant keeps a check of its own rather than resting on that call path.
   if (theirIdxToPayloadPos.size !== partnerPayload.rowIndices.length) {
     throw new Error("partner payload rowIndices contains duplicate indices");
   }

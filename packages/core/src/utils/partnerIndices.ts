@@ -106,6 +106,19 @@ function createRepeatDetector(
   };
 }
 
+/** Optional per-list rules beyond whole, in-range, and non-repeating. */
+export interface PartnerIndexRules {
+  /**
+   * Require the entries to arrive in ascending order. Set only where the order
+   * is a property of the list rather than an incidental one: an association
+   * table's local half is read in that order downstream (the result rows, and
+   * the exchange record's reconstruction of them), so a partner-resolved table
+   * that does not carry it is refused here rather than silently reordering what
+   * those readers reproduce.
+   */
+  ascending?: boolean;
+}
+
 /**
  * Requires every entry of a partner-supplied index list to be a whole number in
  * `[0, exclusiveBound)`, with no entry repeated.
@@ -120,14 +133,17 @@ function createRepeatDetector(
  * @param indices - The partner-supplied entries, in received order.
  * @param exclusiveBound - The count of addressable slots on this side. Derived
  *   locally or from authenticated session state, never from the received frame.
+ * @param rules - Optional additional properties the list must carry; see
+ *   {@link PartnerIndexRules}.
  * @throws A `"protocol"` {@link ConnectionError} on a non-integer, out-of-range,
- *   or repeated entry.
+ *   or repeated entry, or on a descending pair under `rules.ascending`.
  */
 export function assertPartnerIndices(
   participantId: string,
   what: string,
   indices: ReadonlyArray<number>,
   exclusiveBound: number,
+  rules: PartnerIndexRules = {},
 ): void {
   if (indices.length > exclusiveBound)
     throw partnerProtocolError(
@@ -136,6 +152,10 @@ export function assertPartnerIndices(
         `${exclusiveBound} this side can address`,
     );
   const repeats = createRepeatDetector(indices.length, exclusiveBound);
+  let previous = -1;
+  // Each entry is checked in one pass, the repeat before the order, so a list that
+  // both repeats and descends is reported as the repeat -- the narrower of the two
+  // faults, and the one every seam checks.
   for (const index of indices) {
     if (!Number.isInteger(index))
       throw partnerProtocolError(
@@ -149,11 +169,17 @@ export function assertPartnerIndices(
       );
     if (repeats(index))
       throw partnerProtocolError(participantId, `${what} repeats an index`);
+    if (rules.ascending === true && index < previous)
+      throw partnerProtocolError(
+        participantId,
+        `${what} is not in ascending order`,
+      );
+    previous = index;
   }
 }
 
 /** One half of a partner-supplied association table, with what bounds it. */
-export interface PartnerIndexTableHalf {
+export interface PartnerIndexTableHalf extends PartnerIndexRules {
   /** Names the half, for the error message. */
   what: string;
   /** The partner-supplied entries, in received order. */
@@ -174,13 +200,16 @@ export interface PartnerIndexTableHalf {
  * `localHalf.exclusiveBound`. Running the halves through this one entry point
  * keeps the order out of the callers' hands.
  *
+ * Either half may additionally carry the {@link PartnerIndexRules} a seam's own
+ * table has to satisfy, applied to that half alone.
+ *
  * @param participantId - This party's participant id.
  * @param localHalf - The half addressing state this party owns, whose bound is
  *   therefore one of its own counts.
  * @param partnerHalf - The half addressing the partner's rows or masked-set
  *   elements, bounded by a count carried on the authenticated terms exchange.
  * @throws A `"protocol"` {@link ConnectionError} on a bad entry in either half,
- *   or on halves of unequal length.
+ *   on halves of unequal length, or on a half breaking a rule it declared.
  */
 export function assertPartnerIndexTable(
   participantId: string,
@@ -192,6 +221,7 @@ export function assertPartnerIndexTable(
     localHalf.what,
     localHalf.indices,
     localHalf.exclusiveBound,
+    { ascending: localHalf.ascending },
   );
   assertPartnerIndexCount(
     participantId,
@@ -204,5 +234,6 @@ export function assertPartnerIndexTable(
     partnerHalf.what,
     partnerHalf.indices,
     partnerHalf.exclusiveBound,
+    { ascending: partnerHalf.ascending },
   );
 }

@@ -627,7 +627,11 @@ export async function linkViaSinglePassPSI(
     // recompute it -- but every index in it addresses a row one of the two
     // parties counted, and both counts are authenticated session state. Check the
     // two halves against them before the table becomes this party's match set,
-    // its payload row selection, and its attested record.
+    // its payload row selection, and its attested record. The ascending order of
+    // the local half is checked with them: it is part of the AssociationTable
+    // contract (types.ts) that the cascade produces structurally and the receiver
+    // sorts this table into, and the result rows and the record's reconstruction
+    // of them read the table in it.
     const table = await receiveParsed(conn, associationTableMessage);
     assertPartnerIndexTable(
       participant.id,
@@ -635,6 +639,7 @@ export async function linkViaSinglePassPSI(
         what: "the resolved association table's local half",
         indices: table[0],
         exclusiveBound: numRecords,
+        ascending: true,
       },
       {
         what: "the resolved association table's partner half",
