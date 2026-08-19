@@ -2,10 +2,10 @@ import { z } from "zod";
 
 import { UsageError } from "../errors.js";
 import { SEMANTIC_TYPES } from "../types";
-import { MAX_NAME_LENGTH } from "./linkageTerms.js";
+import { COUNT_ONLY_SHAPE_REFUSALS, MAX_NAME_LENGTH } from "./linkageTerms.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 
-import type { SemanticType } from "../types";
+import type { Algorithm, SemanticType } from "../types";
 
 // --- Metadata ----------------------------------------------------------------
 /**
@@ -95,6 +95,47 @@ export function isDisclosedToPartner(column: ColumnMetadata): boolean {
  */
 export function disclosedColumnNames(metadata: Metadata): Array<string> {
   return metadata.filter(isDisclosedToPartner).map((column) => column.name);
+}
+
+/**
+ * Whether this party's input metadata would transmit a column under a count-only
+ * (`psi-c`) algorithm -- the fifth count-only shape rule
+ * (docs/spec/PROTOCOL.md, PSI-C), the one no linkage-terms document carries, so
+ * it lives here beside {@link isDisclosedToPartner}, the predicate it asks.
+ *
+ * False for every `psi` exchange and for an absent metadata block, which resolves
+ * from the exchange's input columns and is not known at the boundary that asks.
+ * The terms-carried rules are `countOnlyShapeViolation` in `config/linkageTerms.ts`.
+ */
+export function countOnlyTransmitsColumn(
+  algorithm: Algorithm,
+  metadata: Metadata | undefined,
+): boolean {
+  if (algorithm !== "psi-c" || metadata === undefined) return false;
+  return metadata.some(isDisclosedToPartner);
+}
+
+/**
+ * Refuse a count-only exchange whose input metadata would transmit a column, at
+ * the boundaries that hold this party's own metadata beside the agreed
+ * algorithm: where an invitation is minted over it, and where one is accepted.
+ *
+ * Fail-closed like its terms-carried siblings ({@link assertCountOnlyTermsShape}):
+ * the marked columns are never quietly dropped to bring the run into the
+ * count-only shape, since the payload is exactly what the operator is deciding
+ * about when they mark a column. Stating it at the choice is also where the
+ * specification puts it, rather than as a surprise once the run aborts.
+ *
+ * A no-op on `psi` and on an unresolved metadata block. Plain {@link UsageError},
+ * for the reason `assertCountOnlyTermsShape` carries; the message names no
+ * column.
+ */
+export function assertCountOnlyTransmitsNoColumn(
+  algorithm: Algorithm,
+  metadata: Metadata | undefined,
+): void {
+  if (!countOnlyTransmitsColumn(algorithm, metadata)) return;
+  throw new UsageError(COUNT_ONLY_SHAPE_REFUSALS.transmittedColumns);
 }
 
 /**

@@ -79,6 +79,15 @@ Date these linkage terms were last modified. A mismatch produces a warning indic
 - `psi` -- reveals the intersection (matched records and their identifiers). Intended for operational data exchange.
 - `psi-c` -- reveals only the cardinality of the intersection (how many records match). Intended for research and program planning.
 
+A count-only exchange is one round over one key, so `psi-c` narrows what the rest of the document may say. Terms setting it are refused, naming what to change, when they declare any of:
+
+- more than one entry in `linkage_keys`;
+- `linkage_strategy: single-pass`;
+- `deduplicate: true`;
+- payload in either direction -- a non-empty `payload.send` or `payload.receive`, or [input metadata](#input-metadata) that would transmit a column (`is_payload: true` on a column whose `role` is not `ignored`).
+
+The refusal happens where the terms are authored, where an invitation over them is minted, and where a received invitation is parsed or accepted. It is never resolved by narrowing the document to the count-only shape or by running it as `psi`; the reasoning is in [PROTOCOL.md](spec/PROTOCOL.md#psi-c). None of this constrains `psi` terms.
+
 > **Not yet implemented:** the `psi-c` algorithm has no count-only run path yet, so it is refused before the exchange runs. An exchange whose linkage terms set `psi-c` aborts with a usage error rather than revealing matched identifiers under an exchange record that would assert only a count was disclosed. It is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). Use `psi` for now.
 
 ### `linkage_terms.linkage_strategy`

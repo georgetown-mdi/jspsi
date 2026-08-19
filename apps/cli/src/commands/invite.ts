@@ -5,6 +5,7 @@ import {
   getLogger,
   encodeInvitation,
   assertAlgorithmImplemented,
+  assertCountOnlyTransmitsNoColumn,
   assertDeduplicateImplemented,
   assertDisclosedNamesCarriable,
   assertFanOutImplemented,
@@ -586,6 +587,22 @@ export async function validateInvite(params: {
         configSource.standardization,
         configTerms,
       );
+
+    // Fail closed, before the token is minted, on a count-only (`psi-c`) config
+    // whose own metadata would transmit a column: the algorithm carries no
+    // payload in either direction, and this is the one count-only shape rule no
+    // linkage-terms document carries, so the config parse above (which applies
+    // the other four) cannot reach it. Ahead of the algorithm gate below, so the
+    // operator is told which rule the config breaks rather than only that no
+    // count-only run path exists yet -- and so it still refuses once that path
+    // lands and the gate below stops firing. Gated on an explicit metadata block
+    // for the same reason as the payload guard above: without one, metadata is
+    // inferred from the exchange's input columns, which this offline mint never
+    // reads.
+    assertCountOnlyTransmitsNoColumn(
+      configTerms.algorithm,
+      configSource.metadata,
+    );
 
     // Fail closed, before the token is minted, on a config whose `algorithm` the
     // run cannot honor -- the mint-boundary counterpart of the same shared
