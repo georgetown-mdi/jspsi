@@ -44,10 +44,15 @@ describe("light-review command wiring", () => {
   });
 });
 
+const TARGET = "feature-branch";
+const TREE = "/workspace/.claude/worktrees/agent-abc";
+
 const roleArgs = (claims, role = "adversarial-verifier") => ({
   docs: [],
   role,
   claims,
+  targetRef: TARGET,
+  worktreePath: TREE,
 });
 const verdict = (claim, fields = {}) => ({
   claim,
@@ -148,6 +153,8 @@ describe.each(SHAPES)("light-review role mode ($shape args)", ({ deliver }) => {
         docs: ["docs/spec/FILE_SYNC.md"],
         role: "security-reviewer",
         claims: ["a claim"],
+        targetRef: TARGET,
+        worktreePath: TREE,
       },
       (prompt, spawn) => {
         asked = prompt;
@@ -272,7 +279,13 @@ describe.each(SHAPES)("light-review role mode ($shape args)", ({ deliver }) => {
   });
 });
 
-const lensArgs = { docs: [], role: null, claims: [] };
+const lensArgs = {
+  docs: [],
+  role: null,
+  claims: [],
+  targetRef: TARGET,
+  worktreePath: TREE,
+};
 const review = {
   findings: [{ name: "n", description: "d", severity: "nit", file: "a.ts" }],
   simplerShape: { simpler: false, reason: "no" },
@@ -323,6 +336,91 @@ describe.each(SHAPES)(
   },
 );
 
+// Every prompt the round spawns, in both modes. The interpolation cases below
+// read these rather than one mode's prompt: a reviewer left on HEAD reviews
+// whichever branch its own working directory happens to hold, which is exactly
+// the false-scope failure the by-ref flow exists to close.
+async function promptsFor(deliver, overrides) {
+  const run = runner(deliver);
+  const lens = [];
+  await run({ ...lensArgs, ...overrides }, (prompt, options) => {
+    lens.push(prompt);
+    return options.label === "consolidator" ? clusters : review;
+  });
+  const role = [];
+  await run({ ...roleArgs(["a claim"]), ...overrides }, (prompt) => {
+    role.push(prompt);
+    return roleReply([verdict("a claim")]);
+  });
+  return [...lens, ...role];
+}
+
+describe.each(SHAPES)(
+  "light-review target ref ($shape args)",
+  ({ deliver }) => {
+    const run = runner(deliver);
+
+    it("puts the target ref, never HEAD, in every reviewer prompt", async () => {
+      const prompts = await promptsFor(deliver, {});
+      expect(prompts).toHaveLength(5);
+      for (const prompt of prompts) {
+        expect(prompt).toContain(`origin/staging...${TARGET}`);
+        expect(prompt).not.toContain("origin/staging...HEAD");
+      }
+    });
+
+    it("reviews a ref that is not a branch name just as literally", async () => {
+      const sha = "0f1e2d3c4b5a";
+      const prompts = await promptsFor(deliver, { targetRef: sha });
+      for (const prompt of prompts) {
+        expect(prompt).toContain(`origin/staging...${sha}`);
+      }
+    });
+
+    it("gives every reviewer the worktree path and the scratch rule", async () => {
+      const prompts = await promptsFor(deliver, {});
+      for (const prompt of prompts) {
+        expect(prompt).toContain(`git -C ${TREE} <command>`);
+        expect(prompt).toContain("under /tmp");
+      }
+    });
+
+    it("tells a reviewer with no worktree to read at the ref and stop short of running code", async () => {
+      for (const worktreePath of [null, undefined, "   "]) {
+        const prompts = await promptsFor(deliver, { worktreePath });
+        for (const prompt of prompts) {
+          expect(prompt, String(worktreePath)).toContain(
+            `git show ${TARGET}:<path>`,
+          );
+          expect(prompt, String(worktreePath)).not.toContain("Scope EVERY");
+        }
+      }
+    });
+
+    it("refuses a round that names no ref instead of falling back to HEAD", async () => {
+      for (const targetRef of [undefined, null, "", "   ", 7, ["a-branch"]]) {
+        await expect(
+          run({ ...lensArgs, targetRef }, () => {
+            throw new Error("must not spawn");
+          }),
+          JSON.stringify(targetRef),
+        ).rejects.toThrow(/targetRef must be a non-empty string/);
+      }
+    });
+
+    it("refuses a worktree path that is not a path", async () => {
+      for (const worktreePath of [7, ["/tmp"], {}]) {
+        await expect(
+          run({ ...lensArgs, worktreePath }, () => {
+            throw new Error("must not spawn");
+          }),
+          JSON.stringify(worktreePath),
+        ).rejects.toThrow(/worktreePath must be the absolute path/);
+      }
+    });
+  },
+);
+
 describe.each(SHAPES)("light-review lens mode ($shape args)", ({ deliver }) => {
   const run = runner(deliver);
 
@@ -330,7 +428,7 @@ describe.each(SHAPES)("light-review lens mode ($shape args)", ({ deliver }) => {
     for (const role of [null, undefined]) {
       for (const claims of [["a claim"], "a claim", {}]) {
         await expect(
-          run({ docs: [], role, claims }, () => {
+          run({ ...lensArgs, role, claims }, () => {
             throw new Error("must not spawn");
           }),
           `${String(role)} ${JSON.stringify(claims)}`,

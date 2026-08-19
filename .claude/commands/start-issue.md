@@ -58,8 +58,12 @@ its local `staging` falls behind `origin/staging`. Sync it before branching:
 4. Rebuild core: `npm run build -w packages/core`. The apps import
    `@psilink/core` from its built `dist/`, and `staging` may have advanced since
    the last issue, so rebuild at every issue start after the sync.
-5. Cut the per-issue branch off the synced `staging`: `git checkout -b <branch>`,
-   then confirm with `git branch --show-current`.
+5. Cut the per-issue branch off the synced `staging` in a worktree of its own --
+   `git worktree add -b <branch> .claude/worktrees/<branch> origin/staging`, then
+   `bash .claude/scripts/worktree-init.sh` from it -- and work there by absolute
+   path. The clone's own tracked files are write-guarded
+   (`block-primary-checkout-writes.mjs`), so an edit made in it is refused; a
+   deliberate edit of the clone itself takes that hook's sentinel.
 
 Pull requests land as squash merges, so `git branch --merged`, `git cherry`, and
 subject greps cannot tell whether a prior branch already landed -- decide from
@@ -154,11 +158,10 @@ of every kind count against it, and only the owner raises it.
 steps above. When the instruction is to orchestrate:
 
 - **Delegate the writing.** Implementation goes to an `implementer` spawn with a
-  self-contained brief; fix rounds are fresh `implementer` spawns. The one
-  exception is /assess-review's own triage pass, which you run and whose small,
-  clearly-right fixes you apply directly -- a fix worth a brief of its own goes
-  to a fresh spawn instead. Outside that pass, the orchestrating session edits
-  nothing on the branch itself.
+  self-contained brief; fix rounds are fresh `implementer` spawns. That includes
+  /assess-review's own triage pass: you run the triage and make the calls, but
+  the edits go to one implementer per branch, a small fix carried as its exact
+  text in the brief. The orchestrating session edits nothing on any branch.
 - **Delegate the reading.** Exploration of the issue's surface goes to a spawn
   that returns a compact digest; your own context holds diff stats,
   `fetch-issues.mjs` output, and agent reports, nothing more -- the same reason
