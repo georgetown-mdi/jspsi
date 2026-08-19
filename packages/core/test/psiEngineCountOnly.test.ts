@@ -62,6 +62,14 @@ const expectedCount = 2;
 const duplicatingSenderValues = ["Carol", "Carol", "Bob", "Dana"];
 const duplicatingReceiverValues = ["Carol", "Carol", "Carol", "Dana", "Henry"];
 
+// Carol repeats only in the sender's own dataset here, so this vector fails if the
+// sender's own uniqueness filter is skipped: an unfiltered sender still contributes
+// Carol twice, and the library's cardinality operation sums min(senderCount,
+// receiverCount) per matched value -- min(2, 1) for Carol plus min(1, 1) for Dana --
+// inflating the reported count to 2 instead of 1.
+const senderOnlyDuplicateSenderValues = ["Carol", "Carol", "Dana"];
+const senderOnlyDuplicateReceiverValues = ["Carol", "Dana"];
+
 type EngineFactory = (
   library: PSILibrary,
   role: Config["role"],
@@ -155,6 +163,23 @@ describe.each([
         countOnlyReceiver,
         duplicatingSenderValues,
         duplicatingReceiverValues,
+      ),
+    ).resolves.toBe(1);
+
+    countOnlySender.dispose();
+    countOnlyReceiver.dispose();
+  });
+
+  test("the count reflects the sender's own filter, not only the receiver's", async () => {
+    const countOnlySender = sender("count-only");
+    const countOnlyReceiver = receiver("count-only");
+
+    await expect(
+      runCountOnlyRound(
+        countOnlySender,
+        countOnlyReceiver,
+        senderOnlyDuplicateSenderValues,
+        senderOnlyDuplicateReceiverValues,
       ),
     ).resolves.toBe(1);
 
@@ -286,6 +311,15 @@ describe.each([
         duplicatingSenderValues,
       );
       expect(permutation).toStrictEqual([]);
+      // Pins the sender's own uniqueness filter, not just the empty permutation: an
+      // unfiltered setup would carry all four of duplicatingSenderValues instead of
+      // the two values it holds exactly once.
+      expect(
+        wasm.serverSetup
+          .deserializeBinary(setup)
+          .getRaw()!
+          .getEncryptedElementsList().length,
+      ).toBe(valuesContributedExactlyOnce(duplicatingSenderValues).length);
 
       await unrecognizedReceiver.receiveServerSetup(setup);
       const request = await unrecognizedReceiver.createClientRequest(
