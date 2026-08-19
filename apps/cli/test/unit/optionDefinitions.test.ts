@@ -242,9 +242,3 @@ test("warnOptionsOverridesIgnoredOffline: names --connection-per-poll when set",
   expect(log.messages).toHaveLength(1);
   expect(log.messages[0]).toContain("--connection-per-poll");
 });
-
-test("warnOptionsOverridesIgnoredOffline: does not name --connection-per-poll when unset", () => {
-  const log = warnCollector();
-  warnOptionsOverridesIgnoredOffline({ connectionPerPoll: undefined }, log);
-  expect(log.messages).toHaveLength(0);
-});

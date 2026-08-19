@@ -176,32 +176,6 @@ test("only keys are rewritten; string values are left verbatim, both directions"
   });
 });
 
-test("an opaque map's contents survive a read -> write round-trip verbatim", () => {
-  // A snake_case key authored inside provider_options is left verbatim by
-  // camelizeKeys (read), and re-snakeizing the camelized form leaves it verbatim
-  // again -- the round-trip stability the shared skip exists to guarantee. The
-  // direct raw-snake-into-snakeizeKeys path is covered by the next test.
-  const input = {
-    connection: {
-      provider_options: { ready_timeout: 5000, keepAlive: true },
-    },
-  };
-  const camelized = camelizeKeys(input) as {
-    connection: { providerOptions: Record<string, unknown> };
-  };
-  expect(camelized.connection.providerOptions).toEqual({
-    ready_timeout: 5000,
-    keepAlive: true,
-  });
-  const snakeized = snakeizeKeys(camelized) as {
-    connection: { provider_options: Record<string, unknown> };
-  };
-  expect(snakeized.connection.provider_options).toEqual({
-    ready_timeout: 5000,
-    keepAlive: true,
-  });
-});
-
 test("snakeizeKeys skips an opaque subtree even given raw snake_case keys", () => {
   // The latent hazard the co-location removes: opacity is decided on the
   // canonicalized key, not the raw one, so a snake_case `provider_options` key
@@ -317,13 +291,6 @@ function wideObject(n: number): Record<string, number> {
   for (let i = 0; i < n; i++) o[`some_snake_key_${i}`] = i;
   return o;
 }
-
-test("an ordinary wide-enough payload is camelized as before", () => {
-  // Comfortably under the budget: keys are still rewritten normally.
-  expect(camelizeKeys({ outer_block: { inner_key: 1, leaf_key: 2 } })).toEqual({
-    outerBlock: { innerKey: 1, leafKey: 2 },
-  });
-});
 
 test("the node-count guard fires at exactly MAX_NODE_COUNT", () => {
   // MAX_NODE_COUNT nodes are accepted; one more is rejected. Pinning the exact

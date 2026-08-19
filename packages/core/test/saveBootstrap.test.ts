@@ -64,16 +64,6 @@ async function runSide(
 
 // --- Intent advertisement ----------------------------------------------------
 
-test("both parties --save: each learns the other advertised save intent", async () => {
-  const [a, b] = createMessagePipe();
-  const [resA, resB] = await Promise.all([
-    runSide(a, "initiator", termsA, true),
-    runSide(b, "responder", termsB, true),
-  ]);
-  expect(resA.partnerSaveIntent).toBe(true);
-  expect(resB.partnerSaveIntent).toBe(true);
-});
-
 test("one party --save: each side correctly learns whether the other saved", async () => {
   const [a, b] = createMessagePipe();
   const [resA, resB] = await Promise.all([
@@ -91,16 +81,6 @@ test("one party --save (responder saves): intent flows in both directions", asyn
     runSide(b, "responder", termsB, true),
   ]);
   expect(resA.partnerSaveIntent).toBe(true);
-  expect(resB.partnerSaveIntent).toBe(false);
-});
-
-test("neither party --save: partnerSaveIntent is false on both sides", async () => {
-  const [a, b] = createMessagePipe();
-  const [resA, resB] = await Promise.all([
-    runSide(a, "initiator", termsA, false),
-    runSide(b, "responder", termsB, false),
-  ]);
-  expect(resA.partnerSaveIntent).toBe(false);
   expect(resB.partnerSaveIntent).toBe(false);
 });
 

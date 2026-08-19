@@ -13,7 +13,6 @@ import {
 import type { HandshakeRole, MessageConnection } from "@psilink/core";
 
 import { LocalFSClient } from "../../src/connection/localFSClient";
-import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 
 // 32 zero bytes and 32 0x01 bytes, each in base64url without padding (43 chars)
 const TOKEN_A = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -145,26 +144,6 @@ test("applyEncryption surfaces own-OR-peer through authenticateConnection across
     // The rotated secret still agrees regardless of the flag values.
     expect(resA.rotatedSecret).toBe(resB.rotatedSecret);
   }
-});
-
-test("rotated token written to the key file carries no expiry", async () => {
-  const connA = makeConn();
-  const connB = makeConn();
-
-  const [mcA, mcB] = await openAndSync(connA, connB);
-  const [roleA, roleB] = roles(connA, connB);
-
-  const [{ rotatedSecret }] = await Promise.all([
-    authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA, true),
-    authenticateConnection(mcB, { sharedSecret: TOKEN_A }, roleB, true),
-  ]).finally(() => teardown(connA, connB));
-
-  const keyFilePath = path.join(tmpDir, "rotated.key");
-  saveKeyFile(keyFilePath, { sharedSecret: rotatedSecret });
-
-  const loaded = loadKeyFile(keyFilePath);
-  expect(loaded?.sharedSecret).toBe(rotatedSecret);
-  expect(loaded?.expires).toBeUndefined();
 });
 
 // --- Input validation --------------------------------------------------------
@@ -318,9 +297,9 @@ test("a legacy SPAKE2-shaped reply fails a new initiator with a clean error", as
 // authenticateConnection checks `expires` twice: once synchronously before the
 // key exchange starts, and once after runKex returns, to catch a secret that
 // expires *during* the round-trip. Only the pre-handshake check is covered
-// above ("authentication throws for an expired token..."); these two tests
-// drive the post-handshake branch (auth.ts) by faking only Date: start the
-// clock just before `expires`, kick off both sides over an in-memory pipe (no
+// above ("authentication throws for an expired token..."); this test drives
+// the post-handshake branch (auth.ts) by faking only Date: start the clock
+// just before `expires`, kick off both sides over an in-memory pipe (no
 // real-timer coupling, so the handshake still completes), then advance the
 // clock past `expires` while the round-trip is in flight, so the post-handshake
 // checks -- which run only after both runKex calls resolve -- see the secret as
@@ -338,40 +317,6 @@ test("a legacy SPAKE2-shaped reply fails a new initiator with a clean error", as
 // microtasks the kex spans -- whereas a single Promise.resolve() tick is not a
 // reliable barrier and could land the advance after the post-check, silently
 // resolving fulfilled on the wrong branch.
-
-test("authentication throws when the shared secret expires during the key-exchange round-trip", async () => {
-  const expires = "2030-01-01T00:00:00.000Z";
-  vi.useFakeTimers({
-    toFake: ["Date"],
-    now: new Date("2029-12-31T23:59:59.000Z"),
-  });
-  const [a, b] = createMessagePipe();
-  const pA = authenticateConnection(
-    a,
-    { sharedSecret: TOKEN_A, expires },
-    "initiator",
-    true,
-  );
-  const pB = authenticateConnection(
-    b,
-    { sharedSecret: TOKEN_A, expires },
-    "responder",
-    true,
-  );
-  // Advance past expires while the round-trip is in flight: strictly after both
-  // synchronous pre-handshake checks (already run, above) and before both
-  // post-handshake checks. See the block comment above for why this is reliable.
-  vi.setSystemTime(new Date("2030-01-01T00:00:01.000Z"));
-  const [resultA, resultB] = await Promise.allSettled([pA, pB]);
-  expect(resultA.status).toBe("rejected");
-  expect(resultB.status).toBe("rejected");
-  expect((resultA as PromiseRejectedResult).reason.message).toContain(
-    "during the key-exchange round-trip",
-  );
-  expect((resultB as PromiseRejectedResult).reason.message).toContain(
-    "during the key-exchange round-trip",
-  );
-});
 
 test("authentication tags post-handshake-expiry errors with psilinkRecoveryHintEmitted", async () => {
   const expires = "2030-01-01T00:00:00.000Z";

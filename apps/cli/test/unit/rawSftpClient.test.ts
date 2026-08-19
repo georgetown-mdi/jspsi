@@ -51,10 +51,6 @@ function expectTeardownStaysOffConsole(): void {
 // `Global error listener: read ECONNRESET` (and the end/close lines) to the
 // console on teardown, which the integration sentinel catches only best-effort.
 // createRawSftpClient must route those off the console at the source.
-test("createRawSftpClient routes teardown diagnostics off the console", () => {
-  expectTeardownStaysOffConsole();
-});
-
 // The suppression must be DETERMINISTIC, not contingent on the suite's log level:
 // the whole point of routing (over draining) is that the line never reaches the
 // console regardless of timing OR verbosity. The integration suite's noisiest

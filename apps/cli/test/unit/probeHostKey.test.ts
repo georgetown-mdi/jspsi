@@ -21,20 +21,13 @@ const FP = "SHA256:" + "A".repeat(43);
 // An injectable probe recording the config it was handed, so a test can assert
 // both the emitted line and that the minimal config carried no credential.
 function makeDeps(presented: PresentedHostKey): ProbeHostKeyDeps & {
-  calls: number;
   lastConfig?: SFTPConnectionConfig;
 } {
-  const state: { calls: number; lastConfig?: SFTPConnectionConfig } = {
-    calls: 0,
-  };
+  const state: { lastConfig?: SFTPConnectionConfig } = {};
   return {
     probe: (config): Promise<PresentedHostKey> => {
-      state.calls += 1;
       state.lastConfig = config;
       return Promise.resolve(presented);
-    },
-    get calls() {
-      return state.calls;
     },
     get lastConfig() {
       return state.lastConfig;

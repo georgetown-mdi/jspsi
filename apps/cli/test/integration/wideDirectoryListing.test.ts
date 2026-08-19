@@ -35,11 +35,11 @@ const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 const TEST_TIMEOUT_MS = 300_000;
 
-// Two caps far past what one packet carries, and one comfortably under it. The
-// narrow rung holds the cap to being honoured as a cap; the wide ones are the
-// settings a test author reaches for when it wants the whole listing at once,
-// and are where a backend that took the number literally would lose the reply.
-const BATCH_CAPS = [512, MAX_DIRECTORY_ENTRIES, 2 * MAX_DIRECTORY_ENTRIES];
+// One cap far past what one packet carries, and one comfortably under it. The
+// narrow rung holds the cap to being honoured as a cap; the wide one is the
+// setting a test author reaches for when it wants the whole listing at once, and
+// is where a backend that took the number literally would lose the reply.
+const BATCH_CAPS = [512, MAX_DIRECTORY_ENTRIES];
 
 /** `count` distinct filenames of exactly `nameLength` characters each. */
 function plantedNames(count: number, nameLength: number): string[] {

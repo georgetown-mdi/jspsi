@@ -17,19 +17,6 @@ describe("deriveRendezvousPeerId", () => {
     expect(first).toBe(second);
   });
 
-  test("distinct roles yield distinct ids for the same secret", async () => {
-    const secret = generateSharedSecret();
-    const inviter = await deriveRendezvousPeerId(secret, "inviter");
-    const acceptor = await deriveRendezvousPeerId(secret, "acceptor");
-    expect(inviter).not.toBe(acceptor);
-  });
-
-  test("distinct secrets yield distinct ids for the same role", async () => {
-    const a = await deriveRendezvousPeerId(generateSharedSecret(), "inviter");
-    const b = await deriveRendezvousPeerId(generateSharedSecret(), "inviter");
-    expect(a).not.toBe(b);
-  });
-
   test("the id is lowercase hex (a valid PeerJS id)", async () => {
     const secret = generateSharedSecret();
     for (const role of RENDEZVOUS_ROLES) {

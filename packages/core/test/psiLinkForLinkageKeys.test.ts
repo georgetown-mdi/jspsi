@@ -1,6 +1,5 @@
 import { expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
-import log from "loglevel";
 
 import {
   buildStandardizedDataset,
@@ -102,8 +101,6 @@ const client = new PSIParticipant(
   { role: "joiner", verbose: -1 },
   UNBOUNDED_PSI_ELEMENTS,
 );
-
-log.setLevel("DEBUG");
 
 // --- Tests --------------------------------------------------------------------
 

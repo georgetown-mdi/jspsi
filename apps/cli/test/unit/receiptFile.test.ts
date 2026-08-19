@@ -7,19 +7,14 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 // Capture writeDualSignedRecord's logger so the non-fatal "could not be written"
 // WARN is asserted rather than leaked to the suite output. getLogger is the only
 // @psilink/core export replaced; everything else stays real.
-const logCapture = vi.hoisted(() => ({
-  warnings: [] as string[],
-  infos: [] as string[],
-}));
+const logCapture = vi.hoisted(() => ({ warnings: [] as string[] }));
 
 vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
   return {
     ...actual,
     getLogger: () => ({
-      info: (msg: string, ...args: unknown[]) => {
-        logCapture.infos.push([msg, ...args.map(String)].join(" "));
-      },
+      info: () => {},
       warn: (msg: string, ...args: unknown[]) => {
         logCapture.warnings.push([msg, ...args.map(String)].join(" "));
       },
@@ -44,7 +39,6 @@ let dir: string;
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-receipt-test-"));
   logCapture.warnings.length = 0;
-  logCapture.infos.length = 0;
 });
 
 afterEach(() => {

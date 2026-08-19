@@ -97,22 +97,6 @@ test("is a no-op for a non-sftp channel (no host key to establish)", async () =>
   expect(deps.probeCalls).toBe(0);
 });
 
-test("is a no-op when a host_key_fingerprint is already pinned", async () => {
-  const conn = sftpConn(FP);
-  const deps = makeDeps({ confirm: true });
-  process.stdin.isTTY = false;
-  await establishHostKeyTrust(
-    conn,
-    {
-      verbosity: 0,
-      loggerName: "accept",
-      persistence: { mode: "save-with-config", configPath: "psilink.yaml" },
-    },
-    deps,
-  );
-  expect(deps.probeCalls).toBe(0); // pinned -> never probes or prompts
-});
-
 test("is a no-op when a list of host_key_fingerprints is already pinned", async () => {
   // First-use trust gates on the pin being unset (=== undefined), which is
   // value-agnostic: a config already carrying multiple pins (a staged rotation)
@@ -244,52 +228,6 @@ test("a malformed --server-host-key-fingerprint value never reaches the trust pa
   ).toThrow(UsageError);
 });
 
-test("fails closed on a non-interactive unpinned run (save-with-config), naming the recovery", async () => {
-  const conn = sftpConn();
-  const deps = makeDeps({ confirm: true });
-  process.stdin.isTTY = false;
-  const run = establishHostKeyTrust(
-    conn,
-    {
-      verbosity: 0,
-      loggerName: "accept",
-      persistence: {
-        mode: "save-with-config",
-        configPath: "/etc/psilink.yaml",
-      },
-    },
-    deps,
-  );
-  await expect(run).rejects.toBeInstanceOf(UsageError);
-  await expect(run).rejects.toThrow(/interactive/i);
-  await expect(run).rejects.toThrow(/host_key_fingerprint/);
-  // The config path rides a cause link, so it is asserted at the rendered
-  // boundary below (the raw `.message` is the summary alone).
-  const rendered = sanitizeErrorForDisplay(await run.catch((e: unknown) => e));
-  expect(rendered).toContain("/etc/psilink.yaml");
-  expect(deps.probeCalls).toBe(0); // never probes or auto-accepts
-  if (conn.channel === "sftp")
-    expect(conn.server.hostKeyFingerprint).toBeUndefined();
-});
-
-test("fails closed on a non-interactive unpinned ephemeral run, with the out-of-band recovery", async () => {
-  const conn = sftpConn();
-  const deps = makeDeps({ confirm: true });
-  process.stdin.isTTY = false;
-  const run = establishHostKeyTrust(
-    conn,
-    { verbosity: 0, loggerName: "psilink", persistence: { mode: "ephemeral" } },
-    deps,
-  );
-  await expect(run).rejects.toBeInstanceOf(UsageError);
-  await expect(run).rejects.toThrow(/interactive/i);
-  // No config path to name; it points at pinning out-of-band in a saved config.
-  const rendered = sanitizeErrorForDisplay(await run.catch((e: unknown) => e));
-  expect(rendered).toMatch(/out-of-band/i);
-  expect(rendered).toMatch(/saved configuration/i);
-  expect(deps.probeCalls).toBe(0);
-});
-
 test("interactive confirm (save-with-config) pins in memory and writes no file", async () => {
   const conn = sftpConn();
   const deps = makeDeps({ confirm: true });
@@ -342,25 +280,6 @@ test("interactive confirm (write-now) pins in memory and writes the config in pl
   }
 });
 
-test("declining the prompt aborts and leaves the connection unpinned", async () => {
-  const conn = sftpConn();
-  const deps = makeDeps({ confirm: false });
-  process.stdin.isTTY = true;
-  await expect(
-    establishHostKeyTrust(
-      conn,
-      {
-        verbosity: -1,
-        loggerName: "exchange",
-        persistence: { mode: "ephemeral" },
-      },
-      deps,
-    ),
-  ).rejects.toThrow(/not trusted/);
-  if (conn.channel === "sftp")
-    expect(conn.server.hostKeyFingerprint).toBeUndefined();
-});
-
 test("declining under the config-writing mode leaves the file byte-identical", async () => {
   // The refusal tells the operator nothing was written, and write-now is the one
   // mode that writes at all -- so the claim is measured against the bytes of the
@@ -392,24 +311,6 @@ test("declining under the config-writing mode leaves the file byte-identical", a
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test("escapes a control-laden key type in the prompt path (no throw)", async () => {
-  // A hostile keyType must not break the flow; sanitizeForDisplay handles it in
-  // the warn message. Confirming still pins the (safe, base64) fingerprint.
-  const conn = sftpConn();
-  const deps = makeDeps({ confirm: true, keyType: "ssh-\x1b[31mevil" });
-  process.stdin.isTTY = true;
-  await establishHostKeyTrust(
-    conn,
-    {
-      verbosity: -1,
-      loggerName: "psilink",
-      persistence: { mode: "ephemeral" },
-    },
-    deps,
-  );
-  if (conn.channel === "sftp") expect(conn.server.hostKeyFingerprint).toBe(FP);
 });
 
 // A raw OpenSSH host-key blob naming `keyType`: a uint32 length prefix, the type

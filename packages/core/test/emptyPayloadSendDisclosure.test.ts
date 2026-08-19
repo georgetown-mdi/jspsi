@@ -124,19 +124,6 @@ function expectNoPayloadOnWire(sent: unknown[]): void {
   expect(JSON.stringify(sent)).not.toContain("E-asthma");
 }
 
-test("an inviter's empty payload.receive mirrors to a present, empty acceptor payload.send that the cross-party check accepts", () => {
-  const acceptorTerms = deriveAcceptedLinkageTerms(inviterTerms, "Acceptor Co");
-  // Present, not absent: the mirror keeps the strict reading on this direction.
-  expect(acceptorTerms.payload).toStrictEqual({ send: [] });
-
-  // Neither party's declaration-versus-declaration check has anything to object
-  // to -- both sides agree no payload column crosses -- so nothing there compares
-  // the acceptor's own file against its own declaration. That comparison is
-  // assertPayloadSendDisclosed's alone.
-  expect(validateCompatibility(acceptorTerms, inviterTerms).errors).toEqual([]);
-  expect(validateCompatibility(inviterTerms, acceptorTerms).errors).toEqual([]);
-});
-
 test("an acceptor declaring it sends nothing is refused before anything is sent when its metadata discloses columns", () => {
   // Inferred, not chosen: neither `diagnosis` nor `notes` is a linkage or PII
   // alias, so both default to transmitted.

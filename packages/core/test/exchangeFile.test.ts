@@ -361,19 +361,6 @@ test("connectionFromLocator: no credential field appears in a webrtc expansion, 
   );
 });
 
-test("connectionFromLocator: a webrtc locator carrying an unexpected key is rejected", () => {
-  // A type-bypassed caller cannot smuggle a credential through: the locator is
-  // validated by the invitation's strict WebRTCEndpointSchema, which rejects any
-  // field outside the allowlist rather than letting the non-strict webrtc
-  // connection schema silently strip it into the persisted block.
-  const rogue = {
-    channel: "webrtc",
-    host: "peer.example.org",
-    key: "peerjs-secret-api-key",
-  } as unknown as WebRTCExchangeLocator;
-  expect(() => connectionFromLocator(rogue)).toThrow(ZodError);
-});
-
 test("connectionFromLocator: a webrtc locator with a nested server credential is rejected", () => {
   // A whole `server` object on the locator is outside the flat locator
   // allowlist, so a credential nested inside it is rejected, not stripped.

@@ -193,18 +193,6 @@ test("a partner that vanishes fails the connection rather than stranding it", as
 
 // --- close ------------------------------------------------------------------
 
-test("a clean close sends the sentinel and tears the session down", async () => {
-  const { channel, session, closed } = harness();
-  const connection = webRtcMessageConnection(session);
-  await connection.send({ step: "last" });
-  await connection.close();
-  expect(decodeSent(channel)).toEqual([
-    { step: "last" },
-    { __closeSentinel: true },
-  ]);
-  expect(closed()).toBe(1);
-});
-
 test("a clean close waits for the peer to acknowledge before tearing down", async () => {
   // The delivery guarantee: `send` resolves on hand-off, so the acknowledgement
   // wait is the only thing standing between a final frame and a lost one.

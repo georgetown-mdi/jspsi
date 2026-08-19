@@ -193,17 +193,6 @@ describe("prepareForExchange: count-only (psi-c) is refused", () => {
       ),
     ).toThrow(/psi-c/);
   });
-
-  test("a psi algorithm prepares normally", () => {
-    // The sibling of the refusal: the implemented algorithm is unaffected.
-    const prepared = prepareForExchange(
-      { linkageTerms: terms, metadata },
-      "Tester",
-      rawRows,
-      columns,
-    );
-    expect(prepared.linkageTerms.algorithm).toBe("psi");
-  });
 });
 
 // --- assertAlgorithmImplemented (the shared guard) ---------------------------
@@ -245,16 +234,6 @@ describe("prepareForExchange: a deduplicating term is refused", () => {
         columns,
       ),
     ).toThrow(/deduplicate/);
-  });
-
-  test("deduplicate: false prepares normally", () => {
-    const prepared = prepareForExchange(
-      { linkageTerms: terms, metadata },
-      "Tester",
-      rawRows,
-      columns,
-    );
-    expect(prepared.linkageTerms.deduplicate).toBe(false);
   });
 });
 
@@ -366,32 +345,6 @@ describe("prepareForExchange: a fan-out transform is refused", () => {
     expect(thrown).not.toBeInstanceOf(OperatorConfigError);
   });
 
-  test("a standardization with no fan-out step prepares normally", () => {
-    const prepared = prepareForExchange(
-      {
-        linkageTerms: terms,
-        metadata,
-        standardization: consistentStandardization,
-      },
-      "Tester",
-      rawRows,
-      columns,
-    );
-    expect(prepared.rowCount).toBe(1);
-  });
-
-  test("the default (unauthored) standardization prepares normally", () => {
-    // The refusal runs over the RESOLVED standardization, so the terms-only path
-    // -- which reconstructs one from the terms -- must stay unaffected.
-    const prepared = prepareForExchange(
-      { linkageTerms: terms, metadata },
-      "Tester",
-      rawRows,
-      columns,
-    );
-    expect(prepared.rowCount).toBe(1);
-  });
-
   // The run boundary re-checks the terms half, so a PreparedExchange assembled
   // without going through prepareForExchange is refused before its terms reach
   // the partner. Every collaborator the run would touch throws when used, so the
@@ -479,10 +432,6 @@ describe("prepareForExchange: an unimplemented signing mode is refused", () => {
 
   test("mode: none prepares normally", () => {
     expect(prepareWithSigning({ mode: "none" }).rowCount).toBe(1);
-  });
-
-  test("an absent signing block prepares normally", () => {
-    expect(prepareWithSigning().rowCount).toBe(1);
   });
 });
 

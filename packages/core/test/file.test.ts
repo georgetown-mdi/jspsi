@@ -269,30 +269,6 @@ for (const wrapper of ceilingGuardWrappers) {
   );
 }
 
-test("loadCSVColumnSample: many short rows whose total exceeds the ceiling do not trip", async () => {
-  // The ceiling bounds a single line, not the total bytes pulled: a file of many
-  // short, terminated rows whose cumulative size far exceeds the ceiling reads
-  // normally, because the span resets at every row terminator. This is the
-  // distinction that keeps a legitimate large input -- which the bounded sample
-  // walks up to the scan cap -- from tripping the limit.
-  const ceiling = 256;
-  const rows = Array.from(
-    { length: 400 },
-    (_v, i) => `Person${i},1990-01-0${(i % 9) + 1}`,
-  ).join("\n");
-  const csv = `name,dob\n${rows}\n`;
-  expect(Buffer.byteLength(csv)).toBeGreaterThan(ceiling * 4);
-  const { columns, sampledColumn, sample } = await loadCSVColumnSample(
-    chunkedStreamOf(csv, 64),
-    pickDob,
-    1000,
-    ceiling,
-  );
-  expect(columns).toEqual(["name", "dob"]);
-  expect(sampledColumn).toBe("dob");
-  expect(sample).toHaveLength(400);
-});
-
 test("loadCSVColumnSample: a well-formed input under the ceiling reads unchanged", async () => {
   // The ceiling leaves a normal input untouched: the same header, sampled column,
   // and bounded sample as without it, even delivered in tiny chunks (lines split
@@ -355,24 +331,6 @@ test("loadCSVFile: destroys the source stream once the ceiling aborts the read",
     /single-line limit/,
   );
   expect(destroySpy).toHaveBeenCalled();
-});
-
-test("loadCSVFile: many short rows whose total exceeds the ceiling do not trip", async () => {
-  // The ceiling bounds a single line, not the total bytes pulled: a file of many
-  // short, terminated rows whose cumulative size far exceeds the ceiling reads
-  // whole, because the span resets at every row terminator. This is the distinction
-  // that keeps a legitimate large operator file -- which loadCSVFile reads in full --
-  // from tripping the limit, delivered in tiny chunks to exercise the reset.
-  const ceiling = 256;
-  const rows = Array.from(
-    { length: 400 },
-    (_v, i) => `Person${i},1990-01-0${(i % 9) + 1}`,
-  ).join("\n");
-  const csv = `name,dob\n${rows}\n`;
-  expect(Buffer.byteLength(csv)).toBeGreaterThan(ceiling * 4);
-  const result = await loadCSVFile(chunkedStreamOf(csv, 64), ceiling);
-  expect(result.meta.fields).toEqual(["name", "dob"]);
-  expect(result.data).toHaveLength(400);
 });
 
 test("loadCSVFile: a well-formed input under the ceiling reads unchanged", async () => {

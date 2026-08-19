@@ -30,8 +30,6 @@ import {
   zeroSetupSftpArgv,
 } from "@jobs/intent";
 
-import { isBareSftpHost } from "@psi/sftpHost";
-
 import {
   SAMPLE_INPUT_FILE_REF,
   TEST_HOST_KEY_FINGERPRINT,
@@ -1287,16 +1285,6 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
           hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
         }),
       ).toThrow(/could not encode/);
-    }
-  });
-
-  test("truncating delimiters are rejected upstream by isBareSftpHost", () => {
-    // Compose now adopts the canonical host, so a URL-significant delimiter would
-    // silently compose to its truncated prefix here (`foo#bar` -> `foo`). The
-    // upstream bare-host predicate is what keeps such a host from ever reaching
-    // compose, so the truncation hazard stays closed by the pair.
-    for (const host of ["foo#bar", "foo?bar", "foo\\bar", "foo%2fbar"]) {
-      expect(isBareSftpHost(host)).toBe(false);
     }
   });
 

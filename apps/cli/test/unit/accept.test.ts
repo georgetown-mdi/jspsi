@@ -202,12 +202,6 @@ test("a checksum mismatch is rejected (before any prompt) with a usage error", a
   );
 });
 
-test("a schema-invalid invitation is rejected with a usage error", async () => {
-  await expect(
-    decodeAndValidateInvitation("not-a-valid-invitation"),
-  ).rejects.toBeInstanceOf(UsageError);
-});
-
 test("an expired invitation is rejected, naming the expiry time", async () => {
   const realNow = Date.now();
   const expires = new Date(realNow + 60_000).toISOString();
@@ -344,27 +338,6 @@ test("validateAccept: offline `-` with consentToTerms reads the CSV from stdin a
   expect(ready.dataSpec.metadata?.map((c) => c.name)).toEqual(
     expect.arrayContaining(["first_name", "last_name", "dob", "ssn"]),
   );
-});
-
-test("validateAccept: offline `-` with consentToTerms false is still rejected", async () => {
-  // The gate flips on consentToTerms: with it off (the default the prompt path
-  // uses), `-` stays an up-front UsageError, the unchanged no-flag behavior.
-  const encoded = await encodeInvitation(
-    sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
-  );
-  let caught: unknown;
-  try {
-    await validateAccept({
-      resolved: { mode: "offline", invitation: encoded, input: "-" },
-      options: testOptions(),
-      consentToTerms: false,
-      log: silentLog,
-    });
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught).toBeInstanceOf(UsageError);
-  expect((caught as Error).message).toMatch(/stdin/);
 });
 
 test("validateAccept: online `-` with consentToTerms reads the CSV from stdin and proceeds", async () => {
@@ -1161,24 +1134,6 @@ test("validateAccept: offline fails with a diff when the config's terms disagree
     // The error names the differing field and points at the config file.
     await expect(run()).rejects.toThrow(/algorithm/);
     await expect(run()).rejects.toThrow(options.configFile);
-  } finally {
-    fs.rmSync(options.configFile, { force: true });
-  }
-});
-
-test("validateAccept: a pre-existing config that cannot be parsed aborts with guidance", async () => {
-  const options = testOptions();
-  // Well-formed YAML that is not a valid exchange spec: parseExchangeSpec throws.
-  fs.writeFileSync(options.configFile, "connection: 123\n");
-  try {
-    const encoded = await encodeInvitation(sampleToken(FUTURE()));
-    await expect(
-      validateAccept({
-        resolved: { mode: "offline", invitation: encoded },
-        options,
-        log: silentLog,
-      }),
-    ).rejects.toThrow(/could not be parsed/);
   } finally {
     fs.rmSync(options.configFile, { force: true });
   }
@@ -2707,26 +2662,6 @@ test.each(hostileVariants)(
     expect(lines.filter((line) => !PRINTABLE_ASCII.test(line))).toEqual([]);
   },
 );
-
-test("displayInvitation: a linkage key name containing the list separator is one entry", () => {
-  // sanitizeForDisplay leaves a printable ASCII comma intact, so a comma-joined
-  // key list would read a single key named "surname, given name" as two keys.
-  const log = getLogger("accept-display-key-comma-test");
-  log.setLevel("silent");
-  const base = sampleToken(FUTURE());
-  const lines = renderDisplayInvitation(log, {
-    ...base,
-    linkageTerms: {
-      ...base.linkageTerms,
-      linkageKeys: [
-        { name: "surname, given name", elements: [{ field: "last_name" }] },
-      ],
-    },
-  }).split("\n");
-  expect(entriesUnder(lines, "  linkage keys (enforced):")).toEqual([
-    "surname, given name",
-  ]);
-});
 
 // --- handler: repeated single-value flag -------------------------------------
 

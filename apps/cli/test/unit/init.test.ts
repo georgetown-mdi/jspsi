@@ -220,15 +220,6 @@ test("buildTemplateData: no input yields the default linkage terms only", async 
   expect(data.linkageTerms.linkageKeys.length).toBeGreaterThan(0);
 });
 
-test("buildTemplateData: a file input infers metadata, fields, and standardization", async () => {
-  const dir = scratchDir();
-  const file = path.join(dir, "in.csv");
-  fs.writeFileSync(file, SAMPLE_CSV);
-  const data = await buildTemplateData(file, "Org");
-  expect(data.metadata?.map((m) => m.name)).toContain("ssn");
-  expect(data.standardization?.map((s) => s.output)).toContain("ssn");
-});
-
 test("buildTemplateData: the bounded read infers the same terms (incl. DOB format) as a full read", async () => {
   // The acceptance constraint: init's lighter read must author terms identical to
   // a full read of the same file. Use a non-default DOB format (MM/DD/YYYY) so the

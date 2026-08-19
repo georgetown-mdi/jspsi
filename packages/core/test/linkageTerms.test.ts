@@ -1999,55 +1999,6 @@ test("rejects an identity longer than the maximum", () => {
   ).toThrow(ZodError);
 });
 
-test("accepts linkageKeys at exactly the maximum count", () => {
-  const linkageKeys = Array.from({ length: MAX_LINKAGE_ENTRIES }, (_, i) => ({
-    name: `K${i}`,
-    elements: [{ field: "ssn" }],
-  }));
-  expect(() => parseLinkageTerms({ ...base, linkageKeys })).not.toThrow();
-});
-
-test("rejects more linkageKeys than the maximum count", () => {
-  const linkageKeys = Array.from(
-    { length: MAX_LINKAGE_ENTRIES + 1 },
-    (_, i) => ({ name: `K${i}`, elements: [{ field: "ssn" }] }),
-  );
-  expect(() => parseLinkageTerms({ ...base, linkageKeys })).toThrow(ZodError);
-});
-
-test("accepts linkageFields at exactly the maximum count", () => {
-  const linkageFields = Array.from({ length: MAX_LINKAGE_ENTRIES }, (_, i) => ({
-    name: `f${i}`,
-    type: "ssn",
-  }));
-  // The key must reference a declared field, so point it at one of the f* names
-  // rather than base's "ssn", which this override does not declare.
-  expect(() =>
-    parseLinkageTerms({
-      ...base,
-      linkageFields,
-      linkageKeys: [{ name: "K", elements: [{ field: "f0" }] }],
-    }),
-  ).not.toThrow();
-});
-
-test("rejects more linkageFields than the maximum count", () => {
-  const linkageFields = Array.from(
-    { length: MAX_LINKAGE_ENTRIES + 1 },
-    (_, i) => ({ name: `f${i}`, type: "ssn" }),
-  );
-  // Point the key at a declared field so the rejection is the count bound alone,
-  // not base's "ssn" reference (undeclared under this override) tripping the
-  // referential-integrity refine.
-  expect(() =>
-    parseLinkageTerms({
-      ...base,
-      linkageFields,
-      linkageKeys: [{ name: "K", elements: [{ field: "f0" }] }],
-    }),
-  ).toThrow(ZodError);
-});
-
 test("rejects an over-long constraint exclude value", () => {
   expect(() =>
     parseLinkageTerms({

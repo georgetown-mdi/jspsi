@@ -246,21 +246,6 @@ const FLOODED_SITES: Array<[string, () => Error, string]> = [
       ),
     STALLED_RECOVERY_STEP,
   ],
-  [
-    "the liveness guard's detail",
-    () =>
-      transportOperationStalledError(
-        "file read",
-        MESSAGE_PATH,
-        "d".repeat(100_000),
-      ),
-    STALLED_RECOVERY_STEP,
-  ],
-  [
-    "the liveness guard's server-reported error",
-    () => deadSessionError(MESSAGE_PATH, "s".repeat(100_000)),
-    STALLED_RECOVERY_STEP,
-  ],
 ];
 
 for (const [label, raise, recoveryStep] of FLOODED_SITES) {

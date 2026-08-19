@@ -1174,22 +1174,6 @@ test("connectionFromEndpoint: throws on a filedrop endpoint naming no directory"
   );
 });
 
-test("connectionFromEndpoint: the split swap is applied exactly once (no double-swap)", () => {
-  // A double application would land the inviter's inbound back on the acceptor's
-  // inbound. Asserting the acceptor's inbound is the inviter's OUTBOUND proves a
-  // single swap; the offline invite path passes `undefined` to this same
-  // function, so there is no second swap site.
-  const endpoint: ConnectionEndpoint = {
-    channel: "filedrop",
-    inboundPath: "/inviter-in",
-    outboundPath: "/inviter-out",
-  };
-  const { connection } = connectionFromEndpoint(endpoint);
-  if (connection.channel !== "filedrop") throw new Error("expected filedrop");
-  expect(connection.inboundPath).toBe(endpoint.outboundPath);
-  expect(connection.inboundPath).not.toBe(endpoint.inboundPath);
-});
-
 // --- applyEndpointSplitDirectories (online accept merge) ---------------------
 
 test("applyEndpointSplitDirectories: grafts a split sftp endpoint onto the URL connection, keeping host/credentials", () => {

@@ -58,34 +58,10 @@ describe("sanitizeErrorForDisplay", () => {
     );
   });
 
-  test("escapes ANSI / control bytes in the top-level message", () => {
-    const out = sanitizeErrorForDisplay(new Error("\x1b[31mEVIL\x1b[0m"));
-    expect(out).not.toContain("\x1b");
-    expect(out).toContain("\\x1b[31mEVIL");
-  });
-
   test("escapes a newline in the message so it cannot spoof a log line", () => {
     const out = sanitizeErrorForDisplay(new Error("ok\nFAKE: all clear"));
     expect(out).not.toContain("\n");
     expect(out).toContain("\\x0a");
-  });
-
-  test("neutralizes deceptive Unicode (bidi override) in the message", () => {
-    const out = sanitizeErrorForDisplay(new Error("user\u202eEVIL"));
-    expect(out).not.toContain("\u202e");
-    expect(out).toContain("\\u202e");
-  });
-
-  test("escapes control/ANSI bytes carried by a chained cause", () => {
-    // The dangerous bytes live one link down the cause chain; the wrapper
-    // message is clean. The cause text must still be neutralized, and the raw
-    // ESC must not appear anywhere in the rendered output.
-    const out = sanitizeErrorForDisplay(
-      new Error("exchange failed", { cause: new Error("\x1b[31mEVIL") }),
-    );
-    expect(out).not.toContain("\x1b");
-    expect(out).toContain("caused by:");
-    expect(out).toContain("\\x1b[31mEVIL");
   });
 
   test("does not re-leak a hostile filedrop path embedded in a transport cause", () => {

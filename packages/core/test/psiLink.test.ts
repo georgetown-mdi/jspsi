@@ -1,7 +1,5 @@
 import { expect, test } from "vitest";
 
-import log from "loglevel";
-
 import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../src/participant";
@@ -62,8 +60,6 @@ const clientData = [
   ["Carol", "Elizabeth", "Henry"],
   ["3", "3", "2"],
 ];
-
-log.setLevel("DEBUG");
 
 let [serverResult, clientResult] = await (async () => {
   return await Promise.all([

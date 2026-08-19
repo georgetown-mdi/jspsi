@@ -1,5 +1,5 @@
 {
-  "description": "Resolved intersection-and-association known-answer vectors for the vendored @openmined/psi.js engine as psilink drives it. Each scenario fixes the engine inputs and pins both the intersection membership and the association/permutation mapping back to original input rows, normalized by sorting on the local index. These consolidate the toStrictEqual KATs otherwise inline in psiParticipant.test.ts, psiLink.test.ts, psiLinkForLinkageKeys.test.ts, psiLinkEmptyRound.test.ts, and psiLinkEmptyKey.test.ts into one portable fork-bump acceptance gate: a fork re-roll or an accidental engine swap that permutes or corrupts the association mapping fails psiIntersectionVectors.test.ts deterministically. This is a CORRECTNESS anchor (the projection is data-defined, so a correct engine always reproduces it), distinct from the BYTE-stability anchor in psi-engine-wire-vectors.json. A green run confirms only that the engine still computes linkage correctly; it does NOT verify the properties that make PSI safe -- that nothing beyond the intersection is revealed, malicious-counterparty resistance, or curve/key handling -- nor byte-level interop, and it does NOT substitute for the explicit security review CONTRIBUTING.md's Cryptographic-dependencies rule requires for any @openmined/psi.js re-roll or replacement. Regenerate with generate-psi-intersection-vectors.mjs in this directory.",
+  "description": "Resolved intersection-and-association known-answer vectors for the vendored @openmined/psi.js engine as psilink drives it. Each scenario fixes the engine inputs and pins both the intersection membership and the association/permutation mapping back to original input rows, normalized by sorting on the local index. They hold every scenario psilink's matching cascade has to get right -- the empty-round and empty-key scenarios pinned nowhere else, plus the projections psiParticipant.test.ts, psiLink.test.ts, and psiLinkForLinkageKeys.test.ts exercise from the API side -- in one portable fork-bump acceptance gate: a fork re-roll or an accidental engine swap that permutes or corrupts the association mapping fails psiIntersectionVectors.test.ts deterministically. This is a CORRECTNESS anchor (the projection is data-defined, so a correct engine always reproduces it), distinct from the BYTE-stability anchor in psi-engine-wire-vectors.json. A green run confirms only that the engine still computes linkage correctly; it does NOT verify the properties that make PSI safe -- that nothing beyond the intersection is revealed, malicious-counterparty resistance, or curve/key handling -- nor byte-level interop, and it does NOT substitute for the explicit security review CONTRIBUTING.md's Cryptographic-dependencies rule requires for any @openmined/psi.js re-roll or replacement. Regenerate with generate-psi-intersection-vectors.mjs in this directory.",
   "curve": "NIST P-256",
   "revealIntersection": true,
   "associationTableLayout": "[localRowIndices, partnerRowIndices]; the two arrays are equal length and pair index-for-index. The starter is sorted ascending by its local index (starter[0]); the joiner is sorted ascending by its partner index (joiner[1]), so across the pair starter[0] === joiner[1] and starter[1] === joiner[0]. undefined inputs (the no-key sentinel) serialize as JSON null.",
@@ -99,7 +99,7 @@
     },
     {
       "name": "empty-round-joiner-fully-matched",
-      "description": "linkViaPSI one-to-one: the joiner is fully matched on key 0 (its key-1 set is empty) while the starter still holds an unmatched record. The matching loop must still run key 1 for both parties. Source: psiLinkEmptyRound.test.ts (joiner fully matched early).",
+      "description": "linkViaPSI one-to-one: the joiner is fully matched on key 0 (its key-1 set is empty) while the starter still holds an unmatched record. The matching loop must still run key 1 for both parties -- skipping a locally-empty round drops a send/receive the partner still performs and deadlocks the lockstep exchange, so a regression hangs this vector.",
       "method": "linkViaPSI",
       "cardinality": "one-to-one",
       "starterKeys": [
@@ -121,7 +121,7 @@
     },
     {
       "name": "empty-round-starter-fully-matched",
-      "description": "Mirror of the above: the starter's key-1 set is empty while the joiner still has an unmatched record. Source: psiLinkEmptyRound.test.ts (starter fully matched early).",
+      "description": "Mirror of the above: the starter's key-1 set is empty while the joiner still has an unmatched record, exercising the same desync in the opposite role direction.",
       "method": "linkViaPSI",
       "cardinality": "one-to-one",
       "starterKeys": [
@@ -143,7 +143,7 @@
     },
     {
       "name": "empty-round-both-fully-matched",
-      "description": "linkViaPSI one-to-one: both parties fully match on key 0, so key 1 is a no-op on both sides. Source: psiLinkEmptyRound.test.ts (both-empty round).",
+      "description": "linkViaPSI one-to-one: both parties fully match on key 0, so key 1 is a no-op on both sides and must still be run by both.",
       "method": "linkViaPSI",
       "cardinality": "one-to-one",
       "starterKeys": [
@@ -165,7 +165,7 @@
     },
     {
       "name": "empty-key-singleton-empty-string-matches",
-      "description": "linkViaPSI one-to-one: '' is a present, matchable key distinct from undefined (the no-key sentinel). The lone '' on each side is unique within its dataset and matches; undefined and non-matching named rows do not. Source: psiLinkEmptyKey.test.ts (singleton '' matches).",
+      "description": "linkViaPSI one-to-one: '' is a present, matchable key distinct from undefined (the no-key sentinel). The lone '' on each side is unique within its dataset and matches; undefined and non-matching named rows do not.",
       "method": "linkViaPSI",
       "cardinality": "one-to-one",
       "starterKeys": [[null, "", "Alice"]],
@@ -175,7 +175,7 @@
     },
     {
       "name": "empty-key-duplicated-empty-string-dropped",
-      "description": "linkViaPSI one-to-one: the starter has two '' values, so every '' is a within-dataset duplicate and is dropped from the round; the joiner's singleton '' therefore matches nothing. Source: psiLinkEmptyKey.test.ts ('' duplicated within a dataset is dropped).",
+      "description": "linkViaPSI one-to-one: the starter has two '' values, so every '' is a within-dataset duplicate and is dropped from the round; the joiner's singleton '' therefore matches nothing, even though a singleton-vs-singleton '' would match.",
       "method": "linkViaPSI",
       "cardinality": "one-to-one",
       "starterKeys": [["", "", "Alice"]],
@@ -185,7 +185,7 @@
     },
     {
       "name": "empty-key-all-empty-column-no-match",
-      "description": "linkViaPSI one-to-one: every '' on both sides is a within-dataset duplicate, so the round drops them all and produces no match. Source: psiLinkEmptyKey.test.ts (all-'' column matches nothing).",
+      "description": "linkViaPSI one-to-one: every '' on both sides is a within-dataset duplicate, so the round drops them all and produces no match.",
       "method": "linkViaPSI",
       "cardinality": "one-to-one",
       "starterKeys": [["", ""]],
@@ -195,7 +195,7 @@
     },
     {
       "name": "empty-key-carried-forward-later-round",
-      "description": "linkViaPSI one-to-one: row 0 matches on key 0 ('A') and is removed; row 1 does not match on key 0 and carries forward to key 1, where both sides' value is '' -- so the carried-forward '' matches like any other value. Source: psiLinkEmptyKey.test.ts ('' matches in a later round).",
+      "description": "linkViaPSI one-to-one: row 0 matches on key 0 ('A') and is removed; row 1 does not match on key 0 and carries forward to key 1, where both sides' value is '' -- so the carried-forward '' matches like any other value, rather than being treated as already matched or dropped.",
       "method": "linkViaPSI",
       "cardinality": "one-to-one",
       "starterKeys": [
@@ -217,7 +217,7 @@
     },
     {
       "name": "empty-key-duplicate-dropped-unique-still-matches",
-      "description": "linkViaPSI one-to-one: the starter's two '' rows are dropped as within-dataset duplicates while its unique 'Alice' still matches -- dropping the duplicated '' does not poison the rest of the round. Source: psiLinkEmptyKey.test.ts (duplicated '' dropped, unique value still matches).",
+      "description": "linkViaPSI one-to-one: the starter's two '' rows are dropped as within-dataset duplicates while its unique 'Alice' still matches -- the uniqueness rule treats '' exactly like any other value, and dropping it does not poison the rest of the round.",
       "method": "linkViaPSI",
       "cardinality": "one-to-one",
       "starterKeys": [["", "", "Alice"]],

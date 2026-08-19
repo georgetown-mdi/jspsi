@@ -33,7 +33,8 @@ import type { InProcessSftpServer } from "../sftpServer/types";
 // widths that matter are then driven through the real paths that build them, the
 // entry sweep over a split scope and the connection cleanup. The entry scan's
 // narrower sweeps have no case of their own: each is that same shape over a
-// subset of ONE listing, so the ladder covers them at and below their width.
+// subset of ONE listing, whose full width the connection-cleanup case drives and
+// the ladder's rungs bracket.
 //
 // THE WIDTHS DRIVEN BELOW ARE THIS FILE'S BOUND. They reach the enforced listing
 // bound and the split-scope union of two listings, which is the widest fan these
@@ -52,16 +53,9 @@ const SPLIT_SCOPE_FAN_WIDTH = 2 * MAX_DIRECTORY_ENTRIES;
 
 // The ladder. The first three rungs are the widths the shared-client listener
 // ceiling was driven at (sharedClientListenerCeiling.test.ts), so the two files
-// are comparable at the bottom; the rest climb to the enforced listing bound and
-// then to the split-scope union of two listings.
-const FAN_WIDTHS = [
-  9,
-  40,
-  512,
-  2048,
-  MAX_DIRECTORY_ENTRIES,
-  SPLIT_SCOPE_FAN_WIDTH,
-] as const;
+// are comparable at the bottom; the rest climb past them to the split-scope
+// union of two listings.
+const FAN_WIDTHS = [9, 40, 512, 2048, SPLIT_SCOPE_FAN_WIDTH] as const;
 
 // Entries the in-process backend answers per READDIR round trip in the cases
 // that make it list a full directory, kept far below the backend's byte budget

@@ -148,6 +148,69 @@ function withFieldConstraints(
   return clone;
 }
 
+// Columns for the four default-constrained types plus a date, hand-built so a test
+// does not lean on inferMetadata's column-name heuristics.
+const constrainedMetadata: Metadata = [
+  { name: "ssn_col", type: "ssn", role: "linkage", isPayload: false },
+  { name: "ssn4_col", type: "ssn4", role: "linkage", isPayload: false },
+  { name: "fn_col", type: "first_name", role: "linkage", isPayload: false },
+  { name: "ln_col", type: "last_name", role: "linkage", isPayload: false },
+  {
+    name: "dob_col",
+    type: "date_of_birth",
+    role: "linkage",
+    isPayload: false,
+  },
+];
+const constrainedColumns = [
+  "ssn_col",
+  "ssn4_col",
+  "fn_col",
+  "ln_col",
+  "dob_col",
+];
+const constrainedRawRows = [
+  {
+    ssn_col: "123456789",
+    ssn4_col: "6789",
+    fn_col: "A",
+    ln_col: "B",
+    dob_col: "01/01/2000",
+  },
+];
+
+/** A fresh editor seed over those columns -- the import target. */
+function constrainedSeed(): AdvancedInviteSeed {
+  return {
+    terms: getDefaultLinkageTerms("Inviter", constrainedMetadata),
+    metadata: constrainedMetadata,
+    columns: constrainedColumns,
+  };
+}
+
+/** The default document the editor exports for those columns: the same draft shape
+ * seedAdvancedInvite builds, so its fields carry exactly the type-default
+ * constraints a rebuild re-stamps, in the canonical DEFAULT_LINKAGE_FIELDS order.
+ * The round-trip-faithful baseline a divergence refusal must NOT trip. */
+function constrainedDefaultExport(): LinkageTerms {
+  const terms = getDefaultLinkageTerms("Inviter", constrainedMetadata);
+  return buildAdvancedTerms({
+    identity: "Inviter",
+    lifetimeSeconds: 3600,
+    outputDirection: "both",
+    algorithm: "psi",
+    deduplicate: false,
+    linkageStrategy: "cascade",
+    metadata: constrainedMetadata,
+    standardization: defaultStandardizationForRows(
+      constrainedMetadata,
+      terms,
+      constrainedRawRows,
+    ),
+    keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
+  });
+}
+
 describe("seedAdvancedInvite + buildAdvancedTerms", () => {
   test("(a) building an unedited seed equals the auto-derived terms", () => {
     const { draft, seed } = seedAdvancedInvite(
@@ -1494,58 +1557,10 @@ describe("draftFromTerms reconstructs multi-field bindings on import", () => {
 });
 
 describe("importedConstraintDivergenceMessage refuses a non-representable-constraints import", () => {
-  // Columns for the four default-constrained types, hand-built so the test does not
-  // lean on inferMetadata's column-name heuristics.
-  const metadata: Metadata = [
-    { name: "ssn_col", type: "ssn", role: "linkage", isPayload: false },
-    { name: "ssn4_col", type: "ssn4", role: "linkage", isPayload: false },
-    { name: "fn_col", type: "first_name", role: "linkage", isPayload: false },
-    { name: "ln_col", type: "last_name", role: "linkage", isPayload: false },
-    {
-      name: "dob_col",
-      type: "date_of_birth",
-      role: "linkage",
-      isPayload: false,
-    },
-  ];
-  const columns = ["ssn_col", "ssn4_col", "fn_col", "ln_col", "dob_col"];
-  const rawRows = [
-    {
-      ssn_col: "123456789",
-      ssn4_col: "6789",
-      fn_col: "A",
-      ln_col: "B",
-      dob_col: "01/01/2000",
-    },
-  ];
-
-  /** A fresh editor seed over these columns -- the import target. */
-  function seedFor(): AdvancedInviteSeed {
-    return {
-      terms: getDefaultLinkageTerms("Inviter", metadata),
-      metadata,
-      columns,
-    };
-  }
-
-  /** The default document the editor exports for these columns: the same draft shape
-   * seedAdvancedInvite builds, so its fields carry exactly the type-default
-   * constraints the rebuild re-stamps. The round-trip-faithful baseline the refusal
-   * must NOT trip. */
-  function defaultExport(): LinkageTerms {
-    const terms = getDefaultLinkageTerms("Inviter", metadata);
-    return buildAdvancedTerms({
-      identity: "Inviter",
-      lifetimeSeconds: 3600,
-      outputDirection: "both",
-      algorithm: "psi",
-      deduplicate: false,
-      linkageStrategy: "cascade",
-      metadata,
-      standardization: defaultStandardizationForRows(metadata, terms, rawRows),
-      keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
-    });
-  }
+  const columns = constrainedColumns;
+  const rawRows = constrainedRawRows;
+  const seedFor = constrainedSeed;
+  const defaultExport = constrainedDefaultExport;
 
   test("a non-default ssn exclude denylist is refused, not silently rebuilt to the default", () => {
     const seed = seedFor();
@@ -1744,57 +1759,9 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
 });
 
 describe("import round-trip preserves field order and declared-but-unreferenced fields", () => {
-  // Columns for the four default-constrained types plus a date, so the editor's own
-  // export carries the type-default constraints the rebuild re-stamps. Hand-built so the
-  // test does not lean on inferMetadata's column-name heuristics.
-  const metadata: Metadata = [
-    { name: "ssn_col", type: "ssn", role: "linkage", isPayload: false },
-    { name: "ssn4_col", type: "ssn4", role: "linkage", isPayload: false },
-    { name: "fn_col", type: "first_name", role: "linkage", isPayload: false },
-    { name: "ln_col", type: "last_name", role: "linkage", isPayload: false },
-    {
-      name: "dob_col",
-      type: "date_of_birth",
-      role: "linkage",
-      isPayload: false,
-    },
-  ];
-  const columns = ["ssn_col", "ssn4_col", "fn_col", "ln_col", "dob_col"];
-  const rawRows = [
-    {
-      ssn_col: "123456789",
-      ssn4_col: "6789",
-      fn_col: "A",
-      ln_col: "B",
-      dob_col: "01/01/2000",
-    },
-  ];
-
-  /** A fresh editor seed over these columns -- the import target. */
-  function seedFor(): AdvancedInviteSeed {
-    return {
-      terms: getDefaultLinkageTerms("Inviter", metadata),
-      metadata,
-      columns,
-    };
-  }
-
-  /** The default document the editor exports for these columns: fields carry exactly
-   * the type-default constraints, in the canonical DEFAULT_LINKAGE_FIELDS order. */
-  function defaultExport(): LinkageTerms {
-    const terms = getDefaultLinkageTerms("Inviter", metadata);
-    return buildAdvancedTerms({
-      identity: "Inviter",
-      lifetimeSeconds: 3600,
-      outputDirection: "both",
-      algorithm: "psi",
-      deduplicate: false,
-      linkageStrategy: "cascade",
-      metadata,
-      standardization: defaultStandardizationForRows(metadata, terms, rawRows),
-      keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
-    });
-  }
+  const rawRows = constrainedRawRows;
+  const seedFor = constrainedSeed;
+  const defaultExport = constrainedDefaultExport;
 
   /** What an import-then-regenerate produces for `terms` against these columns. */
   function rebuild(terms: LinkageTerms): LinkageTerms {

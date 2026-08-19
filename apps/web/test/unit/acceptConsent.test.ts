@@ -92,6 +92,20 @@ describe("commitAcceptance (the consent gate)", () => {
 });
 
 describe("summarizeInvitation", () => {
+  // The header entry a single last-name element produces under a given rule.
+  const headerFor = (transform: LinkageKeyElement["transform"]) =>
+    summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "ln", type: "last_name" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [{ field: "ln", ...(transform && { transform }) }],
+          },
+        ],
+      }),
+    ).linkageKeys[0].headerFields[0];
+
   test("matchedFields lists each matched field once, in first-appearance order across keys", () => {
     const summary = summarizeInvitation(
       makeToken({
@@ -1424,22 +1438,9 @@ describe("summarizeInvitation", () => {
   });
 
   test("names each materially-altering rule in the header by effect or directly", () => {
-    // The header entry a single last-name element produces under a given rule.
     // Guards the whole categorization: an effect name where the matching
     // direction is determinable, a direct name where a partner pattern/value list
     // makes it indeterminate, and nothing for routine standardization.
-    const headerFor = (transform: LinkageKeyElement["transform"]) =>
-      summarizeInvitation(
-        makeToken({
-          linkageFields: [{ name: "ln", type: "last_name" }],
-          linkageKeys: [
-            {
-              name: "K",
-              elements: [{ field: "ln", ...(transform && { transform }) }],
-            },
-          ],
-        }),
-      ).linkageKeys[0].headerFields[0];
 
     // Effect named where the direction is determinable.
     expect(
@@ -1554,62 +1555,7 @@ describe("summarizeInvitation", () => {
     expect(headerFor(undefined)).toBe("last name");
   });
 
-  test("marks a tokenless parse_date output as a stronger breadth than a partial drop", () => {
-    const headerFor = (transform: LinkageKeyElement["transform"]) =>
-      summarizeInvitation(
-        makeToken({
-          linkageFields: [{ name: "ln", type: "last_name" }],
-          linkageKeys: [
-            {
-              name: "K",
-              elements: [{ field: "ln", ...(transform && { transform }) }],
-            },
-          ],
-        }),
-      ).linkageKeys[0].headerFields[0];
-
-    // An output that keeps a date token but drops a component its input carries
-    // collapses dates onto a coarser bucket -- it matches on only part of the
-    // date, so it wears the same "(partial)" marker a substring truncation does.
-    expect(
-      headerFor([
-        {
-          function: "parse_date",
-          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY" },
-        },
-      ]),
-    ).toBe("last name (partial)");
-    // An output carrying NO date token collapses every date to one constant value
-    // -- the maximal match breadth -- so it earns a distinct, stronger marker
-    // rather than reading as the same magnitude as a one-component drop.
-    expect(
-      headerFor([
-        {
-          function: "parse_date",
-          params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
-        },
-      ]),
-    ).toBe("last name (any date)");
-    // A YY in the OUTPUT is an unsubstituted literal, not a resolved year: an
-    // "MM/DD/YY" output keeps month and day but collapses the year (a partial
-    // drop), while a "YY"-only output collapses every date to the constant "YY"
-    // (the maximal breadth). Neither may read as routine canonicalization.
-    expect(
-      headerFor([
-        {
-          function: "parse_date",
-          params: { inputFormat: "MM/DD/YYYY", outputFormat: "MM/DD/YY" },
-        },
-      ]),
-    ).toBe("last name (partial)");
-    expect(
-      headerFor([
-        {
-          function: "parse_date",
-          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YY" },
-        },
-      ]),
-    ).toBe("last name (any date)");
+  test("ranks the tokenless parse_date collapse above every other marker", () => {
     // The "(any date)" collapse presupposes the date is actually parsed: a
     // tokenless OUTPUT whose INPUT also carries no date token drops every record at
     // the input stage -- the element matches NOTHING, not everything -- so it earns
@@ -1673,19 +1619,6 @@ describe("summarizeInvitation", () => {
   });
 
   test("shows no breadth marker for a parse_date whose input drops every record", () => {
-    const headerFor = (transform: LinkageKeyElement["transform"]) =>
-      summarizeInvitation(
-        makeToken({
-          linkageFields: [{ name: "ln", type: "last_name" }],
-          linkageKeys: [
-            {
-              name: "K",
-              elements: [{ field: "ln", ...(transform && { transform }) }],
-            },
-          ],
-        }),
-      ).linkageKeys[0].headerFields[0];
-
     // A parse_date whose input format omits a component core requires (here no
     // year) returns null for EVERY record -- the key matches nothing, a narrowing
     // the separate dead-key advisory surfaces -- so the breadth marker, which
@@ -1732,19 +1665,6 @@ describe("summarizeInvitation", () => {
   });
 
   test("shows no breadth marker when a dead parse_date kills the element via a later rule", () => {
-    const headerFor = (transform: LinkageKeyElement["transform"]) =>
-      summarizeInvitation(
-        makeToken({
-          linkageFields: [{ name: "ln", type: "last_name" }],
-          linkageKeys: [
-            {
-              name: "K",
-              elements: [{ field: "ln", ...(transform && { transform }) }],
-            },
-          ],
-        }),
-      ).linkageKeys[0].headerFields[0];
-
     // A parse_date whose input format omits a component drops every record, and a
     // later step null-propagates it, so the element matches NOTHING. The breadth
     // marker (a broadening signal) must stay silent even though the later rule,
@@ -1799,19 +1719,6 @@ describe("summarizeInvitation", () => {
   });
 
   test("shows a single most-salient marker, effect-named before directly-named", () => {
-    const headerFor = (transform: LinkageKeyElement["transform"]) =>
-      summarizeInvitation(
-        makeToken({
-          linkageFields: [{ name: "ln", type: "last_name" }],
-          linkageKeys: [
-            {
-              name: "K",
-              elements: [{ field: "ln", ...(transform && { transform }) }],
-            },
-          ],
-        }),
-      ).linkageKeys[0].headerFields[0];
-
     // An element carrying more than one rule shows just the most salient: an
     // effect-named rule wins over a directly-named one ...
     expect(
@@ -1848,19 +1755,6 @@ describe("summarizeInvitation", () => {
   });
 
   test("does not mark a phonetic-then-substring element as a literal truncation", () => {
-    const headerFor = (transform: LinkageKeyElement["transform"]) =>
-      summarizeInvitation(
-        makeToken({
-          linkageFields: [{ name: "ln", type: "last_name" }],
-          linkageKeys: [
-            {
-              name: "K",
-              elements: [{ field: "ln", ...(transform && { transform }) }],
-            },
-          ],
-        }),
-      ).linkageKeys[0].headerFields[0];
-
     // The bug: a substring after a value-recoding phonetic step slices the
     // sound-alike code, not the literal name, so "partial" (a literal truncation)
     // would misdescribe the match -- "sound-alike" is the dominant honest effect.

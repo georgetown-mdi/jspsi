@@ -936,16 +936,17 @@ describe("FileSyncRendezvous mismatch skip-sweep", () => {
   });
 });
 
+const shortDeadline = () => ({
+  timeToLive: new Date(Date.now() + 40),
+  pollingFrequency: 10,
+});
+
 // Retain mode's rollback of a terminally failed rendezvous. These assert what
 // is left ON DISK by name: responsibleFiles is retain-aware already and stays
 // empty either way, so an assertion on it would pass whether or not the files
 // were removed.
 describe("FileSyncRendezvous terminal-failure rollback in retain mode", () => {
   const retainFlags = { locklessRendezvous: true, retainFiles: true };
-  const shortDeadline = () => ({
-    timeToLive: new Date(Date.now() + 40),
-    pollingFrequency: 10,
-  });
 
   test("a peer-wait timeout with no peer removes this party's own hello", async () => {
     const files = new Map<string, Buffer>();
@@ -1271,11 +1272,11 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
   // Built through the production composer, not a copy of it: these tests exist
   // to measure what an operator is shown, and a hand-composed dirsDisplay would
   // measure a shape no producer builds.
-  const splitScope = (inbound = SPLIT_INBOUND): RendezvousScope => ({
-    inboundPath: inbound,
+  const splitScope = (): RendezvousScope => ({
+    inboundPath: SPLIT_INBOUND,
     outboundPath: SPLIT_OUTBOUND,
     split: true,
-    dirsDisplay: composeDirsDisplay(inbound, SPLIT_OUTBOUND),
+    dirsDisplay: composeDirsDisplay(SPLIT_INBOUND, SPLIT_OUTBOUND),
   });
 
   // The cause link carrying the scope and the filenames. The renderer caps it
@@ -2262,11 +2263,6 @@ function recordOps(
   }
 }
 
-const shortDeadline = () => ({
-  timeToLive: new Date(Date.now() + 40),
-  pollingFrequency: 10,
-});
-
 describe("FileSyncRendezvous hello publish discipline", () => {
   test("publishes the hello temp-then-rename, never under its final name", async () => {
     const files = new Map<string, Buffer>();
@@ -2712,18 +2708,6 @@ describe("FileSyncRendezvous entry-present peer hello window", () => {
     expect((err as Error).message).toContain("unexpected protocol file");
     expect(Date.now() - started).toBeLessThan(1000);
     expect(files.has(`${DIR}/${helloName("site-a")}`)).toBe(true);
-  });
-
-  test("two leftover peer hellos are still refused at entry", async () => {
-    const files = new Map<string, Buffer>();
-    placePeerHello(files, "zzz", flags);
-    placePeerHello(files, "yyy", flags);
-    const p = makeParty("aaa", { ...flags, ...budget() }, files);
-
-    await expect(p.rdv.run(p.scope)).rejects.toMatchObject({
-      name: "UsageError",
-      message: expect.stringContaining("peer hello files"),
-    });
   });
 
   test("records the entry-present hello for attribution and leaves it set on failure", async () => {

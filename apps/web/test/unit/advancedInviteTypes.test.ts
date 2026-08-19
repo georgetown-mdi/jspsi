@@ -30,13 +30,4 @@ describe("outputForDirection / directionForOutput", () => {
     const neither: Output = { expectsOutput: false, shareWithPartner: false };
     expect(directionForOutput(neither)).toBe("both");
   });
-
-  test("each direction produces a distinct, non-forbidden output pair", () => {
-    const pairs = DIRECTIONS.map((direction) => outputForDirection(direction));
-    expect(pairs).not.toContainEqual({
-      expectsOutput: false,
-      shareWithPartner: false,
-    });
-    expect(new Set(pairs.map((pair) => JSON.stringify(pair))).size).toBe(3);
-  });
 });

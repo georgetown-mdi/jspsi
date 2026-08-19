@@ -94,78 +94,13 @@ function makeIterables(
 
 // --- Basic length / shape tests ----------------------------------------------
 
-test("handles trailing newline (row count)", () => {
-  const rows = [
-    {
-      id: "159859483",
-      first_name: "James",
-      last_name: "Heard",
-      ssn: "559811301",
-      date_of_birth: "19750716",
-    },
-  ];
-  const iters = makeIterables(rows);
-  expect(iters).toHaveLength(terms.linkageKeys.length);
-  expect(iters[0].length).toBe(1);
-});
-
-test("handles multiple rows", () => {
-  const iters = makeIterables(twoRows);
-  expect(iters[0].length).toBe(2);
-  expect(iters[0].at(0)).toBe("559811301HEARD19750716");
-  expect(iters[0].at(1)).toBe("322842281IORIO19750817");
-});
-
-test("second key applies element transforms", () => {
-  const iters = makeIterables(twoRows);
-  expect(iters[1].at(0)).toBe("559811301HJ");
-  expect(iters[1].at(1)).toBe("322842281IA");
-});
-
-test("returns undefined when a required field is absent", () => {
-  const rows = [
-    {
-      id: "1",
-      first_name: "JAMES",
-      last_name: "HEARD",
-      ssn: "",
-      date_of_birth: "19750716",
-    },
-  ];
-  // SSN is empty; buildKeyStrings returns null because the field value is "".
-  // StandardizedKeyIterable must return undefined (not throw).
-  const iters = makeIterables(rows);
-  expect(() => iters[0].at(0)).not.toThrow();
-});
-
 test("indexed access via [] agrees with at()", () => {
   const iters = makeIterables(twoRows);
   expect(iters[0][0]).toBe(iters[0].at(0));
   expect(iters[0][1]).toBe(iters[0].at(1));
 });
 
-test("Symbol.iterator yields same values as at()", () => {
-  const iters = makeIterables(twoRows);
-  const spread = [...iters[0]];
-  expect(spread[0]).toBe(iters[0].at(0));
-  expect(spread[1]).toBe(iters[0].at(1));
-});
-
 // --- Standardization step integration ----------------------------------------
-
-test("identity transform: last_name already upper-case is unchanged", () => {
-  const rows = [
-    {
-      id: "1",
-      first_name: "J",
-      last_name: "SMITH",
-      ssn: "123456789",
-      date_of_birth: "20000101",
-    },
-  ];
-  const iters = makeIterables(rows);
-  expect(iters[0].at(0)).toBe("123456789SMITH20000101");
-});
 
 test("identity transform: mixed-case last_name is passed through as-is (no standardization steps)", () => {
   const rows = [

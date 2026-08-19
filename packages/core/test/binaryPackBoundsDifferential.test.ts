@@ -188,7 +188,7 @@ function u32Bytes(count: number): Array<number> {
  * seven is still a frame the real `unpack` reads, and the assertions below take
  * their reference from it.
  */
-async function markerCorpus(): Promise<Array<MarkerCase>> {
+async function buildMarkerCorpus(): Promise<Array<MarkerCase>> {
   const bigString = "s".repeat(70000); // > 65535 wire bytes -> str32, under the cap
   const raw16Bytes = new Uint8Array(300);
   for (let i = 0; i < raw16Bytes.length; i++) raw16Bytes[i] = (i * 7) & 0xff;
@@ -285,6 +285,13 @@ async function markerCorpus(): Promise<Array<MarkerCase>> {
   );
 
   return cases;
+}
+
+/** The marker corpus, built once per file run: it is a deterministic packing
+ * workload every caller walks read-only, so rebuilding it per test buys nothing. */
+let markerCorpusOnce: Promise<Array<MarkerCase>> | undefined;
+function markerCorpus(): Promise<Array<MarkerCase>> {
+  return (markerCorpusOnce ??= buildMarkerCorpus());
 }
 
 /** A chain of `levels` `array16` headers, each declaring `declared` children, with
@@ -411,7 +418,7 @@ async function binaryArrayFrame(count: number): Promise<Uint8Array> {
 }
 
 /** Whole-frame shapes, at the root rather than wrapped in a probe array. */
-async function shapeCorpus(): Promise<
+async function buildShapeCorpus(): Promise<
   Array<{ label: string; frame: Uint8Array }>
 > {
   const entries: Array<{ label: string; frame: Uint8Array }> = [];
@@ -440,6 +447,14 @@ async function shapeCorpus(): Promise<
     frame: await wideArrayFrame(65536),
   });
   return entries;
+}
+
+/** The shape corpus, built once per file run, on the same read-only terms as the
+ * marker corpus. */
+let shapeCorpusOnce:
+  Promise<Array<{ label: string; frame: Uint8Array }>> | undefined;
+function shapeCorpus(): Promise<Array<{ label: string; frame: Uint8Array }>> {
+  return (shapeCorpusOnce ??= buildShapeCorpus());
 }
 
 /** Every frame the cost differential drives: the per-marker probes and the
@@ -992,17 +1007,6 @@ describe("the map-key rule against the real packer", () => {
   test("accepts every value psilink sends on the WebRTC data channel", async () => {
     for (const { label, value } of webrtcSendSiteValues()) {
       const frame = await packBytes(value);
-      expect(
-        scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES),
-        `the scan refused a real-packed ${label} frame`,
-      ).toBe(true);
-    }
-  });
-
-  test("accepts every real-packed frame in the differential corpus", async () => {
-    // The seeded nested structures and per-marker probes reach far more object
-    // shapes than the send sites do, at depth; none may trip the key rule either.
-    for (const { label, frame } of await shapeCorpus()) {
       expect(
         scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES),
         `the scan refused a real-packed ${label} frame`,

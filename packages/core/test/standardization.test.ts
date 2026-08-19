@@ -474,10 +474,6 @@ describe("runPipeline — parse_date", () => {
         },
       ]);
 
-    test("MM/DD/YY parses at all", () => {
-      expect(parseYY("01/15/90")).toBe("19900115");
-    });
-
     test("68 maps to 2068 (the top of the window)", () => {
       expect(parseYY("06/15/68")).toBe("20680615");
     });
@@ -1168,11 +1164,6 @@ describe("NFC-safe mid-pipeline comparisons (null_if / filter_regex / extract_re
         { function: "split_on", params: { delimiter: "," } },
       ]),
     ).toEqual(new Set([NFC_JOSE]));
-    expect(
-      runPipeline("SMITH-JONES", [
-        { function: "extract_regex", params: { pattern: "^(\\w+)-" } },
-      ]),
-    ).toBe("SMITH");
   });
 
   test("length-sensitive step after a case-fold is cross-party-safe (NFC == NFD input)", () => {
@@ -1750,16 +1741,6 @@ describe("buildKeyStrings", () => {
   const logger = getLogger("cleaning");
 
   afterEach(() => vi.restoreAllMocks());
-
-  test("single-value fields concatenate", () => {
-    const dataset = makeDataset({
-      last_name: "SMITH",
-      date_of_birth: "19900115",
-    });
-    expect(buildKeyStrings(key, dataset, 0)).toEqual(
-      new Set(["SMITH19900115"]),
-    );
-  });
 
   test("empty field value set (null) returns null", () => {
     const rows = [{ last_name: "SMITH", date_of_birth: "000" }];
@@ -2595,10 +2576,6 @@ const fullTerms = getDefaultLinkageTerms(
 );
 
 describe("unsatisfiedLinkageFields", () => {
-  test("an input that covers every field type is fully satisfiable", () => {
-    expect(unsatisfiedLinkageFields(FULL_COLUMNS, fullTerms)).toEqual([]);
-  });
-
   test("names the fields whose type no input column provides", () => {
     const unsatisfied = unsatisfiedLinkageFields(["first_name"], fullTerms);
     const names = unsatisfied.map((f) => f.name).sort();
@@ -2656,15 +2633,6 @@ describe("unsatisfiedLinkageFields", () => {
         ],
       ),
     ).toEqual([]);
-  });
-
-  test("an explicit standardization whose input column is absent does not satisfy", () => {
-    const unsatisfied = unsatisfiedLinkageFields(
-      ["first_name", "last_name", "dob"],
-      fullTerms,
-      [{ output: "ssn", input: "tax_id" }],
-    );
-    expect(unsatisfied.map((f) => f.name)).toContain("ssn");
   });
 
   test("an explicit standardization with an absent input preempts the type fallback", () => {

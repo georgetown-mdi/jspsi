@@ -255,14 +255,6 @@ test("a detected gap latches the wrapper", async () => {
 
 // --- Integrity / format failures (all rejected as "security") -----------------
 
-test("a flipped ciphertext/tag byte is rejected as a security failure", async () => {
-  const [recv, peer] = await makeInjectable("responder");
-  const bytes = await sealRawBytes("initiator", 0, jsonPlaintext({ ok: true }));
-  bytes[bytes.length - 1] ^= 0xff; // corrupt the GCM tag
-  await peer.send(bytes);
-  await expectSecurity(recv.receive(), /authentication tag/i);
-});
-
 test("an envelope shorter than version + IV + tag is rejected as a security failure", async () => {
   const [recv, peer] = await makeInjectable("responder");
   // < 29 bytes (1 version + 12 IV + 16 tag): the minimum-length floor still

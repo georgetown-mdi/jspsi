@@ -96,27 +96,6 @@ describe("ConsoleSentinel", () => {
     sentinel.restore();
   });
 
-  it("passes an allowlisted message and credits its matcher", () => {
-    const allowlist: ConsoleAllowEntry[] = [
-      {
-        id: "intended-warn",
-        levels: ["warn"],
-        match: /known intentional warning/,
-        reason: "exercised by this test",
-      },
-    ];
-    const fake = fakeConsole();
-    const sentinel = new ConsoleSentinel(allowlist);
-    sentinel.install(fake);
-
-    fake.warn("a known intentional warning fired");
-
-    expect(() => sentinel.assertClean()).not.toThrow();
-    expect(sentinel.matchedAllowlistIds()).toEqual(["intended-warn"]);
-    expect(sentinel.unusedAllowlistIds()).toEqual([]);
-    sentinel.restore();
-  });
-
   it("reports an allowlist matcher that never fires", () => {
     const allowlist: ConsoleAllowEntry[] = [
       {

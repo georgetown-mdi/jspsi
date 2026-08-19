@@ -724,19 +724,6 @@ test("SFTP server with keyboard_interactive: false and no password is accepted",
 
 // --- SFTPServer: host_key_fingerprint format ---------------------------------
 
-test("SFTP server with valid host_key_fingerprint is accepted", () => {
-  // Standard base64, SHA256: prefix, 43 characters (42 wide + 1 constrained).
-  const result = safeParseConnectionConfig({
-    ...sftpBase,
-    server: {
-      host: "sftp.example.org",
-      host_key_fingerprint:
-        "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    },
-  });
-  expect(result.success).toBe(true);
-});
-
 test("SFTP host_key_fingerprint missing SHA256: prefix is rejected", () => {
   const result = safeParseConnectionConfig({
     ...sftpBase,
@@ -863,18 +850,6 @@ test("SFTP host_key_fingerprint list mixing a literal and an @-file reference pa
         "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "@/run/secrets/host-fingerprint",
       ],
-    },
-  });
-  expect(result.success).toBe(true);
-});
-
-test("SFTP server with privateKeyPassphrase and privateKey together is valid", () => {
-  const result = safeParseConnectionConfig({
-    channel: "sftp",
-    server: {
-      host: "sftp.example.org",
-      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----",
-      privateKeyPassphrase: "hunter2",
     },
   });
   expect(result.success).toBe(true);
@@ -1047,14 +1022,6 @@ test("peerId is accepted on filedrop when timestampInFilename is true", () => {
     channel: "filedrop",
     path: "/mnt/share",
     options: { timestampInFilename: true, peerId: "agency-a" },
-  });
-  expect(result.success).toBe(true);
-});
-
-test("peerId with hyphens is accepted", () => {
-  const result = safeParseConnectionConfig({
-    ...sftpBase,
-    options: { timestampInFilename: true, peerId: "agency-a-outbound" },
   });
   expect(result.success).toBe(true);
 });

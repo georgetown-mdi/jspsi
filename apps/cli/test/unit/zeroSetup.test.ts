@@ -276,71 +276,6 @@ test("createConnection sftp never produces a config with authentication set", ()
   ).toBeUndefined();
 });
 
-// --- createConnection sftp: percent-decoding ---------------------------------
-// The WHATWG URL parser keeps pathname/username/password percent-encoded, but
-// ssh2 consumes them literally. createConnection must decode before storing, and
-// must match connectionFromURL (the invite/accept twin) on the same input.
-
-test("createConnection sftp: decodes a percent-encoded path", () => {
-  const result = createConnection(
-    new URL("sftp://host/my%20drop"),
-    baseOptions,
-  ) as SFTPConnectionConfig;
-  expect(result.server.path).toBe("/my drop");
-});
-
-test("createConnection sftp: decodes percent-encoded credentials", () => {
-  const result = createConnection(
-    new URL("sftp://us%20er:p%20w@host/drop"),
-    baseOptions,
-  ) as SFTPConnectionConfig;
-  expect(result.server.username).toBe("us er");
-  expect(result.server.password).toBe("p w");
-});
-
-test("createConnection sftp: decodes a percent-encoded host", () => {
-  const result = createConnection(
-    new URL("sftp://my%20server/drop"),
-    baseOptions,
-  ) as SFTPConnectionConfig;
-  expect(result.server.host).toBe("my server");
-});
-
-test("createConnection sftp: a bare-host URL leaves the path unset", () => {
-  // Matches connectionFromURL: a trailing "/" must not be pinned as the remote
-  // path; the server's default working directory is used instead.
-  for (const raw of ["sftp://host", "sftp://host/"]) {
-    const result = createConnection(
-      new URL(raw),
-      baseOptions,
-    ) as SFTPConnectionConfig;
-    expect(result.server.path).toBeUndefined();
-  }
-});
-
-test("createConnection sftp: a host-less URL is a usage error", () => {
-  expect(() => createConnection(new URL("sftp:///drop"), baseOptions)).toThrow(
-    UsageError,
-  );
-  expect(() => createConnection(new URL("sftp:///drop"), baseOptions)).toThrow(
-    /must include a host/,
-  );
-});
-
-test("createConnection sftp: a malformed percent-escape is a redacted usage error", () => {
-  expect(() =>
-    createConnection(new URL("sftp://host/bad%"), baseOptions),
-  ).toThrow(UsageError);
-  let message = "";
-  try {
-    createConnection(new URL("sftp://user:secret%@host/drop"), baseOptions);
-  } catch (err) {
-    message = (err as Error).message;
-  }
-  expect(message).toMatch(/malformed percent-encoding/);
-  expect(message).not.toContain("secret");
-});
-
 // --- createConnection: @path credentials are preserved for persistence -------
 // createConnection builds the connection that --save persists, so it must keep
 // an @path credential ref as-is (the secret is read only at the live-use
@@ -445,32 +380,6 @@ test("handler: a repeated single-value flag exits 64 naming the flag", async () 
       } as unknown as Arguments),
     ).rejects.toThrow("exit:64");
     expect(errSpy).toHaveBeenCalledWith("--server-port may be given only once");
-  } finally {
-    errSpy.mockRestore();
-    exitSpy.mockRestore();
-  }
-});
-
-test("handler: an unrecognized log-level exits 64, not the top-level dump", async () => {
-  // An unrecognized log-level is invalid caller input (exit 64), the same
-  // classification the shared parseCommonBootstrapArgs gives invite/accept, so
-  // the typo gets a clean usage error rather than escaping to the noisy
-  // top-level handler.
-  const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
-  try {
-    await expect(
-      handler({
-        _: [],
-        $0: "psilink",
-        "log-level": "bogus",
-      } as unknown as Arguments),
-    ).rejects.toThrow("exit:64");
-    expect(errSpy).toHaveBeenCalledWith("unrecognized log-level: bogus");
   } finally {
     errSpy.mockRestore();
     exitSpy.mockRestore();

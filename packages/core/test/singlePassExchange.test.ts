@@ -101,7 +101,7 @@ const sortByIndex = (p: ExchangeResult["partnerPayload"]) =>
 
 const both: Output = { expectsOutput: true, shareWithPartner: true };
 
-test("single-pass dispatch: a full runExchange yields the correct matched table", async () => {
+test("single-pass dispatch: a full runExchange yields the correct matched table and partner payload", async () => {
   const [initiator, responder] = await runBoth("single-pass", both, both);
 
   // Carol and Elizabeth overlap. The dispatch must route single-pass and surface
@@ -117,10 +117,6 @@ test("single-pass dispatch: a full runExchange yields the correct matched table"
   ]);
   expect(built(initiator).record.resultSize).toBe(2);
   expect(built(responder).record.resultSize).toBe(2);
-});
-
-test("single-pass delivers the partner payload for the matched rows", async () => {
-  const [initiator, responder] = await runBoth("single-pass", both, both);
 
   // `note` is an inferred payload column; under single-pass it must flow for exactly
   // the matched rows, keyed by the partner's row indices. This drives preparePayload
