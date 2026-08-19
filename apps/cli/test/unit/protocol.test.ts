@@ -37,10 +37,11 @@ vi.mock("@openmined/psi.js", () => ({
 // winner's lock file remains until cleanup() runs in the finally block (after
 // runExchange returns), so it may still be present while this mock polls for
 // .json files. These files are harmless residue and will not be consumed by
-// the message poller.
+// the message poller. The wait is on the peer, so it takes the same backstop as
+// the peer budget the two-party cases run under rather than one of its own.
 async function defaultRunExchange(): Promise<unknown> {
   const { readdir } = await import("node:fs/promises");
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + PEER_WAIT_HANG_BACKSTOP_MS;
   while (mockState.dropDir) {
     let jsonFiles: string[];
     try {
@@ -65,13 +66,14 @@ async function defaultRunExchange(): Promise<unknown> {
 // fault in runProtocol's catch; waiting for both rotations first guarantees the
 // key exchange has finished on both sides (and its last message file is off
 // disk) before either party's doCleanup runs, so no cleanup races the peer's
-// still-pending receive. Bounded so a lone arrival cannot hang.
+// still-pending receive. Bounded so a lone arrival cannot hang, on the same
+// peer-wait backstop the two-party cases run under.
 async function waitForBothKeysRotated(
   keyFileA: string,
   keyFileB: string,
 ): Promise<void> {
   const { readFileSync } = await import("node:fs");
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + PEER_WAIT_HANG_BACKSTOP_MS;
   for (;;) {
     try {
       const a = JSON.parse(readFileSync(keyFileA, "utf8")).sharedSecret;
@@ -103,9 +105,10 @@ function expectNoGenericRecoveryAdvisory(errors: readonly string[]): void {
 // older than A's forces B to be the responder even on coarse-mtime filesystems
 // (FAT/some NFS), where same-bucket timestamps would fall back to UUID
 // comparison and could assign roles unexpectedly. The ENOENT tolerance covers a
-// file that raced ahead of B's synchronize and was already deleted.
+// file that raced ahead of B's synchronize and was already deleted. The wait is
+// on the other party, so it takes the shared peer-wait backstop.
 async function backdateDropDirRendezvousFile(dropDir: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + PEER_WAIT_HANG_BACKSTOP_MS;
   for (;;) {
     let entries: string[];
     try {
@@ -285,6 +288,41 @@ const signingIdentityFixture = await generateSigningIdentity("test-party", {
 
 // Values unused because runExchange and buildOutputTable are mocked.
 const minimalPrepared = {} as unknown as PreparedExchange;
+
+// The peer budget every two-party case in this file gives both parties, and the
+// 20 s bound each of those cases carries as its own timeout. Neither is a timing
+// assertion: the two parties start together and meet in milliseconds, and each
+// case settles its outcome through the mocked runExchange, so nothing here waits
+// for either to elapse on a healthy run.
+//
+// The budget bounds every wait before the exchange, and the teardown drain and
+// close, which core caps at min(their own bound, this). At the default -- one
+// hour -- a party still waiting on a partner that failed its own rendezvous
+// outlives its case's bound and is killed by vitest with a generic message in
+// place of the core layer's own diagnosable timeout; sized near the milliseconds
+// a rendezvous actually costs, it settles the outcome by how promptly a loaded
+// machine schedules the two parties against each other instead. Under a full
+// unit-project run on an idle ten-core container the two-party cases here
+// measure single-digit to low-hundred milliseconds apiece, and 1.6 s at worst
+// across 28 runs with unrelated builds competing for the same cores, so both
+// values stay an order of magnitude clear of the worst measured case and a later
+// tightening has that measurement to start from.
+//
+// The bound sits five seconds above the budget rather than at it, so a run that
+// burns the whole budget still surfaces that budget's own diagnosable timeout.
+// Each case spells the bound as a literal third argument to test(), because
+// prettier keeps a test's callback hugged only for a numeric-literal timeout;
+// the cases that also hold both parties at a barrier spell the same 20 s as
+// BOTH_ARMED_HANG_BACKSTOP_MS + 5_000, the wait their run actually sits in.
+const PEER_WAIT_HANG_BACKSTOP_MS = 15_000;
+
+// Both parties of every two-party case: a 1 ms poll so the rendezvous and key
+// exchange settle without waiting on the polling cadence, and the budget above
+// in place of the one-hour default.
+const TWO_PARTY_OPTIONS = {
+  pollIntervalMs: 1,
+  peerTimeoutMs: PEER_WAIT_HANG_BACKSTOP_MS,
+};
 
 let tmpDir: string;
 let dropDir: string;
@@ -652,7 +690,7 @@ test("authentication=null runs the exchange without authentication and without e
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       null,
       minimalPrepared,
@@ -664,7 +702,7 @@ test("authentication=null runs the exchange without authentication and without e
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       null,
       minimalPrepared,
@@ -674,7 +712,7 @@ test("authentication=null runs the exchange without authentication and without e
     ),
   ]);
   // No assertion on key files: no rotation occurs when auth is null.
-});
+}, 20_000);
 
 // --- Self-attested record persistence via runProtocol ------------------------
 
@@ -732,7 +770,7 @@ test("writes the self-attested record and verification keys when runExchange ret
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       null,
       minimalPrepared,
@@ -745,7 +783,7 @@ test("writes the self-attested record and verification keys when runExchange ret
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       null,
       minimalPrepared,
@@ -767,7 +805,7 @@ test("writes the self-attested record and verification keys when runExchange ret
       parseVerificationKeys(JSON.parse(fs.readFileSync(keyPath, "utf8"))),
     ).toEqual(sampleKeys);
   }
-});
+}, 20_000);
 
 test("a record the run was asked for and could not write warns on fd 3 and exits 73", async () => {
   // The unattended case: records are enabled, the exchange and its results
@@ -787,7 +825,7 @@ test("a record the run was asked for and could not write warns on fd 3 and exits
   try {
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -799,7 +837,7 @@ test("a record the run was asked for and could not write warns on fd 3 and exits
         { eventStream: true },
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -826,7 +864,7 @@ test("a record the run was asked for and could not write warns on fd 3 and exits
   );
   // The successful party is untouched: its record landed and its exit is clean.
   expect(fs.existsSync(path.join(tmpDir, "rec-b.json"))).toBe(true);
-});
+}, 20_000);
 
 // The fixed text runProtocol reports when records were asked for and runExchange
 // returned no audit. It names no destination -- none was ever resolved -- so it
@@ -837,7 +875,7 @@ const NO_RECORD_BUILT_WARNING =
 
 test(
   "a record that could not be built warns and exits non-zero",
-  { timeout: 10_000 },
+  { timeout: 20_000 },
   async () => {
     // The other missing-artifact shape: records are enabled, the exchange and its
     // results succeed, and runExchange returns no audit at all -- the record could
@@ -853,7 +891,7 @@ test(
           {
             channel: "filedrop",
             path: dropDir,
-            options: { pollIntervalMs: 1 },
+            options: TWO_PARTY_OPTIONS,
           },
           null,
           minimalPrepared,
@@ -869,7 +907,7 @@ test(
           {
             channel: "filedrop",
             path: dropDir,
-            options: { pollIntervalMs: 1 },
+            options: TWO_PARTY_OPTIONS,
           },
           null,
           minimalPrepared,
@@ -912,7 +950,7 @@ test("a result file that could not be written fails with the persistence-loss ex
   try {
     [outcome] = await Promise.allSettled([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         path.join(blocker, "out.csv"),
@@ -924,7 +962,7 @@ test("a result file that could not be written fails with the persistence-loss ex
         { eventStream: true },
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -950,7 +988,7 @@ test("a result file that could not be written fails with the persistence-loss ex
   const terminal = lines[lines.length - 1];
   expect(terminal.type).toBe("error");
   expect(terminal.category).toBe("output");
-});
+}, 20_000);
 
 test("a partner-shaped output-phase fault exits 69, not the local write-loss code", async () => {
   // The other half of the same boundary. buildOutputTable's integrity checks run
@@ -982,7 +1020,7 @@ test("a partner-shaped output-phase fault exits 69, not the local write-loss cod
   try {
     [outcome] = await Promise.allSettled([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -994,7 +1032,7 @@ test("a partner-shaped output-phase fault exits 69, not the local write-loss cod
         { eventStream: true },
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -1022,7 +1060,7 @@ test("a partner-shaped output-phase fault exits 69, not the local write-loss cod
   const terminal = lines[lines.length - 1];
   expect(terminal.type).toBe("error");
   expect(terminal.category).toBe("output");
-});
+}, 20_000);
 
 // --- One-sided result withholding via runProtocol ----------------------------
 
@@ -1050,7 +1088,7 @@ test("writes no result file for a non-receiving party when the exchange withhold
 
   await Promise.all([
     runProtocol(
-      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
       null,
       minimalPrepared,
       outputA,
@@ -1058,7 +1096,7 @@ test("writes no result file for a non-receiving party when the exchange withhold
       "test-a",
     ),
     runProtocol(
-      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
       null,
       minimalPrepared,
       outputB,
@@ -1073,7 +1111,7 @@ test("writes no result file for a non-receiving party when the exchange withhold
   // ...and the table-formatting step is never reached, so there is nothing in
   // memory to write either.
   expect(vi.mocked(buildOutputTable)).not.toHaveBeenCalled();
-});
+}, 20_000);
 
 // --- Expired token via runProtocol -------------------------------------------
 
@@ -1106,7 +1144,7 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     {
       sharedSecret: TOKEN_A,
@@ -1122,7 +1160,7 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     {
       sharedSecret: TOKEN_A,
@@ -1152,7 +1190,7 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
   // Token must remain unchanged on both sides.
   expect(loadKeyFile(keyFileA)?.sharedSecret).toBe(TOKEN_A);
   expect(loadKeyFile(keyFileB)?.sharedSecret).toBe(TOKEN_A);
-});
+}, 20_000);
 
 test("runProtocol rejects an already-expired token before opening any connection (no rendezvous I/O)", async () => {
   // The regression guard for hoisting the pre-handshake expiry check ahead of
@@ -1340,7 +1378,7 @@ test("a run whose partner completed the rendezvous keeps the peer-side guidance"
   const rendered = sanitizeErrorForDisplay(err);
   expect(rendered).toContain("The peer completed the rendezvous");
   expect(rendered).not.toContain("No peer was confirmed");
-});
+}, 20_000);
 
 test("entryHelloResidueGuidance leads with the diagnosis and recovery, filename last", () => {
   const line = entryHelloResidueGuidance(`${LEFTOVER_HELLO_ID}-hello.json`);
@@ -1454,6 +1492,9 @@ async function runPartyToKeyExchangeTimeout(
       channel: "filedrop",
       path: dropDir,
       options: {
+        // Not the shared backstop: this budget is the thing under test, waited
+        // out in full on every healthy run, so each case below spends it and
+        // measures ~1.6 s for that reason rather than for a loaded runner.
         pollIntervalMs: 1,
         peerTimeoutMs: 1_500,
         ...connectionOptions,
@@ -1519,7 +1560,7 @@ test("the both-swept advice appears on a flagged run that fails in the key excha
   const err = await runPartyToKeyExchangeTimeout({ sweepExchangeFiles: true });
   expect((err as Error).message).toBe("key exchange handshake timed out");
   expect(mockState.errors).toContain(BOTH_SWEPT_GUIDANCE);
-});
+}, 20_000);
 
 test("the both-swept advice is absent from an unflagged run that fails the same two ways", async () => {
   const waitErr = await runLonePartyWithNoPartner();
@@ -1533,7 +1574,7 @@ test("the both-swept advice is absent from an unflagged run that fails the same 
   const kexErr = await runPartyToKeyExchangeTimeout();
   expect((kexErr as Error).message).toBe("key exchange handshake timed out");
   expect(mockState.errors).not.toContain(BOTH_SWEPT_GUIDANCE);
-});
+}, 20_000);
 
 test("the both-swept advice is absent when the sweep could not delete every file", async () => {
   // The claim that the folder is now empty is unfounded when the sweep itself
@@ -1571,7 +1612,7 @@ test("the both-swept advice is absent from a flagged retain-mode run", async () 
   expect(isPeerWaitTimeout(err)).toBe(true);
   expect(fs.readdirSync(dropDir).length).toBeGreaterThan(0);
   expect(mockState.errors).not.toContain(BOTH_SWEPT_GUIDANCE);
-});
+}, 20_000);
 
 // --- Token rotation via runProtocol ------------------------------------------
 
@@ -1584,14 +1625,12 @@ test("both key files hold the same rotated token after a successful exchange", a
   const outputA = path.join(tmpDir, "out-a.csv");
   const outputB = path.join(tmpDir, "out-b.csv");
 
-  // pollIntervalMs: 1 keeps key-exchange latency low so each party's poller
-  // consumes the peer's last message well before the mock's 5 s deadline.
   await Promise.all([
     runProtocol(
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
       minimalPrepared,
@@ -1603,7 +1642,7 @@ test("both key files hold the same rotated token after a successful exchange", a
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
       minimalPrepared,
@@ -1624,7 +1663,7 @@ test("both key files hold the same rotated token after a successful exchange", a
   // Rotation tokens carry no expiry.
   expect(loadedA?.expires).toBeUndefined();
   expect(loadedB?.expires).toBeUndefined();
-});
+}, 20_000);
 
 test("a token_max_age_days policy stamps expires onto both rotated key files", async () => {
   // The no-policy test above locks in the absent-expiry default; this exercises
@@ -1643,7 +1682,7 @@ test("a token_max_age_days policy stamps expires onto both rotated key files", a
   const before = Date.now();
   await Promise.all([
     runProtocol(
-      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileA, tokenMaxAgeDays: 30 },
       minimalPrepared,
       outputA,
@@ -1651,7 +1690,7 @@ test("a token_max_age_days policy stamps expires onto both rotated key files", a
       "test-a",
     ),
     runProtocol(
-      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileB, tokenMaxAgeDays: 30 },
       minimalPrepared,
       outputB,
@@ -1675,7 +1714,7 @@ test("a token_max_age_days policy stamps expires onto both rotated key files", a
   expect(expiresA).toBeLessThanOrEqual(after + THIRTY_DAYS_MS);
   expect(expiresB).toBeGreaterThanOrEqual(before + THIRTY_DAYS_MS);
   expect(expiresB).toBeLessThanOrEqual(after + THIRTY_DAYS_MS);
-});
+}, 20_000);
 
 // --- Abort-marker echo suppression via runProtocol ---------------------------
 //
@@ -1831,13 +1870,6 @@ function signingPersistFixture(receiptFile: string): SigningPersist {
   };
 }
 
-// The peer wait here is a hang backstop for a party that never gets joined, not
-// a timing assertion: the tests below start both parties together and inject
-// whatever failure they want through runExchange. A bound near the milliseconds
-// a rendezvous actually takes buys nothing and makes the outcome turn on how
-// promptly a loaded machine schedules the two parties against each other.
-const PEER_WAIT_HANG_BACKSTOP_MS = 15_000;
-
 function runSigningParty(
   keyFilePath: string,
   name: string,
@@ -1847,10 +1879,7 @@ function runSigningParty(
     {
       channel: "filedrop",
       path: dropDir,
-      options: {
-        pollIntervalMs: 1,
-        peerTimeoutMs: PEER_WAIT_HANG_BACKSTOP_MS,
-      },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath },
     minimalPrepared,
@@ -1881,7 +1910,7 @@ test("a completed signed run does not warn about a non-signing partner", async (
   expect(
     mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
   ).toBe(false);
-});
+}, 20_000);
 
 // A minimal schema-valid dual-signed record: the receipt an exchange that
 // completed its signature swap returns. Its certificates are the checked-in
@@ -1949,7 +1978,7 @@ test("writes the dual-signed receipt when no audit record was built", async () =
       parseDualSignedRecord(JSON.parse(fs.readFileSync(receipt, "utf8"))),
     ).toEqual(signedReceiptFixture);
   }
-});
+}, 20_000);
 
 test(
   "a ReceiptVerificationError does not warn about a non-signing partner",
@@ -2085,7 +2114,7 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
     minimalPrepared,
@@ -2097,7 +2126,7 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
     minimalPrepared,
@@ -2113,7 +2142,7 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
   // Neither generic advisory should fire: the tag is on the inner error,
   // not the outer wrap, but the cause walker finds it anyway.
   expectNoGenericRecoveryAdvisory(mockState.errors);
-}, 15_000);
+}, 20_000);
 
 test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceededError", async () => {
   // A terminal transport/directory UsageError thrown during the data exchange
@@ -2137,7 +2166,7 @@ test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceed
     .mockImplementationOnce(waitForRotationThenThrowFrameSize);
 
   const pA = runProtocol(
-    { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
     minimalPrepared,
     undefined,
@@ -2145,7 +2174,7 @@ test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceed
     "test-a",
   );
   const pB = runProtocol(
-    { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
     minimalPrepared,
     undefined,
@@ -2159,7 +2188,7 @@ test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceed
 
   // The terminal error's class tag suppresses both generic advisory lines.
   expectNoGenericRecoveryAdvisory(mockState.errors);
-}, 15_000);
+}, 20_000);
 
 test("runProtocol logs recovery message when an error occurs after tokenRotated=true", async () => {
   const keyFileA = path.join(tmpDir, "a.key");
@@ -2182,7 +2211,7 @@ test("runProtocol logs recovery message when an error occurs after tokenRotated=
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
     minimalPrepared,
@@ -2194,7 +2223,7 @@ test("runProtocol logs recovery message when an error occurs after tokenRotated=
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
     minimalPrepared,
@@ -2218,7 +2247,7 @@ test("runProtocol logs recovery message when an error occurs after tokenRotated=
       m.includes("shared secret was already rotated and saved"),
     ),
   ).toBe(true);
-});
+}, 20_000);
 
 test.skipIf(process.platform === "win32")(
   "runProtocol suppresses the generic authStarted advisory when the thrown error already carries the specific saveKeyFile recovery hint",
@@ -2252,7 +2281,7 @@ test.skipIf(process.platform === "win32")(
     const dropConfig = {
       channel: "filedrop" as const,
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     };
 
     // B starts first (becomes responder) so that B's saveKeyFile failure
@@ -2294,6 +2323,7 @@ test.skipIf(process.platform === "win32")(
     // wrapped error message.
     expectNoGenericRecoveryAdvisory(mockState.errors);
   },
+  20_000,
 );
 
 test("runProtocol logs an 'error in flight when SIGINT arrived' error when interrupted", async () => {
@@ -2324,7 +2354,7 @@ test("runProtocol logs an 'error in flight when SIGINT arrived' error when inter
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     null,
     minimalPrepared,
@@ -2336,7 +2366,7 @@ test("runProtocol logs an 'error in flight when SIGINT arrived' error when inter
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     null,
     minimalPrepared,
@@ -2374,7 +2404,7 @@ test("runProtocol logs an 'error in flight when SIGINT arrived' error when inter
   } finally {
     exitSpy.mockRestore();
   }
-});
+}, 20_000);
 
 test("runProtocol sanitizes a hostile cause chain in the signal in-flight log", async () => {
   // The in-flight error is swallowed on the signal path (the process exits on
@@ -2401,7 +2431,7 @@ test("runProtocol sanitizes a hostile cause chain in the signal in-flight log", 
     );
 
   const pA = runProtocol(
-    { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
     null,
     minimalPrepared,
     undefined,
@@ -2409,7 +2439,7 @@ test("runProtocol sanitizes a hostile cause chain in the signal in-flight log", 
     "test-a",
   );
   const pB = runProtocol(
-    { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
     null,
     minimalPrepared,
     undefined,
@@ -2450,7 +2480,7 @@ test("runProtocol sanitizes a hostile cause chain in the signal in-flight log", 
   } finally {
     exitSpy.mockRestore();
   }
-});
+}, 20_000);
 
 test("SIGINT handler exits with code 130", async () => {
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
@@ -2480,7 +2510,7 @@ test("SIGINT handler exits with code 130", async () => {
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     null,
     minimalPrepared,
@@ -2492,7 +2522,7 @@ test("SIGINT handler exits with code 130", async () => {
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     null,
     minimalPrepared,
@@ -2522,7 +2552,7 @@ test("SIGINT handler exits with code 130", async () => {
     rejectB?.(new Error("test cleanup"));
     await Promise.allSettled([pA, pB]);
   }
-});
+}, 20_000);
 
 test("SIGINT logs recovery message when tokenRotated=true", async () => {
   const keyFileA = path.join(tmpDir, "a.key");
@@ -2553,7 +2583,7 @@ test("SIGINT logs recovery message when tokenRotated=true", async () => {
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
     minimalPrepared,
@@ -2565,7 +2595,7 @@ test("SIGINT logs recovery message when tokenRotated=true", async () => {
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
     minimalPrepared,
@@ -2599,7 +2629,7 @@ test("SIGINT logs recovery message when tokenRotated=true", async () => {
     rejectB?.(new Error("test cleanup"));
     await Promise.allSettled([pA, pB]);
   }
-});
+}, 20_000);
 
 test("SIGINT mid-synchronize exits with 130 and cleans up the hello file (started=false branch)", async () => {
   // Distinct from the SIGINT-mid-runExchange test: a single party is started
@@ -2677,7 +2707,7 @@ test("SIGTERM handler exits with code 143", async () => {
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     null,
     minimalPrepared,
@@ -2689,7 +2719,7 @@ test("SIGTERM handler exits with code 143", async () => {
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     null,
     minimalPrepared,
@@ -2716,7 +2746,7 @@ test("SIGTERM handler exits with code 143", async () => {
     rejectB?.(new Error("test cleanup"));
     await Promise.allSettled([pA, pB]);
   }
-});
+}, 20_000);
 
 test("SIGTERM logs recovery message when tokenRotated=true", async () => {
   const keyFileA = path.join(tmpDir, "a.key");
@@ -2747,7 +2777,7 @@ test("SIGTERM logs recovery message when tokenRotated=true", async () => {
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
     minimalPrepared,
@@ -2759,7 +2789,7 @@ test("SIGTERM logs recovery message when tokenRotated=true", async () => {
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
     minimalPrepared,
@@ -2793,7 +2823,7 @@ test("SIGTERM logs recovery message when tokenRotated=true", async () => {
     rejectB?.(new Error("test cleanup"));
     await Promise.allSettled([pA, pB]);
   }
-});
+}, 20_000);
 
 // --- Key-file write failure via runProtocol ----------------------------------
 
@@ -2819,7 +2849,7 @@ test.skipIf(process.platform === "win32")(
     const dropConfig = {
       channel: "filedrop" as const,
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     };
 
     // Start B first so it becomes the responder. As the responder, B's only
@@ -2866,6 +2896,7 @@ test.skipIf(process.platform === "win32")(
     );
     expect(msg).toContain("Your partner may already hold the rotated token");
   },
+  20_000,
 );
 
 // --- SIGINT/SIGTERM exit-code race ------------------------------------------
@@ -2900,7 +2931,7 @@ test("runProtocol resolves (does not reject) when interrupted by SIGINT mid-runE
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     null,
     minimalPrepared,
@@ -2912,7 +2943,7 @@ test("runProtocol resolves (does not reject) when interrupted by SIGINT mid-runE
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     null,
     minimalPrepared,
@@ -2949,7 +2980,7 @@ test("runProtocol resolves (does not reject) when interrupted by SIGINT mid-runE
   } finally {
     exitSpy.mockRestore();
   }
-});
+}, 20_000);
 
 test("runProtocol resolves (does not reject) when interrupted by SIGTERM mid-runExchange", async () => {
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
@@ -2974,7 +3005,7 @@ test("runProtocol resolves (does not reject) when interrupted by SIGTERM mid-run
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     null,
     minimalPrepared,
@@ -2986,7 +3017,7 @@ test("runProtocol resolves (does not reject) when interrupted by SIGTERM mid-run
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     null,
     minimalPrepared,
@@ -3017,7 +3048,7 @@ test("runProtocol resolves (does not reject) when interrupted by SIGTERM mid-run
   } finally {
     exitSpy.mockRestore();
   }
-});
+}, 20_000);
 
 // --- Application-layer AEAD encryption ----------------------------------------
 
@@ -3082,7 +3113,7 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
         {
           channel: "filedrop",
           path: dropDir,
-          options: { pollIntervalMs: 1 },
+          options: TWO_PARTY_OPTIONS,
         },
         { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
         minimalPrepared,
@@ -3094,7 +3125,7 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
         {
           channel: "filedrop",
           path: dropDir,
-          options: { pollIntervalMs: 1 },
+          options: TWO_PARTY_OPTIONS,
         },
         { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
         minimalPrepared,
@@ -3160,7 +3191,7 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
   } finally {
     putSpy.mockRestore();
   }
-}, 15_000);
+}, 20_000);
 
 // --- Post-handshake hook (onAuthenticated) -----------------------------------
 
@@ -3203,7 +3234,7 @@ test("runProtocol invokes onAuthenticated after the rotated key is saved and bef
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
       preparedA,
@@ -3218,7 +3249,7 @@ test("runProtocol invokes onAuthenticated after the rotated key is saved and bef
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
       preparedB,
@@ -3235,7 +3266,7 @@ test("runProtocol invokes onAuthenticated after the rotated key is saved and bef
   expect(aExchangeRunAtHookTime).toBe(false);
   // A successful hook leaves no error in the result.
   expect(resultA.onAuthenticatedError).toBeUndefined();
-});
+}, 20_000);
 
 test("runProtocol persists the onAuthenticated side effect even when the data exchange then fails", async () => {
   // The recurring-exchange guarantee: a handshake success followed by an
@@ -3261,7 +3292,7 @@ test("runProtocol persists the onAuthenticated side effect even when the data ex
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
     minimalPrepared,
@@ -3276,7 +3307,7 @@ test("runProtocol persists the onAuthenticated side effect even when the data ex
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
     minimalPrepared,
@@ -3297,7 +3328,7 @@ test("runProtocol persists the onAuthenticated side effect even when the data ex
   // The handshake had succeeded: the token was rotated before the failure.
   expect(loadKeyFile(keyFileA)?.sharedSecret).not.toBe(TOKEN_A);
   expect(loadKeyFile(keyFileB)?.sharedSecret).not.toBe(TOKEN_A);
-}, 15_000);
+}, 20_000);
 
 test("runProtocol's recovery hint does not promise a clean retry when the post-handshake hook failed", async () => {
   // Compound-failure regression: the handshake succeeds and the key rotates,
@@ -3329,7 +3360,7 @@ test("runProtocol's recovery hint does not promise a clean retry when the post-h
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
     minimalPrepared,
@@ -3344,7 +3375,7 @@ test("runProtocol's recovery hint does not promise a clean retry when the post-h
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
     minimalPrepared,
@@ -3371,7 +3402,7 @@ test("runProtocol's recovery hint does not promise a clean retry when the post-h
       m.includes("Retry the exchange without re-inviting"),
     ),
   ).toBe(false);
-}, 15_000);
+}, 20_000);
 
 test("runProtocol does not invoke onAuthenticated when the handshake fails", async () => {
   // An expired token fails the pre-handshake expiry check in
@@ -3390,7 +3421,7 @@ test("runProtocol does not invoke onAuthenticated when the handshake fails", asy
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     {
       sharedSecret: TOKEN_A,
@@ -3409,7 +3440,7 @@ test("runProtocol does not invoke onAuthenticated when the handshake fails", asy
     {
       channel: "filedrop",
       path: dropDir,
-      options: { pollIntervalMs: 1 },
+      options: TWO_PARTY_OPTIONS,
     },
     {
       sharedSecret: TOKEN_A,
@@ -3434,7 +3465,7 @@ test("runProtocol does not invoke onAuthenticated when the handshake fails", asy
   // No rotation occurred: the original token is unchanged on both sides.
   expect(loadKeyFile(keyFileA)?.sharedSecret).toBe(TOKEN_A);
   expect(loadKeyFile(keyFileB)?.sharedSecret).toBe(TOKEN_A);
-});
+}, 20_000);
 
 test("a throw from onAuthenticated is non-fatal: the exchange still runs and the failure is logged", async () => {
   // The data exchange is the irreplaceable operation; a config-write failure at
@@ -3455,7 +3486,7 @@ test("a throw from onAuthenticated is non-fatal: the exchange still runs and the
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
       minimalPrepared,
@@ -3470,7 +3501,7 @@ test("a throw from onAuthenticated is non-fatal: the exchange still runs and the
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
       minimalPrepared,
@@ -3498,7 +3529,7 @@ test("a throw from onAuthenticated is non-fatal: the exchange still runs and the
   expect((valueA.onAuthenticatedError as Error).message).toBe(
     "simulated config write failure",
   );
-});
+}, 20_000);
 
 test("a failed post-authentication hook warns on fd 3 and exits 73 with a result terminal event", async () => {
   // The unattended half of the same non-fatal contract: the exchange completed,
@@ -3516,7 +3547,7 @@ test("a failed post-authentication hook warns on fd 3 and exits 73 with a result
   try {
     const [resultA, resultB] = await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
         minimalPrepared,
         undefined,
@@ -3530,7 +3561,7 @@ test("a failed post-authentication hook warns on fd 3 and exits 73 with a result
         { eventStream: true },
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
         minimalPrepared,
         undefined,
@@ -3562,7 +3593,7 @@ test("a failed post-authentication hook warns on fd 3 and exits 73 with a result
   // to be re-run.
   expect(lines[lines.length - 1].type).toBe("result");
   expect(lines.filter((l) => l.type === "error")).toHaveLength(0);
-});
+}, 20_000);
 
 test("an async onAuthenticated that rejects is non-fatal: the exchange still runs and the rejection is logged", async () => {
   // The hook is awaited, so an async hook works and its rejected promise is
@@ -3583,7 +3614,7 @@ test("an async onAuthenticated that rejects is non-fatal: the exchange still run
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
       minimalPrepared,
@@ -3598,7 +3629,7 @@ test("an async onAuthenticated that rejects is non-fatal: the exchange still run
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
       minimalPrepared,
@@ -3627,7 +3658,7 @@ test("an async onAuthenticated that rejects is non-fatal: the exchange still run
   expect((valueA.onAuthenticatedError as Error).message).toBe(
     "simulated async config write failure",
   );
-});
+}, 20_000);
 
 test("a hook that throws a falsy value still reports a defined onAuthenticatedError (failure never masquerades as success)", async () => {
   // The caller distinguishes failure from success by the presence of
@@ -3650,7 +3681,7 @@ test("a hook that throws a falsy value still reports a defined onAuthenticatedEr
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
       minimalPrepared,
@@ -3665,7 +3696,7 @@ test("a hook that throws a falsy value still reports a defined onAuthenticatedEr
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
       minimalPrepared,
@@ -3682,7 +3713,7 @@ test("a hook that throws a falsy value still reports a defined onAuthenticatedEr
   // guard correctly treats this as a failure rather than a clean write.
   expect(valueA.onAuthenticatedError).toBeDefined();
   expect(valueA.onAuthenticatedError).toBeInstanceOf(Error);
-});
+}, 20_000);
 
 test("runProtocol without onAuthenticated runs a normal authenticated exchange (existing callers unaffected)", async () => {
   // zeroSetup and exchange pass no post-handshake hook; the new optional
@@ -3698,7 +3729,7 @@ test("runProtocol without onAuthenticated runs a normal authenticated exchange (
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
       minimalPrepared,
@@ -3710,7 +3741,7 @@ test("runProtocol without onAuthenticated runs a normal authenticated exchange (
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1 },
+        options: TWO_PARTY_OPTIONS,
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
       minimalPrepared,
@@ -3728,7 +3759,7 @@ test("runProtocol without onAuthenticated runs a normal authenticated exchange (
   expect(
     mockState.errors.some((m) => m.includes("post-authentication hook")),
   ).toBe(false);
-});
+}, 20_000);
 
 // --- Machine-interface event stream (--event-stream) --------------------------
 //
@@ -3868,7 +3899,7 @@ test("an emitter passed instead of the flag carries every event, and no second s
   try {
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -3880,7 +3911,7 @@ test("an emitter passed instead of the flag carries every event, and no second s
         { eventStream: emitter },
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -3899,7 +3930,7 @@ test("an emitter passed instead of the flag carries every event, and no second s
   // already-preflighted emitter was reused rather than re-opened.
   expect(fd3.preflightProbes).toBe(0);
   expect(takeFd3Lines()).toHaveLength(0);
-});
+}, 20_000);
 
 // --- The caller's pre-terminal hook ------------------------------------------
 
@@ -3932,7 +3963,7 @@ test("a loss reported from the pre-terminal hook precedes the metrics and termin
   try {
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -3950,7 +3981,7 @@ test("a loss reported from the pre-terminal hook precedes the metrics and termin
         },
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -3971,7 +4002,7 @@ test("a loss reported from the pre-terminal hook precedes the metrics and termin
     "metrics",
     "result",
   ]);
-});
+}, 20_000);
 
 test("a throw from the pre-terminal hook does not fail the completed exchange", async () => {
   // The hook reports its own losses, so a throw escaping it is a defect -- but
@@ -3983,7 +4014,7 @@ test("a throw from the pre-terminal hook does not fail the completed exchange", 
   try {
     const [resultA] = await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4000,7 +4031,7 @@ test("a throw from the pre-terminal hook does not fail the completed exchange", 
         },
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4030,7 +4061,7 @@ test("a throw from the pre-terminal hook does not fail the completed exchange", 
   expect(mockState.errors.some((line) => line.includes("let one escape"))).toBe(
     true,
   );
-});
+}, 20_000);
 
 // --- Stage/warning stderr sanitization -----------------------------------------
 
@@ -4056,7 +4087,7 @@ test("a hostile stage label and terms warning reach the human log neutralized", 
 
   await Promise.all([
     runProtocol(
-      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
       null,
       minimalPrepared,
       undefined,
@@ -4064,7 +4095,7 @@ test("a hostile stage label and terms warning reach the human log neutralized", 
       "test-a",
     ),
     runProtocol(
-      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
       null,
       minimalPrepared,
       undefined,
@@ -4084,7 +4115,7 @@ test("a hostile stage label and terms warning reach the human log neutralized", 
   expect(warnLine).toBeDefined();
   expect(warnLine).not.toContain("\x1b");
   expect(warnLine).toContain("\\x1b");
-});
+}, 20_000);
 
 // --- connection_per_poll threads to the SFTP adapter -------------------------
 //
@@ -4174,7 +4205,7 @@ test("a mismatched shared secret under --event-stream emits category security an
   try {
     [resA] = await Promise.allSettled([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
         minimalPrepared,
         undefined,
@@ -4220,7 +4251,7 @@ test("a mismatched shared secret under --event-stream emits category security an
   } finally {
     exitSpy.mockRestore();
   }
-}, 15_000);
+}, 20_000);
 
 test("an SFTP host-key mismatch under --event-stream emits category security and maps to exit 69", async () => {
   // The pinned fingerprint is well-formed but matches no key, so core's real
@@ -4302,7 +4333,7 @@ test("a host-key divergence under --event-stream emits a warning event and still
     // emission is exercised regardless of which party reaches it first.
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4314,7 +4345,7 @@ test("a host-key divergence under --event-stream emits a warning event and still
         { eventStream: true },
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4341,7 +4372,7 @@ test("a host-key divergence under --event-stream emits a warning event and still
   // The stderr warn line is preserved verbatim: un-prefixed, unlike the
   // "terms exchange:" lines onWarning produces.
   expect(mockState.warnings).toContain(divergence);
-});
+}, 20_000);
 
 test("a failed onAuthenticated hook under --event-stream emits a warning event before the success terminal event", async () => {
   // The run completes and writes its result, so the terminal event is a success:
@@ -4360,7 +4391,7 @@ test("a failed onAuthenticated hook under --event-stream emits a warning event b
     // hookless, so every captured fd-3 line is A's.
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
         minimalPrepared,
         undefined,
@@ -4374,7 +4405,7 @@ test("a failed onAuthenticated hook under --event-stream emits a warning event b
         { eventStream: true },
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
         minimalPrepared,
         undefined,
@@ -4402,7 +4433,7 @@ test("a failed onAuthenticated hook under --event-stream emits a warning event b
   expect(
     mockState.errors.some((m) => m.includes("simulated config write failure")),
   ).toBe(true);
-});
+}, 20_000);
 
 // --- Stage timing and operational counters -------------------------------------
 
@@ -4425,7 +4456,7 @@ test("a successful run under --event-stream reports stage timing and counters", 
     // Party A runs flag-on; party B flag-off, so every captured fd-3 line is A's.
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         preparedWithRows,
         undefined,
@@ -4437,7 +4468,7 @@ test("a successful run under --event-stream reports stage timing and counters", 
         { eventStream: true },
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         preparedWithRows,
         undefined,
@@ -4474,7 +4505,7 @@ test("a successful run under --event-stream reports stage timing and counters", 
   expect(metrics.recordsProcessed).toBe(7);
   expect(metrics.transportRetries).toBe(0);
   expect(metrics.reconnects).toBe(0);
-});
+}, 20_000);
 
 test("summarizes the reconnect count at normal verbosity when the session was re-established", async () => {
   // Without --event-stream the reconnect count reaches the operator nowhere, so a
@@ -4490,7 +4521,7 @@ test("summarizes the reconnect count at normal verbosity when the session was re
   try {
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4498,7 +4529,7 @@ test("summarizes the reconnect count at normal verbosity when the session was re
         "test-a",
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4524,7 +4555,7 @@ test("summarizes the reconnect count at normal verbosity when the session was re
     false,
   );
   expect(mockState.infos.some((line) => line.includes("of which"))).toBe(false);
-});
+}, 20_000);
 
 test("summary reports the mid-exchange sub-count apart from the total", async () => {
   // A single merged reconnect number cannot tell benign startup retries from
@@ -4541,7 +4572,7 @@ test("summary reports the mid-exchange sub-count apart from the total", async ()
   try {
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4549,7 +4580,7 @@ test("summary reports the mid-exchange sub-count apart from the total", async ()
         "test-a",
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4569,7 +4600,7 @@ test("summary reports the mid-exchange sub-count apart from the total", async ()
         line.includes("of which 3 were sessions lost mid-exchange"),
     ),
   ).toBe(true);
-});
+}, 20_000);
 
 test("summarizes the forced idle-boundary releases apart from the reconnects", async () => {
   // In connection-per-poll mode a partner that never closes the connection makes
@@ -4585,7 +4616,7 @@ test("summarizes the forced idle-boundary releases apart from the reconnects", a
   try {
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4593,7 +4624,7 @@ test("summarizes the forced idle-boundary releases apart from the reconnects", a
         "test-a",
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4620,7 +4651,7 @@ test("summarizes the forced idle-boundary releases apart from the reconnects", a
   expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
     false,
   );
-});
+}, 20_000);
 
 test("summarizes the declined idle releases as a line apart from the forced ones", async () => {
   // The mode's other per-cycle outcome: the release gave up its wait for another
@@ -4640,7 +4671,7 @@ test("summarizes the declined idle releases as a line apart from the forced ones
   try {
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4648,7 +4679,7 @@ test("summarizes the declined idle releases as a line apart from the forced ones
         "test-a",
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4683,7 +4714,7 @@ test("summarizes the declined idle releases as a line apart from the forced ones
   expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
     false,
   );
-});
+}, 20_000);
 
 test("summarizes the boundaries the partner closed on request as the forced total's denominator", async () => {
   // The mode's ordinary outcome has no inline line at all -- nothing anomalous
@@ -4702,7 +4733,7 @@ test("summarizes the boundaries the partner closed on request as the forced tota
   try {
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4710,7 +4741,7 @@ test("summarizes the boundaries the partner closed on request as the forced tota
         "test-a",
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4740,7 +4771,7 @@ test("summarizes the boundaries the partner closed on request as the forced tota
   expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
     false,
   );
-});
+}, 20_000);
 
 test("summarizes the poll cycles a declined cycle-start re-dial skipped", async () => {
   // The dialing half of what the declined release reports for the releasing half:
@@ -4757,7 +4788,7 @@ test("summarizes the poll cycles a declined cycle-start re-dial skipped", async 
   try {
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4765,7 +4796,7 @@ test("summarizes the poll cycles a declined cycle-start re-dial skipped", async 
         "test-a",
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4793,7 +4824,7 @@ test("summarizes the poll cycles a declined cycle-start re-dial skipped", async 
   expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
     false,
   );
-});
+}, 20_000);
 
 test("a declined release with no session drop leaves the reconnect total and the metrics event untouched", async () => {
   // A run can decline releases without ever losing a session: nothing was closed,
@@ -4809,7 +4840,7 @@ test("a declined release with no session drop leaves the reconnect total and the
     // Party A runs flag-on; party B flag-off, so every captured fd-3 line is A's.
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4821,7 +4852,7 @@ test("a declined release with no session drop leaves the reconnect total and the
         { eventStream: true },
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4852,7 +4883,7 @@ test("a declined release with no session drop leaves the reconnect total and the
   ]);
   expect(metrics.reconnects).toBe(0);
   expect(metrics.transportRetries).toBe(0);
-});
+}, 20_000);
 
 test("summarizes the held idle boundaries as a line apart from the forced and declined ones", async () => {
   // The mode's third per-cycle outcome, and the only one with no inline line at
@@ -4878,7 +4909,7 @@ test("summarizes the held idle boundaries as a line apart from the forced and de
   try {
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4886,7 +4917,7 @@ test("summarizes the held idle boundaries as a line apart from the forced and de
         "test-a",
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4935,7 +4966,7 @@ test("summarizes the held idle boundaries as a line apart from the forced and de
   expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
     false,
   );
-});
+}, 20_000);
 
 test("held boundaries exceeding their stretches state the stretch count", async () => {
   // What separates one unbounded operation holding twenty boundaries from twenty
@@ -4952,7 +4983,7 @@ test("held boundaries exceeding their stretches state the stretch count", async 
   try {
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4960,7 +4991,7 @@ test("held boundaries exceeding their stretches state the stretch count", async 
         "test-a",
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -4978,7 +5009,7 @@ test("held boundaries exceeding their stretches state the stretch count", async 
   );
   expect(held).toBeDefined();
   expect(held).toContain("in 2 unbroken stretches");
-});
+}, 20_000);
 
 test("held boundaries equal to their stretches omit the stretch sub-clause", async () => {
   // Every hold cost exactly one boundary, so the sub-count restates the total and
@@ -4992,7 +5023,7 @@ test("held boundaries equal to their stretches omit the stretch sub-clause", asy
   try {
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -5000,7 +5031,7 @@ test("held boundaries equal to their stretches omit the stretch sub-clause", asy
         "test-a",
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -5018,7 +5049,7 @@ test("held boundaries equal to their stretches omit the stretch sub-clause", asy
   );
   expect(held).toBeDefined();
   expect(held).not.toContain("unbroken");
-});
+}, 20_000);
 
 test("a held boundary with no session drop leaves the reconnect total and the metrics event untouched", async () => {
   // A held boundary closed nothing, so nothing was lost. The reconnect total stays
@@ -5036,7 +5067,7 @@ test("a held boundary with no session drop leaves the reconnect total and the me
     // Party A runs flag-on; party B flag-off, so every captured fd-3 line is A's.
     await Promise.all([
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -5048,7 +5079,7 @@ test("a held boundary with no session drop leaves the reconnect total and the me
         { eventStream: true },
       ),
       runProtocol(
-        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
         minimalPrepared,
         undefined,
@@ -5081,14 +5112,14 @@ test("a held boundary with no session drop leaves the reconnect total and the me
   expect(metrics.reconnects).toBe(0);
   expect(metrics.transportRetries).toBe(0);
   expect(JSON.stringify(metrics)).not.toContain("11");
-});
+}, 20_000);
 
 test("logs no reconnect or per-cycle boundary summary of any kind on a clean run", async () => {
   // The teardown summary is guarded on a non-zero count, so a normal exchange
   // stays quiet.
   await Promise.all([
     runProtocol(
-      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
       null,
       minimalPrepared,
       undefined,
@@ -5096,7 +5127,7 @@ test("logs no reconnect or per-cycle boundary summary of any kind on a clean run
       "test-a",
     ),
     runProtocol(
-      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
       null,
       minimalPrepared,
       undefined,
@@ -5123,7 +5154,7 @@ test("logs no reconnect or per-cycle boundary summary of any kind on a clean run
   expect(mockState.infos.some((line) => line.includes("poll cycle"))).toBe(
     false,
   );
-});
+}, 20_000);
 
 test(
   "an aborted run under --event-stream reports metrics then the classified reason",
@@ -5151,21 +5182,13 @@ test(
 
     // Two parties complete the real rendezvous before either reaches the mocked
     // runExchange, where both then throw. Only party A is flag-on; its outcome is
-    // the one asserted (party B's is not). Each carries an explicit peer wait: it
-    // bounds every pre-exchange wait, and the default (one hour) would let a party
-    // left waiting on a peer that failed its own rendezvous run past this test's
-    // budget and be killed by vitest with a generic message instead of the core
-    // layer's own diagnosable timeout.
-    const partyOptions = {
-      pollIntervalMs: 1,
-      peerTimeoutMs: PEER_WAIT_HANG_BACKSTOP_MS,
-    };
+    // the one asserted (party B's is not).
     mockFd3Open();
     let resA: PromiseSettledResult<unknown>;
     try {
       [resA] = await Promise.allSettled([
         runProtocol(
-          { channel: "filedrop", path: dropDir, options: partyOptions },
+          { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
           null,
           preparedWithRows,
           undefined,
@@ -5177,7 +5200,7 @@ test(
           { eventStream: true },
         ),
         runProtocol(
-          { channel: "filedrop", path: dropDir, options: partyOptions },
+          { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
           null,
           preparedWithRows,
           undefined,
