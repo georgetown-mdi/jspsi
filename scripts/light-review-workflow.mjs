@@ -10,7 +10,7 @@
 export const meta = {
   name: "light-review",
   description:
-    "One review round over the branch diff: three schema-forced lens reviewers plus a consolidator, or one schema-forced role reviewer under a refutation contract",
+    "One review round over the target ref's diff against staging: three schema-forced lens reviewers plus a consolidator, or one schema-forced role reviewer under a refutation contract",
   phases: [{ title: "Review" }, { title: "Consolidate" }],
 };
 
@@ -183,6 +183,34 @@ function resolveWorkflowArgs(delivered) {
 
 const input = resolveWorkflowArgs(args);
 
+// The ref under review. There is deliberately no default: a round that fell back
+// to HEAD would review whatever the CALLER's checkout happens to hold, which is
+// the false-scope bug the by-ref flow exists to close, and it would do it
+// silently. A caller that names no ref gets a thrown round instead.
+if (
+  typeof input.targetRef !== "string" ||
+  input.targetRef.trim().length === 0
+) {
+  throw new Error(
+    `targetRef must be a non-empty string naming the ref under review; got ${JSON.stringify(input.targetRef)}.`,
+  );
+}
+const targetRef = input.targetRef.trim();
+
+if (
+  input.worktreePath !== undefined &&
+  input.worktreePath !== null &&
+  typeof input.worktreePath !== "string"
+) {
+  throw new Error(
+    `worktreePath must be the absolute path of the tree holding ${targetRef}, or null when no tree holds it; got ${JSON.stringify(input.worktreePath)}.`,
+  );
+}
+const worktreePath =
+  typeof input.worktreePath === "string" && input.worktreePath.trim().length > 0
+    ? input.worktreePath.trim()
+    : null;
+
 const docsClause =
   input.docs && input.docs.length
     ? "First read these docs for design context: " +
@@ -190,9 +218,22 @@ const docsClause =
       ". When an issue could be a deliberate design decision, check whether these docs justify it before flagging it.\n\n"
     : "";
 
-const diffScope = `Generate the diff yourself with git diff "origin/staging...HEAD" -- the ref and the three-dot form are both deliberate and non-negotiable: it shows ONLY what this branch added since it forked from staging, and it excludes every commit staging gained after the fork. That diff is the complete and exclusive scope of your review. Never widen it: do not run a two-dot git diff origin/staging HEAD, do not substitute a local staging ref (it goes stale and drags in merged work), do not diff against HEAD~N, the tip of staging, or any other base.
+const diffScope = `Generate the diff yourself with git diff "origin/staging...${targetRef}" -- the ref and the three-dot form are both deliberate and non-negotiable: it shows ONLY what ${targetRef} added since it forked from staging, and it excludes every commit staging gained after the fork. That diff is the complete and exclusive scope of your review. Never widen it: do not run a two-dot git diff origin/staging ${targetRef}, do not substitute a local staging ref (it goes stale and drags in merged work), do not diff against ${targetRef}~N, the tip of staging, or any other base. Review ${targetRef} and nothing else -- never HEAD, and never whatever branch a working directory you land in happens to hold.
 
 Review the branch's own changes and nothing else. Anything attributable to staging advancing since the branch forked -- the branch's base or starting point moving, the "root" of the branch changing, upstream commits the branch has not yet absorbed -- is OUT OF SCOPE and not this branch's responsibility. Do not flag it, describe it, or even mention that the base moved; treat such material as invisible. If a hunk merely re-states upstream staging work rather than introducing new behavior authored on this branch, ignore it. Open another file only if a hunk cannot be judged without it.`;
+
+// Where the reviewer stands, and where anything it creates goes. Both halves are
+// load-bearing: a shell's working directory does not persist between an agent's
+// tool calls, so an unscoped command runs against whatever tree the harness
+// dropped it in; and a scratch file left in the tree under review wedges every
+// later round of that branch, because the clean-tree gate statuses that tree.
+const workingTreeClause = worktreePath
+  ? `The tree holding ${targetRef} is checked out at ${worktreePath}. Scope EVERY command to it -- \`cd ${worktreePath} && <command>\` or \`git -C ${worktreePath} <command>\` -- rather than relying on an earlier cd, which does not carry from one call to the next.`
+  : `No working tree holds ${targetRef}. Read files at the ref with \`git show ${targetRef}:<path>\` and never check it out; if judging this diff needs code RUN rather than read, say so and stop rather than checking anything out.`;
+
+const scratchClause = `Put every file you create -- probe scripts, temporary tests, scratch notes -- under /tmp, never inside a repository working tree.`;
+
+const groundRules = `${workingTreeClause} ${scratchClause}`;
 
 const salvage = (who) =>
   `${who} returned no structured result -- the structured-output retries were exhausted. The analysis usually survives in the rejected attempts: read subagents/workflows/<runId>/agent-<id>.jsonl for this run and salvage it before re-running the round.`;
@@ -233,8 +274,10 @@ if (input.role !== undefined && input.role !== null) {
     if (!claims.includes(claim)) claims.push(claim);
   }
 
-  const rolePrompt = `You are reviewing the current branch (HEAD) of this repository under a refutation contract.
+  const rolePrompt = `You are reviewing the ref ${targetRef} of this repository under a refutation contract.
 ${diffScope}
+
+${groundRules}
 
 ${docsClause}Your contract is the named list of claims below. Take each one as something to REFUTE, not to confirm, and run the evidence yourself rather than taking the claim's own justification on faith. Return exactly one entry per claim, with the claim text copied verbatim so the caller can pair it back up, and a verdict of HOLDS, REFUTED, or COULD-NOT-VERIFY. COULD-NOT-VERIFY is not a pass: an unverifiable claim gates the round exactly as a refuted one does, and uncertainty defaults to refuted.
 
@@ -344,8 +387,10 @@ if (
   );
 }
 
-const reviewerPrompt = `You are a senior software engineer reviewing the current branch (HEAD) of this repository.
+const reviewerPrompt = `You are a senior software engineer reviewing the ref ${targetRef} of this repository.
 ${diffScope}
+
+${groundRules}
 
 ${docsClause}Review for: correctness bugs, logic errors, security issues, missing error handling at system boundaries, type-safety issues, API-contract violations, documentation-tier placement (spec-level detail -- a constant value, byte/wire layout, an HKDF info string or other algorithm step, or "would only need revisiting if..." rationale -- written into a docs/ overview doc rather than docs/spec/), excess prose (a comment that restates the adjacent code, narrates change history -- "now", "previously", "was moved" -- duplicates a JSDoc, or cites a board item id; name such findings "excess prose: ..."), and anything else that looks wrong.
 
@@ -368,15 +413,17 @@ const reviews = (
 ).filter(Boolean);
 if (reviews.length === 0) throw new Error(salvage("Every lens reviewer"));
 
-const consolidatorPrompt = `You are consolidating a code review of the current branch. ${reviews.length} independent reviewers examined git diff "origin/staging...HEAD" (three-dot; the branch's own changes only -- never widen the diff). Their findings:
+const consolidatorPrompt = `You are consolidating a code review of the ref ${targetRef}. ${reviews.length} independent reviewers examined git diff "origin/staging...${targetRef}" (three-dot; that ref's own changes only -- never widen the diff, and never substitute HEAD). Their findings:
 ${JSON.stringify(
   reviews.map((r, i) => ({ reviewer: i + 1, findings: r.findings })),
   null,
   1,
 )}
 
+${groundRules}
+
 ${docsClause}In a single pass -- no sub-agents, no iteration:
-1. Drop any finding that is not about the current branch's own changes (anything describing the branch's base moving, or staging's progress since the fork) -- discard it before clustering, do not even list it as refuted.
+1. Drop any finding that is not about ${targetRef}'s own changes (anything describing the branch's base moving, or staging's progress since the fork) -- discard it before clustering, do not even list it as refuted.
 2. Cluster findings that describe the same underlying issue across reviewers; flaggedBy is the number of distinct reviewers in the cluster.
 3. Verify each cluster's core claim by reading only the specific hunks or files it names -- not the whole diff -- and set verification confirmed/refuted/unverifiable with a one-line verificationNote.`;
 
