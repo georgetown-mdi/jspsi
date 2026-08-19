@@ -1,6 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // The CLI runs on Node (package.json engines: >= 26), not the ES2020
+    // downlevel target the base config sets; build against the ES2022 lib it
+    // actually runs under (matches packages/core) so e.g. Error.cause is in
+    // scope for the Rollup build's type check.
+    "target": "es2022",
+
     "composite": true,
     "outDir": "dist",
     "declaration": true,

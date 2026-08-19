@@ -9,11 +9,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "composite": false,
-    "noEmit": true,
-    // Tests run on Node (vitest), not the ES2020 downlevel emit target the base
-    // config uses; check them against the ES2022 lib they actually run under
-    // (matches packages/core) so e.g. Error.cause is in scope.
-    "target": "es2022"
+    "noEmit": true
   },
   "include": ["src", "test"]
 }
