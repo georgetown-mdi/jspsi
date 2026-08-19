@@ -18,6 +18,10 @@ export interface LoopbackTlsCert {
  * the binary a property of the environment: Windows is left out (it is not a
  * given there, and these suites do not run on it in CI), a minimal container may
  * ship none, and a LibreSSL `openssl` takes the flags below differently.
+ *
+ * `null` here is a prerequisite the environment did not supply, declared as one
+ * in `test/requireTestPrerequisites.ts`: the run names what it costs, and fails
+ * where the environment was supposed to supply it.
  */
 export const loopbackTlsCert: LoopbackTlsCert | null =
   process.platform === "win32" ? null : mintLoopbackTlsCert();
