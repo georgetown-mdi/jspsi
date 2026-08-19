@@ -1143,6 +1143,57 @@ describe("createFetchJobApiClient event-stream reconnect limits", () => {
     expect((error as JobApiRequestError).status).toBe(404);
     expect(calls).toHaveLength(2);
   });
+
+  test("the budget resets on progress, surviving drops that together exceed it", async () => {
+    // Two progress points, each followed by three failed reconnects -- six
+    // failures in all, over the five-attempt budget if it never reset, though no
+    // single stretch reaches it. The run still completes: pinning that the
+    // counter resets on a progressing reconnect rather than merely staying under
+    // a never-reset ceiling.
+    vi.useFakeTimers();
+    const calls: Array<RequestInit | undefined> = [];
+    const failingCalls = new Set([2, 3, 4, 6, 7, 8]);
+    const frames = [
+      'id: 1\ndata: {"v":1,"type":"stage","id":"one"}\n\n',
+      'id: 2\ndata: {"v":1,"type":"stage","id":"two"}\n\n',
+      'id: 3\ndata: {"v":1,"type":"result","resultWritten":true}\n\n',
+    ];
+    let nextFrame = 0;
+    const fetchImpl = ((
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      if (!String(input).endsWith("/events"))
+        return Promise.resolve(new Response(null, { status: 404 }));
+      calls.push(init);
+      if (failingCalls.has(calls.length))
+        return Promise.reject(new TypeError("network error"));
+      const frame = frames[nextFrame++];
+      return Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(frame));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+    }) as typeof fetch;
+
+    const outcome = drain(createFetchJobApiClient(fetchImpl));
+    await vi.advanceTimersByTimeAsync(60000);
+    const { events, error } = await outcome;
+
+    expect(events.map((event) => event.type)).toEqual([
+      "stage",
+      "stage",
+      "result",
+    ]);
+    expect(error).toBeUndefined();
+    expect(calls).toHaveLength(9);
+  });
 });
 
 describe("createServerJobZeroSetupDriver intent", () => {

@@ -54,9 +54,11 @@ function parseOffset(value: string | null): number | null {
 export const SSE_KEEPALIVE_FRAME = ": keepalive\n\n";
 
 /**
- * How long an event stream may go silent before it writes a keepalive frame. An
- * exchange is legitimately quiet for minutes at a time -- a party waiting on its
- * partner emits nothing -- while a reverse proxy or load balancer in front of the
+ * The fixed cadence at which an event stream writes a keepalive frame,
+ * indifferent to real traffic (a redundant comment frame beside real events is
+ * free, and a fixed timer needs no reset bookkeeping). An exchange is
+ * legitimately quiet for minutes at a time -- a party waiting on its partner
+ * emits nothing -- while a reverse proxy or load balancer in front of the
  * console cuts an idle response far sooner (60 seconds is a common default, and
  * a hardened one is shorter). Sized well under that floor so the operator's view
  * of a waiting run survives, rather than raising an idle window the deployment
@@ -91,7 +93,7 @@ export interface JobEventStreamOptions {
 
 /**
  * Build the SSE body for one job: the replay from `afterId`, every later event
- * live, a keepalive frame on every idle {@link SSE_KEEPALIVE_INTERVAL_MS}, and a
+ * live, a keepalive frame every {@link SSE_KEEPALIVE_INTERVAL_MS}, and a
  * close once the terminal event has been delivered.
  *
  * The subscription and the keepalive timer are released on every exit -- the
