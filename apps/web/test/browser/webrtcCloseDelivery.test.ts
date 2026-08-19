@@ -95,6 +95,11 @@ interface CloseTiming {
   received: Array<ReceivedFrame>;
   closeResolvedAt: number;
   outcomes: Array<PeerCloseOutcome>;
+  /** Whether the sender's client had already issued its broker disconnect (a
+   * client-side flag; the broker's own release happens in its socket-close
+   * handler one round trip later) -- read before the default order calls it,
+   * so a `disconnect` that did nothing cannot pass for one that did. */
+  senderDisconnectedAtClose: boolean;
 }
 
 async function sendThenClose(options: {
@@ -107,6 +112,11 @@ async function sendThenClose(options: {
   /** Breaks the link in the tick AFTER the sender's close has begun, so the
    * break lands on a drain already standing rather than before one starts. */
   breakLinkDuringDrain?: (pair: RendezvousPair) => void;
+  /** Frees the sender's broker registration BEFORE its close instead of after
+   * it: the managed re-run's teardown order (managedRunDriver.ts), whose drain
+   * outlives the outcome it reports and so must not hold the record's
+   * rendezvous id. */
+  freeBrokerIdFirst?: boolean;
 }): Promise<CloseTiming> {
   const pair = await connectRendezvousPair(generateSharedSecret(), addressInfo);
   const { inviterPeer, acceptorPeer, inviterConn, acceptorConn } = pair;
@@ -127,9 +137,11 @@ async function sendThenClose(options: {
     // branch and no wait runs at all -- measured: a 100 ms gap here reports no
     // outcome whatsoever on either of the link-break tests below.
     options.breakLink?.(pair);
-    // The production teardown's order (exchangeLifecycle.ts): the flushing
-    // close, then the broker id is freed. `disconnect` deliberately leaves the
-    // data channel standing.
+    // The one-shot lifecycle's teardown order (exchangeLifecycle.ts): the
+    // flushing close, then the broker id is freed. `disconnect` deliberately
+    // leaves the data channel standing, which is what lets the managed re-run's
+    // teardown free the id first instead.
+    if (options.freeBrokerIdFirst) acceptorPeer.disconnect();
     const closing = senderMc.close();
     // A zero delay is enough to land inside the drain: the final frame is sized
     // so its delivery takes hundreds of milliseconds (FINAL_FRAME_BYTES), which
@@ -138,11 +150,17 @@ async function sendThenClose(options: {
       setTimeout(() => options.breakLinkDuringDrain?.(pair), 0);
     await closing;
     const closeResolvedAt = performance.now() - origin;
-    acceptorPeer.disconnect();
+    const senderDisconnectedAtClose = acceptorPeer.disconnected;
+    if (!options.freeBrokerIdFirst) acceptorPeer.disconnect();
 
     const received = await receiving;
     await receiverMc.close();
-    return { received, closeResolvedAt, outcomes };
+    return {
+      received,
+      closeResolvedAt,
+      outcomes,
+      senderDisconnectedAtClose,
+    };
   } finally {
     inviterPeer.destroy();
     acceptorPeer.destroy();
@@ -176,6 +194,27 @@ test("a clean close resolves only once the peer has read the final frame", async
   // healthy exchange to distrust it.
   expect(outcomes).toEqual(["peer-closed"]);
   expect(CLOSE_OUTCOME_WARNINGS[outcomes[0]]).toBeUndefined();
+}, 120_000);
+
+test("a peer whose broker id is already freed still delivers on its close", async (ctx) => {
+  if (!(await canReachServer(hostString)))
+    return ctx.skip(serverUnreachableNote);
+  // The premise the managed re-run's teardown rests on (managedRunDriver.ts):
+  // it frees the broker id before draining, so a failed run's retry can register
+  // the record's rendezvous id again while the drain is still standing. Freeing
+  // it must cost that drain nothing -- same delivery, same ordering, same
+  // outcome as the test above -- and only the real stack can say so.
+  const timing = await sendThenClose({
+    finalFrameSize: FINAL_FRAME_BYTES,
+    freeBrokerIdFirst: true,
+  });
+
+  expect(timing.senderDisconnectedAtClose).toBe(true);
+  expect(timing.received.length).toBe(2);
+  expectFinalFrame(timing.received.at(-1), FINAL_FRAME_BYTES);
+  expect(timing.closeResolvedAt).toBeGreaterThanOrEqual(timing.received[1].at);
+  expect(timing.outcomes).toEqual(["peer-closed"]);
+  expect(CLOSE_OUTCOME_WARNINGS[timing.outcomes[0]]).toBeUndefined();
 }, 120_000);
 
 test("the wait is what orders it: an unwaited close returns with the frame in flight", async (ctx) => {
