@@ -173,7 +173,19 @@ jobs:
       - name: Build CLI
         run: npm run build -w apps/cli
 
+      # apt applies no network timeout of its own, so a mirror connection that
+      # goes quiet hangs the install below with nothing to time it out.
+      - name: Bound apt network stalls
+        run: |
+          echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99-ci-retry
+          echo 'Acquire::http::Timeout "15";' | sudo tee -a /etc/apt/apt.conf.d/99-ci-retry
+          echo 'Acquire::https::Timeout "15";' | sudo tee -a /etc/apt/apt.conf.d/99-ci-retry
+
+      # A mirror that trickles rather than falls silent keeps the timeouts above
+      # from ever firing, so bound the step itself; this job sets no job-level
+      # timeout, leaving the 6h default as its only other backstop.
       - name: Start a Samba server with a writable and a read-only share
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           sudo apt-get update
