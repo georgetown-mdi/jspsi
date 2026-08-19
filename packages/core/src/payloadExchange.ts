@@ -66,9 +66,9 @@ const isPayloadRow = (row: unknown): boolean =>
 // position, so a repeat names two payload rows for one record and the message
 // does not say which is the record's. That is a structural property of the frame,
 // refused here alongside every other malformed shape rather than downstream. The
-// scan stops at the first repeat, and its Set is sized by the entries the frame
-// already materialized rather than by any bound the partner names, so it costs no
-// more than the array it walks.
+// scan runs only on a frame that already passed length parity, stops at the first
+// repeat, and its Set is sized by the entries the frame already materialized
+// rather than by any bound the partner names.
 const hasDistinctRowIndices = (rowIndices: ReadonlyArray<number>): boolean => {
   const seen = new Set<number>();
   for (const rowIndex of rowIndices) {
@@ -127,14 +127,23 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
         "each payload row must be an array of strings or nulls",
       ),
     })
-    .refine(
-      (v) => v.rowIndices.length === v.rows.length,
-      "rowIndices and rows must have the same length",
-    )
-    .refine(
-      (v) => hasDistinctRowIndices(v.rowIndices),
-      "rowIndices must not repeat a row index",
-    ),
+    .superRefine((v, ctx) => {
+      // Parity first: a frame that fails it is refused without paying the
+      // distinctness scan's Set over entries the refusal never needed.
+      if (v.rowIndices.length !== v.rows.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "rowIndices and rows must have the same length",
+        });
+        return;
+      }
+      if (!hasDistinctRowIndices(v.rowIndices)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "rowIndices must not repeat a row index",
+        });
+      }
+    }),
 ]);
 
 /**
