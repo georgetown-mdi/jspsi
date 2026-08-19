@@ -225,8 +225,12 @@ export const SPLIT_DIRECTORY_BOTH_HALVES_REQUIREMENT =
 /**
  * What the console says when the two halves name one directory. Worded as
  * NAMING a different directory rather than as differing text, because core
- * refuses any pair that resolves to the same directory -- a trailing slash or a
- * "." segment makes two different strings one folder.
+ * refuses only the pairs its own textual comparison can see as one directory
+ * -- a trailing slash or a "." segment makes two different strings one
+ * folder. Core deliberately under-collapses: a pair that differs only
+ * through ".." segments, case, or the login-home expansion of a relative
+ * path is the operator's own to keep distinct, per `pathsResolveToSameDir`'s
+ * stated design.
  */
 export const SPLIT_DIRECTORY_DISTINCT_REQUIREMENT =
   "The outbound directory must name a different directory from the inbound " +
