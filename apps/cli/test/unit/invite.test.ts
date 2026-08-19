@@ -1319,6 +1319,45 @@ test("validateInvite: offline config-source refuses a count-only config whose me
   }
 });
 
+test("validateInvite: an explicit empty payload pair still names the count-only rule, not the generic disclosure one", async () => {
+  // The shape rules permit an explicit `payload: {send: [], receive: []}` (both
+  // empty), so this document passes the terms-shape refine. But
+  // assertPayloadSendDisclosed's own empty-send fast path requires
+  // output.shareWithPartner: false, and these terms carry shareWithPartner:
+  // true (the default), so with metadata marking a column disclosed it would
+  // fall through to the generic "payload.send must name exactly the columns..."
+  // message unless the count-only-specific check runs first.
+  const metadata = inferMetadata([
+    "first_name",
+    "last_name",
+    "dob",
+    "ssn",
+    "notes",
+  ]);
+  expect(disclosedColumnNames(metadata)).toEqual(["notes"]);
+  const terms: LinkageTerms = {
+    ...countOnlyTerms(),
+    payload: { send: [], receive: [] },
+  };
+  const { dir, configPath, keyPath } = withConfig(terms, undefined, metadata);
+  try {
+    const invite = () =>
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      });
+    await expect(invite()).rejects.toBeInstanceOf(UsageError);
+    await expect(invite()).rejects.toThrow(/transmits no data columns/);
+    await expect(invite()).rejects.not.toThrow(
+      /payload\.send must name exactly/,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("validateInvite: a psi config with the same metadata and shape still mints", async () => {
   // The narrowing claim at this boundary: every refusal above reads the
   // algorithm first, so the identical document under `psi` is untouched.
