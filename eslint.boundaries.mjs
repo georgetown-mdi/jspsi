@@ -36,7 +36,7 @@
 // the workspace graph is acyclic.
 
 const PACKAGE_MESSAGE =
-  "a package must not import from an app: apps consume packages, never the reverse. Move the shared code into packages/core/src and import it from the app.";
+  "a package must not import from an app: apps consume packages, never the reverse. Move the shared code into a packages/ workspace and import it from the app.";
 
 const CLI_MESSAGE =
   "apps/cli must not import from apps/web: the two apps share code only through @psilink/core. Move the shared code into packages/core/src.";
