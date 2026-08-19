@@ -62,13 +62,25 @@ export function isListedFanOutFunction(functionName: string): boolean {
  * entry added without a matching entry in {@link FAN_OUT_FUNCTION_NAMES} would
  * be. It moves the compile-time capture alone: the exported list is unchanged, so
  * the declared-step gate and the consent surfaces still read `split_on` as the
- * fan-out producer it is.
+ * fan-out producer it is. Synchronous bodies only -- a thenable return is
+ * refused -- and a nested call restores its caller's override rather than the
+ * full list.
  */
 export function withNoListedFanOutFunctions<T>(body: () => T): T {
+  const previous = listedFanOutFunctions;
   listedFanOutFunctions = new Set();
   try {
-    return body();
+    const result = body();
+    if (
+      typeof (result as { then?: unknown } | null | undefined)?.then ===
+      "function"
+    ) {
+      throw new Error(
+        "withNoListedFanOutFunctions supports synchronous bodies only: the listing is restored when body returns, so an async body would run with it restored",
+      );
+    }
+    return result;
   } finally {
-    listedFanOutFunctions = new Set(FAN_OUT_FUNCTION_NAMES);
+    listedFanOutFunctions = previous;
   }
 }

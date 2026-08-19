@@ -42,6 +42,10 @@ import {
   type Standardization,
 } from "../src/config/standardization";
 import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
+import {
+  isListedFanOutFunction,
+  withNoListedFanOutFunctions,
+} from "../src/fanOutFunctions";
 
 const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
   name,
@@ -2286,6 +2290,22 @@ describe("buildKeyStrings", () => {
     const dataset = makeDataset({ last_name: wide, date_of_birth: wide });
     expect(buildKeyStrings(key, dataset, 0)).toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  test("a nested call restores its caller's override, not the full list", () => {
+    withNoListedFanOutFunctions(() => {
+      expect(isListedFanOutFunction("split_on")).toBe(false);
+      withNoListedFanOutFunctions(() => {});
+      expect(isListedFanOutFunction("split_on")).toBe(false);
+    });
+    expect(isListedFanOutFunction("split_on")).toBe(true);
+  });
+
+  test("an async body is refused and the listing restored", () => {
+    expect(() => withNoListedFanOutFunctions(() => Promise.resolve())).toThrow(
+      /synchronous bodies only/,
+    );
+    expect(isListedFanOutFunction("split_on")).toBe(true);
   });
 
   test("the cap refusal names the producer this row expanded through", () => {
