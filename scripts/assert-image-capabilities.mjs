@@ -340,8 +340,17 @@ async function exerciseServe(context, argv) {
   const container = started.stdout.trim();
   try {
     for (let attempt = 1; attempt <= 60; attempt += 1) {
+      // Bounded by a plain setTimeout rather than AbortSignal.timeout, whose
+      // timer is unref'd: a ref'd handle is what keeps the loop alive for the
+      // whole of each poll, so a request that settles neither way fails this
+      // vector instead of draining the loop and ending the run at exit 13 with
+      // this await unsettled.
+      const bound = new AbortController();
+      const stopWaiting = setTimeout(() => bound.abort(), 5000);
       try {
-        const answer = await fetch(`http://127.0.0.1:${port}/`);
+        const answer = await fetch(`http://127.0.0.1:${port}/`, {
+          signal: bound.signal,
+        });
         if (answer.ok)
           return verdict(
             true,
@@ -349,6 +358,8 @@ async function exerciseServe(context, argv) {
           );
       } catch {
         // Not up yet; the attempt bound is what limits how long that stands.
+      } finally {
+        clearTimeout(stopWaiting);
       }
       await new Promise((wake) => setTimeout(wake, 1000));
     }
