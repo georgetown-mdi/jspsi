@@ -210,9 +210,19 @@ export function runManagedExchangeInBrowser(
           return { rotatedSecret: auth.rotatedSecret, handshake: carried };
         } catch (error) {
           // The handshake failed after the channel opened but before the data
-          // exchange: tear down so a failed run never leaks a registered peer or an
-          // open channel.
-          await teardown(peer, conn, mc);
+          // exchange: tear down so a failed run never leaks a registered peer or
+          // an open channel.
+          //
+          // Started, not awaited, for the reason the data exchange's teardown is,
+          // sharpened by where this phase runs: the clean close inside it waits
+          // for the peer to take the final frame, and this catch is inside the
+          // single-writer lock, which releases only when this phase settles.
+          // Awaiting the drain here would hold that lock -- and with it every
+          // other context's run of this record -- for a duration the partner
+          // picks, up to the close ceiling. The drain still runs to completion,
+          // and swallows its own faults, so the failure below is what the run
+          // surfaces.
+          void teardown(peer, conn, mc);
           throw error;
         }
       },
@@ -257,7 +267,8 @@ export function runManagedExchangeInBrowser(
  * hard-close the raw channel when the wrapper never materialized), then free the
  * broker id. Mirrors the one-shot lifecycle's teardown, never throwing -- a
  * teardown fault must not clobber a more accurate outcome, which is also what
- * lets the data exchange start it without awaiting it. */
+ * lets both the failed handshake and the data exchange start it without awaiting
+ * it. */
 async function teardown(
   peer: Peer,
   conn: DataConnection,

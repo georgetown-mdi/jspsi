@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import log from "loglevel";
 
+import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { beginManagedRendezvous } from "../../src/psi/managedRendezvous.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
 import { runManagedExchangeInBrowser } from "../../src/psi/managedRunDriver.js";
@@ -19,9 +20,17 @@ import type { RunOutputs } from "@bench/runOutputs";
  * The browser wiring of a managed re-run, with every platform seam it composes
  * mocked: the rendezvous, the message connection, the handshake, the PSI
  * exchange, and the outputs builder. What is left is the wiring's own decisions,
- * and the one asserted here is the teardown: the run's outputs must not be held
- * behind the clean close's wait for the peer, whose duration the partner chooses
- * up to the close ceiling.
+ * and the ones asserted here are its two teardowns: neither the run's outputs nor
+ * a failed handshake's error may be held behind the clean close's wait for the
+ * peer, whose duration the partner chooses up to the close ceiling.
+ *
+ * On the handshake's teardown that wait costs more than the run's own latency.
+ * The handshake phase runs inside the single-writer lock, which releases when the
+ * phase settles (`runManagedExchange`; the release on a rejecting critical section
+ * is pinned against real Web Locks in test/browser/managedExchangeRun.test.ts), so
+ * a phase that settles only after the drain holds the lock -- and every other
+ * context's run of this record -- for the partner-chosen duration too. A phase
+ * that rejects while the drain is still in flight is what releases it promptly.
  *
  * The orchestration this driver injects into (the lock, the persist ordering, the
  * bookkeeping) is `runManagedRerun`'s, tested in managedRun.test.ts and against
@@ -86,6 +95,7 @@ vi.mock("@psilink/core", async (importOriginal) => {
   };
 });
 
+const mockedAuthenticate = vi.mocked(authenticateExchange);
 const mockedRendezvous = vi.mocked(beginManagedRendezvous);
 const mockedOpen = vi.mocked(openPeerMessageConnection);
 
@@ -235,5 +245,58 @@ describe("runManagedExchangeInBrowser", () => {
     controller.abort();
 
     await expect(running).resolves.toMatchObject({ exchange: OUTPUTS });
+  });
+
+  test("reports a handshake failure while its teardown is still draining", async () => {
+    // The defect this pins: the failed handshake's teardown drains the same
+    // close, and a phase that awaits it settles -- releasing the single-writer
+    // lock over this record -- only once the partner lets go.
+    const { mc, close } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { peer } = acquireResources();
+    mockedAuthenticate.mockRejectedValueOnce(new Error("handshake refused"));
+
+    await expect(runDriver(new AbortController().signal)).rejects.toThrow(
+      "handshake refused",
+    );
+
+    // The drain did start, and is still in flight: the handshake failure came
+    // out from in front of it rather than after it.
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(peer.disconnect).not.toHaveBeenCalled();
+  });
+
+  test("completes a failed handshake's teardown once the drain ends", async () => {
+    // Not awaiting the drain must not mean abandoning it: the guarantee the
+    // handshake's catch exists for is that a failed run leaves neither an open
+    // channel nor a registered peer behind.
+    const { mc, release } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { peer } = acquireResources();
+    mockedAuthenticate.mockRejectedValueOnce(new Error("handshake refused"));
+
+    await expect(runDriver(new AbortController().signal)).rejects.toThrow(
+      "handshake refused",
+    );
+    release();
+    await tick();
+
+    expect(peer.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  test("tears a never-opened channel down before the failure propagates", async () => {
+    // The already-broken connection: no wrapper materialized, so the teardown
+    // hard-closes the raw channel and frees the broker id with no drain to wait
+    // on -- both settled by the time the failure reaches the caller, since
+    // nothing on that path suspends.
+    mockedOpen.mockRejectedValueOnce(new Error("channel never opened"));
+    const { peer, conn } = acquireResources();
+
+    await expect(runDriver(new AbortController().signal)).rejects.toThrow(
+      "channel never opened",
+    );
+
+    expect(conn.close).toHaveBeenCalledTimes(1);
+    expect(peer.disconnect).toHaveBeenCalledTimes(1);
   });
 });
