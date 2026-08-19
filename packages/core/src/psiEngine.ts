@@ -28,7 +28,25 @@ type DeserializedServerSetup = ReturnType<
  */
 export type PsiEngineMode = "identifier-revealing" | "count-only";
 
+// Every mode decision in the engine derives from this one test, so an engine has
+// exactly two states and never a hybrid third. TypeScript does not reach a JS caller
+// of the published package, which can pass a string outside PsiEngineMode; deriving
+// each decision here puts any such value wholly on the count-only side -- the
+// nondisclosing one -- rather than clearing the reveal flag while leaving the
+// contribution filter and the sorting permutation set for `psi`.
+function modeRevealsIdentifiers(mode: PsiEngineMode): boolean {
+  return mode === "identifier-revealing";
+}
+
+// Names an engine's mode back from that one boolean, so a refusal reports one of the
+// two states rather than echoing whatever string constructed the engine.
+function modeName(revealsIdentifiers: boolean): PsiEngineMode {
+  return revealsIdentifiers ? "identifier-revealing" : "count-only";
+}
+
 /**
+ * @internal
+ *
  * The values a party contributes to a count-only round: those occurring EXACTLY
  * ONCE in its own dataset, in input order. Every occurrence of a repeated value is
  * dropped, not just the later ones -- an ambiguous match cannot be attributed to a
@@ -41,7 +59,7 @@ export type PsiEngineMode = "identifier-revealing" | "count-only";
  * contradict such a figure, so the filter is applied here, at the seam that owns
  * the contribution, rather than left to a caller.
  */
-function valuesContributedExactlyOnce(
+export function valuesContributedExactlyOnce(
   values: ReadonlyArray<string>,
 ): Array<string> {
   const occurrences = new Map<string, number>();
@@ -151,7 +169,7 @@ export interface PsiEngine {
 export class InProcessPsiEngine implements PsiEngine {
   private readonly library: PSILibrary;
   private readonly id: string;
-  private readonly mode: PsiEngineMode;
+  private readonly revealsIdentifiers: boolean;
   private readonly server?: PSIServer;
   private readonly client?: PSIClient;
   // The joiner's deserialized setup, held between receiveServerSetup and the match
@@ -167,21 +185,21 @@ export class InProcessPsiEngine implements PsiEngine {
     id: string,
     // Fixed here rather than per call: the reveal flag it sets is generated into
     // the key objects below and rides the request on the wire, so a round's
-    // disclosure is settled with its key. Defaults to the identifier-revealing
-    // `psi` construction.
-    mode: PsiEngineMode = "identifier-revealing",
+    // disclosure is settled with its key. Required rather than defaulted, because a
+    // default is a disclosure a caller can reach by forgetting: a revealing round
+    // run under count-only terms is the substitution the mode exists to prevent.
+    mode: PsiEngineMode,
   ) {
     this.library = library;
     this.id = id;
-    this.mode = mode;
-    const revealIntersection = mode === "identifier-revealing";
+    this.revealsIdentifiers = modeRevealsIdentifiers(mode);
     // Generate the fresh secret key for this exchange, held inside the library's
     // server / client object. An unresolved ("either") role creates neither; the
     // role-guarded methods below then reject, exactly as before this extraction.
     if (role === "starter") {
-      this.server = library.server!.createWithNewKey(revealIntersection);
+      this.server = library.server!.createWithNewKey(this.revealsIdentifiers);
     } else if (role === "joiner") {
-      this.client = library.client!.createWithNewKey(revealIntersection);
+      this.client = library.client!.createWithNewKey(this.revealsIdentifiers);
     }
   }
 
@@ -191,7 +209,7 @@ export class InProcessPsiEngine implements PsiEngine {
     const server = this.server;
     if (!server)
       throw new Error(`${this.id}: createServerSetup requires the server role`);
-    const countOnly = this.mode === "count-only";
+    const countOnly = !this.revealsIdentifiers;
     const sortingPermutation: Array<number> = [];
     const setup = server.createSetupMessage(
       0.0,
@@ -222,10 +240,9 @@ export class InProcessPsiEngine implements PsiEngine {
       throw new Error(
         `${this.id}: createClientRequest requires the client role`,
       );
-    const contributed =
-      this.mode === "count-only"
-        ? valuesContributedExactlyOnce(values)
-        : values;
+    const contributed = this.revealsIdentifiers
+      ? values
+      : valuesContributedExactlyOnce(values);
     return Promise.resolve(client.createRequest(contributed).serializeBinary());
   }
 
@@ -254,14 +271,14 @@ export class InProcessPsiEngine implements PsiEngine {
   // condition as an opaque marshalling error on the WebAssembly build.
   private beginMatch(
     operation: string,
-    mode: PsiEngineMode,
+    requiredMode: PsiEngineMode,
   ): { client: PSIClient; setup: DeserializedServerSetup } {
     const client = this.client;
     if (!client)
       throw new Error(`${this.id}: ${operation} requires the client role`);
-    if (this.mode !== mode)
+    if (this.revealsIdentifiers !== modeRevealsIdentifiers(requiredMode))
       throw new Error(
-        `${this.id}: ${operation} requires a ${mode} PSI engine; this one is ${this.mode}`,
+        `${this.id}: ${operation} requires a ${requiredMode} PSI engine; this one is ${modeName(this.revealsIdentifiers)}`,
       );
     const setup = this.pendingSetup;
     if (setup === undefined)

@@ -123,7 +123,8 @@ function reduceToSingletons<T>(
 // key" (but "" is a real value, kept). `permutation` maps a survivor's index back
 // to its original row when the input is a carried-forward subset of a later round.
 // See docs/spec/PROTOCOL.md (Key input data).
-function removeDuplicatesAndUndefineds(
+/** @internal */
+export function removeDuplicatesAndUndefineds(
   dataWithDuplicatesAndUndefineds: Array<string | undefined>,
   permutation?: Array<number>,
 ): [Array<string>, Array<number>] {

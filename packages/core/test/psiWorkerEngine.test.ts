@@ -28,8 +28,10 @@ function inProcessWorkerEngine(
   id: string,
 ): WorkerPsiEngine {
   let deliver: (response: PsiWorkerResponse) => void = () => {};
-  const dispatch = servePsiWorker(psiLibrary, { role, id }, (response) =>
-    deliver(structuredClone(response)),
+  const dispatch = servePsiWorker(
+    psiLibrary,
+    { role, id, mode: "identifier-revealing" },
+    (response) => deliver(structuredClone(response)),
   );
   const handle: PsiWorkerHandle = {
     postMessage: (request) => dispatch(structuredClone(request)),

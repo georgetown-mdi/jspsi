@@ -28,11 +28,12 @@ export interface PsiWorkerInit {
   role: Config["role"];
   id: string;
   /**
-   * The disclosure the worker's engine is built for, identifier-revealing when
-   * omitted. It seeds the key the worker generates, so it is fixed for the
-   * worker's life exactly as it is for an in-process engine's.
+   * The disclosure the worker's engine is built for. It seeds the key the worker
+   * generates, so it is fixed for the worker's life exactly as it is for an
+   * in-process engine's -- and stated rather than defaulted, so a spawn site that
+   * omits it cannot run a revealing round under count-only terms.
    */
-  mode?: PsiEngineMode;
+  mode: PsiEngineMode;
 }
 
 /**

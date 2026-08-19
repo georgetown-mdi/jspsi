@@ -3,8 +3,10 @@ import { describe, expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
+import { removeDuplicatesAndUndefineds } from "../src/link";
 import {
   InProcessPsiEngine,
+  valuesContributedExactlyOnce,
   type PsiEngine,
   type PsiEngineMode,
 } from "../src/psiEngine";
@@ -29,10 +31,12 @@ import { loadNativeAddonOrSkip } from "./utils/nativeAddon";
 // refused before a run begins (assertAlgorithmImplemented, src/exchange.ts, pinned
 // by its own tests), so these tests are the exercise the mode has.
 //
-// Refusals are asserted as refusals, never by message text: the WebAssembly build
-// surfaces the library's mode-mismatch and association-table conditions as an opaque
-// embind marshalling error where the native addon names them
-// (docs/notes/psi-c-count-only.md).
+// A refusal the library raises is asserted as a refusal wherever a WebAssembly party
+// raises it: that build surfaces the mode-mismatch and association-table conditions as
+// an opaque embind marshalling error where the native addon names them
+// (docs/notes/psi-c-count-only.md). The native-sender legs below, which do get the
+// named condition, assert it, so their refusal is pinned to the wire-enforced reveal
+// flag rather than to any throw.
 
 const wasm = await PSI();
 
@@ -249,6 +253,75 @@ describe.each([
     countOnlyReceiver.dispose();
   });
 
+  // TypeScript does not reach a JS caller of the published package, which can pass a
+  // string outside PsiEngineMode, and both worker seams read their init back through
+  // an unchecked cast, so a spawn site that omits the mode delivers undefined. The
+  // casts stand in for both. Every mode decision derives from a single boolean, so a
+  // value naming no mode has to land wholly on the nondisclosing side rather than
+  // clearing the reveal flag while leaving the contribution filter or the sorting
+  // permutation set for `psi`.
+  const unrecognizedModes: ReadonlyArray<PsiEngineMode> = [
+    "reveal-everything" as PsiEngineMode,
+    undefined as unknown as PsiEngineMode,
+  ];
+
+  test.each(unrecognizedModes)(
+    "an unrecognized mode (%s) is count-only in every respect",
+    async (unrecognizedMode) => {
+      const unrecognizedSender = create(
+        wasm,
+        "starter",
+        "sender",
+        unrecognizedMode,
+      );
+      const unrecognizedReceiver = create(
+        wasm,
+        "joiner",
+        "receiver",
+        unrecognizedMode,
+      );
+      const revealingReceiver = receiver("identifier-revealing");
+
+      const { setup, permutation } = await unrecognizedSender.createServerSetup(
+        duplicatingSenderValues,
+      );
+      expect(permutation).toStrictEqual([]);
+
+      await unrecognizedReceiver.receiveServerSetup(setup);
+      const request = await unrecognizedReceiver.createClientRequest(
+        duplicatingReceiverValues,
+      );
+      const decodedRequest = wasm.request.deserializeBinary(request);
+      expect(decodedRequest.getRevealIntersection()).toBe(false);
+      expect(decodedRequest.getEncryptedElementsList().length).toBe(
+        valuesContributedExactlyOnce(duplicatingReceiverValues).length,
+      );
+      // The same two observations on a `psi` request, so neither is trivially true:
+      // that flag is set and every value is contributed, repeats included.
+      const revealingRequest = await revealingReceiver.createClientRequest(
+        duplicatingReceiverValues,
+      );
+      const decodedRevealingRequest =
+        wasm.request.deserializeBinary(revealingRequest);
+      expect(decodedRevealingRequest.getRevealIntersection()).toBe(true);
+      expect(decodedRevealingRequest.getEncryptedElementsList().length).toBe(
+        duplicatingReceiverValues.length,
+      );
+
+      const response = await unrecognizedSender.processClientRequest(request);
+      await expect(
+        settled(() => unrecognizedReceiver.computeAssociationTable(response)),
+      ).rejects.toThrow();
+      await expect(
+        unrecognizedReceiver.computeIntersectionCardinality(response),
+      ).resolves.toBe(1);
+
+      unrecognizedSender.dispose();
+      unrecognizedReceiver.dispose();
+      revealingReceiver.dispose();
+    },
+  );
+
   test("a mode mismatch cannot complete a round, in either orientation", async () => {
     for (const [senderMode, receiverMode] of mismatchedOrientations) {
       const mismatchedSender = sender(senderMode);
@@ -269,6 +342,53 @@ describe.each([
       mismatchedReceiver.dispose();
     }
   });
+});
+
+// The normative singleton rule -- a party contributes the values occurring exactly
+// once in its own dataset, in first-appearance order -- has two implementations: the
+// engine's count-only contribution filter and the cascade's
+// removeDuplicatesAndUndefineds, which link.ts runs on the live `psi` path. This pins
+// their AGREEMENT on the shared vector set below: which values survive, and the order
+// they survive in. A later fix to either implementation that changes that rule fails
+// here rather than silently leaving the two paths on different rules. What it does not
+// pin is the cascade's extra job -- undefined means "no value for this key" there,
+// where the engine is handed a dense list of strings and never sees one.
+test("the count-only contribution filter and the cascade agree on the singleton rule", () => {
+  const vectors: Array<Array<string>> = [
+    [],
+    ["solo"],
+    ["Alice", "Bob", "Carol"],
+    ["Alice", "Alice"],
+    ["Alice", "Bob", "Alice"],
+    ["Bob", "Alice", "Bob", "Carol", "Alice", "Dana"],
+    ["Alice", "Alice", "Alice", "Bob"],
+    ["", "", "Alice"],
+    ["Alice", "", "Bob"],
+    duplicatingSenderValues,
+    duplicatingReceiverValues,
+    senderValues,
+  ];
+
+  for (const values of vectors) {
+    const [cascadeValues, cascadeIndices] = removeDuplicatesAndUndefineds([
+      ...values,
+    ]);
+    expect(valuesContributedExactlyOnce(values)).toStrictEqual(cascadeValues);
+    // The cascade also reports where each survivor came from; reading the input at
+    // those positions must reproduce the same list, so the two agree on the
+    // occurrences dropped and not merely on the multiset that survives.
+    expect(cascadeIndices.map((index) => values[index])).toStrictEqual(
+      cascadeValues,
+    );
+  }
+
+  // The cascade's own case, outside the agreement: a key with no value drops out.
+  expect(
+    removeDuplicatesAndUndefineds(["Alice", undefined, "Bob", undefined]),
+  ).toStrictEqual([
+    ["Alice", "Bob"],
+    [0, 2],
+  ]);
 });
 
 test("the library's cardinality operation reports the multiset size the filter excludes", () => {
@@ -403,9 +523,19 @@ describe.each(backendPairs)("count-only backend parity: $name", (pair) => {
 
     const revealingRequest =
       await revealingReceiver.createClientRequest(receiverValues);
-    await expect(
+    const mismatchRefusal = expect(
       settled(() => countOnlySender.processClientRequest(revealingRequest)),
-    ).rejects.toThrow();
+    ).rejects;
+    if (pair.sender === "native") {
+      // The addon names the condition it refused on -- the reveal flag the request
+      // carries disagreeing with the one this sender's key was generated under -- so
+      // the refusal is pinned to that flag rather than to any throw at all.
+      await mismatchRefusal.toThrow(/reveal_intersection/);
+    } else {
+      // The WebAssembly sender reports the same condition as an opaque embind
+      // marshalling error, which names nothing to assert on.
+      await mismatchRefusal.toThrow();
+    }
 
     countOnlySender.dispose();
     countOnlyReceiver.dispose();

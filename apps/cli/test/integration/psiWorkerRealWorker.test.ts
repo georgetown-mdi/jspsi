@@ -3,7 +3,11 @@ import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 
 import { afterEach, expect, test } from "vitest";
-import { WorkerPsiEngine, type PsiEngine } from "@psilink/core";
+import {
+  WorkerPsiEngine,
+  type PsiEngine,
+  type PsiWorkerInit,
+} from "@psilink/core";
 
 import { createWorkerThreadHandle } from "../../src/psiWorkerHost";
 
@@ -69,7 +73,8 @@ interface SpawnedEngine {
 // 'error' listener records faults for assertions -- an independent observer, not a
 // reimplementation of the handle's own error routing (Node allows many listeners).
 function spawnEngine(role: "starter" | "joiner", id: string): SpawnedEngine {
-  const worker = new Worker(workerEntry, { workerData: { role, id } });
+  const init: PsiWorkerInit = { role, id, mode: "identifier-revealing" };
+  const worker = new Worker(workerEntry, { workerData: init });
   spawned.push(worker);
   const errors: unknown[] = [];
   worker.on("error", (error) => errors.push(error));

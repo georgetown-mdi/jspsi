@@ -168,5 +168,9 @@ export function createBrowserPsiEngineFactory(
   spawn: SpawnPsiCryptoWorker,
 ): (role: "starter" | "joiner", id: string) => PsiEngine {
   return (role, id) =>
-    new WorkerPsiEngine(createPsiCryptoWorkerHandle(spawn({ role, id })));
+    new WorkerPsiEngine(
+      createPsiCryptoWorkerHandle(
+        spawn({ role, id, mode: "identifier-revealing" }),
+      ),
+    );
 }
