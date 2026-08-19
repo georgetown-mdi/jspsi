@@ -172,6 +172,20 @@ describe("causeChainSome", () => {
     expect(causeChainSome(outer, () => false)).toBe(false);
     expect(reads).toBe(2);
   });
+
+  test("propagates a throwing cause accessor to the caller", () => {
+    const outer = new Error("outer");
+    Object.defineProperty(outer, "cause", {
+      configurable: true,
+      get() {
+        throw new Error("cause accessor exploded");
+      },
+    });
+
+    expect(() => causeChainSome(outer, () => false)).toThrow(
+      "cause accessor exploded",
+    );
+  });
 });
 
 describe("isPeerWaitTimeout cause-chain walk", () => {
