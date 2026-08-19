@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// PreToolUse hook: refuse an Edit, Write, or NotebookEdit that would change a
-// TRACKED file in the repository's MAIN worktree.
+// PreToolUse hook: refuse an Edit, Write, or NotebookEdit that would write a
+// file git does not ignore in the repository's MAIN worktree.
 //
 // Why this exists: review and fixing now run by ref. The orchestrating session
 // stays in the primary checkout and never enters a branch's tree, while every
@@ -13,22 +13,29 @@
 //
 // PATH-SCOPED, NOT ACTOR-SCOPED. The rule is about where the bytes land, not who
 // writes them: an implementer writing into .claude/worktrees/<tree>/... is
-// untouched, and a write to a tracked primary-checkout file is refused whoever
-// makes it. A linked worktree sits UNDER the main root's path prefix here
+// untouched, and a write to primary-checkout content is refused whoever makes
+// it. A linked worktree sits UNDER the main root's path prefix here
 // (.claude/worktrees/ is inside it), so the owning worktree is the longest
 // matching entry of `git worktree list --porcelain` rather than a prefix test
 // against the first one.
 //
-// WHAT PASSES. Untracked and gitignored paths -- scratch/, briefs, round
-// artifacts, memory files, anything under /tmp -- are not repository content and
-// pass. A path outside any repository is not this hook's business and passes.
+// WHAT PASSES, and why the test is IGNORED-ness rather than tracked-ness. Under
+// the by-ref model the main session writes no branch content at all, so the only
+// legitimate writes to this checkout are to paths git ignores -- scratch/,
+// briefs, round artifacts -- plus anything outside the repository entirely
+// (memory files, /tmp), which is not this hook's business. Everything else there
+// is a mistake whether the file exists yet or not: a brand-new source file
+// created in the primary checkout lands on whatever branch it holds exactly as
+// an edit to a tracked one does, and `git check-ignore` is the one question that
+// answers for both.
 //
 // FAIL OPEN, deliberately, and opposite to require-clean-tree-for-review.mjs:
 // this guard shapes where work is written, and nothing about correctness or
 // disclosure rides on it, while a bug here that failed closed would wedge every
 // edit in every tree. So the refusal fires only where the path is positively
-// determined to be tracked content of the main worktree; every unanswerable
-// state (no git, a path git will not resolve, an unreadable event) allows.
+// determined to be non-ignored content of the main worktree; every unanswerable
+// state (no git, a path git will not resolve, a check-ignore that errors rather
+// than answering, an unreadable event) allows.
 //
 // THE DELIBERATE OVERRIDE, the idiom block-model-drop-sendmessage.mjs sets with
 // its [accept-model-drop] marker: a maintainer-directed primary-checkout edit
@@ -43,9 +50,10 @@
 //   - Only file_path (Edit, Write) and notebook_path (NotebookEdit) are read. A
 //     tool that names its target under some other key is not seen, and neither
 //     is a write made through Bash, which this hook does not gate at all.
-//   - Tracked-ness is asked of git at the time of the call. A file staged for
-//     deletion, or one whose tracked-ness changes between this check and the
-//     write, is answered as git sees it now.
+//   - Ignored-ness is asked of git at the time of the call, and a tracked file
+//     is reported as not ignored whatever the exclude patterns say (the check
+//     consults the index). A path whose answer changes between this check and
+//     the write is answered as git sees it now.
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude.
 
@@ -62,14 +70,15 @@ const OVERRIDE_SENTINEL = join(
 
 function block(target, mainRoot) {
   process.stderr.write(
-    `Blocked by block-primary-checkout-writes hook: '${target}' is tracked content of the ` +
-      `main worktree at '${mainRoot}', which no session edits in place. Work on a branch ` +
-      "belongs in that branch's own worktree -- write to the absolute path under " +
-      ".claude/worktrees/<tree>/ instead, and scope every command to it (`cd <tree> && ...` " +
-      "or `git -C <tree> ...`). An edit made here would land on whatever branch the primary " +
-      "checkout holds, off the branch under review, where no review round and no pull request " +
-      `will carry it. For a deliberate, maintainer-directed edit of this checkout, create ` +
-      `'${OVERRIDE_SENTINEL}' in it and delete it when you are done.\n`,
+    `Blocked by block-primary-checkout-writes hook: '${target}' is repository content of the ` +
+      `main worktree at '${mainRoot}', which no session writes -- only paths git ignores there ` +
+      "(scratch/, briefs, round artifacts) are writable, whether the file exists yet or not. " +
+      "Work on a branch belongs in that branch's own worktree -- write to the absolute path " +
+      "under .claude/worktrees/<tree>/ instead, and scope every command to it " +
+      "(`cd <tree> && ...` or `git -C <tree> ...`). A file written here would land on whatever " +
+      "branch the primary checkout holds, off the branch under review, where no review round " +
+      "and no pull request will carry it. For a deliberate, maintainer-directed edit of this " +
+      `checkout, create '${OVERRIDE_SENTINEL}' in it and delete it when you are done.\n`,
   );
   process.exit(2);
 }
@@ -153,19 +162,25 @@ function owningWorktree(path, paths) {
     .sort((a, b) => b.length - a.length)[0];
 }
 
-function isTracked(root, path) {
+// Whether git ignores the path: true, false, or null when git declines to
+// answer at all (exit 128, a missing binary), which allows like every other
+// unanswerable state. `check-ignore` exits 1 -- a real answer of "not ignored"
+// -- for a path no exclude pattern covers and for every tracked file, since it
+// consults the index. It takes pathnames rather than pathspecs, so no `:(...)`
+// magic is passed: git answers 128 to it.
+function isIgnored(root, path) {
   const relativePath = relative(root, path);
-  if (relativePath.length === 0 || relativePath.startsWith("..")) return false;
-  return (
-    git([
-      "-C",
-      root,
-      "ls-files",
-      "--error-unmatch",
-      "--",
-      `:(literal)${relativePath}`,
-    ]) !== null
-  );
+  if (relativePath.length === 0 || relativePath.startsWith("..")) return null;
+  try {
+    execFileSync(
+      "git",
+      ["-C", root, "check-ignore", "--quiet", "--", relativePath],
+      { stdio: "ignore" },
+    );
+    return true;
+  } catch (error) {
+    return error?.status === 1 ? false : null;
+  }
 }
 
 function main() {
@@ -189,7 +204,7 @@ function main() {
   const mainRoot = paths[0];
   if (owningWorktree(path, paths) !== mainRoot) process.exit(0);
   if (existsSync(join(mainRoot, OVERRIDE_SENTINEL))) process.exit(0);
-  if (!isTracked(mainRoot, path)) process.exit(0);
+  if (isIgnored(mainRoot, path) !== false) process.exit(0);
 
   block(target, mainRoot);
 }

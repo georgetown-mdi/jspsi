@@ -32,10 +32,11 @@
 // booked. A lock younger than ROUND_LOCK_TTL_MS refuses the target; an older one
 // is stale and ignored. The TTL is sized well above the longest observed round
 // deliberately: a crashed round that wedged its branch forever is the worse
-// failure, and a rare post-TTL double round is the accepted cost. The lock is
-// keyed on the target's branch name, so a target named by raw sha leaves a lock
-// light-review's branch-keyed cleanup does not match and which expires by TTL
-// instead.
+// failure, and a rare post-TTL double round is the accepted cost. The lock key
+// is derived from the target ref by the same transform light-review's Step 1
+// applies to name the round's artifacts, so the key locked here is the key that
+// round's bookkeeping deletes -- for a target named by raw sha no less than one
+// named by branch.
 //
 // This is the OPPOSITE default from block-protected-push.mjs. That hook fails OPEN
 // because GitHub branch protection backstops a push it misses. Here nothing
@@ -54,10 +55,12 @@
 //
 // STATED LIMITS.
 //   - The by-ref REQUIREMENT is keyed on the call naming the light-review script
-//     (scriptPath or workflow), which is the only Workflow whose rounds are
-//     branch-keyed. A Workflow form that carries neither -- a resume, say --
-//     falls back to the caller's-cwd check, which is this hook's original
-//     posture and not a new hole.
+//     in any of the three fields that can carry it -- scriptPath, workflow, or
+//     the `name` a saved workflow is invoked by -- which is the only Workflow
+//     whose rounds are branch-keyed. Reading all three widens where the gate
+//     applies, which is the fail-closed direction. A Workflow form carrying none
+//     of them -- a resume, say -- falls back to the caller's-cwd check, which is
+//     this hook's original posture and not a new hole.
 //   - A target is matched to a worktree by branch name or by that worktree's
 //     HEAD sha, so a tree holding the ref detached is still statused. A tree
 //     that merely sits at the same commit is statused too: an over-refusal in
@@ -69,7 +72,13 @@
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 
 const DIRTY_ENTRIES_SHOWN = 10;
@@ -233,6 +242,15 @@ function writeLock(path, ref) {
   }
 }
 
+function removeLock(path) {
+  try {
+    rmSync(path, { force: true });
+  } catch {
+    // A lock that cannot be removed expires on its TTL, which is the same
+    // outcome the roll-back is avoiding, only slower.
+  }
+}
+
 function describeMinutes(ms) {
   return `${Math.round(ms / 60000)} minutes`;
 }
@@ -356,15 +374,20 @@ function main() {
     locks.push({ path, ref });
   }
 
-  // Locks are written only once every target has passed, so a refused call
+  // Locks are written only once every target has passed, and a write that fails
+  // part-way through rolls back the ones already written, so a refused call
   // leaves none of them behind to expire.
+  const written = [];
   for (const { path, ref } of locks) {
-    if (!writeLock(path, ref)) {
-      block(
-        `could not write the in-flight round lock '${path}', so a second concurrent ` +
-          `round against '${ref}' could not be refused; fix the path and retry`,
-      );
+    if (writeLock(path, ref)) {
+      written.push(path);
+      continue;
     }
+    for (const done of written) removeLock(done);
+    block(
+      `could not write the in-flight round lock '${path}', so a second concurrent ` +
+        `round against '${ref}' could not be refused; fix the path and retry`,
+    );
   }
   process.exit(0);
 }

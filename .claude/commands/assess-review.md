@@ -162,6 +162,10 @@ there is the one the brief describes.
 
 - Write the brief to a file under `PRIMARY/scratch/` and hand the spawn its path,
   not its text: a pasted brief is re-billed on every call the spawn makes.
+- When the branch has no worktree, make one before dispatching: from the primary
+  checkout, `git worktree add .claude/worktrees/<key> <branch>`. The brief then
+  tells the implementer to run `bash .claude/scripts/worktree-init.sh` from that
+  tree before its first edit, which is what provisions it.
 - Name the tree by ABSOLUTE PATH -- "the branch's worktree at `<TREE>`". Do not
   write "your worktree" or "this worktree": those read as a claim of harness
   isolation, and `require-declared-worktree-isolation.mjs` blocks a spawn that
@@ -213,7 +217,7 @@ The branch is ready when the diff has stabilized (trajectory converging, not
 churning), no unaddressed finding touches a security-relevant surface (one taken
 as a documented limit stops gating readiness once the owner ratifies that
 disposition), brittle areas are shored up or independently assessed, and
-typecheck/lint/tests are green.  When it is ready, say so.
+typecheck/lint/tests are green. When it is ready, say so.
 
 **Re-attestation.** A fix committed here moves the head, so a Security review
 line already attesting an earlier sha goes stale. The mechanical paths below are

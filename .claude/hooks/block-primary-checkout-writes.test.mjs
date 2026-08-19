@@ -23,8 +23,9 @@ function runHook(payload) {
 const write = (file_path, cwd, tool_name = "Write") =>
   runHook({ tool_name, tool_input: { file_path, content: "x" }, cwd });
 
-// A throwaway repo carrying one tracked file, one gitignored file, and a linked
-// worktree nested under .claude/worktrees/ the way the harness places them.
+// A throwaway repo carrying one tracked file, a gitignored scratch/, a source
+// directory holding no file yet, and room for a linked worktree nested under
+// .claude/worktrees/ the way the harness places them.
 function makeRepo() {
   const dir = mkdtempSync(join(tmpdir(), "primary-writes-"));
   const git = (...args) =>
@@ -35,6 +36,7 @@ function makeRepo() {
   writeFileSync(join(dir, "tracked.ts"), "export const a = 1;\n");
   writeFileSync(join(dir, ".gitignore"), "scratch\n.claude/worktrees/\n");
   mkdirSync(join(dir, "scratch"), { recursive: true });
+  mkdirSync(join(dir, "apps", "web", "src"), { recursive: true });
   git("add", "tracked.ts", ".gitignore");
   git("commit", "-q", "-m", "Base commit");
   return dir;
@@ -101,7 +103,7 @@ describe("block-primary-checkout-writes hook", () => {
     for (const tool_name of ["Write", "Edit"]) {
       const { status, stderr } = write(tracked, dir, tool_name);
       expect(status, tool_name).toBe(2);
-      expect(stderr).toContain("tracked content of the main worktree");
+      expect(stderr).toContain("repository content of the main worktree");
     }
     const notebook = runHook({
       tool_name: "NotebookEdit",
@@ -116,10 +118,9 @@ describe("block-primary-checkout-writes hook", () => {
     expect(write("tracked.ts", dir).status).toBe(2);
   });
 
-  it("allows an untracked or gitignored path in the main worktree", () => {
+  it("allows a gitignored path in the main worktree", () => {
     const dir = track(makeRepo());
     for (const path of [
-      join(dir, "brand-new.ts"),
       join(dir, "scratch", "notes.md"),
       join(dir, "scratch", "briefs", "deep", "brief.md"),
     ]) {
@@ -127,13 +128,29 @@ describe("block-primary-checkout-writes hook", () => {
     }
   });
 
-  it("allows a tracked file inside a linked worktree nested under the main root", () => {
+  it("blocks a brand-new untracked file in the main worktree", () => {
+    // The by-ref model writes no branch content here, so a file git neither
+    // tracks nor ignores is as much a mistake as an edit to a tracked one --
+    // and tracked-ness alone cannot see it, since nothing has added it yet.
+    const dir = track(makeRepo());
+    for (const path of [
+      join(dir, "apps", "web", "src", "newComponent.tsx"),
+      join(dir, "brand-new.ts"),
+    ]) {
+      expect(write(path, dir).status, path).toBe(2);
+    }
+  });
+
+  it("allows a tracked or brand-new file inside a linked worktree nested under the main root", () => {
     // The prefix trap: .claude/worktrees/<tree> sits under the main root's path,
     // so a plain prefix test would refuse every fix implementer's edits.
     const dir = track(makeRepo());
     const tree = addWorktree(dir, "feature");
     expect(write(join(tree, "tracked.ts"), dir).status).toBe(0);
     expect(write(join(tree, "tracked.ts"), tree).status).toBe(0);
+    const fresh = join(tree, "apps", "web", "src", "newComponent.tsx");
+    expect(write(fresh, dir).status).toBe(0);
+    expect(write(fresh, tree).status).toBe(0);
   });
 
   it("allows a path outside any repository", () => {

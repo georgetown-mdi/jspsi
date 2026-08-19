@@ -55,14 +55,12 @@ its local `staging` falls behind `origin/staging`. Sync it before branching:
    package-lock.json || npm ci`. The reset in step 2 points `ORIG_HEAD` at the
    pre-sync commit, so `npm ci` runs only when `package-lock.json` actually
    changed.
-4. Rebuild core: `npm run build -w packages/core`. The apps import
-   `@psilink/core` from its built `dist/`, and `staging` may have advanced since
-   the last issue, so rebuild at every issue start after the sync.
-5. Cut the per-issue branch off the synced `staging` in a worktree of its own --
+4. Cut the per-issue branch off the synced `staging` in a worktree of its own --
    `git worktree add -b <branch> .claude/worktrees/<branch> origin/staging`, then
-   `bash .claude/scripts/worktree-init.sh` from it -- and work there by absolute
-   path. The clone's own tracked files are write-guarded
-   (`block-primary-checkout-writes.mjs`), so an edit made in it is refused; a
+   `bash .claude/scripts/worktree-init.sh` from it, which provisions that tree
+   and builds core in it -- and work there by absolute path. The clone's own
+   repository content is write-guarded
+   (`block-primary-checkout-writes.mjs`), so a file written in it is refused; a
    deliberate edit of the clone itself takes that hook's sentinel.
 
 Pull requests land as squash merges, so `git branch --merged`, `git cherry`, and

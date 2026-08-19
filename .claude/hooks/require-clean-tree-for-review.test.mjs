@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -249,6 +250,36 @@ describe("require-clean-tree-for-review hook", () => {
         branch,
       );
     }
+  });
+
+  it("rolls back the locks it wrote when a later one cannot be written", () => {
+    // A directory where the second lock file belongs makes its write fail, aged
+    // past the TTL so the round reaches the write rather than being refused as
+    // in flight; the first target's lock must not survive the refused call.
+    const main = track(makeRepo());
+    track(addWorktree(main, "one"));
+    track(addWorktree(main, "two"));
+    mkdirSync(lockFor(main, "two"), { recursive: true });
+    const aged = new Date(Date.now() - 24 * 60 * 60_000);
+    utimesSync(lockFor(main, "two"), aged, aged);
+    const { status, stderr } = workflowIn(main, review(["one", "two"]));
+    expect(status).toBe(2);
+    expect(stderr).toContain("could not write the in-flight round lock");
+    expect(existsSync(lockFor(main, "one"))).toBe(false);
+  });
+
+  it("gates a round named by a saved workflow's name", () => {
+    // The requirement and the lock ride on any field that can carry the script:
+    // scriptPath, workflow, or the name a saved workflow is invoked by.
+    const main = track(makeRepo());
+    track(addWorktree(main, "feature"));
+    const named = { name: "light-review", args: { targetRef: "feature" } };
+    expect(workflowIn(main, named).status).toBe(0);
+    expect(existsSync(lockFor(main, "feature"))).toBe(true);
+    expect(workflowIn(main, named).status).toBe(2);
+    expect(
+      workflowIn(main, { name: "light-review", args: { docs: [] } }).stderr,
+    ).toContain("must name the ref it reviews");
   });
 
   it("blocks a review round that names no target ref", () => {
