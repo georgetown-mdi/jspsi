@@ -73,6 +73,11 @@ const associationTable: AssociationTable = [
   [1, 0],
 ];
 
+// The run binder the record fixture and the dual-signed record fixture below both
+// carry, so the two artifacts pair as one run. One constant, so a fixture cannot
+// drift into an accidental cross-run pair.
+const RECEIPT_BINDER = "YmluZGVy";
+
 const baseInputs: ExchangeRecordInputs = {
   localTerms: LOCAL_TERMS,
   partnerTerms: PARTNER_TERMS,
@@ -81,6 +86,7 @@ const baseInputs: ExchangeRecordInputs = {
   partnerPayloadReceived,
   associationTable,
   createdAt: "2026-01-02T03:04:05.000Z",
+  receiptBinder: RECEIPT_BINDER,
 };
 
 // The retained input (keyed on `pid`, an identifier column) and result (its
@@ -141,15 +147,20 @@ describe("parseRecordDocument", () => {
   });
 
   test("an unrecognized version is its own named outcome", async () => {
+    // The version a record written before the run binder carries: refused as its
+    // own outcome, naming the version this build recognizes, rather than read as a
+    // record whose absent binder leaves a receipt unpaired.
     const { record } = await fixtures();
     const bumped = JSON.stringify({
       ...record,
-      version: "psilink-exchange-record/v2",
+      version: "psilink-exchange-record/v1",
     });
     const parsed = parseRecordDocument(bumped);
     expect(parsed.kind).toBe("unrecognized-version");
-    if (parsed.kind === "unrecognized-version")
+    if (parsed.kind === "unrecognized-version") {
       expect(parsed.message).toContain("does not recognize");
+      expect(parsed.message).toContain("psilink-exchange-record/v2");
+    }
   });
 
   test("a right-version wrong-shape document is malformed", async () => {
@@ -339,7 +350,7 @@ async function signedFixture(record: ExchangeRecord): Promise<{
     termsHash: record.termsHash,
     initiatorToResponderPayload: "aTJyUGF5bG9hZA",
     responderToInitiatorPayload: "cjJpUGF5bG9hZA",
-    binder: "YmluZGVy",
+    binder: RECEIPT_BINDER,
   };
   return {
     us,
@@ -540,14 +551,21 @@ describe("verifySignedRecord: both certificates anchored", () => {
     expect(view.termsHash.status).toBe(
       "Matches the terms this exchange agreed",
     );
+    // The record loaded beside the receipt carries the same run's binder, so the
+    // pairing is part of what this verdict rests on.
+    expect(view.runBinding.status).toBe(
+      "This receipt and this record are the same run",
+    );
     // The binder is reported, never recomputed: only the two parties held the
     // session key it derives from.
-    expect(view.binderNote).toContain("not recomputed here");
+    expect(view.binderNote).toContain("never recomputed here");
   });
 
-  test("both parties' linkage terms stand in for the record", async () => {
-    // The auditor's route to the same expectations: no exchange record, both
-    // parties' terms restated instead.
+  test("both parties' linkage terms stand in for the record, but pair nothing", async () => {
+    // The auditor's route to the identities and the agreed-terms hash: no exchange
+    // record, both parties' terms restated instead. Terms belong to a partnership
+    // and repeat across every run of it, so they supply no pairing -- which holds
+    // the verdict short of verified without failing it.
     const { record } = await fixtures();
     const { signed, ourFingerprint, partnerFingerprint } =
       await signedFixture(record);
@@ -559,7 +577,62 @@ describe("verifySignedRecord: both certificates anchored", () => {
       },
       { localTerms: LOCAL_TERMS, partnerTerms: PARTNER_TERMS },
     );
-    expect(report.outcome).toBe("verified");
+    expect(report.termsHash).toBe("verified");
+    expect(report.runBinding).toBe("not-checked");
+    expect(report.outcome).toBe("incomplete");
+    const view = signedVerdictViewModel(report);
+    expect(view.runBinding.status).toBe("Not checked");
+    expect(view.runBinding.explanation).toContain(
+      "Load the exchange record for this run",
+    );
+  });
+
+  test("a record from another run of this partnership fails the pairing", async () => {
+    // Both artifacts are genuine and the agreed terms are the same, so the run
+    // binder is the only thing that separates them.
+    const { record } = await fixtures();
+    const { signed, ourFingerprint, partnerFingerprint } =
+      await signedFixture(record);
+    const report = await verifySignedRecord(
+      signed,
+      {
+        pinnedFingerprint: partnerFingerprint,
+        ownCertificateFingerprint: ourFingerprint,
+      },
+      { record: { ...record, receiptBinder: "b3RoZXJSdW5CaW5kZXI" } },
+    );
+    expect(report.runBinding).toBe("mismatch");
+    expect(report.outcome).toBe("failed");
+    const view = signedVerdictViewModel(report);
+    expect(view.runBinding.status).toBe(
+      "Does not match the record's run binder",
+    );
+    expect(view.runBinding.tone).toBe("failed");
+    expect(view.runBinding.explanation).toContain("from different runs");
+    // Distinguishable from the other failure classes: every signature, identity,
+    // and anchor row still reads as verified.
+    for (const party of view.parties)
+      for (const row of party.rows) expect(row.tone).toBe("verified");
+    expect(view.termsHash.tone).toBe("verified");
+  });
+
+  test("a record of an exchange that produced no receipt is reported as unpaired", async () => {
+    const { record } = await fixtures();
+    const { signed, ourFingerprint, partnerFingerprint } =
+      await signedFixture(record);
+    const report = await verifySignedRecord(
+      signed,
+      {
+        pinnedFingerprint: partnerFingerprint,
+        ownCertificateFingerprint: ourFingerprint,
+      },
+      { record: { ...record, receiptBinder: undefined } },
+    );
+    expect(report.runBinding).toBe("unpaired");
+    expect(report.outcome).toBe("failed");
+    const view = signedVerdictViewModel(report);
+    expect(view.runBinding.status).toBe("The record carries no run binder");
+    expect(view.runBinding.explanation).toContain("no signed receipt");
   });
 });
 
@@ -800,6 +873,7 @@ function signedReport(
     pinnedFingerprints: "matched",
     localIdentity: "matched",
     termsHash: "verified",
+    runBinding: "verified",
     binder: "YmluZGVy",
     ...overrides,
   };
@@ -849,8 +923,9 @@ describe("verdictViewModel: the unsigned record's standing caveat", () => {
   test("a run that also verified a dual-signed record points at that verdict", async () => {
     const { record, keys } = await fixtures();
     const report = await verifyExchangeRecord(record, keys, {});
-    // The note names the loaded document: nothing on this page ties a receipt
-    // to the record beside it, so the sentence may not imply it did.
+    // The note names the loaded document: whether the two artifacts are one run
+    // is the signed verdict's pairing row, which may equally report that they are
+    // not, so this sentence may not presume the answer.
     expect(verdictViewModel(report, [], true).signatureNote).toBe(
       "Partner receipt signatures are checked separately below, against the " +
         "dual-signed record you loaded.",

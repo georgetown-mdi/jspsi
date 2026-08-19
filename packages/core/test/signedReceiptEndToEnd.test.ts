@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
@@ -9,14 +9,17 @@ import {
   SIGNED_RECEIPT_VERSION,
   verifyReceiptSignature,
 } from "../src/signedReceipt";
+import { verifyDualSignedRecord } from "../src/signedReceiptVerification";
 import {
   computeCertificateFingerprint,
   generateSigningIdentity,
 } from "../src/signingIdentity";
 
 import type { Output } from "../src/config/linkageTerms";
+import type { ExchangeRecord } from "../src/exchangeRecord";
 import type { ExchangeResult } from "../src/exchange";
 import type { RunExchangeOptions } from "../src/exchange";
+import type { DualSignedRecordVerificationInputs } from "../src/signedReceiptVerification";
 
 // End-to-end coverage of the signed-receipt seam in runExchange: two parties run a
 // full exchange over an in-memory pipe (real PSI) with signing identities and a
@@ -238,4 +241,132 @@ test("a fingerprint-pin mismatch terminates the exchange fail-closed", async () 
   await connInitiator.close();
   await connResponder.close();
   await initiator;
+});
+
+// --- Pairing a receipt to one run --------------------------------------------
+
+/** A signed run of the one partnership, under the session key `key`. */
+function runSigned(
+  key: Uint8Array<ArrayBuffer>,
+): Promise<[ExchangeResult, ExchangeResult]> {
+  return runBoth(
+    {
+      signingIdentity: identityA,
+      partnerFingerprint: fingerprintB,
+      sessionKey: key,
+    },
+    {
+      signingIdentity: identityB,
+      partnerFingerprint: fingerprintA,
+      sessionKey: key,
+    },
+  );
+}
+
+// Two runs of ONE partnership over identical terms, identities, and data, differing
+// only in the session key their key exchanges produced -- the recurring-exchange
+// shape a receipt's signed content cannot tell apart on its own: the terms hash and
+// both certificates repeat byte for byte, and the payload MACs that do differ are
+// not recomputable by any verifier.
+const firstRun = await runSigned(sessionKey);
+const secondRun = await runSigned(
+  new Uint8Array(32).fill(22) as Uint8Array<ArrayBuffer>,
+);
+const firstRecord = firstRun[0].audit!.record;
+const secondRecord = secondRun[0].audit!.record;
+const firstReceipt = firstRun[0].signedReceipt!;
+
+/**
+ * What the initiator holds when it re-verifies its own receipt offline: the partner
+ * pinned out-of-band, its own certificate as the other anchor, and the identities,
+ * terms hash, and run binder its exchange record carries. Everything but the
+ * pairing is identical for either run's record, which is the point -- the pairing is
+ * the only check that can separate them.
+ */
+function heldByInitiator(
+  record: ExchangeRecord,
+): DualSignedRecordVerificationInputs {
+  return {
+    pinnedFingerprints: [fingerprintB],
+    localIdentity: { fingerprint: fingerprintA, source: "named" },
+    expectedIdentities: [record.localIdentity, record.partnerIdentity],
+    expectedTermsHash: record.termsHash,
+    recordReceiptBinder: record.receiptBinder ?? null,
+  };
+}
+
+describe("the run binder pairs a receipt to one exchange run", () => {
+  test("both parties' records carry the run's receipt binder", async () => {
+    expect(firstRecord.receiptBinder).toBe(firstReceipt.content.binder);
+    expect(firstRun[1].audit!.record.receiptBinder).toBe(
+      firstRecord.receiptBinder,
+    );
+  });
+
+  test("two runs of one partnership under identical terms carry distinct binders", async () => {
+    // Every signed value an offline verifier can CHECK is equal across the two
+    // runs: the terms hash (recomputable from both parties' terms) and the two
+    // certificates. The directional payload MACs do vary with the session key, but
+    // a verifier cannot recompute them either, so they separate nothing. The binder
+    // is the one per-run value the record also carries.
+    expect(secondRecord.termsHash).toBe(firstRecord.termsHash);
+    expect(secondRun[0].signedReceipt!.content.termsHash).toBe(
+      firstReceipt.content.termsHash,
+    );
+    expect(secondRun[0].signedReceipt!.initiator.certificate).toEqual(
+      firstReceipt.initiator.certificate,
+    );
+    expect(secondRecord.receiptBinder).not.toBe(firstRecord.receiptBinder);
+  });
+
+  test("a matched receipt/record pair verifies", async () => {
+    const report = await verifyDualSignedRecord(
+      firstReceipt,
+      heldByInitiator(firstRecord),
+    );
+    expect(report.runBinding).toBe("verified");
+    expect(report.outcome).toBe("verified");
+  });
+
+  test("one run's receipt beside another run's record is a mismatch", async () => {
+    const report = await verifyDualSignedRecord(
+      firstReceipt,
+      heldByInitiator(secondRecord),
+    );
+    expect(report.runBinding).toBe("mismatch");
+    expect(report.outcome).toBe("failed");
+    // Every other check still passes: the two runs share the partnership and the
+    // terms, so the pairing is the only thing that separates them.
+    expect(report.termsHash).toBe("verified");
+    expect(report.initiator.signature).toBe("verified");
+    expect(report.responder.signature).toBe("verified");
+    expect(report.initiator.assertedIdentity).toBe("verified");
+    expect(report.initiator.certificateAnchor).toBe("local-identity");
+    expect(report.responder.certificateAnchor).toBe("partner-pin");
+  });
+
+  test("a record of a run that produced no receipt reports the receipt as unpaired", async () => {
+    const [unsigned] = await runBoth({}, {});
+    const unsignedRecord = unsigned.audit!.record;
+    expect(unsignedRecord.receiptBinder).toBeUndefined();
+    const report = await verifyDualSignedRecord(
+      firstReceipt,
+      heldByInitiator(unsignedRecord),
+    );
+    expect(report.runBinding).toBe("unpaired");
+    expect(report.outcome).toBe("failed");
+    expect(report.termsHash).toBe("verified");
+  });
+
+  test("a receipt held without any record leaves the pairing unchecked, short of verified", async () => {
+    // The holder of one artifact is not accused of anything: with no record beside
+    // it there is nothing to pair, and the verdict says so rather than failing.
+    const report = await verifyDualSignedRecord(firstReceipt, {
+      ...heldByInitiator(firstRecord),
+      recordReceiptBinder: undefined,
+    });
+    expect(report.runBinding).toBe("not-checked");
+    expect(report.outcome).toBe("incomplete");
+    expect(report.initiator.signature).toBe("verified");
+  });
 });

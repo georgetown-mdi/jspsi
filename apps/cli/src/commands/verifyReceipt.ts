@@ -36,6 +36,7 @@ import type {
   LocalIdentitySource,
   ReceiptSignatureStatus,
   RecordVerificationReport,
+  RunBindingStatus,
   SignedReceiptPartyReport,
   TermsHashStatus,
   VerificationKeys,
@@ -75,7 +76,9 @@ import {
 // The positional accepts either artifact, dispatched on its format `version`; the
 // dual-signed record can also be named with --signed-record to verify both
 // artifacts of one exchange in a single run, which is what lets the record's terms
-// hash and party identities be carried into the signature checks.
+// hash, party identities, and run binder be carried into the signature checks. The
+// run binder is the pairing: without the exchange record beside it a receipt
+// verifies against a partnership under a set of terms, not against one run of it.
 //
 // The verification keys hold only salts, so the committed data is RE-SUPPLIED from
 // the holder's retained input and result and re-canonicalized (see
@@ -120,7 +123,8 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe:
         "the dual-signed record for this exchange (psilink-receipt-*.json); " +
-        "checks both parties' signatures and certificates alongside the record",
+        "checks both parties' signatures and certificates alongside the record, " +
+        "and that the two artifacts are from the same run",
     })
     .option("partner-fingerprint", {
       type: "string",
@@ -528,6 +532,23 @@ function signedTermsWord(
   return `not checked (pass the exchange record, or ${termsRemediation(supplied)})`;
 }
 
+// What pairing this receipt to one run says. The `not-checked` remediation names
+// the one invocation that supplies the pairing: the exchange record has to be the
+// positional, since --signed-record is refused beside a dual-signed positional.
+const RUN_BINDING_WORD: Record<RunBindingStatus, string> = {
+  verified: "this receipt and this exchange record are the same run",
+  mismatch:
+    "DOES NOT MATCH the exchange record's run binder: the receipt and the " +
+    "record are from different runs, not from one exchange",
+  unpaired:
+    "the exchange record carries no run binder, so it records an exchange that " +
+    "produced no signed receipt -- this receipt is not that run's",
+  "not-checked":
+    "not checked (name this exchange's record as the positional and pass this " +
+    "file with --signed-record); the signed values that can be checked here " +
+    "repeat across every run of this partnership under these terms",
+};
+
 function assertedIdentityWord(
   status: AssertedIdentityStatus,
   supplied: SuppliedVerificationInputs,
@@ -696,15 +717,28 @@ export function formatSignedRecordReport(
   );
   const configNote = configTermsNote(supplied);
   if (configNote !== undefined) lines.push(configNote);
-  // The binder is derived from the exchange's session key, which only the two
-  // parties ever held and neither retains, so it is reported rather than checked:
-  // a verifier confirms the signers signed a receipt carrying this value, and only
-  // the two parties -- during the live exchange, where each derives it
-  // independently -- can tell that a different exchange's binder was substituted.
+  lines.push(
+    `  receipt-record pairing: ${RUN_BINDING_WORD[report.runBinding]}.`,
+  );
+  // Where to look when the pairing failed: the two artifacts of one exchange are
+  // written together, so the likely cause is two files from different runs rather
+  // than an altered artifact.
+  if (report.runBinding === "mismatch" || report.runBinding === "unpaired")
+    lines.push(
+      "  note: an exchange writes its record and its receipt together, under one " +
+        "timestamp stamp by default (psilink-record-<stamp>.json and " +
+        "psilink-receipt-<stamp>.json), so pair them by that stamp.",
+    );
+  // The binder is never RECOMPUTED: deriving it needs the exchange's session key,
+  // which only the two parties ever held and neither retains. What an offline
+  // verifier can check is the pairing line above -- that the binder is the value
+  // the run's own record carries. A binder substituted into both artifacts is
+  // detectable only during the live exchange, where each party derives it
+  // independently.
   lines.push(
     `  per-exchange binder ${sanitizeForDisplay(report.binder)}: covered by ` +
-      "both signatures, not recomputed (deriving it needs the exchange session " +
-      "key, which only the two parties held).",
+      "both signatures, never recomputed (deriving it needs the exchange " +
+      "session key, which only the two parties held).",
   );
   lines.push(...anchoringLines(report, supplied, unanchored));
   return { lines, exitCode: report.outcome === "failed" ? 1 : 0 };
@@ -862,11 +896,17 @@ function signingIdentityPathFrom(
 
 /**
  * What the signature checks are anchored to besides the certificates: the two
- * parties' identities (which each certificate must authorize) and the agreed-terms
- * hash the receipt content carries. The exchange record holds both already, so a
- * party verifying its own exchange supplies them by naming the record; an auditor
- * without the record restates them from both parties' terms instead. With neither,
- * both checks are reported as not performed rather than assumed.
+ * parties' identities (which each certificate must authorize), the agreed-terms
+ * hash the receipt content carries, and the run binder that pairs the receipt to
+ * one exchange. The exchange record holds all three already, so a party verifying
+ * its own exchange supplies them by naming the record; an auditor without the
+ * record restates the first two from both parties' terms instead, and pairs
+ * nothing -- terms are a partnership's, not a run's. With neither, every check is
+ * reported as not performed rather than assumed.
+ *
+ * A record carrying no run binder is passed as an explicit `null`, so a record of
+ * an exchange that produced no receipt is reported as contradicting the receipt in
+ * hand rather than as a pairing nobody could check.
  *
  * The identities are unordered: no artifact outside the dual-signed record records
  * which party held which handshake role, and the per-signer signature binding is
@@ -879,13 +919,14 @@ async function signedRecordExpectations(
 ): Promise<
   Pick<
     DualSignedRecordVerificationInputs,
-    "expectedIdentities" | "expectedTermsHash"
+    "expectedIdentities" | "expectedTermsHash" | "recordReceiptBinder"
   >
 > {
   if (record !== undefined)
     return {
       expectedIdentities: [record.localIdentity, record.partnerIdentity],
       expectedTermsHash: record.termsHash,
+      recordReceiptBinder: record.receiptBinder ?? null,
     };
   if (localTerms === undefined || partnerTerms === undefined) return {};
   return {

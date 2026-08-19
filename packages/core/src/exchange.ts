@@ -1043,6 +1043,27 @@ export async function runExchange(
     linkageTerms.output.expectsOutput && partnerTerms.output.expectsOutput;
   const heldAssociationTable = linkageTerms.output.expectsOutput;
 
+  // What the signed-receipt step needs: a signing identity AND the session key
+  // its binder derives from, resolved once here so the record build below and the
+  // step itself read ONE predicate. That single predicate is what makes the
+  // record's binder present exactly when a receipt exists to pair with it, so an
+  // absent binder in a written record states that no receipt belongs to it --
+  // which is what lets a verifier read an unpaired receipt as a mismatch rather
+  // than as merely unchecked. The binder is derived here, before the record is
+  // built, so both artifacts carry the one value; a failure derives nothing and
+  // throws, unlike the record build below, because the signing step is fatal and
+  // could not run without it.
+  const signing =
+    options.signingIdentity !== undefined && options.sessionKey !== undefined
+      ? {
+          identity: options.signingIdentity,
+          sessionKey: options.sessionKey,
+          // Both parties fold in the INITIATOR's role, so both derive the same
+          // binder with no extra messages; see deriveReceiptBinder.
+          binder: await deriveReceiptBinder(options.sessionKey, "initiator"),
+        }
+      : undefined;
+
   // Build the record after the exchange has fully succeeded. It is a secondary
   // audit artifact, so a failure to build it (e.g. an unexpected non-canonical
   // value) must not fail the exchange or discard its result: catch, warn, and
@@ -1061,6 +1082,9 @@ export async function runExchange(
       localPayloadSent: toCommittedPayload(localPayload),
       partnerPayloadReceived: toCommittedPayload(partnerPayload),
       createdAt: new Date().toISOString(),
+      // The run's shared binder, so this record pairs with the receipt the step
+      // below produces; omitted on every path that produces no receipt.
+      receiptBinder: signing?.binder,
     });
   } catch (err) {
     getLogger("exchange").warn(
@@ -1082,32 +1106,25 @@ export async function runExchange(
   // after exchangePayloads and the record build so the receipt commits to the full
   // result, including payloads.
   let signedReceipt: DualSignedRecord | undefined;
-  if (
-    options.signingIdentity !== undefined &&
-    options.sessionKey !== undefined
-  ) {
+  if (signing !== undefined) {
     // The receipt content is built from the mutually-verifiable facts directly --
     // the agreed-terms hash and session-keyed MACs of the two directional payloads
     // -- NOT from the salted record commitments (per-party salts are not
     // byte-identical across parties). It is therefore independent of the non-fatal
     // audit build above; a party that could not build its local record can still
-    // sign a receipt. The binder is derived from the initiator's role by BOTH
-    // parties, so both compute the one shared binder with no extra messages; see
-    // deriveReceiptBinder.
-    const [binder, termsHash] = await Promise.all([
-      deriveReceiptBinder(options.sessionKey, "initiator"),
-      computeTermsHash(linkageTerms, partnerTerms),
-    ]);
+    // sign a receipt. The binder it signs is the same value the record above
+    // carries, which is what pairs the two artifacts to this one run.
+    const termsHash = await computeTermsHash(linkageTerms, partnerTerms);
     const content: ReceiptContent = await buildReceiptContent(
       handshakeRole,
       termsHash,
       toCommittedPayload(localPayload),
       toCommittedPayload(partnerPayload),
-      binder,
-      options.sessionKey,
+      signing.binder,
+      signing.sessionKey,
     );
     signedReceipt = await exchangeSignedReceipt(conn, handshakeRole, {
-      identity: options.signingIdentity,
+      identity: signing.identity,
       pinnedFingerprint: options.partnerFingerprint,
       // The partner's agreed-terms identity (not the certificate's own), so the
       // pinned certificate must authorize the identity the partner used in the

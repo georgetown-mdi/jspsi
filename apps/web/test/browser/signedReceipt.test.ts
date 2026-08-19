@@ -319,6 +319,10 @@ describe("signed receipt in the browser", () => {
         receiptBundle.expected.responderIdentity,
       ],
       expectedTermsHash: record.content.termsHash,
+      // The bundle is a receipt with no exchange record beside it, so its own
+      // binder stands in for the record's: what this test pins is the signed-byte
+      // layout, not the pairing.
+      recordReceiptBinder: record.content.binder,
     });
     expect(report.outcome).toBe("verified");
     expect(report.initiator.fingerprint).toBe(

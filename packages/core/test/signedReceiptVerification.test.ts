@@ -65,13 +65,16 @@ const fingerprintB = await computeCertificateFingerprint(identityB.certificate);
 const fingerprintC = await computeCertificateFingerprint(outsider.certificate);
 
 const TERMS_HASH = "dGVybXNIYXNo";
+// The run binder both the receipt content and the exchange record for that run
+// carry; one constant so the fixture and the pairing input cannot drift apart.
+const BINDER = "YmluZGVy";
 
 function content(overrides: Partial<ReceiptContent> = {}): ReceiptContent {
   return {
     termsHash: TERMS_HASH,
     initiatorToResponderPayload: "aTJyUGF5bG9hZA",
     responderToInitiatorPayload: "cjJpUGF5bG9hZA",
-    binder: "YmluZGVy",
+    binder: BINDER,
     ...overrides,
   };
 }
@@ -116,14 +119,16 @@ function withUnevaluableResponder(record: DualSignedRecord): DualSignedRecord {
 }
 
 // What a party holding its own exchange record supplies: the partner's pin, its
-// own signing identity (found from the same config rather than restated), and
-// both parties' identities and agreed-terms hash. Party A is the initiator here,
-// so its own identity anchors that slot and the pin anchors the responder's.
+// own signing identity (found from the same config rather than restated), and both
+// parties' identities, agreed-terms hash, and the run binder that record carries.
+// Party A is the initiator here, so its own identity anchors that slot and the pin
+// anchors the responder's.
 const fullyAnchored = {
   pinnedFingerprints: [fingerprintB],
   localIdentity: { fingerprint: fingerprintA, source: "resolved" } as const,
   expectedIdentities: ["Party A", "Party B"] as readonly [string, string],
   expectedTermsHash: TERMS_HASH,
+  recordReceiptBinder: BINDER,
 };
 
 describe("verifyDualSignedRecord", () => {
@@ -160,6 +165,7 @@ describe("verifyDualSignedRecord", () => {
       pinnedFingerprints: [fingerprintB, fingerprintA],
       expectedIdentities: ["Party A", "Party B"],
       expectedTermsHash: TERMS_HASH,
+      recordReceiptBinder: BINDER,
     });
     expect(report.outcome).toBe("verified");
     expect(report.initiator.certificateAnchor).toBe("partner-pin");
@@ -296,13 +302,57 @@ describe("verifyDualSignedRecord", () => {
   test("the binder is reported verbatim, not recomputed", async () => {
     // Recomputing it would need the exchange's session key, which the record
     // never carries and neither party retains: the verifier can only confirm that
-    // the signers signed a receipt carrying this value.
+    // the signers signed a receipt carrying this value, and that the record for the
+    // run carries the same one.
     const report = await verifyDualSignedRecord(
       await signedRecord(content({ binder: "b3RoZXJCaW5kZXI" })),
-      fullyAnchored,
+      { ...fullyAnchored, recordReceiptBinder: "b3RoZXJCaW5kZXI" },
     );
     expect(report.binder).toBe("b3RoZXJCaW5kZXI");
+    expect(report.runBinding).toBe("verified");
     expect(report.outcome).toBe("verified");
+  });
+
+  test("a run binder from another run of this partnership is a mismatch", async () => {
+    // The failure class this pairing exists for: a genuine receipt of one run read
+    // beside the record of another. Nothing else separates them -- same terms hash,
+    // same certificates, same identities.
+    const report = await verifyDualSignedRecord(await signedRecord(), {
+      ...fullyAnchored,
+      recordReceiptBinder: "b3RoZXJCaW5kZXI",
+    });
+    expect(report.outcome).toBe("failed");
+    expect(report.runBinding).toBe("mismatch");
+    expect(report.termsHash).toBe("verified");
+    expect(report.initiator.signature).toBe("verified");
+    expect(report.responder.signature).toBe("verified");
+  });
+
+  test("a record carrying no run binder reports the receipt as unpaired", async () => {
+    // An explicit null: the record is in hand and records an exchange that produced
+    // no signed receipt, so the receipt beside it is contradicted rather than
+    // unchecked.
+    const report = await verifyDualSignedRecord(await signedRecord(), {
+      ...fullyAnchored,
+      recordReceiptBinder: null,
+    });
+    expect(report.outcome).toBe("failed");
+    expect(report.runBinding).toBe("unpaired");
+    expect(report.initiator.signature).toBe("verified");
+  });
+
+  test("no record at all leaves the pairing unchecked and the verdict incomplete", async () => {
+    // The holder of the receipt alone: nothing to pair it to, so which run of this
+    // partnership it attests is open. Reported, never failed.
+    const report = await verifyDualSignedRecord(await signedRecord(), {
+      ...fullyAnchored,
+      recordReceiptBinder: undefined,
+    });
+    expect(report.outcome).toBe("incomplete");
+    expect(report.runBinding).toBe("not-checked");
+    expect(report.termsHash).toBe("verified");
+    expect(report.initiator.certificateAnchor).toBe("local-identity");
+    expect(report.responder.certificateAnchor).toBe("partner-pin");
   });
 
   test("verification does not mutate the record (read-only)", async () => {
@@ -608,6 +658,10 @@ describe("cross-implementation bundle", () => {
         bundle.expected.responderIdentity,
       ],
       expectedTermsHash: record.content.termsHash,
+      // The bundle is a receipt with no exchange record beside it, so the run
+      // binder stands in for the record's: what this test pins is the signed-byte
+      // layout, not the pairing (covered in signedReceiptEndToEnd.test.ts).
+      recordReceiptBinder: record.content.binder,
     });
     expect(report.outcome).toBe("verified");
     expect(report.initiator.fingerprint).toBe(

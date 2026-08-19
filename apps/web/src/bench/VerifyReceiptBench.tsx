@@ -664,6 +664,7 @@ export function VerifyReceiptBench() {
                   <SignedPartySection key={party.label} party={party} />
                 ))}
                 <VerdictCheckRow row={signedVerdict.termsHash} />
+                <VerdictCheckRow row={signedVerdict.runBinding} />
               </Stack>
               {signedVerdict.guidance.length > 0 && (
                 <Stack gap={4} mt="sm">

@@ -815,6 +815,52 @@ describe("binding nonce", () => {
   });
 });
 
+// --- The signed receipt's run binder -----------------------------------------
+
+describe("receipt binder", () => {
+  const BINDER = toBase64Url(salt(9));
+
+  test("is carried verbatim when the run produced a receipt", async () => {
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, receiptBinder: BINDER },
+      fixedRandomness,
+    );
+    expect(record.receiptBinder).toBe(BINDER);
+    expect(parseExchangeRecord(record).receiptBinder).toBe(BINDER);
+  });
+
+  test("is absent as an omitted key, never an undefined one", async () => {
+    // An absent field and a null/undefined field are distinct in the canonical
+    // encoding, and the absence is what states that no receipt belongs to this
+    // record.
+    const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
+    expect("receiptBinder" in record).toBe(false);
+    expect(JSON.parse(serializeExchangeRecord(record))).not.toHaveProperty(
+      "receiptBinder",
+    );
+  });
+
+  test("is distinct from the local binding nonce", async () => {
+    // Two per-run values with different jobs: the nonce is this party's own and
+    // differs between the two parties' records for one run; the receipt binder is
+    // the shared value both parties derive, which is what pairs the artifacts.
+    const { record } = await buildExchangeRecord(
+      { ...baseInputs, receiptBinder: BINDER },
+      fixedRandomness,
+    );
+    expect(record.receiptBinder).not.toBe(record.bindingNonce);
+  });
+
+  test("a value that is not base64url is refused at build", async () => {
+    await expect(
+      buildExchangeRecord(
+        { ...baseInputs, receiptBinder: "not base64url" },
+        fixedRandomness,
+      ),
+    ).rejects.toThrow();
+  });
+});
+
 // --- Untrusted read-path bounds ----------------------------------------------
 
 describe("parse input bounds (untrusted read path)", () => {
@@ -945,8 +991,18 @@ describe("serialize / parse", () => {
 
   test("parseExchangeRecord rejects an unrecognized version", async () => {
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const bumped = { ...record, version: "psilink-exchange-record/v2" };
+    const bumped = { ...record, version: "psilink-exchange-record/v3" };
     expect(() => parseExchangeRecord(bumped)).toThrow();
+  });
+
+  test("parseExchangeRecord refuses a record written before the run binder", async () => {
+    // The v1 shape: no receiptBinder, which a reader cannot tell from an exchange
+    // that produced no signed receipt. Refused on the version discriminant rather
+    // than read as unpaired, so a pre-change artifact is a version refusal and not
+    // a pairing failure. Pre-release, no migration is offered.
+    const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
+    const v1 = { ...record, version: "psilink-exchange-record/v1" };
+    expect(() => parseExchangeRecord(v1)).toThrow();
   });
 });
 
