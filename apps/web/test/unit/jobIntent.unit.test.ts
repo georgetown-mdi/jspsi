@@ -35,6 +35,7 @@ import {
   TEST_HOST_KEY_FINGERPRINT,
   TEST_SFTP_REMOTE_NAME,
   testSftpServerEntry,
+  testSplitSftpServerEntry,
   validInputFileIntent,
   validIntent,
   validLinkageTerms,
@@ -865,6 +866,16 @@ describe("zeroSetupFileSyncArgv", () => {
   });
 });
 
+/** Retain mode with the two settings core requires alongside it -- the option
+ * block a split-directory exchange runs under. */
+function retainModeOptions() {
+  return {
+    retainFiles: true,
+    timestampInFilename: true,
+    locklessRendezvous: true,
+  };
+}
+
 describe("composeSftpConfigDocument", () => {
   test("writes snake_case fields with @path credential refs verbatim at rest", () => {
     const entry = {
@@ -951,6 +962,30 @@ describe("composeSftpConfigDocument", () => {
     );
     const parsed = safeParseExchangeSpec(parseYaml(yaml));
     expect(parsed.success).toBe(true);
+  });
+
+  test("a split-directory entry composes the pair, never a shared path", () => {
+    const yaml = composeSftpConfigDocument(
+      validSftpIntent({ options: retainModeOptions() }),
+      testSplitSftpServerEntry(),
+    );
+    const doc = parseYaml(yaml) as {
+      connection: { server: Record<string, unknown> };
+    };
+    expect(doc.connection.server.inbound_path).toBe("/exchange/in");
+    expect(doc.connection.server.outbound_path).toBe("/exchange/out");
+    expect(doc.connection.server.path).toBeUndefined();
+    expect(yaml).not.toContain("inboundPath");
+    expect(safeParseExchangeSpec(parseYaml(yaml)).success).toBe(true);
+  });
+
+  test("a split-directory entry without retain mode composes no document", () => {
+    // The precondition the console states while the operator is still at the
+    // controls is not merely advisory: the compose refuses the same combination,
+    // so a split can never reach a run under delete mode.
+    expect(() =>
+      composeSftpConfigDocument(validSftpIntent(), testSplitSftpServerEntry()),
+    ).toThrow(/retain_files/);
   });
 });
 
@@ -1173,6 +1208,18 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
   test("builds the sftp URL from host, port, and path", () => {
     const argv = zeroSetupSftpArgv(testSftpServerEntry());
     expect(argv[0]).toBe("sftp://sftp.example.org:2222/exchange");
+  });
+
+  test("a split entry puts the inbound half on the URL and flags the outbound", () => {
+    const argv = zeroSetupSftpArgv(testSplitSftpServerEntry());
+    expect(argv[0]).toBe("sftp://sftp.example.org:2222/exchange/in");
+    expect(argv).toContain("--outbound-path=/exchange/out");
+  });
+
+  test("a single shared directory flags no outbound path", () => {
+    expect(zeroSetupSftpArgv(testSftpServerEntry()).join(" ")).not.toContain(
+      "--outbound-path",
+    );
   });
 
   test("brackets a bare IPv6 host into a valid URL", () => {

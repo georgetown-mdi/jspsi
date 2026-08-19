@@ -1354,6 +1354,48 @@ describe("fetchSftpConnection", () => {
     });
   });
 
+  test("returns a whole split-directory pair", async () => {
+    await expect(
+      fetchSftpConnection(
+        jsonResponse({
+          configured: true,
+          host: "sftp.example.gov",
+          inboundPath: "/exchange/in",
+          outboundPath: "/exchange/out",
+        }),
+      ),
+    ).resolves.toEqual({
+      connection: {
+        host: "sftp.example.gov",
+        inboundPath: "/exchange/in",
+        outboundPath: "/exchange/out",
+        credentialWarnings: [],
+      },
+    });
+  });
+
+  test("a half pair, or a pair beside a shared path, reads as none configured", async () => {
+    // Neither is a shape the appliance can author. Dropping the connection is
+    // what keeps a run -- and the invitation minted from the same projection --
+    // from naming a directory layout the browser only half read.
+    const incoherent: Array<unknown> = [
+      { configured: true, host: "h", inboundPath: "/in" },
+      { configured: true, host: "h", outboundPath: "/out" },
+      { configured: true, host: "h", inboundPath: "/in", outboundPath: "" },
+      {
+        configured: true,
+        host: "h",
+        path: "/x",
+        inboundPath: "/in",
+        outboundPath: "/out",
+      },
+    ];
+    for (const body of incoherent)
+      await expect(fetchSftpConnection(jsonResponse(body))).resolves.toEqual(
+        none,
+      );
+  });
+
   test("parses credentialWarnings, dropping non-string entries", async () => {
     await expect(
       fetchSftpConnection(

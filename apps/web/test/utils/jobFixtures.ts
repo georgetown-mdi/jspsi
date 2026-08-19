@@ -101,6 +101,17 @@ export function testSftpServerEntry(): JobSftpServerEntry {
   };
 }
 
+/** The same entry with a SPLIT remote directory (separate inbound and outbound
+ * folders) in place of the single shared `path`. */
+export function testSplitSftpServerEntry(): JobSftpServerEntry {
+  const { path: _shared, ...rest } = testSftpServerEntry();
+  return {
+    ...rest,
+    inboundPath: "/exchange/in",
+    outboundPath: "/exchange/out",
+  };
+}
+
 /** A valid filedrop zero-setup intent (no shared secret, no linkage terms);
  * overrides merge over the base. */
 export function validZeroSetupIntent(

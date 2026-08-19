@@ -1,4 +1,8 @@
-import { HOST_KEY_FINGERPRINT_REGEX } from "@psilink/core";
+import {
+  ConnectionConfigSchema,
+  HOST_KEY_FINGERPRINT_REGEX,
+  withRetainModeImplications,
+} from "@psilink/core";
 
 import { isBareSftpHost } from "@psi/sftpHost";
 
@@ -41,7 +45,14 @@ export type SftpCredentialSource =
 export interface SftpConnectionFormValues {
   host: string;
   username: string;
+  /** The remote working directory. On its own it is the single directory both
+   * parties exchange through; paired with a non-empty {@link outboundDirectory}
+   * it is the INBOUND (peer-written) half of a split-directory connection. */
   remoteDirectory: string;
+  /** The outbound (self-written) remote directory, for a server with distinct
+   * drop and pickup folders. Blank for the ordinary single-directory
+   * connection. */
+  outboundDirectory: string;
   port: string;
   hostKeyFingerprint: string;
   method: SftpCredentialMethod;
@@ -57,6 +68,7 @@ export const EMPTY_SFTP_FORM: SftpConnectionFormValues = {
   host: "",
   username: "",
   remoteDirectory: "",
+  outboundDirectory: "",
   port: "",
   hostKeyFingerprint: "",
   method: "password",
@@ -99,6 +111,7 @@ export function sftpFormFromLocator(
 export type SftpFormField =
   | "host"
   | "username"
+  | "outboundDirectory"
   | "port"
   | "hostKeyFingerprint"
   | "credential"
@@ -174,14 +187,66 @@ function isAtPath(value: string): boolean {
 }
 
 /**
+ * What the console says when the operator names a separate outbound directory
+ * without retain mode. It states the CLI's `--outbound-path` precondition -- a
+ * split directory requires retain mode -- in the console's own terms, naming the
+ * control the operator flips rather than the flag they do not have. Stating it
+ * here, while they are still at the controls, is what keeps the requirement from
+ * arriving as a refused job: core refuses the same combination when the config is
+ * composed, and the CLI refuses it on a Direct run.
+ */
+export const SPLIT_DIRECTORY_RETAIN_REQUIREMENT =
+  "Separate inbound and outbound directories need retain mode: nothing is " +
+  "deleted after it is read, so each side keeps its own folder. Turn on " +
+  '"Keep every exchange file" under "How files are handled", or clear the ' +
+  "outbound directory to use one shared directory.";
+
+/**
+ * Core's own verdict on a split directory pair, as its message, or undefined
+ * when the pair is coherent. The rules over the pair -- both halves set
+ * together, the two resolving to different directories -- are core's single
+ * statement, so this composes the connection core would parse and reports what
+ * core says rather than restating any rule of its own.
+ *
+ * `retain_files` is set on the composed options because the caller has already
+ * decided the retain precondition; leaving it off would fire core's retain
+ * refine as a second, differently-worded copy of that same message. A blank
+ * inbound half is OMITTED rather than sent as an empty string, so an outbound
+ * directory named without an inbound one meets core's both-halves-together rule
+ * instead of a min-length complaint.
+ */
+function splitDirectoryIssue(
+  host: string,
+  inbound: string,
+  outbound: string,
+): string | undefined {
+  const parsed = ConnectionConfigSchema.safeParse({
+    channel: "sftp",
+    server: {
+      host,
+      ...(inbound === "" ? {} : { inboundPath: inbound }),
+      outboundPath: outbound,
+    },
+    options: withRetainModeImplications({ retainFiles: true }),
+  });
+  return parsed.success ? undefined : parsed.error.issues[0]?.message;
+}
+
+/**
  * The first blocking error on the form, or undefined when the fields are savable.
  * Host, username, a literal fingerprint, and a credential source are required; the
  * port is optional but bounded; a typed credential/passphrase must be an `@path`.
  * The fingerprint is validated against core's `HOST_KEY_FINGERPRINT_REGEX`, and a
  * value shaped like a signing fingerprint gets the confusion message.
+ *
+ * `retainFiles` is the exchange's retain-mode choice as the operator has it set
+ * right now ("How files are handled", the card on the same screen), read
+ * only for the split-directory precondition: naming an outbound directory without
+ * it is refused here rather than by the job the connection would later compose.
  */
 export function sftpFormError(
   values: SftpConnectionFormValues,
+  retainFiles: boolean,
 ): SftpFormError | undefined {
   if (values.host.trim() === "")
     return { field: "host", message: "Enter the SFTP server address." };
@@ -197,6 +262,24 @@ export function sftpFormError(
       field: "username",
       message: "Enter the username for the SFTP account.",
     };
+  // Both directory rules are the split's alone: naming no outbound directory
+  // leaves the single shared remote directory exactly as unvalidated as it was,
+  // and the messages land on the outbound field, the one the operator added.
+  const outboundDirectory = values.outboundDirectory.trim();
+  if (outboundDirectory !== "") {
+    if (!retainFiles)
+      return {
+        field: "outboundDirectory",
+        message: SPLIT_DIRECTORY_RETAIN_REQUIREMENT,
+      };
+    const issue = splitDirectoryIssue(
+      values.host.trim(),
+      values.remoteDirectory.trim(),
+      outboundDirectory,
+    );
+    if (issue !== undefined)
+      return { field: "outboundDirectory", message: issue };
+  }
   const port = values.port.trim();
   if (port !== "") {
     const parsed = Number(port);
@@ -279,22 +362,34 @@ function fingerprintErrorFor(value: string): string | undefined {
  * pasted value (`kind: "raw"`), the last of which the server materializes to a
  * file. A pasted value is sent verbatim (whitespace is significant in a secret),
  * never trimmed.
+ *
+ * The remote directory travels in ONE of its two forms and never both: a named
+ * outbound directory makes the request a split pair (`inbound_path`/
+ * `outbound_path`, the remote-directory field supplying the inbound half, which
+ * is the same mapping the CLI's `--outbound-path` applies), and a blank one
+ * makes it the single shared `path`.
  */
 export function buildAuthoringRequest(
   values: SftpConnectionFormValues,
+  retainFiles: boolean,
 ): AuthoredSftpConnectionRequest | undefined {
-  if (sftpFormError(values) !== undefined) return undefined;
+  if (sftpFormError(values, retainFiles) !== undefined) return undefined;
   const source = values.source;
   // sftpFormError guarantees a defined source; narrow for the type system.
   if (source === undefined) return undefined;
   const port = values.port.trim();
   const remoteDirectory = values.remoteDirectory.trim();
+  const outboundDirectory = values.outboundDirectory.trim();
   const passphrase = values.passphrasePath.trim();
   return {
     host: values.host.trim(),
     ...(port !== "" ? { port: Number(port) } : {}),
     username: values.username.trim(),
-    ...(remoteDirectory !== "" ? { path: remoteDirectory } : {}),
+    ...(remoteDirectory === ""
+      ? {}
+      : outboundDirectory === ""
+        ? { path: remoteDirectory }
+        : { inboundPath: remoteDirectory, outboundPath: outboundDirectory }),
     hostKeyFingerprint: values.hostKeyFingerprint.trim(),
     credential:
       source.kind === "mount"

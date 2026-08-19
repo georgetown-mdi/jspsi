@@ -406,6 +406,12 @@ export async function fetchSftpConnection(
  * a missing or malformed field reads as "no warnings" rather than dropping the
  * connection (a warning is advisory, not load-bearing).
  *
+ * The remote directory is admitted in exactly one of its two forms: the single
+ * shared `path`, or a COMPLETE `inboundPath`/`outboundPath` pair. A half pair, or
+ * a pair alongside `path`, is a shape the appliance cannot have authored, so it
+ * drops the connection rather than arming a run against a directory layout the
+ * browser would then misreport in the invitation it mints.
+ *
  * @internal exported for the authoring client, which parses the same projection
  * off a `PUT /api/jobs/sftp` success body.
  */
@@ -414,10 +420,15 @@ export function sftpConnectionProjectionOf(
 ): SftpConnectionProjection | null {
   if (body === null || typeof body !== "object" || Array.isArray(body))
     return null;
-  const { configured, host, port, path, credentialWarnings } = body as Record<
-    string,
-    unknown
-  >;
+  const {
+    configured,
+    host,
+    port,
+    path,
+    inboundPath,
+    outboundPath,
+    credentialWarnings,
+  } = body as Record<string, unknown>;
   if (configured !== true) return null;
   if (typeof host !== "string" || host.length === 0) return null;
   if (
@@ -430,9 +441,25 @@ export function sftpConnectionProjectionOf(
     return null;
   if (path !== undefined && (typeof path !== "string" || path.length === 0))
     return null;
+  if (
+    inboundPath !== undefined &&
+    (typeof inboundPath !== "string" || inboundPath.length === 0)
+  )
+    return null;
+  if (
+    outboundPath !== undefined &&
+    (typeof outboundPath !== "string" || outboundPath.length === 0)
+  )
+    return null;
+  if ((inboundPath === undefined) !== (outboundPath === undefined)) return null;
+  if (path !== undefined && inboundPath !== undefined) return null;
   const connection: SftpConnectionProjection = { host };
   if (port !== undefined) connection.port = port;
   if (path !== undefined) connection.path = path;
+  if (inboundPath !== undefined && outboundPath !== undefined) {
+    connection.inboundPath = inboundPath;
+    connection.outboundPath = outboundPath;
+  }
   connection.credentialWarnings = Array.isArray(credentialWarnings)
     ? credentialWarnings.filter(
         (entry): entry is string => typeof entry === "string",

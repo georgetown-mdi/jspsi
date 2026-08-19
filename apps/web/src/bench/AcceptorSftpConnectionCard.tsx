@@ -36,12 +36,18 @@ import type { SftpEndpointLocator } from "./sftpConnectionForm";
 export function AcceptorSftpConnectionCard({
   locator,
   connection,
+  retainFiles,
   onAuthored,
   onCleared,
 }: {
   /** The partner-supplied SFTP locator from the accepted invitation's endpoint:
    * where to connect, and nothing more. */
   locator: SftpEndpointLocator;
+  /** The exchange's retain-mode choice, forwarded to the authoring form. An
+   * accept authors no outbound directory of its own -- the partner names the
+   * locator, and a split-directory endpoint is refused at review -- so it reaches
+   * no split-directory rule here. */
+  retainFiles: boolean;
   /** The effective connection: the operator-authored credential-free locator, or
    * null until the operator authors one. */
   connection: SftpConnectionProjection | null;
@@ -111,6 +117,7 @@ export function AcceptorSftpConnectionCard({
     <SftpAuthoringForm
       initial={sftpFormFromLocator(locator)}
       isEdit={connection !== null}
+      retainFiles={retainFiles}
       reviewLocator={locator}
       probeCeremony="exchange"
       onAuthored={(authored) => {

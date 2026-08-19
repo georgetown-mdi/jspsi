@@ -33,6 +33,7 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
 export function SftpConnectionCard({
   connection,
   saveFilePreferred,
+  retainFiles,
   offerSaveFile = true,
   probeCeremony = "exchange",
   onAuthored,
@@ -44,6 +45,9 @@ export function SftpConnectionCard({
   /** The operator chose to run SFTP through their own command-line tool
    * (save-a-file) instead of authoring a connection here. */
   saveFilePreferred: boolean;
+  /** The exchange's retain-mode choice, forwarded to the authoring form for the
+   * split-directory precondition. */
+  retainFiles: boolean;
   /** The host-key confirmation ceremony the authoring form's probe presents,
    * forwarded to {@link SftpAuthoringForm} (default `exchange`; `direct` on the
    * direct-exchange path). */
@@ -141,6 +145,7 @@ export function SftpConnectionCard({
     <SftpAuthoringForm
       initial={initialFormFor(connection)}
       isEdit={connection !== null}
+      retainFiles={retainFiles}
       probeCeremony={probeCeremony}
       onAuthored={(authored) => {
         setFormOpen(false);
@@ -151,9 +156,10 @@ export function SftpConnectionCard({
   );
 }
 
-/** Seed the form from an existing connection's locator (host/port/path); the
- * username and credential are not recoverable from the credential-free projection,
- * so an edit re-enters them. */
+/** Seed the form from an existing connection's locator (host, port, and whichever
+ * remote-directory form it carries -- the shared `path`, or the split pair, whose
+ * inbound half seeds the remote-directory field); the username and credential are
+ * not recoverable from the credential-free projection, so an edit re-enters them. */
 function initialFormFor(
   connection: SftpConnectionProjection | null,
 ): SftpConnectionFormValues {
@@ -162,6 +168,7 @@ function initialFormFor(
     ...EMPTY_SFTP_FORM,
     host: connection.host,
     port: connection.port !== undefined ? String(connection.port) : "",
-    remoteDirectory: connection.path ?? "",
+    remoteDirectory: connection.inboundPath ?? connection.path ?? "",
+    outboundDirectory: connection.outboundPath ?? "",
   };
 }

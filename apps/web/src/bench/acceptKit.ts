@@ -30,10 +30,11 @@
 
 /**
  * The rendezvous locator the sheet prints back, in the two shapes the console
- * mints: an sftp locator (host, optional port, optional remote directory) or a
- * filedrop locator (the shared folder's NAME, never the appliance's absolute
- * path). Credential-free by construction, as the invitation endpoint it is
- * copied from is.
+ * mints: an sftp locator (host, optional port, and either the single shared
+ * remote directory or the split inbound/outbound pair) or a filedrop locator
+ * (the shared folder's NAME, never the appliance's absolute path).
+ * Credential-free by construction, as the invitation endpoint it is copied from
+ * is.
  *
  * The filedrop name is optional because the console cannot always name the
  * shared folder: where the rendezvous mount point was chosen by a launcher
@@ -43,7 +44,14 @@
 import { PLACEHOLDER_SSH_USERNAME } from "@psilink/core";
 
 export type AcceptKitEndpoint =
-  | { channel: "sftp"; host: string; port?: number; path?: string }
+  | {
+      channel: "sftp";
+      host: string;
+      port?: number;
+      path?: string;
+      inboundPath?: string;
+      outboundPath?: string;
+    }
   | { channel: "filedrop"; path?: string };
 
 /**
@@ -178,9 +186,20 @@ function rendezvousLines(endpoint: AcceptKitEndpoint): Array<string> {
   const port = endpoint.port === undefined ? "" : `:${endpoint.port}`;
   return [
     `  SFTP server:    ${printable(endpoint.host)}${port}`,
-    ...(endpoint.path === undefined
-      ? []
-      : [`  Directory:      ${printable(endpoint.path)}`]),
+    // A split-directory invitation names both folders from the INVITER's side,
+    // which is the direction the partner's own command-line tool mirrors: the
+    // inviter's outbound is where the partner reads, and vice versa. Labelling
+    // them by whose they are, rather than by "inbound"/"outbound", is what keeps
+    // the sheet from stating the pair backwards for its reader.
+    ...(endpoint.inboundPath === undefined ||
+    endpoint.outboundPath === undefined
+      ? endpoint.path === undefined
+        ? []
+        : [`  Directory:      ${printable(endpoint.path)}`]
+      : [
+          `  You write to:   ${printable(endpoint.inboundPath)}`,
+          `  You read from:  ${printable(endpoint.outboundPath)}`,
+        ]),
     "",
     "The invitation carries the same locator. Check it against what you were",
     "told to expect before you accept.",

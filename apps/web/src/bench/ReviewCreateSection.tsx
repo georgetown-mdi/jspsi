@@ -247,6 +247,7 @@ export function ReviewCreateSection({
             <SftpConnectionCard
               connection={sftpConnection ?? null}
               saveFilePreferred={sftpSaveFilePreferred}
+              retainFiles={exchangeFiles.retainFiles}
               probeCeremony="exchange"
               onAuthored={onAuthorConnection}
               onCleared={onClearConnection}

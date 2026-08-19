@@ -104,6 +104,7 @@ export function DirectServerSection({
         <SftpConnectionCard
           connection={sftpConnection}
           saveFilePreferred={false}
+          retainFiles={exchangeFiles.retainFiles}
           offerSaveFile={false}
           probeCeremony="direct"
           onAuthored={onAuthorConnection}

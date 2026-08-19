@@ -353,6 +353,73 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     ).toThrow(JobApiConfigError);
   });
 
+  test("a split remote directory is admitted as the inbound/outbound pair", () => {
+    const dir = scratchDir();
+    const secretPath = writeSecretFile(dir);
+    const { entry } = validateAuthoredSftpServer(
+      authoredBody(
+        { inboundPath: "/exchange/in", outboundPath: "/exchange/out" },
+        { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+      ),
+      path.join(dir, "data-root"),
+      undefined,
+    );
+    expect(entry.inboundPath).toBe("/exchange/in");
+    expect(entry.outboundPath).toBe("/exchange/out");
+    expect(entry.path).toBeUndefined();
+  });
+
+  test("the split's retain precondition is NOT applied at authoring time", () => {
+    // Retain mode is a rule over the exchange's tuning options, which the
+    // connection does not carry and this endpoint cannot know. Enforcing it here
+    // would make every split connection unauthorable; it is enforced where the
+    // two meet (the console's form, the config compose, the CLI's own guard).
+    const dir = scratchDir();
+    const secretPath = writeSecretFile(dir);
+    expect(() =>
+      validateAuthoredSftpServer(
+        authoredBody(
+          { inboundPath: "/exchange/in", outboundPath: "/exchange/out" },
+          { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+        ),
+        path.join(dir, "data-root"),
+        undefined,
+      ),
+    ).not.toThrow();
+  });
+
+  test("core's directory-mode rules decide the pair, and reject each bad shape", () => {
+    const dir = scratchDir();
+    const secretPath = writeSecretFile(dir);
+    const credential = {
+      kind: "ref",
+      ref: `@${secretPath}`,
+      credType: "password",
+    };
+    const rejected = [
+      // A shared path alongside the pair: reconciled by nobody, refused here.
+      {
+        path: "/exchange",
+        inboundPath: "/exchange/in",
+        outboundPath: "/exchange/out",
+      },
+      // Half a pair.
+      { inboundPath: "/exchange/in" },
+      { outboundPath: "/exchange/out" },
+      // Two directories that resolve to the same one.
+      { inboundPath: "/exchange/in", outboundPath: "/exchange/in/" },
+      { inboundPath: "/exchange/in", outboundPath: "/exchange/./in" },
+    ];
+    for (const overrides of rejected)
+      expect(() =>
+        validateAuthoredSftpServer(
+          authoredBody(overrides, credential),
+          path.join(dir, "data-root"),
+          undefined,
+        ),
+      ).toThrow(JobApiConfigError);
+  });
+
   test("core's cross-field refine (keyboard_interactive needs password) holds", () => {
     const dir = scratchDir();
     const keyPath = writeSecretFile(dir);

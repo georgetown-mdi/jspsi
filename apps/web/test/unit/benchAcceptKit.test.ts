@@ -148,6 +148,20 @@ describe("accept kit, per-channel shape", () => {
     expect(text).not.toContain("Directory:");
   });
 
+  test("a split-directory sftp sheet states each folder from the READER's side", () => {
+    // The invitation names the pair from the inviter's side: the inviter's
+    // inbound is where its peer -- this sheet's reader -- writes.
+    const text = sheet({
+      channel: "sftp",
+      host: "sftp.example.gov",
+      inboundPath: "/exchange/from-partner",
+      outboundPath: "/exchange/from-inviter",
+    });
+    expect(text).toContain("You write to:   /exchange/from-partner");
+    expect(text).toContain("You read from:  /exchange/from-inviter");
+    expect(text).not.toContain("Directory:");
+  });
+
   test("the terms are referred to, never restated", () => {
     for (const endpoint of [FILEDROP, SFTP]) {
       const text = sheet(endpoint);
