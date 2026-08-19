@@ -42,6 +42,10 @@ import {
   type Standardization,
 } from "../src/config/standardization";
 import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
+import {
+  isListedFanOutFunction,
+  withNoListedFanOutFunctions,
+} from "../src/fanOutFunctions";
 
 const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
   name,
@@ -2270,6 +2274,105 @@ describe("buildKeyStrings", () => {
       }),
     ).toThrow(UsageError);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("the unlisted-producer stand-in is restored by a throwing body", () => {
+    // The stand-in moves the compile-time capture, and the refusal above leaves
+    // it through a throw, so a step compiled afterwards must still see the
+    // declared producer -- otherwise every later drop silently becomes a refusal.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    expect(() =>
+      withUnlistedFanOutFunctions(() => {
+        throw new UsageError("refused inside the stand-in");
+      }),
+    ).toThrow(UsageError);
+    const wide = Array.from({ length: 33 }, (_unused, i) => `V${i}`);
+    const dataset = makeDataset({ last_name: wide, date_of_birth: wide });
+    expect(buildKeyStrings(key, dataset, 0)).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  test("a nested call restores its caller's override, not the full list", () => {
+    withNoListedFanOutFunctions(() => {
+      expect(isListedFanOutFunction("split_on")).toBe(false);
+      withNoListedFanOutFunctions(() => {});
+      expect(isListedFanOutFunction("split_on")).toBe(false);
+    });
+    expect(isListedFanOutFunction("split_on")).toBe(true);
+  });
+
+  test("an async body is refused and the listing restored", () => {
+    expect(() => withNoListedFanOutFunctions(() => Promise.resolve())).toThrow(
+      /synchronous bodies only/,
+    );
+    expect(isListedFanOutFunction("split_on")).toBe(true);
+  });
+
+  test("the cap refusal names the producer this row expanded through", () => {
+    // The refusal covers fuzzy expansion and an unlisted producer alike, and the
+    // count distinguishes them for nobody, so a message naming fuzzy comparisons
+    // as the cause would send an operator to a term this key does not declare.
+    expect(() =>
+      withUnlistedFanOutFunctions(() => {
+        const wide = Array.from({ length: 33 }, (_unused, i) => `V${i}`);
+        const dataset = makeDataset({ last_name: wide, date_of_birth: wide });
+        return buildKeyStrings(key, dataset, 0);
+      }),
+    ).toThrow(/turns one value into several candidates/);
+  });
+
+  test("a cell above the engine's argument limit refuses on the cap", () => {
+    // The cap is what refuses a cell this wide, at every width. Assembling the
+    // element's candidates one at a time is what keeps that true: a spread passes
+    // them as arguments, which fails between 125,000 and 150,000 of them on this
+    // build's Node (lower wherever the stack is smaller), and the RangeError it
+    // raises reports a fault the row does not have.
+    const wideCell = Array.from(
+      { length: 150_000 },
+      (_unused, i) => `V${i}`,
+    ).join("-");
+    let raised: unknown;
+    try {
+      withUnlistedFanOutFunctions(() => {
+        const dataset = makeDataset({
+          last_name: wideCell,
+          date_of_birth: "19750716",
+        });
+        const splittingKey = {
+          name: "LN+DOB",
+          elements: [
+            {
+              field: "last_name",
+              transform: [{ function: "split_on", params: { delimiter: "-" } }],
+            },
+            { field: "date_of_birth" },
+          ],
+        };
+        return buildKeyStrings(splittingKey, dataset, 0);
+      });
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as UsageError).message).toMatch(
+      /expands one row into 150000 key strings/,
+    );
+  });
+});
+
+// --- FAN_OUT_FUNCTION_NAMES --------------------------------------------------
+
+describe("FAN_OUT_FUNCTION_NAMES", () => {
+  test("is frozen, so no consumer can retune the drop-versus-refuse line", () => {
+    // Each compiled step captures its membership in this list, which decides
+    // whether an over-width row is dropped or the run refused. `readonly` is a
+    // compile-time constraint that erases, so the freeze is the guarantee.
+    const listed = [...FAN_OUT_FUNCTION_NAMES];
+    const mutable = FAN_OUT_FUNCTION_NAMES as string[];
+    expect(Object.isFrozen(FAN_OUT_FUNCTION_NAMES)).toBe(true);
+    expect(() => mutable.push("to_upper_case")).toThrow(TypeError);
+    expect(() => (mutable.length = 0)).toThrow(TypeError);
+    expect(FAN_OUT_FUNCTION_NAMES).toEqual(listed);
   });
 });
 
