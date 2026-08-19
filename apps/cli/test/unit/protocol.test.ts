@@ -255,6 +255,7 @@ import {
   runProtocol,
   PEER_SILENCE_GUIDANCE,
   BOTH_SWEPT_GUIDANCE,
+  SIGNING_WITHOUT_RECORD_WARNING,
   entryHelloResidueGuidance,
   type RunProtocolResult,
   type SigningPersist,
@@ -2073,6 +2074,105 @@ test(
     ).toBe(true);
   },
 );
+
+// --- Signing configured with record writing off ------------------------------
+//
+// A run that signs while `--no-record` suppresses the record produces a receipt
+// nothing can ever pair to it, and the record cannot be rebuilt afterwards, so
+// runProtocol warns while both choices are still the operator's to change.
+// Warn, not refuse: the outcome of the run itself is untouched.
+//
+// The predicate cases below need no peer. They run the warn site and then land
+// on preflightKeyFilePath, the next prepare-block throw after it, by passing an
+// empty keyFilePath -- so each settles immediately, with no connection opened.
+
+function runThroughWarnGate(
+  signing: SigningPersist | null,
+  recordOutput?: { recordFile?: string },
+  eventStream?: boolean,
+): Promise<unknown> {
+  return runProtocol(
+    { channel: "filedrop", path: dropDir },
+    { sharedSecret: TOKEN_A, keyFilePath: "" },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test",
+    recordOutput,
+    undefined,
+    undefined,
+    { eventStream },
+    signing,
+  ) as unknown as Promise<unknown>;
+}
+
+test("signing with records off warns on both the log and the event stream", async () => {
+  // Both channels, because the population most likely to run this combination
+  // and not notice is the unattended supervisor that discards stderr on success.
+  mockFd3Open();
+  try {
+    await expect(
+      runThroughWarnGate(
+        signingPersistFixture(path.join(tmpDir, "receipt.json")),
+        undefined,
+        true,
+      ),
+    ).rejects.toThrow("non-empty keyFilePath");
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  expect(mockState.warnings).toContain(SIGNING_WITHOUT_RECORD_WARNING);
+  // The warning precedes the prepare-phase terminal event, so it is on the
+  // stream before anything the run could fail on -- and before any credential,
+  // terms, or data would have been sent.
+  const lines = takeFd3Lines();
+  expect(lines.map((l) => l.type)).toEqual(["warning", "metrics", "error"]);
+  expect(lines[0].message).toBe(SIGNING_WITHOUT_RECORD_WARNING);
+});
+
+test("a signing run that writes its record does not warn", async () => {
+  await expect(
+    runThroughWarnGate(
+      signingPersistFixture(path.join(tmpDir, "receipt.json")),
+      {
+        recordFile: path.join(tmpDir, "rec.json"),
+      },
+    ),
+  ).rejects.toThrow("non-empty keyFilePath");
+
+  expect(mockState.warnings).not.toContain(SIGNING_WITHOUT_RECORD_WARNING);
+});
+
+test("an unsigned run with records off does not warn", async () => {
+  // --no-record alone is an ordinary choice: nothing is left unpairable by it.
+  await expect(runThroughWarnGate(null)).rejects.toThrow(
+    "non-empty keyFilePath",
+  );
+
+  expect(mockState.warnings).not.toContain(SIGNING_WITHOUT_RECORD_WARNING);
+});
+
+test("the warned run still completes", { timeout: 20_000 }, async () => {
+  // The guidance is advice, not a gate: a real two-party exchange with the
+  // warned combination reaches the same completed outcome an unwarned one does.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  const [resultA, resultB] = await Promise.allSettled([
+    runSigningParty(keyFileA, "test-a", path.join(tmpDir, "receipt-a.json")),
+    runSigningParty(keyFileB, "test-b", path.join(tmpDir, "receipt-b.json")),
+  ]);
+  expect(resultA.status).toBe("fulfilled");
+  expect(resultB.status).toBe("fulfilled");
+
+  // One per party: each side warns about its own configuration.
+  expect(
+    mockState.warnings.filter((m) => m === SIGNING_WITHOUT_RECORD_WARNING),
+  ).toHaveLength(2);
+});
 
 // --- Signal and error handler recovery paths ---------------------------------
 //

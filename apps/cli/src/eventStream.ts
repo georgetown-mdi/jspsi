@@ -35,10 +35,11 @@ export const EVENT_STREAM_VERSION = 1;
  * discriminant safely. `stages` is the one-shot stage-list event; `stage` marks
  * each stage transition; `stageEnd` reports a completed stage's wall-clock
  * duration; `warning` carries a non-fatal warning (a terms-exchange warning, the
- * cross-party host-key divergence notice, a missing audit artifact, or any
- * post-authentication persistence failure); `metrics` is the one-shot
- * operational-counter summary emitted just before the terminal event; `result`
- * and `error` are the two terminal events (exactly one fires per run).
+ * cross-party host-key divergence notice, the signing-without-a-record notice, a
+ * missing audit artifact, or any post-authentication persistence failure);
+ * `metrics` is the one-shot operational-counter summary emitted just before the
+ * terminal event; `result` and `error` are the two terminal events (exactly one
+ * fires per run).
  */
 export type EventType =
   "stages" | "stage" | "stageEnd" | "warning" | "metrics" | "result" | "error";
@@ -114,11 +115,12 @@ export interface StageEndEvent extends EventBase {
 
 /**
  * A non-fatal warning: a terms-exchange warning, the cross-party host-key
- * divergence notice, an audit artifact the run was asked for and could not
- * produce, or a post-authentication persistence failure that leaves an
- * otherwise complete online invite/accept short of what it was asked to write
- * -- its configuration, one of the acceptance's consent records on a reused
- * configuration, or the observed received-payload set a later recurring
+ * divergence notice, the pre-exchange notice that a signing identity is
+ * configured while record writing is off, an audit artifact the run was asked
+ * for and could not produce, or a post-authentication persistence failure that
+ * leaves an otherwise complete online invite/accept short of what it was asked
+ * to write -- its configuration, one of the acceptance's consent records on a
+ * reused configuration, or the observed received-payload set a later recurring
  * exchange would have been held to.
  */
 export interface WarningEvent extends EventBase {

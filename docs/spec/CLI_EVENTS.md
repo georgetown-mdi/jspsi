@@ -71,7 +71,9 @@ Emitted when a protocol stage completes, carrying how long it ran so a superviso
 
 ### `warning`
 
-Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWarning`, the cross-party host-key divergence notice -- a security signal a supervisor that discards stderr would otherwise never see -- and one per **persistence loss**, the class defined below (an audit artifact the run was asked for and could not produce, or a configuration or consent record an online `invite`/`accept` could not write). A warning does not end the run.
+Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWarning`, the cross-party host-key divergence notice -- a security signal a supervisor that discards stderr would otherwise never see -- the pre-exchange signing-without-a-record notice below, and one per **persistence loss**, the class defined below (an audit artifact the run was asked for and could not produce, or a configuration or consent record an online `invite`/`accept` could not write). A warning does not end the run.
+
+A run that configures a signing identity while record writing is off (`--no-record`) emits its warning before any credential, terms, or data are sent, so the operator can still change either choice: the receipt that run writes has no record to pair against and can never verify above `INCOMPLETE`, and the record cannot be reconstructed afterwards (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#record-and-verification-keys-files)). The run itself is unaffected -- which artifacts to keep is the operator's call.
 
 An audit-artifact warning takes one of two shapes: an artifact that was built but could not be written names the destination it could not be written to, while an exchange record that could not be built at all names no destination and states that none was written and that the run need not be re-run.
 

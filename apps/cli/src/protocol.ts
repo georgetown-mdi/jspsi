@@ -149,6 +149,31 @@ export const BOTH_SWEPT_GUIDANCE =
   "again on both sides, without --sweep-exchange-files.";
 
 /**
+ * Operator guidance for a run that configures a signing identity while record
+ * writing is off (`--no-record`).
+ *
+ * The receipt is bound to its run by a binder the exchange record carries, so a
+ * receipt with no record beside it has nothing to pair against: it verifies at
+ * most `INCOMPLETE` on every verifying surface, forever. The salts and the
+ * binder are minted during the exchange and stored nowhere else, so the record
+ * cannot be rebuilt afterwards -- the combination is only correctable before the
+ * run, which is why this fires here rather than at the receipt write.
+ *
+ * Warn rather than refuse: which artifacts to keep is the operator's own call,
+ * and a receipt kept for its signatures alone is a legitimate use. The text
+ * therefore names both consequences and both ways out (keep the record, or drop
+ * the signing block) and leaves the choice open. See docs/CLI.md ("Signing
+ * without an exchange record") and docs/spec/EXCHANGE_RECORD.md.
+ */
+export const SIGNING_WITHOUT_RECORD_WARNING =
+  "A signing identity is configured but record writing is off (--no-record). " +
+  "This run still writes its signed receipt, and that receipt can never " +
+  "verify above INCOMPLETE on any verifier: pairing it to this run needs the " +
+  "exchange record, and the record cannot be reconstructed after the " +
+  "exchange. Keep the record (drop --no-record) if you retain receipts as " +
+  "evidence, or drop the signing block if you do not.";
+
+/**
  * CLI-layer extension of {@link Authentication} that co-locates the path where
  * the rotated shared secret is persisted after each successful key exchange.
  * Passed to {@link runProtocol} on its own `auth` parameter, separate from the
@@ -469,7 +494,9 @@ export interface RunProtocolResult {
  * unchanged. The step runs only on the authenticated path, which is the only one
  * that holds the session key the receipt binder needs; a non-null `signing` on the
  * unauthenticated (`auth: null`) path is rejected up front, since there is no
- * session key to bind the receipt to.
+ * session key to bind the receipt to. A non-null `signing` with no `recordOutput`
+ * is permitted and warned about ({@link SIGNING_WITHOUT_RECORD_WARNING}), not
+ * refused: the run proceeds and produces a receipt nothing can pair to it.
  */
 export async function runProtocol(
   connection: ProtocolConnectionConfig,
@@ -628,6 +655,19 @@ export async function runProtocol(
           "unauthenticated (zero-setup) exchange has no session key to bind the " +
           "signed receipt to",
       );
+    // Signing with records off produces a receipt no verifier can ever pair to
+    // its run, and nothing after the exchange can repair it. Surface it here --
+    // before any credential, terms, or data are sent -- while both choices are
+    // still the operator's to change. It rides the machine-interface warning
+    // event as well as stderr because the unattended supervisor that discards
+    // stderr on success is exactly the population that would otherwise collect
+    // permanently unpairable receipts run after run. First-party prose with no
+    // interpolated value, so it composes raw and takes its single escape from
+    // the emitter.
+    if (signing !== null && recordOutput === undefined) {
+      log.warn(SIGNING_WITHOUT_RECORD_WARNING);
+      emit((e) => e.warning(SIGNING_WITHOUT_RECORD_WARNING));
+    }
     if (auth) {
       // Fail fast on the locally-knowable secret preconditions -- a malformed or
       // already-expired shared secret -- BEFORE any credential is presented. Both
