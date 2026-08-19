@@ -124,7 +124,13 @@ export class PSIParticipant {
     this.log = getLoggerForVerbosity("participant", this.config.verbose);
 
     this.engine =
-      engine ?? new InProcessPsiEngine(library, this.config.role, this.id);
+      engine ??
+      new InProcessPsiEngine(
+        library,
+        this.config.role,
+        this.id,
+        "identifier-revealing",
+      );
   }
 
   /**

@@ -1,6 +1,10 @@
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import { InProcessPsiEngine, type PsiEngine } from "./psiEngine";
+import {
+  InProcessPsiEngine,
+  type PsiEngine,
+  type PsiEngineMode,
+} from "./psiEngine";
 import type { Config } from "./types";
 
 // The runtime-agnostic PSI worker seam. It moves the
@@ -12,14 +16,24 @@ import type { Config } from "./types";
 // {@link InProcessPsiEngine} and answers those requests. Both are agnostic to the
 // worker technology -- the CLI wires a `worker_threads` Worker and the browser a
 // Web Worker behind the same {@link PsiWorkerHandle}. Everything that crosses the
-// boundary is raw bytes, value lists, or index lists (never a live library handle
-// and never the secret key, which is generated and stays inside the worker), so the
-// same message protocol serves both structured-clone transports.
+// boundary is raw bytes, value lists, index lists, or a count (never a live library
+// handle and never the secret key, which is generated and stays inside the worker),
+// so the same message protocol serves both structured-clone transports.
 
-/** Seed the worker with once, before any request: the role and id an engine needs. */
+/**
+ * Seed the worker with once, before any request: the role, id, and mode an engine
+ * needs.
+ */
 export interface PsiWorkerInit {
   role: Config["role"];
   id: string;
+  /**
+   * The disclosure the worker's engine is built for. It seeds the key the worker
+   * generates, so it is fixed for the worker's life exactly as it is for an
+   * in-process engine's -- and stated rather than defaulted, so a spawn site that
+   * omits it cannot run a revealing round under count-only terms.
+   */
+  mode: PsiEngineMode;
 }
 
 /**
@@ -31,7 +45,8 @@ export type PsiWorkerRequestBody =
   | { method: "processClientRequest"; requestBytes: Uint8Array }
   | { method: "createClientRequest"; values: ReadonlyArray<string> }
   | { method: "receiveServerSetup"; setupBytes: Uint8Array }
-  | { method: "computeAssociationTable"; responseBytes: Uint8Array };
+  | { method: "computeAssociationTable"; responseBytes: Uint8Array }
+  | { method: "computeIntersectionCardinality"; responseBytes: Uint8Array };
 
 /** A host -> worker request: a {@link PsiWorkerRequestBody} tagged with an id. */
 export interface PsiWorkerRequest {
@@ -160,6 +175,13 @@ export class WorkerPsiEngine implements PsiEngine {
     return this.call({ method: "computeAssociationTable", responseBytes });
   }
 
+  computeIntersectionCardinality(responseBytes: Uint8Array): Promise<number> {
+    return this.call({
+      method: "computeIntersectionCardinality",
+      responseBytes,
+    });
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -170,8 +192,9 @@ export class WorkerPsiEngine implements PsiEngine {
 
 /**
  * The worker-side dispatcher: builds an {@link InProcessPsiEngine} from `library`
- * (so the secret key is generated and lives entirely inside the worker) and returns
- * a handler that answers each {@link PsiWorkerRequest} by calling the matching
+ * in `init`'s mode (so the secret key -- and with it the round's disclosure -- is
+ * generated and lives entirely inside the worker) and returns a handler that
+ * answers each {@link PsiWorkerRequest} by calling the matching
  * engine method and posting the result -- or the error message -- back through
  * `post`. The worker's thread runs the blocking crypto; the host's stays
  * responsive. The CLI / browser worker entry point loads the appropriate backend,
@@ -182,7 +205,7 @@ export function servePsiWorker(
   init: PsiWorkerInit,
   post: (response: PsiWorkerResponse) => void,
 ): (request: PsiWorkerRequest) => void {
-  const engine = new InProcessPsiEngine(library, init.role, init.id);
+  const engine = new InProcessPsiEngine(library, init.role, init.id, init.mode);
   const run = (body: PsiWorkerRequestBody): Promise<unknown> => {
     switch (body.method) {
       case "createServerSetup":
@@ -195,6 +218,8 @@ export function servePsiWorker(
         return engine.receiveServerSetup(body.setupBytes);
       case "computeAssociationTable":
         return engine.computeAssociationTable(body.responseBytes);
+      case "computeIntersectionCardinality":
+        return engine.computeIntersectionCardinality(body.responseBytes);
     }
   };
   return (request: PsiWorkerRequest): void => {

@@ -66,7 +66,11 @@ class FakePsiCryptoWorker implements PsiCryptoWorker {
 
 describe("encode/decodePsiWorkerInit", () => {
   test("round-trips the role/id seed", () => {
-    const init: PsiWorkerInit = { role: "joiner", id: "client" };
+    const init: PsiWorkerInit = {
+      role: "joiner",
+      id: "client",
+      mode: "identifier-revealing",
+    };
     expect(decodePsiWorkerInit(encodePsiWorkerInit(init))).toEqual(init);
   });
 });
@@ -139,10 +143,14 @@ describe("createBrowserPsiEngineFactory", () => {
     return { factory: createBrowserPsiEngineFactory(spawn), seeds, workers };
   }
 
-  test("spawns a worker seeded with the resolved role and id", () => {
+  test("spawns a worker seeded with the resolved role, id, and mode", () => {
     const { factory, seeds, workers } = wireFactory();
     factory("starter", "server");
-    expect(seeds).toEqual([{ role: "starter", id: "server" }]);
+    // The browser exchange runs the identifier-revealing `psi` construction, and the
+    // seed states it: the worker builds its engine -- and its key -- from this alone.
+    expect(seeds).toEqual([
+      { role: "starter", id: "server", mode: "identifier-revealing" },
+    ]);
     expect(workers).toHaveLength(1);
   });
 

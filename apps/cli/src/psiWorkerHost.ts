@@ -7,6 +7,7 @@ import {
   WorkerPsiEngine,
   type PsiEngine,
   type PsiWorkerHandle,
+  type PsiWorkerInit,
   type PsiWorkerRequest,
   type PsiWorkerResponse,
 } from "@psilink/core";
@@ -47,7 +48,7 @@ export function createPsiEngine(
 ): PsiEngine {
   const entry = resolveWorkerEntry();
   if (entry !== undefined) return spawnWorkerPsiEngine(entry, role, id);
-  return new InProcessPsiEngine(library, role, id);
+  return new InProcessPsiEngine(library, role, id, "identifier-revealing");
 }
 
 // The minimal worker_threads Worker surface {@link createWorkerThreadHandle} drives.
@@ -116,10 +117,13 @@ function spawnWorkerPsiEngine(
   role: "starter" | "joiner",
   id: string,
 ): WorkerPsiEngine {
+  // Typed as the seed the worker reads back, so an added required field is a
+  // compile error here rather than a value the worker silently misses.
+  const init: PsiWorkerInit = { role, id, mode: "identifier-revealing" };
   // The worker exposes gc() for the single-pass memory relief itself, at startup
   // (see psiWorker.worker.ts): --expose-gc cannot be passed through a worker's
   // execArgv (Node rejects it), so nothing gc-related is set here.
-  const worker = new Worker(entry, { workerData: { role, id } });
+  const worker = new Worker(entry, { workerData: init });
   // The worker is deliberately NOT unref'd: while crypto is in flight the process
   // must stay alive, exactly as the synchronous masking kept it. dispose() (driven by
   // the exchange's teardown finally) calls terminate(), which is what releases the
