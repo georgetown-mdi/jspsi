@@ -349,6 +349,10 @@ function consoleControlLines(settings: BilateralSettings): Array<string> {
  * partner to infer it from "keeps every file".
  */
 function retainLines(endpoint: AcceptKitEndpoint): Array<string> {
+  const split =
+    endpoint.channel === "sftp" &&
+    endpoint.inboundPath !== undefined &&
+    endpoint.outboundPath !== undefined;
   const persistence =
     endpoint.channel === "filedrop"
       ? [
@@ -358,12 +362,20 @@ function retainLines(endpoint: AcceptKitEndpoint): Array<string> {
           "and clearing it afterwards is a decision the two of you make",
           "deliberately.",
         ]
-      : [
-          "The files stay in the directory the two of you meet in, on the SFTP",
-          "server named above. Nothing removes them when the exchange ends, so",
-          "both of you must start from an empty directory, and clearing it",
-          "afterwards is a decision the two of you make deliberately.",
-        ];
+      : split
+        ? [
+            "The files stay in both directories above -- the one you write to",
+            "and the one you read from -- on the SFTP server named above.",
+            "Nothing removes them when the exchange ends, so both directories",
+            "must start empty, and clearing them afterwards is a decision the",
+            "two of you make deliberately.",
+          ]
+        : [
+            "The files stay in the directory the two of you meet in, on the SFTP",
+            "server named above. Nothing removes them when the exchange ends, so",
+            "both of you must start from an empty directory, and clearing it",
+            "afterwards is a decision the two of you make deliberately.",
+          ];
   return [
     ...heading("THIS EXCHANGE KEEPS ITS FILES"),
     "Your partner has turned on retain mode, so this exchange keeps every",

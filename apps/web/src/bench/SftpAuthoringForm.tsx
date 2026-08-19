@@ -193,12 +193,12 @@ export function SftpAuthoringForm({
         <>
           <TextInput
             label={
-              values.outboundDirectory === ""
+              values.outboundDirectory.trim() === ""
                 ? "Remote directory"
                 : "Inbound directory"
             }
             description={
-              values.outboundDirectory === ""
+              values.outboundDirectory.trim() === ""
                 ? "Optional. The directory on the server both parties exchange through."
                 : "The directory on the server your partner writes to and you read from."
             }
