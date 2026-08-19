@@ -250,6 +250,51 @@ test("a link torn down under a standing drain is not reported as delivered", asy
   );
 }, 120_000);
 
+test("both parties closing a drained exchange read each other's close as the receipt", async (ctx) => {
+  if (!(await canReachServer(hostString)))
+    return ctx.skip(serverUnreachableNote);
+  // The shape every real exchange ends in: both parties have what they came
+  // for, and both run the flushing close at once. Reading the peer's close
+  // sentinel is what makes PeerJS tear THIS side's peer connection down, so
+  // each side's channel starts closing on a link of its own closing -- the
+  // signature of a teardown, on the one exchange that lost nothing. A wait that
+  // read only the link would tell both operators of every healthy exchange to
+  // go and check that their partner got the final message.
+  const pair = await connectRendezvousPair(generateSharedSecret(), addressInfo);
+  const { inviterPeer, acceptorPeer, inviterConn, acceptorConn } = pair;
+  const senderOutcomes: Array<PeerCloseOutcome> = [];
+  const receiverOutcomes: Array<PeerCloseOutcome> = [];
+  try {
+    const senderMc = await openPeerMessageConnection(acceptorConn, {
+      onCloseOutcome: (outcome) => senderOutcomes.push(outcome),
+    });
+    const receiverMc = await openPeerMessageConnection(inviterConn, {
+      onCloseOutcome: (outcome) => receiverOutcomes.push(outcome),
+    });
+
+    await senderMc.send(frameOfBytes(64, 1));
+    await senderMc.send(frameOfBytes(FINAL_FRAME_BYTES, 7));
+    // Drain before either side closes, so nothing is owed when they do: this
+    // pins the healthy ending, not a peer that closes on a frame in flight.
+    await receiverMc.receive(30_000);
+    const received: ReceivedFrame = {
+      bytes: asBytes(await receiverMc.receive(30_000)),
+      at: performance.now(),
+    };
+    expectFinalFrame(received, FINAL_FRAME_BYTES);
+
+    await Promise.all([senderMc.close(), receiverMc.close()]);
+  } finally {
+    inviterPeer.destroy();
+    acceptorPeer.destroy();
+  }
+
+  expect(senderOutcomes).toEqual(["peer-closed"]);
+  expect(receiverOutcomes).toEqual(["peer-closed"]);
+  expect(CLOSE_OUTCOME_WARNINGS[senderOutcomes[0]]).toBeUndefined();
+  expect(CLOSE_OUTCOME_WARNINGS[receiverOutcomes[0]]).toBeUndefined();
+}, 120_000);
+
 test("a peer torn down in this page still closes its stream, and reads as delivered", async (ctx) => {
   if (!(await canReachServer(hostString)))
     return ctx.skip(serverUnreachableNote);

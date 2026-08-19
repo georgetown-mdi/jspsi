@@ -54,8 +54,15 @@ function makeConn(overrides?: {
     overrides && "peerConnection" in overrides
       ? overrides.peerConnection
       : new FakePeerConnection();
+  // `open` is PeerJS's own flag, and it is the wait's evidence that the peer's
+  // close has been read: PeerJS clears it when it reads the peer's in-band
+  // close sentinel. A connection this side is still flushing over has it set.
   return {
-    conn: { dataChannel: channel, peerConnection } as unknown as DataConnection,
+    conn: {
+      dataChannel: channel,
+      peerConnection,
+      open: true,
+    } as unknown as DataConnection,
     channel,
     peerConnection,
   };
@@ -124,10 +131,11 @@ describe("waitForPeerClose", () => {
     async (state) => {
       // The channel goes down either way, so the event alone cannot say whether
       // the peer took the final frame or this side's teardown discarded it. A
-      // link already gone when the channel starts closing settles that: there
-      // was nothing left to deliver over, and reporting the delivery signal
-      // would tell the operator of an exchange that lost its final frame that it
-      // landed.
+      // link already gone when the channel starts closing, with PeerJS still
+      // holding the connection open -- no peer close read -- settles that:
+      // there was nothing left to deliver over, and reporting the delivery
+      // signal would tell the operator of an exchange that lost its final frame
+      // that it landed.
       const { conn, channel, peerConnection } = makeConn();
 
       const waiting = waitForPeerClose(conn);
@@ -139,6 +147,25 @@ describe("waitForPeerClose", () => {
       await expect(waiting).resolves.toBe("peer-gone");
     },
   );
+
+  test("reads a channel closing on a link the peer's own close took down as the peer's", async () => {
+    // The reading above cannot be the link alone: PeerJS ends this side's link
+    // itself when it reads the peer's close sentinel, so both parties closing a
+    // healthy exchange reach `closing` on a link of their own closing. PeerJS
+    // clearing `open` is what says the peer's close is the reason, and without
+    // it every healthy two-sided close would tell its operator to go and check
+    // that the partner got the final frame.
+    const { conn, channel, peerConnection } = makeConn();
+
+    const waiting = waitForPeerClose(conn);
+    expect(await isSettled(waiting)).toBe(false);
+
+    (conn as { open: boolean }).open = false;
+    peerConnection?.enterUnannounced("closed");
+    channel?.enterClosing();
+
+    await expect(waiting).resolves.toBe("peer-closed");
+  });
 
   test("still reads a completed close as the peer's, whatever the link shows", async () => {
     // The `close` event is the fallback for a stack that never enters `closing`,

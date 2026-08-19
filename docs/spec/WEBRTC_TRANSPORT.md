@@ -193,15 +193,26 @@ A teardown on this side reaches the wait as the channel closing, not as a state
 change -- closing a peer connection fires no state event, measured on Chromium,
 the one engine the browser suite drives -- and the channel closing is otherwise
 the peer's receipt. The web wait therefore reads the link at that event rather
-than taking the close at face value: a channel that starts closing while this
-side's peer connection is already gone took the final frame down with it, and
-takes the no-live-peer exit. A completed `close` arriving with no `closing`
-before it is still read as the peer's, because a link state read after a close
-has completed no longer says whether the link died before the close or in
-answer to it, and a doubt invented about a healthy exchange is the worse error.
-The reading is therefore inert on a stack that never fires `closing`: every
-close reads as the peer's there, the pre-reading behavior -- the stated limit
-of this discrimination.
+than taking the close at face value.
+
+A dead link is not the whole reading, because the peer's close ends this side's
+link too: PeerJS closes this side's peer connection as its handling of the
+peer's in-band close sentinel, in the same call, before the channel's `closing`
+fires. Both parties closing a healthy exchange therefore each reach `closing` on
+a link of their own closing, which is the signature of a teardown on the one
+ending that lost nothing -- measured on a real pair in Chromium. What separates
+the two is whether the peer's close is what took the link down: PeerJS holds a
+connection `open` until it reads that close, and a link this side loses some
+other way reaches `closing` with the connection still open. So the no-live-peer
+exit is taken for a channel that starts closing on a link already gone with no
+peer close in hand; a link the peer's own close ended is the peer's receipt.
+
+A completed `close` arriving with no `closing` before it is still read as the
+peer's, because a link state read after a close has completed no longer says
+whether the link died before the close or in answer to it, and a doubt invented
+about a healthy exchange is the worse error. The reading is therefore inert on a
+stack that never fires `closing`: every close reads as the peer's there, the
+pre-reading behavior -- the stated limit of this discrimination.
 
 The web wait also ends when the run itself is cancelled. Up to the ceiling the
 wait's length is the PEER's to choose -- it holds the wait simply by keeping ICE
@@ -237,10 +248,11 @@ peer that closes without draining its inbound queue is indistinguishable from on
 that read everything, and the PARTNER's peer connection torn down by their page
 rather than by reading the sentinel resets its stream gracefully -- measured in
 Chromium, and pinned in `apps/web/test/browser/webrtcCloseDelivery.test.ts` -- so
-that teardown arrives here as the same close. The state of the link is what
-tells a close apart from a teardown, and only this side's link is visible here:
-it separates this side's teardown (above) and can say nothing about the
-partner's. That is also why the cancellation is an exit of
+that teardown arrives here as the same close. The state of the link, read
+together with whether the peer's own close accounts for it, is what tells a
+close apart from a teardown, and only this side's link is visible here: it
+separates a teardown of this side's that the peer had no part in (above) and can
+say nothing about the partner's. That is also why the cancellation is an exit of
 its own rather than whatever the teardown behind it does to the channel: a cancel
 folded into an exit of the link's would report the link's story for a wait the
 operator cut.

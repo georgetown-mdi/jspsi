@@ -29,14 +29,15 @@ const DEAD_PEER_STATES: ReadonlySet<RTCPeerConnectionState> = new Set([
  * from "the wait gave up" branches on this rather than on the wait returning.
  */
 export type PeerCloseOutcome =
-  /** The channel closed with no sign the close was this side's own teardown:
-   * the ordered channel places the close sentinel behind every frame already
-   * handed to `send`, so a peer that reads in order took the final frame before
-   * closing. The only exit that can mean delivered -- for a conforming peer;
-   * one that closes without draining its inbound queue is indistinguishable
-   * from one that read everything. The link is checked where it is readable, at
-   * `closing`: a channel that starts closing on a link this side has already
-   * torn down reports `peer-gone` instead, while a completed `close` with no
+  /** The channel closed with no sign the close was a teardown the peer had no
+   * part in: the ordered channel places the close sentinel behind every frame
+   * already handed to `send`, so a peer that reads in order took the final
+   * frame before closing. The only exit that can mean delivered -- for a
+   * conforming peer; one that closes without draining its inbound queue is
+   * indistinguishable from one that read everything. The reading is made at
+   * `closing`, where the link is still readable: a channel that starts closing
+   * on a link that is already gone reports `peer-gone` instead, unless the
+   * peer's own close is what took the link down. A completed `close` with no
    * `closing` before it is still read as the peer's (see the listener notes
    * below). */
   | "peer-closed"
@@ -48,8 +49,8 @@ export type PeerCloseOutcome =
    * because ICE gave up on the peer, or `closed` because this side tore it
    * down. Whatever was buffered went with it either way, which is why the two
    * share an exit -- neither leaves a partner who can still confirm. Reported
-   * however the wait learns of it: the state change, or a channel close
-   * arriving on an already-dead connection. */
+   * however the wait learns of it: the state change, or a channel starting to
+   * close on an already-dead link that no peer close accounts for. */
   | "peer-gone"
   /** The channel was not open when the wait began, so it could carry neither
    * the sentinel nor the frames behind it. */
@@ -71,6 +72,25 @@ function transportOf(conn: DataConnection): {
   peerConnection: RTCPeerConnection | undefined;
 } {
   return { channel: conn.dataChannel, peerConnection: conn.peerConnection };
+}
+
+/**
+ * Whether the peer's own close has already reached PeerJS. Reading the peer's
+ * in-band close sentinel closes the connection, and closes THIS side's peer
+ * connection inside that same call, so a healthy exchange whose two parties
+ * both close reaches `closing` on a link this side ended -- one step behind the
+ * peer's close rather than instead of it.
+ *
+ * The flushing close this side runs leaves the flag alone: it only queues this
+ * side's own sentinel and returns. A link this side loses some other way
+ * reaches `closing` with the connection still open, PeerJS learning of that
+ * loss only afterwards. Both orderings are measured on a real pair in Chromium
+ * and pinned in apps/web/test/browser/webrtcCloseDelivery.test.ts, the healthy
+ * one also end to end through the lifecycle in
+ * apps/web/test/browser/exchangeLifecycle.test.ts.
+ */
+function peerCloseAlreadyRead(conn: DataConnection): boolean {
+  return !conn.open;
 }
 
 /**
@@ -99,13 +119,16 @@ function transportOf(conn: DataConnection): {
  * apps/web/test/browser/webrtcCloseDelivery.test.ts). A close on that channel
  * is still not the peer's by construction, though: tearing THIS side's peer
  * connection down closes the channel too, and discards everything the drain was
- * waiting on. The wait tells the two apart by the link rather than by assuming
- * which local paths can reach it: the peer connection is dead only where this
- * side is the one that ended it, and the link is read where it is readable --
- * at `closing`, before this side's own stack has answered the close. A
- * completed `close` that arrives with no `closing` before it is still read as
- * the peer's, whatever the link then shows (the deliberate fallback; see
- * docs/spec/WEBRTC_TRANSPORT.md and the `close` listener's note).
+ * waiting on. Two facts separate that teardown from the peer's close, both read
+ * at `closing`, where the link is still readable: whether the link is already
+ * gone, and whether PeerJS has read the peer's own close. A dead link alone
+ * does not mean a teardown the peer had no part in -- PeerJS ends this side's
+ * link itself when it reads the peer's close sentinel, so both parties closing
+ * a healthy exchange reach `closing` on a link of their own closing (measured;
+ * see {@link peerCloseAlreadyRead}). A completed `close` that arrives with no
+ * `closing` before it is still read as the peer's, whatever the link then shows
+ * (the deliberate fallback; see docs/spec/WEBRTC_TRANSPORT.md and the `close`
+ * listener's note).
  *
  * Call this BEFORE asking PeerJS to close, so a peer that closes the instant it
  * reads the sentinel cannot beat the listener into place.
@@ -153,13 +176,20 @@ export function waitForPeerClose(
     const onChannelClosing = () => {
       // The channel is going down, but not necessarily at the peer's hand: a
       // teardown of this side's own peer connection takes the channel with it,
-      // and everything still in the outbound buffer with that. The link says
-      // which of the two happened, and this is the event at which it can still
-      // be asked -- a close under way has not yet been answered by this side's
-      // stack, which a completed one has (see the `close` handler). Both
-      // readings are driven against the real stack in
+      // and everything still in the outbound buffer with that. This is the
+      // event at which the link can still be asked which happened -- a close
+      // under way has not yet been answered by this side's stack, which a
+      // completed one has (see the `close` handler) -- but a dead link is not
+      // the answer on its own, because the peer's close ends this side's link
+      // through PeerJS (see peerCloseAlreadyRead). Only a link gone with no
+      // peer close in hand is this side's teardown. All three readings are
+      // driven against the real stack in
       // apps/web/test/browser/webrtcCloseDelivery.test.ts.
-      settle(noLivePeerConnection() ? "peer-gone" : "peer-closed");
+      settle(
+        noLivePeerConnection() && !peerCloseAlreadyRead(conn)
+          ? "peer-gone"
+          : "peer-closed",
+      );
     };
     const onChannelClose = () => {
       // The terminal event, kept for a stack that never enters `closing` at
