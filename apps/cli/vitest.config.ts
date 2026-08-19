@@ -30,6 +30,17 @@ const WEBRTC_DIR = "test/integration/webrtc";
 
 export default defineConfig({
   test: {
+    // Run-level, not per-project: vitest reads these once for the run rather
+    // than per project, so every project below -- and every project added later
+    // -- is covered without registering anything of its own.
+    //
+    // The dist guard fails the run when the built @psilink/core these suites
+    // import is older than its sources, instead of letting the run report
+    // failures that belong to the build. The reporter names every skipped test
+    // at the end of the run, so a leg that quietly stopped running is visible
+    // rather than folded into a count.
+    globalSetup: ["../../scripts/lib/coreDistFreshness.mjs"],
+    reporters: ["default", "../../scripts/lib/skippedLegReporter.mjs"],
     // Coverage is an informational REPORT, produced on demand by `npm run
     // coverage` (see package.json), never a gate: there is deliberately NO
     // `thresholds` line (see CONTRIBUTING.md, Coverage). The coverage script

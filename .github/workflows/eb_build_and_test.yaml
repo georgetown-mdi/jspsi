@@ -81,6 +81,16 @@ jobs:
       - name: Run tests
         run: |
           npm run -w packages/core test
+      # The web suites below skip the legs whose environment prerequisites are
+      # absent (a loopback TLS certificate, which needs `openssl`), and
+      # apps/web/test/requireTestPrerequisites.ts turns such a skip into a
+      # failure only where CI marks an environment provisioned to a spec. GitHub
+      # Actions sets CI on every job, so the gate is armed here -- asserted
+      # rather than assumed, because if that ever stopped holding the gate would
+      # go quiet with nothing failing. The expression is the guard's own
+      # predicate: set, and not the string "false".
+      - name: Assert the test-prerequisite gate is armed
+        run: test "${CI:-false}" != "false"
       # Web unit tests run in the node environment against the already-built
       # @psilink/core -- no dev server or Docker (the integration and browser
       # projects are the ones that stand up a server), so the shared setup above

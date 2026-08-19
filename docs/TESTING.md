@@ -234,6 +234,75 @@ warm cache passes even when the configuration is wrong. Inline vitest projects
 do not inherit the root `optimizeDeps`/`resolve` configuration; each project
 that needs it carries its own.
 
+## What a run did not cover
+
+A run that quietly covers less than the suite does is worse than a red one: its
+green is read as evidence. Three guards keep the gap visible, each a run-level
+vitest option -- read once for a run rather than per project, so a project added
+later is covered without registering anything of its own. The dist guard is in
+both app configs, the prerequisite guard in `apps/web`'s, and the reporter in
+every workspace config and in the root `vitest.config.ts` as well, since
+reporters belong to the config that starts a run rather than to a project it
+reaches.
+
+### A stale `@psilink/core` dist fails the run
+
+The apps import the built package, never `packages/core/src`, so a run whose
+`dist/` is older than the sources it was built from exercises yesterday's
+library and reports failures that belong to the build. Before any app suite
+runs, the `dist/` entries `packages/core/package.json` publishes are compared
+against `packages/core/src` and `rollup.config.ts`; a dist that is missing or
+older fails the run, naming the file that outran it and the rebuild:
+
+```sh
+npm run build -w packages/core
+```
+
+Set `PSILINK_ALLOW_STALE_CORE_DIST=1` to run against the dist as it stands.
+`packages/core`'s own suite carries no such guard: `pretest` rebuilds, and those
+tests import `src`. A run that selects no app project pays nothing either --
+`npm run test:scripts` needs no build and never asks for one.
+
+The comparison is over modification times, so it catches the ordinary staleness
+-- an edited source, or a checkout that rewound one -- and not a dist built from
+a source since reverted to identical bytes.
+
+### A missing environment prerequisite is named, and fails in CI
+
+Some legs need a tool the repository does not ship. The web signaling suites
+need a self-signed loopback certificate, which Node cannot issue, so
+`apps/web/test/utils/loopbackTlsCert.ts` shells out to `openssl` and the legs
+skip where it cannot mint one (no `openssl`, or a LibreSSL one that takes the
+flags differently).
+
+`apps/web/test/requireTestPrerequisites.ts` declares each such prerequisite and
+decides what its absence costs, by where the run happens. On a workstation the
+run continues, with the missing prerequisite, the coverage it costs, and how to
+supply it named on the console. Under `CI`, the run fails instead: a runner is
+provisioned to a spec, so a prerequisite absent there is a defect in the image
+or the workflow rather than a property of somebody's laptop. Set
+`PSILINK_ALLOW_MISSING_TEST_PREREQUISITES=1` to skip those legs deliberately.
+
+A suite that needs a new prerequisite adds it to `webTestPrerequisites()` beside
+the certificate. The CLI states two of its own the same way but per leg, since
+the legs that must have them are named individually:
+`PSILINK_REQUIRE_WORKER_BUILD=1` on the leg that builds the CLI worker bundle,
+and `PSILINK_SFTP_CHROOT_REQUIRED=1` on the chroot profile.
+
+### Every skipped test is named
+
+Vitest counts skips (`2 passed | 3 skipped`) but names none of them, so a leg
+that starts skipping reads as green with nothing to say which suite went quiet.
+The skipped-leg reporter (`scripts/lib/skippedLegReporter.mjs`) ends every run
+by listing each skipped test under its project and file, with the reason where a
+runtime `ctx.skip(reason)` gave one. `test.todo` is left out, being a
+placeholder vitest already reports on its own.
+
+It reports and never fails: which skips are legitimate is a per-suite question
+-- the SFTP matrix legs skip the backends they are not running, and the whole
+matrix together is the coverage -- so failing on one belongs with whatever
+declares the prerequisite, as above.
+
 ## Shared test material
 
 A helper that only tests use lives in the test tree that uses it --
