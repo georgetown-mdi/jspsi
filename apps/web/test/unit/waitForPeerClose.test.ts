@@ -5,6 +5,8 @@ import {
   waitForPeerClose,
 } from "../../src/psi/waitForPeerClose.js";
 
+import type { PeerCloseOutcome } from "../../src/psi/waitForPeerClose.js";
+
 import type { DataConnection } from "peerjs";
 
 class FakeDataChannel extends EventTarget {
@@ -56,15 +58,34 @@ function drainTaskQueue(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-async function isSettled(promise: Promise<void>): Promise<boolean> {
+async function isSettled(promise: Promise<unknown>): Promise<boolean> {
   let settled = false;
   void promise.then(() => (settled = true));
   await drainTaskQueue();
   return settled;
 }
 
+type ListenerCall = [
+  type: string,
+  handler: EventListenerOrEventListenerObject | null,
+  ...rest: Array<unknown>,
+];
+
+/** The handler a spied add/removeEventListener was given for `event`, asserted
+ * present so comparing two absent handlers cannot pass as identity. */
+function handlerFor(
+  calls: ReadonlyArray<ListenerCall>,
+  event: string,
+): EventListenerOrEventListenerObject {
+  const handler = calls.find(([type]) => type === event)?.[1];
+  expect(typeof handler, `no listener recorded for "${event}"`).toBe(
+    "function",
+  );
+  return handler as EventListenerOrEventListenerObject;
+}
+
 describe("waitForPeerClose", () => {
-  test("resolves once the peer closes the channel", async () => {
+  test("reports the peer's close, the one exit that means delivered", async () => {
     const { conn, channel } = makeConn();
 
     const waiting = waitForPeerClose(conn);
@@ -72,7 +93,7 @@ describe("waitForPeerClose", () => {
 
     channel?.closeFromPeer();
 
-    await expect(waiting).resolves.toBeUndefined();
+    await expect(waiting).resolves.toBe("peer-closed");
   });
 
   test("resolves once the channel enters closing", async () => {
@@ -87,7 +108,7 @@ describe("waitForPeerClose", () => {
 
     channel?.enterClosing();
 
-    await expect(waiting).resolves.toBeUndefined();
+    await expect(waiting).resolves.toBe("peer-closed");
   });
 
   test("resolves once the peer connection is no longer live", async () => {
@@ -101,7 +122,7 @@ describe("waitForPeerClose", () => {
 
     peerConnection?.enter("failed");
 
-    await expect(waiting).resolves.toBeUndefined();
+    await expect(waiting).resolves.toBe("peer-gone");
   });
 
   test("keeps waiting through a transient ICE disconnect", async () => {
@@ -118,14 +139,14 @@ describe("waitForPeerClose", () => {
     peerConnection?.enter("connected");
     (conn.dataChannel as unknown as FakeDataChannel).closeFromPeer();
 
-    await expect(waiting).resolves.toBeUndefined();
+    await expect(waiting).resolves.toBe("peer-closed");
   });
 
   test("resolves when the peer connection is already dead on entry", async () => {
     const { conn, peerConnection } = makeConn();
     peerConnection?.enter("closed");
 
-    await expect(waitForPeerClose(conn)).resolves.toBeUndefined();
+    await expect(waitForPeerClose(conn)).resolves.toBe("peer-gone");
   });
 
   test("does not wait on a channel that is no longer open", async () => {
@@ -134,13 +155,13 @@ describe("waitForPeerClose", () => {
     const { conn, channel } = makeConn();
     if (channel) channel.readyState = "closing";
 
-    await expect(waitForPeerClose(conn)).resolves.toBeUndefined();
+    await expect(waitForPeerClose(conn)).resolves.toBe("channel-not-open");
   });
 
   test("does not wait when the connection exposes no channel", async () => {
     const { conn } = makeConn({ channel: undefined });
 
-    await expect(waitForPeerClose(conn)).resolves.toBeUndefined();
+    await expect(waitForPeerClose(conn)).resolves.toBe("channel-not-open");
   });
 
   test("waits without a peer connection to watch", async () => {
@@ -151,20 +172,28 @@ describe("waitForPeerClose", () => {
 
     channel?.closeFromPeer();
 
-    await expect(waiting).resolves.toBeUndefined();
+    await expect(waiting).resolves.toBe("peer-closed");
   });
 
-  test("resolves at the ceiling when the peer never closes", async () => {
+  test("reports the ceiling when the peer never closes", async () => {
+    // The exit the delivery warning hangs on: the peer answered ICE and the
+    // channel is still open, so the outcome has to say the wait gave up rather
+    // than that the peer took the frame.
     const { conn } = makeConn();
 
-    await expect(waitForPeerClose(conn, 5)).resolves.toBeUndefined();
+    await expect(waitForPeerClose(conn, 5)).resolves.toBe("ceiling");
   });
 
-  test("leaves no listener or timer behind on any settle path", async () => {
+  test("removes the handlers it added, by identity, on any settle path", async () => {
     const { conn, channel, peerConnection } = makeConn();
+    const channelAdd = vi.spyOn(channel as FakeDataChannel, "addEventListener");
     const channelRemove = vi.spyOn(
       channel as FakeDataChannel,
       "removeEventListener",
+    );
+    const peerAdd = vi.spyOn(
+      peerConnection as FakePeerConnection,
+      "addEventListener",
     );
     const peerRemove = vi.spyOn(
       peerConnection as FakePeerConnection,
@@ -177,9 +206,16 @@ describe("waitForPeerClose", () => {
       "close",
       "closing",
     ]);
-    expect(peerRemove).toHaveBeenCalledWith(
-      "connectionstatechange",
-      expect.anything(),
+    // The handler reference, not just the event name: removing a function that
+    // was never added leaves the added one attached for the lifetime of a
+    // channel this wait no longer holds, and an event-name assertion alone
+    // cannot see that.
+    for (const event of ["close", "closing"])
+      expect(handlerFor(channelRemove.mock.calls, event)).toBe(
+        handlerFor(channelAdd.mock.calls, event),
+      );
+    expect(handlerFor(peerRemove.mock.calls, "connectionstatechange")).toBe(
+      handlerFor(peerAdd.mock.calls, "connectionstatechange"),
     );
     // A second peer event after the settle must not re-enter the resolved
     // promise's teardown.
@@ -199,16 +235,16 @@ describe("DEFAULT_PEER_CLOSE_TIMEOUT_MS", () => {
     vi.useFakeTimers();
     try {
       const { conn } = makeConn();
-      let settled = false;
-      void waitForPeerClose(conn).then(() => {
-        settled = true;
+      let outcome: PeerCloseOutcome | undefined;
+      void waitForPeerClose(conn).then((result) => {
+        outcome = result;
       });
 
       await vi.advanceTimersByTimeAsync(DEFAULT_PEER_CLOSE_TIMEOUT_MS - 1);
-      expect(settled).toBe(false);
+      expect(outcome).toBeUndefined();
 
       await vi.advanceTimersByTimeAsync(1);
-      expect(settled).toBe(true);
+      expect(outcome).toBe("ceiling");
     } finally {
       vi.useRealTimers();
     }

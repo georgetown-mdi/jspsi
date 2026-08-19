@@ -22,6 +22,32 @@ const DEAD_PEER_STATES: ReadonlySet<RTCPeerConnectionState> = new Set([
   "closed",
 ]);
 
+/**
+ * How the clean close's wait for the peer ended. Exactly one of these carries a
+ * delivery signal, so a caller that must tell "the peer took the final frame"
+ * from "the wait gave up" branches on this rather than on the wait returning.
+ */
+export type PeerCloseOutcome =
+  /** The channel closed under this side (its `close`/`closing` event): the
+   * ordered channel places the close sentinel behind every frame already handed
+   * to `send`, so a peer that reads in order took the final frame before
+   * closing. The only exit that can mean delivered -- for a conforming peer; one
+   * that closes without draining its inbound queue is indistinguishable from
+   * one that read everything -- and the event is the peer's on the path this
+   * wait exists for, since PeerJS's flushing close leaves the local channel
+   * open (see the listener-set note below). */
+  | "peer-closed"
+  /** The ceiling ran out with the channel still open and the peer still live:
+   * the peer answered ICE but never took the sentinel, so the final frame may
+   * still be sitting in this side's outbound buffer. */
+  | "ceiling"
+  /** No live peer is left to deliver to (the peer connection reached `failed`
+   * or `closed`). Whatever was buffered went with it. */
+  | "peer-gone"
+  /** The channel was not open when the wait began, so it could carry neither
+   * the sentinel nor the frames behind it. */
+  | "channel-not-open";
+
 /** The WebRTC objects under a PeerJS connection. Read through one accessor
  * because PeerJS types both as always present while a connection that never
  * negotiated has neither: the wait then has nothing to watch, which is the same
@@ -36,8 +62,9 @@ function transportOf(conn: DataConnection): {
 /**
  * Resolves once the peer has closed the data channel underneath `conn` - the
  * one delivery signal a browser peer gets - or once there is no live peer left
- * to deliver to, or once `timeoutMs` runs out. Never rejects: the caller is
- * already tearing down.
+ * to deliver to, or once `timeoutMs` runs out, reporting which of those ended
+ * the wait ({@link PeerCloseOutcome}). Never rejects: the caller is already
+ * tearing down.
  *
  * This is what makes a clean close mean delivery. PeerJS's flushing close only
  * queues its in-band close sentinel and returns, so the close resolves with the
@@ -77,37 +104,42 @@ function transportOf(conn: DataConnection): {
 export function waitForPeerClose(
   conn: DataConnection,
   timeoutMs: number = DEFAULT_PEER_CLOSE_TIMEOUT_MS,
-): Promise<void> {
+): Promise<PeerCloseOutcome> {
   const { channel, peerConnection } = transportOf(conn);
   // Nothing to wait for: a channel that is not open can carry neither the
   // sentinel nor the frames behind it, so the wait would be pure delay on a
   // path that has already lost whatever was buffered.
   if (channel === undefined || channel.readyState !== "open")
-    return Promise.resolve();
-  return new Promise<void>((resolve) => {
+    return Promise.resolve("channel-not-open");
+  return new Promise<PeerCloseOutcome>((resolve) => {
     let settled = false;
-    const settle = () => {
+    const settle = (outcome: PeerCloseOutcome) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      channel.removeEventListener("close", settle);
-      channel.removeEventListener("closing", settle);
+      channel.removeEventListener("close", onChannelClose);
+      channel.removeEventListener("closing", onChannelClose);
       peerConnection?.removeEventListener(
         "connectionstatechange",
         onPeerConnectionState,
       );
-      resolve();
+      resolve(outcome);
+    };
+    const onChannelClose = () => {
+      settle("peer-closed");
     };
     const onPeerConnectionState = () => {
       if (
         peerConnection !== undefined &&
         DEAD_PEER_STATES.has(peerConnection.connectionState)
       )
-        settle();
+        settle("peer-gone");
     };
-    const timer = setTimeout(settle, timeoutMs);
-    channel.addEventListener("close", settle);
-    channel.addEventListener("closing", settle);
+    const timer = setTimeout(() => {
+      settle("ceiling");
+    }, timeoutMs);
+    channel.addEventListener("close", onChannelClose);
+    channel.addEventListener("closing", onChannelClose);
     peerConnection?.addEventListener(
       "connectionstatechange",
       onPeerConnectionState,

@@ -45,6 +45,13 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  * {@link waitForPeerClose}), so a resolved close means delivered rather than
  * buffered -- except on the wait's ceiling, dead-peer, and already-not-open
  * paths, where the frame can still be in flight (see {@link waitForPeerClose}).
+ * The ceiling reports itself through `onFinalFrameUnconfirmed`, so a caller can
+ * tell its operator rather than let a run report success with the partner's
+ * copy in doubt: it is the exit a finished exchange reaches with the peer still
+ * live and the channel still open, so nothing else would tell them anything.
+ * The dead-peer and already-not-open exits stay silent, so a partner whose stack
+ * dies during the drain of a run that already reported success is never
+ * reported to anyone; docs/spec/WEBRTC_TRANSPORT.md records that limit.
  *
  * The inbound path is byte-bounded against a hostile or buggy peer: PeerJS chunk
  * reassembly is capped so an oversized PSI set frame or a flood of
@@ -69,6 +76,10 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  *                 reassembly cap) and `closeDrainTimeoutMs` the ceiling on the
  *                 clean close's wait for the peer (see {@link waitForPeerClose}),
  *                 for tests only -- none of them is an operator-facing knob.
+ *                 `onFinalFrameUnconfirmed` fires when a clean close's wait ends
+ *                 on that ceiling, once per connection at most, leaving the
+ *                 operator-facing wording to the caller that owns a warning
+ *                 surface; omitting it makes the exit silent.
  */
 export async function openPeerMessageConnection(
   conn: DataConnection,
@@ -78,6 +89,7 @@ export async function openPeerMessageConnection(
     maxFrameBytes?: number;
     maxConcurrentReassemblies?: number;
     closeDrainTimeoutMs?: number;
+    onFinalFrameUnconfirmed?: () => void;
   },
 ): Promise<MessageConnection> {
   const maxFrameBytes = options?.maxFrameBytes ?? MAX_WEBRTC_FRAME_BYTES;
@@ -156,7 +168,12 @@ export async function openPeerMessageConnection(
               options?.closeDrainTimeoutMs,
             );
             conn.close({ flush: true });
-            await peerClosed;
+            // Only the ceiling reports: the peer-gone and channel-not-open
+            // exits stay silent even where the run itself succeeded, so a
+            // partner whose stack dies during this drain reaches no one. The
+            // limit is recorded in docs/spec/WEBRTC_TRANSPORT.md.
+            if ((await peerClosed) === "ceiling")
+              options?.onFinalFrameUnconfirmed?.();
           } else {
             conn.close();
           }
