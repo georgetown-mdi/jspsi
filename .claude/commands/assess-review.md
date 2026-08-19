@@ -175,6 +175,13 @@ there is the one the brief describes.
   <command>` or `git -C <TREE> <command>`, once per command. A subagent's Bash
   working directory reverts between calls, so a single leading `cd` does not
   stick and the commands after it run in the wrong tree.
+- **Direct the implementer's scratch to `/tmp`.** Every fix brief tells the
+  implementer that its own scratch -- measurement files, repro probes, one-off
+  scripts, build-output experiments -- goes to `/tmp`, never inside the branch
+  worktree: an untracked leftover there blocks
+  `require-clean-tree-for-review.mjs` on the branch's next round, and a fix
+  implementer spawned into that worktree does not own it, so
+  `block-worktree-deletions.mjs` refuses to let it clean the leftover up.
 - **A small fix travels as its exact edit.** For a fix under roughly 20 lines,
   the brief carries the edit itself -- the file, the old text, the new text, and
   the test to run -- and the spawn is a `sonnet` implementer applying it. Writing
