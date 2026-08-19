@@ -901,12 +901,14 @@ function decideGuidance(
  * a status carries a tier here and its wording there, and a remediation names the
  * inputs that surface actually takes.
  *
- * Total over a report {@link verifyDualSignedRecord} produces. Two contradictions
- * a hand-built report can state are refused rather than rendered, since either
- * would have a surface overstate the evidence: a `verified` outcome over a slot
- * nothing anchors, and an `unmatched` local identity with no
- * {@link SignedReceiptVerdictInputs.localIdentitySource} to say what that
- * non-match costs.
+ * Total over a report {@link verifyDualSignedRecord} produces, provided a caller
+ * that supplied a local identity to the verification also states its
+ * {@link SignedReceiptVerdictInputs.localIdentitySource}: a report whose local
+ * identity is `unmatched` is refused without one, because a named identity
+ * contradicts the record while one resolved without being asked does not, and
+ * guessing either way would misgrade the evidence. The other refusal -- a
+ * `verified` outcome over a slot nothing anchors -- is unreachable from a
+ * produced report and can only be stated by a hand-built one.
  */
 export function decideSignedReceiptVerdict(
   report: DualSignedRecordVerificationReport,
