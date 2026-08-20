@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import log from "loglevel";
@@ -10,6 +12,7 @@ import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { beginManagedRendezvous } from "../../src/psi/managedRendezvous.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
 import { runManagedExchangeInBrowser } from "../../src/psi/managedRunDriver.js";
+import { waitForIncomingConnection } from "../../src/psi/waitForConnection.js";
 
 import type { ManagedExchangeRecord } from "../../src/psi/managedExchangeRecord.js";
 import type { ManagedInputSource } from "../../src/psi/managedInputHandle.js";
@@ -17,7 +20,11 @@ import type { ManagedInputSource } from "../../src/psi/managedInputHandle.js";
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
 
-import type { MessageConnection } from "@psilink/core";
+import type {
+  HandshakeRole,
+  MessageConnection,
+  RendezvousRole,
+} from "@psilink/core";
 import type { PeerCloseOutcome } from "../../src/psi/waitForPeerClose.js";
 import type { RunOutputs } from "@bench/runOutputs";
 
@@ -25,9 +32,16 @@ import type { RunOutputs } from "@bench/runOutputs";
  * The browser wiring of a managed re-run, with every platform seam it composes
  * mocked: the rendezvous, the message connection, the handshake, the PSI
  * exchange, and the outputs builder. What is left is the wiring's own decisions,
- * and the ones asserted here are its two teardowns: neither the run's outputs nor
- * a failed handshake's error may be held behind the clean close's wait for the
+ * and the ones asserted here are the handshake role it hands the key exchange
+ * for each stored side, and its two teardowns: neither the run's outputs nor a
+ * failed handshake's error may be held behind the clean close's wait for the
  * peer, whose duration the partner chooses up to the close ceiling.
+ *
+ * The role is asserted from the handshake mock's own arguments, against the
+ * cross-application interop vectors rather than against the table this wiring
+ * reads: the pairing is half a contract with a CLI partner, and a flow that read
+ * the wrong side out of a correct table would take a role no partner pairs with
+ * while the table's own test stayed green.
  *
  * On the handshake's teardown that wait costs more than the run's own latency.
  * The handshake phase runs inside the single-writer lock, which releases when the
@@ -78,6 +92,9 @@ vi.mock("../../src/psi/managedRendezvous.js", () => ({
 vi.mock("../../src/psi/peerMessageConnection.js", () => ({
   openPeerMessageConnection: vi.fn(),
 }));
+vi.mock("../../src/psi/waitForConnection.js", () => ({
+  waitForIncomingConnection: vi.fn(),
+}));
 vi.mock("../../src/psi/managedInputHandle.js", () => ({
   acquireValidatedManagedInput: vi.fn(() =>
     Promise.resolve({ rows: [], columns: [] }),
@@ -110,6 +127,25 @@ vi.mock("@psilink/core", async (importOriginal) => {
 const mockedAuthenticate = vi.mocked(authenticateExchange);
 const mockedRendezvous = vi.mocked(beginManagedRendezvous);
 const mockedOpen = vi.mocked(openPeerMessageConnection);
+const mockedWaitForIncoming = vi.mocked(waitForIncomingConnection);
+
+/** The side-to-handshake-role pairing both applications are held to, read from
+ * the shared cross-application fixture. */
+const SIDE_VECTORS = (
+  JSON.parse(
+    readFileSync(
+      new URL(
+        "../../../../packages/core/test/vectors/webrtc-interop-vectors.json",
+        import.meta.url,
+      ),
+      { encoding: "utf8" },
+    ),
+  ) as {
+    rendezvous: {
+      sides: Array<{ side: RendezvousRole; handshakeRole: HandshakeRole }>;
+    };
+  }
+).rendezvous.sides;
 
 /** Only the fields the driver itself reads: the side that picks the handshake
  * role, and the secret/terms/expiry it hands to seams that are mocked here. */
@@ -119,6 +155,12 @@ const RECORD = {
   sharedSecret: "stored-secret",
   exchangeFile: {},
 } as unknown as ManagedExchangeRecord;
+
+/** The same record stored for the other rendezvous side. */
+const recordForSide = (side: RendezvousRole): ManagedExchangeRecord => ({
+  ...RECORD,
+  side,
+});
 
 /** The per-run input source; its contents never reach anything unmocked. */
 const SOURCE = {} as unknown as ManagedInputSource;
@@ -153,20 +195,31 @@ function makeParkedCloseMc() {
   };
 }
 
-function acquireResources() {
+function acquireResources(side: RendezvousRole = "acceptor") {
   const peer = { disconnect: vi.fn(), destroy: vi.fn() };
   const conn = { close: vi.fn() };
-  mockedRendezvous.mockResolvedValue({
-    side: "acceptor",
-    peer: peer as unknown as Peer,
-    conn: conn as unknown as DataConnection,
-  });
+  mockedRendezvous.mockResolvedValue(
+    side === "inviter"
+      ? { side: "inviter", peer: peer as unknown as Peer }
+      : {
+          side: "acceptor",
+          peer: peer as unknown as Peer,
+          conn: conn as unknown as DataConnection,
+        },
+  );
+  // The inviter listens, so its channel arrives through the inbound wait rather
+  // than out of the acquisition.
+  mockedWaitForIncoming.mockResolvedValue(conn as unknown as DataConnection);
   return { peer, conn };
 }
 
-function runDriver(signal: AbortSignal, onWarning?: (message: string) => void) {
+function runDriver(
+  signal: AbortSignal,
+  onWarning?: (message: string) => void,
+  record: ManagedExchangeRecord = RECORD,
+) {
   return runManagedExchangeInBrowser({
-    record: RECORD,
+    record,
     source: SOURCE,
     signal,
     urls: URLS,
@@ -186,6 +239,32 @@ afterEach(() => {
 });
 
 describe("runManagedExchangeInBrowser", () => {
+  test.each(SIDE_VECTORS)(
+    "authenticates a stored $side in the vector's $handshakeRole role",
+    async ({ side, handshakeRole }) => {
+      // The role this flow reads out of the side-to-role table, taken from the
+      // handshake's own arguments: a re-run that authenticated in the role its
+      // partner also took never completes a handshake, and no web-to-web test
+      // would notice, since both ends would have moved together.
+      const { mc } = makeParkedCloseMc();
+      mockedOpen.mockResolvedValue(mc);
+      acquireResources(side);
+
+      await runDriver(
+        new AbortController().signal,
+        undefined,
+        recordForSide(side),
+      );
+
+      expect(mockedAuthenticate).toHaveBeenCalledWith(
+        mc,
+        handshakeRole,
+        RECORD.sharedSecret,
+        undefined,
+      );
+    },
+  );
+
   test("yields its outputs while the close is still draining", async () => {
     // The defect this pins: a peer that answers ICE but never reads the close
     // sentinel holds the drain to its ceiling, and awaiting the drain would hold

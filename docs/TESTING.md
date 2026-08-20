@@ -331,6 +331,45 @@ The decision, the alternatives measured against it, and where each current
 `@psilink/core/testing` subject stands are in
 [cross-workspace-test-material.md](notes/cross-workspace-test-material.md).
 
+### Checked-in vectors
+
+A vector file is shared test DATA rather than a helper, so it takes neither
+route above: each one lives in `packages/core/test/vectors/` beside the
+generator that produces it, and a suite in any workspace reads it by relative
+path -- the Node suites with `node:fs`, the browser suites with Vite's `?raw`.
+Nothing about it enters `packages/core/src` or ships in `dist/testing.*`.
+
+Reading one from more than one workspace is deliberate, along two axes. A
+construction that two applications implement independently is guarded only when
+each application's OWN call sites are driven against one pinned answer; a test
+that computes both "sides" through a single shared path proves nothing about
+either. And a construction that runs on `crypto.subtle` is a different
+implementation on each platform, so a Node-only assertion of it leaves the
+browser half unmeasured.
+
+`webrtc-interop-vectors.json` -- the CLI-to-web rendezvous, invitation, and
+handshake-role contract -- splits both ways:
+
+- `packages/core/test/webrtcInterop.test.ts` for what core alone owns.
+- `apps/cli/test/unit/webrtcInterop.test.ts` and
+  `apps/cli/test/unit/webrtcDispatch.test.ts` for the CLI's own constructions.
+- `apps/web/test/unit/webrtcInterop.test.ts` for the web app's, with each of the
+  three flows that read the side-to-role table driven through its own entry
+  point as well: the two one-shot flows in
+  `apps/web/test/unit/webrtcInteropHooks.test.ts` and the managed re-run in
+  `apps/web/test/unit/managedRunDriver.test.ts`. A correct table read on the
+  wrong key is the same failure on the wire, and one no web-to-web test can see,
+  since a swapped key moves both ends together.
+- `apps/web/test/browser/webrtcInterop.test.ts` for the peer-id derivation and
+  the invitation checksum in real Chromium.
+
+Each of those projects runs on every pull request that can touch the contract,
+so a divergence fails there rather than at first cross-application contact.
+`kex-vectors.json` splits on the platform axis alone
+(`packages/core/test/kex.test.ts` and `apps/web/test/browser/kex.test.ts`): both
+applications drive the key schedule through the same core entry point, so it has
+no per-application call sites to guard.
+
 ## Verifying Windows owner-only file protections
 
 On Windows the CLI protects its owner-only files with ACLs rather than POSIX mode bits, and no automated test leg runs on Windows. The checks below are a manual procedure to run on a Windows host to confirm the owner-only writers still narrow ACLs correctly after a change to their Windows branch. Run them in PowerShell from a scratch directory on an NTFS volume that carries the usual inheritable ACEs (a subdirectory of the user profile is fine); each check produces an artifact you then inspect. `$me` below is the domain-qualified account the CLI narrows the file to; derive it from `whoami`, the same call the CLI uses to name the grant principal, so the comparison matches the granted identity exactly (domain casing and NetBIOS form included).

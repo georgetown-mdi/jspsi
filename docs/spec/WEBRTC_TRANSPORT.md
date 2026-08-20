@@ -45,6 +45,16 @@ The handshake role is fixed by the rendezvous role rather than negotiated
 separately: the parties already had to disagree about which end they are in
 order to meet at all.
 
+Both implementations resolve this table identically or a CLI party and a browser
+party cannot complete a handshake with each other, so the pairing -- together
+with the request-encryption flag each side sends, `false` on both (see
+[Application-layer encryption](#application-layer-encryption)) -- is pinned by
+the cross-application conformance vectors at
+[`packages/core/test/vectors/webrtc-interop-vectors.json`](../../packages/core/test/vectors/webrtc-interop-vectors.json),
+which each application's own suite asserts its own side against. See
+[PROTOCOL.md](PROTOCOL.md#webrtc-rendezvous-peer-id-derivation) for what the
+file records.
+
 ## Broker socket
 
 The client opens

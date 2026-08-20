@@ -12,6 +12,7 @@ import {
   createServerJobExchangeDriver,
 } from "@psi/serverJobExchangeDriver";
 import { discardServerJob, writeAttachment } from "@psi/consoleJobAttachment";
+import { HANDSHAKE_ROLE_FOR_SIDE } from "@psi/handshakeRole";
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
 import { dialAsAcceptor } from "@psi/rendezvous";
 
@@ -215,7 +216,7 @@ async function resolveJobInputSource(
  * on the launch so a superseded launch aborts and resets -- with the acceptor's
  * differences re-surfaced from the legacy exchange screen's acceptor role:
  *
- *  - The acceptor is the PSI INITIATOR (`exchangeRole: "initiator"`), and the
+ *  - The acceptor is the PSI INITIATOR ({@link HANDSHAKE_ROLE_FOR_SIDE}), and the
  *    WASM library is awaited EARLY (before dialing, to fail fast) -- the inverse
  *    of the inviter's late await.
  *  - It DIALS the inviter's derived id ({@link dialAsAcceptor}), which tears down
@@ -406,7 +407,7 @@ export function useAcceptorExchange({
     const browserDriver = (): ExchangeDriver<RunOutputs> =>
       createBrowserExchangeDriver<RunOutputs>({
         acquire,
-        exchangeRole: "initiator",
+        exchangeRole: HANDSHAKE_ROLE_FOR_SIDE.acceptor,
         sharedSecret: token.sharedSecret,
         expires: token.expires,
         generateOutput,
