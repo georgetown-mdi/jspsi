@@ -318,7 +318,8 @@ function WithheldResultInset() {
  * seat that computed its own count gets no such line -- the count-only mode is
  * enforced for it, and a caveat there would be false.
  *
- * Exported for the copy-pin test.
+ * The sentence is pinned as literals in the bench browser cases rather than
+ * through this export.
  *
  * @internal
  */
