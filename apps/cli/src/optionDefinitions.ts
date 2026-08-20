@@ -530,10 +530,9 @@ export function connectionOverridesFrom(
  * the two never both fire.
  *
  * `--outbound-path` is deliberately NOT one of these flags: unlike the silently-
- * ignored options above, it is a hard error on a non-file-sync channel (the
- * URL-driven commands reject a webrtc URL before overrides apply, and
- * applyConnectionOverrides throws on a webrtc config), so it needs no
- * "ignored" warning -- a warning here would falsely promise it was tolerated.
+ * ignored options above, {@link applyConnectionOverrides} throws on it off the
+ * file-sync channels, so it needs no "ignored" warning -- a warning here would
+ * falsely promise it was tolerated.
  */
 export function warnUnsupportedFileSyncFlags(
   channel: ConnectionConfig["channel"],
@@ -569,6 +568,46 @@ export function warnUnsupportedFileSyncFlags(
     log.warn(
       `--polling-frequency has no effect on the ${channel} channel and will be ` +
         "ignored; it is only supported on sftp and filedrop",
+    );
+}
+
+/**
+ * Warn that the server-block overrides a webrtc connection cannot take
+ * (`--server-port`, `--server-username`) have no effect on it, naming whichever
+ * the caller actually set. {@link applyConnectionOverrides} merges the server
+ * sub-group on `sftp` alone, so on webrtc both are parsed and dropped; this is
+ * the ignored-flag warning for that drop, the counterpart to the file-sync one
+ * {@link warnUnsupportedFileSyncFlags} emits. A no-op on every other channel,
+ * where the wording below (which names the coordination server and the ws/wss
+ * URL) would not apply. Warn-not-block, per the trusted-operator posture.
+ *
+ * The two carry different remedies, so each warns for itself: the coordination
+ * server's port is part of the location the URL already gives, while its
+ * `username` has no URL form at all and is authored in the connection block
+ * (the same remedy {@link WEBRTC_URL_EXTRAS_REFUSED} gives for `server.key`).
+ */
+export function warnUnsupportedWebRTCServerFlags(
+  channel: ConnectionConfig["channel"],
+  flags: { serverPort?: number; serverUsername?: string },
+  log: { warn: (message: string) => void },
+): void {
+  if (channel !== "webrtc") return;
+  // Security invariant, as in warnServerOverridesIgnoredOffline: emit the flag
+  // NAME only. --server-username is operator-supplied free text reaching the
+  // terminal and any --log-file, so the message stays static.
+  if (flags.serverPort !== undefined)
+    log.warn(
+      "--server-port has no effect on the webrtc channel and will be ignored; " +
+        "the coordination server's port is part of the ws:// or wss:// URL " +
+        "this invitation is built from.",
+    );
+  if (flags.serverUsername !== undefined)
+    log.warn(
+      "--server-username has no effect on the webrtc channel and will be " +
+        "ignored; a webrtc invitation reaches its coordination server by " +
+        "location alone. For a coordination server that needs a user, author " +
+        "`channel: webrtc` (with `server.username`) in psilink.yaml and run " +
+        "'psilink exchange'.",
     );
 }
 

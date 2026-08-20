@@ -58,6 +58,7 @@ import {
   warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
   warnUnsupportedFileSyncFlags,
+  warnUnsupportedWebRTCServerFlags,
   type CommonBootstrapOptions,
 } from "../optionDefinitions";
 import {
@@ -372,6 +373,17 @@ export async function validateInvite(params: {
         connectionPerPoll:
           options.connectionPerPoll === true ||
           fileSyncOptions?.connectionPerPoll === true,
+      },
+      log,
+    );
+    // The server-block half of the same report. This is the one command that
+    // builds a webrtc connection from a URL, so it is the only place
+    // --server-port/--server-username can be typed at a channel that drops them.
+    warnUnsupportedWebRTCServerFlags(
+      connection.channel,
+      {
+        serverPort: options.serverPort,
+        serverUsername: options.serverUsername,
       },
       log,
     );

@@ -531,6 +531,45 @@ test("validateInvite: a webrtc invite declares no retain mode and reports the fl
   warnSpy.mockRestore();
 });
 
+test("validateInvite: a webrtc invite reports --server-port/--server-username ignored", async () => {
+  // The server block is merged on sftp alone, so both are dropped on this
+  // channel: the port the partner is handed comes from the URL, and the
+  // username never lands anywhere at all.
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-ws-server-flags-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  const ready = await validateInvite({
+    resolved: {
+      mode: "online",
+      url: new URL("wss://peers.example.org:8443/psi"),
+      input,
+    },
+    options: { ...options, serverPort: 9999, serverUsername: "alice" },
+    acceptTimeout: 900,
+    log,
+  });
+  const warnings = warnSpy.mock.calls.map((c) => String(c[0]));
+  expect(warnings.some((m) => m.includes("--server-port"))).toBe(true);
+  expect(warnings.some((m) => m.includes("--server-username"))).toBe(true);
+  // Flag names only: these lines reach the terminal and any --log-file, so no
+  // override value rides along on one.
+  expect(warnings.some((m) => m.includes("alice"))).toBe(false);
+  if (ready.mode !== "online") throw new Error("expected online mode");
+  if (ready.connection.channel !== "webrtc") throw new Error("expected webrtc");
+  expect(ready.connection.server.port).toBe(8443);
+  expect(ready.connection.server.username).toBeUndefined();
+  // Nor does either reach the endpoint the acceptor seeds its own block from.
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.connectionEndpoint).toEqual({
+    channel: "webrtc",
+    host: "peers.example.org",
+    port: 8443,
+    path: "/psi",
+  });
+  warnSpy.mockRestore();
+});
+
 test("validateInvite: online carries the disclosed-columns subset from the inferred metadata", async () => {
   // An input with non-linkage columns: `notes` infers as an `other` payload column
   // and `member_id` as an `_id` row-identifier, both transmitted; the name/dob/ssn

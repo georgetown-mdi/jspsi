@@ -44,6 +44,7 @@ import {
   warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
   warnUnsupportedFileSyncFlags,
+  warnUnsupportedWebRTCServerFlags,
 } from "../../src/optionDefinitions";
 import {
   applyEndpointSplitDirectories,
@@ -992,6 +993,46 @@ test("warnUnsupportedFileSyncFlags: a non-file-sync channel warns only for the f
   const neither = collectWarnings();
   warnUnsupportedFileSyncFlags("webrtc", {}, neither);
   expect(neither.messages).toHaveLength(0);
+});
+
+// --- warnUnsupportedWebRTCServerFlags ----------------------------------------
+
+test("warnUnsupportedWebRTCServerFlags: webrtc warns once per flag set", () => {
+  const both = collectWarnings();
+  warnUnsupportedWebRTCServerFlags(
+    "webrtc",
+    { serverPort: 9000, serverUsername: "alice" },
+    both,
+  );
+  expect(both.messages).toHaveLength(2);
+  expect(both.messages[0]).toContain("--server-port");
+  expect(both.messages[1]).toContain("--server-username");
+  // Flag names only -- the message is static apart from them, so an override
+  // value never reaches the terminal or a --log-file.
+  expect(both.messages.join("")).not.toContain("alice");
+  expect(both.messages.join("")).not.toContain("9000");
+
+  const onlyPort = collectWarnings();
+  warnUnsupportedWebRTCServerFlags("webrtc", { serverPort: 9000 }, onlyPort);
+  expect(onlyPort.messages).toHaveLength(1);
+
+  const neither = collectWarnings();
+  warnUnsupportedWebRTCServerFlags("webrtc", {}, neither);
+  expect(neither.messages).toHaveLength(0);
+});
+
+test("warnUnsupportedWebRTCServerFlags: the file-sync channels never warn", () => {
+  // Both flags are applied on sftp, and the message's wording (a coordination
+  // server named by a ws/wss URL) fits no other channel.
+  for (const channel of ["sftp", "filedrop"] as const) {
+    const log = collectWarnings();
+    warnUnsupportedWebRTCServerFlags(
+      channel,
+      { serverPort: 9000, serverUsername: "alice" },
+      log,
+    );
+    expect(log.messages).toHaveLength(0);
+  }
 });
 
 test("runOrExit: a successful body does not exit", async () => {
