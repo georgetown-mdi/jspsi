@@ -311,24 +311,35 @@ A helper that only tests use lives in the test tree that uses it --
 import anything the repository declares, root devDependencies (`typescript`)
 included, for as long as no workspace outside its own imports it.
 
-A helper that more than one workspace's test tree needs has one channel:
-`@psilink/core/testing`, whose subjects live in `packages/core/src`. Two
-properties constrain what may go there. Everything it holds is built into
-`dist/testing.*` and published with `@psilink/core`, so a fixture put there
-ships to consumers. And it cannot import a dependency `packages/core` does not
-declare in its own `dependencies`, so a helper needing a root devDependency
-cannot use it at all -- the core build fails rather than the import resolving.
-Reach for the channel only when a second workspace genuinely needs the helper,
-and keep it in its own test tree otherwise.
+A helper that more than one workspace's test tree needs has two channels, and
+which one it takes is decided by what it imports, not by what it is about.
 
-There is deliberately no dedicated cross-workspace testkit package: reopen that
-question when a third piece of test-only material would move into
-`packages/core/src` purely for reach, when a helper two workspaces need must
-import a dependency `packages/core` does not declare, when the shipped
-`dist/testing.*` surface starts costing something a consumer or a review can
-name, or when `apps/cli` and `apps/web` grow a second copy of the same helper.
-The decision, the alternatives measured against it, and where each current
-`@psilink/core/testing` subject stands are in
+`@psilink/core/testing`, whose subjects live in `packages/core/src`, is the
+channel for a helper that needs nothing `packages/core` does not already declare
+in its own `dependencies`. Everything it holds is built into `dist/testing.*`
+and published with `@psilink/core`, so a fixture put there ships to consumers.
+
+`@psilink/testkit` is the channel for a helper that cannot meet that condition:
+a private, never-published workspace with no build and no `dist`, whose
+`exports` map points at its `./src/*.ts` and which is therefore consumed as raw
+TypeScript and typechecked inside each consumer's own program. It may import
+anything the repository declares, including a dependency `packages/core` does
+not -- which is the whole reason it exists, since core's build resolves its
+externals from `dependencies` alone, so an import of anything else either fails
+that build or is inlined into the package core publishes.
+
+Its admission rule, which is narrow on purpose: material goes in only when a
+second workspace's test tree genuinely needs it AND it cannot take the
+`@psilink/core/testing` channel, and it is exported one explicit subpath at a
+time. Nothing moves in for tidiness, and the existing `@psilink/core/testing`
+subjects stay where they are. Its one subject today is the WebRTC inbound frame
+fixture set, which both apps' transports are held to and which is built with the
+real `peerjs-js-binarypack` packer (a devDependency of `packages/core`, not a
+dependency).
+
+Anything a single workspace needs stays in that workspace's own test tree,
+whichever channel it would qualify for. The decision, the alternatives measured
+against it, and where each current `@psilink/core/testing` subject stands are in
 [cross-workspace-test-material.md](notes/cross-workspace-test-material.md).
 
 ### Checked-in vectors

@@ -4,12 +4,12 @@ title: "Where cross-workspace test material lives"
 
 # Where cross-workspace test material lives
 
-_Status: decided, nothing built. psilink adds no dedicated home for test-only
-material that has to reach more than one workspace; `@psilink/core/testing`
-stays the one channel, and the condition that reopens the question is written
-where it will be seen, in
-[TESTING.md](../TESTING.md#shared-test-material). This note records the
-constraints that shaped the decision, what each piece of test-only material
+_Status: decided and built. psilink first decided to add no dedicated home,
+naming the conditions that would reopen the question; one of them then fired,
+and the home exists as `packages/testkit` -- private, unpublished, consumed as
+raw TypeScript -- holding what `@psilink/core/testing` cannot. This note records
+the constraints that shaped both decisions, what fired the trigger and what the
+second decision was measured against, what each piece of test-only material
 inside `packages/core/src` is, and the alternatives weighed and not adopted. See
 [docs/notes/README.md](README.md)._
 
@@ -34,7 +34,7 @@ with the package, or -- if it needs a root devDependency -- cannot use the
 channel at all. The question is whether psilink builds a home with neither
 property, and if not, what would make it build one.
 
-## The decision
+## The first decision, and what it rested on
 
 Build no new home. `@psilink/core/testing` remains the single cross-workspace
 channel for test-only material, test-only material shipping in `dist/testing.*`
@@ -43,6 +43,48 @@ line in [TESTING.md](../TESTING.md#shared-test-material) rather than a promise
 here, because the failure mode this decision guards against is the whole
 question being retaken from scratch by whoever next hits one of the constraints
 below.
+
+That decision turned on there being no inhabitant: every approach was measured
+working, and what none of them had was a helper that needed it.
+
+## The second decision: the home exists
+
+An inhabitant arrived -- the WebRTC inbound frame fixture set, which the CLI's
+reassembler and the web app's PeerJS wrap must both be held to, and which is
+built with the real `peerjs-js-binarypack` packer. It fires two of the reopen
+conditions at once: it is a third piece of test-only material that would move
+into `packages/core/src` purely for reach, and it needs a dependency
+`packages/core` does not declare. So `packages/testkit` was built, in the
+minimal form alternative C describes: private, no build script, no `dist`,
+nothing published, an `exports` map onto `./src/*.ts`, and one explicit subpath
+per subject.
+
+Two costs the first decision anticipated turned out to be already paid or
+smaller than recorded. The root `build` script is `npm run build --workspaces
+--if-present`, so a workspace declaring no `build` script no longer fails it.
+And adding the workspace touched no tsconfig, no rollup config, no eslint
+config, and no vitest config: `package-lock.json` gains the two entries npm
+writes for a workspace link, and each consuming app declares the dependency.
+
+The junk-drawer risk the first decision named is answered by the admission rule
+in [TESTING.md](../TESTING.md#shared-test-material) rather than by the package's
+existence: material enters only when a second workspace's test tree needs it AND
+it cannot take the `@psilink/core/testing` channel. Nothing migrated -- the
+existing subjects of that channel meet its condition and stay on it.
+
+### What constraint 1 does when the dependency is bundleable
+
+The `typescript` case fails the core build loudly. `peerjs-js-binarypack` does
+not: measured on this repository, an import of it from
+`packages/core/src/testing.ts` builds green and inlines a copy of the packer
+into the published `dist/testing.esm.js` (119,902 bytes to 130,260, with no
+import of the package left in the output). That is the same constraint operating
+silently instead of loudly, and it is worse in one respect -- the repository
+exact-pins that packer because the wire encoding it produces is a compatibility
+surface, and vendoring a second copy of it into a published bundle puts that pin
+one build away from meaning nothing. A helper needing a dependency core does not
+declare therefore takes the testkit whether or not the build would tolerate
+inlining it.
 
 ## The constraints, and where they bite
 
@@ -56,7 +98,9 @@ re-derivable rather than taken on trust.
    the compiler, and the CJS interop fails the core build outright (`"default"
    is not exported by .../typescript/lib/typescript.js`). The constraint is the
    dependency, not the file's location: moving the helper elsewhere inside
-   `packages/core` does not lift it.
+   `packages/core` does not lift it. A loud failure is the lucky case -- a
+   dependency rollup can bundle is inlined into the published output instead,
+   which is what the second decision measured.
 2. **The project-reference redirect.** `apps/web/tsconfig.json` references
    `packages/core` as a composite project, so a web file importing a `.ts` that
    belongs to core's project is redirected to a per-file declaration output the
@@ -75,7 +119,7 @@ resolved through `node_modules` is in neither -- TS6307 does not reach a
 publishes no declarations. That exemption is what every candidate home below
 turns on.
 
-## What the decision rests on
+## What the first decision rested on
 
 **The case that raised the question resolved without a channel.** Two
 compiler-API walks over declared type positions -- one behind the linkage-term
@@ -114,16 +158,24 @@ and puts fixtures in front of anyone reading core's exports. Nothing measures it
 accepted rather than priced, and its arrival on the trigger list below is what
 turns it back into a live question.
 
+The second decision overtook exactly two of these: the two apps' test trees
+acquired material they both need, and the approach that would have been built
+empty acquired its inhabitant. The rest still hold, which is why the home is
+narrow rather than a general test-scaffolding package.
+
 ## The test-only material inside `packages/core/src`
 
-Nothing moves under this decision. What is settled is which side of the line
-each piece is on, so the answer is already taken when the question reopens.
+Nothing moved when the home was built, and the admission rule is why: each of
+these can take the `@psilink/core/testing` channel, so the fact that a second
+channel now exists is not a reason to migrate it. What would move one is a
+decision about core's export map, or the shipped `dist/testing.*` surface being
+priced -- not this note.
 
 - `linkageTermConsentCoverage.ts` -- test-only. A classification of every
   linkage term by whether it bears on consent, plus the probes that hold the
   consent summary to it. Coupled to core's own types, consumed by core's tests
-  and by the web browser suite. It belongs in a test home; while there is none
-  it stays, and it ships.
+  and by the web browser suite. It imports nothing core does not declare, so it
+  stays on the channel that serves it, and it ships.
 - `displayEscapingFixtures.ts` -- test-only. Hostile-input fixtures (control
   characters, bidirectional overrides, confusable donors) shared by core's tests
   and the web browser suite. Same disposition, and the clearer shape of the
@@ -146,20 +198,20 @@ each piece is on, so the answer is already taken when the question reopens.
   green without it. Cost: it changes how the web app typechecks against core
   everywhere, permanently, to serve test scaffolding -- and it leaves constraint
   1 standing, so a shared helper needing `typescript` is no closer.
-- **A test-only workspace consumed as raw `.ts`.** A `packages/*` package that
-  is private, has no build and no `dist`, and whose `exports` map points at
-  `./src/*.ts` is resolved through `node_modules` and therefore exempt from
-  constraints 2 and 3. Core, the CLI test config, and web all typecheck a
-  consumer of one, its source is genuinely inside each consumer's program rather
-  than skipped, and it may import both a root devDependency and `@psilink/core`
-  types at once -- no project-reference cycle arises, because no project
-  reference exists in either direction. Costs: the root `build` script fans out
-  over every workspace, so a workspace declaring no `build` script fails it
-  until the script tolerates one; each consumer typechecks the shared source
+- **A test-only workspace consumed as raw `.ts`.** ADOPTED, as
+  `packages/testkit`. A `packages/*` package that is private, has no build and
+  no `dist`, and whose `exports` map points at `./src/*.ts` is resolved through
+  `node_modules` and therefore exempt from constraints 2 and 3. Core, the CLI
+  test config, and web all typecheck a consumer of one, its source is genuinely
+  inside each consumer's program rather than skipped, and it may import both a
+  dependency core does not declare and `@psilink/core` types at once -- no
+  project-reference cycle arises, because no project reference exists in either
+  direction. Its standing costs: each consumer typechecks the shared source
   inside its own program, so an error there surfaces once per consuming project
-  rather than once globally; and it is a new top-level package with an admission
-  rule to hold. Not adopted for want of an inhabitant, not for want of a
-  mechanism.
+  rather than once globally, and it is a top-level package with an admission
+  rule to hold. The cost the first decision recorded against it -- the root
+  `build` script failing on a workspace that declares no `build` script -- was
+  already paid, that script being `--if-present`.
 - **Split core's tsconfig.** Take `test/**/*.ts` out of
   `packages/core/tsconfig.json`'s `include` and add a non-composite
   `tsconfig.test.json` covering source and tests, the shape `apps/cli` already
@@ -202,22 +254,25 @@ its included files into `outDir`, which for core is the `dist` it publishes, so
 the arm that would resolve the redirect does it by enlarging the shipped
 surface with core's test-file declarations.
 
-Both arms therefore wait on the same event: the wiring starts mattering when a
-cross-workspace `.ts` import exists to be redirected. Whichever reopens the
-question below reopens this with it.
+Both arms wait on the same event: the wiring starts mattering when a
+cross-workspace `.ts` import exists to be REDIRECTED. The testkit's arrival is
+not that event, and the reason is the exemption above -- its source is reached
+through `node_modules`, where no composite redirect exists, so `npm run
+typecheck` is as green with it as without. An import that would exercise the
+wiring is one reaching a `.ts` inside core's own file list, which is the shape
+neither decision introduced.
 
-## What reopens this
+## What is still open
 
-The operational form of this list, in the place a contributor meets it, is in
-[TESTING.md](../TESTING.md#shared-test-material). In full:
+The operational form of this, in the place a contributor meets it, is in
+[TESTING.md](../TESTING.md#shared-test-material).
 
-- A third piece of test-only material would move into `packages/core/src` purely
-  for reach. Two are there.
-- A helper two workspaces need must import a dependency `packages/core` does not
-  declare -- constraint 1, the one no relocation inside core can satisfy.
-- The shipped `dist/testing.*` surface starts costing something nameable: a
-  consumer raising it, a package-size or supply-chain review, or a decision
-  about core's export map that has to rule on whether `./testing` stays a public
-  subpath.
-- `apps/cli` or `apps/web` grows a second copy of a helper that already exists
-  in the other's test tree.
+- The shipped `dist/testing.*` surface is still unpriced. What would price it: a
+  consumer raising it, a package-size or supply-chain review, or a decision about
+  core's export map that has to rule on whether `./testing` stays a public
+  subpath. Until then the material on that channel stays where it is.
+- The composite/references arms above are untaken, and the testkit did not force
+  them.
+- The testkit's admission rule is held by review, not by a check. It has one
+  subject; a second that does not meet the rule is how it starts becoming the
+  junk drawer the first decision named.
