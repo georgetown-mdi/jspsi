@@ -1191,6 +1191,11 @@ export async function runExchange(
 
   // Received-payload enforcement, fail-closed before the result or audit record is
   // built (so a mismatched payload is never written to disk or surfaced):
+  // - A count-only run locks in the empty column set unconditionally: psi-c
+  //   refuses payload in either direction and its record's payload commitments
+  //   are fixed present-and-empty (docs/spec/EXCHANGE_RECORD.md, Count-only
+  //   (psi-c) records), so a transmitted column can never be lazily accepted
+  //   here regardless of expectsOutput or any lock-in the prepare step carries.
   // - A no-output party (expectsOutput:false) must receive NO payload. The
   //   send-gate above keeps a conforming partner from sending any; expecting the
   //   empty set here closes it fail-closed against a non-conforming one.
@@ -1198,9 +1203,11 @@ export async function runExchange(
   //   acceptor's carried disclosedPayloadColumns, or a persisted lock-in); a lazy
   //   one (expectedPayloadColumns undefined) takes whatever the sender's own
   //   disclosure metadata transmits.
-  const expectedReceive = linkageTerms.output.expectsOutput
-    ? prepared.expectedPayloadColumns
-    : [];
+  const expectedReceive = countOnly
+    ? []
+    : linkageTerms.output.expectsOutput
+      ? prepared.expectedPayloadColumns
+      : [];
   reconcileReceivedPayload(partnerPayload, expectedReceive);
 
   // resultSize (the intersection size) is bound only when both parties are

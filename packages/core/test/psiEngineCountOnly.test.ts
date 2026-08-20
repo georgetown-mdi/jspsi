@@ -623,4 +623,53 @@ describe.each(backendPairs)("count-only backend parity: $name", (pair) => {
     countOnlyReceiver.dispose();
     revealingReceiver.dispose();
   });
+
+  // The same inflation attempt pinned above for the WASM-only pair, run over this
+  // pair's backends: the sender that produces the response varies, but the wire
+  // bytes are decoded and re-encoded through the WASM module's protobuf codec
+  // either way, exactly as the setup and request bytes already cross backends above.
+  test("a duplicated response does not inflate the reported cardinality", async (ctx) => {
+    const resolved = libraries();
+    if (!resolved) {
+      ctx.skip();
+      return;
+    }
+    const [senderLibrary, receiverLibrary] = resolved;
+    const countOnlySender = inProcess(
+      senderLibrary,
+      "starter",
+      "sender",
+      "count-only",
+    );
+    const countOnlyReceiver = inProcess(
+      receiverLibrary,
+      "joiner",
+      "receiver",
+      "count-only",
+    );
+
+    const { setup } = await countOnlySender.createServerSetup(senderValues);
+    await countOnlyReceiver.receiveServerSetup(setup);
+    const request = await countOnlyReceiver.createClientRequest(receiverValues);
+    const response = await countOnlySender.processClientRequest(request);
+
+    const inflated = wasm.response.deserializeBinary(response);
+    const elements = inflated.getEncryptedElementsList_asU8();
+    expect(elements.length).toBe(receiverValues.length);
+    inflated.setEncryptedElementsList(
+      Array.from({ length: 5 }, () => elements).flat(),
+    );
+    const inflatedBytes = inflated.serializeBinary();
+    expect(
+      wasm.response.deserializeBinary(inflatedBytes).getEncryptedElementsList()
+        .length,
+    ).toBe(receiverValues.length * 5);
+
+    await expect(
+      countOnlyReceiver.computeIntersectionCardinality(inflatedBytes),
+    ).resolves.toBe(expectedCount);
+
+    countOnlySender.dispose();
+    countOnlyReceiver.dispose();
+  });
 });

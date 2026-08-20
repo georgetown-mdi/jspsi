@@ -96,6 +96,30 @@ function recording(
   };
 }
 
+// Swaps this party's own outbound no-data payload frame ({hasData: false} --
+// the only frame a genuine count-only run ever builds, since associationTable
+// stays undefined under countOnly regardless of entitlement) for a hostile
+// non-empty one, leaving every other frame (terms exchange, PSI round, count
+// report) untouched. What a partner that does not honor the send-gate at all --
+// reaching the wire directly rather than through this codebase's own
+// prepareForExchange/runExchange path -- can put on it.
+function withHostilePayload(
+  conn: MessageConnection,
+  hostilePayload: unknown,
+): MessageConnection {
+  return {
+    send: (data) => {
+      const outgoing =
+        typeof data === "object" && data !== null && "hasData" in data
+          ? hostilePayload
+          : data;
+      return conn.send(outgoing);
+    },
+    receive: (timeoutMs?: number) => conn.receive(timeoutMs),
+    close: () => conn.close(),
+  };
+}
+
 const countReports = (frames: Array<unknown>): Array<unknown> =>
   frames.filter(
     (frame) =>
@@ -468,6 +492,55 @@ test("a count-only exchange whose input metadata would transmit a column is refu
       ["first_name", "note"],
     ),
   ).toThrow(/transmits no data columns/);
+});
+
+test("a count-only run refuses an inbound payload column from a non-conforming partner", async () => {
+  // docs/spec/PROTOCOL.md (PSI-C, Refusals) refuses payload in EITHER direction,
+  // and the record's payload commitments are fixed present-and-empty
+  // (docs/spec/EXCHANGE_RECORD.md, Count-only records) -- normative regardless of
+  // what a partner actually transmits. The outbound leg is closed structurally
+  // (associationTable stays undefined under countOnly, so this codebase's own
+  // send-gate never builds a non-empty payload); this pins the INBOUND leg,
+  // which a partner not honoring that gate could otherwise cross, refusing
+  // through the run's expectedReceive lock-in rather than accepting whatever
+  // columns arrive.
+  const [connInitiator, connResponder] = createMessagePipe();
+  const hostilePayload = {
+    hasData: true,
+    columns: ["note"],
+    rowIndices: [0],
+    rows: [["c-c"]],
+  };
+  const [initiatorOutcome, responderOutcome] = await Promise.allSettled([
+    runExchange(
+      connInitiator,
+      "initiator",
+      prepared("Initiator Co", both, initiatorRows, "psi-c"),
+      { psiLibrary },
+    ),
+    runExchange(
+      withHostilePayload(connResponder, hostilePayload),
+      "responder",
+      prepared("Responder Co", both, responderRows, "psi-c"),
+      { psiLibrary },
+    ),
+  ]);
+
+  // The initiator is the party that receives the hostile frame, so it is the one
+  // that aborts through reconcileReceivedPayload's existing refusal.
+  expect(initiatorOutcome.status).toBe("rejected");
+  const refusal =
+    initiatorOutcome.status === "rejected"
+      ? initiatorOutcome.reason
+      : undefined;
+  expect(refusal).toBeInstanceOf(ConnectionError);
+  expect((refusal as ConnectionError).kind).toBe("protocol");
+  expect((refusal as Error).message).toContain("no payload at all");
+
+  // The responder is the one forging the frame, not receiving one: its own
+  // received payload (the initiator's genuine empty message) still matches its
+  // own empty expectation, so only the victim's leg trips.
+  expect(responderOutcome.status).toBe("fulfilled");
 });
 
 // --- The count-report frame on receipt ---------------------------------------
