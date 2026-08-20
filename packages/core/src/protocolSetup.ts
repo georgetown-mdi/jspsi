@@ -205,22 +205,13 @@ const effectiveKeyCountField = z
 // parse (see protocolVersionProbe), so a reshaped sibling field cannot throw the
 // parse before the version is read and bury the skew diagnosis. The version is
 // read independently of the rest of the envelope on both message paths.
-// The value is 2, the version at which a single-pass sender may ship the ragged
-// index table a fan-out configuration produces (docs/spec/PROTOCOL.md,
-// Wire-format deltas). A pre-release wire delta is held at the version it lands
-// on while some other control keeps every exchange off the new bytes; this one
-// has none, because a fan-out authored in a party's own standardization rides no
-// agreed term the partner's terms validation could refuse. So the reconcile is
-// what holds a peer that cannot read that layout apart from one that ships it,
-// and the skew surfaces as the version diagnosis rather than as a frame-parse
-// failure mid-exchange.
-//
-// Typed `number` rather than the literal, for the reason APPLIED_SETTINGS types
-// its flags `boolean`: a check written against a particular version reads as a
-// genuine runtime branch rather than a comparison the compiler rejects as
-// provably false the moment the version moves past it.
+// Held at 1: pre-publication there are no deployed peers for this reconcile to
+// hold apart, so a wire-format delta -- including the ragged single-pass index
+// table a fan-out configuration produces -- ships within version 1 rather than
+// bumping it, and a bump is reserved for the first wire-incompatible change made
+// once the software is published (docs/spec/PROTOCOL.md, Wire-format deltas).
 /** @internal exported for the protocol-version reconcile tests. */
-export const PROTOCOL_VERSION: number = 2;
+export const PROTOCOL_VERSION = 1;
 
 /**
  * The operator-facing diagnosis surfaced -- and sent to the partner as the abort
