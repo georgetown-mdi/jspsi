@@ -121,6 +121,23 @@ function decodeRagged(words: Array<number>) {
   );
 }
 
+// Every ragged-table guard refuses PARTNER content, so the class is part of each
+// refusal's contract and not only its wording: a caller distinguishes a partner
+// fault from a local one by the ConnectionError kind alone.
+function expectProtocolRefusal(decode: () => unknown, message: RegExp): void {
+  const err = (() => {
+    try {
+      decode();
+      return undefined;
+    } catch (e: unknown) {
+      return e;
+    }
+  })();
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).message).toMatch(message);
+}
+
 test("a well-formed ragged table decodes to the cells it declares", () => {
   // key 0: row 0 -> {3, 7}, row 1 -> {}; key 1: row 0 -> {0}, row 1 -> {1, 2, 5}.
   const cells = decodeRagged([2, 3, 7, 0, 1, 0, 3, 1, 2, 5]);
@@ -180,27 +197,20 @@ test.each([
     /trailing words past its last cell/,
   ],
 ])("the ragged table is refused for %s", (_label, words, message) => {
-  expect(() => decodeRagged(words)).toThrow(message);
-  const err = (() => {
-    try {
-      decodeRagged(words);
-      return undefined;
-    } catch (e: unknown) {
-      return e;
-    }
-  })();
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
+  expectProtocolRefusal(() => decodeRagged(words), message);
 });
 
 test("the ragged table is refused for carrying more candidates than the declared width admits", () => {
   // The running total is bounded by the sender's OWN advertised slot count, so a
   // frame within the width bound cell by cell is still refused when its cells sum
-  // past what the sender said it would ship.
+  // past what the sender said it would ship. It is the guard bounding the one
+  // allocation the frame's own word count sizes, so its class carries as much as
+  // its wording: a caller reads a partner fault off the class.
   const words = [2, 0, 1, 2, 2, 3, 2, 4, 5, 2, 6, 7];
-  expect(() =>
-    decodeRaggedIndexTable("client", Int32Array.from(words), 2, 2, 7),
-  ).toThrow(/more candidate values than the sender's declared width/);
+  expectProtocolRefusal(
+    () => decodeRaggedIndexTable("client", Int32Array.from(words), 2, 2, 7),
+    /more candidate values than the sender's declared width/,
+  );
 });
 
 // --- the record-level resolution, over a real two-party exchange -------------
@@ -492,8 +502,19 @@ test("an over-ceiling fan-out exchange aborts on both sides before any frame mov
     await expect(run).rejects.not.toThrow(/cascade/);
   }
   expect(overWithFanOut).toBeLessThan(rowsWithinPlainBudget);
-  // Neither role put anything on the wire before aborting.
-  void peer;
+  // Neither role put anything on the wire before aborting: the peer end of the
+  // pipe has no frame waiting. A parked receive() cannot show that on its own (an
+  // in-memory pipe carries no inactivity deadline, so it would never settle), so
+  // race it against a macrotask -- the pipe delivers through queueMicrotask, and
+  // both runs above are already settled, so a frame either role sent has landed by
+  // the time the timer fires.
+  const nothingDelivered = Symbol("nothing delivered");
+  await expect(
+    Promise.race([
+      peer.receive(),
+      new Promise((resolve) => setTimeout(() => resolve(nothingDelivered), 0)),
+    ]),
+  ).resolves.toBe(nothingDelivered);
 });
 
 test("a row realizing more candidates than the party declared is refused, not shipped", async () => {

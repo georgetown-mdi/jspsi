@@ -219,6 +219,27 @@ function valueSlots(party: SinglePassPartySize): number {
 }
 
 /**
+ * Does this party fan out -- is its declared effective key count above the agreed
+ * key count? The single discriminant every layout-dependent decision reads: the
+ * sender's index-table encoder and the receiver's decoder pick (link.ts), the
+ * ragged count-prefix term of {@link singlePassReplyByteCap} below, and whether
+ * the over-ceiling guidance offers removing a fan-out as a remedy.
+ *
+ * Written once because a divergence between those is not a cosmetic one: a read
+ * gate sized for the fixed-width layout while the frame carries the ragged one
+ * rejects a legitimate reply mid-exchange, and the opposite pairing admits a frame
+ * the decoder then reads under the wrong shape. The party is passed as an object
+ * rather than a second bare count so the two numbers cannot be transposed at a
+ * call site.
+ */
+export function partyFansOut(
+  agreedKeyCount: number,
+  party: Pick<SinglePassPartySize, "effectiveKeyCount">,
+): boolean {
+  return party.effectiveKeyCount > agreedKeyCount;
+}
+
+/**
  * Does a single party's own dataset alone exceed the single-pass ceiling? True
  * when `effectiveKeyCount * recordCount > MAX_SINGLE_PASS_CELLS`. This is the
  * coarse one-party gate the {@link prepareForExchange} pre-flight uses, when only
@@ -278,10 +299,10 @@ export function singlePassExchangeExceedsCap(
  * 2^53, so no rounding occurs). The sender contributes a masked value plus an index
  * word per value slot; the receiver contributes a masked value per value slot; and
  * a sender that fans out ships the ragged index table, whose per-cell
- * candidate-count prefix is the last term. The discriminant is the sender's own
- * declared effective key count against the agreed key count, which both parties
- * read from the same authenticated advertisement, so a fan-out-free exchange
- * derives exactly the cap it derived before fan-out existed.
+ * candidate-count prefix is the last term. The discriminant is {@link
+ * partyFansOut} on the sender, which both parties evaluate from the same
+ * authenticated advertisement, so a fan-out-free exchange derives exactly the cap
+ * it derived before fan-out existed.
  *
  * Call only for an in-cap exchange (guard with {@link singlePassExchangeExceedsCap}
  * first): at the slot ceiling the cap is about 240 MiB fan-out-free and about 251
@@ -299,10 +320,9 @@ export function singlePassReplyByteCap(
   sender: SinglePassPartySize,
   receiver: SinglePassPartySize,
 ): number {
-  const senderCountPrefixBytes =
-    sender.effectiveKeyCount > keyCount
-      ? SINGLE_PASS_BYTES_PER_INDEX_WORD * keyCount * sender.recordCount
-      : 0;
+  const senderCountPrefixBytes = partyFansOut(keyCount, sender)
+    ? SINGLE_PASS_BYTES_PER_INDEX_WORD * keyCount * sender.recordCount
+    : 0;
   return (
     (SINGLE_PASS_BYTES_PER_MASKED_VALUE + SINGLE_PASS_BYTES_PER_INDEX_WORD) *
       valueSlots(sender) +

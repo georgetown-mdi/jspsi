@@ -15,9 +15,11 @@ import {
 } from "../src/link";
 import { MAX_WEBRTC_FRAME_BYTES } from "../src/connection/binaryPackBounds";
 import { MAX_KEY_CANDIDATES_PER_ROW } from "../src/fanOutFunctions";
+import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTerms";
 import {
   MAX_FRAME_SIZE_BYTES,
   MAX_SINGLE_PASS_CELLS,
+  partyFansOut,
   singlePassDatasetExceedsCap,
   singlePassExchangeExceedsCap,
   singlePassReplyByteCap,
@@ -698,7 +700,7 @@ test("singlePassExchangeExceedsCap fires when EITHER party is over the budget", 
   ).toBe(true);
 });
 
-test("singlePassReplyByteCap weights the sender heavier and stays below both transport envelopes at the ceiling", () => {
+test("singlePassReplyByteCap weights the sender heavier and charges the ragged table on top", () => {
   // The sender contributes a masked value + an index word per value slot; the
   // receiver a masked value per value slot; plus a fixed overhead. Pinning the
   // exact formula is what makes the cap reproducible across implementations.
@@ -727,13 +729,9 @@ test("singlePassReplyByteCap weights the sender heavier and stays below both tra
   expect(singlePassReplyByteCap(1, size(10, 1), size(5, 20))).toBe(
     (40 + 4) * (1 * 10) + 40 * (20 * 5) + 256,
   );
-  // At the ceiling (both parties' slots at the budget) the derived cap must stay
-  // below both transports' fixed frame envelopes, so the per-transport clamp does
-  // not bind and a legitimate single-pass reply the slot budget admits is never
-  // rejected mid-exchange. This guards a future raise of MAX_SINGLE_PASS_CELLS (or
-  // of the per-slot byte weights): prose in frameSize.ts asserts the invariant, but
-  // only a check can keep it true. The fan-out arm carries the ragged table's count
-  // prefixes on top, so it is the binding one.
+  // At the same slot budget, a fanning-out sender's cap exceeds a fan-out-free
+  // one's: the ragged table's per-cell count prefixes are the added term, which is
+  // why the envelope invariant below is maximized over a fanning-out sender.
   const atCeiling = singlePassReplyByteCap(
     1,
     { effectiveKeyCount: 1, recordCount: MAX_SINGLE_PASS_CELLS },
@@ -748,15 +746,56 @@ test("singlePassReplyByteCap weights the sender heavier and stays below both tra
     { effectiveKeyCount: 1, recordCount: MAX_SINGLE_PASS_CELLS },
   );
   expect(atFanOutCeiling).toBeGreaterThan(atCeiling);
-  for (const cap of [atCeiling, atFanOutCeiling]) {
-    // The file-sync backstop, a core constant.
-    expect(cap).toBeLessThan(MAX_FRAME_SIZE_BYTES);
-    // The nearer constraint on the raised cap: the WebRTC data channel's fixed
-    // browser-tab envelope. The coupling is bidirectional -- lowering
-    // MAX_WEBRTC_FRAME_BYTES below this ceiling cap would pass every bound's own
-    // test yet reject legitimate WebRTC replies, so the two must move together.
-    expect(cap).toBeLessThan(MAX_WEBRTC_FRAME_BYTES);
+});
+
+test("singlePassReplyByteCap stays below both transport envelopes at its maximum over the admissible space", () => {
+  // The derived cap must stay below both transports' fixed frame envelopes, so the
+  // per-transport clamp does not bind and a legitimate single-pass reply the slot
+  // budget admits is never rejected mid-exchange. This guards a future raise of
+  // MAX_SINGLE_PASS_CELLS, of MAX_LINKAGE_ENTRIES, or of the per-slot byte weights:
+  // prose in frameSize.ts asserts the invariant, but only a check can keep it true.
+  //
+  // The maximum is SEARCHED rather than hand-picked, so a change to any of those
+  // bounds re-maximizes here instead of leaving the invariant evaluated at an
+  // interior point that still passes. The space searched is the one the wire admits
+  // (assertPartnerEffectiveKeyCount, protocolSetup.ts): up to MAX_LINKAGE_ENTRIES
+  // agreed keys, an effective key count of keyCount + fanOutKeys *
+  // (MAX_KEY_CANDIDATES_PER_ROW - 1) for a whole number of fanning-out keys, and --
+  // since the cap rises with rows -- the largest record count the slot budget
+  // leaves that width.
+  const partiesAt = (keyCount: number) =>
+    Array.from({ length: keyCount + 1 }, (_unused, fanOutKeys) => {
+      const effectiveKeyCount =
+        keyCount + fanOutKeys * (MAX_KEY_CANDIDATES_PER_ROW - 1);
+      return {
+        effectiveKeyCount,
+        recordCount: Math.floor(MAX_SINGLE_PASS_CELLS / effectiveKeyCount),
+      };
+    });
+  const empty = { effectiveKeyCount: 0, recordCount: 0 };
+  let worst = { bytes: 0, keyCount: 0, sender: empty, receiver: empty };
+  for (let keyCount = 1; keyCount <= MAX_LINKAGE_ENTRIES; keyCount++) {
+    const parties = partiesAt(keyCount);
+    for (const sender of parties)
+      for (const receiver of parties) {
+        const bytes = singlePassReplyByteCap(keyCount, sender, receiver);
+        if (bytes > worst.bytes) worst = { bytes, keyCount, sender, receiver };
+      }
   }
+  // The maximizing pair is inside the slot budget, so it is a reply the ceiling
+  // admits rather than one the over-ceiling gate would have refused first.
+  expect(singlePassExchangeExceedsCap(worst.sender, worst.receiver)).toBe(
+    false,
+  );
+  // It fans out, which is what makes the ragged count-prefix term the binding one.
+  expect(partyFansOut(worst.keyCount, worst.sender)).toBe(true);
+  // The file-sync backstop, a core constant.
+  expect(worst.bytes).toBeLessThan(MAX_FRAME_SIZE_BYTES);
+  // The nearer constraint: the WebRTC data channel's fixed browser-tab envelope.
+  // The coupling is bidirectional -- lowering MAX_WEBRTC_FRAME_BYTES below this
+  // maximum would pass every bound's own test yet reject legitimate WebRTC replies,
+  // so the two must move together.
+  expect(worst.bytes).toBeLessThan(MAX_WEBRTC_FRAME_BYTES);
 });
 
 test("the single-pass receiver read gate is bounded to the derived reply cap", async () => {

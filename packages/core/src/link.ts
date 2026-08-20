@@ -6,6 +6,7 @@ import {
   type MessageConnection,
 } from "./connection/messageConnection";
 import {
+  partyFansOut,
   singlePassExchangeExceedsCap,
   singlePassReplyByteCap,
   type SinglePassPartySize,
@@ -493,8 +494,8 @@ function singlePassOverCapMessage(
   receiver: SinglePassPartySize,
 ): string {
   const fansOut =
-    sender.effectiveKeyCount > numLinkageKeys ||
-    receiver.effectiveKeyCount > numLinkageKeys;
+    partyFansOut(numLinkageKeys, sender) ||
+    partyFansOut(numLinkageKeys, receiver);
   return (
     `${id}: single-pass cannot carry this dataset: ${numLinkageKeys} linkage ` +
     `key(s) with ${sender.recordCount} sender and ${receiver.recordCount} ` +
@@ -665,7 +666,9 @@ export async function linkViaSinglePassPSI(
   // discriminant is the declared value rather than the data, so the build refuses
   // a cell wider than what was declared instead of silently outgrowing the slot
   // bound derived from it.
-  const localFansOut = localEffectiveKeyCount > numLinkageKeys;
+  const localFansOut = partyFansOut(numLinkageKeys, {
+    effectiveKeyCount: localEffectiveKeyCount,
+  });
 
   const { distinctValues, columns, numRecords, slotCount } =
     getDistinctValuesAndIndices(data, localFansOut);
@@ -688,7 +691,7 @@ export async function linkViaSinglePassPSI(
   // The sender's advertised width decides message 2's layout on BOTH sides, so a
   // sender that declares no fan-out ships the frame it always shipped even when
   // its partner fans out.
-  const senderFansOut = senderSize.effectiveKeyCount > numLinkageKeys;
+  const senderFansOut = partyFansOut(numLinkageKeys, senderSize);
 
   // The value slots this party's own data actually occupies must fit the bound its
   // advertisement claims: the partner's decode, its element bounds, and its read
