@@ -86,12 +86,15 @@ function validateEvent(event: unknown): event is StreamEvent {
     case "result":
       return (
         typeof event.resultWritten === "boolean" &&
-        // The count-only field is optional, and a present one is a non-negative
-        // integer like every other numeric field of this stream.
-        (event.intersectionCount === undefined ||
-          (typeof event.intersectionCount === "number" &&
+        // The count-only fields are optional and paired: a present count is a
+        // non-negative integer like every other numeric field of this stream,
+        // and its provenance flag travels with it or not at all.
+        (event.intersectionCount === undefined
+          ? event.countReportedByPartner === undefined
+          : typeof event.intersectionCount === "number" &&
             Number.isInteger(event.intersectionCount) &&
-            event.intersectionCount >= 0))
+            event.intersectionCount >= 0 &&
+            typeof event.countReportedByPartner === "boolean")
       );
     case "error":
       return (
