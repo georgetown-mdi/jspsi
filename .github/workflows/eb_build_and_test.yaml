@@ -71,7 +71,7 @@ jobs:
     # workflow_call, a hang would also stall a production deploy. 30 min sits far
     # above a normal run (install + builds + tests + browser provisioning) yet
     # cuts a true hang short. It must also clear the worst case the browser
-    # provisioning step below is allowed: its 21 min plus the ~4 min the rest of
+    # provisioning step below is allowed: its 22 min plus the ~4 min the rest of
     # the job measures, so an upstream stall there ends on that step's own named
     # failure rather than on this cap, which GitHub reports as a cancellation.
     timeout-minutes: 30
@@ -124,7 +124,7 @@ jobs:
         run: |
           version="$(node -p "require('playwright/package.json').version")"
           test -n "$version"
-          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       # A hit restores the browser build into the directory the install step below
       # reads, taking the download CDN out of the run entirely; the apt libraries
       # --with-deps installs are not in this cache and are installed on every run
@@ -157,11 +157,12 @@ jobs:
       # each attempt bounds the whole command and a stalled attempt is retried here
       # rather than costing a human rerun of the workflow. The 10m per-attempt
       # bound clears the slowest measured success (7m24s) with headroom; two
-      # attempts and the backoff between them fit inside timeout-minutes, so the
-      # per-attempt bound is what fires and names the failure, and timeout-minutes
-      # fits inside the job bound above.
+      # attempts, each with timeout's 30s kill-after grace, plus the 15s backoff
+      # between them total 21m15s, inside timeout-minutes, so the per-attempt
+      # bound is what fires and names the failure, and timeout-minutes fits
+      # inside the job bound above.
       - name: Install Playwright Chromium
-        timeout-minutes: 21
+        timeout-minutes: 22
         run: |
           attempts=2
           attempt_timeout=10m
