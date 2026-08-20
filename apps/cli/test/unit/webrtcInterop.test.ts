@@ -322,16 +322,24 @@ describe("the rendezvous ids the CLI registers and addresses", () => {
     "the $side acts only on frames from the id it expects its partner on",
     async (side) => {
       const { socket, session } = await startRendezvous(side.side);
+      const settlement = watchSettlement(session);
+
       // A LEAVE from anyone else is not the partner and must not perturb the
       // rendezvous; the derived remote id is what tells the two apart.
       socket.deliver({
         type: BROKER_MESSAGE.leave,
         src: "0".repeat(vectors.rendezvous.peerIds.inviter.length),
       });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(await settlementOf(session)).toBe("waiting");
+      await drainPendingWork();
+      expect(settlement()).toBe("waiting");
 
+      // The same delivery and the same drain, with the partner's id: a
+      // settlement the drain CAN observe, which is what makes the reading above
+      // a rejection that did not happen rather than one that had not arrived.
       socket.deliver({ type: BROKER_MESSAGE.leave, src: side.remotePeerId });
+      await drainPendingWork();
+      expect(settlement()).toBe("rejected");
+
       await expect(session).rejects.toThrow(
         /left the signaling server before the connection was established/,
       );
@@ -339,21 +347,33 @@ describe("the rendezvous ids the CLI registers and addresses", () => {
   );
 });
 
-/**
- * Whether a rendezvous has settled yet. A rendezvous still waiting is one of the
- * assertions above, so the answer has to come back rather than block on a
- * promise that is not meant to settle at all.
- */
-async function settlementOf(
+/** Record how a rendezvous settles, without waiting on a promise that may be
+ * meant never to settle at all. */
+function watchSettlement(
   session: Promise<unknown>,
-): Promise<"waiting" | "resolved" | "rejected"> {
-  return await Promise.race([
-    session.then(
-      () => "resolved" as const,
-      () => "rejected" as const,
-    ),
-    new Promise<"waiting">((resolve) =>
-      setTimeout(() => resolve("waiting"), 20),
-    ),
-  ]);
+): () => "waiting" | "resolved" | "rejected" {
+  let state: "waiting" | "resolved" | "rejected" = "waiting";
+  void session.then(
+    () => {
+      state = "resolved";
+    },
+    () => {
+      state = "rejected";
+    },
+  );
+  return () => state;
+}
+
+/**
+ * Let every job the delivery just queued run to completion. The negotiation
+ * latches a terminal failure synchronously inside the socket's message
+ * dispatch, so what stands between that latch and the settlement this test
+ * reads is a chain of microtasks and nothing else; `setImmediate` resolves
+ * after the queue holding them has drained. Deliberately NOT a wall-clock
+ * window: a timed wait would let a slow runner report "still waiting" for a
+ * rejection that had merely not arrived yet, which is the vacuous pass this
+ * check exists to avoid.
+ */
+function drainPendingWork(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve));
 }

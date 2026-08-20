@@ -36,6 +36,11 @@ import type Peer from "peerjs";
  * vectors in packages/core/test/vectors/webrtc-interop-vectors.json. The CLI's
  * constructions are driven against the same file from apps/cli's suite, and the
  * constructions core alone owns are pinned in packages/core/test/webrtcInterop.test.ts.
+ *
+ * Two companions carry the rest of the web app's half: webrtcInteropHooks.test.ts
+ * and managedRunDriver.test.ts drive each flow that reads the side-to-role table
+ * through its own entry point, and test/browser/webrtcInterop.test.ts re-runs the
+ * crypto.subtle-borne derivations in real Chromium.
  */
 
 interface InteropVectors {
@@ -281,8 +286,10 @@ async function ephemeralShare(): Promise<string> {
 describe("the handshake role and encryption request the web app puts on the wire", () => {
   test("the side-to-role table matches the vector for every rendezvous side", () => {
     // The one table all three web flows read (the one-shot inviter and acceptor
-    // and the managed re-run), so a flow cannot take a role the CLI does not
-    // pair with.
+    // and the managed re-run). Necessary and not sufficient: a flow that read
+    // the wrong side out of a correct table would still take a role the CLI does
+    // not pair with, so which KEY each one reads is pinned at its own call site
+    // (webrtcInteropHooks.test.ts, managedRunDriver.test.ts).
     for (const side of vectors.rendezvous.sides)
       expect(HANDSHAKE_ROLE_FOR_SIDE[side.side]).toBe(side.handshakeRole);
   });
