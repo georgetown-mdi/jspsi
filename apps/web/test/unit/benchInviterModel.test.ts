@@ -192,7 +192,7 @@ describe("spine derivation from the read file", () => {
         inviterLedgerRows(
           editorFromCsv("Dana", csv),
           "2026-07-08T19:32:00.000Z",
-          { matchedRecordCount: 3 },
+          { kind: "matched", matchedRecordCount: 3 },
         ),
       ),
     ).toEqual(subset);
@@ -831,18 +831,22 @@ describe("after the exchange completes", () => {
   }
 
   test("the ledger reports the invitation used and the matched count", () => {
-    expect(outcomeRow({ matchedRecordCount: 1847 }, "Expires")?.value).toBe(
-      "Invitation used",
-    );
     expect(
-      outcomeRow({ matchedRecordCount: 1847 }, "You will receive")?.value,
+      outcomeRow({ kind: "matched", matchedRecordCount: 1847 }, "Expires")
+        ?.value,
+    ).toBe("Invitation used");
+    expect(
+      outcomeRow(
+        { kind: "matched", matchedRecordCount: 1847 },
+        "You will receive",
+      )?.value,
     ).toBe("1,847 matched rows + shared columns");
   });
 
   test("a withheld result states the caveat rather than a count", () => {
-    expect(
-      outcomeRow({ resultWithheld: true }, "You will receive")?.value,
-    ).toBe("No result table - withheld by the agreed terms");
+    expect(outcomeRow({ kind: "withheld" }, "You will receive")?.value).toBe(
+      "No result table - withheld by the agreed terms",
+    );
   });
 
   test("a count-only result states the overlap size and denies the table", () => {
@@ -850,13 +854,16 @@ describe("after the exchange completes", () => {
     // exactly what its terms promised, and no matched rows or shared columns
     // reached anyone -- so the row claims neither.
     const value = outcomeRow(
-      { intersectionCount: 1847, matchedRecordCount: 1847 },
+      { kind: "counted", intersectionCount: 1847 },
       "You will receive",
     )?.value;
     expect(value).toBe(
-      "1,847 matched - the size of the overlap only, no result table",
+      "1,847 records in common - the size of the overlap only, no matched " +
+        "rows and no shared columns",
     );
-    expect(value).not.toContain("shared columns");
+    // Neither of the other two rows: it does not claim matched rows arrived, and
+    // it does not claim the terms withheld anything.
+    expect(value).not.toContain("matched rows + ");
     expect(value).not.toContain("withheld");
   });
 
@@ -864,11 +871,12 @@ describe("after the exchange completes", () => {
     // The count rides its own field, so an empty intersection reports as a count
     // of zero rather than falling back to either of the other two rows.
     expect(
-      outcomeRow(
-        { intersectionCount: 0, matchedRecordCount: 0 },
-        "You will receive",
-      )?.value,
-    ).toBe("0 matched - the size of the overlap only, no result table");
+      outcomeRow({ kind: "counted", intersectionCount: 0 }, "You will receive")
+        ?.value,
+    ).toBe(
+      "0 records in common - the size of the overlap only, no matched rows " +
+        "and no shared columns",
+    );
   });
 
   test("unsealing reopens the session with every input intact", () => {

@@ -167,6 +167,14 @@ export interface ResultEvent extends EventBase {
    * promised; without it, the terms withheld the result table.
    */
   intersectionCount?: number;
+  /**
+   * Whether {@link intersectionCount} arrived as the partner's report rather than
+   * as a figure this party computed -- true for the PSI sender seat of a
+   * both-entitled count-only run, false for the receiver that computed it. Emitted
+   * exactly when {@link intersectionCount} is, so a consumer reads the pair or
+   * neither; absent means there was no count to qualify.
+   */
+  countReportedByPartner?: boolean;
 }
 
 /** The failure terminal event. Exactly one terminal event fires per run. */
@@ -311,14 +319,16 @@ export function buildMetricsEvent(
 }
 
 /**
- * Build the success terminal event. `intersectionCount` is passed only for a
- * count-only run this party's terms entitle it to read, and the field is omitted
- * entirely otherwise: its presence is what a consumer keys the count-only
- * outcome off, so a zero count and an absent one must stay distinguishable.
+ * Build the success terminal event. `count` is passed only for a count-only run
+ * this party's terms entitle it to read, and its fields are omitted entirely
+ * otherwise: the presence of `intersectionCount` is what a consumer keys the
+ * count-only outcome off, so a zero count and an absent one must stay
+ * distinguishable. The tally and its provenance travel as one argument so the
+ * stream cannot carry a count without saying whose reading it is.
  */
 export function buildResultEvent(
   resultWritten: boolean,
-  intersectionCount?: number,
+  count?: { intersectionCount: number; reportedByPartner: boolean },
 ): ResultEvent {
   return {
     v: EVENT_STREAM_VERSION,
@@ -329,8 +339,11 @@ export function buildResultEvent(
     // the same non-negative whole-number floor the metrics counters take. Core
     // bounds the reported figure to the smaller of the two exchanged record
     // counts before it gets here.
-    ...(intersectionCount !== undefined
-      ? { intersectionCount: toCount(intersectionCount) }
+    ...(count !== undefined
+      ? {
+          intersectionCount: toCount(count.intersectionCount),
+          countReportedByPartner: count.reportedByPartner,
+        }
       : {}),
   };
 }
@@ -427,7 +440,10 @@ export interface EventStreamEmitter {
     transportRetries: number,
     reconnects: number,
   ): void;
-  result(resultWritten: boolean, intersectionCount?: number): void;
+  result(
+    resultWritten: boolean,
+    count?: { intersectionCount: number; reportedByPartner: boolean },
+  ): void;
   error(error: unknown, phase: ErrorPhase): void;
 }
 
@@ -451,8 +467,8 @@ function createEventStreamEmitter(): EventStreamEmitter {
       writer.emit(
         buildMetricsEvent(recordsProcessed, transportRetries, reconnects),
       ),
-    result: (resultWritten, intersectionCount) =>
-      writer.emit(buildResultEvent(resultWritten, intersectionCount)),
+    result: (resultWritten, count) =>
+      writer.emit(buildResultEvent(resultWritten, count)),
     error: (error, phase) => writer.emit(buildErrorEvent(error, phase)),
   };
 }

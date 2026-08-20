@@ -137,9 +137,31 @@ function result(resultWritten: boolean): RelayEvent {
 }
 
 /** The count-only terminal event: no result file was written, and the count the
- * run reported rides the same event (docs/spec/CLI_EVENTS.md, `result`). */
-function countOnlyResult(intersectionCount: number): RelayEvent {
-  return { v: 1, type: "result", resultWritten: false, intersectionCount };
+ * run reported rides the same event with the provenance that decides whether the
+ * surface caveats it (docs/spec/CLI_EVENTS.md, `result`). */
+function countOnlyResult(
+  intersectionCount: number,
+  countReportedByPartner = false,
+): RelayEvent {
+  return {
+    v: 1,
+    type: "result",
+    resultWritten: false,
+    intersectionCount,
+    countReportedByPartner,
+  };
+}
+
+/** The result download url a `matched` outputs shape carries, and undefined for
+ * the two shapes that have no result file at all -- so an assertion reads the field
+ * it means without restating the narrowing at every call site. */
+function resultsUrlOf(outputs: RunOutputs): string | undefined {
+  return outputs.kind === "matched" ? outputs.resultsUrl : undefined;
+}
+
+/** The count a `counted` outputs shape carries, and undefined for the other two. */
+function countOf(outputs: RunOutputs): number | undefined {
+  return outputs.kind === "counted" ? outputs.intersectionCount : undefined;
 }
 
 function errorEvent(category: string, message: string): RelayEvent {
@@ -215,8 +237,8 @@ describe("createServerJobExchangeDriver event mapping", () => {
     expect(events.onError).not.toHaveBeenCalled();
     expect(events.onResult).toHaveBeenCalledTimes(1);
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.resultWithheld).toBeUndefined();
-    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(outputs.kind).not.toBe("withheld");
+    expect(resultsUrlOf(outputs)).toBe("/api/jobs/job-1/result");
   });
 
   test("a withheld result maps to the withheld outputs variant", async () => {
@@ -228,8 +250,8 @@ describe("createServerJobExchangeDriver event mapping", () => {
 
     expect(events.onError).not.toHaveBeenCalled();
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.resultWithheld).toBe(true);
-    expect(outputs.resultsUrl).toBeUndefined();
+    expect(outputs.kind).toBe("withheld");
+    expect(resultsUrlOf(outputs)).toBeUndefined();
   });
 
   test("a count-only result maps to the counted outputs, not the withheld ones", async () => {
@@ -243,10 +265,42 @@ describe("createServerJobExchangeDriver event mapping", () => {
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
     // The count is the run's whole result: nothing was withheld from this party,
     // and there is no result file on the appliance to point a download at.
-    expect(outputs.intersectionCount).toBe(42);
-    expect(outputs.matchedRecordCount).toBe(42);
-    expect(outputs.resultWithheld).toBeUndefined();
-    expect(outputs.resultsUrl).toBeUndefined();
+    expect(outputs.kind).toBe("counted");
+    expect(countOf(outputs)).toBe(42);
+    expect(resultsUrlOf(outputs)).toBeUndefined();
+    // The completion headline reads the counted shape's own field, so the count
+    // must not also arrive as a matched-row figure.
+    expect(outputs.matchedRecordCount).toBeUndefined();
+  });
+
+  test("the count's provenance rides the event onto the counted outputs", async () => {
+    // The appliance operator reading a count it did not compute gets the same
+    // trust-contingent caveat the CLI's own completion line carries, so the seat
+    // must survive the relay rather than being flattened to the local reading.
+    const reported = scriptedClient([countOnlyResult(42, true)]);
+    const reportedEvents = driverEvents(new AbortController().signal);
+    await createServerJobExchangeDriver(driverConfig(), reported.client).run(
+      reportedEvents,
+    );
+    expect(reportedEvents.onResult.mock.calls[0][0]).toMatchObject({
+      kind: "counted",
+      countReportedByPartner: true,
+    });
+
+    // A frame that omits the field renders the count as this party's own reading:
+    // a caveat on a locally computed count would be a false statement about an
+    // enforced outcome.
+    const bare = scriptedClient([
+      { v: 1, type: "result", resultWritten: false, intersectionCount: 42 },
+    ]);
+    const bareEvents = driverEvents(new AbortController().signal);
+    await createServerJobExchangeDriver(driverConfig(), bare.client).run(
+      bareEvents,
+    );
+    expect(bareEvents.onResult.mock.calls[0][0]).toMatchObject({
+      kind: "counted",
+      countReportedByPartner: false,
+    });
   });
 
   test("a zero count is still a count, not a withheld result", async () => {
@@ -259,8 +313,8 @@ describe("createServerJobExchangeDriver event mapping", () => {
     await driver.run(events);
 
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.intersectionCount).toBe(0);
-    expect(outputs.resultWithheld).toBeUndefined();
+    expect(countOf(outputs)).toBe(0);
+    expect(outputs.kind).not.toBe("withheld");
   });
 
   test("a malformed count falls back to the event's own resultWritten shape", async () => {
@@ -275,8 +329,8 @@ describe("createServerJobExchangeDriver event mapping", () => {
     await driver.run(events);
 
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.intersectionCount).toBeUndefined();
-    expect(outputs.resultWithheld).toBe(true);
+    expect(countOf(outputs)).toBeUndefined();
+    expect(outputs.kind).toBe("withheld");
   });
 
   test("a written result outranks a count the same event carries", async () => {
@@ -293,9 +347,9 @@ describe("createServerJobExchangeDriver event mapping", () => {
     await driver.run(events);
 
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
-    expect(outputs.intersectionCount).toBeUndefined();
-    expect(outputs.resultWithheld).toBeUndefined();
+    expect(resultsUrlOf(outputs)).toBe("/api/jobs/job-1/result");
+    expect(countOf(outputs)).toBeUndefined();
+    expect(outputs.kind).not.toBe("withheld");
   });
 
   test("a security error passes its category through VERBATIM", async () => {
@@ -459,7 +513,7 @@ describe("createServerJobExchangeDriver record downloads", () => {
 
     expect(events.onError).not.toHaveBeenCalled();
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(resultsUrlOf(outputs)).toBe("/api/jobs/job-1/result");
     expect(outputs.record).toEqual({
       recordUrl: "/api/jobs/job-1/record",
       recordFileName: RECORD_NAME,
@@ -479,8 +533,8 @@ describe("createServerJobExchangeDriver record downloads", () => {
     await driver.run(events);
 
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.resultWithheld).toBe(true);
-    expect(outputs.resultsUrl).toBeUndefined();
+    expect(outputs.kind).toBe("withheld");
+    expect(resultsUrlOf(outputs)).toBeUndefined();
     expect(outputs.record?.recordUrl).toBe("/api/jobs/job-1/record");
     expect(outputs.record?.keysUrl).toBe("/api/jobs/job-1/keys");
   });
@@ -494,7 +548,7 @@ describe("createServerJobExchangeDriver record downloads", () => {
 
     expect(events.onError).not.toHaveBeenCalled();
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(resultsUrlOf(outputs)).toBe("/api/jobs/job-1/result");
     expect(outputs.record).toBeUndefined();
   });
 
@@ -511,7 +565,7 @@ describe("createServerJobExchangeDriver record downloads", () => {
 
     expect(events.onError).not.toHaveBeenCalled();
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(resultsUrlOf(outputs)).toBe("/api/jobs/job-1/result");
     expect(outputs.record).toBeUndefined();
   });
 
@@ -662,7 +716,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     expect(events.onStages).toHaveBeenCalledTimes(1);
     expect(events.onStage).toHaveBeenCalledWith("prepare");
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(resultsUrlOf(outputs)).toBe("/api/jobs/job-1/result");
     expect(events.onError).not.toHaveBeenCalled();
   });
 
@@ -923,7 +977,7 @@ describe("createFetchJobApiClient over an injected fetch", () => {
     // The streamed result frame reached onResult, with the record pair fetched
     // off the status endpoint.
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.resultsUrl).toBe("/api/jobs/job-9/result");
+    expect(resultsUrlOf(outputs)).toBe("/api/jobs/job-9/result");
     expect(outputs.record).toEqual({
       recordUrl: "/api/jobs/job-9/record",
       recordFileName: "psilink-record-2026-07-08T14-32-00-000Z.json",
@@ -1370,7 +1424,7 @@ describe("createServerJobZeroSetupDriver intent", () => {
     expect(events.onStages).toHaveBeenCalledTimes(1);
     expect(events.onStage).toHaveBeenCalledWith("prepare");
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(resultsUrlOf(outputs)).toBe("/api/jobs/job-1/result");
     expect(events.onError).not.toHaveBeenCalled();
   });
 
@@ -1430,7 +1484,7 @@ describe("createServerJobReattachDriver", () => {
     ]);
     expect(events.onResult).toHaveBeenCalledTimes(1);
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
-    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(resultsUrlOf(outputs)).toBe("/api/jobs/job-1/result");
     expect(events.onError).not.toHaveBeenCalled();
   });
 

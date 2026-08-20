@@ -1,5 +1,6 @@
 import {
   buildOutputTable,
+  countIsPartnerReported,
   serializeExchangeRecord,
   serializeVerificationKeys,
 } from "@psilink/core";
@@ -7,13 +8,25 @@ import {
 import type { ExchangeResult, PreparedExchange } from "@psilink/core";
 import type { ExchangeOutputs } from "@psi/exchangeLifecycle";
 
-/** The bench run's downloadable artifacts: the lifecycle's outputs widened
- * with the matched-record count the completion header states. Present when this
- * party holds a result to count -- the rows of a matched table, or a count-only
- * run's intersection size -- and absent when the terms withheld one. */
+/** The bench run's downloadable artifacts: the lifecycle's outputs widened with
+ * the matched-record count the completion header states. It counts the ROWS of a
+ * matched result table, so it is meaningful for the `matched` case alone -- a
+ * count-only run's intersection size is its own field on its own case, and copying
+ * it here would put the same number in two places on one screen. It stays optional
+ * because the console's server-job path holds the result on the appliance and never
+ * counts its rows. */
 export type RunOutputs = ExchangeOutputs & {
   matchedRecordCount?: number;
 };
+
+/** The two outcomes that leave a run with no result file to download: the terms
+ * withheld the result table, or the run was count-only and produced no table for
+ * anyone. Narrowed from {@link RunOutputs} so the inset standing in for the download
+ * cannot be handed a `matched` run, which has a file to offer. */
+export type NoResultFileOutputs = Extract<
+  RunOutputs,
+  { kind: "withheld" | "counted" }
+>;
 
 /** The object-URL boundary {@link buildRunOutputs} allocates through --
  * `window.URL` in the app, a recording fake in tests. */
@@ -59,9 +72,10 @@ export function buildRunOutputs(
   try {
     // A count-only (psi-c) run produces no matched pairing at all, so there is no
     // results file to write and nothing was withheld from this party: its whole
-    // result is the count, carried through for the completion panel to state.
-    // Checked before the withheld case, which a count-only receiver would otherwise
-    // fall into and be reported as having received nothing.
+    // result is the count, carried through with the provenance its surface needs to
+    // state (a sender seat's count is the partner's report). Checked before the
+    // withheld case, which a count-only receiver would otherwise fall into and be
+    // reported as having received nothing.
     //
     // Otherwise the exchange withholds the result table from a party whose agreed
     // terms give it no output (a one-sided exchange where this party is the
@@ -71,11 +85,12 @@ export function buildRunOutputs(
     const generated: RunOutputs =
       result.intersectionCount !== undefined
         ? {
+            kind: "counted",
             intersectionCount: result.intersectionCount,
-            matchedRecordCount: result.intersectionCount,
+            countReportedByPartner: countIsPartnerReported(result),
           }
         : result.associationTable === undefined
-          ? { resultWithheld: true }
+          ? { kind: "withheld" }
           : (() => {
               const { headers, rows } = buildOutputTable(
                 result.associationTable,
@@ -88,6 +103,7 @@ export function buildRunOutputs(
                 "\n" +
                 rows.map((r) => r.join(",") + "\n").join("");
               return {
+                kind: "matched" as const,
                 resultsUrl: trackedUrl(new Blob([csv], { type: "text/csv" })),
                 matchedRecordCount: rows.length,
               };

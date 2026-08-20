@@ -205,7 +205,7 @@ export interface RecordDownloads {
   keysFileName: string;
 }
 
-/** Fields common to both shapes of {@link ExchangeOutputs}. */
+/** Fields common to all three shapes of {@link ExchangeOutputs}. */
 interface ExchangeOutputsBase {
   /** The exchange-record downloads (the shareable record plus its private
    * verification keys), present or absent as a whole. Absent only when building
@@ -217,24 +217,20 @@ interface ExchangeOutputsBase {
 }
 
 /** A receiver's outputs: the matched results file (CSV), plus the optional record
- * downloads. `resultWithheld` is necessarily absent/false here. */
+ * downloads. */
 interface ReceivedExchangeOutputs extends ExchangeOutputsBase {
+  kind: "matched";
   /** The matched results (CSV), as an object URL the UI exposes as a download. */
   resultsUrl: string;
-  resultWithheld?: false;
-  intersectionCount?: undefined;
 }
 
 /** A non-receiving helper's outputs: no results file, only the optional record
  * downloads. The exchange withheld the result table from this party (its agreed
  * terms give it no output; `ExchangeResult.associationTable` is undefined), so the
  * UI shows that it contributed to the match but receives no result table, rather
- * than an empty CSV that reads like a zero-match run. `resultsUrl` is necessarily
- * absent here. */
+ * than an empty CSV that reads like a zero-match run. */
 interface WithheldExchangeOutputs extends ExchangeOutputsBase {
-  resultWithheld: true;
-  resultsUrl?: undefined;
-  intersectionCount?: undefined;
+  kind: "withheld";
 }
 
 /** A count-only (`psi-c`) receiver's outputs: the intersection size, and no results
@@ -243,16 +239,23 @@ interface WithheldExchangeOutputs extends ExchangeOutputsBase {
  * (`ExchangeResult.intersectionCount`), which is why it is its own case rather than
  * a receiver with an empty CSV or a helper that got nothing. */
 interface CountOnlyExchangeOutputs extends ExchangeOutputsBase {
+  kind: "counted";
   intersectionCount: number;
-  resultsUrl?: undefined;
-  resultWithheld?: false;
+  /** Whether the count arrived as the PARTNER's report rather than as a figure this
+   * party computed (`countIsPartnerReported` in `@psilink/core`). The sender seat of
+   * a both-entitled count-only run reads a number it cannot check, so its surface
+   * carries the trust-contingent caveat; the receiver computed its own and does
+   * not. */
+  countReportedByPartner: boolean;
 }
 
 /** The downloadable artifacts produced after a successful exchange: each is an
  * object URL the UI exposes as a download with a timestamped filename. The matched
  * result is present XOR withheld XOR counted, so the cases are a discriminated union
- * rather than independent optionals -- the invalid states ("both a result and
- * withheld", "neither") are unrepresentable. */
+ * over `kind` rather than independent optionals -- the invalid states ("both a result
+ * and withheld", "neither") are unrepresentable, and a surface that gains a fourth
+ * outcome without handling it is a compile error rather than a case silently
+ * rendered as one of the others. */
 export type ExchangeOutputs =
   ReceivedExchangeOutputs | WithheldExchangeOutputs | CountOnlyExchangeOutputs;
 

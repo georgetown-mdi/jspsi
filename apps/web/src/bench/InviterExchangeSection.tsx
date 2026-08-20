@@ -277,10 +277,7 @@ export function InviterExchangeSection({
           </div>
         )}
       {phase === "done" && (
-        <DonePanel
-          matchedRecordCount={outputs?.matchedRecordCount}
-          finishedAt={run.finishedAt}
-        />
+        <DonePanel outputs={outputs} finishedAt={run.finishedAt} />
       )}
       <RunWarningsAlert warnings={warnings} />
       <StatusPanel
@@ -291,14 +288,14 @@ export function InviterExchangeSection({
       {phase === "done" && outputs !== undefined && (
         <>
           <h2>Downloads</h2>
-          {outputs.resultsUrl === undefined ? (
-            <NoResultFileInset intersectionCount={outputs.intersectionCount} />
-          ) : (
+          {outputs.kind === "matched" ? (
             <DownloadRow
               label="Download result"
               href={outputs.resultsUrl}
               fileName="results.csv"
             />
+          ) : (
+            <NoResultFileInset outputs={outputs} />
           )}
           {outputs.record !== undefined && (
             <>

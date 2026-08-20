@@ -798,6 +798,28 @@ export interface ExchangeResult {
   signedReceipt?: DualSignedRecord;
 }
 
+/**
+ * Whether a count-only (`psi-c`) tally this party holds arrived as the PARTNER's
+ * report rather than as a figure this party computed. The receiver alone computes
+ * the count; the sender's copy, when its terms entitle it to one, travels over the
+ * count-report leg and is the receiver's word, which psilink does not check against
+ * a run of its own (docs/spec/PROTOCOL.md, PSI-C -- "The sender's knowledge of the
+ * count is trust-contingent"). False for every party that computed its own count,
+ * and false for a run that produced no count at all.
+ *
+ * Both front ends read this one predicate rather than each restating the role rule:
+ * it decides whether the seat's completion copy carries the trust-contingent caveat,
+ * and a second reading that disagreed would caveat a locally computed count or
+ * present a reported one as this party's own finding.
+ */
+export function countIsPartnerReported(
+  result: Pick<ExchangeResult, "intersectionCount" | "resolvedRole">,
+): boolean {
+  return (
+    result.intersectionCount !== undefined && result.resolvedRole === "sender"
+  );
+}
+
 export interface RunExchangeOptions {
   /** The loaded PSI WASM/native library instance. */
   psiLibrary: PSILibrary;

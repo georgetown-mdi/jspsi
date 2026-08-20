@@ -76,6 +76,7 @@ import {
   buildManagedDeposit,
   webrtcLocatorFromEndpoint,
 } from "./manageOfferModel";
+import { ledgerOutcomeOf, seedRows } from "./inviterModel";
 import { AcceptorCleaningStep } from "./AcceptorCleaningStep";
 import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
 import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
@@ -92,7 +93,6 @@ import { TopBar } from "./TopBar";
 import { acceptorTimelineSteps } from "./exchangeRun";
 import { consoleAcquiredCsv } from "./consoleAcquiredCsv";
 import { restorablePosition } from "./stepRestore";
-import { seedRows } from "./inviterModel";
 import { splitRendezvousRetainProblem } from "./filedropRendezvousChoice";
 import styles from "./bench.module.css";
 import { useAcceptorExchange } from "./useAcceptorExchange";
@@ -893,11 +893,7 @@ export function AcceptorBench() {
         rows={(settled && launched !== undefined
           ? acceptorDoneLedgerRows(
               token,
-              {
-                matchedRecordCount: outputs.matchedRecordCount,
-                resultWithheld: outputs.resultWithheld,
-                intersectionCount: outputs.intersectionCount,
-              },
+              ledgerOutcomeOf(outputs),
               launched.edits.metadata,
               howItRuns,
             )

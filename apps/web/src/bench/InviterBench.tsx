@@ -94,6 +94,7 @@ import {
   inviterLedgerRows,
   inviterRailFacts,
   isCliTransport,
+  ledgerOutcomeOf,
   resetToRecommended,
   reviewValidation,
   sealEditor,
@@ -1167,13 +1168,7 @@ export function InviterBench() {
           rows={inviterLedgerRows(
             editor,
             savedExchange?.invitation.expires ?? invitation?.expires,
-            outputs === undefined
-              ? undefined
-              : {
-                  matchedRecordCount: outputs.matchedRecordCount,
-                  resultWithheld: outputs.resultWithheld,
-                  intersectionCount: outputs.intersectionCount,
-                },
+            outputs === undefined ? undefined : ledgerOutcomeOf(outputs),
           ).map((row) => ({
             label: row.label,
             reference: row.reference,

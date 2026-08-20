@@ -110,8 +110,10 @@ interface CapturedLifecycle {
   onStages: (stages: Array<unknown>) => void;
   onStage: (stageId: string) => void;
   onResult: (outputs: {
+    kind: "matched" | "withheld" | "counted";
     resultsUrl?: string;
-    resultWithheld?: boolean;
+    intersectionCount?: number;
+    countReportedByPartner?: boolean;
     matchedRecordCount?: number;
     record?: {
       recordUrl: string;
@@ -1710,6 +1712,7 @@ describe("acceptor bench: run and completion", () => {
     call.onStage("waiting for peer");
     call.onStage("confirming protocol");
     call.onResult({
+      kind: "matched" as const,
       resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
       matchedRecordCount: 1847,
       record: {
@@ -1785,6 +1788,7 @@ describe("acceptor bench: run and completion", () => {
       call.onStage("waiting for peer");
       call.onStage("confirming protocol");
       call.onResult({
+        kind: "matched" as const,
         resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
         matchedRecordCount: 1847,
         record: {
@@ -1861,6 +1865,7 @@ describe("acceptor bench: run and completion", () => {
     await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
 
     lifecycleCall(0).onResult({
+      kind: "matched" as const,
       resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
       matchedRecordCount: 12,
       record: {
@@ -1892,7 +1897,7 @@ describe("acceptor bench: run and completion", () => {
     const call = lifecycleCall(0);
     call.onStage("waiting for peer");
     call.onResult({
-      resultWithheld: true,
+      kind: "withheld" as const,
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
         recordFileName: "psilink-record-x.json",
