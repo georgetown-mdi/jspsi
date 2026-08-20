@@ -106,9 +106,6 @@ const jobExchangeOptionsFields = {
   pollIntervalMs: z.number().int().positive().optional(),
   peerTimeoutMs: z.number().int().positive().optional(),
   serverConnectTimeoutMs: z.number().int().positive().optional(),
-  // The ceiling is core's MAX_RECONNECT_ATTEMPTS itself, not a copied literal,
-  // so this boundary moves with core's value the way the sibling timeout
-  // fields already do through checkAgainstCoreFileSyncOptions.
   maxReconnectAttempts: z
     .number()
     .int()
