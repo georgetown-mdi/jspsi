@@ -340,7 +340,7 @@ export function preScanVerdict(fixture: WebrtcFrameFixture): FrameVerdict {
  * an `ArrayBuffer` argument decodes to an `ArrayBuffer`, a view to a view. A transport
  * that hands the unpacker the buffer rather than a view over it therefore delivers a
  * value a bare comparison cannot see into. */
-function normalizeBinary(value: unknown): unknown {
+export function normalizeBinary(value: unknown): unknown {
   if (value instanceof ArrayBuffer) return Array.from(new Uint8Array(value));
   if (ArrayBuffer.isView(value)) {
     return Array.from(
