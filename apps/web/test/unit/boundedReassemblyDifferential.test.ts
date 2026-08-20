@@ -723,9 +723,9 @@ function stringWeightOf(declaredBytes: number): number {
  * string its header-plus-per-byte weight, each `bin`/`raw` value the fixed overhead
  * of the view it decodes to, and each number marker wider than 16 bits the heap
  * number its value may be boxed in. A value the weights charge no more than its
- * container's slot adds nothing here. This walk reports the modelled cost and never a measured
- * allocation. `cost` is the exact budget the production scan should charge;
- * `endOffset` is the byte offset the real unpacker finishes at.
+ * container's slot adds nothing here. This walk reports the modelled cost and
+ * never a measured allocation. `cost` is the exact budget the production scan
+ * should charge; `endOffset` is the byte offset the real unpacker finishes at.
  * Deliberately not derived from `scanFrameStructure`, so a source marker-dispatch
  * bug shows up as a boundary mismatch against this reference rather than being
  * masked by a shared walk.

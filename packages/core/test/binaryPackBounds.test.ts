@@ -62,9 +62,11 @@ function fixstr(s: string): Array<number> {
 /** One mapped-element record `{theirIndex, iteration}` as BinaryPack: a `fixmap`
  * of two pairs with the real string keys, a small (fixint) `iteration`, and
  * `theirIndex` under one of the two index widths the budget derivation uses -- a
- * fixint below 128, a `uint32` above it, which is the marker the real packer chooses
- * once an index passes 65,535 (pinned there against the packer in the differential
- * suite). Exactly the shape `conn.send` serializes for the largest legitimate
+ * fixint at 127 and below, a `uint32` above it. Those two are the only widths this
+ * helper emits, which is what its call sites here need; it does not reproduce the
+ * packer's own `uint8`/`uint16` choices in between, and the width the real packer
+ * gives an index at scale is pinned against the packer itself in the differential
+ * suite. Exactly the shape `conn.send` serializes for the largest legitimate
  * inbound frame. */
 function mappedRecord(theirIndex: number, iteration: number): Array<number> {
   const index =

@@ -147,17 +147,24 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
  * is not a string on the wire (see {@link scanFrameStructure}), and a string key
  * IS the property name, already charged in full by the `string` weight.
  *
- * The model is deliberately a *conservative* upper bound for every kind it charges:
- * it charges each object key string in full, though V8 internalizes repeated
- * property keys to one shared string, and each wide number marker its boxed cost,
- * though a small integer written in one is held in the slot -- so the real retained
- * peak of a key-heavy or index-heavy frame is lower. A true memory envelope is
- * simpler for a security reviewer to audit than one resting on V8
- * interning/representation choices an engine update could change; the cost of
+ * Each weight is set deliberately high where the retention it stands for is
+ * understood: an object key string is charged in full, though V8 internalizes
+ * repeated property keys to one shared string, and a wide number marker its boxed
+ * cost, though a small integer written in one is held in the slot. A model a
+ * security reviewer can audit is worth more than one resting on V8
+ * interning/representation choices an engine update could change; the cost of that
  * conservatism is a budget sized above the realistic legitimate frame rather than
- * hugging it (see
- * {@link MAX_WEBRTC_FRAME_STRUCTURE_BYTES}). Fixed, not configurable, for the same
- * reason as the budget itself.
+ * hugging it (see {@link MAX_WEBRTC_FRAME_STRUCTURE_BYTES}).
+ *
+ * The weights are model figures, and the differential suites score both sides of
+ * their comparison by them: they pin the scan to THIS MODEL -- the charge equals
+ * the modelled cost of the real unpacker's own value inventory -- rather than
+ * pinning the model to the heap, and no check here compares a decoded value's
+ * retained bytes against the weight charged for it. How closely a weight tracks
+ * what `unpack` really retains for its kind is therefore an open limit of this
+ * control, backed only where a measurement is recorded for that kind
+ * (docs/spec/CHANNEL_SECURITY.md carries the residual). Fixed, not configurable,
+ * for the same reason as the budget itself.
  */
 export const WEBRTC_VALUE_WEIGHTS = {
   object: 64,
@@ -206,15 +213,18 @@ export const WEBRTC_VALUE_WEIGHTS = {
  * encrypted element occupies on the wire (see docs/spec/PROTOCOL.md). A set frame
  * filling the 256 MiB wire cap carries about 7.67 million elements, whose
  * mapped-element frame would reach about 1.36 GiB and be rejected here.
- * Residual: every kind is charged at least what `unpack` retains for it, so the
- * per-frame worst case for the deserialized structure is this budget itself. A
- * frame of the heaviest kind (~4.07M declared empty-payload `bin` views at 264
- * charged bytes each with their array slot) meets the refusal at ~4 MB of
- * proportional wire while retaining ~0.79x the budget; the same count with
- * 60-63-byte payloads is equally admitted and retains ~1.09x, its payload bytes
- * the ~1x-wire addition the spec residual states
- * (docs/spec/CHANNEL_SECURITY.md), held by the wire cap rather than here -- the
- * one retention this budget does not itself bound. An all-empty-object frame
+ * Residual: this budget bounds what the scan CHARGES a frame, so the per-frame
+ * worst case for the deserialized structure is this budget itself under the
+ * weights above -- a modelled envelope rather than a measured ceiling on the heap,
+ * since how closely a weight tracks the retention it stands for is backed only
+ * where a measurement is recorded for that kind (see
+ * {@link WEBRTC_VALUE_WEIGHTS}). The frame that reaches the refusal on the least
+ * wire (~4.07M declared empty-payload `bin` views at 264 charged bytes each with
+ * their array slot) meets it at ~4 MB of proportional wire while retaining ~0.79x
+ * the budget; the same count with 60-63-byte payloads is equally admitted and
+ * retains ~1.09x, its payload bytes the ~1x-wire addition the spec residual states
+ * (docs/spec/CHANNEL_SECURITY.md), held by the wire cap rather than here -- a
+ * retention this budget charges nothing for. An all-empty-object frame
  * needs ~16.7M elements and ~16 MiB of wire to meet the same refusal (the
  * per-container byte check ties cost to wire), and a frame of the cheapest boxed
  * numbers needs ~213 MiB of wire -- inside the wire cap, so this budget is what
