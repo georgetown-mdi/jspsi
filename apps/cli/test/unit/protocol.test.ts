@@ -4494,7 +4494,8 @@ test("a terms-exchange warning under --event-stream reaches the fd-3 warning eve
   const widthNotice =
     "effective key count above the agreed terms: partner advertised 21 " +
     "value slot(s) per record against the 2 the agreed linkage keys imply; " +
-    "the extra width is a fan-out only the partner's own standardization holds";
+    "the extra width is the partner's own declaration and is not shown in " +
+    "the agreed terms";
 
   vi.mocked(runExchange).mockImplementation((async (...args: unknown[]) => {
     const options = args[3] as { onWarning?: (msg: string) => void };

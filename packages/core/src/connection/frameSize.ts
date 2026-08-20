@@ -252,8 +252,9 @@ export function partyFansOut(
  * coarse one-party gate the {@link prepareForExchange} pre-flight uses, when only
  * this party's row count is known: if a party's own contribution already exceeds
  * the budget, single-pass cannot succeed whatever the partner's size. The
- * authoritative two-party check is {@link singlePassExchangeExceedsCap}, run
- * post-handshake once both counts are exchanged.
+ * two-party check production runs post-handshake, once both counts are exchanged,
+ * is {@link singlePassCeilingBreach}; {@link singlePassExchangeExceedsCap} is the
+ * boolean convenience over it.
  *
  * A party declaring no fan-out passes its plain key count, for which this is the
  * cell-count gate unchanged.
@@ -344,8 +345,9 @@ export function singlePassExchangeExceedsCap(
  * authenticated advertisement, so a fan-out-free exchange derives exactly the cap
  * it derived before fan-out existed.
  *
- * Call only for an in-cap exchange (guard with {@link singlePassExchangeExceedsCap}
- * first): at the slot ceiling the cap is about 240 MiB fan-out-free and about 251
+ * Call only for an in-cap exchange (guard with {@link singlePassCeilingBreach}
+ * first, or its boolean convenience {@link singlePassExchangeExceedsCap}): at the
+ * slot ceiling the cap is about 240 MiB fan-out-free and about 251
  * MiB with the ragged table's count prefixes, below both transports' fixed
  * envelopes (the 256 MiB WebRTC envelope is the nearer one), so the per-transport
  * clamp -- min with {@link MAX_FRAME_SIZE_BYTES} for file-sync, with

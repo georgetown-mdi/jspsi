@@ -1040,10 +1040,12 @@ test("single-pass aborts symmetrically when the exchange exceeds the ceiling", a
     ),
   );
   // This party's own size is named as being within the ceiling, and it is not
-  // offered the local dataset remedies: nothing it can change moves the limit the
-  // partner's declaration reached.
+  // offered the local dataset remedies: nothing it can change under these terms
+  // moves the limit the partner's declaration reached. The scope is stated too --
+  // the linkage keys are an agreed term, so a re-agreed narrower set is a change
+  // this message does not speak to.
   await expect(run).rejects.toThrow(
-    /This party's own 2 value slot\(s\) are within the ceiling/,
+    /This party's own 2 value slot\(s\) are within the ceiling, so within the agreed terms neither its linkage keys nor its record count can lift this: the partner reduces its record count or splits its dataset\./,
   );
   await expect(run).rejects.not.toThrow(/Reduce the number of linkage keys/);
   await expect(run).rejects.not.toThrow(/cascade/);

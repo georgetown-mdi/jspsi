@@ -498,8 +498,8 @@ function partnerWidthAboveAgreedNotice(
   return (
     "effective key count above the agreed terms: partner advertised " +
     `${partnerEffectiveKeyCount} value slot(s) per record against the ` +
-    `${agreedWidth} the agreed linkage keys imply; the extra width is a ` +
-    "fan-out only the partner's own standardization holds"
+    `${agreedWidth} the agreed linkage keys imply; the extra width is the ` +
+    "partner's own declaration and is not shown in the agreed terms"
   );
 }
 

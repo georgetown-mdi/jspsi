@@ -721,6 +721,12 @@ test("the responder warns when the partner's advertised width is above the agree
   // and the one the agreed linkage keys imply.
   expect(notice).toContain("partner advertised 20 value slot(s) per record");
   expect(notice).toContain("against the 1 the agreed linkage keys imply");
+  // The gap is characterized by what this party can check -- the advertisement is
+  // the partner's own, and the agreed terms do not show the width -- and not by
+  // where the extra width came from, which this party cannot verify.
+  expect(notice).toContain(
+    "the extra width is the partner's own declaration and is not shown in the agreed terms",
+  );
 });
 
 test("the initiator warns on a width above the floor advertised on message 2", async () => {

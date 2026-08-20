@@ -538,8 +538,9 @@ function singlePassOverCapMessage(
         ? "The partner reduces its record count or splits its dataset on its " +
           "side too."
         : `This party's own ${valueSlots(local)} value slot(s) are within the ` +
-          "ceiling, so no change to its linkage keys or record count lifts " +
-          "this: the partner reduces its record count or splits its dataset.") +
+          "ceiling, so within the agreed terms neither its linkage keys nor " +
+          "its record count can lift this: the partner reduces its record " +
+          "count or splits its dataset.") +
         (partyFansOut(numLinkageKeys, partner)
           ? fanOutRemedy("the partner's")
           : ""),
