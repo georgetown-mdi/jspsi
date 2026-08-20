@@ -64,7 +64,8 @@ export const PLACEHOLDER_SSH_USERNAME = "REPLACE_WITH_SSH_USERNAME";
  * host/port/path -- where the acceptor's signaling socket goes, which is the
  * only thing a party running its own (or a forked deployment's) coordination
  * server cannot convey any other way. Everything else on that connection is left
- * behind: the PeerJS `key` and `username`, the `stun`/`turn` entries (a relay
+ * behind: the `key` and `username` fields (only `key` is PeerJS's own; `username`
+ * has no consumer on this channel at all), the `stun`/`turn` entries (a relay
  * entry carries a credential of its own), the `provision` block, and `secure` --
  * the first three because they are not a public locator, `secure` because the
  * endpoint schema has no field for it, so an acceptor seeded from one resolves
@@ -77,8 +78,15 @@ export const PLACEHOLDER_SSH_USERNAME = "REPLACE_WITH_SSH_USERNAME";
  * than emitted as a locator the partner could not dial -- and rather than
  * failing the whole invite when the endpoint is encoded. An empty `path`, which
  * the webrtc server schema permits and the endpoint schema rejects, is dropped
- * for the same reason: a blank signaling path is not a locator, and omitting it
- * leaves the acceptor on the broker's default mount point.
+ * for the same reason: a blank signaling path is not a locator. That drop is
+ * unreachable from today's only caller -- `psilink invite`'s URL-built webrtc
+ * connection never has an empty pathname (asserted in the CLI's
+ * `inviterConnectionFromURL` suite) -- so it is a dead branch, not active
+ * behavior. A future producer reachable with a genuinely empty path must emit
+ * the resolved mount point itself rather than drop the field and lean on a
+ * consumer default: the CLI and browser resolve an absent path differently
+ * (see docs/spec/WEBRTC_TRANSPORT.md), so there is no shared default to defer
+ * to.
  *
  * A host or path longer than the endpoint schema allows
  * ({@link MAX_ENDPOINT_HOST_LENGTH} / {@link MAX_ENDPOINT_PATH_LENGTH}) is the
@@ -149,8 +157,8 @@ export function endpointFromConnection(
       channel: "webrtc",
       host: server.host,
       port: reachablePort(server.port),
-      // The signaling mount point, dropped when blank (see the doc comment); an
-      // absent path leaves the acceptor on the broker default.
+      // The signaling mount point, dropped when blank (see the doc comment); a
+      // dead branch for today's only caller, which never mints an empty one.
       path:
         server.path !== undefined && server.path !== ""
           ? server.path
