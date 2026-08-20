@@ -18,22 +18,28 @@ import {
 } from "@jobs/handoff";
 import { generateJobId, writeJobFile } from "@jobs/workdir";
 import { JobInputNotFoundError } from "@jobs/workInputs";
+import { createServerJobExchangeDriver } from "@psi/serverJobExchangeDriver";
+import { failureFor } from "@bench/useInviterExchange";
 
 import {
   STUB_CLI_PATH,
   TEST_HOST_KEY_FINGERPRINT,
+  VALID_SHARED_SECRET,
   composedConnection,
   composedServer,
   tempDataRoot,
   validInputFileIntent,
   validIntent,
+  validLinkageTerms,
   validSftpIntent,
   validZeroSetupIntent,
   validZeroSetupSftpIntent,
 } from "../utils/jobFixtures";
 
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
-import type { CliDriverHandlers } from "@jobs/cliDriver";
+import type { CliDriverHandlers, RelayEvent } from "@jobs/cliDriver";
+import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
+import type { JobApiClient } from "@psi/serverJobExchangeDriver";
 import type { JobInputFileReference } from "@jobs/intent";
 
 vi.mock("@jobs/workdir", { spy: true });
@@ -357,6 +363,68 @@ describe("JobManager end-to-end via the stub CLI", () => {
     );
     expect(degraded).toBe(true);
     expect(record.status).toBe("succeeded");
+  });
+});
+
+describe("a synthesized persistence-loss terminal reaches the operator's alert", () => {
+  test("the composed alert claims no artifact its own cause cannot confirm", async () => {
+    // End to end across the three layers that compose this alert: the manager
+    // synthesizes the terminal (exit 73, no terminal event), the driver maps that
+    // relay frame onto a lifecycle category and message, and the seat composes the
+    // operator-facing copy from the pair. The manager's real event buffer is what
+    // is replayed, so a reworded synthesized message is re-composed here rather
+    // than asserted against a copy of itself.
+    const manager = makeManager({ exitCode: 73 });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+
+    const relayed = record.events.map((entry) => entry.event);
+    const client: JobApiClient = {
+      createJob: () => Promise.resolve(id),
+      openEventStream: async function* (): AsyncIterable<RelayEvent> {
+        for (const event of relayed) {
+          await Promise.resolve();
+          yield event;
+        }
+      },
+      cancelJob: () => Promise.resolve(),
+      deleteJob: () => Promise.resolve(),
+      fetchJobStatus: () => Promise.resolve({ kind: "live", status: "failed" }),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+    };
+    const failures: Array<{
+      category: ExchangeErrorCategory;
+      error: unknown;
+    }> = [];
+    await createServerJobExchangeDriver(
+      {
+        transport: { channel: "filedrop" },
+        side: "inviter",
+        linkageTerms: validLinkageTerms(),
+        sharedSecret: VALID_SHARED_SECRET,
+        inputSource: { kind: "inline", csv: "ssn\n111223333\n" },
+      },
+      client,
+    ).run({
+      signal: new AbortController().signal,
+      onStages: () => undefined,
+      onStage: () => undefined,
+      onResult: () => undefined,
+      onError: (failure) => failures.push(failure),
+    });
+
+    expect(failures).toHaveLength(1);
+    const alert = failureFor(failures[0].category, failures[0].error);
+    expect(alert.category).toBe("output");
+    expect(alert.title).toBe("Results unavailable");
+    // The alert leads with the do-not-repeat instruction, then hands over the
+    // appliance's own cause. The lead must not name an artifact that cause
+    // immediately says cannot be confirmed -- the two sentences are read together.
+    expect(alert.message).toContain("do not run this exchange again");
+    expect(alert.message).toContain("a local write failed:");
+    expect(alert.message).toContain("cannot confirm which files reached disk");
+    expect(alert.message).not.toContain("generating the results file");
   });
 });
 

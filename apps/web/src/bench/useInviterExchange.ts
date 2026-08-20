@@ -133,16 +133,19 @@ export function failureFor(
     // categories this alert offers no way to run again -- and it says so, since
     // an operator who reads a failure and finds no retry control looks for one
     // elsewhere (the console's own start-over, or the command line) rather than
-    // concluding the run must not be repeated. Sanitized at the display
-    // boundary: the output error is local, but the alert is operator-facing, so
-    // escape it like any other.
+    // concluding the run must not be repeated. The cause it carries is either
+    // this browser's own results-file build or the appliance's report of a lost
+    // local write it cannot name, so the lead claims only that a local write
+    // failed -- naming the results file would contradict the second message.
+    // Sanitized at the display boundary: the output error is local, but the
+    // alert is operator-facing, so escape it like any other.
     return {
       category,
       title: "Results unavailable",
       message:
         "The linkage completed, so do not run this exchange again - a second " +
         "run would send your data for an exchange that already happened. On " +
-        "this machine, generating the results file failed: " +
+        "this machine, a local write failed: " +
         sanitizeForDisplay(errorMessage(error)),
     };
   }

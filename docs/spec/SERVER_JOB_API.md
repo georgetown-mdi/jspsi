@@ -409,7 +409,7 @@ The child's exit is classified from the exit code and signal, per the CLI's term
 - `completedWithPersistenceLoss` with no terminal event: an `error` terminal with `category: "output"`, the local-output-stage category, whose message states that a local write was lost and that the appliance cannot say which one. The category is load-bearing rather than cosmetic: it is the one a console seat renders with no way to run the exchange again, while the `exchange` category below is retryable and would invite the re-run this exit code exists to prevent.
 - any other exit with no terminal event: a `failed` terminal (`category: "exchange"`) noting the stream broke and, when known, the exit code.
 
-A synthesized terminal sets `status` exactly as a CLI-emitted one does -- `result` is `succeeded`, `error` is `failed`. A persistence loss with no terminal event is therefore `failed`: the console never saw an artifact announced, so it promises none, which is the rule every broken stream takes regardless of exit code. The outcome still carries the do-not-repeat signal, and the synthesized message points the operator at the workdir.
+A synthesized `result` terminal sets `status` to `succeeded` and a synthesized `error` to `failed` -- except the interrupt case above, whose `status` is already `cancelled` before synthesis and keeps it. A persistence loss with no terminal event is therefore `failed`: the console never saw an artifact announced, so it promises none, which is the rule every broken stream takes regardless of exit code. The outcome still carries the do-not-repeat signal, and the synthesized message points the operator at the workdir.
 
 ## Cancellation escalation
 

@@ -59,7 +59,7 @@ describe("failureFor", () => {
     expect(failure.message).toContain("do not run this exchange again");
     expect(failure.message).toContain("already happened");
     expect(failure.message).toContain(
-      "generating the results file failed: blob quota exceeded",
+      "a local write failed: blob quota exceeded",
     );
   });
 
