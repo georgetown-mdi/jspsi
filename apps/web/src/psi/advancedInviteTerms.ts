@@ -10,7 +10,6 @@ import { outputForDirection } from "./advancedInviteTypes";
 import { payloadSendForMetadata } from "./metadataEditing";
 
 import type {
-  Algorithm,
   ExchangeDataSpec,
   LinkageField,
   LinkageKey,
@@ -27,11 +26,11 @@ import type { AdvancedInviteDraft, DraftKey } from "./advancedInviteTypes";
  * terms. Pure -- no validation. {@link validateAdvancedInvite} runs the built terms
  * through the core schema, which stays the single validation source.
  *
- * The gated-setting clamp lives here: {@link buildAdvancedTerms} forces the
- * matching algorithm, deduplication, and per-element fuzzy expansion to the applied
- * behavior while their {@link APPLIED_SETTINGS} flag is false, the structural half
- * of the gate that holds regardless of how the draft reached its state. The
- * disabled editor controls and the import refusal are the other layers.
+ * The gated-setting clamp lives here: {@link buildAdvancedTerms} forces
+ * deduplication and per-element fuzzy expansion to the applied behavior while
+ * their {@link APPLIED_SETTINGS} flag is false, the structural half of the gate
+ * that holds regardless of how the draft reached its state. The disabled editor
+ * controls and the import refusal are the other layers.
  */
 
 /** NFC-normalize and trim a free-text value. NFC is the cross-party canonical
@@ -157,12 +156,11 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // overrides identity, the output direction, the enabled keys, and the legal
   // agreement.
   const baseTerms = getDefaultLinkageTerms(draft.identity, draft.metadata);
-  // Clamp the matching algorithm and per-element fuzzy expansion to the applied
-  // behavior while gated, so the built terms can never carry a setting the run does
-  // not yet honor regardless of how the draft reached this state (a UI gap, an
-  // import) -- the structural half of the gate that holds even if the disabled
-  // controls or import refusal are bypassed.
-  const algorithm: Algorithm = APPLIED_SETTINGS.psiC ? draft.algorithm : "psi";
+  // Clamp deduplication and per-element fuzzy expansion to the applied behavior
+  // while gated, so the built terms can never carry a setting the run does not yet
+  // honor regardless of how the draft reached this state (a UI gap, an import) --
+  // the structural half of the gate that holds even if the disabled controls or
+  // import refusal are bypassed.
   const deduplicate = APPLIED_SETTINGS.deduplicate ? draft.deduplicate : false;
   const enabledKeys = draft.keys
     .filter((entry) => entry.enabled)
@@ -197,7 +195,10 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   const terms: LinkageTerms = {
     ...baseTerms,
     identity: normalizeText(draft.identity),
-    algorithm,
+    // Unclamped, unlike its gated neighbors: the exchange honors both members, and
+    // a count-only document outside the shape the specification admits is refused
+    // by the count-only rules rather than narrowed here.
+    algorithm: draft.algorithm,
     deduplicate,
     linkageStrategy: draft.linkageStrategy,
     output: outputForDirection(draft.outputDirection),

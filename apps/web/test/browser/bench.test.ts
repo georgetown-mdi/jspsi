@@ -1115,7 +1115,7 @@ describe("inviter bench", () => {
     }
   });
 
-  test("customize tabs: reorder keys, author an agreement, gated settings stay inert", async () => {
+  test("customize tabs: reorder keys, author an agreement, the gated setting stays inert", async () => {
     app.render(createElement(InviterBench));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
@@ -1174,8 +1174,11 @@ describe("inviter bench", () => {
       .element(page.getByText("Single-pass widens what one of you can observe"))
       .toBeInTheDocument();
 
-    // The gated method and deduplication controls are visible but inert.
-    await expect.element(page.getByLabelText("Matching method")).toBeDisabled();
+    // The matching-method control is live -- the exchange conducts both
+    // algorithms -- while the gated deduplication control is visible and inert.
+    await expect
+      .element(page.getByLabelText("Matching method"))
+      .not.toBeDisabled();
     await expect
       .element(
         page.getByLabelText(

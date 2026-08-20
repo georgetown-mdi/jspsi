@@ -1,6 +1,6 @@
 /**
  * Whether today's PSI exchange actually honors each setting an inviter can
- * propose: the `algorithm` (`psi-c`), `deduplicate`, and per-element
+ * propose that it does not yet apply: `deduplicate` and per-element
  * `generateFuzzyComparisons`. SINGLE SOURCE OF TRUTH read by the shared consent
  * summary both acceptance surfaces render (to flag a proposed-but-not-applied
  * setting), the web app's expert linkage-terms editor (to gate a control off and
@@ -9,14 +9,13 @@
  * or imported -- with a setting active while its flag is false would let an
  * operator mint an invitation whose headline behavior silently does not happen.
  *
- * `psiC` is the privacy footgun -- a selectable count-only (`psi-c`) setting while
- * the run still reveals matched identifiers would let an operator believe
- * identifiers are withheld when they are not, so the editor keeps it un-selectable
- * (and clamps it out of the built terms) and both consent surfaces flag a proposed
- * `psi-c`, until this flips. Matching is hard-wired one-to-one: a proposed
- * `deduplicate` is refused at the exchange boundary before the run, while fuzzy
- * expansion (`fuzzyComparisons`) is a silent no-op; the same flag-driven gating
- * applies to all three.
+ * The two are not alike in what not-applying them does. Matching is hard-wired
+ * one-to-one, so a proposed `deduplicate` is refused at the exchange boundary
+ * before the run (`assertDeduplicateImplemented`, `exchange.ts`, and the CLI
+ * invite mint boundary); an operator who reached such an exchange would have the
+ * run aborted whatever this says, and that refusal must be replaced by the real
+ * matching path in the change that flips it. Fuzzy expansion is a silent no-op
+ * instead. The same flag-driven gating applies to both.
  *
  * Flip a flag to `true` when the exchange wires the feature in (tracked on the
  * product board); the editor control unlocks, the clamp and import refusal stop
@@ -38,25 +37,16 @@
  * candidates is attributed, which the current one-to-one accounting has no
  * answer for.
  *
- * `psiC` is the one flag the exchange boundary itself reads: the count-only run
- * path exists (`linkViaCountOnlyPSI`, `link.ts`), and `assertAlgorithmImplemented`
- * (`exchange.ts`) admits `psi-c` exactly while this flag is true -- so flipping it
- * is what makes a count-only exchange runnable, at the same moment it becomes
- * selectable on the acceptance surfaces. `deduplicate` is not there yet: the
- * exchange boundary refuses it regardless of this flag
- * (`assertDeduplicateImplemented` in `exchange.ts`, and the CLI invite mint
- * boundary), so an operator who reached such an exchange would have the run
- * aborted whatever this says, and that refusal must be replaced by the real
- * matching path in the change that flips it. The full psi-c ungate checklist
- * across web, CLI, and core is tracked on the product board under "Implement
- * count-only PSI".
+ * The count-only algorithm (`psi-c`) is NOT gated here: the exchange runs it
+ * (`linkViaCountOnlyPSI`, `link.ts`), `assertAlgorithmImplemented` (`exchange.ts`)
+ * admits it, and it is selectable on the authoring and acceptance surfaces. What
+ * bounds it is the shape the specification admits (docs/spec/PROTOCOL.md, PSI-C),
+ * enforced as its own refusals rather than as an applied-settings flag.
  */
 export const APPLIED_SETTINGS: {
-  readonly psiC: boolean;
   readonly deduplicate: boolean;
   readonly fuzzyComparisons: boolean;
 } = {
-  psiC: false,
   deduplicate: false,
   fuzzyComparisons: false,
 };

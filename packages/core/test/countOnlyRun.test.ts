@@ -1,15 +1,10 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 
-// The count-only run path is gated on APPLIED_SETTINGS.psiC, which is false in the
-// shipped build: `psi-c` terms are refused at every boundary, and that refusal is
-// pinned against the REAL flag elsewhere (countOnlyShape.test.ts, and the run-boundary
-// case in exchangeRecordEndToEnd.test.ts). This file forces the flag true so the path
-// itself is verified rather than only reachable in review. Every property asserted
-// here is a normative row of docs/spec/PROTOCOL.md (PSI-C) or of
-// docs/spec/EXCHANGE_RECORD.md (Count-only records).
-vi.mock("../src/appliedSettings", () => ({
-  APPLIED_SETTINGS: { psiC: true, deduplicate: false, fuzzyComparisons: false },
-}));
+// The count-only run driven end to end over a real message pipe and a real PSI
+// library, against the shipped build rather than a forced setting. Every property
+// asserted here is a normative row of docs/spec/PROTOCOL.md (PSI-C) or of
+// docs/spec/EXCHANGE_RECORD.md (Count-only records), and the `psi` runs beside them
+// hold the comparison the count-only claim is stated against.
 
 import PSI from "@openmined/psi.js";
 
@@ -287,6 +282,35 @@ test("the count equals what a single-key psi run over the same key and data matc
   expect(counted.responder.intersectionCount).toBe(
     matched.responder.associationTable?.[0].length,
   );
+});
+
+test("a psi run over the same terms and data still reveals identifiers", async () => {
+  // The other side of the coordinated change: admitting psi-c leaves the
+  // identifier-revealing run exactly as it was, so an operator who did not ask for a
+  // count still gets the pairing and a record attesting that it was disclosed.
+  const { initiator, responder, initiatorSent, responderSent } = await runBoth(
+    both,
+    both,
+    "psi",
+  );
+
+  expect(initiator.associationTable?.[0]).toHaveLength(expectedCount);
+  expect(responder.associationTable?.[0]).toHaveLength(expectedCount);
+  expect(initiator.intersectionCount).toBeUndefined();
+  expect(responder.intersectionCount).toBeUndefined();
+
+  // The record attests the identifier-revealing algorithm, and carries the
+  // association-table commitment that marks this party as having received the
+  // pairing -- the row a count-only record is required not to carry.
+  expect(initiator.audit!.record.governance.algorithm).toBe("psi");
+  expect(responder.audit!.record.governance.algorithm).toBe("psi");
+  expect(initiator.audit!.record.commitments.associationTable).toBeDefined();
+  expect(responder.audit!.record.commitments.associationTable).toBeDefined();
+
+  // The count-report leg is psi-c's alone: a psi run carries none in either
+  // direction, so admitting psi-c added no frame to the revealing exchange.
+  expect(countReports(initiatorSent)).toEqual([]);
+  expect(countReports(responderSent)).toEqual([]);
 });
 
 test("one-sided: the non-entitled party is sent no count-report frame at all", async () => {

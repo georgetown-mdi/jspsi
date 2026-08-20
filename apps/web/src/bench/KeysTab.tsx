@@ -236,12 +236,7 @@ export function KeysTab({
       )}
       <NativeSelect
         label="Matching method"
-        description={
-          APPLIED_SETTINGS.psiC
-            ? "Reveal the matched identifiers, or only the count."
-            : '"Reveal only the count (psi-c)" is not available yet; the standard method applies.'
-        }
-        disabled={!APPLIED_SETTINGS.psiC}
+        description="Reveal the matched identifiers, or only the count."
         value={editor.draft.algorithm}
         data={[
           { value: "psi", label: "Reveal the matched identifiers (standard)" },

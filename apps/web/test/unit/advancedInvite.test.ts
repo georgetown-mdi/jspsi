@@ -905,8 +905,8 @@ describe("the linkage-strategy control", () => {
       ...draft,
       linkageStrategy: "single-pass",
     });
-    // Written straight through -- not clamped like algorithm/deduplicate -- and the
-    // built terms still parse through the core schema.
+    // Written straight through -- not clamped like deduplicate/fuzzyComparisons --
+    // and the built terms still parse through the core schema.
     expect(built.linkageStrategy).toBe("single-pass");
     expect(safeParseLinkageTerms(built).success).toBe(true);
   });
@@ -917,9 +917,10 @@ describe("the linkage-strategy control", () => {
       ...draft,
       linkageStrategy: "single-pass",
     });
-    // Unlike a gated psi-c/deduplicate setting, an imported single-pass document is
-    // adopted rather than refused: single-pass is honored end-to-end, so it carries
-    // no gatedActiveSettingMessage. This is the lie-proof encoding of "not gated".
+    // Unlike a gated deduplicate/fuzzyComparisons setting, an imported single-pass
+    // document is adopted rather than refused: single-pass is honored end-to-end,
+    // so it carries no gatedActiveSettingMessage. This is the lie-proof encoding of
+    // "not gated".
     expect(gatedActiveSettingMessage(exported)).toBeUndefined();
     const imported = draftFromTerms(exported, seed);
     expect(imported.linkageStrategy).toBe("single-pass");

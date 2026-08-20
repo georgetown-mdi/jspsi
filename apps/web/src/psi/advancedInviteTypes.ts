@@ -25,16 +25,16 @@ import type {
  * (a field reference chosen from the declared list, a per-element transform
  * pipeline, and a two-of-N swap) and imports/exports the whole terms document.
  *
- * `algorithm` (psi-c), `deduplicate`, and per-element fuzzy comparisons are GATED:
- * the terms mapping clamps them to the applied behavior (`psi` / no-dedup /
- * no-fuzzy) while their `APPLIED_SETTINGS` flag is false, the editor controls are
- * disabled to match, and an import that turns one on is refused -- so the editor
- * can never mint an invitation whose headline behavior silently does not happen
- * (psi-c being the privacy footgun). A fan-out transform step is held back the
- * same way against core's own list rather than an `APPLIED_SETTINGS` flag: the
- * step editor does not offer the family, and a document that carries one -- in a
- * cleaning step or a linkage-key element transform -- blocks generation and is
- * refused at the mint, since core refuses the run it commits to.
+ * `deduplicate` and per-element fuzzy comparisons are GATED: the terms mapping
+ * clamps them to the applied behavior (no-dedup / no-fuzzy) while their
+ * `APPLIED_SETTINGS` flag is false, the editor controls are disabled to match, and
+ * an import that turns one on is refused -- so the editor can never mint an
+ * invitation whose headline behavior silently does not happen. A fan-out transform
+ * step is held back the same way against core's own list rather than an
+ * `APPLIED_SETTINGS` flag: the step editor does not offer the family, and a
+ * document that carries one -- in a cleaning step or a linkage-key element
+ * transform -- blocks generation and is refused at the mint, since core refuses
+ * the run it commits to.
  * No payload block is authored into the terms.
  * The output direction is settable now that one-sided output is honored
  * end-to-end (the acceptor mirrors the inviter's output and the exchange withholds
@@ -128,10 +128,10 @@ export interface AdvancedInviteDraft {
    * unrepresentable -- it has no `OutputDirection`. */
   outputDirection: OutputDirection;
   /** The matching algorithm. `psi` reveals matched identifiers; `psi-c` reveals
-   * only the count. Gated: {@link buildAdvancedTerms} clamps it to `psi` while
-   * `APPLIED_SETTINGS`.psiC is false, so the built terms can never carry a
-   * count-only setting the run does not yet honor (the editor control is disabled
-   * to match). Carried so the control unlocks the moment the flag flips. */
+   * only the count. Ungated -- the exchange honors both -- so
+   * {@link buildAdvancedTerms} writes it straight through with no clamp; a
+   * count-only draft outside the shape the specification admits is refused by the
+   * count-only rules at validation instead. */
   algorithm: Algorithm;
   /** Whether more than one of the holder's records may match the same partner
    * record -- deduplication of the holder's OWN inputs, which lets multiple of its

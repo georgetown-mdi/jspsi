@@ -294,60 +294,48 @@ acceptance does after it states the conflict.
 
 ## Proposed is not applied
 
-Three settings an inviter may declare are not honored by today's exchange: the
-count-only algorithm, deduplicated matching, and the per-element fuzzy-comparison
-expansion. `APPLIED_SETTINGS` is the single source of truth for which, and the
-summary carries the resulting flags alongside each term rather than leaving each
-renderer to consult it. A surface therefore cannot state a matching behavior the
-run does not perform, and cannot forget the caveat for one setting while carrying
-it for another.
+Two settings an inviter may declare are not honored by today's exchange:
+deduplicated matching and the per-element fuzzy-comparison expansion.
+`APPLIED_SETTINGS` is the single source of truth for which, and the summary
+carries the resulting flags alongside each term rather than leaving each renderer
+to consult it. A surface therefore cannot state a matching behavior the run does
+not perform, and cannot forget the caveat for one setting while carrying it for
+another.
 
-The three are not equally urgent, and the surfaces place their caveats
-accordingly. A proposed count-only algorithm states a DISCLOSURE guarantee, so
-its caveat sits with the headline itself, where a reader cannot take the
-guarantee as in force without also meeting the caveat. Deduplication and fuzzy
-comparison change match multiplicity and breadth, not what is disclosed, so their
-caveats sit one expand down with the headlines they qualify.
+Neither changes what is disclosed -- they change match multiplicity and breadth --
+so their caveats sit one expand down with the headlines they qualify. A setting
+that stated a DISCLOSURE guarantee would take the other placement: with the
+headline itself, where a reader cannot take the guarantee as in force without also
+meeting what qualifies it.
 
 What each caveat SAYS follows what not applying the setting actually does, and the
-three are not alike there. The count-only algorithm and deduplication are refused
-at the exchange boundary, so an invitation carrying either aborts before any
-identifier is revealed; their caveats name that refusal and what to ask the
-inviter for. A caveat saying the run proceeds and reveals more than the headline
-promised describes a run that does not happen -- which is what one surface said
-about a count-only invitation while the other said the opposite. The fuzzy
-expansion has no such refusal: it is a silent no-op that narrows the match, so its
-marker says only that the expansion is proposed, and a refusal claim there would be
-the same error facing the other way.
-
-That the count-only caveat is a moving target is the reason it is pinned by a
-render test on both surfaces: when the count-only run path lands the caveat goes
-from both of them, as a deliberate edit rather than a silent divergence. What each
-surface shows in its place is the count-only tier below -- whose gated facts the
-two render alike, and whose headline they place differently.
+two are not alike there. Deduplication is refused at the exchange boundary, so an
+invitation carrying it aborts before any identifier is revealed; its caveat names
+that refusal and what to ask the inviter for. A caveat saying the run proceeds and
+reveals more than the headline promised describes a run that does not happen --
+which is what one surface once said about a count-only invitation while the other
+said the opposite. The fuzzy expansion has no such refusal: it is a silent no-op
+that narrows the match, so its marker says only that the expansion is proposed,
+and a refusal claim there would be the same error facing the other way.
 
 The caveat copy is carried once, beside the classification, and rendered twice --
 for the same reason the classification is. Two surfaces authoring their own
 account of the same unimplemented setting is how they came to say opposite things
 about a proposed count-only exchange in the first place.
 
-## The count-only tier, authored behind the flag it waits on
+## The count-only tier
 
-What that caveat gives way to is authored and wired already, behind the same
-`psiCApplied` the caveat reads. Both surfaces render the tier's facts where the
-summary says the run honors the algorithm, and the gate keeps every one of those
-sentences off both surfaces while the exchange refuses a `psi-c` invitation
-outright -- so landing the count-only run path flips the copy by flipping one
-flag, rather than by a copy edit made at the same time and hoped to match.
+The exchange conducts a count-only run, so what both surfaces render for a `psi-c`
+invitation is the tier stating what it discloses -- never a caveat qualifying the
+algorithm away. The algorithm alone is what reaches the tier: no second flag can
+hold half of it back, and none can be left set while the other clears.
 
 The count-only disclosure statement itself is shared wording rather than a shared
-placement. The web screen carries it as the matching-method headline for any
-`psi-c` invitation, qualified in place by the refusal caveat directly beneath it;
-the CLI accept prompt names the algorithm there and prints the statement only
-where the flag says the run honors it. Each surface's render test pins both sides
-of the gate it holds: the caveat present and the five gated notes absent under a
-refused invitation (the web additionally pins the headline present there), the
-tier's own wording and placement measured with the flag moved.
+placement. The web screen carries it as the matching-method headline; the CLI
+accept prompt names the algorithm there and prints the statement beneath it. Each
+surface's render test pins the tier's own wording and placement, and the absence
+of every one of its sentences from a `psi` invitation, so the presence is the
+algorithm's doing rather than the fixture's.
 
 Count-only is the mildest disclosure psilink offers and it is not zero disclosure,
 which is why the tier is more than one replacement sentence. The intersection
@@ -382,8 +370,8 @@ guarantee and what an acceptor is told it guarantees.
 The last of those is the one an acceptor could act on wrongly, so it is never
 separated from the guarantee it bounds: a reader who takes "only a number" for the
 safe option must not be able to reach that reading without meeting it. This is the
-same placement rule the not-applied caveats follow, applied to a caveat on an
-applied setting.
+same placement rule the not-applied caveats follow, applied to a sentence that
+bounds a setting the run does honor.
 
 ### Why the payload sentence names the algorithm
 
@@ -399,34 +387,29 @@ leaves their machine is also where the specification puts it -- at the choice, n
 as a surprise once the run aborts.
 
 Each surface backs that sentence with a render-side refusal rather than printing
-it over a contradiction: an applied `psi-c` whose viewer-side outbound set carries
-a column, or whose invitation declares payload in either direction, throws instead
+it over a contradiction: a `psi-c` whose viewer-side outbound set carries a
+column, or whose invitation declares payload in either direction, throws instead
 of rendering the guarantee. Those throws are a backstop and not the remedy. The
-remedy is the actionable refusal ahead of them, which does not wait on
-`APPLIED_SETTINGS.psiC`: a payload-declaring `psi-c` document is refused wherever
-it is parsed, and an input-metadata payload column wherever a surface holds this
-party's own metadata beside the agreed algorithm -- at the mint and at the accept.
-An operator meets the rule and what to change about it, not a raw render error.
-The mint half of that is inert until `APPLIED_SETTINGS.psiC` flips: while the
-flag is false the web surface's own terms-building step clamps the algorithm to
-`psi` before a `psi-c` document exists at the mint for the rule to catch, so
-"refused where the terms are authored" describes the post-flip build, while the
-parse and accept points, the CLI's among them, are live today.
+remedy is the actionable refusal ahead of them: a payload-declaring `psi-c`
+document is refused wherever it is parsed, and an input-metadata payload column
+wherever a surface holds this party's own metadata beside the agreed algorithm --
+where the terms are authored, at the mint, and at the accept. An operator meets
+the rule and what to change about it, not a raw render error.
 
 The payload refusal is not the only one the tier's copy presupposes. The
 spec's remaining `psi-c` shape refusals are held on the same footing: more than
 one linkage key and `linkage_strategy: single-pass` would falsify the tier's own
 copy -- the round-disclosure note speaks of one key's exactly-once values, and
 the result note denies any record-by-record pairing -- and `deduplicate` is
-refused twice over, by the count-only rule that outlives the flag flip and by
-`assertDeduplicateImplemented`, which refuses it under every algorithm while no
-run honors it. None of those three -- more than one linkage key, single-pass,
-and deduplicate -- has a render backstop, by decision rather than omission: the
-refusals reach them at parse and at accept, which is where a document that
+refused twice over, by the count-only rule and by `assertDeduplicateImplemented`,
+which refuses it under every algorithm while no run honors it. None of those
+three -- more than one linkage key, single-pass, and deduplicate -- has a render
+backstop, by decision rather than omission: the refusals reach them where the
+terms are authored, at parse, and at accept, which is where a document that
 breaks one is stopped.
 
-That the CLI puts the whole tier in its twice-printed decision block, where it
-prints the algorithm and its caveat today, is the same judgment read from the
+That the CLI puts the whole tier in its twice-printed decision block, beside the
+algorithm it prints there, is the same judgment read from the
 other end: under `psi-c` what the run discloses IS the decision, so these are the
 facts an operator answering the prompt has to have in front of them rather than
 the terms they qualify. It costs length -- the block below carries a fixed budget
@@ -452,15 +435,9 @@ forecloses -- directly under a headline saying only the count is revealed.
 
 So the fact is scoped by the ALGORITHM and not by the linkage strategy: it holds
 for a one-sided `psi` exchange under both strategies and for no `psi-c` exchange
-at all. Both surfaces withhold it for ANY `psi-c` invitation rather than for an
-applied one, which is the difference from the tier's own five sentences. Those
-are gated on `psiCApplied` because they state what a count-only run holds, and
-while the exchange refuses those terms there is no such run to state anything
-about; this one is a claim about a disclosure, and a refused invitation makes no
-disclosure either. Gating it on the applied flag would put the claim back on both
-surfaces the moment `APPLIED_SETTINGS.psiC` flips -- the one moment there is a
-live count-only run for it to be wrong about -- so the gate that reads the
-algorithm alone is what makes the ungate a flag flip here as well. What a
+at all. Both surfaces withhold it for any `psi-c` invitation, off the same reading
+of the algorithm that reaches the tier's own five sentences -- one gate, so the
+fact and its replacement cannot both be shown or both be missing. What a
 count-only run does disclose is the tier's to state, and it already does: the
 round disclosures beside the count, and the enforced half that hands neither
 party a pairing.

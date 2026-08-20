@@ -885,17 +885,28 @@ describe("customize tabs", () => {
     expect(after.slice(2)).toEqual(before.slice(2));
   });
 
-  test("gated settings cannot alter minted terms", () => {
+  test("a gated setting cannot alter minted terms", () => {
     const seeded = editorFromCsv("Dana", csv);
-    const forced = editorWithDeduplicate(
-      editorWithAlgorithm(seeded, "psi-c"),
-      true,
-    );
-    expect(forced.draft.algorithm).toBe("psi-c");
+    const forced = editorWithDeduplicate(seeded, true);
     expect(forced.draft.deduplicate).toBe(true);
-    const terms = mintedTerms(forced);
-    expect(terms.algorithm).toBe("psi");
-    expect(terms.deduplicate).toBe(false);
+    expect(mintedTerms(forced).deduplicate).toBe(false);
+  });
+
+  test("a count-only draft over a seeded multi-key spine blocks generation", () => {
+    // The algorithm is not clamped -- the exchange honors psi-c -- so a draft that
+    // selects it reaches the count-only shape rules, and the seeded spine authors
+    // more than one linkage key, the shape a count-only run does not admit. Blocking
+    // generation is the fix path: narrowing the document to one key silently is
+    // exactly what the specification forbids.
+    const seeded = editorFromCsv("Dana", csv);
+    const countOnly = editorWithAlgorithm(seeded, "psi-c");
+    expect(countOnly.draft.algorithm).toBe("psi-c");
+    expect(
+      countOnly.draft.keys.filter((k) => k.enabled).length,
+    ).toBeGreaterThan(1);
+    const validation = reviewValidation(countOnly);
+    expect(validation.canGenerate).toBe(false);
+    expect(validation.terms).toBeUndefined();
   });
 
   test("adding a same-typed field binds the free column uniquely", () => {

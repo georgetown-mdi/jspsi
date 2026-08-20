@@ -411,39 +411,32 @@ function CondensableDetails({
  * level, and accessible name a tier is announced with are authored once rather than
  * per tier.
  *
- * Every "proposed but not yet applied" caveat (psi-c count-only, deduplicate, and
- * per-element fuzzy comparison) follows ONE placement rule, so the flagging is
- * uniform rather than decided per setting: a setting's caveat renders at the SAME
- * visibility level as the headline it contradicts, never one expand down, so a
- * reader can never see a headline setting as in force while its caveat is hidden.
- * Which level that is follows the setting's disclosure weight. psi-c states a
- * disclosure GUARANTEE -- only the match count is revealed, no identifiers -- so
- * its headline is always-visible in the core and its caveat sits with it there;
- * deduplicate and fuzzy change match multiplicity/breadth, not what is disclosed,
- * so their headlines sit in a disclosure rather than the core (deduplicate in
- * "Other details", fuzzy in each key's detail, itself behind the matching
- * disclosure) and their caveats sit with those headlines, co-hidden with them. The
- * asymmetry is deliberate: a count-only headline is the one an acceptor could act
- * on -- treating an exchange as safe to run because only a count is revealed --
- * whereas a looser match multiplicity or breadth is not something a reader takes as
- * a disclosure guarantee, so its caveat can sit one expand down with it. What each
- * caveat SAYS is fixed copy read from `PROPOSED_NOT_APPLIED_NOTES` in
- * `@psilink/core`, which the CLI accept prompt renders too, so no partner text
- * enters a caveat and neither surface can restate one. Render tests pin each caveat
- * at its headline's level against the accessibility tree.
+ * Every "proposed but not yet applied" caveat (deduplicate and per-element fuzzy
+ * comparison) follows ONE placement rule, so the flagging is uniform rather than
+ * decided per setting: a setting's caveat renders at the SAME visibility level as
+ * the headline it contradicts, never one expand down, so a reader can never see a
+ * headline setting as in force while its caveat is hidden. Which level that is
+ * follows the setting's disclosure weight. Both change match multiplicity/breadth
+ * rather than what is disclosed, so their headlines sit in a disclosure rather than
+ * the core (deduplicate in "Other details", fuzzy in each key's detail, itself
+ * behind the matching disclosure) and their caveats sit with those headlines,
+ * co-hidden with them: a looser match multiplicity or breadth is not something a
+ * reader takes as a disclosure guarantee, where a statement about what is disclosed
+ * would have to sit always-visible in the core. What each caveat SAYS is fixed copy
+ * read from `PROPOSED_NOT_APPLIED_NOTES` in `@psilink/core`, which the CLI accept
+ * prompt renders too, so no partner text enters a caveat and neither surface can
+ * restate one. Render tests pin each caveat at its headline's level against the
+ * accessibility tree.
  *
- * The same placement rule governs the count-only facts the psi-c caveat gives way to
- * once `psiCApplied` says the run honors the algorithm: what the run itself holds,
+ * The same placement rule governs the count-only facts: what the run itself holds,
  * what its rounds disclose beside the count, and the bound a partner's choice of
  * input puts on both are always-visible with the matching-method headline, the
  * reported-count caveat sits with result sharing, and the no-payload sentence takes
- * the outbound-send slot ahead of every entitlement-driven block there. Those five
- * sentences are what the flag gates. The headline is not one of them: this screen
- * renders `COUNT_ONLY_DISCLOSURE_STATEMENT` for ANY psi-c invitation, qualified in
- * place by the refusal caveat while the exchange will not run on those terms, where
- * the CLI accept prompt prints that same wording only once the flag says the run
- * honors it. Every sentence, and the enforced-versus-partner basis behind it, is
- * read from `COUNT_ONLY_DISCLOSURE_STATEMENT` and `CONSENT_FACTS` in `@psilink/core`.
+ * the outbound-send slot ahead of every entitlement-driven block there. Every
+ * sentence, and the enforced-versus-partner basis behind it, is read from
+ * `COUNT_ONLY_DISCLOSURE_STATEMENT` and `CONSENT_FACTS` in `@psilink/core`, which the
+ * CLI accept prompt reads too, so the two surfaces cannot state different outcomes
+ * for one invitation.
  *
  * Two payload facts whose detail lives in the "Other details" disclosure carry an
  * always-visible count in a direction tier, since each would otherwise be invisible
@@ -718,11 +711,8 @@ export function InvitationTerms({
   // A count-only exchange answers the slot ahead of even that: it carries no payload
   // in either direction whichever party the terms entitle to the count, so the
   // entitlement the gate below reads does not decide the question and the sentence
-  // stating it names the algorithm instead. Gated on the run honoring the algorithm
-  // (psiCApplied), so while the exchange refuses a psi-c invitation outright the
-  // entitlement answers the slot as it does for psi, and no block here describes a
-  // run that does not happen.
-  const countOnlyApplied = summary.algorithm === "psi-c" && summary.psiCApplied;
+  // stating it names the algorithm instead.
+  const countOnly = summary.algorithm === "psi-c";
   // The set the count-only block takes the slot from: the inviter's declared send
   // under "proposing", the acceptor's own resolved columns otherwise -- the same
   // viewer-relative pair the blocks below render.
@@ -742,7 +732,7 @@ export function InvitationTerms({
   // backstop behind them. Rendering "no data columns in either direction" over a
   // column would take the operator's consent to a disclosure that happens. The
   // message states the fact and names no column.
-  if (countOnlyApplied && viewerOutboundSend.length > 0)
+  if (countOnly && viewerOutboundSend.length > 0)
     throw new Error(
       "count-only terms carry a non-empty outbound column set: a psi-c " +
         "exchange sends no data column in either direction",
@@ -757,24 +747,22 @@ export function InvitationTerms({
   // rule (core's LinkageTermsSchema); the same backstop reading applies. Read off
   // the two counts those notices are composed from, so no declaration can reach a
   // notice this check did not see.
-  if (countOnlyApplied && (sendCount > 0 || receiveCount > 0))
+  if (countOnly && (sendCount > 0 || receiveCount > 0))
     throw new Error(
       "count-only terms declare a payload column: a psi-c exchange moves no " +
         "data column in either direction",
     );
-  const outboundNoPayloadRenders = !countOnlyApplied && !partnerReceivesResult;
+  const outboundNoPayloadRenders = !countOnly && !partnerReceivesResult;
   const proposingSendChipsRender =
-    perspective === "proposing" &&
-    !countOnlyApplied &&
-    !outboundNoPayloadRenders;
+    perspective === "proposing" && !countOnly && !outboundNoPayloadRenders;
   const outboundSendListRenders =
     perspective !== "proposing" &&
-    !countOnlyApplied &&
+    !countOnly &&
     !outboundNoPayloadRenders &&
     outboundColumns !== undefined;
   const outboundForwardRefRenders =
     perspective === "review" &&
-    !countOnlyApplied &&
+    !countOnly &&
     !outboundNoPayloadRenders &&
     outboundColumns === undefined;
   // Every block that can occupy the outbound-send slot carries the same caption, the
@@ -790,7 +778,7 @@ export function InvitationTerms({
   // for the acceptor once the gate or a chosen file answers it) and/or the egress
   // request.
   const showsDiscloseGroup =
-    countOnlyApplied ||
+    countOnly ||
     proposingSendChipsRender ||
     outboundNoPayloadRenders ||
     outboundSendListRenders ||
@@ -975,7 +963,7 @@ export function InvitationTerms({
               count, and a sentence reasoning from receipt would be answering a
               different question. Read from `@psilink/core` like every other block
               in this slot; fixed first-party copy, naming no column. */}
-          {countOnlyApplied && (
+          {countOnly && (
             <Term label={outboundSendSlotLabel}>
               <Text size="sm">{CONSENT_FACTS.countOnlyNoPayload.note}</Text>
             </Term>
@@ -1090,27 +1078,15 @@ export function InvitationTerms({
               </>
             )}
           </Text>
-          {/* psi-c states a disclosure guarantee, so by the caveat-placement rule
-              above its caveat is always-visible here with its headline: the
-              count-only line must never read as in force while the exchange
-              refuses to run on those terms at all. What the caveat says -- the
-              refusal, and what to ask the partner for -- is the shared copy the
-              CLI accept prompt renders, so the two surfaces cannot state opposite
-              outcomes for one invitation. */}
-          {summary.algorithm === "psi-c" && !summary.psiCApplied && (
-            <Text size="xs" c="dimmed">
-              {PROPOSED_NOT_APPLIED_NOTES.psiC}
-            </Text>
-          )}
-          {/* Once the run honors the algorithm, the same placement rule keeps the
-              tier that qualifies the headline beside it rather than one expand
-              down: what the enforced half covers, what the rounds disclose past
-              the count, and -- the one a reader taking "only a number" for the
-              safe option most needs -- the bound a partner's choice of input puts
-              on all of it. Each sentence is read from the shared table with its
-              basis, so neither surface classifies a half of the count-only claim
-              for itself. */}
-          {countOnlyApplied && (
+          {/* The count-only headline states a disclosure guarantee, so by the
+              caveat-placement rule above the tier that qualifies it sits beside it
+              rather than one expand down: what the enforced half covers, what the
+              rounds disclose past the count, and -- the one a reader taking "only
+              a number" for the safe option most needs -- the bound a partner's
+              choice of input puts on all of it. Each sentence is read from the
+              shared table with its basis, so neither surface classifies a half of
+              the count-only claim for itself. */}
+          {countOnly && (
             <>
               <Text size="xs" c="dimmed">
                 {CONSENT_FACTS.countOnlyResult.note}
@@ -1159,13 +1135,11 @@ export function InvitationTerms({
               screen, so the fact is stated for both. Where exactly one party is
               entitled, that party is the receiver by the role rule and computes its
               own count, so no report exists to caveat. */}
-          {countOnlyApplied &&
-            viewerReceivesResult &&
-            partnerReceivesResult && (
-              <Text size="xs" c="dimmed">
-                {CONSENT_FACTS.countOnlyReportedCount.note}
-              </Text>
-            )}
+          {countOnly && viewerReceivesResult && partnerReceivesResult && (
+            <Text size="xs" c="dimmed">
+              {CONSENT_FACTS.countOnlyReportedCount.note}
+            </Text>
+          )}
           {partnerReceivesResult ? (
             // The partner DOES receive: the accountable disclosure (the 164.528
             // event). A "Yes" carries no false-guarantee risk, so it stays a plain
@@ -1201,12 +1175,9 @@ export function InvitationTerms({
                   algorithm-neutral -- by the role rule the non-receiving party of
                   a count-only run is the SENDER, which computes nothing from the
                   round and is sent no count-report frame (docs/spec/PROTOCOL.md,
-                  PSI-C), so it learns no membership. Withheld for ANY psi-c
-                  invitation rather than for an applied one alone -- while the
-                  exchange refuses those terms no run happens to disclose anything
-                  either -- so the claim cannot return when APPLIED_SETTINGS.psiC
-                  flips; what a count-only run does disclose is the tier the
-                  matching-method headline above carries. */}
+                  PSI-C), so it learns no membership. What a count-only run does
+                  disclose is the tier the matching-method headline above
+                  carries. */}
               {summary.algorithm !== "psi-c" && (
                 <Text size="xs" c="dimmed">
                   {CONSENT_FACTS.partnerLearnsOwnMembership.note}

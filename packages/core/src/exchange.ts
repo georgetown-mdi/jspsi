@@ -1,5 +1,4 @@
 import { getLogger } from "./utils/logger.js";
-import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
   assertCountOnlyTransmitsNoColumn,
   inferMetadata,
@@ -145,13 +144,11 @@ export interface PreparedExchange {
  * Refuse a linkage-terms `algorithm` this build cannot actually honor, before any
  * matched identifier is revealed.
  *
- * `psi` always runs: it reveals matched identifiers (`linkViaPSI` /
- * `linkViaSinglePassPSI`), which is what its record attests. `psi-c` (count-only)
- * has a run path -- one round over one key, resolving to the intersection size alone
- * ({@link linkViaCountOnlyPSI}) -- and runs exactly while `APPLIED_SETTINGS.psiC` is
- * true. That flag, not this guard, is the single point the count-only algorithm
- * becomes selectable across core, the CLI, and the web, so an operator can never
- * meet a surface that offers count-only while a run would disclose otherwise.
+ * `psi` reveals matched identifiers (`linkViaPSI` / `linkViaSinglePassPSI`), which
+ * is what its record attests. `psi-c` (count-only) resolves to the intersection
+ * size alone over one round of one key ({@link linkViaCountOnlyPSI}); the shape
+ * that round demands is enforced by the count-only refusals rather than here, so
+ * this guard answers only whether a run path exists for the algorithm at all.
  *
  * What the refusal protects is the record's integrity: an algorithm with no run path
  * would disclose differently than the self-attested exchange record asserts -- a gap
@@ -163,13 +160,13 @@ export interface PreparedExchange {
  * record honest but silently ignore an operator's stated intent to disclose only a
  * count, so the run refuses instead.
  *
- * The guard is an ALLOWLIST, not a denylist of the unimplemented: `psi` always,
- * `psi-c` while its flag is true, and any algorithm later added to `AlgorithmSchema`
- * refused by default until it too is implemented and allowed here. This follows the
- * repo's allowlist-over-blocklist rule (CONTRIBUTING.md, Code Conventions) and keeps
- * enum growth fail-closed -- `buildExchangeRecord` copies `algorithm` verbatim with
- * no guard of its own, so a new unimplemented member slipping past this run-side gate
- * is exactly what the allowlist prevents.
+ * The guard is an ALLOWLIST, not a denylist of the unimplemented: `psi` and `psi-c`,
+ * with any algorithm later added to `AlgorithmSchema` refused by default until it too
+ * is implemented and allowed here. This follows the repo's allowlist-over-blocklist
+ * rule (CONTRIBUTING.md, Code Conventions) and keeps enum growth fail-closed --
+ * `buildExchangeRecord` copies `algorithm` verbatim with no guard of its own, so a new
+ * unimplemented member slipping past this run-side gate is exactly what the allowlist
+ * prevents.
  *
  * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`: on the
  * accept side the algorithm is adopted verbatim from the partner's invitation
@@ -181,14 +178,14 @@ export interface PreparedExchange {
  */
 export function assertAlgorithmImplemented(algorithm: Algorithm): void {
   if (algorithm === "psi") return;
-  if (algorithm === "psi-c" && APPLIED_SETTINGS.psiC) return;
+  if (algorithm === "psi-c") return;
   throw new UsageError(
     "this linkage-terms algorithm is not yet implemented: only " +
-      '"psi", which reveals matched identifiers, runs today. A count-only ' +
-      '("psi-c"), or any other non-psi algorithm, would disclose differently ' +
-      "than its exchange record could attest, so it is refused before any " +
-      'identifier is revealed. Set the linkage-terms algorithm to "psi", or ' +
-      "wait for support before running.",
+      '"psi", which reveals matched identifiers, and "psi-c", which reveals ' +
+      "only the count, run today. Any other algorithm would disclose " +
+      "differently than its exchange record could attest, so it is refused " +
+      "before any identifier is revealed. Set the linkage-terms algorithm to " +
+      "one of those, or wait for support before running.",
   );
 }
 

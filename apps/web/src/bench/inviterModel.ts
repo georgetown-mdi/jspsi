@@ -622,9 +622,9 @@ export function editorWithFieldAdded(
   return { ...editor, draft: draftWithFieldAdded(editor.draft, type) };
 }
 
-/** Set the matching algorithm. Gated: while the run does not honor psi-c the
- * control stays disabled and {@link validateAdvancedInvite}'s build clamps the
- * minted terms to `psi` regardless of this draft state. */
+/** Set the matching algorithm. Ungated -- the exchange honors both members -- so
+ * the built terms carry it as authored; a count-only draft outside the shape a
+ * count-only run admits blocks generation at {@link validateAdvancedInvite}. */
 export function editorWithAlgorithm(
   editor: InviterEditor,
   algorithm: AdvancedInviteDraft["algorithm"],

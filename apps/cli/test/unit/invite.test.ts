@@ -17,7 +17,12 @@ import {
   StandardizationTermsError,
   UsageError,
 } from "@psilink/core";
-import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
+import type {
+  Algorithm,
+  LinkageTerms,
+  Metadata,
+  Standardization,
+} from "@psilink/core";
 
 // Mock only runOnlineBootstrap, so the online-handler wiring can be asserted
 // without opening a connection or running a real exchange; every other
@@ -31,6 +36,24 @@ vi.mock("../../src/onlineBootstrap", async () => {
   return { ...actual, runOnlineBootstrap: vi.fn() };
 });
 
+// Wrap loadConfigLinkageSource as a PASSTHROUGH spy, leaving every other config
+// export (saveConfig included) genuine: each test below reads its real config
+// file, and only the algorithm-gate case replaces the read for one call. That
+// substitution is the only way to reach the gate at all -- AlgorithmSchema admits
+// exactly the implemented pair today, so a config naming anything else is refused
+// by the parse on the way in, and the gate holds the line for the member added to
+// the enum ahead of its run path.
+vi.mock("../../src/config", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../src/config")>(
+      "../../src/config",
+    );
+  return {
+    ...actual,
+    loadConfigLinkageSource: vi.fn(actual.loadConfigLinkageSource),
+  };
+});
+
 import {
   handler as inviteHandler,
   offlineAbandonNotice,
@@ -38,7 +61,7 @@ import {
   resolveInvitePositionals,
   validateInvite,
 } from "../../src/commands/invite";
-import { saveConfig } from "../../src/config";
+import { loadConfigLinkageSource, saveConfig } from "../../src/config";
 import { MAX_TIMEOUT_SECONDS } from "../../src/util/cli";
 import {
   connectionFromEndpoint,
@@ -1194,29 +1217,59 @@ test("validateInvite: offline config-source refuses a standardization that contr
   }
 });
 
-test("validateInvite: offline config-source refuses a psi-c algorithm before minting", async () => {
-  // The mint-boundary counterpart of the run-side count-only refusal: a config
-  // whose `algorithm` is `psi-c` (advertised but not yet runnable) must be refused
-  // BEFORE the token is disclosed, so `invite` never mints an invitation the
-  // config's own `psilink exchange` would then reject (exit 64) -- the same
-  // fail-fast, mint-mirrors-run posture as the payload and standardization guards
-  // above. No input is passed, so it exercises the check in isolation.
-  //
-  // The terms are in the count-only SHAPE (one key, cascade, no deduplication, no
-  // payload), so the count-only shape rules pass them through and this exercises
-  // the algorithm gate itself rather than one of those.
+test("validateInvite: offline config-source mints a conforming psi-c config", async () => {
+  // The mint boundary mirrors the run: the exchange conducts a count-only run, so a
+  // config in the count-only SHAPE (one key, cascade, no deduplication, no payload)
+  // reaches a token rather than the algorithm gate. What the shape rules refuse
+  // instead is covered by the cases below. No input is passed, so this exercises the
+  // mint-boundary checks in isolation.
   const terms: LinkageTerms = countOnlyTerms();
   const { dir, configPath, keyPath } = withConfig(terms);
   try {
-    const invite = () =>
-      validateInvite({
+    const minted = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    if (minted.mode !== "offlineFromConfig")
+      throw new Error(`expected an offline config mint, got ${minted.mode}`);
+    expect(minted.linkageTerms.algorithm).toBe("psi-c");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: offline config-source refuses an algorithm with no run path before minting", async () => {
+  // The mint-boundary counterpart of the exchange-time gate: an algorithm no run
+  // path honors is refused BEFORE the token is disclosed, so `invite` never mints
+  // an invitation the config's own `psilink exchange` would then refuse (exit 64).
+  // The terms reach the mint past the config parse (see the module mock at the top
+  // of this file), which is the shape a member added to AlgorithmSchema ahead of
+  // its run path takes at this boundary.
+  const { dir, configPath, keyPath } = withConfig(defaultTerms());
+  vi.mocked(loadConfigLinkageSource).mockReturnValueOnce({
+    linkageTerms: { ...defaultTerms(), algorithm: "psi-x" as Algorithm },
+    retainsFiles: false,
+  });
+  try {
+    let thrown: unknown;
+    try {
+      await validateInvite({
         resolved: { mode: "offline" },
         options: testOptions({ configFile: configPath, keyFile: keyPath }),
         acceptTimeout: 900,
         log: silentLog,
       });
-    await expect(invite()).rejects.toBeInstanceOf(UsageError);
-    await expect(invite()).rejects.toThrow(/psi-c/);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UsageError);
+    // Named by what this build runs, not by the value handed to it: the algorithm
+    // can be adopted from a partner's document, so the message carries only the
+    // fixed enum literals.
+    expect(String(thrown)).toMatch(/not yet implemented/);
+    expect(String(thrown)).not.toMatch(/psi-x/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

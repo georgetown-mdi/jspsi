@@ -88,8 +88,6 @@ A count-only exchange is one round over one key, so `psi-c` narrows what the res
 
 The refusal happens where the terms are authored, where an invitation over them is minted, and where a received invitation is parsed or accepted. It is never resolved by narrowing the document to the count-only shape or by running it as `psi`; the reasoning is in [PROTOCOL.md](spec/PROTOCOL.md#psi-c). None of this constrains `psi` terms.
 
-> **Not yet enabled:** the `psi-c` algorithm is not yet turned on, so it is refused before the exchange runs. An exchange whose linkage terms set `psi-c` aborts with a usage error rather than revealing matched identifiers under an exchange record that would assert only a count was disclosed. It is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). Use `psi` for now.
-
 ### `linkage_terms.linkage_strategy`
 
 *Type:* enum: `cascade` | `single-pass`  
@@ -284,7 +282,7 @@ linkage_terms:
 | `transform` | array | no | Sequence of transformation steps applied to the canonical field value before concatenation into the key |
 | `generate_fuzzy_comparisons` | string | no | Method for generating additional values for fuzzy matching: `transpositions` generates all two-digit transpositions; `edit_distances` generates all single-character deletions, matching values within one edit distance; `adjacent_years` generates dates +/- 1 year from the input. Applied after any transformation |
 
-> **Not yet implemented:** `generate_fuzzy_comparisons` is accepted by the schema, but the expansion (transpositions, edit distances, adjacent years) is not generated at key-building time yet, so authoring it has no effect on matching today. It is not silently inert to the partner, though: an invitation carrying it shows the setting on the accepting party's consent display marked as proposed and not yet applied, so the partner weighs the term you authored rather than the narrower matching the run performs. Unlike `psi-c` and `deduplicate`, a fuzzy term is not refused -- the run proceeds and simply matches without the expansion. Working fuzzy keys are targeted for the 1.0 release; see [ROADMAP.md](ROADMAP.md).
+> **Not yet implemented:** `generate_fuzzy_comparisons` is accepted by the schema, but the expansion (transpositions, edit distances, adjacent years) is not generated at key-building time yet, so authoring it has no effect on matching today. It is not silently inert to the partner, though: an invitation carrying it shows the setting on the accepting party's consent display marked as proposed and not yet applied, so the partner weighs the term you authored rather than the narrower matching the run performs. Unlike `deduplicate`, a fuzzy term is not refused -- the run proceeds and simply matches without the expansion. Working fuzzy keys are targeted for the 1.0 release; see [ROADMAP.md](ROADMAP.md).
 
 #### Transform steps
 

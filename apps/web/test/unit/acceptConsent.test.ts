@@ -1183,10 +1183,10 @@ describe("summarizeInvitation", () => {
     );
   });
 
-  test("marks psi-c as proposed but not yet applied", () => {
-    // psi-c is surfaced (terms as proposed) but flagged not-applied, so the
-    // count-only claim cannot read as in force while the run still reveals
-    // matched identifiers.
+  test("surfaces psi-c with no applied qualifier, since the run honors it", () => {
+    // The algorithm is what a surface reads to decide whether the count-only tier
+    // renders; the summary carries no second flag that could hold it back while the
+    // exchange conducts the run.
     const summary = summarizeInvitation(
       makeToken({
         algorithm: "psi-c",
@@ -1195,7 +1195,7 @@ describe("summarizeInvitation", () => {
       }),
     );
     expect(summary.algorithm).toBe("psi-c");
-    expect(summary.psiCApplied).toBe(false);
+    expect(summary).not.toHaveProperty("psiCApplied");
   });
 
   test("leads a substring on a name field with a literal slice phrase", () => {

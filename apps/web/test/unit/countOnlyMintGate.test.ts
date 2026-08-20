@@ -8,21 +8,20 @@ import { validateAdvancedInvite } from "@psi/advancedInviteValidation";
 import type * as PsilinkCore from "@psilink/core";
 import type { AdvancedInviteDraft } from "@psi/advancedInviteTypes";
 
-// The count-only shape gate at the web AUTHORING boundary. `buildAdvancedTerms`
-// clamps the algorithm (and deduplication) to the applied behavior while their
-// APPLIED_SETTINGS flags are false, so a draft cannot put `psi-c` into the built
-// terms today. Both flags are forced here to reach the gate that has to hold once
-// they flip -- the same reason core's fuzzy-expansion suite forces its own flag.
-// The rules themselves are untouched by the mock: they read the algorithm, not
-// whether a run path exists. The mock is file-scoped, which is why the authoring
-// gate lives here and the accept and import gates -- which need no forced flag --
-// stay on the unmocked path in countOnlyAcceptGates.test.ts.
+// The count-only shape gate at the web AUTHORING boundary. One of the five rules
+// -- duplicate matches -- is unreachable through `buildAdvancedTerms` while
+// `APPLIED_SETTINGS.deduplicate` is false, since the build clamps the setting away
+// before any rule sees it, so that flag is forced here to reach the gate that has
+// to hold once it flips (the same reason core's fuzzy-expansion suite forces its
+// own). The rules themselves are untouched by the mock: they read the algorithm and
+// the document. The mock is file-scoped, which is why the authoring gate lives here
+// and the accept and import gates -- which need no forced flag -- stay on the
+// unmocked path in countOnlyAcceptGates.test.ts.
 vi.mock("@psilink/core", async (importOriginal) => {
   const actual = await importOriginal<typeof PsilinkCore>();
   return {
     ...actual,
     APPLIED_SETTINGS: {
-      psiC: true,
       deduplicate: true,
       fuzzyComparisons: false,
     },
@@ -51,9 +50,9 @@ function countOnlyDraft(columns: Array<string> = LINKAGE_COLUMNS) {
 }
 
 describe("the count-only shape gate at the Generate boundary", () => {
-  test("the forced flags really do put psi-c into the built terms", () => {
-    // Without this the cases below would pass on a clamped `psi` document, which
-    // every rule leaves alone -- they would gate nothing and still be green.
+  test("the draft's psi-c really does reach the built terms", () => {
+    // Without this the cases below could pass on a `psi` document, which every rule
+    // leaves alone -- they would gate nothing and still be green.
     const { draft } = countOnlyDraft();
     expect(buildAdvancedTerms(draft).algorithm).toBe("psi-c");
   });

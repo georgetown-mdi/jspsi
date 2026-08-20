@@ -159,8 +159,8 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
     {
       path: ["linkage_terms", "algorithm"],
       lines: [
-        "psi reveals matched ids; psi-c reveals only the match count. psi-c is",
-        "not yet implemented and is refused before the exchange runs -- use psi.",
+        "psi reveals matched ids; psi-c reveals only the match count. psi-c runs",
+        "one key in one round under cascade and carries no payload columns.",
       ],
     },
     {

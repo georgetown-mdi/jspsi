@@ -5,7 +5,7 @@ import { expect, test, describe, afterEach, vi } from "vitest";
 // yet. This file pins what the expansion does once that flag flips, so the
 // key-building half is verified rather than only reachable in review.
 vi.mock("../src/appliedSettings", () => ({
-  APPLIED_SETTINGS: { psiC: false, deduplicate: false, fuzzyComparisons: true },
+  APPLIED_SETTINGS: { deduplicate: false, fuzzyComparisons: true },
 }));
 
 import {

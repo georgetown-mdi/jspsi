@@ -609,9 +609,10 @@ export async function validateInvite(params: {
     // exchange-time check, so this hand-authored offline mint never discloses an
     // invitation the config's own `psilink exchange` would then refuse (exit 64).
     // Unconditional, unlike the two guards above: `algorithm` is always present,
-    // and only this config-as-source path can carry a hand-authored `psi-c` (the
-    // online and infer paths build terms from columns via getDefaultLinkageTerms,
-    // which is always `psi`). See assertAlgorithmImplemented.
+    // and only this config-as-source path can carry a hand-authored algorithm at
+    // all (the online and infer paths build terms from columns via
+    // getDefaultLinkageTerms, which is always `psi`). See
+    // assertAlgorithmImplemented.
     assertAlgorithmImplemented(configTerms.algorithm);
 
     // Likewise fail closed pre-mint on a `deduplicate: true` term the run

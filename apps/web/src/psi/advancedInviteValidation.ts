@@ -434,8 +434,6 @@ export function gatedActiveSettingMessage(
   terms: LinkageTerms,
 ): string | undefined {
   const blocked: Array<string> = [];
-  if (terms.algorithm === "psi-c" && !APPLIED_SETTINGS.psiC)
-    blocked.push("count-only matching (psi-c)");
   if (terms.deduplicate && !APPLIED_SETTINGS.deduplicate)
     blocked.push("duplicate matches");
   if (

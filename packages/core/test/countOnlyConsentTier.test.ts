@@ -4,6 +4,7 @@ import { APPLIED_SETTINGS } from "../src/appliedSettings.js";
 import {
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
+  PROPOSED_NOT_APPLIED_NOTES,
 } from "../src/consentFacts.js";
 import { parseLinkageTerms } from "../src/config/linkageTerms.js";
 import {
@@ -67,20 +68,16 @@ describe("the count-only consent tier", () => {
     expect(COUNT_ONLY_DISCLOSURE_STATEMENT.length).toBeGreaterThan(0);
   });
 
-  test("keeps its gated notes off every surface while the exchange does not conduct a count-only run", () => {
-    // The five notes are authored and both surfaces render them behind one flag:
-    // the run path lands with `APPLIED_SETTINGS.psiC`, and until it does an acceptor
-    // must meet the refusal rather than a disclosure guarantee for a run that
-    // aborts. The gate is a summary field rather than a renderer's own reading, so
-    // this is what makes the flip one edit instead of two. The headline those notes
-    // qualify is shared wording each surface places for itself -- the web consent
-    // screen shows it for any psi-c invitation beside the caveat, the CLI accept
-    // prompt only behind this flag -- so each surface's own render test pins that
-    // half.
-    expect(APPLIED_SETTINGS.psiC).toBe(false);
+  test("carries no proposed-but-not-applied caveat, since the exchange conducts the run", () => {
+    // The count-only tier is reached from the algorithm alone: what a surface
+    // renders for a psi-c invitation is the tier, never a caveat qualifying it away.
+    // A caveat keyed to the algorithm would be the drift this pins -- it would state
+    // a refusal the exchange no longer performs, over sentences that are true.
+    expect(PROPOSED_NOT_APPLIED_NOTES).not.toHaveProperty("psiC");
+    expect(Object.keys(APPLIED_SETTINGS)).not.toContain("psiC");
     expect(
-      summarizeInvitation({ linkageTerms: COUNT_ONLY_PROBE_TERMS }).psiCApplied,
-    ).toBe(false);
+      summarizeInvitation({ linkageTerms: COUNT_ONLY_PROBE_TERMS }).algorithm,
+    ).toBe("psi-c");
   });
 
   test("is measured by the consent-coverage probe on terms a count-only run accepts", () => {

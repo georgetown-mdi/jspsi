@@ -11,6 +11,7 @@ import {
 } from "../src/connection/messageConnection";
 import { UsageError } from "../src/errors";
 
+import type { Algorithm } from "../src/types";
 import type { BuiltExchangeRecord } from "../src/exchangeRecord";
 import type { Output } from "../src/config/linkageTerms";
 import type { ExchangeResult } from "../src/exchange";
@@ -90,14 +91,50 @@ function built(result: ExchangeResult): BuiltExchangeRecord {
   return result.audit!;
 }
 
-test("run boundary: a psi-c terms value is refused before any identifier is revealed", async () => {
-  // The last line of the disclosure-integrity guarantee: even a PreparedExchange
-  // carrying psi-c -- constructed here by overriding the prepared terms, the way a
-  // caller that skipped prepareForExchange could -- is refused at the run boundary,
-  // before the terms exchange puts anything on the wire, so no linkage runs and no
-  // record asserting count-only over an identifier-revealing run is ever produced.
-  // The guard fires before the first await, so runExchange rejects without a
-  // partner on the pipe.
+test("run boundary: an algorithm with no run path is refused before anything goes on the wire", async () => {
+  // The run-side half of the record-integrity guarantee: a PreparedExchange
+  // carrying an algorithm outside the implemented allowlist -- constructed here by
+  // overriding the prepared terms, the way a caller that skipped prepareForExchange
+  // and the same guard it drives could -- is refused at the run boundary, so no
+  // round runs under whichever path the dispatch would otherwise fall through to
+  // and no record attests a disclosure the run did not make.
+  const both: Output = { expectsOutput: true, shareWithPartner: true };
+  const unimplementedPrepared = prepared("Initiator Co", both, clientRows);
+  unimplementedPrepared.linkageTerms = {
+    ...unimplementedPrepared.linkageTerms,
+    // The enum admits no such member, so the cast reaches the shape a member
+    // later added to AlgorithmSchema takes here before a run path exists for it.
+    algorithm: "psi-x" as Algorithm,
+  };
+  const [conn] = createMessagePipe();
+  // Every connection call throws, so a frame the refusal failed to stop surfaces
+  // as this distinct error rather than parking on a pipe with no partner.
+  const unusableConnection = new Proxy(conn, {
+    get: () => {
+      throw new Error("the connection was used past the algorithm refusal");
+    },
+  });
+  const run = runExchange(
+    unusableConnection,
+    "initiator",
+    unimplementedPrepared,
+    {
+      psiLibrary,
+    },
+  );
+  await expect(run).rejects.toThrow(UsageError);
+  await expect(run).rejects.toThrow(/not yet implemented/);
+});
+
+test("run boundary: a psi-c run whose metadata transmits a column is refused before anything goes on the wire", async () => {
+  // These fixtures' inferred metadata makes the non-linkage `note` column a
+  // disclosed payload column, and a count-only exchange carries no payload in
+  // either direction. A PreparedExchange carrying that pair -- constructed here by
+  // overriding the prepared terms, the way a caller that skipped
+  // prepareForExchange could -- is refused by the metadata rule at the run
+  // boundary, so no linkage runs and no record attesting a count-only run over a
+  // transmitting input is ever produced. The refusal fires before the first await,
+  // so runExchange rejects without a partner on the pipe.
   const both: Output = { expectsOutput: true, shareWithPartner: true };
   const psiCPrepared = prepared("Initiator Co", both, clientRows);
   psiCPrepared.linkageTerms = {
@@ -105,9 +142,80 @@ test("run boundary: a psi-c terms value is refused before any identifier is reve
     algorithm: "psi-c",
   };
   const [conn] = createMessagePipe();
-  await expect(
-    runExchange(conn, "initiator", psiCPrepared, { psiLibrary }),
-  ).rejects.toThrow(UsageError);
+  const run = runExchange(conn, "initiator", psiCPrepared, { psiLibrary });
+  await expect(run).rejects.toThrow(UsageError);
+  await expect(run).rejects.toThrow(/transmits no data columns/);
+});
+
+test("terms exchange: an out-of-shape psi-c document is refused on receipt, rejecting both parties' runs with no linkage and no record", async () => {
+  // The same override with the metadata rule out of the way: rows and columns
+  // carrying only the linkage column transmit nothing, so the pre-wire refusal
+  // above does not fire and the out-of-shape document (two linkage keys) reaches
+  // the wire. What refuses it there is the parse of the PARTNER's terms in the
+  // terms exchange, which applies the same count-only shape rules the schema
+  // carries -- upstream of the agreed-terms boundary (resolveCountOnlyRun), which
+  // countOnlyRun.test.ts drives directly. Both parties carry the same document, so
+  // each refuses the other's and the run is rejected whole on both sides rather
+  // than narrowed to the first key.
+  const both: Output = { expectsOutput: true, shareWithPartner: true };
+  const linkageOnly = (identity: string, rows: typeof serverRows) => {
+    const spec = prepareForExchange(
+      { linkageTerms: { ...firstNameTerms, identity, output: both } },
+      identity,
+      rows.map(({ first_name }) => ({ first_name })),
+      ["first_name"],
+    );
+    spec.linkageTerms = {
+      ...spec.linkageTerms,
+      algorithm: "psi-c",
+      linkageKeys: [
+        ...spec.linkageTerms.linkageKeys,
+        { name: "firstNameAgain", elements: [{ field: "firstName" }] },
+      ],
+    };
+    return spec;
+  };
+  // Every PSI call throws, so any linkage the refusal failed to stop surfaces as
+  // this distinct error rather than the terms refusal asserted below.
+  const unusablePsiLibrary = new Proxy(psiLibrary, {
+    get: () => {
+      throw new Error("the PSI library was used past the terms refusal");
+    },
+  });
+  const [connInitiator, connResponder] = createMessagePipe();
+  const outcomes = await Promise.allSettled([
+    runExchange(
+      connInitiator,
+      "initiator",
+      linkageOnly("Initiator Co", clientRows),
+      {
+        psiLibrary: unusablePsiLibrary,
+      },
+    ),
+    runExchange(
+      connResponder,
+      "responder",
+      linkageOnly("Responder Co", serverRows),
+      {
+        psiLibrary: unusablePsiLibrary,
+      },
+    ),
+  ]);
+
+  // Both sides reject, so neither returns an ExchangeResult and neither builds the
+  // record a completed run carries.
+  expect(outcomes.map((outcome) => outcome.status)).toEqual([
+    "rejected",
+    "rejected",
+  ]);
+  for (const outcome of outcomes) {
+    const refusal = (outcome as PromiseRejectedResult).reason as Error;
+    // Each party's failure is the count-only rule the document breaks -- the one
+    // that refuses it, carried across the abort so both ends name it -- and not the
+    // unusable PSI library, so no round ran on either side.
+    expect(refusal.message).toMatch(/exactly one linkage key/);
+    expect(refusal.message).not.toMatch(/PSI library/);
+  }
 });
 
 test("both-output: both records agree on terms and carry the result size", async () => {

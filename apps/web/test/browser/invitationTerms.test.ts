@@ -16,7 +16,6 @@ import { InvitationTerms } from "@components/InvitationTerms";
 
 import {
   BEL,
-  CONSENT_PROBE_TERMS,
   COUNT_ONLY_PROBE_TERMS,
   ESC,
   PRINTABLE_ASCII,
@@ -88,30 +87,24 @@ const terms: LinkageTerms = {
   },
 };
 
-// The corrected count-only caveat, spelled out as the whole sentence rather than
-// read from PROPOSED_NOT_APPLIED_NOTES. What it SAYS is load-bearing and moving:
-// psi-c is asserted on every run path today, so the exchange is refused before any
-// identifier is revealed, and when the count-only run path lands the caveat goes
-// from both this pin and the CLI accept prompt's (apps/cli/test/unit/accept.test.ts),
-// each giving way to the count-only tier its own surface places. Pinning the
-// sentence on both surfaces, against the same terms document, is what makes that a
-// deliberate edit on each rather than a divergence neither notices.
-const PSI_C_CAVEAT =
-  "Your partner proposes a count-only exchange, but this version of the " +
-  "exchange does not yet apply it and will refuse to run; ask your partner " +
-  'for an invitation using the "psi" algorithm.';
+// The count-only headline, spelled out as the whole sentence rather than read from
+// COUNT_ONLY_DISCLOSURE_STATEMENT. What it SAYS is load-bearing: it is the sentence
+// an acceptor could act on -- treating an exchange as safe to run because only a
+// count is revealed -- so an edit to it has to be made here as well, on this
+// surface, rather than followed. The CLI accept prompt pins it against the same
+// terms document (apps/cli/test/unit/accept.test.ts), which is what makes a copy
+// edit a deliberate edit on each surface rather than a divergence neither notices.
+const COUNT_ONLY_HEADLINE =
+  "Only the number of records you have in common is revealed, not which " +
+  "records match.";
 
-// The five gated tier notes that caveat gives way to, authored and rendered behind
-// `psiCApplied`. All five, so the gate is measured over the whole gated set rather
-// than over a sample of it: a count-only guarantee stated for an exchange that
-// refuses to run is the same error as the caveat claiming identifiers are revealed,
-// facing the other way. The count-only disclosure statement is deliberately not in
-// the list -- this screen renders it as its matching-method headline for any psi-c
-// invitation, beside the caveat, and the test below asserts it PRESENT there, where
-// the CLI accept prompt asserts its own absence. Their rendering is pinned in
-// invitationTermsCountOnly.test.ts, which is where the flag can be moved; here the
-// real flag decides.
-const COUNT_ONLY_GATED_TIER_NOTES = [
+// The five tier notes rendered beside that headline, read from the shared table.
+// All five, so the tier is measured whole rather than sampled: a half of the
+// count-only claim reaching an acceptor without the half that bounds it is the error
+// the shared table exists to prevent. The headline is deliberately not in the list
+// -- it is shared wording the two surfaces place differently, so its placement is a
+// fact about this screen and is asserted as one.
+const COUNT_ONLY_TIER_NOTES = [
   CONSENT_FACTS.countOnlyResult.note,
   CONSENT_FACTS.countOnlyRoundDisclosures.note,
   CONSENT_FACTS.countOnlyReportedCount.note,
@@ -587,16 +580,22 @@ describe("InvitationTerms: the condensed reference view folds the lower tiers", 
     await expect.element(group("Legal agreement")).toBeInTheDocument();
   });
 
-  test("folding never sweeps the disclosure-critical psi-c caveat out of the always-visible core", async () => {
-    // psi-c is a disclosure GUARANTEE (only the count is revealed). Its "not yet
-    // applied" caveat must stay in the always-visible "What the exchange produces"
-    // tier -- folding it would let a viewer read count-only as in force while the
-    // exchange refuses to run at all. This is the one caveat that may never move
-    // below its headline, so it must never move behind the fold either.
-    renderCondensed({ algorithm: "psi-c" });
+  test("folding never sweeps the disclosure-critical count-only tier out of the always-visible core", async () => {
+    // psi-c states a disclosure GUARANTEE (only the count is revealed), so the tier
+    // that bounds it must stay in the always-visible "What the exchange produces"
+    // tier -- folding it would let a viewer read count-only as unqualified. This is
+    // the tier that may never sit below its headline, so it must never move behind
+    // the fold either.
+    renderTerms(COUNT_ONLY_PROBE_TERMS, {
+      perspective: "proposing",
+      condensed: true,
+    });
     const produce = group("What the exchange produces");
     await expect.element(produce).toBeInTheDocument();
-    expect(produce.element().textContent).toContain(PSI_C_CAVEAT);
+    expect(produce.element().textContent).toContain(COUNT_ONLY_HEADLINE);
+    expect(produce.element().textContent).toContain(
+      CONSENT_FACTS.countOnlyInputChoice.note,
+    );
   });
 
   test("the fold toggle is self-describing (perspective-neutral, so it fits agreed terms too)", async () => {
@@ -862,9 +861,7 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     // run's non-receiving party is the SENDER, which computes nothing from the round
     // and is sent no count-report frame (docs/spec/PROTOCOL.md, PSI-C). The same
     // output pair as the test above, so the difference measured is the algorithm's
-    // alone. Withheld for ANY psi-c invitation rather than for an applied one --
-    // invitationTermsCountOnly.test.ts holds the other side of that flag -- so the
-    // claim cannot return when APPLIED_SETTINGS.psiC flips.
+    // alone.
     renderTerms({
       ...COUNT_ONLY_PROBE_TERMS,
       output: { expectsOutput: false, shareWithPartner: true },
@@ -2160,13 +2157,13 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
   });
 });
 
-describe("InvitationTerms: proposed-but-not-applied caveats sit at their headline's visibility level", () => {
-  // The consent-integrity invariant this locks in: a "proposed but not yet applied"
-  // caveat renders at the SAME visibility level as the headline it contradicts,
-  // never one expand down, so a reader can never see a headline setting as in force
-  // while its caveat is hidden. Which level that is follows the setting's disclosure
-  // weight -- psi-c states a disclosure GUARANTEE (count only, no identifiers), so
-  // its headline and caveat are always-visible in the core; deduplicate and fuzzy
+describe("InvitationTerms: a qualifying sentence sits at its headline's visibility level", () => {
+  // The consent-integrity invariant this locks in: a sentence that qualifies a
+  // headline renders at the SAME visibility level as that headline, never one expand
+  // down, so a reader can never see a headline as in force while what qualifies it
+  // is hidden. Which level that is follows the setting's disclosure weight -- psi-c
+  // states a disclosure GUARANTEE (count only, no identifiers), so its headline and
+  // the tier bounding it are always-visible in the core; deduplicate and fuzzy
   // change match behavior/breadth, not what is disclosed, so their headlines and
   // caveats sit one expand down together. These assert placement against the
   // accessibility tree (which panel the text lives in), not styling.
@@ -2174,87 +2171,63 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
     renderTerms({ ...terms, ...overrides });
   }
 
-  // Both caveats share the "does not yet apply it and will refuse to run" lead --
-  // psilink refuses the run either way -- so each assertion keys on the clause
-  // that names what to ask the partner for instead.
-  const psiCCaveat = PSI_C_CAVEAT;
   const deduplicateCaveat = "for an invitation without deduplication";
 
-  test("the psi-c caveat states the refusal, in the words the CLI accept prompt shows", async () => {
-    // psi-c is refused on every run path, so nothing runs and no identifier is
-    // revealed; a caveat saying the matched identifiers are still revealed would
-    // describe a run that does not happen.
+  test("the count-only tier states the disclosure, in the words the CLI accept prompt shows", async () => {
+    // A count-only run reveals no identifier, so the psi consequence must not reach
+    // this screen; what does is the headline plus every sentence that bounds it.
     //
-    // Rendered from core's shared consent probes -- the same terms documents the
-    // CLI's pin uses -- so the two pins measure one sentence against one input.
-    //
-    // Both documents, mirroring the CLI's two-document sweep: the payload-carrying
-    // one psi-c refuses, and the conforming one (COUNT_ONLY_PROBE_TERMS), which is
-    // the shape an invitation will have in the wild once the run path lands. A gate
-    // measured on the refused shape alone would leave the shape that matters
-    // unswept.
-    for (const linkageTerms of [
-      { ...CONSENT_PROBE_TERMS, algorithm: "psi-c" as const },
-      COUNT_ONLY_PROBE_TERMS,
-    ]) {
-      // A fresh mount per document, so each assertion reads that document's render
-      // rather than the previous one still on screen.
-      app.unmount();
-      renderTerms(linkageTerms);
-      await expect
-        .element(group("What the exchange produces"))
-        .toBeInTheDocument();
-      expect(app.container.textContent).toContain(PSI_C_CAVEAT);
-      expect(app.container.textContent).not.toContain(
-        "matched records are still revealed",
-      );
-      // The headline the caveat qualifies renders for a proposed psi-c as well: it
-      // states what the algorithm reveals, which is what the caveat then says this
-      // version will not run. Spelled out because it is shared wording the two
-      // surfaces place differently -- this screen shows it for any psi-c invitation,
-      // the CLI accept prompt withholds it until the run honors the algorithm -- so
-      // its presence here is a fact about this screen and is asserted as one.
-      expect(app.container.textContent).toContain(
-        "Only the number of records you have in common is revealed, not which " +
-          "records match.",
-      );
-      // The gate, read through the real APPLIED_SETTINGS.psiC rather than around
-      // it: while the exchange refuses these terms, not one of the five gated tier
-      // notes may reach the screen. That absence IS the cross-surface invariant --
-      // the CLI's pin asserts the same five against its own prompt.
-      for (const copy of COUNT_ONLY_GATED_TIER_NOTES)
-        expect(app.container.textContent).not.toContain(copy);
-    }
+    // Rendered from core's shared consent probe -- the same terms document the CLI's
+    // pin uses -- so the two pins measure one set of sentences against one input.
+    renderTerms(COUNT_ONLY_PROBE_TERMS);
+    await expect
+      .element(group("What the exchange produces"))
+      .toBeInTheDocument();
+    expect(app.container.textContent).not.toContain(
+      "records you have in common are revealed to whoever receives the result",
+    );
+    // Spelled out because it is shared wording the two surfaces place differently --
+    // this screen renders it as its matching-method headline, the CLI accept prompt
+    // beneath the algorithm it names -- so its presence here is a fact about this
+    // screen and is asserted as one.
+    expect(app.container.textContent).toContain(COUNT_ONLY_HEADLINE);
+    // Every sentence of the tier, which IS the cross-surface invariant -- the CLI's
+    // pin asserts the same five against its own prompt.
+    for (const copy of COUNT_ONLY_TIER_NOTES)
+      expect(app.container.textContent).toContain(copy);
   });
 
-  test("the psi-c count-only caveat is always-visible in the core, not one expand down", async () => {
-    // psi-c proposed, not applied (APPLIED_SETTINGS.psiC is false), so the count-only
-    // guarantee carries its caveat. deduplicate is proposed too (the module terms),
-    // so BOTH caveats render -- the psi-c one in the core, the deduplicate one in
-    // "Other details" -- exactly the differentiated-but-consistent rule.
-    renderCaveatTerms({ algorithm: "psi-c" });
+  test("the count-only tier is always-visible in the core, not one expand down", async () => {
+    // psi-c states a disclosure guarantee, so the sentences that bound it sit in the
+    // always-visible core; the module terms' deduplicate caveat sits one expand down
+    // in "Other details" -- exactly the differentiated-but-consistent rule. The
+    // count-only document carries deduplicate false, so the pair is measured across
+    // the two renders rather than one.
+    renderTerms(COUNT_ONLY_PROBE_TERMS);
     await expect.element(toggle("Other details")).toBeInTheDocument();
 
-    // Both disclosures start collapsed, yet the psi-c caveat is legible: it is in the
-    // always-visible core, so the acceptor cannot read the count-only guarantee as in
-    // force without also seeing that the run does not yet honor it.
+    // Both disclosures start collapsed, yet the bound is legible: it is in the
+    // always-visible core, so the acceptor cannot read the count-only guarantee as
+    // unqualified without also meeting what it does not cover.
     expect(
       toggle("Other details").element().getAttribute("aria-expanded"),
     ).toBe("false");
     expect(
       toggle("Matching strategies").element().getAttribute("aria-expanded"),
     ).toBe("false");
-    expect(app.container.textContent).toContain(psiCCaveat);
+    expect(app.container.textContent).toContain(
+      CONSENT_FACTS.countOnlyInputChoice.note,
+    );
 
     // Structurally in the core, not inside either disclosure (accessibility tree,
-    // not styling): the caveat is within neither the "Other details" panel nor the
+    // not styling): the sentence is within neither the "Other details" panel nor the
     // "Matching strategies" panel, both of which carry their collapsed content even
     // while hidden.
     expect((await readyPanel("Other details")).textContent).not.toContain(
-      psiCCaveat,
+      CONSENT_FACTS.countOnlyInputChoice.note,
     );
     expect((await readyPanel("Matching strategies")).textContent).not.toContain(
-      psiCCaveat,
+      CONSENT_FACTS.countOnlyInputChoice.note,
     );
   });
 
@@ -2312,9 +2285,8 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
   test("a setting that matches the run carries no not-yet-applied caveat", async () => {
     // psi (identifiers revealed -- the run's actual behavior), deduplicate off (the
     // run is one-to-one), and no fuzzy: every displayed setting equals what the run
-    // does, so none is flagged. This is the realizable stand-in for the applied case,
-    // since the APPLIED_SETTINGS flags are all false today; the flag gating itself is
-    // asserted in the summarizeInvitation unit tests.
+    // does, so none is flagged. The flag gating itself is asserted in the
+    // summarizeInvitation unit tests.
     renderCaveatTerms({
       algorithm: "psi",
       deduplicate: false,
@@ -2322,9 +2294,9 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
       linkageKeys: [{ name: "DOB", elements: [{ field: "dob" }] }],
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    // None of the three caveats renders anywhere on the screen. container includes
-    // the collapsed panels' mounted content, so this also covers the detail levels,
-    // not just the core.
+    // Neither caveat renders anywhere on the screen. container includes the
+    // collapsed panels' mounted content, so this also covers the detail levels, not
+    // just the core.
     expect(app.container.textContent).not.toContain("does not yet apply it");
     expect(app.container.textContent).not.toContain(
       "(proposed; not yet applied)",

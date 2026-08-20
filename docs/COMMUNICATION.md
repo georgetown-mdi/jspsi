@@ -45,7 +45,7 @@ The default terms are the file-derived defaults, and every part of them is adjus
 
 Per-field data cleaning is a Cleaning tab reached from the ledger's Customize rows, shown as a normal part of preparing for the exchange rather than gated behind expert mode: the inviter authors each field's cleaning steps -- raw regular-expression steps included, each marked "advanced" -- and chooses which column feeds it, with a whole-file coverage warning and a malformed-step gate that blocks creation, matching the acceptor's cleaning editor (below).
 
-The matching algorithm (`psi-c`), deduplication, and fuzzy comparison are surfaced as controls but stay disabled until the exchange applies them, gated on the same applied-flags the consent screen reads, so a setting the run would not honor cannot be authored.
+The matching algorithm is a selectable control, since the exchange conducts both `psi` and count-only (`psi-c`) runs; a count-only draft outside the one-key, cascade, no-payload shape a count-only run admits blocks generation and names what to change. Deduplication and fuzzy comparison are surfaced as controls but stay disabled until the exchange applies them, gated on the same applied-flags the consent screen reads, so a setting the run would not honor cannot be authored.
 
 ### Expert authoring and import/export
 
@@ -121,7 +121,7 @@ When the agreed terms give a party no result, the exchange withholds from that p
 - the viewer's own non-receipt is enforced (sent none, fails closed on any it is sent), so a "No" there is a hard fact;
 - the partner's non-receipt is cooperative, resting on the agreed terms being honored (the documented property of one-sided PSI; see [one-sided-disclosure.md](notes/one-sided-disclosure.md)). The partner's "No" additionally states the honest-helper membership disclosure, which a `psi` exchange carries and a count-only one does not. The partner's "Yes" notes that the agreement, not the tool, governs the result's use once it is out.
 
-Settings the run does not yet apply are flagged proposed-but-not-applied by one consistent rule: the caveat renders at the same visibility level as the headline it contradicts, so a reader never sees a headline as in force while its caveat is hidden. `psi-c`'s count-only guarantee is disclosure-critical, so it and its caveat are always-visible in the core; deduplicate and fuzzy comparison change match breadth rather than disclosure, so their caveats sit with their headlines inside a disclosure. The run is currently one-to-one, fuzzy expansion is unimplemented, and `psi-c`'s count-only guarantee is not yet honored, so all three are surfaced as proposed and flagged.
+A sentence that qualifies a headline renders at the same visibility level as that headline, so a reader never sees a headline as in force while what qualifies it is hidden. `psi-c`'s count-only guarantee is disclosure-critical, so it and the tier bounding it -- what the rounds still disclose, whose word the count arrives on, and what a partner's choice of input defeats -- are always-visible in the core. Deduplicate and fuzzy comparison change match breadth rather than disclosure, so their proposed-but-not-applied caveats sit with their headlines inside a disclosure; the run is currently one-to-one and fuzzy expansion is unimplemented, so both are surfaced as proposed and flagged.
 
 The rendezvous peer-id derivation that places the two parties on the connection is specified in [PROTOCOL.md](spec/PROTOCOL.md).
 

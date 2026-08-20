@@ -209,8 +209,8 @@ export const CONSENT_PROBE_TERMS: LinkageTerms = {
  *
  * It is the `algorithm` entry's variant document below, exported so each
  * surface's render test pins the count-only tier against the same terms the
- * coverage probe measures it on -- the arrangement the psi-c caveat pins
- * already use, one document read by both suites.
+ * coverage probe measures it on -- one document read by both suites, so neither
+ * surface's pin can drift onto a shape the other never rendered.
  */
 export const COUNT_ONLY_PROBE_TERMS: LinkageTerms = {
   ...CONSENT_PROBE_TERMS,

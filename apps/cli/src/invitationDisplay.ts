@@ -316,7 +316,7 @@ export function logDecisionFacts(
   // name what settles it, rather than assert a count. An empty set is a truthful
   // "(none)", not a presupposed non-empty disclosure.
   const outboundLabel = marked("columns you will send", "outboundSend");
-  const countOnlyApplied = summary.algorithm === "psi-c" && summary.psiCApplied;
+  const countOnly = summary.algorithm === "psi-c";
   // The count-only "(none)" below states a precondition of the algorithm rather than
   // a set this renderer read: psi-c admits no payload in either direction, and a
   // terms document or input metadata declaring one is refused where the terms are
@@ -327,7 +327,7 @@ export function logDecisionFacts(
   // validateAccept); this throw is the render-side backstop behind it. Printing
   // "(none)" over a column would take the operator's consent to a disclosure that
   // happens. The message states the fact and names no column.
-  if (countOnlyApplied && (ownOutboundSend?.length ?? 0) > 0)
+  if (countOnly && (ownOutboundSend?.length ?? 0) > 0)
     throw new Error(
       "count-only exchange resolved a non-empty outbound column set: a psi-c " +
         "run carries no payload in either direction",
@@ -342,7 +342,7 @@ export function logDecisionFacts(
   // decode, which applies the same rule (LinkageTermsSchema). Both directions,
   // since the sentence covers both.
   if (
-    countOnlyApplied &&
+    countOnly &&
     ((summary.payload?.send.length ?? 0) > 0 ||
       (summary.payload?.receive.length ?? 0) > 0)
   )
@@ -350,7 +350,7 @@ export function logDecisionFacts(
       "count-only terms declare a payload column: a psi-c run moves no " +
         "payload in either direction",
     );
-  if (countOnlyApplied) {
+  if (countOnly) {
     // The algorithm answers this slot ahead of the entitlement the other cases read:
     // a count-only exchange carries no payload in either direction whoever receives
     // the count, so the reason no column leaves is one the shared sentence states
@@ -380,19 +380,13 @@ export function logDecisionFacts(
   );
   emit(`    ${CONSENT_FACTS.invitingParty.note}`);
   emit(`  ${marked("PSI algorithm", "algorithm")}: ${summary.algorithm}`);
-  // A count-only algorithm states a DISCLOSURE guarantee, so what qualifies it sits
-  // with the headline it bears on rather than further down -- the caveat while the
-  // exchange refuses to run on those terms, and the tier's own facts once it does.
-  // Both are read from the shared table, and the gate is what the two surfaces hold
-  // in common: while the exchange refuses psi-c, not one of the five tier sentences
-  // is reachable on either of them. COUNT_ONLY_DISCLOSURE_STATEMENT is shared wording
-  // rather than a shared placement -- the web screen carries it as its matching-method
-  // headline for any psi-c invitation, qualified in place by the refusal caveat, where
-  // this prompt names the algorithm and prints the statement only once the run honors
-  // it.
-  if (summary.algorithm === "psi-c" && !summary.psiCApplied)
-    emit(`    ${PROPOSED_NOT_APPLIED_NOTES.psiC}`);
-  if (countOnlyApplied) {
+  // A count-only algorithm states a DISCLOSURE guarantee, so the tier that qualifies
+  // it sits with the headline it bears on rather than further down. Every sentence is
+  // read from the shared table, so the two surfaces cannot state different outcomes
+  // for one invitation. COUNT_ONLY_DISCLOSURE_STATEMENT is shared wording rather than
+  // a shared placement -- the web screen carries it as its matching-method headline,
+  // where this prompt names the algorithm and prints the statement beneath it.
+  if (countOnly) {
     emit(`    ${COUNT_ONLY_DISCLOSURE_STATEMENT}`);
     emit(`    ${CONSENT_FACTS.countOnlyResult.note}`);
     emit(
@@ -546,10 +540,8 @@ export function displayInvitation(params: {
   // happens at all: by the role rule the non-receiving party of a count-only run is
   // the SENDER, which computes nothing from the round and is sent no count-report
   // frame (docs/spec/PROTOCOL.md, PSI-C), so it learns no membership of its own
-  // records. Withheld for ANY psi-c invitation rather than for an applied one alone
-  // -- while the exchange refuses those terms no run happens to disclose anything
-  // either -- so the claim cannot return when APPLIED_SETTINGS.psiC flips. What a
-  // count-only run does disclose is the tier logDecisionFacts prints above.
+  // records. What a count-only run does disclose is the tier logDecisionFacts prints
+  // above.
   if (!summary.inviterReceivesOutput && summary.algorithm !== "psi-c") {
     emit(
       `  ${marked("what your partner learns either way", "partnerLearnsOwnMembership")}:`,

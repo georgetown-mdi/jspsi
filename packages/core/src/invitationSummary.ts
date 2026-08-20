@@ -462,14 +462,6 @@ export interface InvitationSummary {
   /** `psi` reveals matched identifiers; `psi-c` reveals only the count. */
   algorithm: Algorithm;
   /**
-   * Whether today's exchange actually applies `psi-c` when it is proposed (see
-   * {@link APPLIED_SETTINGS}). Meaningful only when {@link algorithm} is
-   * `psi-c`; the renderer flags a proposed `psi-c` as not-yet-applied -- the run
-   * still reveals matched identifiers -- when this is false, so a count-only
-   * claim cannot read as in force while it is not.
-   */
-  psiCApplied: boolean;
-  /**
    * How the agreed linkage keys are exchanged: `cascade` (the default) or
    * `single-pass`. single-pass is disclosure-affecting -- to run in one batched
    * round the sender hands the receiver its full per-key value structure, so the
@@ -1205,7 +1197,6 @@ export function summarizeInvitation(
   const summary: InvitationSummary = {
     invitingParty: redactAndSanitizeForDisplay(terms.identity),
     algorithm: terms.algorithm,
-    psiCApplied: APPLIED_SETTINGS.psiC,
     linkageStrategy: terms.linkageStrategy,
     inviterReceivesOutput: terms.output.expectsOutput,
     inviterSharesResult: terms.output.shareWithPartner,

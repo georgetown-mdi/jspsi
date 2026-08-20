@@ -17,12 +17,11 @@
 // partner's non-receipt, off the same `output` pair, rests on the partner's word).
 // `linkageTermConsentCoverage.ts` is the repo's precedent for the shape.
 //
-// One tier here states facts about a run no version conducts yet: the count-only
-// (`psi-c`) facts, which both surfaces render only where `psiCApplied` says the
-// exchange honors the algorithm. Their bases are the per-party learn-basis rows
-// of docs/spec/PROTOCOL.md's PSI-C section rather than a judgment made here, so
-// a row reclassified there and not here is a divergence between a specification
-// and the sentence an acceptor consents on.
+// One tier here states facts about the count-only (`psi-c`) run alone, which both
+// surfaces render for a `psi-c` invitation and withhold otherwise. Their bases are
+// the per-party learn-basis rows of docs/spec/PROTOCOL.md's PSI-C section rather
+// than a judgment made here, so a row reclassified there and not here is a
+// divergence between a specification and the sentence an acceptor consents on.
 //
 // Rationale and the decisions taken: docs/notes/shared-consent-summary.md.
 
@@ -421,13 +420,10 @@ export const OUTBOUND_SEND_NO_PAYLOAD_SENTENCE =
  * own; the count-only tier is exactly where a second account would cost most,
  * since a reader takes "only a number" for the safe option.
  *
- * Shared wording, not a shared placement, and this line alone of the tier: the
- * web consent screen renders it as its matching-method headline for ANY `psi-c`
- * invitation, qualified in place by {@link PROPOSED_NOT_APPLIED_NOTES.psiC}
- * while the exchange refuses to run on those terms, where the CLI accept prompt
- * names the algorithm there and prints this line only where `psiCApplied` says
- * the run honors it. The `countOnly*` facts have no such split -- both surfaces
- * hold every one of them behind that same flag.
+ * Shared wording, not a shared placement: the web consent screen renders it as
+ * its matching-method headline, where the CLI accept prompt names the algorithm
+ * there and prints this line beneath it. Both surfaces render it, and the
+ * `countOnly*` facts with it, for exactly a `psi-c` invitation.
  *
  * Fixed first-party copy naming no value, so a surface may render it verbatim.
  */
@@ -439,32 +435,20 @@ export const COUNT_ONLY_DISCLOSURE_STATEMENT =
  * The caveat copy for a term an inviter may declare that today's exchange does
  * not apply, keyed by the {@link APPLIED_SETTINGS} flag that gates it.
  *
- * The three are not alike in what not-applying them does, and the copy follows
- * that rather than a house style. `psiC` and `deduplicate` are refused at the
- * exchange boundary (`assertAlgorithmImplemented` / `assertDeduplicateImplemented`
- * in `exchange.ts`), so an invitation carrying either aborts before any identifier
- * is revealed: their copy names the refusal and what to ask the inviter for. A
- * caveat claiming the run proceeds and discloses more than the headline would be
- * describing a run that does not happen.
+ * The two are not alike in what not-applying them does, and the copy follows
+ * that rather than a house style. `deduplicate` is refused at the exchange
+ * boundary (`assertDeduplicateImplemented` in `exchange.ts`), so an invitation
+ * carrying it aborts before any identifier is revealed: its copy names the
+ * refusal and what to ask the inviter for. A caveat claiming the run proceeds and
+ * discloses more than the headline would be describing a run that does not
+ * happen.
  * `fuzzyComparisons` has no such refusal; it is a silent no-op that narrows the
  * match, so its marker says only that the expansion is proposed, and claiming a
  * refusal there would be the same error in the other direction.
  *
- * Shared for the same reason the classification is. The count-only entry is the
- * one that moves: what it flips TO is authored already, as
- * {@link COUNT_ONLY_DISCLOSURE_STATEMENT} and the `countOnly*` facts above. The
- * facts are what both surfaces hold behind `psiCApplied`, so the flip is
- * `APPLIED_SETTINGS.psiC` landing with the run path rather than a copy edit; the
- * statement is shared wording each surface places for itself, and on the web
- * consent screen it renders beside this very entry (see its own docblock). This
- * entry is what the same change deletes; the render tests pinning both sides of
- * the gate make that a deliberate edit on each surface.
+ * Shared for the same reason the classification is.
  */
 export const PROPOSED_NOT_APPLIED_NOTES = {
-  psiC:
-    "Your partner proposes a count-only exchange, but this version of the " +
-    "exchange does not yet apply it and will refuse to run; ask your partner " +
-    'for an invitation using the "psi" algorithm.',
   deduplicate:
     "Your partner proposes this, but this version of the exchange does not " +
     "yet apply it and will refuse to run; ask your partner for an invitation " +
