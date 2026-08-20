@@ -950,8 +950,8 @@ function uniqueColumnName(base: string, taken: ReadonlySet<string>): string {
  * recoverable from the payload values. The remaining columns are the partner's
  * payload columns, each using its original name, prefixed with `their_` only when
  * it collides with our identifier column. All values are RFC 4180 escaped. Null
- * cells in the partner's payload (columns present in the schema but absent from a
- * row) are emitted as empty strings.
+ * cells in the partner's payload are emitted as empty strings; a row whose width
+ * disagrees with the declared columns is refused.
  */
 export function buildOutputTable(
   associationTable: AssociationTable,
@@ -970,6 +970,15 @@ export function buildOutputTable(
     throw new Error(
       "partner payload rowIndices and rows have different lengths: " +
         `${partnerPayload.rowIndices.length} vs ${partnerPayload.rows.length}`,
+    );
+  }
+
+  if (
+    !hasOneCellPerColumn(partnerPayload.columns.length, partnerPayload.rows)
+  ) {
+    throw new Error(
+      "partner payload rows do not carry one cell per declared column: " +
+        `expected ${partnerPayload.columns.length} cells per row`,
     );
   }
 

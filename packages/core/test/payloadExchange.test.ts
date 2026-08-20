@@ -1684,3 +1684,25 @@ test("buildOutputTable: throws when partner payload rowIndices contains duplicat
     ),
   ).toThrow("duplicate");
 });
+
+test("buildOutputTable: throws when a partner payload row is narrower than the declared columns", () => {
+  const partnerPayload: PartnerPayload = {
+    columns: ["partner_id", "notes"],
+    rowIndices: [0],
+    rows: [["Q0"]],
+  };
+  expect(() =>
+    buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
+  ).toThrow("one cell per declared column");
+});
+
+test("buildOutputTable: throws when a partner payload row is wider than the declared columns", () => {
+  const partnerPayload: PartnerPayload = {
+    columns: ["partner_id", "notes"],
+    rowIndices: [0],
+    rows: [["Q0", "note0", "extra"]],
+  };
+  expect(() =>
+    buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
+  ).toThrow("one cell per declared column");
+});
