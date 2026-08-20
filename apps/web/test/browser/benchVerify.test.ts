@@ -418,6 +418,55 @@ describe("verify receipt bench", () => {
       .toBeInTheDocument();
   });
 
+  test("a mismatch with no empty cells earns no note", async () => {
+    // The tampered-record test above reaches a mismatch through an altered
+    // commitment; this one reaches the same partnerPayloadReceived mismatch
+    // through an honest re-supply that simply differs from what was committed
+    // -- no cell involved is ever empty, so the null explanation is impossible
+    // and must not appear beside it.
+    const { record, keys } = await buildFixture();
+    await mountVerifyBench();
+
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec.json", serializeExchangeRecord(record)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(1)),
+      jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Re-supply your files to open the commitments",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(2)),
+      csvFile("input.csv", INPUT_CSV),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(3)),
+      // Our row 0 pairs the partner's row 1, whose committed value was "south";
+      // re-supplying a different non-empty value mismatches without an empty
+      // cell anywhere in the re-supplied payload.
+      csvFile("result.csv", "pid,their_row_id,clinic\nP0,1,east\nP1,0,north\n"),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Verify with these files" }),
+    );
+
+    await expect
+      .element(page.getByText("Verification failed"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("a committed empty string from a committed null", {
+          exact: false,
+        }),
+      )
+      .not.toBeInTheDocument();
+  });
+
   test("a missing-salt keys file renders the distinct wrong-or-drifted state", async () => {
     const { record, keys } = await buildFixture();
     // The optional association-table salt is schema-valid to omit, so the keys

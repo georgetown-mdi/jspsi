@@ -1175,6 +1175,41 @@ describe("handler", () => {
     expect(exitCode).toBe(1);
   });
 
+  test("a mismatch with no empty cells earns no note", async () => {
+    // The same re-supply shape as the null-reproduction case above, but the
+    // committed and re-supplied values differ without either being empty: the
+    // null explanation is impossible there, so the note must not appear beside
+    // a mismatch it does not explain.
+    const dir = tmp();
+    const { record, keys } = await buildExchangeRecord({
+      ...baseInputs,
+      associationTable: [[0], [0]],
+      partnerPayloadReceived: { columns: ["status"], rows: [["active"]] },
+    });
+    const recordPath = join(dir, "rec.json");
+    writeFileSync(recordPath, serializeExchangeRecord(record));
+    writeFileSync(join(dir, "rec.keys.json"), serializeVerificationKeys(keys));
+    const inputPath = join(dir, "input.csv");
+    writeFileSync(inputPath, "pid,dose\nP0,10mg\n");
+    const resultPath = join(dir, "result.csv");
+    writeFileSync(resultPath, "pid,row_id,status\nP0,0,inactive\n");
+
+    const { stdout, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "input-file": inputPath,
+      "result-file": resultPath,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("VERIFICATION FAILED");
+    expect(stdout).toContain(
+      "commitment partnerPayloadReceived: DOES NOT MATCH",
+    );
+    expect(stdout).not.toContain(
+      "cannot distinguish a committed empty string from a committed null",
+    );
+    expect(exitCode).toBe(1);
+  });
+
   test("a dual-signed record positional verifies the signatures alone", async () => {
     const { signedPath, identityPath, pin } = await exchangeArtifacts();
     const { stdout, exits, exitCode } = await runVerify({
