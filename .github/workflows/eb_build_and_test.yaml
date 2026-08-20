@@ -21,7 +21,9 @@ on:
   # difference. packages/core/** matches the sibling cli_build_and_test.yaml,
   # and packages/peerjs-broker/** is here because the web app consumes the
   # signaling broker from that workspace and bundles it into the deployed
-  # server.
+  # server. packages/testkit/** is here for the same reason the test trees are:
+  # the web unit suite is driven by fixtures that workspace holds, so a change
+  # confined to them would otherwise weaken this gate without re-running it.
   pull_request:
     branches: [main, staging]
     paths:
@@ -31,6 +33,7 @@ on:
       - "apps/web/**"
       - "packages/core/**"
       - "packages/peerjs-broker/**"
+      - "packages/testkit/**"
       - ".github/actions/setup/**"
       - ".github/workflows/eb_build_and_test.yaml"
 

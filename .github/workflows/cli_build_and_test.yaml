@@ -23,6 +23,10 @@ on:
       # broker workspace or to the standalone entry point it spawns must re-run
       # this gate.
       - "packages/peerjs-broker/**"
+      # The CLI's unit suite is driven by fixtures this workspace holds
+      # (docs/TESTING.md, Shared test material), so a change confined to them
+      # weakens this gate's own assertions unless it re-runs the gate.
+      - "packages/testkit/**"
       - "package-lock.json"
       - "tsconfig.base.json"
       - ".github/actions/setup/**"

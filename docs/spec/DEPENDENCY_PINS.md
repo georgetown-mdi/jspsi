@@ -56,10 +56,15 @@ asking for an npm exclude entry that would be false.
   declares it too, as a devDependency at that same exact version, because the
   marker scan that parses the wire format lives there and its differential test
   drives the real encoder as its oracle -- so the guard over the shared bound
-  holds whether or not an app keeps the dependency. All three declarations must
-  move together -- a browser peer and a CLI peer that pack differently cannot
-  exchange a frame, and a core scan differentiated against a different version
-  than either app ships is not testing the shipped premise.
+  holds whether or not an app keeps the dependency. `packages/testkit` declares
+  it at that same exact version as well, because the shared WebRTC inbound frame
+  fixtures both transports are held to are built with the real packer
+  (`packages/testkit/src/webrtcInboundFrames.ts`), and a workspace's own imports
+  are declared in its own manifest rather than resolved through a consumer's
+  hoisting. All four declarations must move together -- a browser peer and a CLI
+  peer that pack differently cannot exchange a frame, and a core scan or a
+  shared fixture set differentiated against a different version than either app
+  ships is not testing the shipped premise.
 - **CLI WebRTC peer (`werift`).** The CLI drives werift's `RTCPeerConnection`
   directly rather than running PeerJS in Node
   (`docs/notes/cli-webrtc-stack.md`), so the transport depends on behaviours
@@ -547,6 +552,8 @@ Then run `npm run test:integration -w apps/cli` against the new version. The con
 ## Upgrading the PeerJS Stack (peerjs / peerjs-js-binarypack)
 
 The web WebRTC data-channel inbound bound specified in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md) reaches past the public `DataConnection` API into PeerJS reassembly/unpack internals (`apps/web/src/psi/boundedReassembly.ts`) and parses the `peerjs-js-binarypack` wire format directly (`packages/core/src/connection/binaryPackBounds.ts`), so it rests on premises about both packages' internal behavior that an upgrade can silently break. Re-verify the following on any `peerjs` or `peerjs-js-binarypack` version bump, before the bump merges.
+
+A `peerjs-js-binarypack` bump is one edit across four declaration sites: `apps/web/package.json` and `apps/cli/package.json` (the two shipped encoders), `packages/core/package.json` (a devDependency, the real encoder the scan's differential suite oracles against), and `packages/testkit/package.json` (the shared inbound frame fixtures both transports are driven through, `packages/testkit/src/webrtcInboundFrames.ts`). A site left behind puts the shipped wire format and the version the guards are measured against out of step.
 
 The internal assumptions the bound relies on:
 

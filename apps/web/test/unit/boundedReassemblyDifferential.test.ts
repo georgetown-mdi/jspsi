@@ -10,6 +10,8 @@ import {
   scanFrameStructure,
 } from "@psilink/core";
 
+import { normalizeBinary } from "@psilink/testkit/webrtcInboundFrames";
+
 import { boundChunkReassembly } from "../../src/psi/boundedReassembly.js";
 
 import type { Packable, Unpackable } from "peerjs-js-binarypack";
@@ -46,30 +48,6 @@ async function packBytes(value: Packable): Promise<Uint8Array> {
  * bridges the declared type to the real call shape. */
 function unpackFrame(bytes: Uint8Array): Unpackable {
   return unpack<Unpackable>(bytes as unknown as ArrayBuffer);
-}
-
-/** Recursively rewrite every `ArrayBuffer`/typed-array in a decoded value to a
- * plain number array, so a value-decode equality assertion compares binary payloads
- * by content. This vitest's `toEqual` treats two distinct `ArrayBuffer`s as equal
- * regardless of their bytes, so an undetected byte-level divergence inside a decoded
- * `bin`/`raw` value would slip past a bare `toEqual`; normalizing both sides first
- * forces the comparison through the bytes. */
-function normalizeBinary(value: unknown): unknown {
-  if (value instanceof ArrayBuffer) return Array.from(new Uint8Array(value));
-  if (ArrayBuffer.isView(value)) {
-    return Array.from(
-      new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
-    );
-  }
-  if (Array.isArray(value)) return value.map(normalizeBinary);
-  if (value !== null && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [key, inner] of Object.entries(value)) {
-      out[key] = normalizeBinary(inner);
-    }
-    return out;
-  }
-  return value;
 }
 
 interface Chunk {
