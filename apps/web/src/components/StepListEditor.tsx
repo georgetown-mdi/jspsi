@@ -525,7 +525,8 @@ export function StepListEditor({
               host enables it, so it is never mixed into the standard menu or offered
               as a recommended step (and never offered at all in the cross-party
               element-transform editor). The offered set withholds the fan-out
-              family core refuses to run; see OFFERED_EXPERT_FUNCTION_GROUPS. */}
+              family at every strategy, wider than core's own refusal by design;
+              see OFFERED_EXPERT_FUNCTION_GROUPS. */}
           {showExpertGroups && <Menu.Divider />}
           {showExpertGroups &&
             OFFERED_EXPERT_FUNCTION_GROUPS.map(renderMenuGroup)}
