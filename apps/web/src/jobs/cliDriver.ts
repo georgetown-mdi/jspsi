@@ -428,9 +428,14 @@ const RELAY_EVENT_TYPES = new Set<RelayEventType>([
  * the seat that renders it, never carried in a relayed field, and the property
  * that a relayed event holds no unescaped control character is unchanged.
  *
- * The chain field is assigned AFTER the loop, so it wins over a same-named key a
- * subverted source put on the event: what the seat renders is always this pass's
- * derivation from `message`, never a chain the source handed over whole.
+ * The chain field is the relay's own on every event type and every path. The
+ * field pass DROPS a same-named key a subverted source put on the event, and an
+ * `error` event is then assigned this pass's derivation from `message`: the
+ * links when it is a string, and no links when the event carries no string
+ * `message` to render, which leaves the seat on the flat-field fallback it
+ * already takes for an event no chain was derived for. So the depth bound and
+ * the per-link budget hold wherever the field is emitted, and what the seat
+ * renders is never a chain the source handed over whole.
  */
 export function validateAndSanitizeEvent(value: unknown): RelayEvent | null {
   if (value === null || typeof value !== "object" || Array.isArray(value))
@@ -444,16 +449,31 @@ export function validateAndSanitizeEvent(value: unknown): RelayEvent | null {
   )
     return null;
   const sanitized: Record<string, unknown> = {};
-  for (const [key, field] of Object.entries(record))
-    sanitized[sanitizeForDisplay(key)] =
+  for (const [key, field] of Object.entries(record)) {
+    const outKey: string = sanitizeForDisplay(key);
+    // A source key of the chain field's name is dropped rather than copied, on
+    // every event type: only the derivation below may reach that field, and
+    // dropping it here is what leaves no path carrying the source's own. The
+    // ESCAPED key decides it, since that is the key that would land.
+    if (outKey === ERROR_MESSAGE_CHAIN_FIELD) continue;
+    sanitized[outKey] =
       type === "warning" && key === "message" && typeof field === "string"
         ? sanitizeForDisplay(field, {
             maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
           })
         : sanitizeValue(field);
+  }
+  // Unconditional for an error event, so the field's provenance does not vary
+  // with what the source sent: no string `message` is no chain to split, and an
+  // empty one is inert at the seat, which then reads its flat-field fallback.
   const chain =
-    type === "error" && typeof record.message === "string"
-      ? { [ERROR_MESSAGE_CHAIN_FIELD]: sanitizeErrorChainLinks(record.message) }
+    type === "error"
+      ? {
+          [ERROR_MESSAGE_CHAIN_FIELD]:
+            typeof record.message === "string"
+              ? sanitizeErrorChainLinks(record.message)
+              : [],
+        }
       : {};
   return { ...sanitized, ...chain, v: 1, type: type as RelayEventType };
 }

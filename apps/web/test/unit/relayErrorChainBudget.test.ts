@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { afterEach, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 import {
   CAUSE_DEPTH_ELISION_MARKER,
@@ -18,10 +18,10 @@ import {
   createFetchJobApiClient,
   createServerJobReattachDriver,
 } from "@psi/serverJobExchangeDriver";
+import { spawnExchangeJob, validateAndSanitizeEvent } from "@jobs/cliDriver";
 import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
 import { failureFor } from "@bench/useInviterExchange";
 import { renderSseFrame } from "@jobs/sse";
-import { spawnExchangeJob } from "@jobs/cliDriver";
 
 import {
   STUB_CLI_PATH,
@@ -285,4 +285,104 @@ test("a cut chain reaches the seat saying it was cut", async () => {
   expect(failure.message).toContain(CAUSE_DEPTH_ELISION_MARKER);
   expect(failure.message).toContain(`link ${MAX_ERROR_CAUSE_DEPTH - 1}`);
   expect(failure.message).not.toContain(`link ${MAX_ERROR_CAUSE_DEPTH}`);
+});
+
+// The links the seat renders are the relay's own derivation, which is a claim
+// about PROVENANCE and not only about volume: a chain the source handed over
+// whole was never split by the renderer, so no depth bound and no per-link
+// budget were ever applied to it, and its content is a subverted child's rather
+// than the failure's. These drive the source's field onto every shape of event
+// that reaches the relay -- with a chain to derive and without one, terminal and
+// not -- and fail unless the outgoing field is the relay's own.
+describe("the relayed chain is the relay's own derivation, never the source's", () => {
+  /** The chain field of a relayed event, whatever the relay put on it. */
+  function relayedChain(event: RelayEvent | null): unknown {
+    expect(event).not.toBeNull();
+    return (event as RelayEvent)[ERROR_MESSAGE_CHAIN_FIELD];
+  }
+
+  test("an error event carrying no message carries no forged chain", async () => {
+    const forged = ["a failure that did not happen", "and its forged recovery"];
+    const event = validateAndSanitizeEvent({
+      v: 1,
+      type: "error",
+      category: "config",
+      messageChain: forged,
+    });
+    expect(relayedChain(event)).toEqual([]);
+
+    // An empty derivation is what leaves the seat on its flat-field fallback,
+    // so the operator reads the relay's own copy rather than the source's.
+    const failure = await failureAtSeat([event as RelayEvent]);
+    for (const link of forged) expect(failure.message).not.toContain(link);
+  });
+
+  test("an error event whose message is not a string carries no forged chain", async () => {
+    const forged = ["attacker link A", "attacker link B"];
+    const event = validateAndSanitizeEvent({
+      v: 1,
+      type: "error",
+      category: "config",
+      message: 12345,
+      messageChain: forged,
+    });
+    expect(relayedChain(event)).toEqual([]);
+    // The flat field keeps the generic pass's treatment of a non-string; it is
+    // the chain that is derived, and a non-string message derives none.
+    expect((event as RelayEvent).message).toBe(12345);
+
+    const failure = await failureAtSeat([event as RelayEvent]);
+    for (const link of forged) expect(failure.message).not.toContain(link);
+  });
+
+  test("a forged chain of 50,000 links is not carried at any size", () => {
+    const flood = Array.from(
+      { length: 50_000 },
+      (_, index) => `link-${index}-${"z".repeat(200)}`,
+    );
+    const event = validateAndSanitizeEvent({
+      v: 1,
+      type: "error",
+      category: "config",
+      messageChain: flood,
+    });
+    expect(relayedChain(event)).toEqual([]);
+    // Dropped rather than relocated: no field of the outgoing event holds more
+    // links than the renderer's own walk can emit.
+    for (const value of Object.values(event as RelayEvent))
+      expect(Array.isArray(value) && value.length > MAX_ERROR_CAUSE_DEPTH).toBe(
+        false,
+      );
+  });
+
+  test("a chain derived from a real message wins over a forged field", async () => {
+    const message = refusalChain();
+    const forged = ["a failure that did not happen", "and its forged recovery"];
+    const event = validateAndSanitizeEvent({
+      v: 1,
+      type: "error",
+      category: "config",
+      message,
+      messageChain: forged,
+    });
+    const chain = relayedChain(event) as Array<string>;
+    expect(chain).toHaveLength(2);
+    expect(chain[1]).toBe(RECOVERY_STEP);
+    for (const link of forged) expect(chain).not.toContain(link);
+
+    const failure = await failureAtSeat([event as RelayEvent]);
+    expect(failure.message.endsWith(RECOVERY_STEP)).toBe(true);
+    for (const link of forged) expect(failure.message).not.toContain(link);
+  });
+
+  test("a non-error event carrying the key does not relay it", () => {
+    const event = validateAndSanitizeEvent({
+      v: 1,
+      type: "warning",
+      message: "a warning the operator reads",
+      messageChain: ["a link on an event that has no chain"],
+    });
+    expect(event).not.toBeNull();
+    expect(ERROR_MESSAGE_CHAIN_FIELD in (event as RelayEvent)).toBe(false);
+  });
 });

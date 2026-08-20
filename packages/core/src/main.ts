@@ -94,7 +94,6 @@ export {
   redactAndSanitizeForDisplay,
   MAX_ERROR_CAUSE_DEPTH,
   CAUSE_DEPTH_ELISION_MARKER,
-  ERROR_CAUSE_SEPARATOR,
 } from "./utils/sanitizeErrorForDisplay";
 export { reconcileHostKeyFingerprints } from "./hostKeyReconciliation";
 export { describeDecodeError } from "./utils/describeDecodeError";

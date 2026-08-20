@@ -143,7 +143,10 @@ function snakeToCamel(s: string): string {
  * key with an embedded acronym (`URL`) renders `u_r_l`. Every key the exchange
  * schema defines is lowercase words, so the inverse is exact for them; a key from
  * a free-form record (a transform's `params`) is the operator's own and can be
- * spelled outside that convention.
+ * spelled outside that convention. Not a stable public API for consumers outside
+ * the workspace, exactly as {@link snakeizeKeys} is not.
+ *
+ * @internal
  */
 export function snakeizeKey(key: string): string {
   return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
