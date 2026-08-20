@@ -4,6 +4,7 @@ import { parse as parseYaml } from "yaml";
 
 import {
   MAX_NAME_LENGTH,
+  MAX_RECONNECT_ATTEMPTS,
   MAX_TIMEOUT_SECONDS,
   assessOutboundPayloadConsent,
   disclosedColumnNames,
@@ -778,6 +779,43 @@ describe("the connection-tuning knobs reach the composed config", () => {
       composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange"),
     ) as { connection: { options?: Record<string, unknown> } };
     expect(doc.connection.options).toBeUndefined();
+  });
+});
+
+// The retry-budget ceiling is imported from core rather than a copied
+// literal, so these bind to core's own MAX_RECONNECT_ATTEMPTS: a schema that
+// drifted back to a stale literal would fail one of the two assertions below.
+describe("maxReconnectAttempts is bounded by core's own MAX_RECONNECT_ATTEMPTS", () => {
+  test("refuses a value past the ceiling on the exchange and zero-setup arms", () => {
+    for (const result of [
+      jobExchangeIntentSchema.safeParse(
+        validIntent({
+          options: { maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS + 1 },
+        }),
+      ),
+      jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupIntent({
+          options: { maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS + 1 },
+        }),
+      ),
+    ])
+      expect(result.success).toBe(false);
+  });
+
+  test("admits the ceiling itself on both arms", () => {
+    for (const result of [
+      jobExchangeIntentSchema.safeParse(
+        validIntent({
+          options: { maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS },
+        }),
+      ),
+      jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupIntent({
+          options: { maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS },
+        }),
+      ),
+    ])
+      expect(result.success).toBe(true);
   });
 });
 
