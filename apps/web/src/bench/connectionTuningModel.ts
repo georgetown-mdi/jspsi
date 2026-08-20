@@ -359,17 +359,37 @@ export function connectionTuningSummary(
 }
 
 /**
- * The placeholder each duration field shows: core's own default for that field,
- * expressed in the unit the field is currently authored in, so an operator who
- * leaves it blank can see what the run will actually use. Rounded to a whole
- * number, since the placeholder is a legible hint rather than an exact value to
- * copy.
+ * The coarsest unit in which `ms` is a whole number, milliseconds always
+ * eligible as the last resort. The unit a duration's own value is stated in
+ * naturally, independent of whichever unit a field happens to be authored in.
+ */
+function naturalDurationUnit(ms: number): DurationUnit {
+  const coarsestFirst: ReadonlyArray<DurationUnit> = ["h", "m", "s", "ms"];
+  return (
+    coarsestFirst.find((candidate) =>
+      Number.isInteger(ms / UNIT_MS[candidate]),
+    ) ?? "ms"
+  );
+}
+
+/**
+ * The placeholder each duration field shows: core's own default for that
+ * field, so an operator who leaves it blank can see what the run will
+ * actually use. When the default is a whole number in the unit the field is
+ * currently authored in, that bare number is shown, exactly as before. When
+ * it is not, showing a rounded bare number would misstate the default (or,
+ * for some unit/default pairs, round to "0", a value the field itself
+ * refuses), so the placeholder instead states the default in its own natural
+ * unit as text -- never a rounded bare number.
  */
 export function defaultPlaceholder(
   defaultMs: number,
   unit: DurationUnit,
 ): string {
-  return String(Math.round(defaultMs / UNIT_MS[unit]));
+  const converted = defaultMs / UNIT_MS[unit];
+  if (Number.isInteger(converted)) return String(converted);
+  const natural = naturalDurationUnit(defaultMs);
+  return `default ${defaultMs / UNIT_MS[natural]} ${natural}`;
 }
 
 /** Core's default for each duration field, keyed by the draft field it belongs

@@ -6,6 +6,7 @@ import {
   CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS,
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
   DEFAULT_POLLING_FREQUENCY_MS,
+  DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
   LOW_POLLING_FREQUENCY_WARN_MS,
   MAX_RECONNECT_ATTEMPTS,
   MAX_TIMEOUT_SECONDS,
@@ -456,9 +457,41 @@ describe("the placeholder shows core's own default in the chosen unit", () => {
   test.each([
     ["ms", "5000"],
     ["s", "5"],
-  ] as const)("the poll default reads as %s", (unit, expected) => {
-    expect(defaultPlaceholder(DEFAULT_POLLING_FREQUENCY_MS, unit)).toBe(
-      expected,
-    );
-  });
+  ] as const)(
+    "the poll default reads as a bare number in %s, which is exact",
+    (unit, expected) => {
+      expect(defaultPlaceholder(DEFAULT_POLLING_FREQUENCY_MS, unit)).toBe(
+        expected,
+      );
+    },
+  );
+
+  // A rounded bare number here would misstate the default, or read "0", a
+  // value the field itself refuses. The placeholder states the default in
+  // its own natural unit as text instead.
+  test.each([
+    [
+      "the poll default in minutes",
+      DEFAULT_POLLING_FREQUENCY_MS,
+      "m",
+      "default 5 s",
+    ],
+    [
+      "the connect-timeout default in hours",
+      DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
+      "h",
+      "default 30 s",
+    ],
+    [
+      "the connect-timeout default in minutes",
+      DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
+      "m",
+      "default 30 s",
+    ],
+  ] as const)(
+    "%s is stated in its own unit, not rounded",
+    (_label, defaultMs, unit, expected) => {
+      expect(defaultPlaceholder(defaultMs, unit)).toBe(expected);
+    },
+  );
 });

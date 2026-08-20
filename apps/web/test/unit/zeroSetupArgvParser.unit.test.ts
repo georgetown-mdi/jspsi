@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 
-import { MAX_TIMEOUT_SECONDS } from "@psilink/core";
+import { MAX_RECONNECT_ATTEMPTS, MAX_TIMEOUT_SECONDS } from "@psilink/core";
 
 import {
   CONNECTION_TUNING_DEFAULT,
@@ -337,6 +337,38 @@ describe(
       expect(parsed.status).not.toBe(EXIT_USAGE);
       expect(parsed.stderr).toContain("input.csv does not exist");
     });
+
+    test.each([
+      ["a poll interval of 1ms, the schema's floor", "--polling-frequency=1ms"],
+      [
+        "a poll interval at Number.MAX_SAFE_INTEGER ms, the schema's ceiling",
+        `--polling-frequency=${Number.MAX_SAFE_INTEGER}ms`,
+      ],
+      ["a retry budget of 0, the schema's floor", "--max-reconnect-attempts=0"],
+      [
+        "a retry budget of 604800, the schema's ceiling",
+        `--max-reconnect-attempts=${MAX_RECONNECT_ATTEMPTS}`,
+      ],
+    ])(
+      // Pins the schema's extreme admitted values against the real parser, so
+      // a drift between the schema's bound and the flag grammar's own would
+      // show here rather than only at a boundary neither suite drives.
+      "%s parses past flag validation",
+      async (_label, flag) => {
+        const { dir, connectionArgs } = splitSftpConnection();
+        const argv = await captureZeroSetupArgv({
+          workdir: dir,
+          connectionArgs,
+          optionArgs: [...retainModeFileSyncArgs(), flag],
+          eventStream: true,
+          timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+        });
+        const parsed = parseWithRealCli(argv, dir);
+        expect(parsed.stderr).not.toContain("Unknown argument");
+        expect(parsed.status).not.toBe(EXIT_USAGE);
+        expect(parsed.stderr).toContain("input.csv does not exist");
+      },
+    );
 
     test("an hour past that ceiling is a usage error, which is why the card refuses it", async () => {
       // The refusal the console makes at authoring time, driven at the boundary
