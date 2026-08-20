@@ -10,7 +10,6 @@ import { outputForDirection } from "./advancedInviteTypes";
 import { payloadSendForMetadata } from "./metadataEditing";
 
 import type {
-  Algorithm,
   ExchangeDataSpec,
   LinkageField,
   LinkageKey,
@@ -161,10 +160,7 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // while gated, so the built terms can never carry a setting the run does not yet
   // honor regardless of how the draft reached this state (a UI gap, an import) --
   // the structural half of the gate that holds even if the disabled controls or
-  // import refusal are bypassed. The algorithm is written straight through: the
-  // exchange honors both members, and a count-only document outside the shape the
-  // specification admits is refused by the count-only rules rather than clamped.
-  const algorithm: Algorithm = draft.algorithm;
+  // import refusal are bypassed.
   const deduplicate = APPLIED_SETTINGS.deduplicate ? draft.deduplicate : false;
   const enabledKeys = draft.keys
     .filter((entry) => entry.enabled)
@@ -199,7 +195,10 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   const terms: LinkageTerms = {
     ...baseTerms,
     identity: normalizeText(draft.identity),
-    algorithm,
+    // Unclamped, unlike its gated neighbors: the exchange honors both members, and
+    // a count-only document outside the shape the specification admits is refused
+    // by the count-only rules rather than narrowed here.
+    algorithm: draft.algorithm,
     deduplicate,
     linkageStrategy: draft.linkageStrategy,
     output: outputForDirection(draft.outputDirection),

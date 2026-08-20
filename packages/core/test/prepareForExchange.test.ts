@@ -15,6 +15,7 @@ import {
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 import type { MessageConnection } from "../src/connection/messageConnection";
+import type { Algorithm } from "../src/types";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
 import type { SigningConfig, SigningMode } from "../src/config/signing";
@@ -213,6 +214,13 @@ describe("prepareForExchange: count-only (psi-c) is admitted in shape", () => {
 
 // --- assertAlgorithmImplemented (the shared guard) ---------------------------
 
+// An algorithm value outside the implemented pair: the shape a member later added
+// to AlgorithmSchema takes at these boundaries before a run path exists for it,
+// and the shape a hand-crafted document reaching core past every schema takes
+// today. Cast through the type, as the signing-mode sibling below does, because
+// the enum admits no such member.
+const unimplementedAlgorithm = "psi-x" as Algorithm;
+
 describe("assertAlgorithmImplemented", () => {
   test("passes psi-c", () => {
     expect(() => assertAlgorithmImplemented("psi-c")).not.toThrow();
@@ -220,6 +228,47 @@ describe("assertAlgorithmImplemented", () => {
 
   test("passes psi", () => {
     expect(() => assertAlgorithmImplemented("psi")).not.toThrow();
+  });
+
+  test("refuses an algorithm outside the allowlist", () => {
+    // The guard is an allowlist of what this build runs, not a denylist of the
+    // unimplemented, so an algorithm with no run path is refused by default -- what
+    // keeps the self-attested record from attesting a disclosure the run could not
+    // have made.
+    expect(() => assertAlgorithmImplemented(unimplementedAlgorithm)).toThrow(
+      UsageError,
+    );
+    // The refusal names the fixed enum literals it does admit, never the value it
+    // was handed (which can be partner-controlled free text).
+    expect(() => assertAlgorithmImplemented(unimplementedAlgorithm)).toThrow(
+      /not yet implemented/,
+    );
+    expect(() =>
+      assertAlgorithmImplemented(unimplementedAlgorithm),
+    ).not.toThrow(/psi-x/);
+  });
+});
+
+describe("prepareForExchange: an unimplemented algorithm is refused", () => {
+  const prepareWithAlgorithm = (algorithm: Algorithm) =>
+    prepareForExchange(
+      { linkageTerms: { ...terms, algorithm }, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+
+  test("an algorithm with no run path is refused before connecting", () => {
+    // The prepare boundary drives the guard, so a terms document that reached core
+    // past every schema -- a hand-crafted token, a hand-authored config -- is
+    // refused before any credential, terms, or data are sent, rather than run under
+    // whichever path the dispatch happens to fall through to.
+    expect(() => prepareWithAlgorithm(unimplementedAlgorithm)).toThrow(
+      UsageError,
+    );
+    expect(() => prepareWithAlgorithm(unimplementedAlgorithm)).toThrow(
+      /not yet implemented/,
+    );
   });
 });
 
