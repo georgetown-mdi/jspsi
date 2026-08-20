@@ -5,8 +5,11 @@ import { spawn } from "node:child_process";
 
 import {
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+  sanitizeErrorChainLinks,
   sanitizeForDisplay,
 } from "@psilink/core";
+
+import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
 
 import type { ChildProcess } from "node:child_process";
 import type { Readable } from "node:stream";
@@ -406,16 +409,28 @@ const RELAY_EVENT_TYPES = new Set<RelayEventType>([
  * default: a stage label, a nested value anywhere, and this event's own keys are
  * each one value.
  *
- * A terminal `error` event's `message` takes that default too, and it is not one
- * value: the CLI renders it through `sanitizeErrorForDisplay`, so what crosses
- * is a whole cause chain -- up to `MAX_ERROR_CAUSE_DEPTH` links at
- * `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH` each, joined by the renderer's own
- * framing. Re-capping that at the per-value default cuts it wherever 256
- * characters fall, which on a refusal composed as a partition by chooser is
- * inside the first link or two, so the first-party recovery step the partition
- * deliberately moves onto a later link does not reach the console seat that
- * renders this field (`errorMessageOf` in `../psi/serverJobExchangeDriver.ts`).
- * What a console operator loses there is the next step, not the failure itself.
+ * A terminal `error` event's `message` is not one value either: the CLI renders
+ * it through `sanitizeErrorForDisplay`, so what crosses is a whole cause chain --
+ * up to `MAX_ERROR_CAUSE_DEPTH` links at `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`
+ * each, joined by the renderer's own framing. It crosses STRUCTURALLY rather than
+ * under a wider flat cap: {@link ERROR_MESSAGE_CHAIN_FIELD} carries the links
+ * apart, each escaped at the budget the renderer gave it and the count held to
+ * the renderer's own depth bound, so the relay admits exactly the volume the
+ * renderer emits and no more, and the seat rebuilds the chain from the links
+ * (`errorMessageOf` in `../psi/serverJobExchangeDriver.ts`). Splitting first is
+ * what keeps the recovery step intact: charged as one value, the chain is cut
+ * wherever 256 characters fall, which on a refusal composed as a partition by
+ * chooser is inside its first link or two, and the recovery the partition
+ * deliberately moves onto a later link never reaches the operator.
+ *
+ * Every relayed link is still whole-escaped, so no raw byte of the renderer's
+ * framing crosses either: the newline that joins the chain is re-introduced by
+ * the seat that renders it, never carried in a relayed field, and the property
+ * that a relayed event holds no unescaped control character is unchanged.
+ *
+ * The chain field is assigned AFTER the loop, so it wins over a same-named key a
+ * subverted source put on the event: what the seat renders is always this pass's
+ * derivation from `message`, never a chain the source handed over whole.
  */
 export function validateAndSanitizeEvent(value: unknown): RelayEvent | null {
   if (value === null || typeof value !== "object" || Array.isArray(value))
@@ -436,7 +451,11 @@ export function validateAndSanitizeEvent(value: unknown): RelayEvent | null {
             maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
           })
         : sanitizeValue(field);
-  return { ...sanitized, v: 1, type: type as RelayEventType };
+  const chain =
+    type === "error" && typeof record.message === "string"
+      ? { [ERROR_MESSAGE_CHAIN_FIELD]: sanitizeErrorChainLinks(record.message) }
+      : {};
+  return { ...sanitized, ...chain, v: 1, type: type as RelayEventType };
 }
 
 /**

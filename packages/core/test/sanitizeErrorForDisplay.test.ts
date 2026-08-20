@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  joinErrorCauseChain,
+  sanitizeErrorChainLinks,
   sanitizeErrorForDisplay,
   redactAndSanitizeForDisplay,
   redactPrivateKeyMaterial,
@@ -494,6 +496,119 @@ describe("sanitizeErrorForDisplay", () => {
       expect(out).not.toContain("then first-party text");
       expect(out).toContain("the next link is out of reach");
     });
+  });
+});
+
+// The re-render seam: a boundary that receives a chain this module already
+// rendered, as TEXT, and has to carry it onward or show it (the console relay
+// reading the CLI's terminal error, and the console seat that renders one). What
+// it must not do is charge the whole chain to one value's cap, which cuts the
+// chain inside its first link or two and drops the recovery step a later link
+// carries.
+describe("sanitizeErrorChainLinks", () => {
+  /** A first-party link of `size` printable ASCII characters, ending on `tail`
+   * so a cut anywhere in it is visible at the end of the link. */
+  function linkOfSize(size: number, tail: string): string {
+    return "x".repeat(size - tail.length) + tail;
+  }
+
+  test("splits at framing a link's own text cannot forge", () => {
+    // The escape runs before the join, so every newline a link's own message
+    // carries is escaped and only this module's framing survives as a raw one.
+    // A link that spells the separator's text verbatim is therefore one link,
+    // not two -- the property the split relies on.
+    const forged = "spoofed\ncaused by: injected link";
+    const rendered = sanitizeErrorForDisplay(
+      new Error(`outer ${forged}`, { cause: new Error("the real cause") }),
+    );
+
+    const links = sanitizeErrorChainLinks(rendered);
+    expect(links).toHaveLength(2);
+    expect(links[0]).toContain("spoofed");
+    expect(links[0]).toContain("injected link");
+    expect(links[1]).toBe("the real cause");
+  });
+
+  test("keeps a chain past the per-value default whole, link by link", () => {
+    const RECOVERY = "Re-pin the host key on both sides, then run it again.";
+    const rendered = sanitizeErrorForDisplay(
+      new Error(linkOfSize(600, "the refusal."), {
+        cause: new Error(linkOfSize(600, "what was observed."), {
+          cause: new Error(linkOfSize(600, RECOVERY)),
+        }),
+      }),
+    );
+    // Only worth driving past the cap a per-value pass would apply.
+    expect(rendered.length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
+
+    const links = sanitizeErrorChainLinks(rendered);
+    expect(links).toHaveLength(3);
+    expect(
+      links.every((link) => !link.includes(DISPLAY_TRUNCATION_MARKER)),
+    ).toBe(true);
+    // The whole chain survives the re-render, framing and all.
+    expect(joinErrorCauseChain(links)).toBe(rendered);
+    expect(links[2].endsWith(RECOVERY)).toBe(true);
+  });
+
+  test("charges each link its own budget rather than the chain one link's", () => {
+    // Two links at the per-link budget: the pass admits both whole, where a cap
+    // over the whole chain would have to cut the second.
+    const first = linkOfSize(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH, "first end.");
+    const second = linkOfSize(
+      COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+      "second end.",
+    );
+    const links = sanitizeErrorChainLinks(joinErrorCauseChain([first, second]));
+    expect(links).toEqual([first, second]);
+  });
+
+  test("cuts a link past the per-link budget, and marks the cut", () => {
+    const links = sanitizeErrorChainLinks(
+      "y".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH + 1),
+    );
+    expect(links).toHaveLength(1);
+    expect(links[0]).toBe(
+      "y".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH) +
+        DISPLAY_TRUNCATION_MARKER,
+    );
+  });
+
+  test("bounds the link count at the renderer's depth and marks the elision", () => {
+    // A chain this renderer cannot produce -- more links than the walk's own
+    // depth bound -- which is what a subverted source would hand a boundary.
+    const overLong = Array.from(
+      { length: MAX_ERROR_CAUSE_DEPTH + 3 },
+      (_, index) => `link ${index}`,
+    );
+    const links = sanitizeErrorChainLinks(joinErrorCauseChain(overLong));
+
+    expect(links).toHaveLength(MAX_ERROR_CAUSE_DEPTH);
+    expect(links[links.length - 1]).toBe(
+      `link ${MAX_ERROR_CAUSE_DEPTH - 1} ${CAUSE_DEPTH_ELISION_MARKER}`,
+    );
+    expect(joinErrorCauseChain(links)).not.toContain(
+      `link ${MAX_ERROR_CAUSE_DEPTH}`,
+    );
+  });
+
+  test("escapes every link it admits", () => {
+    // The sender's own pass is not trusted: a link arriving with raw bytes is
+    // escaped here too, in every position of the chain.
+    const hostile = "\x1b[31m‮EVIL";
+    const links = sanitizeErrorChainLinks(
+      joinErrorCauseChain([`head ${hostile}`, `tail ${hostile}`]),
+    );
+    for (const link of links) {
+      expect(link).not.toContain("\x1b");
+      expect(link).not.toContain("‮");
+      expect(link).toContain("\\x1b");
+      expect(link).toContain("\\u202e");
+    }
+  });
+
+  test("returns a lone message as one link", () => {
+    expect(sanitizeErrorChainLinks("no chain here")).toEqual(["no chain here"]);
   });
 });
 

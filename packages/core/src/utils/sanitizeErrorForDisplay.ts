@@ -60,8 +60,14 @@ export const CAUSE_DEPTH_ELISION_MARKER = "...[further causes elided]";
  * before it is joined, so no partner-controlled control character can ride in
  * alongside this one. Consumers that render to HTML must opt into preserving the
  * newline (e.g. `white-space: pre-line`); browsers collapse it otherwise.
+ *
+ * That escape-then-join order is also what makes the join REVERSIBLE, which is
+ * what {@link sanitizeErrorChainLinks} relies on: the escape rewrites every code
+ * point outside printable ASCII, the newline among them, so the only raw newline
+ * a rendered chain can carry is the one this constant put there. A link whose own
+ * text reads `caused by:` therefore cannot forge a link boundary.
  */
-const CAUSE_SEPARATOR = "\ncaused by: ";
+export const ERROR_CAUSE_SEPARATOR = "\ncaused by: ";
 
 /**
  * Fallback emitted for a cause-chain link whose message cannot be read -- a
@@ -291,5 +297,60 @@ export function sanitizeErrorForDisplay(err: unknown): string {
   if (elided)
     links[links.length - 1] =
       `${links[links.length - 1]} ${CAUSE_DEPTH_ELISION_MARKER}`;
-  return links.join(CAUSE_SEPARATOR);
+  return joinErrorCauseChain(links);
+}
+
+/**
+ * Join already-escaped links into the rendered chain
+ * {@link sanitizeErrorForDisplay} produces, adding only this module's own
+ * {@link ERROR_CAUSE_SEPARATOR} framing. It is what a boundary that carried the
+ * chain link by link renders with, so the text an operator reads is assembled by
+ * the same code on either route.
+ */
+export function joinErrorCauseChain(links: ReadonlyArray<string>): string {
+  return links.join(ERROR_CAUSE_SEPARATOR);
+}
+
+/**
+ * Take a chain {@link sanitizeErrorForDisplay} already rendered and return its
+ * links, each escaped and bounded as that renderer bounds them: at most
+ * {@link MAX_ERROR_CAUSE_DEPTH} links, each escaped at
+ * {@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH}, a longer chain marked with
+ * {@link CAUSE_DEPTH_ELISION_MARKER} rather than shortened in silence.
+ *
+ * This is for a boundary that receives a rendered chain as TEXT and must carry it
+ * onward or show it -- the console relay reading the CLI's fd-3 terminal error,
+ * and the console seat that renders one. Such a boundary re-escapes what it
+ * received (defense in depth: it does not trust the sender's own pass), and the
+ * budget it re-escapes under is the point of splitting first. A chain is not one
+ * value: charging the whole of it to the per-value {@link
+ * DEFAULT_MAX_DISPLAY_LENGTH} cuts it wherever 256 characters fall, which on a
+ * refusal composed as a partition by chooser is inside its first link or two, so
+ * the recovery step a later link carries never reaches the operator. Escaping
+ * link by link gives each link the budget the renderer already gave it, and takes
+ * the renderer's own depth bound for the count, so the boundary admits exactly
+ * the volume the renderer emits and no more.
+ *
+ * The split is exact rather than heuristic, and {@link ERROR_CAUSE_SEPARATOR}
+ * carries why: a link's own text cannot forge a boundary.
+ *
+ * It escapes and does not redact, which is what a re-render boundary does with
+ * text somebody else composed: {@link redactPrivateKeyMaterial} runs where a
+ * fragment is composed and again per link where the chain is first rendered, and
+ * its dangling rule is fail-closed past a truncated marker, so a further pass
+ * here would buy nothing on a chain this renderer produced while giving a planted
+ * marker a second chance to consume the recovery text composed behind it.
+ */
+export function sanitizeErrorChainLinks(rendered: string): Array<string> {
+  const links = rendered.split(ERROR_CAUSE_SEPARATOR);
+  const kept = links.slice(0, MAX_ERROR_CAUSE_DEPTH).map((link) =>
+    sanitizeForDisplay(link, {
+      maxLength: COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+    }),
+  ) as Array<string>;
+  // Appended after the escape and the cap, exactly as the renderer appends it.
+  if (links.length > MAX_ERROR_CAUSE_DEPTH)
+    kept[kept.length - 1] =
+      `${kept[kept.length - 1]} ${CAUSE_DEPTH_ELISION_MARKER}`;
+  return kept;
 }

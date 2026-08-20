@@ -1,7 +1,9 @@
-import { ProcessState, getLogger } from "@psilink/core";
+import { ProcessState, getLogger, joinErrorCauseChain } from "@psilink/core";
 
 import { recordFileStamp } from "@bench/runOutputs";
 import { whenDiagnostic } from "@utils/diagnostics";
+
+import { ERROR_MESSAGE_CHAIN_FIELD } from "./relayErrorChain";
 
 import type { ExchangeDriver, ExchangeDriverEvents } from "./exchangeDriver";
 import type {
@@ -791,8 +793,22 @@ function errorCategoryOf(event: RelayEvent): ExchangeErrorCategory {
     : "exchange";
 }
 
-/** Read the display-safe message off an `error` relay event. */
+/** Read the display-safe message off an `error` relay event, rebuilding the
+ * cause chain from the links the relay carried apart
+ * ({@link ERROR_MESSAGE_CHAIN_FIELD}) so a terminal error arrives whole -- its
+ * explanation AND the recovery step a later link carries -- rather than cut at
+ * whatever the flat `message` field's per-value cap left of it. The flat field
+ * is the fallback: an event the relay did not derive a chain for (a
+ * manager-synthesized terminal, whose text is one first-party sentence) carries
+ * only that. */
 function errorMessageOf(event: RelayEvent): string {
+  const chain = event[ERROR_MESSAGE_CHAIN_FIELD];
+  if (Array.isArray(chain)) {
+    const links = chain.filter(
+      (link): link is string => typeof link === "string" && link.length > 0,
+    );
+    if (links.length > 0) return joinErrorCauseChain(links);
+  }
   const message = event.message;
   return typeof message === "string" && message.length > 0
     ? message
