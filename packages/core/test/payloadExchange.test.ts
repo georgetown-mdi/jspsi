@@ -1081,6 +1081,148 @@ test("exchangePayloads: distinct row indices parse whatever order they arrive in
   });
 });
 
+test("exchangePayloads: a frame declaring no columns but carrying rows is refused at parse, as a protocol fault", async () => {
+  // The starkest width fault: every value in the frame's rows belongs to a column
+  // the frame does not name. Accepting it would commit those values to this
+  // party's exchange record while the record's readable received-column list --
+  // built from the same frame's columns -- said none were received. The wire
+  // schema refuses it where the message is parsed, with the classification every
+  // other malformed partner frame gets, so the receive rejects before any output
+  // or record stage reads the payload.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: [],
+    rowIndices: [0],
+    rows: [["x"]],
+  });
+  const err = await initiatorPromise.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect(String((err as ConnectionError).cause)).toMatch(
+    /each payload row must have one value per declared column/,
+  );
+});
+
+test("exchangePayloads: a row carrying more values than the frame names columns is refused", async () => {
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["patient_id"],
+    rowIndices: [0],
+    rows: [["P0", "undeclared"]],
+  });
+  const err = await initiatorPromise.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect(String((err as ConnectionError).cause)).toMatch(
+    /each payload row must have one value per declared column/,
+  );
+});
+
+test("exchangePayloads: a row carrying fewer values than the frame names columns is refused", async () => {
+  // The other width direction, refused by the same rule: a named column with no
+  // value for the record would otherwise be committed as an absent cell the
+  // record's column list still claims was received.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["patient_id", "diagnosis"],
+    rowIndices: [0, 2],
+    rows: [["P0", "A"], ["P2"]],
+  });
+  const err = await initiatorPromise.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect(String((err as ConnectionError).cause)).toMatch(
+    /each payload row must have one value per declared column/,
+  );
+});
+
+test("exchangePayloads: an ordinary output party's multi-column frame parses", async () => {
+  // The accepting half of the rule: rows exactly as wide as the columns the frame
+  // names parse, and a null cell counts as the value it is rather than as a
+  // missing one.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["patient_id", "diagnosis"],
+    rowIndices: [0, 2],
+    rows: [
+      ["P0", "A"],
+      ["P2", null],
+    ],
+  });
+  await expect(initiatorPromise).resolves.toEqual({
+    columns: ["patient_id", "diagnosis"],
+    rowIndices: [0, 2],
+    rows: [
+      ["P0", "A"],
+      ["P2", null],
+    ],
+  });
+});
+
+test("exchangePayloads: a zero-match frame naming columns but carrying no rows parses", async () => {
+  // No row, so no row to be too wide or too narrow: a sender with transmittable
+  // columns and nothing matched is honest, and the rule leaves it alone.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: ["patient_id"],
+    rowIndices: [],
+    rows: [],
+  });
+  await expect(initiatorPromise).resolves.toEqual({
+    columns: ["patient_id"],
+    rowIndices: [],
+    rows: [],
+  });
+});
+
+test("exchangePayloads: a columnless frame carrying no rows parses, committing nothing", async () => {
+  // The boundary the rule stops at. This party's own preparePayload sends
+  // hasData:false rather than this shape, but it carries no value against no
+  // column, so its record's committed payload and readable column list agree at
+  // empty and there is nothing for the rule to refuse.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: [],
+    rowIndices: [],
+    rows: [],
+  });
+  await expect(initiatorPromise).resolves.toEqual({
+    columns: [],
+    rowIndices: [],
+    rows: [],
+  });
+});
+
 test("exchangePayloads: send rejection rejects the initiator", async () => {
   const sendError = new Error("send failed");
   const conn: MessageConnection = {
@@ -1541,4 +1683,26 @@ test("buildOutputTable: throws when partner payload rowIndices contains duplicat
       partnerPayload,
     ),
   ).toThrow("duplicate");
+});
+
+test("buildOutputTable: throws when a partner payload row is narrower than the declared columns", () => {
+  const partnerPayload: PartnerPayload = {
+    columns: ["partner_id", "notes"],
+    rowIndices: [0],
+    rows: [["Q0"]],
+  };
+  expect(() =>
+    buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
+  ).toThrow("one cell per declared column");
+});
+
+test("buildOutputTable: throws when a partner payload row is wider than the declared columns", () => {
+  const partnerPayload: PartnerPayload = {
+    columns: ["partner_id", "notes"],
+    rowIndices: [0],
+    rows: [["Q0", "note0", "extra"]],
+  };
+  expect(() =>
+    buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
+  ).toThrow("one cell per declared column");
 });
