@@ -626,6 +626,106 @@ test("record counts ride the terms messages, not a separate frame", async () => 
   }
 });
 
+// --- The declared effective key count ----------------------------------------
+// It rides the same envelope as the record count and on the same terms, and with
+// that count it is the party's value slot bound -- the authenticated input every
+// derived single-pass bound reads. A fan-out-free party advertises its plain key
+// count, so these fixtures (one key, no fan-out) advertise 1.
+
+test("effective key counts ride the terms messages beside the record counts", async () => {
+  const [connA, connB] = makeConnections();
+  const { conn: recordingA, sent: initiatorSent } = recordingConnection(connA);
+  const { conn: recordingB, sent: responderSent } = recordingConnection(connB);
+  const [a, b] = await Promise.all([
+    exchangeTerms(recordingA, "initiator", termsA, 100),
+    exchangeTerms(recordingB, "responder", termsB, 200),
+  ]);
+
+  expect(a.partnerEffectiveKeyCount).toBe(1);
+  expect(b.partnerEffectiveKeyCount).toBe(1);
+  expect(initiatorSent[0]).toMatchObject({ effectiveKeyCount: 1 });
+  expect(responderSent[0]).toMatchObject({ effectiveKeyCount: 1 });
+});
+
+test("a party may advertise more than the agreed terms' floor", async () => {
+  // A local standardization can fan out a field the terms do not show, so the
+  // agreed terms fix a FLOOR rather than the value: an advertisement above it,
+  // divisible as a whole number of fan-out keys, is accepted.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
+  await connA.send({
+    linkageTerms: termsA,
+    recordCount: 100,
+    effectiveKeyCount: 20,
+    protocolVersion: PROTOCOL_VERSION,
+  });
+  await connA.receive(); // msg 2
+  await connA.send({ decision: "proceed" });
+  expect((await responder).partnerEffectiveKeyCount).toBe(20);
+});
+
+test.each([
+  ["below the agreed key count", 0],
+  ["above the per-key candidate ceiling", 21],
+  ["implying a fractional number of fan-out keys", 5],
+])(
+  "the responder refuses an effective key count %s as a protocol violation",
+  async (_label, effectiveKeyCount) => {
+    const [connA, connB] = makeConnections();
+    const responder = exchangeTerms(connB, "responder", termsB, 200);
+    await connA.send({
+      linkageTerms: termsA,
+      recordCount: 100,
+      effectiveKeyCount,
+      protocolVersion: PROTOCOL_VERSION,
+    });
+    const abort = await connA.receive();
+    expect(abort).toMatchObject({
+      decision: "abort",
+      abortReasons: ["partner advertised an unusable effective key count"],
+    });
+    const err = await responder.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect((err as ConnectionError).kind).toBe("protocol");
+  },
+);
+
+test("the initiator refuses an unusable effective key count on message 2 too", async () => {
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
+  await connB.receive(); // msg 1
+  await connB.send({
+    linkageTerms: termsB,
+    decision: "proceed",
+    recordCount: 200,
+    effectiveKeyCount: 7,
+    protocolVersion: PROTOCOL_VERSION,
+  });
+  const abort = await connB.receive();
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: ["partner advertised an unusable effective key count"],
+  });
+  const err = await initiator.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+});
+
+test("a partner that omits the effective key count resolves to the agreed key count", async () => {
+  // Only a build predating the field can omit it, and such a build predates the
+  // fan-out capability, so the plain key count is exactly what its data obeys.
+  // The protocol-version reconcile is what lets such a peer proceed at all, so
+  // the frame omits the version too.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
+  await connA.send({ linkageTerms: termsA, recordCount: 100 });
+  await connA.receive(); // msg 2
+  await connA.send({ decision: "proceed" });
+  expect((await responder).partnerEffectiveKeyCount).toBe(
+    termsA.linkageKeys.length,
+  );
+});
+
 // --- Missing record count ----------------------------------------------------
 
 test("initiator aborts when a proceed frame omits the record count", async () => {

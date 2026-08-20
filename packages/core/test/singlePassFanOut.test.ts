@@ -1,0 +1,546 @@
+import { expect, test } from "vitest";
+
+import PSI from "@openmined/psi.js";
+
+import { PSIParticipant } from "../src/participant";
+import {
+  decodeRaggedIndexTable,
+  linkViaSinglePassPSI,
+  type SinglePassSessionBounds,
+} from "../src/link";
+import {
+  declaredEffectiveKeyCount,
+  MAX_KEY_CANDIDATES_PER_ROW,
+} from "../src/fanOutFunctions";
+import {
+  MAX_SINGLE_PASS_CELLS,
+  singlePassReplyByteCap,
+} from "../src/connection/frameSize";
+import {
+  createMessagePipe,
+  ConnectionError,
+} from "../src/connection/messageConnection";
+import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { AssociationTable } from "../src/types";
+import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
+
+const psiLibrary = await PSI();
+
+// Fan-out matching is specified for single-pass and for it alone
+// (docs/spec/PROTOCOL.md, Fan-out matching). These drive linkViaSinglePassPSI
+// directly, because the interim refusal still stops a declared fan-out before
+// prepareForExchange or runExchange would reach a round.
+
+// --- the declared effective key count ----------------------------------------
+// A party's per-key candidate factors, summed: the authenticated number the slot
+// arithmetic, the message-2 layout, and the derived caps all read.
+
+const fanOutStep = { function: "split_on", params: { delimiter: "/" } };
+
+function termsWith(
+  keys: LinkageTerms["linkageKeys"],
+): Pick<LinkageTerms, "linkageKeys"> {
+  return { linkageKeys: keys };
+}
+
+test("a party declaring no fan-out has its plain key count", () => {
+  const terms = termsWith([
+    { name: "one", elements: [{ field: "ssn" }] },
+    { name: "two", elements: [{ field: "lastName" }, { field: "dob" }] },
+  ]) as LinkageTerms;
+  expect(declaredEffectiveKeyCount(terms)).toBe(2);
+});
+
+test("an element transform's fan-out raises only its own key's factor", () => {
+  const terms = termsWith([
+    { name: "one", elements: [{ field: "ssn", transform: [fanOutStep] }] },
+    { name: "two", elements: [{ field: "lastName" }] },
+  ]) as LinkageTerms;
+  expect(declaredEffectiveKeyCount(terms)).toBe(MAX_KEY_CANDIDATES_PER_ROW + 1);
+});
+
+test("a fan-out anywhere in a key counts that key once, however many elements declare one", () => {
+  const terms = termsWith([
+    {
+      name: "one",
+      elements: [
+        { field: "ssn", transform: [fanOutStep] },
+        { field: "lastName", transform: [fanOutStep] },
+      ],
+    },
+  ]) as LinkageTerms;
+  expect(declaredEffectiveKeyCount(terms)).toBe(MAX_KEY_CANDIDATES_PER_ROW);
+});
+
+test("a standardization fan-out raises the factor of every key reading that field", () => {
+  // The partner cannot see this surface -- a standardization is per-party and
+  // local -- which is why the agreed terms fix a floor rather than the value.
+  const terms = termsWith([
+    { name: "one", elements: [{ field: "lastName" }] },
+    { name: "two", elements: [{ field: "ssn" }] },
+  ]) as LinkageTerms;
+  const standardization = [
+    { output: "lastName", input: "last_name", steps: [fanOutStep] },
+  ];
+  expect(declaredEffectiveKeyCount(terms)).toBe(2);
+  expect(declaredEffectiveKeyCount(terms, standardization)).toBe(
+    MAX_KEY_CANDIDATES_PER_ROW + 1,
+  );
+});
+
+test("a standardization fan-out on a field no key reads changes nothing", () => {
+  const terms = termsWith([
+    { name: "one", elements: [{ field: "ssn" }] },
+  ]) as LinkageTerms;
+  const standardization = [
+    { output: "lastName", input: "last_name", steps: [fanOutStep] },
+  ];
+  expect(declaredEffectiveKeyCount(terms, standardization)).toBe(1);
+});
+
+// --- message 2 part (d): the ragged layout's decode guards --------------------
+// Every bound comes from authenticated session state -- the agreed key count, the
+// record count the sender carried on the terms exchange, the normative width
+// bound, and the sender's declared slot bound -- never from the frame itself. A
+// frame failing any of them is a clean protocol error, not a wrong
+// reconstruction.
+
+// Two keys over two records, the sender declaring a fan-out (slot bound 2 * 20).
+const RAGGED_KEYS = 2;
+const RAGGED_ROWS = 2;
+const RAGGED_SLOT_BOUND = MAX_KEY_CANDIDATES_PER_ROW * RAGGED_ROWS;
+
+function decodeRagged(words: Array<number>) {
+  return decodeRaggedIndexTable(
+    "client",
+    Int32Array.from(words),
+    RAGGED_KEYS,
+    RAGGED_ROWS,
+    RAGGED_SLOT_BOUND,
+  );
+}
+
+test("a well-formed ragged table decodes to the cells it declares", () => {
+  // key 0: row 0 -> {3, 7}, row 1 -> {}; key 1: row 0 -> {0}, row 1 -> {1, 2, 5}.
+  const cells = decodeRagged([2, 3, 7, 0, 1, 0, 3, 1, 2, 5]);
+  expect(cells).toHaveLength(RAGGED_KEYS);
+  expect(cells[0].count(0)).toBe(2);
+  expect([cells[0].valueAt(0, 0), cells[0].valueAt(0, 1)]).toEqual([3, 7]);
+  expect(cells[0].count(1)).toBe(0);
+  expect(cells[1].count(0)).toBe(1);
+  expect(cells[1].valueAt(0, 0)).toBe(0);
+  expect(cells[1].count(1)).toBe(3);
+  expect([
+    cells[1].valueAt(1, 0),
+    cells[1].valueAt(1, 1),
+    cells[1].valueAt(1, 2),
+  ]).toEqual([1, 2, 5]);
+});
+
+test.each([
+  [
+    "carrying fewer words than the agreed key and record counts declare cells",
+    [0, 0, 0],
+    /fewer cells than the agreed key and record counts/,
+  ],
+  [
+    "declaring a cell wider than the normative width bound",
+    [MAX_KEY_CANDIDATES_PER_ROW + 1, 0, 0, 0, 0],
+    /wider than one record may contribute/,
+  ],
+  [
+    "declaring a negative candidate count",
+    [-1, 0, 0, 0],
+    /wider than one record may contribute/,
+  ],
+  [
+    "repeating a value index inside one cell",
+    [2, 4, 4, 0, 0, 0],
+    /not strictly ascending/,
+  ],
+  [
+    "listing a cell's value indices out of order",
+    [2, 7, 3, 0, 0, 0],
+    /not strictly ascending/,
+  ],
+  [
+    "naming a value index outside the sender's declared value set",
+    [1, RAGGED_SLOT_BOUND, 0, 0, 0],
+    /outside the sender's declared value set/,
+  ],
+  [
+    "running out of words inside a cell it declared",
+    [0, 0, 0, 3, 1, 2],
+    /truncated inside a cell it declared/,
+  ],
+  [
+    "carrying trailing words past its last cell",
+    [1, 0, 0, 0, 0, 9],
+    /trailing words past its last cell/,
+  ],
+])("the ragged table is refused for %s", (_label, words, message) => {
+  expect(() => decodeRagged(words)).toThrow(message);
+  const err = (() => {
+    try {
+      decodeRagged(words);
+      return undefined;
+    } catch (e: unknown) {
+      return e;
+    }
+  })();
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+});
+
+test("the ragged table is refused for carrying more candidates than the declared width admits", () => {
+  // The running total is bounded by the sender's OWN advertised slot count, so a
+  // frame within the width bound cell by cell is still refused when its cells sum
+  // past what the sender said it would ship.
+  const words = [2, 0, 1, 2, 2, 3, 2, 4, 5, 2, 6, 7];
+  expect(() =>
+    decodeRaggedIndexTable("client", Int32Array.from(words), 2, 2, 7),
+  ).toThrow(/more candidate values than the sender's declared width/);
+});
+
+// --- the record-level resolution, over a real two-party exchange -------------
+
+function boundsFor(
+  partnerRecordCount: number,
+  localEffectiveKeyCount: number,
+  partnerEffectiveKeyCount: number,
+): SinglePassSessionBounds {
+  return {
+    partnerRecordCount,
+    localEffectiveKeyCount,
+    partnerEffectiveKeyCount,
+  };
+}
+
+type Column = Array<string | Set<string> | undefined>;
+
+/**
+ * Run a real single-pass exchange between a PSI sender (starter) and receiver
+ * (joiner) over an in-memory pipe, with each party's declared effective key count
+ * derived from whether its own fixture fans out. Returns both parties' tables --
+ * the sender's is the receiver's, transposed, so asserting on both is what pins
+ * that the one resolver's verdict reaches both sides intact.
+ */
+async function runFanOutExchange(
+  senderData: Array<Column>,
+  receiverData: Array<Column>,
+  withhold = false,
+): Promise<{ senderTable: AssociationTable; receiverTable: AssociationTable }> {
+  const keyCount = senderData.length;
+  const declaredFor = (data: Array<Column>): number =>
+    data.some((column) => column.some((cell) => cell instanceof Set))
+      ? keyCount * MAX_KEY_CANDIDATES_PER_ROW
+      : keyCount;
+  const senderEffectiveKeyCount = declaredFor(senderData);
+  const receiverEffectiveKeyCount = declaredFor(receiverData);
+  const [senderConn, receiverConn] = createMessagePipe();
+  const [senderTable, receiverTable] = await Promise.all([
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      new PSIParticipant(
+        "server",
+        psiLibrary,
+        { role: "starter", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      senderConn,
+      senderData,
+      boundsFor(
+        receiverData[0].length,
+        senderEffectiveKeyCount,
+        receiverEffectiveKeyCount,
+      ),
+      withhold,
+      -1,
+    ),
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      new PSIParticipant(
+        "client",
+        psiLibrary,
+        { role: "joiner", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      receiverConn,
+      receiverData,
+      boundsFor(
+        senderData[0].length,
+        receiverEffectiveKeyCount,
+        senderEffectiveKeyCount,
+      ),
+      withhold,
+      -1,
+    ),
+  ]);
+  return { senderTable, receiverTable };
+}
+
+test("every candidate enters the round on its own, so a fan-out matches where a single value would not", async () => {
+  const { senderTable, receiverTable } = await runFanOutExchange(
+    [[new Set(["Mary Shaye", "Mary Smith"])]],
+    [["Mary Smith"]],
+  );
+  expect(receiverTable).toStrictEqual([[0], [0]]);
+  expect(senderTable).toStrictEqual([[0], [0]]);
+});
+
+test("a fanning record that matches two of the partner's takes the lower receiver row and neither matches again", async () => {
+  // The spec's own example, lifted to two keys: one fanning sender record is a
+  // record-level candidate for two receiver records, the sweep accepts exactly one
+  // under a one-to-one cardinality, and the one it discarded leaves candidacy all
+  // the same -- so the second key, where a FRESH sender record would have paired
+  // with it, cannot rescue it.
+  const { receiverTable } = await runFanOutExchange(
+    [
+      [new Set(["A", "B"]), undefined],
+      [undefined, "shared"],
+    ],
+    [
+      ["A", "B"],
+      [undefined, "shared"],
+    ],
+  );
+  expect(receiverTable).toStrictEqual([[0], [0]]);
+});
+
+test("two of the sender's records matching one fanning receiver record resolve to the lower SENDER row", async () => {
+  // The tiebreak is by (sender row, receiver row), not by the order a cell lists
+  // its candidates: the receiver's cell lists "A" first, which belongs to sender
+  // row 1, yet sender row 0 -- holding "B" -- is what the sweep accepts.
+  const { receiverTable } = await runFanOutExchange(
+    [["B", "A"]],
+    [[new Set(["A", "B"])]],
+  );
+  expect(receiverTable).toStrictEqual([[0], [0]]);
+});
+
+test("a record whose candidates matched but which resolution left unpaired ends unmatched", async () => {
+  // Removal is on a POTENTIAL match: sender row 1's only chance was the round it
+  // was discarded in, and the later key it would have matched on cannot rescue it.
+  const { receiverTable } = await runFanOutExchange(
+    [
+      ["A", "B"],
+      [undefined, "late"],
+    ],
+    [
+      [new Set(["A", "B"]), undefined],
+      [undefined, "late"],
+    ],
+  );
+  expect(receiverTable).toStrictEqual([[0], [0]]);
+});
+
+test("within-round uniqueness applies per value, not per record", async () => {
+  // "P" is held by both sender records, so it is ambiguous and leaves the round --
+  // while each record's OTHER candidate stays in it and matches. Under a
+  // per-record rule both sender records would have sat the round out entirely.
+  const { receiverTable } = await runFanOutExchange(
+    [[new Set(["P", "Q"]), new Set(["P", "R"])]],
+    [["Q", "R"]],
+  );
+  expect(receiverTable).toStrictEqual([
+    [0, 1],
+    [0, 1],
+  ]);
+});
+
+test("a record with no candidates for a key sits that round out and stays eligible", async () => {
+  const { receiverTable } = await runFanOutExchange(
+    [
+      [undefined, new Set(["A", "B"])],
+      ["later", undefined],
+    ],
+    [
+      [new Set(["A", "C"]), undefined],
+      [undefined, "later"],
+    ],
+  );
+  // Round 0 pairs sender row 1's "A" with receiver row 0; round 1 pairs the two
+  // records that sat it out.
+  expect(receiverTable).toStrictEqual([
+    [0, 1],
+    [1, 0],
+  ]);
+});
+
+test("a party that declares a fan-out but never splits a row produces the fan-out-free table", async () => {
+  // The ragged layout carries the same information as the fixed-width one, so the
+  // declaration changes the bytes and nothing else.
+  const senderData: Array<Column> = [["Alice", "Bob", "Carol"]];
+  const receiverData: Array<Column> = [["Carol", "Alice", "Dave"]];
+  const fixedWidth = await runFanOutExchange(senderData, receiverData);
+  const [senderConn, receiverConn] = createMessagePipe();
+  const [, raggedReceiverTable] = await Promise.all([
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      new PSIParticipant(
+        "server",
+        psiLibrary,
+        { role: "starter", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      senderConn,
+      senderData,
+      boundsFor(3, MAX_KEY_CANDIDATES_PER_ROW, 1),
+      false,
+      -1,
+    ),
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      new PSIParticipant(
+        "client",
+        psiLibrary,
+        { role: "joiner", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      receiverConn,
+      receiverData,
+      boundsFor(3, 1, MAX_KEY_CANDIDATES_PER_ROW),
+      false,
+      -1,
+    ),
+  ]);
+  expect(raggedReceiverTable).toStrictEqual(fixedWidth.receiverTable);
+});
+
+// --- withholding is unaffected by fan-out ------------------------------------
+
+test("a blind helper sending a fan-out table still receives no message 3", async () => {
+  // Withholding is decided by the sender's output entitlement and payload intent
+  // alone; the layout of the frame it sent has no bearing on it. The sender ends
+  // with the empty table it is supposed to, and the receiver's own result is the
+  // one the fan-out produced.
+  const { senderTable, receiverTable } = await runFanOutExchange(
+    [[new Set(["Mary Shaye", "Mary Smith"])]],
+    [["Mary Smith"]],
+    true,
+  );
+  expect(senderTable).toStrictEqual([[], []]);
+  expect(receiverTable).toStrictEqual([[0], [0]]);
+});
+
+// --- the derived caps account for the fan-out width --------------------------
+
+test("the receiver's read gate carries the ragged table's count-prefix term", async () => {
+  const setCalls: Array<number | undefined> = [];
+  let resolveReceive: ((v: unknown) => void) | undefined;
+  const senderEffectiveKeyCount = MAX_KEY_CANDIDATES_PER_ROW;
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    new PSIParticipant(
+      "client",
+      psiLibrary,
+      { role: "joiner", verbose: -1 },
+      UNBOUNDED_PSI_ELEMENTS,
+    ),
+    {
+      send: async () => {},
+      receive: () =>
+        new Promise((resolve) => {
+          resolveReceive = resolve;
+        }),
+      close: async () => {},
+      setInboundFrameCap: (maxBytes) => setCalls.push(maxBytes),
+    },
+    [["a", "b", "c"]],
+    boundsFor(2, 1, senderEffectiveKeyCount),
+    false,
+    -1,
+  );
+  await new Promise((r) => setTimeout(r, 0));
+  expect(setCalls[0]).toBe(
+    singlePassReplyByteCap(
+      1,
+      { effectiveKeyCount: senderEffectiveKeyCount, recordCount: 2 },
+      { effectiveKeyCount: 1, recordCount: 3 },
+    ),
+  );
+  resolveReceive?.(new Uint8Array(4));
+  await expect(run).rejects.toThrow();
+});
+
+test("an over-ceiling fan-out exchange aborts on both sides before any frame moves", async () => {
+  // The fan-out is the whole reason this exchange is over the budget: the same row
+  // count against the plain key count is comfortably inside it. Both parties reach
+  // the verdict from the advertisements alone, so neither sends and neither waits.
+  const rowsWithinPlainBudget = MAX_SINGLE_PASS_CELLS;
+  const overWithFanOut = Math.floor(MAX_SINGLE_PASS_CELLS / 20) + 1;
+  const [conn, peer] = createMessagePipe();
+  const roles = ["starter", "joiner"] as const;
+  for (const role of roles) {
+    const run = linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      new PSIParticipant(
+        role === "starter" ? "server" : "client",
+        psiLibrary,
+        { role, verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      conn,
+      [["a", "b"]],
+      boundsFor(overWithFanOut, 1, MAX_KEY_CANDIDATES_PER_ROW),
+      false,
+      -1,
+    );
+    await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
+    await expect(run).rejects.toThrow(/fans out counts as 20/);
+    await expect(run).rejects.not.toThrow(/cascade/);
+  }
+  expect(overWithFanOut).toBeLessThan(rowsWithinPlainBudget);
+  // Neither role put anything on the wire before aborting.
+  void peer;
+});
+
+test("a row realizing more candidates than the party declared is refused, not shipped", async () => {
+  // The advertisement is what the partner's element bounds, read gate, and decode
+  // are all derived from, so a candidate producer the declared factors do not
+  // account for must land here rather than on the wire. One key declared
+  // fan-out-free, one row carrying a set.
+  const [conn] = createMessagePipe();
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    new PSIParticipant(
+      "server",
+      psiLibrary,
+      { role: "starter", verbose: -1 },
+      UNBOUNDED_PSI_ELEMENTS,
+    ),
+    conn,
+    [[new Set(["A", "B"])]],
+    boundsFor(1, 1, 1),
+    false,
+    -1,
+  );
+  await expect(run).rejects.toThrow(/fan-out/);
+});
+
+test("a cell wider than the normative width bound is refused as the table is built", async () => {
+  // The realization layer drops an over-width row before it reaches a round; this
+  // is the strategy's own backstop for a caller that assembled one anyway, and it
+  // is what keeps the sender from building a frame its own decoder would reject.
+  const tooWide = new Set(
+    Array.from({ length: MAX_KEY_CANDIDATES_PER_ROW + 1 }, (_u, i) => `V${i}`),
+  );
+  const [conn] = createMessagePipe();
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    new PSIParticipant(
+      "server",
+      psiLibrary,
+      { role: "starter", verbose: -1 },
+      UNBOUNDED_PSI_ELEMENTS,
+    ),
+    conn,
+    [[tooWide]],
+    boundsFor(1, MAX_KEY_CANDIDATES_PER_ROW, 1),
+    false,
+    -1,
+  );
+  await expect(run).rejects.toThrow(
+    /contributes 21 candidate value\(s\) to linkage key 0/,
+  );
+});

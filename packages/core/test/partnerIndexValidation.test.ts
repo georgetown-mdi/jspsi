@@ -9,6 +9,7 @@ import {
   psiElementBounds,
 } from "../src/connection/frameSize";
 import { assertPartnerIndices } from "../src/utils/partnerIndices";
+import { fanOutFreeBounds } from "./utils/singlePassBounds";
 import {
   createMessagePipe,
   ConnectionError,
@@ -35,7 +36,10 @@ const joinerKeys = [["Zed", "Bob", "Carol"]];
 // Real per-message element bounds, as exchange.ts derives them from the agreed key
 // count and the two exchanged record counts: the cascade checks a partner-supplied
 // value index against the bound on the partner's masked set.
-const elementBounds = psiElementBounds(1, ROWS, ROWS);
+const elementBounds = psiElementBounds(
+  { effectiveKeyCount: 1, recordCount: ROWS },
+  { effectiveKeyCount: 1, recordCount: ROWS },
+);
 
 function makeParticipant(role: "starter" | "joiner"): PSIParticipant {
   return new PSIParticipant(
@@ -174,7 +178,7 @@ async function singlePassWithDeviation(deviate: Deviation): Promise<unknown> {
     makeParticipant("starter"),
     deviatingInbound(senderConn, deviate),
     starterKeys,
-    ROWS,
+    fanOutFreeBounds(1, ROWS),
     false,
     -1,
   );
@@ -183,7 +187,7 @@ async function singlePassWithDeviation(deviate: Deviation): Promise<unknown> {
     makeParticipant("joiner"),
     receiverConn,
     joinerKeys,
-    ROWS,
+    fanOutFreeBounds(1, ROWS),
     false,
     -1,
   );

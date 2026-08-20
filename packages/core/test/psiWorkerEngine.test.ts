@@ -14,6 +14,7 @@ import {
 import type { Config } from "../src/types";
 import { sortAssociationTable } from "../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
+import { fanOutFreeBounds } from "./utils/singlePassBounds";
 
 const psiLibrary = await PSI();
 
@@ -111,7 +112,7 @@ test("a worker-backed single-pass exchange yields the correct result", async () 
       server,
       serverConn,
       serverData,
-      clientData[0].length,
+      fanOutFreeBounds(serverData.length, clientData[0].length),
       false,
       -1,
     ),
@@ -120,7 +121,7 @@ test("a worker-backed single-pass exchange yields the correct result", async () 
       client,
       clientConn,
       clientData,
-      serverData[0].length,
+      fanOutFreeBounds(clientData.length, serverData[0].length),
       false,
       -1,
     ),

@@ -4,15 +4,21 @@ import type { HandshakeRole, PsiRole } from "./types";
 import type { LinkageTerms, Output } from "./config/linkageTerms";
 import type { PresentedHostKey } from "./connection/fileSyncConnection";
 import {
+  MAX_LINKAGE_ENTRIES,
   parseLinkageTerms,
   validateCompatibility,
 } from "./config/linkageTerms";
 import { SHARED_SECRET_REGEX } from "./config/connection";
 import { MAX_RECORD_COUNT } from "./connection/frameSize";
+import {
+  declaredEffectiveKeyCount,
+  MAX_KEY_CANDIDATES_PER_ROW,
+} from "./fanOutFunctions";
 import { randomBytes, toBase64Url } from "./utils/crypto";
 import { describeDecodeError } from "./utils/describeDecodeError";
 import { boundedArray } from "./utils/boundedArray";
 import {
+  ConnectionError,
   receiveParsed,
   parseOrProtocolError,
   type MessageConnection,
@@ -128,6 +134,46 @@ export const recordCountField = z
   .nonnegative()
   .max(MAX_RECORD_COUNT);
 
+// The largest effective key count any conforming party can declare: every one of
+// the MAX_LINKAGE_ENTRIES keys the terms schema admits fanning out to the full
+// MAX_KEY_CANDIDATES_PER_ROW width. It is the outer safety bound alone -- what
+// keeps a pathological advertisement out of the products the derived bounds
+// multiply, exactly as MAX_RECORD_COUNT does for the record count. The checks that
+// actually bind are keyCount-relative and cannot run until the terms are agreed,
+// so the schema deliberately admits anything they will decide (0 included) and
+// assertPartnerEffectiveKeyCount refuses it with the classified protocol error
+// rather than a decode failure blaming the linkage terms.
+const MAX_EFFECTIVE_KEY_COUNT =
+  MAX_LINKAGE_ENTRIES * MAX_KEY_CANDIDATES_PER_ROW;
+
+// Each party's declared effective key count rides the terms-exchange envelope
+// beside `recordCount`: the sum, over the agreed linkage keys, of the candidate
+// factor this party declares for each -- MAX_KEY_CANDIDATES_PER_ROW for a key some
+// declared fan-out produces values for, 1 otherwise (declaredEffectiveKeyCount in
+// fanOutFunctions.ts). Multiplied by the party's record count it is that party's
+// value slot count, the authenticated upper bound on its distinct linkage-key value
+// count, and it replaces `keyCount * recordCount` in every derived single-pass
+// bound (frameSize.ts). A fan-out-free party advertises its plain key count, so
+// every fan-out-free bound is unchanged.
+//
+// It discloses a CONFIGURATION fact (this party declares a fan-out on some keys),
+// not a data fact: it is the same number whether or not any row actually splits.
+// Like `recordCount` it is per-party, per-run bounds metadata carried on the
+// envelope and never inside `linkageTerms`, so it does not enter the
+// canonical/agreed-terms hash.
+//
+// `.optional()` because a build that predates the field advertises none, and the
+// protocol-version reconcile lets such a legacy peer proceed; that peer also
+// predates the fan-out capability, so an absent advertisement resolves to the plain
+// key count -- exactly what a fan-out-free party would have sent. See
+// assertPartnerEffectiveKeyCount for the checks a PRESENT value must pass.
+const effectiveKeyCountField = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(MAX_EFFECTIVE_KEY_COUNT)
+  .optional();
+
 // The psilink exchange-protocol version, advertised by both parties on the terms
 // exchange and reconciled fail-closed: a partner that advertises anything other
 // than this build's exact version is on an incompatible build, so the exchange
@@ -159,8 +205,14 @@ export const recordCountField = z
 // parse (see protocolVersionProbe), so a reshaped sibling field cannot throw the
 // parse before the version is read and bury the skew diagnosis. The version is
 // read independently of the rest of the envelope on both message paths.
+// Version 2 carries the fan-out capability: the `effectiveKeyCount` field above,
+// the value-slot arithmetic every single-pass bound derives from it, and the
+// conditional ragged layout of single-pass message 2 (docs/spec/PROTOCOL.md,
+// Wire-format deltas). A mixed pair fails closed on either route -- this reconcile
+// refuses the skew, and a build predating the capability refuses fan-out terms
+// through its own refusal.
 /** @internal exported for the protocol-version reconcile tests. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /**
  * The operator-facing diagnosis surfaced -- and sent to the partner as the abort
@@ -214,6 +266,7 @@ export const PROTOCOL_VERSION_MISMATCH_MESSAGE =
 const termsMessage = z.object({
   linkageTerms: z.unknown(),
   recordCount: recordCountField,
+  effectiveKeyCount: effectiveKeyCountField,
   // Read as `unknown`, not a typed number, so a PRESENT-but-non-matching value
   // (a foreign integer, or a garbled/wrong-typed value from a non-conforming or
   // corrupted peer) reconciles to the actionable version mismatch rather than
@@ -241,6 +294,7 @@ const termsWithDecisionMessage = z.object({
   decision: z.enum(["proceed", "abort"]),
   abortReasons: abortReasonsField,
   recordCount: recordCountField.optional(),
+  effectiveKeyCount: effectiveKeyCountField,
   protocolVersion: z.unknown().optional(), // read as unknown; see termsMessage
   save: z.boolean().optional(),
   disclosesPayload: z.boolean().optional(), // per-party payload-intent; see termsMessage
@@ -275,6 +329,17 @@ export interface TermsExchangeResult {
    * partner that omits it fails the exchange as a non-conforming peer).
    */
   partnerRecordCount: number;
+  /**
+   * The partner's declared effective key count, read off the terms message
+   * envelope beside its record count and validated against the agreed terms (see
+   * {@link assertPartnerEffectiveKeyCount}). With the partner's record count it is
+   * the partner's value slot count, the authenticated input every derived
+   * single-pass bound reads (see `psiElementBounds` and `singlePassReplyByteCap`
+   * in connection/frameSize.ts). A partner that advertised none -- a build
+   * predating the field, and so predating the fan-out capability -- resolves to
+   * the agreed key count, the value a fan-out-free party advertises.
+   */
+  partnerEffectiveKeyCount: number;
   /**
    * Whether the partner advertised zero-setup `--save` intent on this terms
    * exchange. `false` outside the save flow (the partner omitted the field).
@@ -316,6 +381,58 @@ export interface TermsExchangeResult {
    * logs it at a low level (the CLI logs it at debug; see apps/cli/src/protocol.ts).
    */
   partnerHostKeyMalformed: boolean;
+}
+
+/**
+ * Validate the partner's advertised effective key count against the AGREED terms
+ * and resolve it to the number every derived single-pass bound reads.
+ *
+ * Called only once the terms are agreed, which is the first point both parties'
+ * linkage keys are known to be identical -- so both derive the same `keyCount` and
+ * the same floor, and each holds the other to the value the other holds it to.
+ * The checks (docs/spec/PROTOCOL.md, Wire-format deltas):
+ *
+ * - `keyCount <= effectiveKeyCount <= keyCount * MAX_KEY_CANDIDATES_PER_ROW`, the
+ *   range a sum of per-key factors of 1 or 20 can occupy;
+ * - `effectiveKeyCount - keyCount` divisible by `MAX_KEY_CANDIDATES_PER_ROW - 1`,
+ *   so the implied count of fan-out keys is a whole number in `0 .. keyCount`;
+ * - at least the floor the agreed terms imply -- the value derived from the
+ *   partner's element transforms alone, which both parties can see. A party may
+ *   advertise MORE than that floor, because its own local standardization can fan
+ *   out a field the terms do not show.
+ *
+ * An advertisement failing any of them is a protocol violation, like every other
+ * partner-supplied count: a `"protocol"` {@link ConnectionError}, and the caller
+ * best-effort sends the partner the abort so neither side waits on a frame the
+ * other will not send.
+ *
+ * An ABSENT advertisement resolves to `keyCount`: it can only come from a build
+ * that predates this field, which predates the fan-out capability too, so the
+ * plain key count is exactly what such a peer's data obeys.
+ */
+function assertPartnerEffectiveKeyCount(
+  advertised: number | undefined,
+  agreedTerms: LinkageTerms,
+): number {
+  const keyCount = agreedTerms.linkageKeys.length;
+  if (advertised === undefined) return keyCount;
+  const refuse = (detail: string): never => {
+    throw new ConnectionError(
+      `partner advertised an unusable effective key count (${advertised} ` +
+        `against ${keyCount} agreed linkage key(s)): ${detail}`,
+      "protocol",
+    );
+  };
+  if (
+    advertised < keyCount ||
+    advertised > keyCount * MAX_KEY_CANDIDATES_PER_ROW
+  )
+    refuse("outside the range a per-key candidate factor can sum to");
+  if ((advertised - keyCount) % (MAX_KEY_CANDIDATES_PER_ROW - 1) !== 0)
+    refuse("implies a fractional number of fan-out keys");
+  if (advertised < declaredEffectiveKeyCount(agreedTerms))
+    refuse("below the floor the agreed linkage keys' own transforms imply");
+  return advertised;
 }
 
 /**
@@ -419,8 +536,8 @@ async function reconcileProtocolVersion(
  * proceed.
  *
  * The three-message protocol mirrors the sequencing of the handshake:
- *   1. Initiator  -> Responder : `{ linkageTerms, recordCount, protocolVersion }`
- *   2. Responder  -> Initiator : `{ linkageTerms, recordCount, decision, protocolVersion }`
+ *   1. Initiator  -> Responder : `{ linkageTerms, recordCount, effectiveKeyCount, protocolVersion }`
+ *   2. Responder  -> Initiator : `{ linkageTerms, recordCount, effectiveKeyCount, decision, protocolVersion }`
  *   3. Initiator  -> Responder : `{ decision }`
  *
  * If either party finds the terms incompatible, it sends `decision: "abort"`
@@ -446,6 +563,14 @@ async function reconcileProtocolVersion(
  * exchange both parties always perform. It is per-party role and
  * element-bounds metadata carried on the envelope beside `linkageTerms`, never
  * inside them, so it does not enter the canonical/agreed-terms hash.
+ *
+ * `localEffectiveKeyCount` (this party's declared per-key candidate factors,
+ * summed) rides both terms messages beside the record count and on the same terms,
+ * and the partner's is read back -- after the range, divisibility, and
+ * agreed-terms-floor checks of {@link assertPartnerEffectiveKeyCount} -- as
+ * {@link TermsExchangeResult.partnerEffectiveKeyCount}. Omitting it advertises the
+ * floor the agreed terms alone imply, which is correct for any caller holding no
+ * local standardization that fans out.
  *
  * When `localSaveIntent` is set, this party's zero-setup `--save` intent is
  * advertised on its terms message (message 1 for the initiator, message 2 for
@@ -491,7 +616,14 @@ export async function exchangeTerms(
   localSaveIntent?: boolean,
   localHostKey?: PresentedHostKey,
   localDisclosesPayload?: boolean,
+  localEffectiveKeyCount?: number,
 ): Promise<TermsExchangeResult> {
+  // This party's declared effective key count is always advertised. A caller that
+  // holds a local standardization passes the value derived from BOTH authoring
+  // surfaces; one that does not gets the floor the terms alone imply, which is the
+  // most a party without a local fan-out could declare.
+  const effectiveKeyCount =
+    localEffectiveKeyCount ?? declaredEffectiveKeyCount(localTerms);
   // Spread into the outgoing terms frame only when this party is saving, so a
   // non-save exchange sends no `save` field at all.
   const saveField = localSaveIntent === true ? { save: true } : {};
@@ -514,6 +646,7 @@ export async function exchangeTerms(
     await conn.send({
       linkageTerms: localTerms,
       recordCount: localRecordCount,
+      effectiveKeyCount,
       protocolVersion: PROTOCOL_VERSION,
       ...saveField,
       ...disclosesPayloadField,
@@ -592,12 +725,30 @@ export async function exchangeTerms(
       throw new Error(`linkage terms are incompatible: ${errors.join("; ")}`);
     }
 
+    // Held to the AGREED terms, which the compatibility check just proved
+    // identical to ours, so both parties apply the same range, divisibility, and
+    // floor to each other's advertisement. Best-effort abort first so the
+    // responder fails with the cause rather than on its receive timeout.
+    let partnerEffectiveKeyCount: number;
+    try {
+      partnerEffectiveKeyCount = assertPartnerEffectiveKeyCount(
+        msg.effectiveKeyCount,
+        partnerTerms,
+      );
+    } catch (err) {
+      await sendAbort(conn, [
+        "partner advertised an unusable effective key count",
+      ]);
+      throw err;
+    }
+
     await conn.send({ decision: "proceed" });
 
     return {
       partnerTerms,
       warnings,
       partnerRecordCount: msg.recordCount,
+      partnerEffectiveKeyCount,
       partnerSaveIntent: msg.save === true,
       partnerDisclosesPayload: msg.disclosesPayload,
       partnerHostKey: msg.hostKey.value,
@@ -615,6 +766,7 @@ export async function exchangeTerms(
     // which requires `recordCount` (message 1's schema makes it mandatory, so a
     // missing count is caught as a parse error before this value is returned).
     let partnerRecordCount = 0;
+    let partnerAdvertisedEffectiveKeyCount: number | undefined;
     let partnerSaveIntent = false;
     let partnerDisclosesPayload: boolean | undefined;
     let partnerHostKey: PresentedHostKey | undefined;
@@ -629,6 +781,7 @@ export async function exchangeTerms(
     try {
       const parsed = termsMessage.parse(rawData);
       partnerRecordCount = parsed.recordCount;
+      partnerAdvertisedEffectiveKeyCount = parsed.effectiveKeyCount;
       partnerSaveIntent = parsed.save === true;
       partnerDisclosesPayload = parsed.disclosesPayload;
       partnerHostKey = parsed.hostKey.value;
@@ -661,10 +814,27 @@ export async function exchangeTerms(
       throw new Error(`linkage terms are incompatible: ${errors.join("; ")}`);
     }
 
+    // See the initiator branch: held to the agreed terms, aborted best-effort.
+    let partnerEffectiveKeyCount: number;
+    try {
+      partnerEffectiveKeyCount = assertPartnerEffectiveKeyCount(
+        partnerAdvertisedEffectiveKeyCount,
+        partnerTerms!,
+      );
+    } catch (err) {
+      await sendAbort(
+        conn,
+        ["partner advertised an unusable effective key count"],
+        localTerms,
+      );
+      throw err;
+    }
+
     await conn.send({
       linkageTerms: localTerms,
       decision: "proceed",
       recordCount: localRecordCount,
+      effectiveKeyCount,
       protocolVersion: PROTOCOL_VERSION,
       ...saveField,
       ...disclosesPayloadField,
@@ -683,6 +853,7 @@ export async function exchangeTerms(
       partnerTerms: partnerTerms!,
       warnings,
       partnerRecordCount,
+      partnerEffectiveKeyCount,
       partnerSaveIntent,
       partnerDisclosesPayload,
       partnerHostKey,

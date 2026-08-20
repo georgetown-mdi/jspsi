@@ -11,6 +11,8 @@ import {
   buildStandardizedDataset,
   assertFanOutImplemented,
   assertStandardizationMatchesTerms,
+  declaredEffectiveKeyCount,
+  MAX_KEY_CANDIDATES_PER_ROW,
   StandardizedKeyIterable,
 } from "./standardization.js";
 import { columnValues, inferDateFormat } from "./utils/date.js";
@@ -138,6 +140,22 @@ export interface PreparedExchange {
    */
   rawRows: Array<CSVRow>;
   rowCount: number;
+  /**
+   * This party's declared effective key count -- the sum, over the agreed linkage
+   * keys, of the candidate factor its configuration declares for each (see
+   * `declaredEffectiveKeyCount`). Advertised on the terms exchange, where it
+   * becomes the authenticated input every derived single-pass bound reads.
+   *
+   * Populated by {@link prepareForExchange}, which is the only holder of BOTH
+   * authoring surfaces: a `PreparedExchange` retains the built dataset rather than
+   * the standardization spec, so one assembled without going through it leaves
+   * this undefined and {@link runExchange} advertises the floor the agreed terms
+   * alone imply. That is the same terms-half asymmetry `assertFanOutImplemented`
+   * carries at the run boundary, and it fails closed the same way: a local fan-out
+   * the advertisement does not account for is refused as the single-pass index
+   * table is built, not shipped under a bound it exceeds.
+   */
+  effectiveKeyCount?: number;
 }
 
 /**
@@ -499,11 +517,22 @@ export function prepareForExchange(
     linkageTerms.output,
   );
 
+  // This party's declared effective key count: the sum over the agreed keys of the
+  // candidate factor its configuration declares for each, over BOTH authoring
+  // surfaces -- the terms' element transforms and this party's own standardization.
+  // The default standardization declares no fan-out, so an unauthored one yields
+  // the terms' own floor. It sizes the pre-flight gate below and, carried on the
+  // returned PreparedExchange, the bounds every single-pass frame is derived from.
+  const effectiveKeyCount = declaredEffectiveKeyCount(
+    linkageTerms,
+    exchangeDataSpec.standardization,
+  );
+
   // Pre-flight the single-pass dataset ceiling. This is a coarse, ONE-PARTY
   // lower-bound gate: it can only see this party's own row count, not the
   // partner's nor either side's distinct-value counts (never computed locally, and
   // never exchanged). If this party's own
-  // keyCount * rows already exceeds the budget, single-pass cannot succeed
+  // value slots already exceed the budget, single-pass cannot succeed
   // whatever the partner's size, so fail here rather than after the handshake and
   // the PSI encryption. The authoritative, symmetric two-party check runs in
   // linkViaSinglePassPSI once both record counts are exchanged; that asymmetry --
@@ -518,13 +547,17 @@ export function prepareForExchange(
   // caught the same over-ceiling dataset.
   if (
     linkageTerms.linkageStrategy === "single-pass" &&
-    singlePassDatasetExceedsCap(linkageTerms.linkageKeys.length, rawRows.length)
+    singlePassDatasetExceedsCap(effectiveKeyCount, rawRows.length)
   ) {
     throw new Error(
       `single-pass linkage cannot carry this dataset: ${rawRows.length} ` +
         `record(s) across ${linkageTerms.linkageKeys.length} linkage key(s) ` +
         "exceed the single-pass ceiling. Reduce the number of linkage keys or " +
-        "the record count, or split the dataset into smaller batches.",
+        "the record count, or split the dataset into smaller batches." +
+        (effectiveKeyCount > linkageTerms.linkageKeys.length
+          ? ` A linkage key that fans out counts as ${MAX_KEY_CANDIDATES_PER_ROW} ` +
+            "toward that ceiling, so removing a fan-out is another remedy."
+          : ""),
     );
   }
 
@@ -604,6 +637,7 @@ export function prepareForExchange(
     dataset,
     rawRows,
     rowCount: rawRows.length,
+    effectiveKeyCount,
   };
 }
 
@@ -937,11 +971,21 @@ export async function runExchange(
   // and needs the explicit, authenticated signal (see the withhold gate below).
   const localDisclosesPayload = prepared.metadata.some(isDisclosedToPartner);
 
+  // This party's declared effective key count, advertised on the terms exchange as
+  // the authenticated input the single-pass bounds are derived from.
+  // prepareForExchange holds both authoring surfaces and computes it; a
+  // PreparedExchange assembled elsewhere retains no standardization spec, so it
+  // falls back to the floor the terms alone imply (see
+  // PreparedExchange.effectiveKeyCount).
+  const localEffectiveKeyCount =
+    prepared.effectiveKeyCount ?? declaredEffectiveKeyCount(linkageTerms);
+
   onStage(CONFIRMING_PROTOCOL_STAGE_ID);
   const {
     partnerTerms,
     warnings,
     partnerRecordCount,
+    partnerEffectiveKeyCount,
     partnerSaveIntent,
     partnerDisclosesPayload,
     partnerHostKey,
@@ -954,6 +998,7 @@ export async function runExchange(
     options.saveIntent,
     options.observedHostKey,
     localDisclosesPayload,
+    localEffectiveKeyCount,
   );
   for (const warning of warnings) onWarning(warning);
 
@@ -1027,15 +1072,26 @@ export async function runExchange(
   );
 
   // Per-message element-count caps for the PSI decode seams, from authenticated
-  // session state only: the agreed key count and the two exchanged record counts.
-  // The receiver (joiner) is the PSI sender's counterpart, so the sender's set is
-  // the partner's when this party receives; both parties compute identical bounds.
-  const senderRecordCount = isReceiver ? partnerRecordCount : rowCount;
-  const receiverRecordCount = isReceiver ? rowCount : partnerRecordCount;
+  // session state only: the two exchanged record counts and the two advertised
+  // effective key counts. The receiver (joiner) is the PSI sender's counterpart, so
+  // the sender's set is the partner's when this party receives; both parties
+  // compute identical bounds.
+  const singlePassBounds = {
+    partnerRecordCount,
+    localEffectiveKeyCount,
+    partnerEffectiveKeyCount,
+  };
+  const localSize = {
+    effectiveKeyCount: localEffectiveKeyCount,
+    recordCount: rowCount,
+  };
+  const partnerSize = {
+    effectiveKeyCount: partnerEffectiveKeyCount,
+    recordCount: partnerRecordCount,
+  };
   const elementBounds = psiElementBounds(
-    linkageTerms.linkageKeys.length,
-    senderRecordCount,
-    receiverRecordCount,
+    isReceiver ? partnerSize : localSize,
+    isReceiver ? localSize : partnerSize,
   );
 
   // Single-pass association-table withholding, derived from symmetric
@@ -1064,9 +1120,10 @@ export async function runExchange(
   // Single-pass is allowlisted; any other value (including the default) runs the
   // cascade. No mismatch guard needed here -- validateCompatibility already
   // aborted upstream if the two parties' strategies differ. Single-pass takes the
-  // partner record count too: it (with this party's count and the agreed key
-  // count) derives the per-exchange frame cap and the abort-if-over-ceiling gate,
-  // identically on both parties (see linkViaSinglePassPSI and frameSize.ts).
+  // exchanged bounds too: the partner's record count and both parties' effective
+  // key counts derive the per-exchange frame cap, the abort-if-over-ceiling gate,
+  // and the index-table layout, identically on both parties (see
+  // linkViaSinglePassPSI and frameSize.ts).
   //
   // Build the crypto engine, then the participant, INSIDE the disposing try. The
   // engine psiEngineFactory returns is a worker (a worker_threads worker in the CLI, a
@@ -1135,7 +1192,7 @@ export async function runExchange(
               participant,
               conn,
               linkageKeyIterables,
-              partnerRecordCount,
+              singlePassBounds,
               withholdSenderTable,
               verbosity,
               onStage,

@@ -7,19 +7,24 @@ import {
   psiElementBounds,
 } from "../src/connection/frameSize";
 import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTerms";
+import { MAX_KEY_CANDIDATES_PER_ROW } from "../src/fanOutFunctions";
 import { recordCountField } from "../src/protocolSetup";
 
-// --- MAX_RECORD_COUNT: the cell-count gate's exact-product dependency, as a check -
-// The cell-count gate (singlePassDatasetExceedsCap) decides keyCount * recordCount
-// > MAX_SINGLE_PASS_CELLS, and its precision argument holds only while that product
-// is exact -- below 2^53. That once rested implicitly on the recordCount schema's
-// `.int()` safe-integer ceiling; MAX_RECORD_COUNT makes it an explicit bound. This
-// pins the guarantee so a future raise of MAX_LINKAGE_ENTRIES or MAX_RECORD_COUNT
-// that would let the product lose precision fails here rather than silently
-// corrupting the gate.
+// --- MAX_RECORD_COUNT: the slot-count gate's exact-product dependency, as a check -
+// The slot-count gate (singlePassDatasetExceedsCap) decides effectiveKeyCount *
+// recordCount > MAX_SINGLE_PASS_CELLS, and its precision argument holds only while
+// that product is exact -- below 2^53. That once rested implicitly on the
+// recordCount schema's `.int()` safe-integer ceiling; MAX_RECORD_COUNT makes it an
+// explicit bound. Fan-out multiplies the left factor by up to
+// MAX_KEY_CANDIDATES_PER_ROW, cutting the headroom from about 35x to about 1.8x, so
+// the check is against the EFFECTIVE key count: a future raise of
+// MAX_LINKAGE_ENTRIES, MAX_KEY_CANDIDATES_PER_ROW, or MAX_RECORD_COUNT that would
+// let the product lose precision fails here rather than silently corrupting the
+// gate.
 
-test("keyCount * recordCount stays an exact integer at the schema maxima", () => {
-  const productAtMaxima = MAX_LINKAGE_ENTRIES * MAX_RECORD_COUNT;
+test("effectiveKeyCount * recordCount stays an exact integer at the schema maxima", () => {
+  const maxEffectiveKeyCount = MAX_LINKAGE_ENTRIES * MAX_KEY_CANDIDATES_PER_ROW;
+  const productAtMaxima = maxEffectiveKeyCount * MAX_RECORD_COUNT;
   expect(productAtMaxima).toBeLessThanOrEqual(Number.MAX_SAFE_INTEGER);
   expect(Number.isSafeInteger(productAtMaxima)).toBe(true);
 });
@@ -39,15 +44,31 @@ test("recordCountField rejects a record count above the explicit bound at decode
 });
 
 // --- psiElementBounds: authenticated per-message decode-seam caps --------------
-// Both parties derive identical bounds from the agreed key count and the two
-// exchanged record counts. The setup carries the sender's set; the request and the
-// response (which re-encrypts that request) carry the receiver's.
+// Both parties derive identical bounds from the two exchanged record counts and
+// the two declared effective key counts. The setup carries the sender's set; the
+// request and the response (which re-encrypts that request) carry the receiver's.
 
-test("psiElementBounds maps each message kind to keyCount * the relevant party's count", () => {
-  const bounds = psiElementBounds(3, 10, 7);
+test("psiElementBounds maps each message kind to the relevant party's value slots", () => {
+  const bounds = psiElementBounds(
+    { effectiveKeyCount: 3, recordCount: 10 },
+    { effectiveKeyCount: 3, recordCount: 7 },
+  );
   expect(bounds.setup).toBe(3 * 10); // sender's set
   expect(bounds.request).toBe(3 * 7); // receiver's set
   expect(bounds.response).toBe(3 * 7); // re-encrypted receiver's set
+});
+
+test("psiElementBounds widens with the fanning-out party alone", () => {
+  // A fan-out multiplies only its own party's slots, so a sender that fans out
+  // does not loosen the bound on the receiver's request -- the bound each party
+  // enforces stays derived from the OTHER party's own declaration.
+  const bounds = psiElementBounds(
+    { effectiveKeyCount: 22, recordCount: 10 },
+    { effectiveKeyCount: 3, recordCount: 7 },
+  );
+  expect(bounds.setup).toBe(22 * 10);
+  expect(bounds.request).toBe(3 * 7);
+  expect(bounds.response).toBe(3 * 7);
 });
 
 // --- MAX_PSI_DECODE_ELEMENTS: the pre-deserialize ceiling's two security props --

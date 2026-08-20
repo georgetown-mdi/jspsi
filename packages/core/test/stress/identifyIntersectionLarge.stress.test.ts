@@ -38,7 +38,10 @@ test(`identifyIntersection over ${N} elements yields the ${OVERLAP} shared ids`,
   // so each masked set carries exactly N elements and the tight bound N admits it
   // -- proving the guard never rejects a genuinely large legitimate frame.
   const [serverConn, clientConn] = createMessagePipe();
-  const bounds = psiElementBounds(1, N, N);
+  const bounds = psiElementBounds(
+    { effectiveKeyCount: 1, recordCount: N },
+    { effectiveKeyCount: 1, recordCount: N },
+  );
   const server = new PSIParticipant(
     "server",
     psi,
