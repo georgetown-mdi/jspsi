@@ -15,6 +15,7 @@ import {
   parseVerificationKeys,
   reconstructCommittedData,
   recordedVersionMatches,
+  reproductionMismatchCauses,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
   SIGNED_RECEIPT_VERSION,
@@ -1185,6 +1186,9 @@ export async function handler(argv: Arguments): Promise<void> {
         localTerms,
         partnerTerms,
       });
+      // A reproduction limitation is named only once the verdict shows it could
+      // be the cause, so it joins the notes after the report, not before it.
+      warnings.push(...reproductionMismatchCauses(report, data));
       const rendered = formatVerificationReport(
         report,
         warnings,

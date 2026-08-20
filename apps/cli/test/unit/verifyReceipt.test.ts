@@ -1133,6 +1133,48 @@ describe("handler", () => {
     expect(exitCode).toBe(0);
   });
 
+  test("a received null the result wrote as an empty cell is named as the cause", async () => {
+    // The operator's own re-supply path, end to end: the partner's one value was
+    // null when it was committed, the result file wrote it as an empty cell, and
+    // nothing in the retained files distinguishes that from a committed empty
+    // string. The received-payload commitment therefore cannot reproduce -- and
+    // the verdict names the reason instead of leaving a bare mismatch to read as
+    // tampering.
+    const dir = tmp();
+    const { record, keys } = await buildExchangeRecord({
+      ...baseInputs,
+      associationTable: [[0], [0]],
+      partnerPayloadReceived: { columns: ["status"], rows: [[null]] },
+    });
+    const recordPath = join(dir, "rec.json");
+    writeFileSync(recordPath, serializeExchangeRecord(record));
+    writeFileSync(join(dir, "rec.keys.json"), serializeVerificationKeys(keys));
+    const inputPath = join(dir, "input.csv");
+    writeFileSync(inputPath, "pid,dose\nP0,10mg\n");
+    const resultPath = join(dir, "result.csv");
+    writeFileSync(resultPath, "pid,row_id,status\nP0,0,\n");
+
+    const { stdout, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "input-file": inputPath,
+      "result-file": resultPath,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain(
+      "commitment partnerPayloadReceived: DOES NOT MATCH",
+    );
+    expect(stdout).toContain(
+      "note: the re-supplied received payload carries empty cells",
+    );
+    expect(stdout).toContain(
+      "cannot distinguish a committed empty string from a committed null",
+    );
+    // The commitments the result does reproduce still open, and the verdict is
+    // still a failure: the note is a cause to check, not an exoneration.
+    expect(stdout).toContain("commitment localPayloadSent: opened and matches");
+    expect(exitCode).toBe(1);
+  });
+
   test("a dual-signed record positional verifies the signatures alone", async () => {
     const { signedPath, identityPath, pin } = await exchangeArtifacts();
     const { stdout, exits, exitCode } = await runVerify({

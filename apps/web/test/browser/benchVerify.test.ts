@@ -354,6 +354,70 @@ describe("verify receipt bench", () => {
       .toBeInTheDocument();
   });
 
+  test("a received null the result wrote as an empty cell is named beside the mismatch", async () => {
+    // The partner's second value was null when it was committed; the result file
+    // writes a null and an empty string the same way, so the re-supply reproduces
+    // an empty string and the received-payload commitment cannot open. The reader
+    // gets the reason rather than a bare mismatch that reads as tampering.
+    const { record, keys } = await buildExchangeRecord({
+      localTerms: LOCAL_TERMS,
+      partnerTerms: PARTNER_TERMS,
+      recordsExposed: 2,
+      localPayloadSent,
+      partnerPayloadReceived: {
+        columns: ["clinic"],
+        rows: [["north"], [null]],
+      },
+      associationTable,
+      createdAt: "2026-01-02T03:04:05.000Z",
+      receiptBinder: RECEIPT_BINDER,
+    });
+    await mountVerifyBench();
+
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec.json", serializeExchangeRecord(record)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(1)),
+      jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Re-supply your files to open the commitments",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(2)),
+      csvFile("input.csv", INPUT_CSV),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(3)),
+      // Our row 0 pairs the partner's row 1 -- the null cell -- so the result
+      // carries it as an empty cell.
+      csvFile("result.csv", "pid,their_row_id,clinic\nP0,1,\nP1,0,north\n"),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Verify with these files" }),
+    );
+
+    await expect
+      .element(page.getByText("Verification failed"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("carries empty cells", { exact: false }).first())
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page
+          .getByText("a committed empty string from a committed null", {
+            exact: false,
+          })
+          .first(),
+      )
+      .toBeInTheDocument();
+  });
+
   test("a missing-salt keys file renders the distinct wrong-or-drifted state", async () => {
     const { record, keys } = await buildFixture();
     // The optional association-table salt is schema-valid to omit, so the keys

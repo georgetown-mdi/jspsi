@@ -13,6 +13,7 @@ import log from "loglevel";
 import {
   deriveOurIdColumn,
   reconstructCommittedData,
+  reproductionMismatchCauses,
   sanitizeErrorForDisplay,
   toRetainedResult,
   verifyExchangeRecord,
@@ -496,6 +497,13 @@ export function VerifyReceiptBench() {
           localTerms,
           partnerTerms,
         });
+        // A reproduction limitation is named only once the verdict shows it
+        // could be the cause, so it joins the notes after the report, not
+        // before it.
+        recordWarnings = [
+          ...recordWarnings,
+          ...reproductionMismatchCauses(recordReport, data),
+        ];
       }
       let signedView: SignedVerdictViewModel | undefined;
       if (signedRecord?.record !== undefined) {

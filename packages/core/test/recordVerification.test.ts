@@ -1,15 +1,28 @@
+import { Readable } from "node:stream";
+
 import { describe, expect, test } from "vitest";
 
 import { buildExchangeRecord } from "../src/exchangeRecord";
-import { verifyExchangeRecord } from "../src/recordVerification";
+import { buildOutputTable } from "../src/payloadExchange";
+import { loadCSVFile } from "../src/file";
+import {
+  reconstructCommittedData,
+  reproductionMismatchCauses,
+  toRetainedResult,
+  verifyExchangeRecord,
+} from "../src/recordVerification";
 
 import type {
   CommittedPayload,
   ExchangeRecordInputs,
 } from "../src/exchangeRecord";
 import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { Metadata } from "../src/config/metadata";
+import type { PartnerPayload } from "../src/payloadExchange";
+import type { RetainedResult } from "../src/recordVerification";
 import type { CanonicalValue } from "../src/utils/canonical";
 import type { AssociationTable } from "../src/types";
+import type { CSVRow } from "../src/file";
 
 // --- Fixtures ----------------------------------------------------------------
 
@@ -232,5 +245,155 @@ describe("verifyExchangeRecord", () => {
     });
     expect(report.commitments.localPayloadSent).toBe("mismatch");
     expect(report.outcome).toBe("failed");
+  });
+});
+
+// --- The null-versus-empty reproduction edge ---------------------------------
+
+// The retained artifacts behind the record `baseInputs` describes: three input
+// rows whose matched pair is [0, 2], and the partner's payload in its own send
+// order (ascending row index), whose second cell is the genuine null. Verifying
+// from these is the operator's actual path -- write a result, keep the input, come
+// back later -- so the edge is driven through the real writer and reader rather
+// than asserted from a hand-built data set.
+const retainedInputRows: CSVRow[] = [
+  { pid: "P0", dose: "10mg" },
+  { pid: "P1", dose: "15mg" },
+  { pid: "P2", dose: "20mg" },
+];
+const retainedMetadata: Metadata = [
+  { name: "pid", type: "ssn", role: "identifier", isPayload: false },
+  { name: "dose", type: "first_name", role: "payload", isPayload: true },
+];
+const partnerPayloadAsSent: PartnerPayload = {
+  columns: ["status"],
+  rowIndices: [0, 1],
+  rows: [["active"], [null]],
+};
+
+// buildOutputTable emits already-escaped cells and every writer only joins them,
+// so serializing that way and reading the bytes back through the shared reader is
+// the round trip a holder's retained result makes.
+async function retainedResultFor(
+  partnerPayload: PartnerPayload,
+): Promise<RetainedResult> {
+  const table = buildOutputTable(
+    associationTable,
+    retainedInputRows,
+    retainedMetadata,
+    partnerPayload,
+  );
+  const csv = [table.headers, ...table.rows]
+    .map((cells) => cells.join(",") + "\n")
+    .join("");
+  const stream = new Readable({ read() {} });
+  stream.push(Buffer.from(csv, "utf8"));
+  stream.push(null);
+  return toRetainedResult(await loadCSVFile(stream));
+}
+
+function reconstructFrom(
+  record: Parameters<typeof reconstructCommittedData>[0]["record"],
+  result: RetainedResult,
+) {
+  return reconstructCommittedData({
+    record,
+    inputRows: retainedInputRows,
+    result,
+    ourIdColumn: "pid",
+  });
+}
+
+describe("reproductionMismatchCauses", () => {
+  test("the result writes a committed null as an empty cell", async () => {
+    // The premise the whole caveat rests on: our matched rows [0, 2] pair with
+    // partner rows [1, 0], so the first result row carries the partner's null and
+    // the second its "active" -- and the null arrives as an empty string.
+    const result = await retainedResultFor(partnerPayloadAsSent);
+    expect(result.rows.map((row) => row[2])).toEqual(["", "active"]);
+  });
+
+  test("a quoted empty string and an empty cell read back identically", async () => {
+    // Quoting the result's fields does not resolve the edge: both spellings of an
+    // empty cell come back from the shared reader as the same empty string, so no
+    // reader-side distinction is available to reconstruct a null from.
+    const csv = 'pid,row_id,status\nP0,1,""\nP2,0,\n';
+    const stream = new Readable({ read() {} });
+    stream.push(Buffer.from(csv, "utf8"));
+    stream.push(null);
+    const result = toRetainedResult(await loadCSVFile(stream));
+    expect(result.rows.map((row) => row[2])).toEqual(["", ""]);
+  });
+
+  test("a committed null reproduces as an empty string, and the note names it", async () => {
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const result = await retainedResultFor(partnerPayloadAsSent);
+    const { data, warnings } = reconstructFrom(record, result);
+    const report = await verifyExchangeRecord(record, keys, {
+      data,
+      localTerms: termsA,
+      partnerTerms: termsB,
+    });
+    // Nothing was modified, and everything reproducible reproduced: the received
+    // payload alone mismatches, on the one cell the result could not carry.
+    expect(warnings).toEqual([]);
+    expect(report.commitments.partnerPayloadReceived).toBe("mismatch");
+    expect(report.commitments.localPayloadSent).toBe("verified");
+    expect(report.commitments.associationTable).toBe("verified");
+    const causes = reproductionMismatchCauses(report, data);
+    expect(causes).toHaveLength(1);
+    expect(causes[0]).toContain(
+      "cannot distinguish a committed empty string from a committed null",
+    );
+    // The cause is named, not accepted: the verdict is still a failure.
+    expect(report.outcome).toBe("failed");
+  });
+
+  test("an empty string in that cell opens the commitment and earns no note", async () => {
+    // The same exchange with an empty string where the null was: the result cell
+    // is identical, but this time it reproduces what was committed. An empty cell
+    // on its own must not raise the note, or every verified result carrying one
+    // would come with a caveat about a mismatch that did not happen.
+    const emptyRatherThanNull: PartnerPayload = {
+      ...partnerPayloadAsSent,
+      rows: [["active"], [""]],
+    };
+    const { record, keys } = await buildExchangeRecord({
+      ...baseInputs,
+      partnerPayloadReceived: {
+        columns: ["status"],
+        rows: [["active"], [""]],
+      },
+    });
+    const result = await retainedResultFor(emptyRatherThanNull);
+    const { data } = reconstructFrom(record, result);
+    const report = await verifyExchangeRecord(record, keys, { data });
+    expect(report.commitments.partnerPayloadReceived).toBe("verified");
+    expect(reproductionMismatchCauses(report, data)).toEqual([]);
+  });
+
+  test("a mismatch with no empty cell earns no note", async () => {
+    // A received payload that mismatches on a non-empty value: the null
+    // explanation is impossible there, so naming it would point the operator away
+    // from a real discrepancy.
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const data = {
+      ...fullData,
+      partnerPayloadReceived: {
+        columns: ["status"],
+        rows: [["active"], ["inactive"]],
+      },
+    };
+    const report = await verifyExchangeRecord(record, keys, { data });
+    expect(report.commitments.partnerPayloadReceived).toBe("mismatch");
+    expect(reproductionMismatchCauses(report, data)).toEqual([]);
+  });
+
+  test("a report opened against nothing earns no note", async () => {
+    // The auditor case: no data was re-supplied, so no commitment mismatched and
+    // there is nothing to explain.
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const report = await verifyExchangeRecord(record, keys);
+    expect(reproductionMismatchCauses(report)).toEqual([]);
   });
 });
