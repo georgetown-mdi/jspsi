@@ -9,6 +9,7 @@ import type {
 } from "@psilink/core";
 
 import { applyConnectionOverrides, type ConnectionOverrides } from "./config";
+import { brokerLocationFromConnection } from "./connection/webrtc/weriftPeer";
 import { decodeUrlComponent, redactUrlCredentials } from "./util/connectionUrl";
 
 // The connection channels connectionFromURL turns a URL into: the file-sync
@@ -178,16 +179,32 @@ export function connectionFromURL(
  * A webrtc URL maps scheme to `secure` (`wss:` leaves the field unset, whose
  * default is TLS; `ws:` sets it false, which the dial then warns about), and its
  * host, port, and path to the `server` block the broker location resolves from.
- * A bare-host URL leaves `path` unset so the broker's default mount point is
- * used, exactly as the sftp branch leaves the remote working directory unset.
  * Nothing else on the URL is read: see {@link WEBRTC_URL_EXTRAS_REFUSED}.
+ *
+ * The mount point is always recorded, unlike the sftp branch's remote working
+ * directory: the invitation minted from this connection carries the endpoint a
+ * PARTNER seeds its own connection from, and a partner running a different
+ * client resolves an absent path to that client's own default rather than to
+ * this one's. The browser app defaults it to its own broker mount (`/api/`)
+ * while the CLI defaults it to `/`, so a locator that named none would send the
+ * two to different sockets. Recording the value this CLI itself resolves keeps
+ * the endpoint self-describing and leaves no default to disagree about.
  *
  * There is no host check to match the sftp branch's, because `ws:`/`wss:` are
  * SPECIAL schemes to the URL parser and `sftp:` is not: a special-scheme URL
  * with nothing where the host goes fails to parse at all, and one written with
- * an empty authority takes its first path segment as the host instead. The
- * parse this receives therefore always names one (asserted in the unit suite,
- * against the parser itself rather than a reading of it).
+ * an empty authority takes its first path segment as the host instead, and its
+ * `pathname` is never empty. The parse this receives therefore always names a
+ * host and a mount point (both asserted in the unit suite, against the parser
+ * itself rather than a reading of it).
+ *
+ * The connection is resolved through `brokerLocationFromConnection` before it is
+ * returned, so every shape the dial would refuse -- an undialable port, or a
+ * delimiter that percent-encoding carried past the checks above and into the
+ * host or path -- is a usage error HERE, at the mint boundary, rather than one
+ * raised inside the exchange after the invitation has reached stdout. The warn
+ * callback is a no-op: the plaintext advisory belongs to the run that dials, and
+ * the inviting command names the endpoint's own plaintext limitation itself.
  *
  * @internal exported for testing
  */
@@ -209,10 +226,9 @@ export function inviterConnectionFromURL(
       // scheme's default is already normalized away here and the connection's
       // own default (443 or 80, to match `secure`) covers it.
       port: url.port ? Number(url.port) : undefined,
-      path:
-        url.pathname && url.pathname !== "/"
-          ? decodeUrlComponent(url.pathname, url)
-          : undefined,
+      // The parser yields "/" for a bare-host URL, so this is always set (see
+      // the doc comment on why the mount point is never left to a default).
+      path: decodeUrlComponent(url.pathname, url),
       // Only the plaintext choice is recorded: leaving `secure` unset on a wss:
       // URL keeps the config's TLS default, which is what the field means when
       // omitted, rather than restating it.
@@ -223,5 +239,10 @@ export function inviterConnectionFromURL(
   // --accept-timeout arrives as peerTimeout) on every channel and ignores the
   // file-sync-only ones here; --outbound-path, which has no meaning without a
   // directory, is refused there rather than dropped.
-  return applyConnectionOverrides(base, overrides) as WebRTCConnectionConfig;
+  const connection = applyConnectionOverrides(
+    base,
+    overrides,
+  ) as WebRTCConnectionConfig;
+  brokerLocationFromConnection(connection.server, () => {});
+  return connection;
 }

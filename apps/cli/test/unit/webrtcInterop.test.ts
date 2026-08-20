@@ -3,8 +3,12 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { BROKER_MESSAGE } from "../../src/connection/webrtc/brokerClient";
-import { connectionFromEndpoint } from "../../src/onlineBootstrap";
+import {
+  connectionFromEndpoint,
+  endpointFromConnection,
+} from "../../src/onlineBootstrap";
 import { decodeAndValidateInvitation } from "../../src/invitationDecode";
+import { inviterConnectionFromURL } from "../../src/connectionFromUrl";
 import { openWebRtcPeerSession } from "../../src/connection/webrtc/weriftPeer";
 import { webRtcDialFrom } from "../../src/protocol";
 import { withWebRTCPeerRole } from "../../src/webrtcPeerRole";
@@ -28,11 +32,14 @@ import type {
  * locator, the peer id it registers under and the one it addresses, and the
  * handshake role it takes. This file drives only the CLI's own constructions,
  * against the shared known-answer vectors in
- * packages/core/test/vectors/webrtc-interop-vectors.json -- whose invitation is
- * minted in the shape the WEB app emits, that being the direction this file
- * drives: a CLI acceptor consuming a browser-minted invitation. (Both apps mint
- * one; what the CLI's own mint emits is asserted in invite.test.ts, against the
- * connection it will run rather than against a fixed vector.)
+ * packages/core/test/vectors/webrtc-interop-vectors.json. Both mint directions
+ * are covered: the vectors' invitation is minted in the shape the WEB app emits,
+ * for a CLI acceptor consuming it, and `signaling.cliMintedEndpoints` fixes the
+ * locator a CLI inviter emits from a ws/wss URL for a browser acceptor to
+ * consume. The web-side halves of both are driven in
+ * apps/web/test/unit/webrtcInterop.test.ts. (What the CLI's mint carries BESIDE
+ * the locator -- that no credential rides along -- is asserted in
+ * invite.test.ts, against the connection it will run.)
  *
  * The remaining CLI element, the request-encryption flag each party puts on the
  * handshake wire, is asserted against the same vectors in webrtcDispatch.test.ts,
@@ -58,6 +65,11 @@ interface InteropVectors {
     endpoint: WebRTCEndpoint;
     brokerHost: string;
     brokerPathname: string;
+    cliMintedEndpoints: Array<{
+      inviteUrl: string;
+      endpoint: WebRTCEndpoint;
+      brokerLocation: { host: string; port: number; path: string };
+    }>;
   };
   invitation: { token: InvitationToken; encoded: string };
 }
@@ -112,6 +124,42 @@ describe("the invitation a CLI acceptor consumes", () => {
       role: "acceptor",
     });
   });
+});
+
+// --- minting the invitation a web acceptor consumes ---------------------------
+
+describe("the locator a CLI inviter mints from its URL", () => {
+  test.each(vectors.signaling.cliMintedEndpoints)(
+    "$inviteUrl emits the endpoint vector",
+    ({ inviteUrl, endpoint }) => {
+      // The whole of what the partner is handed. A field left off here is one
+      // the partner's own client fills in from a default of its own, which is
+      // exactly the divergence a shared vector exists to pin -- so the mint is
+      // compared as a whole object, not field by field.
+      expect(
+        endpointFromConnection(
+          inviterConnectionFromURL(new URL(inviteUrl), {}),
+        ),
+      ).toEqual(endpoint);
+    },
+  );
+
+  test.each(vectors.signaling.cliMintedEndpoints)(
+    "$inviteUrl dials the broker location the vector fixes",
+    ({ inviteUrl, brokerLocation }) => {
+      // The other side of the same coin: what THIS party's own run resolves the
+      // connection to. The endpoint above is only a locator the partner can meet
+      // if it names the socket this side is actually registered on.
+      const connection = withWebRTCPeerRole(
+        inviterConnectionFromURL(new URL(inviteUrl), {}),
+        "inviter",
+      );
+      if (connection.channel !== "webrtc") throw new Error("expected webrtc");
+      expect(
+        webRtcDialFrom(connection, sharedSecret).options.location,
+      ).toMatchObject(brokerLocation);
+    },
+  );
 });
 
 // --- the dial plan each configured role resolves to ---------------------------

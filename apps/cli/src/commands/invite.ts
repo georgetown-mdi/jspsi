@@ -373,17 +373,24 @@ export async function validateInvite(params: {
         connectionPerPoll:
           options.connectionPerPoll === true ||
           fileSyncOptions?.connectionPerPoll === true,
+        peerId: options.peerId,
+        timestampInFilename: options.timestampInFilename,
       },
       log,
     );
-    // The server-block half of the same report. This is the one command that
-    // builds a webrtc connection from a URL, so it is the only place
-    // --server-port/--server-username can be typed at a channel that drops them.
+    // The server-block half of the same report: applyConnectionOverrides merges
+    // that sub-group on sftp alone, so every --server-* flag typed at this
+    // command's ws:/wss: URL is dropped, credentials included.
     warnUnsupportedWebRTCServerFlags(
       connection.channel,
       {
         serverPort: options.serverPort,
         serverUsername: options.serverUsername,
+        serverPassword: options.serverPassword,
+        serverPrivateKey: options.serverPrivateKey,
+        serverPrivateKeyPassphrase: options.serverPrivateKeyPassphrase,
+        serverKeyboardInteractive: options.serverKeyboardInteractive,
+        serverHostKeyFingerprint: options.serverHostKeyFingerprint,
       },
       log,
     );

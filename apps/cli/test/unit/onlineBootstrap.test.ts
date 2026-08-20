@@ -30,6 +30,7 @@ import type {
 } from "@psilink/core";
 
 import { saveConfig } from "../../src/config";
+import { brokerLocationFromConnection } from "../../src/connection/webrtc/weriftPeer";
 import {
   connectionFromURL,
   inviterConnectionFromURL,
@@ -995,6 +996,43 @@ test("warnUnsupportedFileSyncFlags: a non-file-sync channel warns only for the f
   expect(neither.messages).toHaveLength(0);
 });
 
+test("warnUnsupportedFileSyncFlags: the filename toggles are reported too, by name only", () => {
+  // peer_id and timestamp_in_filename are FileSyncOptions fields, applied on
+  // sftp and filedrop alone, so both are dropped on a webrtc connection exactly
+  // as the three above are.
+  const both = collectWarnings();
+  warnUnsupportedFileSyncFlags(
+    "webrtc",
+    { peerId: "party-a", timestampInFilename: true },
+    both,
+  );
+  expect(both.messages).toHaveLength(2);
+  expect(both.messages[0]).toContain("--peer-id");
+  expect(both.messages[1]).toContain("--timestamp-in-filename");
+  // --peer-id's value is operator-supplied free text reaching the terminal and
+  // any --log-file, so the message names the flag alone.
+  expect(both.messages.join("")).not.toContain("party-a");
+
+  // The negated boolean form asks for the default, not for a dropped setting.
+  const negated = collectWarnings();
+  warnUnsupportedFileSyncFlags(
+    "webrtc",
+    { timestampInFilename: false },
+    negated,
+  );
+  expect(negated.messages).toHaveLength(0);
+
+  for (const channel of ["sftp", "filedrop"] as const) {
+    const log = collectWarnings();
+    warnUnsupportedFileSyncFlags(
+      channel,
+      { peerId: "party-a", timestampInFilename: true },
+      log,
+    );
+    expect(log.messages).toHaveLength(0);
+  }
+});
+
 // --- warnUnsupportedWebRTCServerFlags ----------------------------------------
 
 test("warnUnsupportedWebRTCServerFlags: webrtc warns once per flag set", () => {
@@ -1021,14 +1059,59 @@ test("warnUnsupportedWebRTCServerFlags: webrtc warns once per flag set", () => {
   expect(neither.messages).toHaveLength(0);
 });
 
+test("warnUnsupportedWebRTCServerFlags: every dropped credential flag is reported, by name only", () => {
+  // A credential typed at a channel that discards it is the drop most worth
+  // reporting: from the terminal it looks exactly like one that was used. The
+  // values below are the secrets themselves, so the same pass that checks each
+  // flag is named checks that no value rode along with it.
+  const secrets = {
+    serverPassword: "hunter2",
+    serverPrivateKey: "/keys/id_ed25519",
+    serverPrivateKeyPassphrase: "open-sesame",
+    serverKeyboardInteractive: true,
+    serverHostKeyFingerprint: `SHA256:${"A".repeat(43)}`,
+  } as const;
+  const log = collectWarnings();
+  warnUnsupportedWebRTCServerFlags("webrtc", secrets, log);
+  expect(log.messages).toHaveLength(5);
+  for (const flag of [
+    "--server-password",
+    "--server-private-key",
+    "--server-private-key-passphrase",
+    "--server-keyboard-interactive",
+    "--server-host-key-fingerprint",
+  ])
+    expect(log.messages.some((m) => m.startsWith(`${flag} `))).toBe(true);
+  const rendered = log.messages.join("");
+  for (const value of Object.values(secrets))
+    if (typeof value === "string") expect(rendered).not.toContain(value);
+
+  // The negated boolean form asks for the default, not for a dropped setting.
+  const negated = collectWarnings();
+  warnUnsupportedWebRTCServerFlags(
+    "webrtc",
+    { serverKeyboardInteractive: false },
+    negated,
+  );
+  expect(negated.messages).toHaveLength(0);
+});
+
 test("warnUnsupportedWebRTCServerFlags: the file-sync channels never warn", () => {
-  // Both flags are applied on sftp, and the message's wording (a coordination
-  // server named by a ws/wss URL) fits no other channel.
+  // Every one of these is applied on sftp, and the messages' wording (a
+  // coordination server named by a ws/wss URL) fits no other channel.
   for (const channel of ["sftp", "filedrop"] as const) {
     const log = collectWarnings();
     warnUnsupportedWebRTCServerFlags(
       channel,
-      { serverPort: 9000, serverUsername: "alice" },
+      {
+        serverPort: 9000,
+        serverUsername: "alice",
+        serverPassword: "hunter2",
+        serverPrivateKey: "/keys/id_ed25519",
+        serverPrivateKeyPassphrase: "open-sesame",
+        serverKeyboardInteractive: true,
+        serverHostKeyFingerprint: `SHA256:${"A".repeat(43)}`,
+      },
       log,
     );
     expect(log.messages).toHaveLength(0);
@@ -1403,10 +1486,14 @@ test("inviterConnectionFromURL: a ws URL records the plaintext choice", () => {
   ).toBe("webrtc");
 });
 
-test("inviterConnectionFromURL: a bare-host webrtc URL leaves port and path unset", () => {
-  // Both defaults live in the broker-location resolution (443/80 and "/"), so
-  // pinning them here would restate one place's answer in another. The scheme's
+test("inviterConnectionFromURL: a bare-host webrtc URL leaves the port unset but names the mount point", () => {
+  // The port default lives in the broker-location resolution (443/80), so
+  // pinning it here would restate one place's answer in another; the scheme's
   // own default port is normalized away by the URL parser before it is read.
+  // The PATH is different: this connection's locator is minted onto an
+  // invitation a partner's own client resolves, and an absent path is resolved
+  // to that client's default rather than to this one's, so the resolved mount
+  // point is recorded here instead of being left to be re-derived.
   for (const raw of [
     "wss://peers.example.org",
     "wss://peers.example.org/",
@@ -1415,7 +1502,62 @@ test("inviterConnectionFromURL: a bare-host webrtc URL leaves port and path unse
     const conn = inviterConnectionFromURL(new URL(raw), {});
     if (conn.channel !== "webrtc") throw new Error("expected webrtc");
     expect(conn.server.port).toBeUndefined();
-    expect(conn.server.path).toBeUndefined();
+    expect(conn.server.path).toBe("/");
+  }
+});
+
+test("inviterConnectionFromURL: refuses pre-mint every shape the dial would refuse", () => {
+  // The invitation is minted from this connection and printed before anything
+  // is dialed, so a shape the dial rejects must fail HERE -- otherwise the run
+  // discloses a live token and only then reports the URL unusable. Percent
+  // encoding is what carries these past the userinfo/query/fragment checks: the
+  // parser leaves `%3F` in the path, and decoding it yields a delimiter that
+  // could move the signaling socket.
+  for (const raw of [
+    "wss://peers.example.org/psi%3Fkey=private",
+    "wss://peers.example.org/psi%23fragment",
+    "wss://peers.example.org/psi%40elsewhere.example.org",
+    "wss://peers.example.org/psi%5Celsewhere",
+    "wss://peers.example.org/psi%20space",
+  ]) {
+    expect(() => inviterConnectionFromURL(new URL(raw), {})).toThrow(
+      UsageError,
+    );
+    expect(() => inviterConnectionFromURL(new URL(raw), {})).toThrow(
+      /could move the signaling socket/,
+    );
+  }
+  // Port 0 is a legal port number the connection schema admits and nothing
+  // listens on; the same refusal, from the same resolution.
+  expect(() =>
+    inviterConnectionFromURL(new URL("wss://peers.example.org:0/psi"), {}),
+  ).toThrow(/not a dialable port/);
+});
+
+test("inviterConnectionFromURL: a plaintext webrtc URL raises no dial-time advisory at mint", () => {
+  // The connection resolves through the broker-location guard here, which warns
+  // on a plaintext socket through the transport's own logger. That advisory
+  // belongs to the run that dials; the inviting command names the endpoint's own
+  // plaintext limitation itself, so a copy at mint would double-report it. The
+  // spy is on the transport logger the guard's default callback writes to, which
+  // is what makes this a silence that was measured rather than assumed.
+  const transportLog = getLogger("webrtc");
+  const warnSpy = vi.spyOn(transportLog, "warn");
+  try {
+    const conn = inviterConnectionFromURL(
+      new URL("ws://127.0.0.1:9000/psi"),
+      {},
+    );
+    if (conn.channel !== "webrtc") throw new Error("expected webrtc");
+    expect(conn.server.secure).toBe(false);
+    expect(warnSpy).not.toHaveBeenCalled();
+    // The same guard, called the way the dial calls it, does warn -- so the
+    // silence above is the callback this builder passes, not a guard that never
+    // speaks.
+    brokerLocationFromConnection(conn.server);
+    expect(warnSpy).toHaveBeenCalled();
+  } finally {
+    warnSpy.mockRestore();
   }
 });
 
@@ -1447,6 +1589,20 @@ test("inviterConnectionFromURL: the parser itself makes a host-less webrtc URL u
   const conn = inviterConnectionFromURL(new URL("wss:///psi"), {});
   if (conn.channel !== "webrtc") throw new Error("expected webrtc");
   expect(conn.server.host).toBe("psi");
+});
+
+test("inviterConnectionFromURL: the parser never hands the builder an empty webrtc pathname", () => {
+  // The mint reads `pathname` unconditionally, on the premise that a special
+  // scheme always yields at least "/". Measured against the parser, not read off
+  // it: an empty value would be recorded as a mount point no broker resolves,
+  // and would then be refused by the broker-location guard.
+  for (const raw of [
+    "wss://peers.example.org",
+    "wss://peers.example.org:8443",
+    "wss:///psi",
+    "ws://127.0.0.1:9000",
+  ])
+    expect(new URL(raw).pathname).not.toBe("");
 });
 
 test("inviterConnectionFromURL: the shared timeouts apply on webrtc, the file-sync options do not", () => {

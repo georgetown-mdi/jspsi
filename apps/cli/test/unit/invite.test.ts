@@ -531,6 +531,162 @@ test("validateInvite: a webrtc invite declares no retain mode and reports the fl
   warnSpy.mockRestore();
 });
 
+test("validateInvite: a bare-host webrtc URL still emits a mount point on the endpoint", async () => {
+  // The partner's client resolves an endpoint that names no path to its own
+  // default, which is not this one's -- the browser app mounts its broker at
+  // /api/ while the CLI dials /. Emitting the resolved value is what keeps a
+  // bare-host invitation meeting the partner instead of silently waiting out
+  // the accept-timeout at a different socket.
+  const { input, options } = onlineFixture();
+  const ready = await validateInvite({
+    resolved: {
+      mode: "online",
+      url: new URL("wss://peers.example.org"),
+      input,
+    },
+    options,
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.connectionEndpoint).toEqual({
+    channel: "webrtc",
+    host: "peers.example.org",
+    path: "/",
+  });
+});
+
+test("validateInvite: a webrtc URL the dial would refuse fails before the token exists", async () => {
+  // The branch's own ordering invariant: everything fallible runs before the
+  // token reaches stdout. A percent-encoded delimiter survives the
+  // userinfo/query/fragment refusal and lands in the path, and port 0 is a legal
+  // port nothing listens on; both are refused when the broker location is
+  // resolved, so both must be resolved HERE rather than inside the exchange.
+  const { input, options } = onlineFixture();
+  for (const raw of [
+    "wss://peers.example.org/psi%3Fkey=private",
+    "wss://peers.example.org/psi%40elsewhere.example.org",
+    "wss://peers.example.org:0/psi",
+  ])
+    await expect(
+      validateInvite({
+        resolved: { mode: "online", url: new URL(raw), input },
+        options,
+        acceptTimeout: 900,
+        log: silentLog,
+      }),
+    ).rejects.toBeInstanceOf(UsageError);
+});
+
+test("handler: a webrtc URL the dial would refuse prints no invitation", async () => {
+  // The end-to-end half of the ordering invariant above: the refusal is an
+  // exit-64 usage error, and stdout -- which carries the invitation and nothing
+  // else -- stays empty. A check on validateInvite alone could not see a token
+  // printed by the handler around it.
+  const { input, options } = onlineFixture();
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: ["wss://peers.example.org/psi%3Fkey=private", input],
+      "config-file": options.configFile,
+      "key-file": options.keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).toHaveBeenCalledWith(64);
+    expect(stdio.stdoutWrites.join("")).toBe("");
+    expect(fs.existsSync(options.keyFile)).toBe(false);
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
+  }
+});
+
+test("validateInvite: a webrtc invite reports every dropped --server-* flag", async () => {
+  // The credential flags are the drop most worth reporting: the server block is
+  // merged on sftp alone, so each is parsed and discarded here, and from the
+  // terminal that looks exactly like one that was used.
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-ws-credential-flags-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  const secrets = {
+    serverPassword: "hunter2",
+    serverPrivateKey: "/keys/id_ed25519",
+    serverPrivateKeyPassphrase: "open-sesame",
+    serverKeyboardInteractive: true,
+    serverHostKeyFingerprint: `SHA256:${"A".repeat(43)}`,
+  };
+  const ready = await validateInvite({
+    resolved: {
+      mode: "online",
+      url: new URL("wss://peers.example.org:8443/psi"),
+      input,
+    },
+    options: { ...options, ...secrets },
+    acceptTimeout: 900,
+    log,
+  });
+  const warnings = warnSpy.mock.calls.map((c) => String(c[0]));
+  for (const flag of [
+    "--server-password",
+    "--server-private-key",
+    "--server-private-key-passphrase",
+    "--server-keyboard-interactive",
+    "--server-host-key-fingerprint",
+  ])
+    expect(warnings.some((m) => m.startsWith(`${flag} `))).toBe(true);
+  // Reported by name: none of the values reaches the terminal or a --log-file.
+  const rendered = warnings.join("");
+  for (const value of Object.values(secrets))
+    if (typeof value === "string") expect(rendered).not.toContain(value);
+  // Nor does any of them reach the connection this party runs, the endpoint the
+  // partner seeds from, or the encoded token around it.
+  if (ready.mode !== "online") throw new Error("expected online mode");
+  if (ready.connection.channel !== "webrtc") throw new Error("expected webrtc");
+  expect(ready.connection.server).toEqual({
+    host: "peers.example.org",
+    port: 8443,
+    path: "/psi",
+  });
+  for (const value of Object.values(secrets))
+    if (typeof value === "string")
+      expect(ready.invitation).not.toContain(value);
+  warnSpy.mockRestore();
+});
+
+test("validateInvite: a webrtc invite reports the dropped filename toggles", async () => {
+  // peer_id and timestamp_in_filename name outgoing exchange FILES; a channel
+  // with no directory writes none, so applyConnectionOverrides drops both.
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-ws-filename-flags-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  const ready = await validateInvite({
+    resolved: {
+      mode: "online",
+      url: new URL("wss://peers.example.org/psi"),
+      input,
+    },
+    options: { ...options, peerId: "party-a", timestampInFilename: true },
+    acceptTimeout: 900,
+    log,
+  });
+  const warnings = warnSpy.mock.calls.map((c) => String(c[0]));
+  expect(warnings.some((m) => m.startsWith("--peer-id "))).toBe(true);
+  expect(warnings.some((m) => m.startsWith("--timestamp-in-filename "))).toBe(
+    true,
+  );
+  expect(warnings.join("")).not.toContain("party-a");
+  if (ready.mode !== "online") throw new Error("expected online mode");
+  expect(ready.connection.options).toEqual({ peerTimeoutMs: 900_000 });
+});
+
 test("validateInvite: a webrtc invite reports --server-port/--server-username ignored", async () => {
   // The server block is merged on sftp alone, so both are dropped on this
   // channel: the port the partner is handed comes from the URL, and the

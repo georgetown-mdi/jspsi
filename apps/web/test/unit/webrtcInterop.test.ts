@@ -30,10 +30,11 @@ import type Peer from "peerjs";
  * browser peer and a CLI peer agree on the parts each app constructs for itself:
  * the signaling locator it mints, the peer id it registers under and the one it
  * dials, the handshake role it feeds the key exchange, and the
- * request-encryption flag it puts on the wire. A test that ran both "sides"
- * through one code path would prove nothing, so this file drives only the WEB
- * app's own constructions and checks them against the shared known-answer
- * vectors in packages/core/test/vectors/webrtc-interop-vectors.json. The CLI's
+ * request-encryption flag it puts on the wire, and the location it resolves from
+ * a locator the CLI minted. A test that ran both "sides" through one code path
+ * would prove nothing, so this file drives only the WEB app's own constructions
+ * and checks them against the shared known-answer vectors in
+ * packages/core/test/vectors/webrtc-interop-vectors.json. The CLI's
  * constructions are driven against the same file from apps/cli's suite, and the
  * constructions core alone owns are pinned in packages/core/test/webrtcInterop.test.ts.
  *
@@ -58,7 +59,14 @@ interface InteropVectors {
       requestEncryption: boolean;
     }>;
   };
-  signaling: { endpoint: WebRTCEndpoint };
+  signaling: {
+    endpoint: WebRTCEndpoint;
+    cliMintedEndpoints: Array<{
+      inviteUrl: string;
+      endpoint: WebRTCEndpoint;
+      brokerLocation: { host: string; port: number; path: string };
+    }>;
+  };
   invitation: { token: InvitationToken; encoded: string };
 }
 
@@ -165,6 +173,31 @@ describe("the signaling locator the web app mints", () => {
       path: endpoint.path,
     });
   });
+});
+
+describe("the signaling location a web acceptor resolves from a CLI-minted endpoint", () => {
+  test.each(vectors.signaling.cliMintedEndpoints)(
+    "$inviteUrl resolves to the broker location the CLI itself dials",
+    async ({ endpoint, brokerLocation }) => {
+      // The CLI-mint -> browser-accept direction. This side resolves an absent
+      // endpoint field from a default of its own -- the app's own `/api/` mount
+      // for the path, its own page protocol for the port -- so a locator minted
+      // by the other application is only met if what it names survives that
+      // resolution unchanged. The vector fixes the socket both sides must reach.
+      const cap = capturingPeerFactory();
+      const dial = dialAsAcceptor(sharedSecret, endpoint, {
+        peerFactory: cap.factory,
+      });
+      await vi.waitFor(() => expect(cap.peer.dialed.length).toBe(1));
+      expect(cap.options()).toMatchObject(brokerLocation);
+      // The dial never opens here; abandon it so the retry loop stops.
+      cap.peer.emit(
+        "error",
+        Object.assign(new Error("stop"), { type: "fatal" }),
+      );
+      await expect(dial).rejects.toThrow();
+    },
+  );
 });
 
 describe("the peer ids the web app registers and dials", () => {

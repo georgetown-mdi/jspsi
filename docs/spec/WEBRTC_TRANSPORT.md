@@ -80,6 +80,16 @@ page it was served over and the CLI has no page for:
 | `key` | `peerjs` |
 | `secure` | `true` |
 
+Those defaults are one implementation's, not the wire's: a browser peer resolves
+an absent `path` to the web app's own broker mount (`/api/`) rather than to `/`.
+An invitation endpoint therefore carries the mount point resolved -- `psilink
+invite` records the path it will itself dial, `/` included, even where the
+`ws:`/`wss:` URL wrote none -- so a locator crossing between the two
+applications leaves no field for the consumer to fill in from a default the
+producer does not share. Both mint directions are pinned by the
+cross-application conformance vectors (see
+[PROTOCOL.md](PROTOCOL.md#webrtc-rendezvous-peer-id-derivation)).
+
 The address is built through the URL API, with `path` assigned as a pathname
 rather than concatenated, so the scheme's default port is left implicit in it.
 `host` and `path` are refused for shape before anything is dialed, because both
