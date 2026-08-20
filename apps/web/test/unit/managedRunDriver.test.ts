@@ -2,6 +2,10 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import log from "loglevel";
 
+import {
+  FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
+  FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
+} from "../../src/psi/exchangeLifecycle.js";
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { beginManagedRendezvous } from "../../src/psi/managedRendezvous.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
@@ -14,6 +18,7 @@ import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
 
 import type { MessageConnection } from "@psilink/core";
+import type { PeerCloseOutcome } from "../../src/psi/waitForPeerClose.js";
 import type { RunOutputs } from "@bench/runOutputs";
 
 /**
@@ -159,13 +164,21 @@ function acquireResources() {
   return { peer, conn };
 }
 
-function runDriver(signal: AbortSignal) {
+function runDriver(signal: AbortSignal, onWarning?: (message: string) => void) {
   return runManagedExchangeInBrowser({
     record: RECORD,
     source: SOURCE,
     signal,
     urls: URLS,
+    ...(onWarning !== undefined ? { onWarning } : {}),
   });
+}
+
+/** Report how the clean close's wait for the peer ended, the way the transport
+ * does: through the `onCloseOutcome` the driver handed `openPeerMessageConnection`
+ * when it opened this run's connection. */
+function reportCloseOutcome(outcome: PeerCloseOutcome) {
+  mockedOpen.mock.calls[0][1]?.onCloseOutcome?.(outcome);
 }
 
 afterEach(() => {
@@ -242,6 +255,7 @@ describe("runManagedExchangeInBrowser", () => {
     await runDriver(controller.signal);
 
     expect(mockedOpen).toHaveBeenCalledWith(conn, {
+      onCloseOutcome: expect.any(Function),
       signal: controller.signal,
     });
   });
@@ -315,4 +329,99 @@ describe("runManagedExchangeInBrowser", () => {
     expect(conn.close).toHaveBeenCalledTimes(1);
     expect(peer.disconnect).toHaveBeenCalledTimes(1);
   });
+
+  test.each([
+    ["ceiling", FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING],
+    ["peer-gone", FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING],
+    ["channel-not-open", FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING],
+  ] as const)(
+    "tells the operator when the close ends on %s",
+    async (outcome, expected) => {
+      // The gap this pins: a recurring run's close outcome reached nobody, so the
+      // one population that cannot watch the exchange happen was never told its
+      // partner may not have taken the final frame. The wording is the run
+      // vocabulary's, unchanged from the one-shot path -- an exit that ran the
+      // wait out and one that lost the link say different things about the
+      // partner's copy.
+      const { mc, release } = makeParkedCloseMc();
+      mockedOpen.mockResolvedValue(mc);
+      acquireResources();
+      const onWarning = vi.fn();
+
+      await runDriver(new AbortController().signal, onWarning);
+      reportCloseOutcome(outcome);
+      release();
+      await tick();
+
+      expect(onWarning.mock.calls).toEqual([[expected]]);
+    },
+  );
+
+  test("says nothing when the peer's own close ends the wait", async () => {
+    // The peer's close IS the delivery signal, so the run that got it has nothing
+    // to report: a notice here would put a doubt on the one exit that resolves it.
+    const { mc, release } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    const onWarning = vi.fn();
+
+    await runDriver(new AbortController().signal, onWarning);
+    reportCloseOutcome("peer-closed");
+    release();
+    await tick();
+
+    expect(onWarning).not.toHaveBeenCalled();
+  });
+
+  test.each(["ceiling", "peer-gone", "channel-not-open"] as const)(
+    "withholds a %s notice from a failed handshake's close",
+    async (outcome) => {
+      // The failed handshake's teardown drains a close of its own, whose wait ends
+      // exactly the way a completed run's does. Both notices speak for a run that
+      // succeeded here ("Your own results are complete"), so this one drains that
+      // close and says nothing -- the failure has told the operator something
+      // stronger already.
+      const { mc, release } = makeParkedCloseMc();
+      mockedOpen.mockResolvedValue(mc);
+      acquireResources();
+      mockedAuthenticate.mockRejectedValueOnce(new Error("handshake refused"));
+      const onWarning = vi.fn();
+
+      await expect(
+        runDriver(new AbortController().signal, onWarning),
+      ).rejects.toThrow("handshake refused");
+      reportCloseOutcome(outcome);
+      release();
+      await tick();
+
+      expect(onWarning).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([
+    "ceiling",
+    "peer-gone",
+    "channel-not-open",
+    "run-aborted",
+  ] as const)(
+    "drops a %s notice raised once the run has aborted",
+    async (outcome) => {
+      // A cancel cuts the close's wait rather than letting it run out, and the
+      // teardown behind the cancel ends the same close without a delivery signal
+      // either way -- a partner notice on a run the operator stopped is noise.
+      const { mc, release } = makeParkedCloseMc();
+      mockedOpen.mockResolvedValue(mc);
+      acquireResources();
+      const controller = new AbortController();
+      const onWarning = vi.fn();
+
+      await runDriver(controller.signal, onWarning);
+      controller.abort();
+      reportCloseOutcome(outcome);
+      release();
+      await tick();
+
+      expect(onWarning).not.toHaveBeenCalled();
+    },
+  );
 });

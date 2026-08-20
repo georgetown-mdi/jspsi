@@ -31,6 +31,7 @@ import { loadPsiBackend, runExchange } from "@psilink/core";
 
 import { buildRunOutputs } from "@bench/runOutputs";
 
+import { CLOSE_OUTCOME_WARNINGS } from "./exchangeLifecycle";
 import { acquireValidatedManagedInput } from "./managedInputHandle";
 import { authenticateExchange } from "./authenticateExchange";
 import { beginManagedRendezvous } from "./managedRendezvous";
@@ -52,6 +53,7 @@ import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 import type { ManagedExchangeRunResult } from "./managedExchangeRun";
 import type { ManagedInputSource } from "./managedInputHandle";
 import type { ManagedRerunOptions } from "./managedRun";
+import type { PeerCloseOutcome } from "./waitForPeerClose";
 
 /** This party's PSI/handshake role for its `side`: the inviter listens (the PSI
  * responder), the acceptor dials (the PSI initiator) -- the same mapping the
@@ -104,6 +106,13 @@ export interface ManagedRunDriverConfig {
   /** Injected clock and lock discipline (the attended path sets `lock.ifAvailable`
    * so a run already in progress elsewhere surfaces the benign state). */
   options?: ManagedRerunOptions;
+  /** A non-fatal, operator-relevant notice raised mid-run -- today only the clean
+   * close ending on an exit that carries no delivery signal rather than on the
+   * peer's close ({@link CLOSE_OUTCOME_WARNINGS}). Optional: a caller with no
+   * notice surface omits it and the notice is dropped. Never a terminal -- the run
+   * still settles exactly once, and a notice raised by the teardown's close
+   * arrives after it, since neither teardown is awaited. */
+  onWarning?: (message: string) => void;
 }
 
 /**
@@ -118,12 +127,31 @@ export interface ManagedRunDriverConfig {
  * exchange; the caller classifies them through {@link benignRerunOutcome}. A
  * handshake or data-exchange failure propagates unchanged for the caller's generic
  * failure path.
+ *
+ * A clean close whose wait for the peer ends on an exit carrying no delivery
+ * signal raises the matching notice through `onWarning`, so a re-run's operator
+ * learns their partner may never have taken the final frame -- the same notice
+ * vocabulary the one-shot lifecycle raises, behind this wiring's own emit gate.
  */
 export function runManagedExchangeInBrowser(
   config: ManagedRunDriverConfig,
 ): Promise<ManagedExchangeRunResult<RunOutputs>> {
-  const { record, source, signal, urls } = config;
+  const { record, source, signal, urls, onWarning } = config;
   const exchangeRole = HANDSHAKE_ROLE_FOR_SIDE[record.side];
+
+  // Two gates on the notices this run's close can raise. This run's own outputs
+  // must be built, because both notices speak for a completed exchange ("Your own
+  // results are complete") and the failed handshake's teardown drains a close
+  // whose wait ends exactly the same way, on a run that has already surfaced
+  // something stronger. And the run must still be live: a cancelled run's
+  // teardown ends its close without a delivery signal too, and a partner notice
+  // on a run the operator stopped is noise.
+  let builtOutputs = false;
+  const emitCloseWarning = (outcome: PeerCloseOutcome) => {
+    const warning = CLOSE_OUTCOME_WARNINGS[outcome];
+    if (warning === undefined || !builtOutputs || signal.aborted) return;
+    onWarning?.(warning);
+  };
 
   return runManagedRerun<ManagedRerunInput, ManagedRerunCarried, RunOutputs>(
     record,
@@ -188,7 +216,10 @@ export function runManagedExchangeInBrowser(
           // peer, on this teardown and on the data exchange's: without it the
           // wait stands until the peer takes the final frame or the ceiling
           // expires, a duration the peer chooses.
-          mc = await openPeerMessageConnection(conn, { signal });
+          mc = await openPeerMessageConnection(conn, {
+            onCloseOutcome: emitCloseWarning,
+            signal,
+          });
           // record.expires stays enforced at the handshake (core's pre- and
           // post-handshake guards), covering a bound that lapses between the
           // pre-connection expiry check and here; the orchestration re-maps that
@@ -246,7 +277,9 @@ export function runManagedExchangeInBrowser(
               ),
             },
           );
-          return buildRunOutputs(result, carried.prepared, urls);
+          const outputs = buildRunOutputs(result, carried.prepared, urls);
+          builtOutputs = true;
+          return outputs;
         } finally {
           // Started, not awaited: the clean close inside it waits for the peer to
           // take the final frame, and a peer that keeps the link up without
