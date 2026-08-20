@@ -312,10 +312,12 @@ describe("prepareForExchange: a deduplicating term is refused", () => {
 
 // --- A fan-out transform fails closed before connecting -----------------------
 
-describe("prepareForExchange: a fan-out transform is refused", () => {
-  // Matching runs on a single value per record, so a record whose value splits
-  // realizes a candidate set no linkage strategy can consume. Refuse before any
+describe("prepareForExchange: a fan-out transform is refused off single-pass", () => {
+  // Fan-out matching runs under single-pass alone, so a record whose value
+  // splits realizes a candidate set the cascade cannot consume. Refuse before any
   // connection rather than abort the run once a splitting row reaches a round.
+  // The base `terms` are cascade, so every case below is the refusing half; the
+  // admitted half is the single-pass describe that follows.
   const splittingStandardization: Standardization = [
     {
       output: "first_name",
@@ -468,6 +470,122 @@ describe("prepareForExchange: a fan-out transform is refused", () => {
     });
     await expect(run).rejects.toThrow(/the connection was used/);
   });
+
+  test("runExchange refuses this party's own fan-out advertisement off single-pass", async () => {
+    // The advertisement is the same declaration read at the run boundary: a
+    // count above the agreed key count says this party fans out, which the
+    // partner refuses as a protocol violation. Refused locally first, so the
+    // operator reads its own configuration named rather than a message about the
+    // partner. Only a PreparedExchange assembled outside prepareForExchange
+    // reaches it, which is what setting the field by hand stands in for.
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    prepared.effectiveKeyCount = MAX_KEY_CANDIDATES_PER_ROW;
+
+    const run = runExchange(unusableConnection(), "initiator", prepared, {
+      psiLibrary: unusablePsiLibrary,
+    });
+    await expect(run).rejects.toThrow(UsageError);
+    await expect(run).rejects.toThrow(/effective key count/);
+    // Its own fault, named as its own: nothing in the message attributes the
+    // advertisement to the partner.
+    await expect(run).rejects.not.toThrow(/partner advertised/);
+  });
+});
+
+// --- The same two surfaces run under single-pass ------------------------------
+
+describe("prepareForExchange: a fan-out transform runs under single-pass", () => {
+  // The admitted half of the strategy rule: single-pass matches a record's whole
+  // candidate set (docs/spec/PROTOCOL.md, Fan-out matching), so both authoring
+  // surfaces prepare and reach the terms exchange rather than being refused.
+  const singlePassTerms: LinkageTerms = {
+    ...terms,
+    linkageStrategy: "single-pass",
+  };
+
+  const splittingStandardization: Standardization = [
+    {
+      output: "last_name",
+      input: "last_name",
+      steps: [{ function: "split_on", params: { delimiter: "-" } }],
+    },
+  ];
+
+  const splittingElementTerms: LinkageTerms = {
+    ...singlePassTerms,
+    linkageKeys: [
+      {
+        name: "FN_LN",
+        elements: [
+          { field: "first_name" },
+          {
+            field: "last_name",
+            transform: [{ function: "split_on", params: { delimiter: "-" } }],
+          },
+        ],
+      },
+    ],
+  };
+
+  test("a standardization declaring split_on prepares, and advertises the fan-out width", () => {
+    const prepared = prepareForExchange(
+      {
+        linkageTerms: singlePassTerms,
+        metadata,
+        standardization: splittingStandardization,
+      },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    // The width the partner's element bounds and read gate are derived from: the
+    // one key this party fans out counts as MAX_KEY_CANDIDATES_PER_ROW, not 1.
+    expect(prepared.effectiveKeyCount).toBe(MAX_KEY_CANDIDATES_PER_ROW);
+  });
+
+  test("a linkage-key element transform declaring split_on prepares", () => {
+    const prepared = prepareForExchange(
+      { linkageTerms: splittingElementTerms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.effectiveKeyCount).toBe(
+      declaredEffectiveKeyCount(splittingElementTerms),
+    );
+  });
+
+  test("runExchange carries fan-out terms to the terms exchange", async () => {
+    // The run boundary's half: the terms reach the connection rather than the
+    // refusal, so the failure is the unusable connection's.
+    const failIfUsed = (): never => {
+      throw new Error("the connection was used");
+    };
+    const prepared = prepareForExchange(
+      { linkageTerms: splittingElementTerms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    const run = runExchange(
+      { send: failIfUsed, receive: failIfUsed, close: failIfUsed },
+      "initiator",
+      prepared,
+      {
+        psiLibrary: new Proxy({} as PSILibrary, {
+          get: () => {
+            throw new Error("the PSI library was used");
+          },
+        }),
+      },
+    );
+    await expect(run).rejects.toThrow(/the connection was used/);
+  });
 });
 
 // --- The single-pass ceiling pre-flight, and the refusals ahead of it ---------
@@ -516,23 +634,28 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
     expect(prepare).not.toThrow(/removing a fan-out/);
   });
 
-  test("an over-ceiling fan-out config is refused for the fan-out, not offered a smaller size", () => {
-    // The interim refusal stops a declared fan-out whatever the row count, so
-    // offering the ceiling's "removing a fan-out is another remedy" here would
-    // promise a run this build refuses at every size. The pre-flight therefore runs
-    // behind that refusal -- an ordering, not a wording: once the refusal narrows to
-    // the cascade, a runnable single-pass fan-out reaches the pre-flight and the
-    // remedy it offers is a real one.
+  test("an over-ceiling fan-out config is offered the fan-out remedy the ceiling has for it", () => {
+    // A fan-out key costs MAX_KEY_CANDIDATES_PER_ROW value slots per record, so a
+    // fanning config crosses the ceiling at that many times fewer rows -- and
+    // dropping the fan-out is a remedy that really does bring it back under. The
+    // remedy is offered on the same discriminant the frame layout reads
+    // (partyFansOut), so the guidance cannot disagree with the wire about whether
+    // this party fans out.
     const overCeilingRows = rowsOverCeiling(MAX_KEY_CANDIDATES_PER_ROW);
-    // The dataset really is over the ceiling at the width this config declares, so
-    // the pre-flight has something to fire on: what arrives below is the ordering's
-    // doing rather than a fixture that never reached the gate.
+    // The dataset really is over the ceiling at the width this config declares,
+    // rather than at its plain key count: the fan-out is what puts it over.
     expect(
       singlePassDatasetExceedsCap(
         declaredEffectiveKeyCount(fanOutTerms),
         overCeilingRows.length,
       ),
     ).toBe(true);
+    expect(
+      singlePassDatasetExceedsCap(
+        fanOutTerms.linkageKeys.length,
+        overCeilingRows.length,
+      ),
+    ).toBe(false);
     const prepare = () =>
       prepareForExchange(
         { linkageTerms: fanOutTerms, metadata },
@@ -541,8 +664,23 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
         columns,
       );
     expect(prepare).toThrow(UsageError);
-    expect(prepare).toThrow(/split_on/);
-    expect(prepare).not.toThrow(/single-pass ceiling/);
+    expect(prepare).toThrow(/exceed the single-pass ceiling/);
+    expect(prepare).toThrow(/removing a fan-out/);
+  });
+
+  test("a fan-out config inside the ceiling prepares", () => {
+    // The pre-flight's other side: the same terms over a dataset the declared
+    // width admits reach the built exchange rather than a refusal, so the case
+    // above fires on the size and not on the fan-out.
+    const prepared = prepareForExchange(
+      { linkageTerms: fanOutTerms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.effectiveKeyCount).toBe(
+      declaredEffectiveKeyCount(fanOutTerms),
+    );
   });
 
   test("a standardization contradicting its terms is refused ahead of the ceiling", () => {

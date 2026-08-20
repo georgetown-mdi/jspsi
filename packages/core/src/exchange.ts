@@ -38,6 +38,7 @@ import {
 } from "./link.js";
 import { InProcessPsiEngine } from "./psiEngine.js";
 import {
+  partyFansOut,
   psiElementBounds,
   singlePassDatasetExceedsCap,
 } from "./connection/frameSize.js";
@@ -297,6 +298,43 @@ export function assertDeduplicateImplemented(deduplicate: boolean): void {
       "silently matched one-to-one rather than honored. The exchange is " +
       "refused before matching begins. Set deduplicate to false until " +
       "deduplication is implemented.",
+  );
+}
+
+/**
+ * Refuse this party's OWN fan-out advertisement on a strategy that matches a
+ * single value per record, before the terms exchange carries it.
+ *
+ * The advertised effective key count exceeding the agreed key count declares a
+ * fan-out ({@link partyFansOut}), and fan-out matching runs under single-pass
+ * alone (docs/spec/PROTOCOL.md, Fan-out runs under single-pass only). The partner
+ * refuses such an advertisement as a protocol violation, so without this the
+ * operator whose own `PreparedExchange` carried it reads the partner's message
+ * for a fault of its own making -- and reads it as the partner's.
+ *
+ * Reachable only from a `PreparedExchange` assembled outside
+ * {@link prepareForExchange}, which refuses the declared fan-out that would
+ * produce this count. The count is this party's own either way -- derived from
+ * its terms and standardization, or set by the caller -- so the message names
+ * this party's configuration and stays a {@link UsageError}, like the width
+ * refusals the single-pass build raises for the same class of over-declared size.
+ */
+function assertFanOutAdvertisementMatchesStrategy(
+  terms: LinkageTerms,
+  effectiveKeyCount: number,
+): void {
+  if (terms.linkageStrategy === "single-pass") return;
+  const keyCount = terms.linkageKeys.length;
+  if (!partyFansOut(keyCount, { effectiveKeyCount })) return;
+  throw new UsageError(
+    "this exchange would advertise an effective key count of " +
+      `${effectiveKeyCount} against its ${keyCount} agreed linkage key(s), ` +
+      "which declares a fan-out, while its linkage terms name a strategy that " +
+      "matches a single value per record. Fan-out matching runs under the " +
+      "single-pass linkage strategy only, so the partner refuses that " +
+      "advertisement rather than serving it. Prepare the exchange from its " +
+      "linkage terms and standardization, or agree terms whose " +
+      "linkage_strategy is single-pass.",
   );
 }
 
@@ -562,12 +600,12 @@ export function prepareForExchange(
     );
 
   // Fail closed on a transform that fans one value out into several match
-  // candidates: matching runs on a single value per record, so a splitting
-  // record's candidate set has no round to enter and the run would abort once it
-  // reached one. Run over the RESOLVED standardization (authored or default,
-  // which declares no fan-out) plus the terms' element transforms, so both
-  // authoring surfaces are covered; the terms half is refused again at the run
-  // boundary. See assertFanOutImplemented.
+  // candidates under a strategy that matches one value per record: the splitting
+  // record's candidate set has no round to enter there, and the run would abort
+  // once it reached one. Run over the RESOLVED standardization (authored or
+  // default, which declares no fan-out) plus the terms' element transforms, so
+  // both authoring surfaces are covered; the terms half is refused again at the
+  // run boundary. See assertFanOutImplemented.
   assertFanOutImplemented(linkageTerms, standardization);
 
   // Pre-flight the single-pass dataset ceiling. This is a coarse, ONE-PARTY
@@ -588,16 +626,19 @@ export function prepareForExchange(
   // receiver pay a full handshake and PSI encryption before the authoritative gate
   // caught the same over-ceiling dataset.
   //
-  // Ordered BEHIND the fan-out refusal above, so a config declaring a fan-out is
-  // refused for what actually stops it rather than offered a smaller size this
-  // build would refuse at any size. The order needs no revisiting when that
-  // refusal narrows to the cascade: a runnable single-pass fan-out then reaches
-  // this gate, whose fan-out remedy is a real one for it.
+  // Ordered BEHIND the fan-out refusal above, so a config declaring a fan-out
+  // under a strategy that cannot match one is refused for what actually stops it
+  // rather than offered a smaller size that build refuses at any size. A runnable
+  // single-pass fan-out reaches this gate, whose fan-out remedy is a real one for
+  // it.
   //
   // Every remedy the message names is a configuration the operator can change --
   // fewer keys, fewer records, smaller batches, one less fan-out -- so it is a
   // usage fault (CLI exit 64), like the width refusals the single-pass build
-  // raises for the same class of over-declared size.
+  // raises for the same class of over-declared size. Whether to offer the fan-out
+  // remedy is read through partyFansOut, the single layout discriminant, so the
+  // guidance and the frame layout cannot disagree about whether this party fans
+  // out.
   if (
     linkageTerms.linkageStrategy === "single-pass" &&
     singlePassDatasetExceedsCap(effectiveKeyCount, rawRows.length)
@@ -607,7 +648,7 @@ export function prepareForExchange(
         `record(s) across ${linkageTerms.linkageKeys.length} linkage key(s) ` +
         "exceed the single-pass ceiling. Reduce the number of linkage keys or " +
         "the record count, or split the dataset into smaller batches." +
-        (effectiveKeyCount > linkageTerms.linkageKeys.length
+        (partyFansOut(linkageTerms.linkageKeys.length, { effectiveKeyCount })
           ? ` A linkage key that fans out counts as ${MAX_KEY_CANDIDATES_PER_ROW} ` +
             "toward that ceiling, so removing a fan-out is another remedy."
           : ""),
@@ -951,14 +992,14 @@ export async function runExchange(
   // assertCountOnlyTransmitsNoColumn.
   assertCountOnlyTransmitsNoColumn(linkageTerms.algorithm, prepared.metadata);
 
-  // Refuse a fan-out element transform before the terms go on the wire, so a
-  // PreparedExchange built without going through prepareForExchange cannot start
-  // a run that aborts at its first splitting row. This reaches the terms half
-  // only: a PreparedExchange retains the built dataset, not the standardization
-  // spec, so a fan-out authored there and assembled outside prepareForExchange is
-  // refused when that row's candidate set reaches the linkage strategy -- at the
-  // point of harm, but after this party's terms have gone on the wire. See
-  // assertFanOutImplemented.
+  // Refuse a fan-out element transform under a strategy that matches one value
+  // per record before the terms go on the wire, so a PreparedExchange built
+  // without going through prepareForExchange cannot start a run that aborts at
+  // its first splitting row. This reaches the terms half only: a PreparedExchange
+  // retains the built dataset, not the standardization spec, so a fan-out
+  // authored there and assembled outside prepareForExchange is refused when that
+  // row's candidate set reaches the linkage strategy -- at the point of harm, but
+  // after this party's terms have gone on the wire. See assertFanOutImplemented.
   assertFanOutImplemented(linkageTerms);
 
   // Refuse a disclosed column whose name is too long to carry before anything goes
@@ -990,6 +1031,14 @@ export async function runExchange(
   // PreparedExchange.effectiveKeyCount).
   const localEffectiveKeyCount =
     prepared.effectiveKeyCount ?? declaredEffectiveKeyCount(linkageTerms);
+
+  // Refuse this party's own fan-out advertisement on a strategy that cannot
+  // match one, before it goes on the wire and comes back as the partner's
+  // refusal. See assertFanOutAdvertisementMatchesStrategy.
+  assertFanOutAdvertisementMatchesStrategy(
+    linkageTerms,
+    localEffectiveKeyCount,
+  );
 
   onStage(CONFIRMING_PROTOCOL_STAGE_ID);
   const {

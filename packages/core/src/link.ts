@@ -174,8 +174,8 @@ export function removeDuplicatesAndUndefineds(
  *   local records (indexed by row position) yielding the record's value for
  *   that key, or `undefined` if the record has no value for it. A record
  *   yielding a candidate SET is refused rather than matched on one of them:
- *   fan-out matching runs under single-pass only, and is not implemented there
- *   either (docs/spec/PROTOCOL.md, Fan-out matching).
+ *   fan-out matching runs under single-pass only (docs/spec/PROTOCOL.md, Fan-out
+ *   matching).
  * @param partnerRecordCount - The partner's raw row count, exchanged over the
  *   encrypted channel during role resolution. It is the authenticated bound the
  *   partner-returned row indices are checked against before they reach the

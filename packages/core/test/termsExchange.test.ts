@@ -828,13 +828,12 @@ test("the initiator refuses an advertisement below the floor on message 2 too", 
 // function of the agreed pair and both orientations refuse in lockstep.
 //
 // Only the PARTNER's advertisement needs a check here: a local fan-out config
-// never reaches an advertisement at all, because assertFanOutImplemented refuses
-// a declared fan-out on either authoring surface at prepareForExchange and
-// runExchange re-checks the terms half before the terms go on the wire (both
-// pinned in prepareForExchange.test.ts). What survives that is the
-// standardization half of a PreparedExchange assembled outside
-// prepareForExchange, which carries the declared count but not the spec it came
-// from -- and the partner refuses exactly that advertisement here.
+// off single-pass never reaches an advertisement at all, because
+// assertFanOutImplemented refuses a declared fan-out on either authoring surface
+// at prepareForExchange, runExchange re-checks the terms half before the terms go
+// on the wire, and the advertisement itself is checked against the local strategy
+// beside it (all three pinned in prepareForExchange.test.ts). What the partner
+// refuses here is the advertisement a non-conforming peer sends anyway.
 
 test("the responder refuses a fan-out advertisement on a cascade exchange", async () => {
   // The same value the single-pass case above accepts, so what refuses it is the

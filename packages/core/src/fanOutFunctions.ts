@@ -20,9 +20,9 @@ import type { Standardization } from "./config/standardization.js";
 /**
  * The standardization functions that expand ONE value into several match
  * candidates -- the multi-value `FieldValue` case. An exchange whose transforms
- * declare one of these is refused ahead of the consent copy that would describe
- * what it runs, rather than run with the narrower matching it would actually
- * deliver; see `assertFanOutImplemented`.
+ * declare one of these matches on every candidate under the single-pass strategy,
+ * and is refused under every other rather than run with the narrower matching one
+ * of those would actually deliver; see `assertFanOutImplemented`.
  *
  * It is also what {@link declaredEffectiveKeyCount} reads to decide a key's
  * candidate factor, so an entry here widens every derived single-pass bound for
