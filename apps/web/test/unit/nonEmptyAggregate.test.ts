@@ -25,6 +25,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** A fan-out pipeline: a value carrying the delimiter realizes several candidates. */
+const SPLIT_ON_SPACE: Standardization = [
+  {
+    output: "first_name",
+    input: "n",
+    steps: [{ function: "split_on", params: { delimiter: " " } }],
+  },
+];
+
 describe("computeFieldCoverage: the silent-empty defense", () => {
   test("a transform that collapses every row to null surfaces a 0% coverage alarm", () => {
     // parse_date with the wrong input format matches no row -> every value drops to
@@ -88,32 +97,37 @@ describe("computeFieldCoverage: the silent-empty defense", () => {
     expect(isSilentEmpty(coverage)).toBe(false);
   });
 
-  test("a fan-out (multi-value) row is not produced, matching core's refusal", () => {
-    // split_on emits a multi-value Set for a value that splits; fan-out matching is
-    // not implemented, and core refuses an exchange declaring it rather than
-    // matching such a row, so it yields no matchable key. The metric must agree --
-    // counting it would be a false all-clear. A value with no delimiter stays a
-    // one-element Set (a single matchable key) and is produced.
-    const standardization: Standardization = [
-      {
-        output: "first_name",
-        input: "n",
-        steps: [{ function: "split_on", params: { delimiter: " " } }],
-      },
-    ];
+  test("a fan-out (multi-value) row counts once, never more than the row it is", () => {
+    // split_on emits a multi-value Set for a value that splits. Those values cross
+    // into the key's candidate set the single-pass strategy matches on, so the row
+    // is matchable and produced -- but as ONE row, keeping produced bounded by total
+    // and the rate inside [0, 1]. A value with no delimiter stays a one-element Set
+    // and is produced the same way, so a mixed column is fully covered.
     const mixed = computeFieldCoverage(
       [{ n: "mary jane" }, { n: "ann marie" }, { n: "mary" }],
-      standardization,
+      SPLIT_ON_SPACE,
     )[0];
-    expect(mixed.produced).toBe(1); // only the unsplit "mary"
+    expect(mixed.total).toBe(3);
+    expect(mixed.produced).toBe(3);
+    expect(mixed.rate).toBe(1);
     expect(isSilentEmpty(mixed)).toBe(false);
+  });
 
+  test("an all-fan-out field is fully produced, not a 'cannot match' alarm", () => {
+    // Every row splits, so a single-value reading would report zero coverage and fire
+    // the red "no row produces a value ... it cannot match" alert on a field that does
+    // match. A fan-out under a strategy that cannot realize the candidate set is
+    // refused at authoring, at the mint, and at prepare (core's
+    // assertFanOutImplemented), where the fault is named and fixable, so this readout
+    // does not pre-warn for it.
     const allFanOut = computeFieldCoverage(
       [{ n: "mary jane" }, { n: "ann marie" }],
-      standardization,
+      SPLIT_ON_SPACE,
     )[0];
-    expect(allFanOut.produced).toBe(0);
-    expect(isSilentEmpty(allFanOut)).toBe(true);
+    expect(allFanOut.total).toBe(2);
+    expect(allFanOut.produced).toBe(2);
+    expect(allFanOut.rate).toBe(1);
+    expect(isSilentEmpty(allFanOut)).toBe(false);
   });
 
   test("the sweep observes empties, so coalesce rescuing dropped rows raises coverage", () => {

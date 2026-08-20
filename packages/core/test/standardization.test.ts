@@ -46,7 +46,6 @@ import {
   isListedFanOutFunction,
   withNoListedFanOutFunctions,
 } from "../src/fanOutFunctions";
-import { PROTOCOL_VERSION } from "../src/protocolSetup";
 
 const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
   name,
@@ -2526,6 +2525,15 @@ describe("assertStandardizationMatchesTerms", () => {
 
 describe("assertFanOutImplemented", () => {
   const fanOutStep = { function: "split_on", params: { delimiter: "-" } };
+  const elementFanOutKeys: LinkageTerms["linkageKeys"] = [
+    {
+      name: "LN+DOB",
+      elements: [
+        { field: "last_name", transform: [fanOutStep] },
+        { field: "date_of_birth" },
+      ],
+    },
+  ];
 
   test("refuses a standardization declaring a fan-out step, naming it", () => {
     // A standardization is only ever this party's own -- no invitation carries
@@ -2550,20 +2558,65 @@ describe("assertFanOutImplemented", () => {
     // alert.
     const terms: LinkageTerms = {
       ...minimalTerms,
-      linkageKeys: [
-        {
-          name: "LN+DOB",
-          elements: [
-            { field: "last_name", transform: [fanOutStep] },
-            { field: "date_of_birth" },
-          ],
-        },
-      ],
+      linkageKeys: elementFanOutKeys,
     };
     expect(() => assertFanOutImplemented(terms)).toThrow(UsageError);
     expect(() => assertFanOutImplemented(terms)).toThrow(/split_on/);
     expect(() => assertFanOutImplemented(terms)).not.toThrow(
       OperatorConfigError,
+    );
+  });
+
+  test("admits both authoring surfaces under single-pass, the strategy that matches a candidate set", () => {
+    // The narrowed rule's other half: fan-out matching is specified for
+    // single-pass alone (docs/spec/PROTOCOL.md, Fan-out runs under single-pass
+    // only), so the same two configurations the cascade refuses above run there.
+    const singlePassTerms: LinkageTerms = {
+      ...minimalTerms,
+      linkageStrategy: "single-pass",
+    };
+    const standardization = [
+      { output: "last_name", input: "LN", steps: [fanOutStep] },
+    ];
+    expect(() =>
+      assertFanOutImplemented(singlePassTerms, standardization),
+    ).not.toThrow();
+    expect(() =>
+      assertFanOutImplemented({
+        ...singlePassTerms,
+        linkageKeys: elementFanOutKeys,
+      }),
+    ).not.toThrow();
+  });
+
+  test("refuses a strategy this build does not recognize, rather than admitting it", () => {
+    // An allowlist, not a cascade-named denylist: a strategy added to the schema
+    // refuses a fan-out until it too realizes one. Cast because no such member
+    // exists yet -- which is the case this pins.
+    const futureStrategyTerms = {
+      ...minimalTerms,
+      linkageStrategy: "two-pass",
+      linkageKeys: elementFanOutKeys,
+    } as unknown as LinkageTerms;
+    expect(() => assertFanOutImplemented(futureStrategyTerms)).toThrow(
+      UsageError,
+    );
+  });
+
+  test("the refusal names the strategy rule and the two ways out of it", () => {
+    // What an operator does about it: agree single-pass terms, or drop the step.
+    // Neither remedy is derivable from the function name alone, so both are
+    // pinned rather than left to the message's shape.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: elementFanOutKeys,
+    };
+    expect(() => assertFanOutImplemented(terms)).toThrow(/single-pass/);
+    expect(() => assertFanOutImplemented(terms)).toThrow(
+      /Agree linkage terms whose linkage_strategy is single-pass/,
+    );
+    expect(() => assertFanOutImplemented(terms)).toThrow(
+      /remove the "split_on" step/,
     );
   });
 
@@ -2593,51 +2646,6 @@ describe("assertFanOutImplemented", () => {
     ).not.toThrow();
     expect(() => assertFanOutImplemented(minimalTerms)).not.toThrow();
   });
-
-  // docs/spec/PROTOCOL.md's "Wire-format deltas: existing frames only, and no
-  // version bump" paragraph holds PROTOCOL_VERSION at 1 only because this
-  // refusal keeps every production exchange off the ragged single-pass wire
-  // layout that fan-out introduces. Narrowing this refusal while the version
-  // is still 1 would ship a build that interoperates at version 1 yet
-  // degrades a standardization-only fan-out to a generic frame error against
-  // an unpatched peer, instead of the version reconcile catching it. Once
-  // PROTOCOL_VERSION moves past 1, runIf skips this test with no edit here.
-  test.runIf(PROTOCOL_VERSION === 1)(
-    "a declared fan-out is still refused before the exchange runs while PROTOCOL_VERSION is 1",
-    () => {
-      const message =
-        "PROTOCOL_VERSION must move past 1 before the standing fan-out " +
-        'refusal narrows -- see docs/spec/PROTOCOL.md, "Wire-format deltas: ' +
-        'existing frames only, and no version bump"';
-
-      const singlePassTerms: LinkageTerms = {
-        ...minimalTerms,
-        linkageStrategy: "single-pass",
-      };
-      const standardization = [
-        { output: "last_name", input: "LN", steps: [fanOutStep] },
-      ];
-      expect(() => {
-        assertFanOutImplemented(singlePassTerms, standardization);
-      }, message).toThrow();
-
-      const elementTerms: LinkageTerms = {
-        ...singlePassTerms,
-        linkageKeys: [
-          {
-            name: "LN+DOB",
-            elements: [
-              { field: "last_name", transform: [fanOutStep] },
-              { field: "date_of_birth" },
-            ],
-          },
-        ],
-      };
-      expect(() => {
-        assertFanOutImplemented(elementTerms);
-      }, message).toThrow();
-    },
-  );
 });
 
 // --- resolveFieldColumns -----------------------------------------------------

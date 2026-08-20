@@ -602,15 +602,15 @@ export async function generateInvitation(params: {
     });
 
   // Fail closed, before the token is minted, on terms or a standardization that
-  // declares a step expanding one value into several match candidates: matching
-  // runs on a single value per record, so the run this invitation commits to is
-  // already refused (assertFanOutImplemented, which prepareForExchange applies at
-  // exchange time -- too late for an invitation the partner has been sent). The
-  // CLI's config-source mint runs the same check for the same reason. The editor's
-  // Generate gate names the missing capability on the offending control, so this
-  // is the mint-boundary backstop the quick path and any non-editor caller reach,
-  // covering both surfaces at once: the embedded terms' element transforms and
-  // this party's own authored cleaning.
+  // declares a step expanding one value into several match candidates under a
+  // strategy that matches one value per record: the run this invitation commits
+  // to is already refused (assertFanOutImplemented, which prepareForExchange
+  // applies at exchange time -- too late for an invitation the partner has been
+  // sent). The CLI's config-source mint runs the same check for the same reason.
+  // The editor's Generate gate is wider still and fires first on the paths it
+  // covers, so this is the mint-boundary backstop the quick path and any
+  // non-editor caller reach, covering both surfaces at once: the embedded terms'
+  // element transforms and this party's own authored cleaning.
   assertFanOutImplemented(linkageTerms, params.standardization);
 
   // Bound the token's lifetime so an intercepted invitation cannot be accepted

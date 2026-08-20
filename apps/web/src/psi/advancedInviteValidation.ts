@@ -68,8 +68,8 @@ const UNSUPPLYABLE_KEY_MESSAGE =
 
 /** Whether a step list declares a function core classes as fan-out -- one that
  * expands a value into several match candidates. Read from core's
- * `FAN_OUT_FUNCTION_NAMES` rather than a second web-side list, so this gate
- * follows exactly what `assertFanOutImplemented` refuses. */
+ * `FAN_OUT_FUNCTION_NAMES` rather than a second web-side list, so a producer
+ * added there is gated here with no second edit. */
 function declaresFanOut(
   steps: ReadonlyArray<{ function: string }> | undefined,
 ): boolean {
@@ -79,17 +79,21 @@ function declaresFanOut(
 }
 
 /** Shown when a cleaning step or a linkage-key transform splits one value into
- * several match candidates. Matching runs on a single value per record, so core
- * refuses such an exchange before it runs; blocking here names the missing
- * capability at the moment of choice rather than leaving the operator to author
- * and mint an invitation whose run is already refused. Names the unbuilt
- * capability, not the offending step: the step's function name can arrive on an
- * imported document, which is partner-influenceable, the same reason
+ * several match candidates. This editor authors no fan-out -- its add-step menu
+ * offers none (`OFFERED_EXPERT_FUNCTION_GROUPS`), so one can only arrive on an
+ * imported document -- and it is deliberately blocked at the moment of choice
+ * rather than left to mint an invitation the editor cannot show the operator the
+ * consequences of authoring. The gate is this editor's, wider than core's own
+ * refusal, which admits a fan-out under single-pass; the message therefore points
+ * at the surface that does author one rather than calling the capability unbuilt.
+ * Names that capability and not the offending step: the step's function name can
+ * arrive on an imported document, which is partner-influenceable, the same reason
  * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field. */
 const FAN_OUT_MESSAGE_BODY =
-  "splits one value into several values to match on. Matching on several " +
-  "values per record is not built yet, so an exchange that asks for it is " +
-  "refused before it runs. Remove that step before generating.";
+  "splits one value into several values to match on, which this editor does " +
+  "not author. Remove that step before generating; an exchange that matches " +
+  "on several values per record is authored from the command line, and runs " +
+  "under single-pass linkage only.";
 
 /** The control each count-only shape rule reports against. Every rule but the
  * payload one is a property of the matching arrangement the key list holds, which
@@ -324,14 +328,15 @@ export function validateAdvancedInvite(
       "Finish or fix the highlighted cleaning steps before generating.";
   }
 
-  // The fan-out gate, at the same altitude as core's own refusal
-  // (`assertFanOutImplemented`, which the mint boundary applies again) and read
-  // from the same list. Both surfaces a fan-out can reach are checked: an
-  // authored cleaning step, and a linkage-key element transform, which an
-  // imported document carries (the step editor offers the family on neither).
-  // Written last and unconditionally -- a fan-out step blocks generation whatever
-  // else the control reports, and removing it is the only fix, so it is the
-  // message worth showing.
+  // The fan-out gate, read from the same list core's own refusal
+  // (`assertFanOutImplemented`) reads, and deliberately wider than it: core
+  // admits a fan-out under single-pass, while this editor authors none at any
+  // strategy. Both surfaces a fan-out can reach are checked: an authored cleaning
+  // step, and a linkage-key element transform, which an imported document carries
+  // (the step editor offers the family on neither). Written last and
+  // unconditionally -- a fan-out step blocks generation whatever else the control
+  // reports, and removing it is the only fix here, so it is the message worth
+  // showing.
   if (
     draft.standardization.some((transformation) =>
       declaresFanOut(transformation.steps),

@@ -205,11 +205,11 @@ const effectiveKeyCountField = z
 // parse (see protocolVersionProbe), so a reshaped sibling field cannot throw the
 // parse before the version is read and bury the skew diagnosis. The version is
 // read independently of the rest of the envelope on both message paths.
-// Held at 1 through pre-release wire deltas: no deployed peers exist for this
-// reconcile to hold apart, so a bump is reserved for the first wire-incompatible
-// change after the software is officially published. A build predating the
-// fan-out capability is held closed by its own fan-out refusal, not by this
-// reconcile (docs/spec/PROTOCOL.md, Wire-format deltas).
+// Held at 1: pre-publication there are no deployed peers for this reconcile to
+// hold apart, so a wire-format delta -- including the ragged single-pass index
+// table a fan-out configuration produces -- ships within version 1 rather than
+// bumping it, and a bump is reserved for the first wire-incompatible change made
+// once the software is published (docs/spec/PROTOCOL.md, Wire-format deltas).
 /** @internal exported for the protocol-version reconcile tests. */
 export const PROTOCOL_VERSION = 1;
 

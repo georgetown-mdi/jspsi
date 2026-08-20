@@ -133,9 +133,8 @@ export const TRANSFORM_FUNCTION_GLOSSARY: Record<string, string> = {
   filter_regex:
     "Drops values that do not match a pattern, removing them from matching.",
   split_on:
-    "Splits the value into several candidates. This version of the exchange " +
-    "does not match on them and refuses to run at all while a linkage key or " +
-    "standardization uses this step.",
+    "Splits the value into several candidates, each able to match " +
+    "independently, so a record matches when any one of them does.",
   coalesce:
     "Substitutes a fallback value for an empty field, which can create matches that would not otherwise occur.",
 };
@@ -488,6 +487,29 @@ export interface InvitationSummary {
    */
   deduplicateApplied: boolean;
   /**
+   * Whether any linkage key's element transforms split one value into several
+   * match candidates -- the fan-out an element marker names, as "multiple" where
+   * the strategy matches those candidates and "not supported" where it refuses
+   * the exchange.
+   *
+   * Read from the AGREED terms alone, which is all an invitation carries: the
+   * inviting party's own data standardization can fan out a field the terms do
+   * not show, and no invitation carries one. So this is what the acceptor can be
+   * told, not the whole of what the inviter may run.
+   */
+  fansOut: boolean;
+  /**
+   * Whether the exchange this invitation proposes matches on those candidates.
+   *
+   * True exactly for `single-pass`, the one strategy fan-out matching is
+   * specified for (docs/spec/PROTOCOL.md, Fan-out runs under single-pass only);
+   * under any other, terms declaring a fan-out are refused before the exchange
+   * runs. Meaningful only alongside {@link fansOut}, and it selects which of the
+   * two fan-out consent facts a surface renders, exactly as the pair of output
+   * receipts is selected by value.
+   */
+  fanOutApplied: boolean;
+  /**
    * Linkage keys (records are matched on these), in the inviter's order, each
    * carrying its ordered elements and matching rules.
    */
@@ -816,9 +838,9 @@ function parseDateBreadth(
   return dropsComponent ? "partial" : undefined;
 }
 
-/** Whether the element's transform declares a step the exchange refuses to run
- * a fan-out for -- the rule behind the "not supported" marker, and the reason a
- * swap leaves that marker on its declaring element. */
+/** Whether the element's transform declares a step that expands its value into
+ * several match candidates -- the rule behind the "multiple" marker, and, where
+ * the strategy refuses such an exchange, behind the "not supported" one. */
 function declaresFanOut(element: LinkageKeyElement): boolean {
   const functions = new Set((element.transform ?? []).map((s) => s.function));
   return FAN_OUT_FUNCTION_NAMES.some((name) => functions.has(name));
@@ -827,9 +849,13 @@ function declaresFanOut(element: LinkageKeyElement): boolean {
 /**
  * The terse informative marker for a key element's collapsed-header entry.
  *
- * A rule the exchange refuses outright is named as one ("not supported", today
- * the fan-out family) and outranks every marker below: no matching of any breadth
- * happens under it, so naming a breadth would describe a run that does not occur.
+ * A rule the exchange refuses outright is named as one ("not supported") and
+ * outranks every marker below: no matching of any breadth happens under it, so
+ * naming a breadth would describe a run that does not occur. The fan-out family
+ * is that case under a strategy that matches one value per record; under
+ * single-pass, which matches the whole candidate set, the same element earns the
+ * breadth marker "multiple" instead -- `fanOutMatches` is which of the two the
+ * agreed strategy makes true.
  *
  * The marker is undefined when the element matches exactly or only canonicalizes
  * its value (case, whitespace, accents, affixes, padding, and a `parse_date` that merely
@@ -873,26 +899,27 @@ function declaresFanOut(element: LinkageKeyElement): boolean {
  *
  * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
  * header is deliberately terse, so an element carrying more than one rule shows
- * just the first -- the refused "not supported" rule ranks first, then the
- * maximal-breadth "any date" collapse, then the other effect-named rules, then
- * the directly-named ones -- while its complete rule set is carried on
- * {@link InvitationKeySummary.elements} for the
- * renderer's per-key detail. The element stays flagged either way.
+ * just the first -- the fan-out rule ranks first, whichever of its two markers it
+ * earns, then the maximal-breadth "any date" collapse, then the other
+ * effect-named rules, then the directly-named ones -- while its complete rule set
+ * is carried on {@link InvitationKeySummary.elements} for the renderer's per-key
+ * detail. The element stays flagged either way.
  */
 function elementBreadthMarker(
   element: LinkageKeyElement,
+  fanOutMatches: boolean,
 ): Displayable | undefined {
   const steps = element.transform ?? [];
   const functions = new Set(steps.map((s) => s.function));
-  // A rule the exchange refuses outright outranks every breadth marker below,
-  // including the maximal-breadth "any date" collapse and the dead-pipeline
-  // suppression: no matching of any breadth happens, so naming a breadth would
-  // describe a run that does not occur. Fan-out is that case today -- core
-  // refuses a declared `split_on` before the exchange runs
-  // (assertFanOutImplemented) rather than matching on the candidate set a
-  // splitting record realizes -- and the glossary line for the step states the
-  // refusal.
-  if (declaresFanOut(element)) return displayText`not supported`;
+  // Fan-out outranks every marker below, including the maximal-breadth "any
+  // date" collapse and the dead-pipeline suppression, in both of its cases. Where
+  // the strategy matches the candidate set a splitting record realizes, the
+  // element matches on several values at once, which is a broader breadth than
+  // any single-valued rule below could name. Where it does not, core refuses the
+  // exchange before it runs (assertFanOutImplemented), so no matching of any
+  // breadth happens and naming one would describe a run that does not occur.
+  if (declaresFanOut(element))
+    return fanOutMatches ? displayText`multiple` : displayText`not supported`;
   // An element whose pipeline produces no value for ANY record matches nothing,
   // not more -- the opposite of a broadening, and a narrowing-to-empty the separate
   // dead-key advisory surfaces -- so it earns no marker, whatever rule a later step
@@ -942,10 +969,13 @@ function elementBreadthMarker(
  * reference to a human-readable label and surfacing every non-default matching
  * rule. `fieldByName` maps a field `name` to its semantic type; an element or
  * swap reference that does not resolve falls back to the sanitized raw string.
+ * `fanOutMatches` is whether the agreed strategy matches a record's whole
+ * candidate set, which decides both fan-out markers below.
  */
 function summarizeKey(
   key: LinkageKey,
   fieldByName: Map<string, LinkageField["type"]>,
+  fanOutMatches: boolean,
 ): InvitationKeySummary {
   const labelForField = (fieldName: string): Displayable => {
     const type = fieldByName.get(fieldName);
@@ -1030,17 +1060,27 @@ function summarizeKey(
         // element's header entry shows its partner's marker. This is exact for
         // every configuration (one marker, two equal, two different, transform or
         // fuzzy), since the whole element moves; a same-marker pair swaps to an
-        // identical header, and a no-marker pair to the bare labels. The one
-        // exception is a refused rule: "not supported" names a step the operator
-        // has to find and remove, and the step sits in the element that DECLARES
-        // it, whichever field that element reads on a receiver. Re-attribution
-        // describes what a run does to each field, and a refused key has no run to
-        // describe, so a fan-out anywhere in the pair leaves both markers on their
-        // declaring elements rather than pointing the operator at a field carrying
-        // no such step.
-        if (!declaresFanOut(first) && !declaresFanOut(second)) {
-          headerMarkerOverride.set(first, elementBreadthMarker(second));
-          headerMarkerOverride.set(second, elementBreadthMarker(first));
+        // identical header, and a no-marker pair to the bare labels. A fan-out
+        // that MATCHES re-attributes like any other rule: the element's
+        // candidates are what the partner's field is matched on, which is what
+        // the marker describes. The one exception is a refused rule: "not
+        // supported" names a step the operator has to find and remove, and the
+        // step sits in the element that DECLARES it, whichever field that element
+        // reads on a receiver. Re-attribution describes what a run does to each
+        // field, and a refused key has no run to describe, so a refused fan-out
+        // anywhere in the pair leaves both markers on their declaring elements
+        // rather than pointing the operator at a field carrying no such step.
+        const refusedFanOut =
+          !fanOutMatches && (declaresFanOut(first) || declaresFanOut(second));
+        if (!refusedFanOut) {
+          headerMarkerOverride.set(
+            first,
+            elementBreadthMarker(second, fanOutMatches),
+          );
+          headerMarkerOverride.set(
+            second,
+            elementBreadthMarker(first, fanOutMatches),
+          );
         }
         // The expanded detail lists each element's transforms under its DECLARED
         // field, so a re-attributed header marker has no anchor there unless the
@@ -1074,7 +1114,7 @@ function summarizeKey(
     const label = compactLabelForField(element.field);
     const marker = headerMarkerOverride.has(element)
       ? headerMarkerOverride.get(element)
-      : elementBreadthMarker(element);
+      : elementBreadthMarker(element, fanOutMatches);
     const entry =
       marker !== undefined ? displayText`${label} (${marker})` : label;
     if (seenHeaderFields.has(entry)) continue;
@@ -1194,6 +1234,12 @@ export function summarizeInvitation(
   // them (matching is currently hard-wired to one-to-one, and fuzzy expansion is
   // unimplemented). The *Applied flags below carry that gap to the renderer; the
   // displayed terms are what the acceptor agrees to.
+  // Which of the two fan-out registers this invitation is in: the strategy that
+  // matches a candidate set, or one that refuses the terms outright. Read once
+  // here so the element markers, the key summaries and the consent fact a surface
+  // renders all follow the same verdict.
+  const fanOutMatches = terms.linkageStrategy === "single-pass";
+
   const summary: InvitationSummary = {
     invitingParty: redactAndSanitizeForDisplay(terms.identity),
     algorithm: terms.algorithm,
@@ -1202,7 +1248,11 @@ export function summarizeInvitation(
     inviterSharesResult: terms.output.shareWithPartner,
     deduplicate: terms.deduplicate,
     deduplicateApplied: APPLIED_SETTINGS.deduplicate,
-    linkageKeys: terms.linkageKeys.map((key) => summarizeKey(key, fieldByName)),
+    fansOut: terms.linkageKeys.some((key) => key.elements.some(declaresFanOut)),
+    fanOutApplied: fanOutMatches,
+    linkageKeys: terms.linkageKeys.map((key) =>
+      summarizeKey(key, fieldByName, fanOutMatches),
+    ),
     matchedFields,
     linkageFields,
     // Narrowed to the one value a surface may state, over both grounds that put

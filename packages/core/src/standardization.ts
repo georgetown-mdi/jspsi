@@ -672,28 +672,30 @@ const quotedFanOutFunctionNames = FAN_OUT_FUNCTION_NAMES.map(
   (name) => `"${name}"`,
 ).join(", ");
 
-// The recovery step both fan-out refusals close on. Named separately only
-// because the two reach it from different openings (a declared step versus a
-// record that actually expanded), not because they differ in what to do.
-const FAN_OUT_RECOVERY =
-  `Remove the ${quotedFanOutFunctionNames} step from the standardization ` +
-  "and from every linkage-key element transform, or wait for fan-out support " +
-  "before running.";
+// The recovery the DECLARED-step refusal closes on: the strategy that matches a
+// candidate set, or no candidate set at all. Named separately because the
+// refusal's two surfaces share it while differing in error class.
+const FAN_OUT_STRATEGY_RECOVERY =
+  "Agree linkage terms whose linkage_strategy is single-pass, or remove the " +
+  `${quotedFanOutFunctionNames} step from the standardization and from every ` +
+  "linkage-key element transform.";
 
 // The message both DECLARED-step refusals carry, raised before the exchange
 // runs. `functionName` is matched against FAN_OUT_FUNCTION_NAMES before it
-// reaches here, so the message carries a fixed literal, never partner free text.
-// The two declaring surfaces share the wording and differ only in error class,
-// because they differ in whose content the fault is -- see
-// assertFanOutImplemented.
+// reaches here, so the message carries a fixed literal, never partner free text;
+// the strategy the terms actually name is deliberately not interpolated, since
+// nothing narrows it to a schema literal at this boundary. The two declaring
+// surfaces share the wording and differ only in error class, because they differ
+// in whose content the fault is -- see assertFanOutImplemented.
 function fanOutDeclaredMessage(functionName: string): string {
   return (
-    "fan-out matching is not yet implemented, but these transforms declare a " +
+    "fan-out matching runs under the single-pass linkage strategy only, but " +
+    "these linkage terms name another and these transforms declare a " +
     `"${functionName}" step: it expands one value into several match ` +
-    "candidates, while matching runs on a single value per record. A record " +
-    "whose value actually splits would abort the run the moment it reached a " +
-    "matching strategy rather than match one key per candidate, so the " +
-    `exchange is refused up front instead. ${FAN_OUT_RECOVERY}`
+    "candidates, while every other strategy matches a single value per record. " +
+    "A record whose value actually splits would abort the run the moment it " +
+    "reached a matching round rather than match one key per candidate, so the " +
+    `exchange is refused up front instead. ${FAN_OUT_STRATEGY_RECOVERY}`
   );
 }
 
@@ -709,19 +711,25 @@ function fanOutDeclaredMessage(functionName: string): string {
  * width checks (`link.ts`), which are a different refusal on the same class of
  * fault: an expansion the declared factors do not account for.
  *
- * Unreachable from a declared fan-out while {@link assertFanOutImplemented} gates
- * every run path, and deliberately a check rather than a comment saying so: it
- * also covers a fan-out function that never made it into
- * {@link FAN_OUT_FUNCTION_NAMES}, and the standardization-authored half that gate
- * cannot see on a prepared exchange assembled outside `prepareForExchange`.
+ * Unreachable from a fan-out the terms declare while {@link
+ * assertFanOutImplemented} gates every run path off single-pass, and
+ * deliberately a check rather than a comment saying so: it also covers a fan-out
+ * function that never made it into {@link FAN_OUT_FUNCTION_NAMES}, and the
+ * standardization-authored half that gate cannot see on a prepared exchange
+ * assembled outside `prepareForExchange`.
  */
 export function fanOutReachedMatchingRefusal(): UsageError {
   return new UsageError(
-    "fan-out matching is not yet implemented, but a transform expanded a " +
-      "record into several match candidates: matching runs on a single value " +
-      "per record, so continuing would drop the record from its linkage key " +
-      "rather than match it on each candidate. The exchange is refused " +
-      `instead. ${FAN_OUT_RECOVERY}`,
+    "a transform expanded a record into several match candidates, but this " +
+      "round matches a single value per record: fan-out matching runs under " +
+      "the single-pass linkage strategy, and there only for a party whose " +
+      "declared linkage terms and standardization account for the expansion. " +
+      "Continuing would drop the record from its linkage key rather than " +
+      "match it on each candidate, so the exchange is refused instead. Remove " +
+      "the step that expands this record's value -- a " +
+      `${quotedFanOutFunctionNames} step under another strategy, a fuzzy ` +
+      "comparison, or a transform that expands one value without being a " +
+      "declared fan-out function.",
   );
 }
 
@@ -1331,8 +1339,8 @@ function noRealizedValues(): RealizedFieldValues {
  * An empty array indicates that the record has no valid value for this field and
  * is excluded from any linkage key that references it. More than one value is a
  * fan-out: {@link buildKeyStrings} crosses every value into the key's candidate
- * set, and an exchange declaring one is refused ahead of the consent copy that
- * would describe it (see {@link assertFanOutImplemented}).
+ * set, which the single-pass strategy matches on and every other one refuses
+ * (see {@link assertFanOutImplemented}).
  */
 export class StandardizedField {
   readonly name: string;
@@ -2072,18 +2080,20 @@ export function assertStandardizationMatchesTerms(
 }
 
 /**
- * Refuse transforms that declare a fan-out step this build will not run, before
- * any matching begins.
+ * Refuse transforms that declare a fan-out step under a linkage strategy that
+ * matches a single value per record, before any matching begins.
  *
- * The single-pass strategy matches a candidate set (docs/spec/PROTOCOL.md,
- * Fan-out matching); the consent and documentation surfaces still describe a
- * build in which no fan-out runs, and the cascade -- the schema default -- has no
- * fan-out realization at all. So the refusal stays blanket rather than narrowing
- * to the cascade: a fan-out term admitted ahead of those surfaces would match
- * records under copy that does not describe what ran, which is the
- * disclosure-fidelity gap this refusal closes, the fan-out sibling of
+ * Fan-out matching is specified for the single-pass strategy and for it alone
+ * (docs/spec/PROTOCOL.md, Fan-out runs under single-pass only), so terms naming
+ * anything else are refused here: the cascade -- the schema default -- has no
+ * fan-out realization, and a candidate set reaching it would be narrowed to less
+ * than the terms declare. The gate is an ALLOWLIST rather than a cascade-named
+ * denylist, so a strategy later added to `LinkageStrategySchema` refuses a
+ * fan-out until it too realizes one. It is the fan-out sibling of
  * `assertAlgorithmImplemented` and `assertDeduplicateImplemented` in
- * `exchange.ts`.
+ * `exchange.ts`, and it runs at the three points those use: when terms are
+ * authored or minted, at the local prepare step, and at the agreed-terms run
+ * boundary.
  *
  * Both authoring surfaces a fan-out step can reach are checked, because both
  * realize a candidate set: a standardization transformation feeds
@@ -2095,6 +2105,12 @@ export function assertStandardizationMatchesTerms(
  * {@link fanOutReachedMatchingRefusal} on the cascade, and on single-pass the
  * declared-width check its table build runs -- both at the point of harm, but
  * after this party's terms have gone on the wire.
+ *
+ * The asymmetry that half carries is why the local surface is refused here at all
+ * rather than left to the strategy: an element-transform fan-out rides the agreed
+ * terms and both parties refuse it in lockstep, while a standardization is
+ * per-party and local, so a partner cannot derive its refusal and would be left
+ * waiting on a run this party is about to abort.
  *
  * The two surfaces carry the same message under DIFFERENT error classes, because
  * they differ in whose content the fault is. A `standardization` is only ever this
@@ -2113,15 +2129,12 @@ export function assertStandardizationMatchesTerms(
  * only the fan-out functions this module recognizes -- a declared name reaches it
  * having already matched one -- so no partner free text is interpolated, and the
  * CLI classifies both as a usage error (exit 64) through the base class.
- *
- * Narrowing this to a cascade-only refusal is what lets a single-pass fan-out
- * run; do it in the same change that trues up the consent copy, which still
- * describes a build where no fan-out matches.
  */
 export function assertFanOutImplemented(
   terms: LinkageTerms,
   standardization?: Standardization,
 ): void {
+  if (terms.linkageStrategy === "single-pass") return;
   for (const transformation of standardization ?? []) {
     const declared = declaredFanOutFunction(transformation.steps);
     if (declared !== undefined)

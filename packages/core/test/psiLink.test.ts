@@ -282,9 +282,9 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
 // Fan-out matching is specified for single-pass and for it alone, so the cascade
 // refuses the record where it would consume it rather than narrowing to one
 // candidate or dropping the record, either of which matches on less than the terms
-// declare. A declared fan-out is refused before the exchange runs
-// (assertFanOutImplemented); this is the same fail-closed behavior at the point of
-// harm, for a candidate set that reached a round anyway.
+// declare. A fan-out declared under the cascade is refused before the exchange
+// runs (assertFanOutImplemented); this is the same fail-closed behavior at the
+// point of harm, for a candidate set that reached a round anyway.
 test("a candidate set reaching the cascade is refused, not narrowed", async () => {
   const withCandidateSet: Array<Array<string | Set<string> | undefined>> = [
     ["A", new Set(["B", "C"])],

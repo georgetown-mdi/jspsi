@@ -1047,7 +1047,7 @@ standardization:
         params:
           values: ["000000000", "123456789", "111111111"]
 
-  - output: last_name_variants   # fan-out: one row -> multiple PSI entries (refused today, see Fan-out below)
+  - output: last_name_variants   # fan-out: one row -> multiple PSI entries (single-pass only, see Fan-out below)
     input: LAST_NAME
     steps:
       - function: to_upper_case
@@ -1063,7 +1063,7 @@ A configuration that authors no `standardization` at all is cleaned by the per-t
 
 When an exchange configuration authors its own `standardization`, that standardization is treated as authoritative: if it contradicts the linkage terms -- a transformation `output` naming no declared linkage field, or a `steps` entry naming an unknown `function` -- it fails closed (the CLI exits 64) with a message naming the offending output or function, rather than warning and proceeding past the contradiction. A direct `exchange`, and any run that mints no invitation, is refused during data preparation, before any credential, terms, or data are sent -- on an unpinned SFTP configuration the first-use host-key probe is the one connection that precedes it, and it presents no credential (see [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#sftp-host-key-verification)); a config-source `psilink invite` is refused at mint time, before the token is disclosed, so an inconsistent configuration never yields an invitation the same config's later `exchange` would reject. A configuration that authors no `standardization` reconstructs the default per-type cleaning from its metadata and terms, so it is unaffected by this check.
 
-A `split_on` step fails closed at the same points, whether it sits in a `standardization` or in a linkage key's element transform: matching on the several values it produces is not implemented, so the exchange is refused rather than run with the narrower matching it would deliver (see [Fan-out (multi-value fields)](#fan-out-multi-value-fields)). The web app closes the same door where an invitation is authored: its cleaning-step menu does not offer the function, and a terms document that declares one -- in a cleaning step or a linkage key's element transform -- blocks generation and is refused at the mint, so no invitation is issued for an exchange that is already refused.
+A `split_on` step fails closed at the same points under any `linkage_strategy` but `single-pass`, whether it sits in a `standardization` or in a linkage key's element transform: matching on the several values it produces runs under single-pass alone, so the exchange is refused rather than run with the narrower matching the other strategy would deliver (see [Fan-out (multi-value fields)](#fan-out-multi-value-fields)). The web app authors no `split_on` at all: its cleaning-step menu does not offer the function, and a terms document that declares one -- in a cleaning step or a linkage key's element transform -- blocks generation and is refused at the mint, whatever strategy it names. A fan-out is therefore authored in a configuration file, as the example above does, and run with `psilink exchange` or minted with `psilink invite`.
 
 ### Transformation fields
 
@@ -1096,13 +1096,13 @@ A step may produce `null` to signal that the record has no valid value for this 
 
 ### Fan-out (multi-value fields)
 
-> **Not yet implemented:** matching on the values `split_on` produces is not implemented, and an exchange whose standardization or linkage-key transforms declare `split_on` is refused before it runs -- a splitting row's several values have no round to enter, so running it would abort rather than match each value. Fan-out is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). The description below is the intended design.
-
 The `split_on` function produces `set<string>` instead of a single `string`. When a transformation ends with a set, the field carries multiple candidate values. Each value generates a separate PSI entry for the row, but all entries retain the original row identifier so that a match resolves back to the source row.
 
 **Cross-product**: when a linkage key references multiple fan-out fields, the key strings are the cartesian product of those fields' value lists. A `split_on` on both `first_name` and `last_name` with two parts each produces four key strings per row. The total count can grow quickly, so it is capped: a row producing more than 20 candidate values for one linkage key contributes none of them to that key's round -- it sits that key out exactly as a row with no value does, remains eligible for later keys, and the drop is warned. The cap is what keeps the exchange's frame and memory limits derivable from the record counts the two parties exchange; it is specified, with that arithmetic, in [PROTOCOL.md](spec/PROTOCOL.md#fan-out-matching-multi-value-key-candidates).
 
-**`single-pass` only**: fan-out runs under [`linkage_strategy: single-pass`](#linkage_termslinkage_strategy). Terms that declare a `split_on` under the default `cascade` are refused -- when authored or minted into an invitation, at data preparation, and again once both parties' terms are agreed -- rather than run with matching on one candidate. Choosing fan-out therefore also means choosing single-pass, whose larger disclosure (the receiver sees the sender's full per-key value structure) and tighter dataset ceiling are described under that term.
+**`single-pass` only**: fan-out runs under [`linkage_strategy: single-pass`](#linkage_termslinkage_strategy). Terms that declare a `split_on` under the default `cascade` are refused -- when authored or minted into an invitation, at data preparation, and again once both parties' terms are agreed -- rather than run with matching on one candidate. Choosing fan-out therefore also means choosing single-pass, whose larger disclosure (the receiver sees the sender's full per-key value structure) and tighter dataset ceiling are described under that term. A fan-out key also costs 20 toward that ceiling in place of 1, so a template with one fan-out key carries proportionally fewer records; the arithmetic is in [PROTOCOL.md](spec/PROTOCOL.md#the-width-bound-a-per-record-key-candidate-cap).
+
+**What the accepting party is told**: an invitation whose linkage keys split a value marks each such key element as matching on several values, and states the consequences the acceptor consents to -- matching per candidate, the record leaving the later keys once any candidate matches, and the candidate grouping the single-pass receiver is handed. Under any other strategy that same invitation states the refusal instead. A fan-out authored in your own `standardization` is not on that surface at all: a standardization is per-party and local, and no invitation carries one.
 
 **Match resolution for fan-out**: when several PSI entries derived from the same row match in one linkage key's round, the parties do NOT communicate to resolve it. Both derive the same record-level pairing locally from what the exchange already carries: each round's matches are lifted to record pairs, a deterministic rule accepts at most one pair per record, and every record whose candidates matched at all leaves the candidate set for later keys -- so an individual matches once or not at all, and one whose evidence was contradictory ends unmatched rather than matching on a less precise key. The rule, its ordering, and the disclosure fan-out adds are specified in [PROTOCOL.md](spec/PROTOCOL.md#fan-out-matching-multi-value-key-candidates).
 
@@ -1154,7 +1154,7 @@ A `parse_date` step whose `input_format` cannot supply a complete date -- for ex
 
 #### Fan-out
 
-> **Not yet implemented:** matching on fan-out values is not implemented, so an exchange declaring `split_on` is refused before it runs; see [Fan-out (multi-value fields)](#fan-out-multi-value-fields) and [ROADMAP.md](ROADMAP.md).
+> **`single-pass` only:** matching on the values `split_on` produces runs under [`linkage_strategy: single-pass`](#linkage_termslinkage_strategy); an exchange declaring one under any other strategy is refused before it runs. See [Fan-out (multi-value fields)](#fan-out-multi-value-fields).
 
 | Function | Description | Parameters |
 |----------|-------------|------------|

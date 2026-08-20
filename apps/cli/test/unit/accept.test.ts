@@ -34,6 +34,7 @@ import type {
   ConnectionEndpoint,
   ConsentFact,
   InvitationToken,
+  LinkageStrategy,
   LinkageTerms,
   TransformStep,
 } from "@psilink/core";
@@ -122,6 +123,34 @@ function sampleToken(
     sharedSecret: generateSharedSecret(),
     expires,
     connectionEndpoint,
+  };
+}
+
+// A token whose one linkage key splits its element's value into several match
+// candidates: the shape that raises a fan-out consent fact, in whichever of the
+// two registers the strategy puts it.
+function splittingKeyToken(
+  expires: string,
+  linkageStrategy: LinkageStrategy,
+): InvitationToken {
+  const token = sampleToken(expires);
+  return {
+    ...token,
+    linkageTerms: {
+      ...token.linkageTerms,
+      linkageStrategy,
+      linkageKeys: [
+        {
+          name: "last name",
+          elements: [
+            {
+              field: token.linkageTerms.linkageFields[0].name,
+              transform: [{ function: "split_on", params: { delimiter: " " } }],
+            },
+          ],
+        },
+      ],
+    },
   };
 }
 
@@ -1887,6 +1916,38 @@ test("displayInvitation: shows the linkage strategy and, for single-pass, the di
   expect(singlePass).toContain("docs/EXCHANGE_REFERENCE.md");
 });
 
+test("displayInvitation: states what a splitting key does, in the register its strategy puts it in", () => {
+  // A key element that splits its value is matched on each candidate, which is
+  // both a widening and a disclosure -- and under a strategy that matches one
+  // value per record it is a refusal instead. The sentence for each case comes
+  // from core's shared classification, so this prompt and the web consent screen
+  // state the consequence in the same words rather than two accounts of it.
+  const log = getLogger("accept-display-fan-out-test");
+  log.setLevel("silent");
+
+  const matched = renderDisplayInvitation(
+    log,
+    splittingKeyToken(FUTURE(), "single-pass"),
+  );
+  expect(matched).toContain("several values per record (enforced):");
+  expect(matched).toContain(CONSENT_FACTS.fanOutCandidates.note);
+  expect(matched).toContain("(multiple)");
+
+  const refused = renderDisplayInvitation(
+    log,
+    splittingKeyToken(FUTURE(), "cascade"),
+  );
+  expect(refused).toContain("several values per record (enforced):");
+  expect(refused).toContain(CONSENT_FACTS.fanOutRefused.note);
+  expect(refused).toContain("(not supported)");
+
+  // Silent for terms that declare no split, so the line is not a fixture of the
+  // prompt itself.
+  expect(renderDisplayInvitation(log, sampleToken(FUTURE()))).not.toContain(
+    "several values per record",
+  );
+});
+
 test("displayInvitation: represents every consent-relevant linkage term, bar the recorded gaps", () => {
   // Which terms an acceptor's consent turns on is judged once, in core's shared
   // classification, so this prompt and the web consent summary cannot drift on
@@ -2125,7 +2186,25 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
     ...sampleToken(FUTURE()),
     inviterRetainsFiles: true,
   });
-  const rendered = `${acceptorWithheld}\n${inviterWithheld}\n${renderCountOnlyFacts()}\n${retaining}`;
+  // The fan-out pair is the fifth and sixth, for the same reason again: both are
+  // raised by a linkage key that splits its element's value, and which of the two
+  // follows the strategy, so no variation above reaches either.
+  const fanOutMatched = renderDisplayInvitation(
+    log,
+    splittingKeyToken(FUTURE(), "single-pass"),
+  );
+  const fanOutRefused = renderDisplayInvitation(
+    log,
+    splittingKeyToken(FUTURE(), "cascade"),
+  );
+  const rendered = [
+    acceptorWithheld,
+    inviterWithheld,
+    renderCountOnlyFacts(),
+    retaining,
+    fanOutMatched,
+    fanOutRefused,
+  ].join("\n");
 
   // The whole table, rather than a list restated here: a caveat this renderer
   // authored for itself instead of reading is absent from the rendering and fails,

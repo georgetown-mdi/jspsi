@@ -92,12 +92,16 @@ export interface FieldValueCoverage {
   /** Rows examined -- the full parsed row count. */
   total: number;
   /**
-   * Rows whose pipeline yields exactly one matchable key. `null` and an empty `Set`
+   * Rows whose pipeline yields at least one matchable key. `null` and an empty `Set`
    * (value set `[]`) are not a key; an empty STRING is -- it is a participating key
    * element distinct from a dropped value, so an all-`""` field is fully PRODUCED, not
-   * zero coverage. A fan-out `Set` of two or more values is NOT counted: fan-out
-   * matching is not implemented, and core refuses an exchange declaring it rather
-   * than matching such a row, so it produces no matchable key today.
+   * zero coverage. A fan-out `Set` of two or more values counts ONCE, as the single row
+   * it is (so the tally stays bounded by {@link total}): its values cross into the key's
+   * candidate set that the single-pass strategy matches on, so the row is matchable
+   * rather than dropped. A fan-out under any other strategy is refused where the fault
+   * is fixable -- core's `assertFanOutImplemented`, at authoring, at the mint, and at
+   * prepare -- so this readout does not pre-warn for it; counting the row as no
+   * coverage would cry wolf on a field that matches.
    */
   produced: number;
   /** {@link produced} / {@link total} in [0, 1]; 0 when {@link total} is 0. */
@@ -138,9 +142,9 @@ export interface FieldValueCoverage {
 export interface FieldCoverageAccumulator {
   /**
    * Fold one row into every field's tally: for each available field, count the row
-   * as produced iff its pipeline yields exactly one matchable key (an empty STRING
-   * counts; a dropped null/empty-Set, and a multi-value fan-out Set core refuses
-   * to match, do not). Increments the shared row total. A field whose
+   * as produced iff its pipeline yields at least one matchable key (an empty STRING
+   * counts, and a multi-value fan-out Set counts once; a dropped null/empty-Set does
+   * not). Increments the shared row total. A field whose
    * pipeline THROWS on a row degrades to `unavailable` and is no longer evaluated,
    * so one bad row never aborts the sweep (nor, server-side, 400s the whole request).
    */
@@ -153,7 +157,7 @@ export interface FieldCoverageAccumulator {
  * Build a {@link FieldCoverageAccumulator} for `standardization`, compiling each
  * transformation's pipeline once. See {@link FieldCoverageAccumulator} for the
  * one-computation rationale and {@link computeFieldCoverage} for the sweep
- * semantics (empties observed, empty-string counted, fan-out excluded).
+ * semantics (empties observed, empty-string counted, fan-out counted once).
  */
 export function createFieldCoverageAccumulator(
   standardization: Standardization,
@@ -192,10 +196,10 @@ export function createFieldCoverageAccumulator(
         // specific row's value. Degrade that field to unavailable (and stop
         // evaluating it) rather than aborting the whole sweep, matching the old
         // whole-file computeFieldCoverage: server-side one bad row would otherwise
-        // 400 the entire coverage request. One matchable key iff the value set is
-        // exactly one value -- see FieldValueCoverage.produced.
+        // 400 the entire coverage request. A matchable key iff the value set is
+        // non-empty, a fan-out counting once -- see FieldValueCoverage.produced.
         try {
-          if (entry.field.evaluateRow(row).length === 1) entry.produced++;
+          if (entry.field.evaluateRow(row).length > 0) entry.produced++;
         } catch {
           entry.field = null;
           entry.produced = 0;
@@ -217,9 +221,9 @@ export function createFieldCoverageAccumulator(
 
 /**
  * Compute per-field value coverage over the WHOLE row set. For each transformation,
- * runs its pipeline over every row's input column and counts the rows that yield
- * exactly one matchable key (an empty STRING counts; a dropped null/empty-Set, and a
- * multi-value fan-out Set that core refuses to match, do not).
+ * runs its pipeline over every row's input column and counts the rows that yield at
+ * least one matchable key (an empty STRING counts, and a fan-out into several
+ * candidates counts once as the row it is; a dropped null/empty-Set does not).
  *
  * This is a per-field proxy: it measures the field's own standardization pipeline, not
  * a linkage key's element transforms or its cross-field (composite-key) collapse.

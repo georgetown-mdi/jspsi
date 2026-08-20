@@ -1800,12 +1800,12 @@ test("validateInvite: offline config-source refuses a deduplicating term before 
 });
 
 test("validateInvite: offline config-source refuses a fan-out standardization before minting", async () => {
-  // The mint-boundary counterpart of the run-side fan-out refusal (matching runs
-  // on a single value per record, so a splitting record's candidate set has no
-  // round to enter): a config whose hand-authored standardization declares
-  // `split_on` must
-  // be refused BEFORE the token is disclosed, so `invite` never mints an
-  // invitation the config's own `psilink exchange` would then reject (exit 64).
+  // The mint-boundary counterpart of the run-side fan-out refusal (these default
+  // terms are cascade, which matches one value per record, so a splitting
+  // record's candidate set has no round to enter): a config whose hand-authored
+  // standardization declares `split_on` must be refused BEFORE the token is
+  // disclosed, so `invite` never mints an invitation the config's own `psilink
+  // exchange` would then reject (exit 64).
   // The standardization is otherwise consistent with the terms, so it passes the
   // earlier consistency gate and reaches this one. An OperatorConfigError: a
   // standardization is only ever this party's own authoring.
@@ -1871,6 +1871,55 @@ test("validateInvite: offline config-source refuses a fan-out element transform 
     await expect(invite()).rejects.toBeInstanceOf(UsageError);
     await expect(invite()).rejects.not.toBeInstanceOf(OperatorConfigError);
     await expect(invite()).rejects.toThrow(/split_on/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: offline config-source mints a fan-out under single-pass", async () => {
+  // The admitted half of the same gate, and the path an operator is sent to: the
+  // web editor authors no fan-out, so a config naming single-pass is where one is
+  // written, and the mint must carry it rather than refuse it. Both authoring
+  // surfaces at once -- the config's own standardization and a key's element
+  // transform.
+  const base = defaultTerms();
+  const [firstKey, ...restKeys] = base.linkageKeys;
+  const terms: LinkageTerms = {
+    ...base,
+    linkageStrategy: "single-pass",
+    linkageKeys: [
+      {
+        ...firstKey,
+        elements: firstKey.elements.map((element, i) =>
+          i === 0
+            ? {
+                ...element,
+                transform: [
+                  { function: "split_on", params: { delimiter: " " } },
+                ],
+              }
+            : element,
+        ),
+      },
+      ...restKeys,
+    ],
+  };
+  const { dir, configPath, keyPath } = withConfig(terms, [
+    {
+      output: "last_name",
+      input: "last_name",
+      steps: [{ function: "split_on", params: { delimiter: " " } }],
+    },
+  ]);
+  try {
+    await expect(
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      }),
+    ).resolves.toBeDefined();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

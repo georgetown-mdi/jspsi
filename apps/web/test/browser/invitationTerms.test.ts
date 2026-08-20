@@ -2157,6 +2157,62 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
   });
 });
 
+describe("InvitationTerms: matching on several values per record", () => {
+  // A key element that splits its value is matched on each candidate, which
+  // widens what meets and adds a disclosure -- so, like the strategy it is
+  // coupled to, its consequence is always-visible rather than an expand down.
+  // The copy is read from CONSENT_FACTS, the same table the CLI accept prompt
+  // renders, so this asserts the shared sentence rather than a second one.
+  const fanOutTerms = (linkageStrategy: LinkageStrategy): LinkageTerms => ({
+    ...terms,
+    linkageStrategy,
+    linkageKeys: [
+      {
+        name: "LN",
+        elements: [
+          {
+            field: "last_name",
+            transform: [{ function: "split_on", params: { delimiter: " " } }],
+          },
+        ],
+      },
+    ],
+  });
+
+  test("states what a splitting key does where the strategy matches candidates", async () => {
+    renderTerms(fanOutTerms("single-pass"));
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      CONSENT_FACTS.fanOutCandidates.note,
+    );
+    expect((await readyPanel("Other details")).textContent).not.toContain(
+      CONSENT_FACTS.fanOutCandidates.note,
+    );
+  });
+
+  test("states the refusal where the strategy matches one value per record", async () => {
+    renderTerms(fanOutTerms("cascade"));
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      CONSENT_FACTS.fanOutRefused.note,
+    );
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.fanOutCandidates.note,
+    );
+  });
+
+  test("says nothing about candidates for terms that declare no split", async () => {
+    renderTerms(terms);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.fanOutCandidates.note,
+    );
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.fanOutRefused.note,
+    );
+  });
+});
+
 describe("InvitationTerms: a qualifying sentence sits at its headline's visibility level", () => {
   // The consent-integrity invariant this locks in: a sentence that qualifies a
   // headline renders at the SAME visibility level as that headline, never one expand

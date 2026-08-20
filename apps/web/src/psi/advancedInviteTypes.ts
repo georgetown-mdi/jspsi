@@ -33,8 +33,10 @@ import type {
  * step is held back the same way against core's own list rather than an
  * `APPLIED_SETTINGS` flag: the step editor does not offer the family, and a
  * document that carries one -- in a cleaning step or a linkage-key element
- * transform -- blocks generation and is refused at the mint, since core refuses
- * the run it commits to.
+ * transform -- blocks generation and is refused at the mint. That gate is this
+ * editor's own and wider than core's refusal by design: core admits a fan-out
+ * under single-pass, while this editor authors none at any strategy, having no
+ * control on which to weigh a fan-out's consequences for the operator.
  * No payload block is authored into the terms.
  * The output direction is settable now that one-sided output is honored
  * end-to-end (the acceptor mirrors the inviter's output and the exchange withholds

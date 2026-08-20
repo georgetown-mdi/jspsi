@@ -4,6 +4,11 @@ import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../src/participant";
 import {
+  prepareForExchange,
+  runExchange,
+  type ExchangeResult,
+} from "../src/exchange";
+import {
   decodeRaggedIndexTable,
   linkViaSinglePassPSI,
   type SinglePassSessionBounds,
@@ -28,9 +33,11 @@ import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 const psiLibrary = await PSI();
 
 // Fan-out matching is specified for single-pass and for it alone
-// (docs/spec/PROTOCOL.md, Fan-out matching). These drive linkViaSinglePassPSI
-// directly, because the interim refusal still stops a declared fan-out before
-// prepareForExchange or runExchange would reach a round.
+// (docs/spec/PROTOCOL.md, Fan-out matching). Most of these drive
+// linkViaSinglePassPSI directly, over candidate sets handed to it, so a rule can
+// be exercised on the exact shape it governs; the end-to-end section at the
+// bottom runs the whole path instead -- authored terms, key realization, the
+// terms exchange, and the resolved association table.
 
 // --- the declared effective key count ----------------------------------------
 // A party's per-key candidate factors, summed: the authenticated number the slot
@@ -601,4 +608,127 @@ test("rows inside the per-record bound that overrun the declared slots are refus
     /built 40 candidate value slot\(s\) across 2 linkage key\(s\) and 1 record\(s\), more than the 21/,
   );
   await expect(run).rejects.toThrow(UsageError);
+});
+
+// --- end to end: authored terms through to the association table -------------
+// The rules above are exercised on candidate sets handed straight to the
+// strategy. These run the same rules from the other end: linkage terms declaring
+// a `split_on` element transform, prepared over raw rows by prepareForExchange,
+// exchanged by runExchange over a message pipe, and resolved into the table each
+// party is handed. Single-pass only -- every other strategy refuses a declared
+// fan-out at terms validation (assertFanOutImplemented).
+
+// Two keys, most precise first. The last-name element splits on the space the
+// default name pipeline leaves where a hyphen was ("Smith-Jones" standardizes to
+// "SMITH JONES"), so a hyphenated surname enters its round as both parts; the
+// first-name key is the less precise round the removal rule protects.
+const fanOutExchangeTerms: LinkageTerms = {
+  version: "1.0.0",
+  identity: "Fan-out Test",
+  date: "2026-01-01",
+  algorithm: "psi",
+  linkageStrategy: "single-pass",
+  output: { expectsOutput: true, shareWithPartner: true },
+  deduplicate: false,
+  linkageFields: [
+    { name: "last_name", type: "last_name" },
+    { name: "first_name", type: "first_name" },
+  ],
+  linkageKeys: [
+    {
+      name: "last name",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "split_on", params: { delimiter: " " } }],
+        },
+      ],
+    },
+    { name: "first name", elements: [{ field: "first_name" }] },
+  ],
+};
+
+const initiatorRows = [
+  // Matches through one of its two candidates: no partner record holds the whole
+  // "SMITH JONES". Its first name matches a DIFFERENT partner record in the
+  // later round, which is the removal rule's fixture.
+  { last_name: "Smith-Jones", first_name: "Alice" },
+  { last_name: "Brown", first_name: "Carol" },
+  // Reaches the second round with its candidacy intact, so the round the
+  // removal keeps the first record out of is one that demonstrably runs.
+  { last_name: "Taylor", first_name: "Frank" },
+];
+
+const responderRows = [
+  { last_name: "Jones", first_name: "Zoe" },
+  // The record the first initiator row would meet on first name, had matching
+  // on a last-name candidate not taken it out of that round.
+  { last_name: "Green", first_name: "Alice" },
+  { last_name: "Brown", first_name: "Dan" },
+  { last_name: "Wilson", first_name: "Frank" },
+];
+
+async function runFanOutExchangeEndToEnd(): Promise<
+  [ExchangeResult, ExchangeResult]
+> {
+  const [initiatorConn, responderConn] = createMessagePipe();
+  const prepare = (identity: string, rows: Array<Record<string, string>>) =>
+    prepareForExchange(
+      { linkageTerms: { ...fanOutExchangeTerms, identity } },
+      identity,
+      rows,
+      ["last_name", "first_name"],
+    );
+  return Promise.all([
+    runExchange(
+      initiatorConn,
+      "initiator",
+      prepare("Initiator Co", initiatorRows),
+      { psiLibrary },
+    ),
+    runExchange(
+      responderConn,
+      "responder",
+      prepare("Responder Co", responderRows),
+      { psiLibrary },
+    ),
+  ]);
+}
+
+test("a split_on configuration matches on each candidate, from authored terms to the table", async () => {
+  const [initiator, responder] = await runFanOutExchangeEndToEnd();
+
+  // Initiator row 0 matches responder row 0 on the "JONES" candidate its surname
+  // split off -- a pairing no single-valued realization of that surname
+  // produces. Rows 1 and 2 are the ordinary single-valued matches beside it, one
+  // per key round.
+  expect(initiator.associationTable).toEqual([
+    [0, 1, 2],
+    [0, 2, 3],
+  ]);
+  // The same three pairs from the other side, each party naming its own rows
+  // first.
+  expect(responder.associationTable).toEqual([
+    [0, 2, 3],
+    [0, 1, 2],
+  ]);
+});
+
+test("a record that matched on a candidate leaves candidacy for the later key", async () => {
+  const [initiator] = await runFanOutExchangeEndToEnd();
+
+  // Initiator row 0 and responder row 1 share a first name, which is the second
+  // key's whole content, so the only thing keeping them apart is the removal
+  // rule: row 0 appeared in the first round's candidate pairs and left candidacy
+  // for every round after it.
+  const table = initiator.associationTable;
+  expect(table).toBeDefined();
+  const [localRows, partnerRows] = table!;
+  expect(partnerRows[localRows.indexOf(0)]).toBe(0);
+  expect(partnerRows).not.toContain(1);
+  // The removed record's first-name value really is the one the other party
+  // holds, so this is the rule biting rather than a fixture that never met.
+  expect(initiatorRows[0].first_name).toBe(responderRows[1].first_name);
+  // And the later round did run: row 2 is matched there, on first name alone.
+  expect(localRows).toContain(2);
 });

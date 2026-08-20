@@ -487,12 +487,14 @@ describe("generateInvitation", () => {
     ).rejects.toThrow(/does not transmit/);
   });
 
-  // The mint-boundary fan-out backstop. The editor's Generate gate names the
-  // missing capability on the offending control, so these hand-built shapes stand
-  // in for a caller that reaches the mint without it -- and pin that the refusal
-  // is the mint's, not the run's, so no invitation for an exchange core already
-  // refuses ever reaches a partner. The declaring function comes from core's list
-  // rather than a literal, so a fan-out function added there is covered here.
+  // The mint-boundary fan-out backstop, over the default terms, which are
+  // cascade -- the strategy that matches one value per record and so refuses a
+  // fan-out. The editor's Generate gate names the missing capability on the
+  // offending control, so these hand-built shapes stand in for a caller that
+  // reaches the mint without it -- and pin that the refusal is the mint's, not
+  // the run's, so no invitation for an exchange core already refuses ever reaches
+  // a partner. The declaring function comes from core's list rather than a
+  // literal, so a fan-out function added there is covered here.
   const [fanOutFunction] = FAN_OUT_FUNCTION_NAMES;
   const fanOutStep = { function: fanOutFunction, params: { delimiter: "-" } };
 
@@ -521,7 +523,9 @@ describe("generateInvitation", () => {
         linkageTerms: fanning,
         metadata,
       }),
-    ).rejects.toThrow(/fan-out matching is not yet implemented/);
+    ).rejects.toThrow(
+      /fan-out matching runs under the single-pass linkage strategy only/,
+    );
   });
 
   test("refuses to mint when the authored standardization fans out", async () => {
@@ -537,7 +541,9 @@ describe("generateInvitation", () => {
           { output: "last_name", input: "last_name", steps: [fanOutStep] },
         ],
       }),
-    ).rejects.toThrow(/fan-out matching is not yet implemented/);
+    ).rejects.toThrow(
+      /fan-out matching runs under the single-pass linkage strategy only/,
+    );
   });
 
   // A linkable CSV (ssn + names + dob give satisfiable keys) that ALSO carries
