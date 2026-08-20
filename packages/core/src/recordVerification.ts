@@ -286,10 +286,12 @@ const RESULT_VALUE_COLUMN_START = 2;
  * duplicate value in the identifier column makes a matched row's index ambiguous
  * (the first occurrence is used), and a result referencing an identifier the
  * supplied input does not carry means the input does not match this exchange. A
- * third has no warning to give: a result value cell cannot distinguish a
+ * third cannot be seen from here: a result value cell cannot distinguish a
  * committed empty string from a committed null (the result wrote both as an
  * empty cell), so a genuinely-null received cell reproduces as an empty string
- * and its commitment reports a mismatch with nothing naming that cause. All are
+ * and its commitment mismatches. Nothing in the re-supplied files tells those two
+ * apart, so it is named as a possible cause once the verdict is in hand rather
+ * than guessed at here -- see {@link reproductionMismatchCauses}. All are
  * limitations of reproducing from the human-readable result.
  */
 export function reconstructCommittedData(
@@ -391,6 +393,68 @@ export function reconstructCommittedData(
   data.partnerPayloadReceived = partnerPayloadReceived as CanonicalValue;
 
   return { data, warnings };
+}
+
+function isCanonicalObject(
+  value: CanonicalValue | undefined,
+): value is { readonly [key: string]: CanonicalValue } {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// Whether a re-supplied payload carries an empty-string cell. The value arrives
+// as a CanonicalValue -- the domain the commitment opened over, not a parsed
+// CommittedPayload -- so its rows are read structurally: a caller may hand this
+// anything it handed verifyExchangeRecord.
+function carriesEmptyCell(value: CanonicalValue | undefined): boolean {
+  if (!isCanonicalObject(value)) return false;
+  const rows = value["rows"];
+  if (!Array.isArray(rows)) return false;
+  return rows.some(
+    (row) => Array.isArray(row) && row.some((cell) => cell === ""),
+  );
+}
+
+/**
+ * The reproduction limitations that could themselves account for a mismatch in
+ * `report`, as notes for the same sink a verification consumer renders the
+ * {@link ReconstructedData} warnings on. Empty when nothing in the verdict is
+ * explained by one -- most runs.
+ *
+ * One limitation qualifies today. A result value cell cannot distinguish a
+ * committed empty string from a committed null: the result writes both as an
+ * empty cell and the reader hands both back as `""`, so a partner value that was
+ * null when it was committed reproduces as an empty string and
+ * `partnerPayloadReceived` mismatches with nothing in the re-supplied files
+ * naming the cause. Neither half of the condition is worth saying on its own --
+ * with no empty cell the null explanation is impossible, and with no mismatch
+ * there is nothing to explain -- so the note is raised only where both hold, and
+ * an operator reading it is reading it about their own verdict.
+ *
+ * Only `partnerPayloadReceived` is subject to it. `localPayloadSent` re-supplies
+ * from the retained INPUT file, which the send side read through the same reader:
+ * an empty cell was `""` at commit time and reads `""` again, and an absent
+ * column was null both times, so an empty cell there is reproduced rather than
+ * guessed at.
+ *
+ * Call it after {@link verifyExchangeRecord} with the same `data` that was passed
+ * in; it reads the report and that data only, and never contradicts a verdict --
+ * a mismatch stays a mismatch, since the record cannot say which value was
+ * committed.
+ */
+export function reproductionMismatchCauses(
+  report: RecordVerificationReport,
+  data: Partial<Record<CommitmentName, CanonicalValue>> = {},
+): string[] {
+  if (report.commitments.partnerPayloadReceived !== "mismatch") return [];
+  if (!carriesEmptyCell(data.partnerPayloadReceived)) return [];
+  return [
+    "the re-supplied received payload carries empty cells, and a result cell " +
+      "cannot distinguish a committed empty string from a committed null -- " +
+      "the result writes both as an empty cell. A partner-sent null in one of " +
+      "those cells would reproduce here as an empty string and report this " +
+      "mismatch; the commitment covers the whole payload, so this is one " +
+      "possible cause, not a confirmation that nothing else differs.",
+  ];
 }
 
 // --- Re-supply input shaping -------------------------------------------------
