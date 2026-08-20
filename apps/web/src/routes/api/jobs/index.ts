@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import {
   ExchangeBusyError,
+  JobRendezvousRetainRequiredError,
   JobRendezvousUnavailableError,
   SftpUnavailableError,
 } from "@jobs/jobManager";
@@ -39,7 +40,8 @@ import { jobCreateIntentSchema } from "@jobs/intent";
  * an unparseable one a 400) before schema validation runs.
  *
  * The unavailable rejection is EMPTY-bodied: an sftp intent with no connection
- * authored (or a filedrop intent with no rendezvous directory) is 400. The busy
+ * authored, a filedrop intent with no rendezvous directory, and a filedrop intent
+ * a split-provisioned appliance cannot run without retain mode are each 400. The busy
  * rejection is a 409 carrying only the occupying exchange's id (nothing else about
  * it), disclosed to the same-origin operator on their own loopback appliance.
  */
@@ -69,11 +71,13 @@ export const Route = createFileRoute("/api/jobs/")({
           if (error instanceof ExchangeBusyError)
             return jobJsonResponse({ id: error.activeJobId }, 409);
           // A mounted input that names no regular file, a filedrop intent with no
-          // rendezvous directory configured, or an sftp intent with no connection
-          // authored is a 400 (the manager left no workdir behind).
+          // rendezvous directory configured, a filedrop intent on a
+          // split-provisioned appliance without retain mode, or an sftp intent with
+          // no connection authored is a 400 (the manager left no workdir behind).
           if (
             error instanceof JobInputNotFoundError ||
             error instanceof JobRendezvousUnavailableError ||
+            error instanceof JobRendezvousRetainRequiredError ||
             error instanceof SftpUnavailableError
           )
             return jobEmptyResponse(400);

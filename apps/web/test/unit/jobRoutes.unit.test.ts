@@ -880,6 +880,57 @@ describe("POST /api/jobs rejects a concurrent filedrop job", () => {
   });
 });
 
+describe("POST /api/jobs on a split-provisioned appliance", () => {
+  /** The retain trio a split rendezvous requires, as the console's file-handling
+   * card resolves it before it POSTs. */
+  const RETAIN_OPTIONS = {
+    retainFiles: true,
+    timestampInFilename: true,
+    locklessRendezvous: true,
+  };
+
+  /** Seed the global manager with both rendezvous legs mounted, so every filedrop
+   * create it serves carries the inbound/outbound pair. */
+  function enableSplitRendezvous(): void {
+    const root = tempDataRoot("routes-split");
+    roots.push(root);
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rvzRoot(),
+      jobRendezvousOutboundDir: rvzRoot(),
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+  }
+
+  test("a filedrop intent without retain mode is an empty-bodied 400", async () => {
+    enableSplitRendezvous();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    // The documented rejection for the precondition, not the generic 500 a
+    // compose failure would be: the browser reads a 400 as an actionable
+    // local-configuration fault and says which control to turn on.
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe("");
+  });
+
+  test("the same intent with retain mode is created (so the 400 was the retain gate)", async () => {
+    enableSplitRendezvous();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent({ options: RETAIN_OPTIONS })),
+      params: {},
+    })) as Response;
+    // Only the file-handling options differ from the 400 above, so that 400 was
+    // the split rendezvous meeting a run that would not keep its files.
+    expect(response.status).toBe(201);
+  });
+});
+
 describe("DELETE frees the slot for a new POST", () => {
   test("a terminal exchange is 409 until DELETE, then a POST succeeds", async () => {
     const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
