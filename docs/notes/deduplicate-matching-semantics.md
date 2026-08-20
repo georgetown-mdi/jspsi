@@ -1,5 +1,5 @@
 ---
-title: "Deduplicate: Which Side Fans, and How Far the Multiplicity Reaches"
+title: "Deduplicate: Which Side Carries the Multiplicity, and How Far It Reaches"
 ---
 
 # Deduplicating matching semantics: the direction, the axis, and the round boundary
@@ -10,7 +10,7 @@ This is design rationale. Nothing here binds an implementation; the normative ro
 
 ## The problem
 
-`deduplicate` is schema-complete, exchanged, consented to, and refused at run time. What it was not was specified: the protocol document carried design intent rather than rows, and the surfaces describing the term disagreed about which DIRECTION it fans -- a field comment reading "this party's records may match more than one of the partner's" against an operator-facing description of grouping one's own inputs. Those are opposite exchanges. Since nothing runs, the disagreement costs nothing at run time; it would have cost a great deal at implementation time, when two surfaces claiming opposite cardinalities are read as requirements.
+`deduplicate` is schema-complete, exchanged, consented to, and refused at run time. What it was not was specified: the protocol document carried design intent rather than rows, and the surfaces describing the term disagreed about which DIRECTION the multiplicity runs -- a field comment reading "this party's records may match more than one of the partner's" against an operator-facing description of grouping one's own inputs. Those are opposite exchanges. Since nothing runs, the disagreement costs nothing at run time; it would have cost a great deal at implementation time, when two surfaces claiming opposite cardinalities are read as requirements.
 
 ## Why the declaring party is the "many" side
 
@@ -61,6 +61,7 @@ That closure is a separate piece of work with its own disclosure question, so th
 ## What stays open
 
 - **Cross-round accumulation**, above: the rule taken is the conservative one, and the case for the other is a real one.
+- **Binding the many side's per-value multiplicity.** The spec states the limit ([Deriving one table from the exchanged association maps](../spec/PROTOCOL.md#deriving-one-table-from-the-exchanged-association-maps)): the group size behind a position is that side's self-declaration, where the values-per-record axis binds its comparable quantity against authenticated session state. What authenticated quantity a check could bind the group size against, and what a party overstating a group would gain by it, are for the work that implements the cardinality to settle.
 - **The closure procedure** for `many-to-many`, and what it discloses.
 - **Fan-out combined with a deduplicating cardinality.** The relaxed acceptance clause is specified and the two axes are defined to compose, but no exchange runs both today, and the combination deserves worked cases before it does.
 - **How the grouping is surfaced.** A deduplicating result is several output rows against one partner row; what a result file and a result view make of that is a front-end question this note does not touch.
