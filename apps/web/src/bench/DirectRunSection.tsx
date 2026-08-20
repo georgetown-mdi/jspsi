@@ -7,13 +7,13 @@ import {
   DonePanel,
   DownloadRow,
   FailureAlert,
+  NoResultFileInset,
   RECONNECTING_HEADING,
   ReattachedRunNotice,
   ReattachingNotice,
   RunWarningsAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
-  WithheldResultInset,
   recoveredExchangeHeading,
 } from "./BenchRunSurface";
 import { RecurringHandoff } from "./RecurringHandoff";
@@ -184,8 +184,8 @@ export function DirectRunSection({
       {outputs !== undefined && (
         <>
           <h2>Downloads</h2>
-          {outputs.resultWithheld === true ? (
-            <WithheldResultInset />
+          {outputs.resultsUrl === undefined ? (
+            <NoResultFileInset intersectionCount={outputs.intersectionCount} />
           ) : (
             <DownloadRow
               label="Download result"

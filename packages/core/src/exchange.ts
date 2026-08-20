@@ -1,5 +1,11 @@
 import { getLogger } from "./utils/logger.js";
-import { inferMetadata, isDisclosedToPartner } from "./config/metadata.js";
+import { APPLIED_SETTINGS } from "./appliedSettings.js";
+import {
+  assertCountOnlyTransmitsNoColumn,
+  inferMetadata,
+  isDisclosedToPartner,
+} from "./config/metadata.js";
+import { assertCountOnlyTermsShape } from "./config/linkageTerms.js";
 import { getDefaultLinkageTerms } from "./defaults/linkageTerms.js";
 import { getDefaultStandardization } from "./defaults/standardization.js";
 import {
@@ -15,18 +21,21 @@ import {
 } from "./utils/sanitizeErrorForDisplay.js";
 import type { CSVRow } from "./file.js";
 import { PSIParticipant } from "./participant.js";
-import type { PsiEngine } from "./psiEngine.js";
+import type { PsiEngine, PsiEngineMode } from "./psiEngine.js";
 import {
   exchangeTerms,
   exchangeBootstrapSecret,
+  reportsCountToSender,
   resolveRole,
 } from "./protocolSetup.js";
 import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
 import {
+  linkViaCountOnlyPSI,
   linkViaPSI,
   linkViaSinglePassPSI,
   withholdsSenderAssociationTable,
 } from "./link.js";
+import { InProcessPsiEngine } from "./psiEngine.js";
 import {
   psiElementBounds,
   singlePassDatasetExceedsCap,
@@ -59,6 +68,7 @@ import type {
   Prettify,
   Algorithm,
 } from "./types.js";
+import { ConnectionError } from "./connection/messageConnection.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
 import type { PresentedHostKey } from "./connection/fileSyncConnection.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
@@ -132,35 +142,34 @@ export interface PreparedExchange {
 }
 
 /**
- * Refuse a linkage-terms `algorithm` the run cannot actually honor, before any
+ * Refuse a linkage-terms `algorithm` this build cannot actually honor, before any
  * matched identifier is revealed.
  *
- * Only `psi` is implemented: the run reveals matched identifiers unconditionally
- * (`linkViaPSI` / `linkViaSinglePassPSI`), with no count-only code path. `psi-c`
- * (count-only) is advertised by `AlgorithmSchema` and the consent copy but has no
- * run path, so a `psi-c` run would reveal matched identifiers while its
- * self-attested exchange record asserts count-only disclosure -- an integrity gap
- * in the compliance accounting (HIPAA 45 CFR 164.528 and FERPA disclosure
- * accounting turn on what was ACTUALLY disclosed). Fail closed here so the record
- * can never diverge from the run: a `psi-c` terms value reaching core through ANY
- * mint or accept path -- a hand-crafted token, a CLI-authored config, a non-web
- * mint -- is refused, not left to each client to clamp. This is the run-side half
+ * `psi` always runs: it reveals matched identifiers (`linkViaPSI` /
+ * `linkViaSinglePassPSI`), which is what its record attests. `psi-c` (count-only)
+ * has a run path -- one round over one key, resolving to the intersection size alone
+ * ({@link linkViaCountOnlyPSI}) -- and runs exactly while `APPLIED_SETTINGS.psiC` is
+ * true. That flag, not this guard, is the single point the count-only algorithm
+ * becomes selectable across core, the CLI, and the web, so an operator can never
+ * meet a surface that offers count-only while a run would disclose otherwise.
+ *
+ * What the refusal protects is the record's integrity: an algorithm with no run path
+ * would disclose differently than the self-attested exchange record asserts -- a gap
+ * in the compliance accounting (HIPAA 45 CFR 164.528 and FERPA disclosure accounting
+ * turn on what was ACTUALLY disclosed). A terms value reaching core through ANY mint
+ * or accept path -- a hand-crafted token, a CLI-authored config, a non-web mint -- is
+ * refused here rather than left to each client to clamp. This is the run-side half
  * the record-integrity guarantee rests on; a pure record-side clamp would keep the
  * record honest but silently ignore an operator's stated intent to disclose only a
  * count, so the run refuses instead.
  *
- * The guard ALLOWLISTS `psi` rather than denylisting `psi-c`: only the one
- * implemented, identifier-revealing algorithm proceeds, so any algorithm later
- * added to `AlgorithmSchema` is refused by default until it too is explicitly
- * implemented and allowed here. This follows the repo's allowlist-over-blocklist
- * rule (CONTRIBUTING.md, Code Conventions) and keeps enum growth fail-closed --
- * `buildExchangeRecord` copies `algorithm` verbatim with no guard of its own, so a
- * new unimplemented member slipping past this run-side gate is exactly what the
- * allowlist prevents.
- *
- * When a real count-only run path lands, REPLACE this refusal with it and ungate
- * the client-side gates in the same change -- flipping `APPLIED_SETTINGS.psiC`
- * alone is not sufficient while this refusal stands.
+ * The guard is an ALLOWLIST, not a denylist of the unimplemented: `psi` always,
+ * `psi-c` while its flag is true, and any algorithm later added to `AlgorithmSchema`
+ * refused by default until it too is implemented and allowed here. This follows the
+ * repo's allowlist-over-blocklist rule (CONTRIBUTING.md, Code Conventions) and keeps
+ * enum growth fail-closed -- `buildExchangeRecord` copies `algorithm` verbatim with
+ * no guard of its own, so a new unimplemented member slipping past this run-side gate
+ * is exactly what the allowlist prevents.
  *
  * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`: on the
  * accept side the algorithm is adopted verbatim from the partner's invitation
@@ -172,14 +181,77 @@ export interface PreparedExchange {
  */
 export function assertAlgorithmImplemented(algorithm: Algorithm): void {
   if (algorithm === "psi") return;
+  if (algorithm === "psi-c" && APPLIED_SETTINGS.psiC) return;
   throw new UsageError(
-    'this linkage-terms algorithm is not yet implemented: only "psi" is ' +
-      "supported, and it reveals matched identifiers. A count-only " +
+    "this linkage-terms algorithm is not yet implemented: only " +
+      '"psi", which reveals matched identifiers, runs today. A count-only ' +
       '("psi-c"), or any other non-psi algorithm, would disclose differently ' +
       "than its exchange record could attest, so it is refused before any " +
       'identifier is revealed. Set the linkage-terms algorithm to "psi", or ' +
       "wait for support before running.",
   );
+}
+
+/**
+ * The refusal raised when the two parties' agreed terms name different algorithms
+ * at the run boundary ({@link resolveCountOnlyRun}).
+ *
+ * A {@link ConnectionError} of kind `protocol` rather than a {@link UsageError}:
+ * this party's own algorithm is its own config, so a divergence is the partner
+ * having proceeded past the terms-exchange compatibility abort that refuses one --
+ * a peer violating the message protocol, not a local misconfiguration. The CLI's
+ * `instanceof UsageError ? 64 : 69` mapping therefore yields 69, and a consumer
+ * keeping per-failure bookkeeping can branch on the type. The message names only
+ * the fixed algorithm literals of `AlgorithmSchema`, never partner free text.
+ */
+export class AlgorithmDivergenceError extends ConnectionError {
+  constructor(message: string) {
+    super(message, "protocol");
+    this.name = "AlgorithmDivergenceError";
+  }
+}
+
+/**
+ * Resolve whether this exchange runs the count-only (`psi-c`) path, from BOTH
+ * parties' agreed terms, and refuse a count-only exchange outside the shape the
+ * specification admits.
+ *
+ * The agreed-terms run boundary the specification names (docs/spec/PROTOCOL.md,
+ * PSI-C), and the second of the two enforcement points core owns -- the first being
+ * the local prepare step, which sees only this party's own terms. Symmetric in the
+ * pair: each party calls it with its own terms plus the partner's and asserts over
+ * both, so a refusal aborts both parties at the same point rather than desyncing the
+ * lockstep round. Same shape and same reason as
+ * {@link resolveLinkageCardinality}, which resolves the matching cardinality
+ * immediately after the terms exchange.
+ *
+ * The pair must name ONE algorithm, and a divergent pair is refused here with an
+ * {@link AlgorithmDivergenceError} rather than resolved to either party's value:
+ * resolving would run the revealing engine while this party's record attested the
+ * count-only algorithm its own terms named -- the substitution docs/spec/PROTOCOL.md
+ * forbids. `algorithm` is a mandatory-consistency term, so `validateCompatibility`
+ * aborts a divergent pair at the terms exchange upstream; this is that invariant
+ * encoded at the boundary the run turns on rather than asserted about it. The verdict
+ * is then simply whether the agreed algorithm is `psi-c`.
+ */
+export function resolveCountOnlyRun(
+  localTerms: LinkageTerms,
+  partnerTerms: LinkageTerms,
+): boolean {
+  assertAlgorithmImplemented(localTerms.algorithm);
+  assertAlgorithmImplemented(partnerTerms.algorithm);
+  if (localTerms.algorithm !== partnerTerms.algorithm)
+    throw new AlgorithmDivergenceError(
+      "the two parties' agreed linkage terms name different algorithms: this " +
+        `party runs "${localTerms.algorithm}" and the partner runs ` +
+        `"${partnerTerms.algorithm}". The algorithm settles what the run ` +
+        "discloses and what each party's exchange record attests, so a " +
+        "divergent pair is refused before the round begins rather than " +
+        "resolved to either party's value.",
+    );
+  assertCountOnlyTermsShape(localTerms);
+  assertCountOnlyTermsShape(partnerTerms);
+  return localTerms.algorithm === "psi-c";
 }
 
 /**
@@ -346,13 +418,22 @@ export function prepareForExchange(
     columnNames,
   );
 
-  // Fail closed on a count-only (`psi-c`) algorithm before any credential, terms,
-  // or data are sent: no count-only run path exists, so a `psi-c` run would reveal
-  // matched identifiers under a self-attested record asserting only a count. Refuse
-  // here (friendly, revealing nothing) and again at the run boundary (runExchange)
-  // so the refusal holds even for a PreparedExchange built without going through
-  // this function. See assertAlgorithmImplemented.
+  // Fail closed on an algorithm with no run path before any credential, terms, or
+  // data are sent: such a run would disclose differently than its self-attested
+  // record asserts. Refuse here (friendly, revealing nothing) and again at the run
+  // boundary (runExchange) so the refusal holds even for a PreparedExchange built
+  // without going through this function. See assertAlgorithmImplemented.
   assertAlgorithmImplemented(linkageTerms.algorithm);
+
+  // The local prepare step of the count-only shape refusal, the first of the two
+  // enforcement points core owns (the other is the agreed-terms run boundary; see
+  // resolveCountOnlyRun). Both run over metadata RESOLVED above -- the config's own
+  // or the one inferred from this run's input columns -- so the transmit rule is
+  // never asked of an unresolved block, which would pass it vacuously. A no-op on
+  // every `psi` exchange. See assertCountOnlyTermsShape and
+  // assertCountOnlyTransmitsNoColumn.
+  assertCountOnlyTermsShape(linkageTerms);
+  assertCountOnlyTransmitsNoColumn(linkageTerms.algorithm, metadata);
 
   // Fail closed on a deduplicating term before any credential, terms, or data are
   // sent: matching runs strictly one-to-one, so `deduplicate: true` cannot be
@@ -604,6 +685,29 @@ export interface ExchangeResult {
    * helper neither receives the table nor binds it in its record.
    */
   associationTable: AssociationTable | undefined;
+  /**
+   * The size of the intersection, and the whole result of a count-only (`psi-c`)
+   * exchange: present exactly when this party ran one AND its agreed terms entitle it
+   * to output. `undefined` on every `psi` exchange, whose result is the association
+   * table above -- the count is not a second reading of a `psi` run.
+   *
+   * This is what keeps a count-only receiver from presenting as the withheld-helper
+   * shape: `associationTable === undefined` alone means "this party receives nothing",
+   * which is true of a count-only helper and false of a count-only receiver, and only
+   * this field tells them apart. A count-only run leaves the table undefined for BOTH
+   * parties -- it produces no pairing for either to hold, so there is nothing to
+   * withhold -- and the count reaches the sender only through the count-report leg
+   * the agreed entitlements gate.
+   *
+   * Its presence rule is this party's OWN entitlement, deliberately not the
+   * both-entitled gate the record's result size takes: in a one-sided run the
+   * receiver holds a count its own record does not carry
+   * (docs/spec/EXCHANGE_RECORD.md, Count-only records), and that receiver is the
+   * party the run was conducted for. The sender's copy, when it gets one, is the
+   * receiver's report rather than a figure it computed -- the same trust posture as
+   * the `psi` association-table return leg (docs/spec/PROTOCOL.md, PSI-C).
+   */
+  intersectionCount: number | undefined;
   /** Linkage terms received from the partner during the handshake. */
   partnerTerms: LinkageTerms;
   /** The PSI role assigned to this party (sender or receiver). */
@@ -656,14 +760,22 @@ export interface RunExchangeOptions {
   /** The loaded PSI WASM/native library instance. */
   psiLibrary: PSILibrary;
   /**
-   * Builds the crypto engine for the PSI participant, given its resolved role and
-   * id. When omitted, the participant runs the masking in-process on the calling
-   * thread (the default, and what the browser uses). The CLI supplies a factory
-   * that spawns a `worker_threads` worker so the masking runs off the
-   * event-loop-owning thread, keeping it responsive for the SFTP heartbeat and
-   * timers; the returned engine is disposed when the PSI phase ends.
+   * Builds the crypto engine for the PSI participant, given its resolved role, id,
+   * and the disclosure mode the agreed algorithm resolved to. When omitted, the
+   * masking runs in-process on the calling thread (the default, and what the browser
+   * uses). The CLI supplies a factory that spawns a `worker_threads` worker so the
+   * masking runs off the event-loop-owning thread, keeping it responsive for the SFTP
+   * heartbeat and timers; the returned engine is disposed when the PSI phase ends.
+   *
+   * The mode is passed rather than assumed: it is generated into the engine's key
+   * material, so an engine built for the other mode refuses the match this run needs
+   * instead of quietly producing the other disclosure.
    */
-  psiEngineFactory?: (role: "starter" | "joiner", id: string) => PsiEngine;
+  psiEngineFactory?: (
+    role: "starter" | "joiner",
+    id: string,
+    mode: PsiEngineMode,
+  ) => PsiEngine;
   /**
    * Called at the start of each protocol stage. The `id` values match those
    * returned by {@link describeExchangeStages}.
@@ -780,14 +892,22 @@ export async function runExchange(
 ): Promise<ExchangeResult> {
   const { dataset, linkageTerms, rowCount, retentionDisposition } = prepared;
 
-  // Last line of defense for the disclosure-integrity guarantee: refuse a
-  // count-only (`psi-c`) algorithm before any matched identifier is revealed, so
-  // the self-attested record can never attest count-only over an
-  // identifier-revealing run. prepareForExchange refuses it at prepare time; this
-  // holds even for a PreparedExchange constructed without going through it, and
-  // fires before the terms exchange puts anything on the wire. See
-  // assertAlgorithmImplemented.
+  // Last line of defense for the disclosure-integrity guarantee: refuse an algorithm
+  // with no run path before anything goes on the wire, so the self-attested record
+  // can never attest a disclosure the run did not make. prepareForExchange refuses it
+  // at prepare time; this holds even for a PreparedExchange constructed without going
+  // through it, and fires before the terms exchange puts anything on the wire. The
+  // partner's half of the same question is settled after the terms exchange, from the
+  // agreed pair (resolveCountOnlyRun). See assertAlgorithmImplemented.
   assertAlgorithmImplemented(linkageTerms.algorithm);
+
+  // Refuse a count-only exchange whose input metadata would transmit a column before
+  // anything goes on the wire, over the RESOLVED metadata a PreparedExchange always
+  // carries -- the rule fails open on an unresolved block, and this is the boundary
+  // that holds one. prepareForExchange refuses it at prepare time; this holds for a
+  // PreparedExchange assembled without going through it. See
+  // assertCountOnlyTransmitsNoColumn.
+  assertCountOnlyTransmitsNoColumn(linkageTerms.algorithm, prepared.metadata);
 
   // Refuse a fan-out element transform before the terms go on the wire, so a
   // PreparedExchange built without going through prepareForExchange cannot start
@@ -849,6 +969,13 @@ export async function runExchange(
     linkageTerms.deduplicate,
     partnerTerms.deduplicate,
   );
+
+  // Resolve which disclosure this exchange runs from both parties' agreed terms, at
+  // the same point and for the same reason as the cardinality above: the resolution
+  // is symmetric, so a count-only exchange outside the specified shape aborts BOTH
+  // parties here -- before the bootstrap frame and the PSI round -- rather than
+  // starting a round one side would refuse. See resolveCountOnlyRun.
+  const countOnly = resolveCountOnlyRun(linkageTerms, partnerTerms);
 
   // Surface a present-but-malformed partner advertisement as a diagnostic. The
   // value was already dropped by the fail-soft parse (partnerHostKey is
@@ -952,16 +1079,29 @@ export async function runExchange(
   // building the engine first and disposing it in the finally when the participant
   // never took ownership makes "the worker is never orphaned" a structural guarantee
   // rather than a comment resting on the constructor happening not to throw. The
-  // default in-process engine is built inside the constructor from `library`, so
-  // `engine` is undefined on that path and the else-branch is a no-op (a constructor
-  // throw there allocates nothing to dispose). Nothing above depends on the
-  // participant, so this ordering is free.
+  // default in-process engine is built here too, from `library`, so the engine the
+  // finally disposes is a real one on every path -- it holds the library's server or
+  // client objects (the secret key among them) whether or not the participant took
+  // ownership of it. Nothing above depends on the participant, so this ordering is
+  // free.
   const psiRole = isReceiver ? "joiner" : "starter";
   const psiId = isReceiver ? "client" : "server";
-  const engine = options.psiEngineFactory?.(psiRole, psiId);
+  // The disclosure this round is built for, settled once from the agreed algorithm
+  // and generated into the engine's key material rather than chosen when the result
+  // is read: a count-only engine refuses the operations that would name a match, and
+  // an identifier-revealing one refuses to report a cardinality, so a round cannot
+  // resolve to the disclosure the other mode's terms agreed. It also rides the
+  // receiver's request on the wire, where the partner's sender enforces agreement.
+  const engineMode: PsiEngineMode = countOnly
+    ? "count-only"
+    : "identifier-revealing";
+  const engine =
+    options.psiEngineFactory?.(psiRole, psiId, engineMode) ??
+    new InProcessPsiEngine(psiLibrary, psiRole, psiId, engineMode);
 
   let participant: PSIParticipant | undefined;
-  let associationTable: AssociationTable;
+  let associationTable: AssociationTable | undefined;
+  let intersectionCount: number | undefined;
   try {
     participant = new PSIParticipant(
       psiId,
@@ -970,27 +1110,48 @@ export async function runExchange(
       elementBounds,
       engine,
     );
-    associationTable =
-      linkageTerms.linkageStrategy === "single-pass"
-        ? await linkViaSinglePassPSI(
-            { cardinality },
-            participant,
-            conn,
-            linkageKeyIterables,
-            partnerRecordCount,
-            withholdSenderTable,
-            verbosity,
-            onStage,
-          )
-        : await linkViaPSI(
-            { cardinality },
-            participant,
-            conn,
-            linkageKeyIterables,
-            partnerRecordCount,
-            verbosity,
-            onStage,
-          );
+    if (countOnly)
+      // One round over one key, resolving to the intersection size and nothing that
+      // names a match. The count-report leg is part of the same call: both parties
+      // derive whether it runs from the agreed entitlements, so the receiver never
+      // sends a frame the sender will not read and the sender never awaits one the
+      // receiver will not send. The reported figure is bounded by the smaller of the
+      // two exchanged record counts, which is authenticated session state on both
+      // sides -- an intersection cannot exceed either party's dataset.
+      intersectionCount = await linkViaCountOnlyPSI(
+        participant,
+        conn,
+        linkageKeyIterables,
+        reportsCountToSender(
+          linkageTerms.output.expectsOutput,
+          partnerTerms.output.expectsOutput,
+        ),
+        Math.min(rowCount, partnerRecordCount),
+        verbosity,
+        onStage,
+      );
+    else
+      associationTable =
+        linkageTerms.linkageStrategy === "single-pass"
+          ? await linkViaSinglePassPSI(
+              { cardinality },
+              participant,
+              conn,
+              linkageKeyIterables,
+              partnerRecordCount,
+              withholdSenderTable,
+              verbosity,
+              onStage,
+            )
+          : await linkViaPSI(
+              { cardinality },
+              participant,
+              conn,
+              linkageKeyIterables,
+              partnerRecordCount,
+              verbosity,
+              onStage,
+            );
   } finally {
     // Dispose the crypto engine once the PSI phase is done (or has thrown); the
     // participant is not used past this point. Disposing the participant frees its
@@ -998,10 +1159,11 @@ export async function runExchange(
     // (the secret key among the WASM-heap state they hold), and a worker-backed engine
     // terminates its worker, so a ref'd worker handle can never hold the process open
     // at teardown. If the constructor threw before the participant took ownership,
-    // dispose the bare injected engine so the worker psiEngineFactory already spawned
-    // is still terminated, never orphaned.
+    // dispose the engine directly -- whether psiEngineFactory spawned a worker or the
+    // default in-process engine was built above, it is a live engine here and never
+    // orphaned.
     if (participant !== undefined) participant.dispose();
-    else engine?.dispose();
+    else engine.dispose();
   }
 
   // Send-gate: transmit payload only to a partner entitled to the result. A party
@@ -1012,9 +1174,15 @@ export async function runExchange(
   // will receive output; otherwise an empty message goes on the wire and is
   // recorded as such. The disclosure is closed at the source here, not merely
   // declared empty.
-  const localPayload: PayloadWireMessage = partnerTerms.output.expectsOutput
-    ? preparePayload(prepared.rawRows, prepared.metadata, associationTable)
-    : { hasData: false };
+  //
+  // A count-only run has no association table to attach payload values to, and its
+  // terms carry no payload column in either direction, so it exchanges the empty
+  // message -- committed explicitly as empty, never omitted
+  // (docs/spec/EXCHANGE_RECORD.md, Count-only records).
+  const localPayload: PayloadWireMessage =
+    partnerTerms.output.expectsOutput && associationTable !== undefined
+      ? preparePayload(prepared.rawRows, prepared.metadata, associationTable)
+      : { hasData: false };
   const partnerPayload = await exchangePayloads(
     conn,
     handshakeRole,
@@ -1023,6 +1191,11 @@ export async function runExchange(
 
   // Received-payload enforcement, fail-closed before the result or audit record is
   // built (so a mismatched payload is never written to disk or surfaced):
+  // - A count-only run locks in the empty column set unconditionally: psi-c
+  //   refuses payload in either direction and its record's payload commitments
+  //   are fixed present-and-empty (docs/spec/EXCHANGE_RECORD.md, Count-only
+  //   (psi-c) records), so a transmitted column can never be lazily accepted
+  //   here regardless of expectsOutput or any lock-in the prepare step carries.
   // - A no-output party (expectsOutput:false) must receive NO payload. The
   //   send-gate above keeps a conforming partner from sending any; expecting the
   //   empty set here closes it fail-closed against a non-conforming one.
@@ -1030,18 +1203,32 @@ export async function runExchange(
   //   acceptor's carried disclosedPayloadColumns, or a persisted lock-in); a lazy
   //   one (expectedPayloadColumns undefined) takes whatever the sender's own
   //   disclosure metadata transmits.
-  const expectedReceive = linkageTerms.output.expectsOutput
-    ? prepared.expectedPayloadColumns
-    : [];
+  const expectedReceive = countOnly
+    ? []
+    : linkageTerms.output.expectsOutput
+      ? prepared.expectedPayloadColumns
+      : [];
   reconcileReceivedPayload(partnerPayload, expectedReceive);
 
   // resultSize (the intersection size) is bound only when both parties are
-  // entitled to output; heldAssociationTable gates both the record's committed
-  // table and the table returned to the caller, so it is one predicate. See the
+  // entitled to output; heldResult gates both the record's committed table and what
+  // is returned to the caller, so it is one predicate. See the
   // ExchangeResult.associationTable JSDoc below for the disclosure rationale.
   const bothExpectOutput =
     linkageTerms.output.expectsOutput && partnerTerms.output.expectsOutput;
-  const heldAssociationTable = linkageTerms.output.expectsOutput;
+  const heldResult = linkageTerms.output.expectsOutput;
+
+  // The intersection size this party can attest, whichever algorithm produced it: the
+  // count is a count-only run's whole result, so it takes the result-size field the
+  // matched table's length takes under `psi`, under the same unchanged entitlement
+  // gate. A count-only run's record carries NO association-table commitment on either
+  // side -- neither party holds a pairing to commit to, whatever its entitlement --
+  // and that absence is normative rather than incidental (the commitment's presence
+  // is what marks a party as having received the matched pairing). See
+  // docs/spec/EXCHANGE_RECORD.md, Count-only records.
+  const attestedResultSize = countOnly
+    ? intersectionCount
+    : associationTable?.[0].length;
 
   // What the signed-receipt step needs: a signing identity AND the session key
   // its binder derives from, resolved once here so the record build below and the
@@ -1074,11 +1261,11 @@ export async function runExchange(
       localTerms: linkageTerms,
       partnerTerms,
       recordsExposed: rowCount,
-      resultSize: bothExpectOutput ? associationTable[0].length : undefined,
+      resultSize: bothExpectOutput ? attestedResultSize : undefined,
       // Self-facing audit pointer from this party's local config; undefined when
       // unconfigured, in which case the record omits it.
       retentionDisposition,
-      associationTable: heldAssociationTable ? associationTable : undefined,
+      associationTable: heldResult ? associationTable : undefined,
       localPayloadSent: toCommittedPayload(localPayload),
       partnerPayloadReceived: toCommittedPayload(partnerPayload),
       createdAt: new Date().toISOString(),
@@ -1138,7 +1325,14 @@ export async function runExchange(
     // Withheld (undefined) from a party whose agreed terms give it no output, so
     // a non-receiving helper does not get the result table to write; the receiver
     // and both-output parties get it as before. Same predicate as the record gate.
-    associationTable: heldAssociationTable ? associationTable : undefined,
+    associationTable: heldResult ? associationTable : undefined,
+    // The count-only run's whole result, under the same entitlement gate the table
+    // takes: a party whose agreed terms give it no output does not receive the count
+    // either. In a one-sided count-only run that party is the PSI sender, and the
+    // count-report leg is suppressed for it upstream (reportsCountToSender), so this
+    // gate is the entitlement predicate applied once more at the boundary rather than
+    // the only thing standing between a helper and a count.
+    intersectionCount: heldResult ? intersectionCount : undefined,
     partnerTerms,
     resolvedRole,
     partnerPayload,

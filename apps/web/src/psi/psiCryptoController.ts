@@ -4,6 +4,7 @@ import { errorFromWorkerEvent } from "./workerEventError";
 
 import type {
   PsiEngine,
+  PsiEngineMode,
   PsiWorkerHandle,
   PsiWorkerInit,
   PsiWorkerRequest,
@@ -166,11 +167,7 @@ export function createPsiCryptoWorkerHandle(
  */
 export function createBrowserPsiEngineFactory(
   spawn: SpawnPsiCryptoWorker,
-): (role: "starter" | "joiner", id: string) => PsiEngine {
-  return (role, id) =>
-    new WorkerPsiEngine(
-      createPsiCryptoWorkerHandle(
-        spawn({ role, id, mode: "identifier-revealing" }),
-      ),
-    );
+): (role: "starter" | "joiner", id: string, mode: PsiEngineMode) => PsiEngine {
+  return (role, id, mode) =>
+    new WorkerPsiEngine(createPsiCryptoWorkerHandle(spawn({ role, id, mode })));
 }

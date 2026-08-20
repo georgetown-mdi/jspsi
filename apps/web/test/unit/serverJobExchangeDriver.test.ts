@@ -136,6 +136,12 @@ function result(resultWritten: boolean): RelayEvent {
   return { v: 1, type: "result", resultWritten };
 }
 
+/** The count-only terminal event: no result file was written, and the count the
+ * run reported rides the same event (docs/spec/CLI_EVENTS.md, `result`). */
+function countOnlyResult(intersectionCount: number): RelayEvent {
+  return { v: 1, type: "result", resultWritten: false, intersectionCount };
+}
+
 function errorEvent(category: string, message: string): RelayEvent {
   return { v: 1, type: "error", category, message };
 }
@@ -224,6 +230,72 @@ describe("createServerJobExchangeDriver event mapping", () => {
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
     expect(outputs.resultWithheld).toBe(true);
     expect(outputs.resultsUrl).toBeUndefined();
+  });
+
+  test("a count-only result maps to the counted outputs, not the withheld ones", async () => {
+    const { client } = scriptedClient([countOnlyResult(42)]);
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    expect(events.onError).not.toHaveBeenCalled();
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    // The count is the run's whole result: nothing was withheld from this party,
+    // and there is no result file on the appliance to point a download at.
+    expect(outputs.intersectionCount).toBe(42);
+    expect(outputs.matchedRecordCount).toBe(42);
+    expect(outputs.resultWithheld).toBeUndefined();
+    expect(outputs.resultsUrl).toBeUndefined();
+  });
+
+  test("a zero count is still a count, not a withheld result", async () => {
+    // The field's presence is the discriminant, so an empty intersection reports
+    // as the count-only outcome rather than falling into the withheld shape.
+    const { client } = scriptedClient([countOnlyResult(0)]);
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.intersectionCount).toBe(0);
+    expect(outputs.resultWithheld).toBeUndefined();
+  });
+
+  test("a malformed count falls back to the event's own resultWritten shape", async () => {
+    // A frame outside the contract must not render a nonsense figure: the run is
+    // reported by what resultWritten says, which here is a withheld result.
+    const { client } = scriptedClient([
+      { v: 1, type: "result", resultWritten: false, intersectionCount: -1 },
+    ]);
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.intersectionCount).toBeUndefined();
+    expect(outputs.resultWithheld).toBe(true);
+  });
+
+  test("a written result outranks a count the same event carries", async () => {
+    // An out-of-contract event: the contract carries a count only on the
+    // resultWritten:false arm (docs/spec/CLI_EVENTS.md, `result`). Reading the count
+    // first would cost the operator the download link for a result the appliance did
+    // write, so resultWritten stays the outer discriminant.
+    const { client } = scriptedClient([
+      { v: 1, type: "result", resultWritten: true, intersectionCount: 7 },
+    ]);
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(outputs.intersectionCount).toBeUndefined();
+    expect(outputs.resultWithheld).toBeUndefined();
   });
 
   test("a security error passes its category through VERBATIM", async () => {

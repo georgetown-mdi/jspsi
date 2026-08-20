@@ -1143,6 +1143,7 @@ export function InviterBench() {
               : {
                   matchedRecordCount: outputs.matchedRecordCount,
                   resultWithheld: outputs.resultWithheld,
+                  intersectionCount: outputs.intersectionCount,
                 },
           ).map((row) => ({
             label: row.label,

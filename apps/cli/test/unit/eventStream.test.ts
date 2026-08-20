@@ -84,7 +84,15 @@ function validateEvent(event: unknown): event is StreamEvent {
           (event[k] as number) >= 0,
       );
     case "result":
-      return typeof event.resultWritten === "boolean";
+      return (
+        typeof event.resultWritten === "boolean" &&
+        // The count-only field is optional, and a present one is a non-negative
+        // integer like every other numeric field of this stream.
+        (event.intersectionCount === undefined ||
+          (typeof event.intersectionCount === "number" &&
+            Number.isInteger(event.intersectionCount) &&
+            event.intersectionCount >= 0))
+      );
     case "error":
       return (
         typeof event.message === "string" &&
@@ -114,6 +122,7 @@ test("every event type validates against the schema and carries a version", () =
     buildMetricsEvent(1000, 2, 1),
     buildResultEvent(true),
     buildResultEvent(false),
+    buildResultEvent(false, 7),
     buildErrorEvent(new Error("boom"), "run"),
   ];
   for (const event of events) {
@@ -145,6 +154,41 @@ test("metrics counters and stage durations are clamped to non-negative integers"
   const stageEnd = buildStageEndEvent("stage 1 / 1", -7);
   expect(stageEnd.durationMs).toBe(0);
   expect(validateEvent(stageEnd)).toBe(true);
+});
+
+// --- The terminal result event's count-only field ----------------------------
+
+test("the result event carries a count-only run's count, and omits the field otherwise", () => {
+  // The field's PRESENCE is the discriminant between the two resultWritten:false
+  // outcomes, so a zero count must be emitted as a present zero rather than
+  // collapsing into the withheld shape a missing field means.
+  const counted = buildResultEvent(false, 0);
+  expect(validateEvent(counted)).toBe(true);
+  expect(counted.resultWritten).toBe(false);
+  expect("intersectionCount" in counted).toBe(true);
+  expect(counted.intersectionCount).toBe(0);
+
+  const withheld = buildResultEvent(false);
+  expect(validateEvent(withheld)).toBe(true);
+  expect("intersectionCount" in withheld).toBe(false);
+
+  const written = buildResultEvent(true);
+  expect("intersectionCount" in written).toBe(false);
+
+  // Serialized, the absence is a field a consumer never sees rather than a null.
+  expect(JSON.parse(JSON.stringify(withheld))).toEqual({
+    v: EVENT_STREAM_VERSION,
+    type: "result",
+    resultWritten: false,
+  });
+});
+
+test("a malformed count is floored like every other numeric field", () => {
+  // The count is the one numeric field a partner can influence (the count-report
+  // leg), so the builder floors it rather than trusting the value it is handed.
+  expect(buildResultEvent(false, -3).intersectionCount).toBe(0);
+  expect(buildResultEvent(false, Number.NaN).intersectionCount).toBe(0);
+  expect(buildResultEvent(false, 4.7).intersectionCount).toBe(4);
 });
 
 test("a stageEnd event pairs an id with a whole-millisecond duration", () => {

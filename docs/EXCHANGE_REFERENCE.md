@@ -88,7 +88,7 @@ A count-only exchange is one round over one key, so `psi-c` narrows what the res
 
 The refusal happens where the terms are authored, where an invitation over them is minted, and where a received invitation is parsed or accepted. It is never resolved by narrowing the document to the count-only shape or by running it as `psi`; the reasoning is in [PROTOCOL.md](spec/PROTOCOL.md#psi-c). None of this constrains `psi` terms.
 
-> **Not yet implemented:** the `psi-c` algorithm has no count-only run path yet, so it is refused before the exchange runs. An exchange whose linkage terms set `psi-c` aborts with a usage error rather than revealing matched identifiers under an exchange record that would assert only a count was disclosed. It is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). Use `psi` for now.
+> **Not yet enabled:** the `psi-c` algorithm is not yet turned on, so it is refused before the exchange runs. An exchange whose linkage terms set `psi-c` aborts with a usage error rather than revealing matched identifiers under an exchange record that would assert only a count was disclosed. It is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). Use `psi` for now.
 
 ### `linkage_terms.linkage_strategy`
 

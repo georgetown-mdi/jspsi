@@ -6,6 +6,7 @@ import {
   InProcessPsiEngine,
   WorkerPsiEngine,
   type PsiEngine,
+  type PsiEngineMode,
   type PsiWorkerHandle,
   type PsiWorkerInit,
   type PsiWorkerRequest,
@@ -45,10 +46,11 @@ export function createPsiEngine(
   library: PSILibrary,
   role: "starter" | "joiner",
   id: string,
+  mode: PsiEngineMode,
 ): PsiEngine {
   const entry = resolveWorkerEntry();
-  if (entry !== undefined) return spawnWorkerPsiEngine(entry, role, id);
-  return new InProcessPsiEngine(library, role, id, "identifier-revealing");
+  if (entry !== undefined) return spawnWorkerPsiEngine(entry, role, id, mode);
+  return new InProcessPsiEngine(library, role, id, mode);
 }
 
 // The minimal worker_threads Worker surface {@link createWorkerThreadHandle} drives.
@@ -116,10 +118,11 @@ function spawnWorkerPsiEngine(
   entry: string,
   role: "starter" | "joiner",
   id: string,
+  mode: PsiEngineMode,
 ): WorkerPsiEngine {
   // Typed as the seed the worker reads back, so an added required field is a
   // compile error here rather than a value the worker silently misses.
-  const init: PsiWorkerInit = { role, id, mode: "identifier-revealing" };
+  const init: PsiWorkerInit = { role, id, mode };
   // The worker exposes gc() for the single-pass memory relief itself, at startup
   // (see psiWorker.worker.ts): --expose-gc cannot be passed through a worker's
   // execArgv (Node rejects it), so nothing gc-related is set here.

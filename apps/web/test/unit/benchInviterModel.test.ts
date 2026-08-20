@@ -819,6 +819,32 @@ describe("after the exchange completes", () => {
     ).toBe("No result table - withheld by the agreed terms");
   });
 
+  test("a count-only result states the overlap size and denies the table", () => {
+    // The third outcome, distinct from both of the others: this party received
+    // exactly what its terms promised, and no matched rows or shared columns
+    // reached anyone -- so the row claims neither.
+    const value = outcomeRow(
+      { intersectionCount: 1847, matchedRecordCount: 1847 },
+      "You will receive",
+    )?.value;
+    expect(value).toBe(
+      "1,847 matched - the size of the overlap only, no result table",
+    );
+    expect(value).not.toContain("shared columns");
+    expect(value).not.toContain("withheld");
+  });
+
+  test("a zero-count count-only result is still the counted row", () => {
+    // The count rides its own field, so an empty intersection reports as a count
+    // of zero rather than falling back to either of the other two rows.
+    expect(
+      outcomeRow(
+        { intersectionCount: 0, matchedRecordCount: 0 },
+        "You will receive",
+      )?.value,
+    ).toBe("0 matched - the size of the overlap only, no result table");
+  });
+
   test("unsealing reopens the session with every input intact", () => {
     const authored = editorWithLegalAgreement(editorFromCsv("Dana", csv), {
       reference: "MOU-1",

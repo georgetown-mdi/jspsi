@@ -231,6 +231,21 @@ export class InProcessPsiEngine implements PsiEngine {
         `${this.id}: processClientRequest requires the server role`,
       );
     const request = this.library.request.deserializeBinary(requestBytes);
+    // The reveal flag rides the request, and the library refuses to serve a request
+    // whose flag disagrees with the key this server was created under -- the
+    // wire-enforced mode agreement (docs/spec/PROTOCOL.md, PSI-C). Read the flag and
+    // name the condition here: the native addon names it, but the WebAssembly build
+    // surfaces the same refusal as an opaque embind marshalling error, which leaves a
+    // count-only sender unable to tell "the partner ran the revealing mode" from
+    // "the frame was malformed". Both are protocol aborts; only this one names a
+    // partner whose run mode contradicts the agreed algorithm. Fixed literals only:
+    // the request is partner-supplied.
+    if (request.getRevealIntersection() !== this.revealsIdentifiers)
+      throw new Error(
+        `${this.id} protocol error: the partner's PSI request ran the ` +
+          `${modeName(request.getRevealIntersection())} mode, where this ` +
+          `exchange runs ${modeName(this.revealsIdentifiers)}`,
+      );
     return Promise.resolve(server.processRequest(request).serializeBinary());
   }
 

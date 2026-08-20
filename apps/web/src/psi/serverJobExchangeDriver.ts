@@ -705,16 +705,44 @@ function stagesOf(event: RelayEvent): Array<StageDefinition> {
   });
 }
 
+/** The intersection size a count-only (`psi-c`) `result` event reports, or
+ * undefined when the run reported none. The field's PRESENCE is the discriminant
+ * the CLI's contract defines (docs/spec/CLI_EVENTS.md, `result`), so a zero count
+ * is a count and a missing one is not; a value outside the non-negative safe
+ * integers is treated as absent, keeping a malformed frame off the counted shape
+ * rather than rendering a nonsense figure. */
+function countOnlyResultCount(event: RelayEvent): number | undefined {
+  const count = event.intersectionCount;
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= 0
+    ? count
+    : undefined;
+}
+
 /** The base bench {@link RunOutputs} for a `result` relay event, before the
  * record pair is attached. A server job writes its result on the appliance, so
  * there is no browser object URL: a received result points `resultsUrl` at the
  * job's appliance result endpoint (a real same-origin download href), and a
  * withheld result is the withheld variant exactly as the browser driver
- * produces it. */
+ * produces it.
+ *
+ * `resultWritten` is the outer discriminant, exactly as the contract states it
+ * (docs/spec/CLI_EVENTS.md, `result`): a written result is a written result, and a
+ * count rides only the `false` arm. Reading the count first would let an
+ * out-of-contract event that carries both cost this party the download link for a
+ * result the appliance did in fact write.
+ *
+ * Within that arm the count separates the two outcomes the contract gives it: a
+ * count-only run withheld nothing from this party -- the count is what its terms
+ * promised, and there is no result file for either party -- while its absence is the
+ * helper's withheld result. The count doubles as the completion header's matched
+ * figure, as it does on the browser-direct path (`buildRunOutputs`,
+ * `@bench/runOutputs`). */
 function baseResultOutputs(event: RelayEvent, jobId: string): RunOutputs {
-  return event.resultWritten === false
-    ? { resultWithheld: true }
-    : { resultsUrl: jobResultUrl(jobId) };
+  if (event.resultWritten !== false) return { resultsUrl: jobResultUrl(jobId) };
+  const intersectionCount = countOnlyResultCount(event);
+  return intersectionCount !== undefined
+    ? { intersectionCount, matchedRecordCount: intersectionCount }
+    : { resultWithheld: true };
 }
 
 /** Attach the record-pair downloads to the base outputs, pointed at the

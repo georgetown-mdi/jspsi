@@ -347,6 +347,38 @@ describe("acceptor completion ledger", () => {
     );
   });
 
+  test("a count-only result states the overlap size and denies the table", () => {
+    // The third outcome: a count-only run leaves no matched rows and no shared
+    // columns for anyone, so the row claims neither -- and it was not withheld
+    // either, since the count is what the agreed terms promised this party.
+    const rows = acceptorDoneLedgerRows(
+      makeToken(),
+      { intersectionCount: 1847, matchedRecordCount: 1847 },
+      DISCLOSING_METADATA,
+      HOW_IT_RUNS,
+    );
+    const value = rowValue(rows, "You received");
+    expect(value).toBe(
+      "1,847 matched - the size of the overlap only, no result table",
+    );
+    // Not the matched row: the invitation's disclosed columns are not appended,
+    // because a count-only run transmits no payload in either direction.
+    expect(value).not.toContain("enrollment_date");
+    expect(value).not.toContain("withheld");
+  });
+
+  test("a zero-count count-only result is still the counted row", () => {
+    const rows = acceptorDoneLedgerRows(
+      makeToken(),
+      { intersectionCount: 0, matchedRecordCount: 0 },
+      DISCLOSING_METADATA,
+      HOW_IT_RUNS,
+    );
+    expect(rowValue(rows, "You received")).toBe(
+      "0 matched - the size of the overlap only, no result table",
+    );
+  });
+
   test("a zero-count result reads as zero matched rows", () => {
     const rows = acceptorDoneLedgerRows(
       makeToken({ payload: { send: [], receive: [] } }),

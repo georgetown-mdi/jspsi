@@ -27,8 +27,8 @@ import { failureFor } from "./useInviterExchange";
 
 import {
   DownloadRow,
+  NoResultFileInset,
   RunWarningsAlert,
-  WithheldResultInset,
   recoveredExchangeHeading,
 } from "./BenchRunSurface";
 import { RecurringHandoff } from "./RecurringHandoff";
@@ -289,8 +289,8 @@ export function RecoveredExchangePanel() {
       {outputs !== undefined && (
         <>
           <h3>Downloads</h3>
-          {outputs.resultWithheld === true ? (
-            <WithheldResultInset />
+          {outputs.resultsUrl === undefined ? (
+            <NoResultFileInset intersectionCount={outputs.intersectionCount} />
           ) : (
             <DownloadRow
               label="Download result"

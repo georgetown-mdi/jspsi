@@ -935,11 +935,29 @@ export interface InviterLedgerRow {
 
 /** What a completed exchange settled, folded into the ledger: the invitation
  * is consumed (its expiry no longer means anything), and the receive row can
- * state what actually arrived -- the matched-row count, or that the agreed
- * terms withheld the result table from this party. */
+ * state what actually arrived -- the matched-row count, the size of the overlap a
+ * count-only exchange reported, or that the agreed terms withheld the result table
+ * from this party. */
 export interface LedgerOutcome {
   matchedRecordCount?: number;
   resultWithheld?: boolean;
+  /** The count a count-only (`psi-c`) exchange reported, present only for such a
+   * run. It is a distinct outcome from both of the others: this party received
+   * exactly what its terms promised, and no result table exists for anyone. */
+  intersectionCount?: number;
+}
+
+/**
+ * The receive row's value for a count-only exchange, shared by both seats' ledgers
+ * so one wording covers the outcome: the run reported the size of the overlap and
+ * nothing else, so the row states the count and denies the result table rather than
+ * naming matched rows and shared columns neither party received.
+ */
+export function countOnlyLedgerValue(intersectionCount: number): string {
+  return (
+    `${new Intl.NumberFormat("en-US").format(intersectionCount)} matched - ` +
+    "the size of the overlap only, no result table"
+  );
 }
 
 /**
@@ -994,9 +1012,14 @@ export function inviterLedgerRows(
       value:
         outcome === undefined
           ? "Matched rows + your partner's shared columns"
-          : outcome.resultWithheld === true
-            ? "No result table - withheld by the agreed terms"
-            : `${new Intl.NumberFormat("en-US").format(outcome.matchedRecordCount ?? 0)} matched rows + shared columns`,
+          : // The count-only case is read before the withheld one and before the
+            // matched one: it holds no result table either, so both of those would
+            // report it as something it is not.
+            outcome.intersectionCount !== undefined
+            ? countOnlyLedgerValue(outcome.intersectionCount)
+            : outcome.resultWithheld === true
+              ? "No result table - withheld by the agreed terms"
+              : `${new Intl.NumberFormat("en-US").format(outcome.matchedRecordCount ?? 0)} matched rows + shared columns`,
     },
     keys.length > 0
       ? {

@@ -8,8 +8,9 @@ import type { ExchangeResult, PreparedExchange } from "@psilink/core";
 import type { ExchangeOutputs } from "@psi/exchangeLifecycle";
 
 /** The bench run's downloadable artifacts: the lifecycle's outputs widened
- * with the matched-row count the completion header states. Present exactly
- * when the result table is (a withheld result has no count to state). */
+ * with the matched-record count the completion header states. Present when this
+ * party holds a result to count -- the rows of a matched table, or a count-only
+ * run's intersection size -- and absent when the terms withheld one. */
 export type RunOutputs = ExchangeOutputs & {
   matchedRecordCount?: number;
 };
@@ -56,30 +57,41 @@ export function buildRunOutputs(
   const jsonUrl = (text: string): string =>
     trackedUrl(new Blob([text], { type: "application/json" }));
   try {
-    // The exchange withholds the result table from a party whose agreed
+    // A count-only (psi-c) run produces no matched pairing at all, so there is no
+    // results file to write and nothing was withheld from this party: its whole
+    // result is the count, carried through for the completion panel to state.
+    // Checked before the withheld case, which a count-only receiver would otherwise
+    // fall into and be reported as having received nothing.
+    //
+    // Otherwise the exchange withholds the result table from a party whose agreed
     // terms give it no output (a one-sided exchange where this party is the
     // PSI sender/helper): produce no results file -- the completion panel
     // shows it contributed but receives no result -- while still offering
     // the record downloads below.
     const generated: RunOutputs =
-      result.associationTable === undefined
-        ? { resultWithheld: true }
-        : (() => {
-            const { headers, rows } = buildOutputTable(
-              result.associationTable,
-              prepared.rawRows,
-              prepared.metadata,
-              result.partnerPayload,
-            );
-            const csv =
-              headers.join(",") +
-              "\n" +
-              rows.map((r) => r.join(",") + "\n").join("");
-            return {
-              resultsUrl: trackedUrl(new Blob([csv], { type: "text/csv" })),
-              matchedRecordCount: rows.length,
-            };
-          })();
+      result.intersectionCount !== undefined
+        ? {
+            intersectionCount: result.intersectionCount,
+            matchedRecordCount: result.intersectionCount,
+          }
+        : result.associationTable === undefined
+          ? { resultWithheld: true }
+          : (() => {
+              const { headers, rows } = buildOutputTable(
+                result.associationTable,
+                prepared.rawRows,
+                prepared.metadata,
+                result.partnerPayload,
+              );
+              const csv =
+                headers.join(",") +
+                "\n" +
+                rows.map((r) => r.join(",") + "\n").join("");
+              return {
+                resultsUrl: trackedUrl(new Blob([csv], { type: "text/csv" })),
+                matchedRecordCount: rows.length,
+              };
+            })();
     // The record downloads are produced only when the audit pair exists;
     // absent if building the record failed after a successful exchange, in
     // which case they are intentionally omitted without a blocking alert.

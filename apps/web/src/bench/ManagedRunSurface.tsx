@@ -37,7 +37,7 @@ import {
   CopyRow,
   DonePanel,
   DownloadRow,
-  WithheldResultInset,
+  NoResultFileInset,
 } from "./BenchRunSurface";
 import {
   classifyManagedRunFailure,
@@ -462,8 +462,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
               matchedRecordCount={outputs.matchedRecordCount}
               finishedAt={finishedAt}
             />
-            {outputs.resultWithheld === true ? (
-              <WithheldResultInset />
+            {outputs.resultsUrl === undefined ? (
+              <NoResultFileInset
+                intersectionCount={outputs.intersectionCount}
+              />
             ) : (
               <DownloadRow
                 label="Download result"

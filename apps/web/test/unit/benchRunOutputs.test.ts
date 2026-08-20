@@ -58,6 +58,17 @@ function withheldResult(): ExchangeResult {
   } as unknown as ExchangeResult;
 }
 
+// A count-only (psi-c) run: no matched pairing for anyone, and the intersection size
+// as the party's whole result.
+function countOnlyResult(): ExchangeResult {
+  return {
+    associationTable: undefined,
+    intersectionCount: 4,
+    partnerPayload: { columns: [], rowIndices: [], rows: [] },
+    audit,
+  } as unknown as ExchangeResult;
+}
+
 describe("buildRunOutputs", () => {
   test("a received result yields the results url, count, and timestamped record pair", () => {
     const { urls, created, revoked } = recordingUrls();
@@ -83,6 +94,22 @@ describe("buildRunOutputs", () => {
     expect(outputs.resultWithheld).toBe(true);
     expect(outputs.resultsUrl).toBeUndefined();
     expect(outputs.matchedRecordCount).toBeUndefined();
+    expect(outputs.record?.recordUrl).toBe(created[0]);
+    expect(created).toHaveLength(2);
+  });
+
+  test("a count-only result reports its count rather than reading as withheld", () => {
+    const { urls, created } = recordingUrls();
+    const outputs = buildRunOutputs(countOnlyResult(), prepared, urls);
+
+    // The count-only receiver got exactly what its terms promised, so nothing was
+    // withheld from it -- reporting it as withheld would state the opposite.
+    expect(outputs.resultWithheld).toBeUndefined();
+    expect(outputs.intersectionCount).toBe(4);
+    expect(outputs.matchedRecordCount).toBe(4);
+    // No pairing exists to write, so no results file is created; the record pair is
+    // still offered.
+    expect(outputs.resultsUrl).toBeUndefined();
     expect(outputs.record?.recordUrl).toBe(created[0]);
     expect(created).toHaveLength(2);
   });
