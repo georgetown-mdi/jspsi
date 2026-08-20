@@ -18,6 +18,7 @@ import {
   createServerJobExchangeDriver,
 } from "@psi/serverJobExchangeDriver";
 import { discardServerJob, writeAttachment } from "@psi/consoleJobAttachment";
+import { HANDSHAKE_ROLE_FOR_SIDE } from "@psi/handshakeRole";
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
 import { hasRecoveryHint } from "@psi/authenticateExchange";
 import { inviterExchangeDataSpec } from "@psi/advancedInvite";
@@ -461,7 +462,7 @@ export function useInviterExchange({
     const browserDriver = (): ExchangeDriver<RunOutputs> =>
       createBrowserExchangeDriver<RunOutputs>({
         acquire,
-        exchangeRole: "responder",
+        exchangeRole: HANDSHAKE_ROLE_FOR_SIDE.inviter,
         sharedSecret: minted.sharedSecret,
         expires: minted.expires,
         generateOutput,

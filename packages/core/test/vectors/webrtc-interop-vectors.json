@@ -1,0 +1,92 @@
+{
+  "description": "Known-answer vectors for the parts of a CLI<->web WebRTC exchange that both apps construct independently: the invitation encoding, the HKDF-derived rendezvous peer ids, and each side's pairing of rendezvous role to key-exchange handshake role and request-encryption flag. A divergence in any of these passes each app's own tests and fails only when a CLI peer and a browser peer first meet, so each app drives its OWN construction against this file from its own workspace suite. The key-exchange transcript itself is pinned separately by kex-vectors.json, which fixes both ephemeral private keys; the handshake as each app invokes it generates its ephemeral key pair internally, so what is pinned here is the role and flag each app feeds it.",
+  "construction": {
+    "peerId": "HKDF-SHA-256 over the decoded 32-byte shared secret, 32-byte zero salt, info `psilink-webrtc-peerid-v1:<role>`, first 16 bytes, lowercase hex. Roles are 'inviter' and 'acceptor'; the inviter registers with the signaling broker under its own id and the acceptor dials it.",
+    "invitation": "base64url(UTF-8 JSON body) with base64url(SHA-256(body)[0:4]) appended. The JSON key order is the invitation schema's parse-result order, which canonicalJson below states literally.",
+    "signaling": "The endpoint carries host/port/path only. It names no scheme: each side resolves ws vs wss locally (the browser from its own page protocol, the CLI from `server.secure`, which defaults to true), so no scheme is pinned here."
+  },
+  "inputs": {
+    "sharedSecretHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "sharedSecret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "signalingLocation": {
+      "hostname": "psilink.example.org",
+      "port": "8443"
+    }
+  },
+  "rendezvous": {
+    "peerIds": {
+      "inviter": "e8b35fb4fb96af41090588bb63f86c07",
+      "acceptor": "5fd2d0b6ad1b36fcba81a6486b4f8f60"
+    },
+    "sides": [
+      {
+        "side": "inviter",
+        "localPeerId": "e8b35fb4fb96af41090588bb63f86c07",
+        "remotePeerId": "5fd2d0b6ad1b36fcba81a6486b4f8f60",
+        "handshakeRole": "responder",
+        "requestEncryption": false
+      },
+      {
+        "side": "acceptor",
+        "localPeerId": "5fd2d0b6ad1b36fcba81a6486b4f8f60",
+        "remotePeerId": "e8b35fb4fb96af41090588bb63f86c07",
+        "handshakeRole": "initiator",
+        "requestEncryption": false
+      }
+    ]
+  },
+  "signaling": {
+    "endpoint": {
+      "channel": "webrtc",
+      "host": "psilink.example.org",
+      "port": 8443,
+      "path": "/api/"
+    },
+    "brokerHost": "psilink.example.org:8443",
+    "brokerPathname": "/api/peerjs"
+  },
+  "invitation": {
+    "token": {
+      "version": "1",
+      "linkageTerms": {
+        "version": "1.0.0",
+        "identity": "Interop Fixture Party",
+        "date": "2026-01-01",
+        "algorithm": "psi",
+        "linkageStrategy": "cascade",
+        "output": {
+          "expectsOutput": true,
+          "shareWithPartner": false
+        },
+        "deduplicate": false,
+        "linkageFields": [
+          {
+            "type": "ssn",
+            "name": "ssn"
+          }
+        ],
+        "linkageKeys": [
+          {
+            "name": "SSN",
+            "elements": [
+              {
+                "field": "ssn"
+              }
+            ]
+          }
+        ]
+      },
+      "sharedSecret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expires": "2999-01-01T00:00:00.000Z",
+      "connectionEndpoint": {
+        "channel": "webrtc",
+        "host": "psilink.example.org",
+        "port": 8443,
+        "path": "/api/"
+      },
+      "disclosedPayloadColumns": ["given_name"]
+    },
+    "canonicalJson": "{\"version\":\"1\",\"linkageTerms\":{\"version\":\"1.0.0\",\"identity\":\"Interop Fixture Party\",\"date\":\"2026-01-01\",\"algorithm\":\"psi\",\"linkageStrategy\":\"cascade\",\"output\":{\"expectsOutput\":true,\"shareWithPartner\":false},\"deduplicate\":false,\"linkageFields\":[{\"type\":\"ssn\",\"name\":\"ssn\"}],\"linkageKeys\":[{\"name\":\"SSN\",\"elements\":[{\"field\":\"ssn\"}]}]},\"sharedSecret\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"expires\":\"2999-01-01T00:00:00.000Z\",\"connectionEndpoint\":{\"channel\":\"webrtc\",\"host\":\"psilink.example.org\",\"port\":8443,\"path\":\"/api/\"},\"disclosedPayloadColumns\":[\"given_name\"]}",
+    "encoded": "eyJ2ZXJzaW9uIjoiMSIsImxpbmthZ2VUZXJtcyI6eyJ2ZXJzaW9uIjoiMS4wLjAiLCJpZGVudGl0eSI6IkludGVyb3AgRml4dHVyZSBQYXJ0eSIsImRhdGUiOiIyMDI2LTAxLTAxIiwiYWxnb3JpdGhtIjoicHNpIiwibGlua2FnZVN0cmF0ZWd5IjoiY2FzY2FkZSIsIm91dHB1dCI6eyJleHBlY3RzT3V0cHV0Ijp0cnVlLCJzaGFyZVdpdGhQYXJ0bmVyIjpmYWxzZX0sImRlZHVwbGljYXRlIjpmYWxzZSwibGlua2FnZUZpZWxkcyI6W3sidHlwZSI6InNzbiIsIm5hbWUiOiJzc24ifV0sImxpbmthZ2VLZXlzIjpbeyJuYW1lIjoiU1NOIiwiZWxlbWVudHMiOlt7ImZpZWxkIjoic3NuIn1dfV19LCJzaGFyZWRTZWNyZXQiOiJBQUVDQXdRRkJnY0lDUW9MREEwT0R4QVJFaE1VRlJZWEdCa2FHeHdkSGg4IiwiZXhwaXJlcyI6IjI5OTktMDEtMDFUMDA6MDA6MDAuMDAwWiIsImNvbm5lY3Rpb25FbmRwb2ludCI6eyJjaGFubmVsIjoid2VicnRjIiwiaG9zdCI6InBzaWxpbmsuZXhhbXBsZS5vcmciLCJwb3J0Ijo4NDQzLCJwYXRoIjoiL2FwaS8ifSwiZGlzY2xvc2VkUGF5bG9hZENvbHVtbnMiOlsiZ2l2ZW5fbmFtZSJdfQulzt8A"
+  }
+}

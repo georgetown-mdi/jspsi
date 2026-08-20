@@ -331,6 +331,28 @@ The decision, the alternatives measured against it, and where each current
 `@psilink/core/testing` subject stands are in
 [cross-workspace-test-material.md](notes/cross-workspace-test-material.md).
 
+### Checked-in vectors
+
+A vector file is shared test DATA rather than a helper, so it takes neither
+route above: each one lives in `packages/core/test/vectors/` beside the
+generator that produces it, and a suite in any workspace reads it by relative
+path -- the Node suites with `node:fs`, the browser suites with Vite's `?raw`.
+Nothing about it enters `packages/core/src` or ships in `dist/testing.*`.
+
+Reading one from more than one workspace is deliberate. A construction that two
+applications implement independently is guarded only when each application's OWN
+call sites are driven against one pinned answer; a test that computes both
+"sides" through a single shared path proves nothing about either. So
+`webrtc-interop-vectors.json` -- the CLI-to-web rendezvous, invitation, and
+handshake-role contract -- is asserted from `packages/core/test/webrtcInterop.test.ts`
+for what core alone owns, from `apps/cli/test/unit/webrtcInterop.test.ts` and
+`apps/cli/test/unit/webrtcDispatch.test.ts` for the CLI's own constructions, and
+from `apps/web/test/unit/webrtcInterop.test.ts` for the web app's. Each of those
+projects runs on every pull request that can touch the contract, so a divergence
+fails there rather than at first cross-application contact.
+`kex-vectors.json` splits the same way, across the Node and browser platforms
+instead of across the two applications.
+
 ## Verifying Windows owner-only file protections
 
 On Windows the CLI protects its owner-only files with ACLs rather than POSIX mode bits, and no automated test leg runs on Windows. The checks below are a manual procedure to run on a Windows host to confirm the owner-only writers still narrow ACLs correctly after a change to their Windows branch. Run them in PowerShell from a scratch directory on an NTFS volume that carries the usual inheritable ACEs (a subdirectory of the user profile is fine); each check produces an artifact you then inspect. `$me` below is the domain-qualified account the CLI narrows the file to; derive it from `whoami`, the same call the CLI uses to name the grant principal, so the comparison matches the granted identity exactly (domain casing and NetBIOS form included).

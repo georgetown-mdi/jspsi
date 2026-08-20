@@ -32,6 +32,7 @@ import { loadPsiBackend, runExchange } from "@psilink/core";
 import { buildRunOutputs } from "@bench/runOutputs";
 
 import { CLOSE_OUTCOME_WARNINGS } from "./exchangeLifecycle";
+import { HANDSHAKE_ROLE_FOR_SIDE } from "./handshakeRole";
 import { acquireValidatedManagedInput } from "./managedInputHandle";
 import { authenticateExchange } from "./authenticateExchange";
 import { beginManagedRendezvous } from "./managedRendezvous";
@@ -42,8 +43,8 @@ import { prepareManagedRerunExchange } from "./managedPreparedExchange";
 import { runManagedRerun } from "./managedRun";
 import { waitForIncomingConnection } from "./waitForConnection";
 
-import type { HandshakeRole, MessageConnection } from "@psilink/core";
 import type { DataConnection } from "peerjs";
+import type { MessageConnection } from "@psilink/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type Peer from "peerjs";
 
@@ -54,17 +55,6 @@ import type { ManagedExchangeRunResult } from "./managedExchangeRun";
 import type { ManagedInputSource } from "./managedInputHandle";
 import type { ManagedRerunOptions } from "./managedRun";
 import type { PeerCloseOutcome } from "./waitForPeerClose";
-
-/** This party's PSI/handshake role for its `side`: the inviter listens (the PSI
- * responder), the acceptor dials (the PSI initiator) -- the same mapping the
- * one-shot flows assign. */
-const HANDSHAKE_ROLE_FOR_SIDE: Record<
-  ManagedExchangeRecord["side"],
-  HandshakeRole
-> = {
-  inviter: "responder",
-  acceptor: "initiator",
-};
 
 /** What the input phase yields to the handshake: the prepared exchange bound to
  * this run's freshly-read rows, before any connection. */

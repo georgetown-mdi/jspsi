@@ -23,8 +23,12 @@ import type { MessageConnection, PreparedExchange } from "@psilink/core";
 const mockState = vi.hoisted(() => ({
   /** Every rendezvous the dispatch asked for, in call order. */
   dials: [] as Array<Record<string, unknown>>,
-  /** What each party asked the key exchange for, by handshake role. */
-  handshakes: [] as Array<{ role: string; requestEncryption: boolean }>,
+  /** What each party asked the key exchange for, attributed to its side. */
+  handshakes: [] as Array<{
+    side: "inviter" | "acceptor";
+    role: string;
+    requestEncryption: boolean;
+  }>,
   /** The connection each party's runExchange was handed. */
   exchangeConnections: [] as Array<unknown>,
   /** Every `log.info` line the run emitted, with its arguments joined as a console joins them. */
@@ -59,7 +63,14 @@ vi.mock("@psilink/core", async (importActual) => {
         role: Parameters<typeof actual.authenticateConnection>[2],
         requestEncryption: boolean,
       ) => {
-        mockState.handshakes.push({ role, requestEncryption });
+        // The linked pair below hands each party its own connection object, so
+        // identity is what attributes a captured handshake to the side that ran
+        // it -- the argument list itself carries no party name.
+        mockState.handshakes.push({
+          side: connection === pair.inviter ? "inviter" : "acceptor",
+          role,
+          requestEncryption,
+        });
         return actual.authenticateConnection(
           connection,
           params,
@@ -160,6 +171,26 @@ function linkedConnection(role: "inviter" | "acceptor"): MessageConnection {
 const minimalPrepared = {} as unknown as PreparedExchange;
 const SECRET = generateSharedSecret();
 
+/** The cross-app conformance fixture: each rendezvous side's key-exchange
+ * handshake role and request-encryption flag, pinned once for both apps. */
+const interopVectors = JSON.parse(
+  fs.readFileSync(
+    new URL(
+      "../../../../packages/core/test/vectors/webrtc-interop-vectors.json",
+      import.meta.url,
+    ),
+    { encoding: "utf8" },
+  ),
+) as {
+  rendezvous: {
+    sides: Array<{
+      side: "inviter" | "acceptor";
+      handshakeRole: string;
+      requestEncryption: boolean;
+    }>;
+  };
+};
+
 let tmpDir: string;
 
 beforeEach(() => {
@@ -243,6 +274,24 @@ test("neither party asks for the application-layer AEAD, and neither wraps", asy
   expect(mockState.exchangeConnections).toHaveLength(2);
   for (const connection of mockState.exchangeConnections)
     expect([pair.inviter, pair.acceptor]).toContain(connection);
+});
+
+test("each party's role and encryption request match the shared interop vectors", async () => {
+  await Promise.all([runParty("inviter"), runParty("acceptor")]);
+  // The two assertions above hold the CLI to its own reading of the pairing;
+  // this one holds it to the shared cross-app vectors the web app's suite
+  // asserts its own side against (apps/web/test/unit/webrtcInterop.test.ts), so
+  // the two apps cannot agree with themselves and disagree with each other. The
+  // rest of the CLI's side of that fixture is driven in webrtcInterop.test.ts;
+  // the request-encryption flag is only observable through a real handshake,
+  // which this file already drives.
+  const bySide = new Map(mockState.handshakes.map((h) => [h.side, h]));
+  expect(bySide.size).toBe(interopVectors.rendezvous.sides.length);
+  for (const side of interopVectors.rendezvous.sides)
+    expect(bySide.get(side.side)).toMatchObject({
+      role: side.handshakeRole,
+      requestEncryption: side.requestEncryption,
+    });
 });
 
 test("the rendezvous is dialed with the configured broker and ICE servers", async () => {
