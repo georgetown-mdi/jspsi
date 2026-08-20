@@ -12,6 +12,63 @@ docs/spec/README.md, "Where does my content go?". -->
 
 This is the security overview for security teams and compliance officers. It covers the threat model, the authentication design, and the channel-security controls at the level of what each protects against and why it is sufficient. It does not specify how they are built.
 
+## Start here
+
+This is the plain-language layer: what PSI-Link does, what it protects and from whom, and what stays with the deploying agency. Everything after it is the design itself, which a reader assessing a particular control drills into from here. The regulatory framings -- the NIST SP 800-53 control mapping, the FIPS 140 position, and the sector-specific readings -- are in [COMPLIANCE.md](COMPLIANCE.md).
+
+### What PSI-Link does
+
+Two agencies operating under a signed data sharing agreement each hold a file of records about people. PSI-Link tells each agency which of those people appear in both files, and hands over -- for the matched people only -- the columns each agency designated in advance for disclosure. Neither agency sends the other its file, and neither learns anything about the records that did not match.
+
+Each agency runs the software itself, in a container on its own machine or in its own browser. There is no service in the middle holding the data: what the two parties meet over is an SFTP server, a shared folder, or a direct browser-to-browser connection, and the exchange is designed so that whoever operates that meeting point cannot read it ([SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md)).
+
+### What it protects, and from whom
+
+| Who | What they would otherwise see | What prevents it |
+|-----|------------------------------|------------------|
+| The partner agency | Your whole file, including the records that did not match | Records are matched in encrypted form, so the identifiers you match on are never sent. The partner receives the overlap and the payload columns you designated ([Private set intersection](#private-set-intersection), [Data handling](#data-handling)) |
+| The SFTP server operator or shared-folder administrator | Every file the exchange writes into the rendezvous directory | A recurring exchange wraps its frames in application-layer AES-256-GCM keyed from the key exchange, so the administrator sees ciphertext; the key-exchange handshake frames that establish that key are the stated exception (see [COMPLIANCE.md's SC-8 row](COMPLIANCE.md#nist-sp-800-53)). A zero-setup exchange has no session key and rests on that administrator's access controls instead ([Channel security](#channel-security)) |
+| Anyone on the network path | Traffic in transit | The channel's own encryption beneath that wrap: SSH for SFTP, DTLS for a WebRTC connection, and for a network-mounted share whatever the operator configures for it ([Channel security](#channel-security)) |
+| The peer-coordination server the web application uses | The exchange it introduces the two browsers for | It relays opaque rendezvous-setup messages only; the data channel is end-to-end encrypted and never reaches it ([Channel security](#channel-security)) |
+| Someone posing as your partner | An exchange conducted with them instead | A recurring exchange proves both parties hold a secret established out of band, before any data moves, and rotates it afterwards. Authentication is a hard gate: if it fails, nothing is exchanged ([Authentication](#authentication)) |
+| Whoever can read your disks and backups | The key file, the signing identity, the exchange records, and the result | Nothing in this software beyond owner-only file permissions. At-rest confidentiality is the agency's storage or full-disk encryption ([Key file security](#key-file-security)) |
+
+**What it does not protect against.** Three limits belong up front rather than at the end of a threat model:
+
+- **The partner learns the intersection, and each party's dataset size.** That is the exchange, not a leak. The guarantee is about the records that did not match, and it is only as strong as the linkage keys the parties agree on: a key built from too little PII is open to a differencing or brute-force attack, so both parties review the keys before agreeing to them ([Threat model](#threat-model)).
+- **A zero-setup exchange has no shared secret**, so it carries no application-layer encryption and no key-exchange authentication. Trust rests on the transport and on whoever administers the server or shared folder ([Transport-layer authentication](#transport-layer-authentication)).
+- **Code running where the exchange runs.** An attacker who can run code on the operator's machine, or inside the web application's browser origin, reads what the operator reads. The browser case is set out in full, including what it means for a managed exchange's stored secret ([Hosted at-rest threat model for managed exchanges](#hosted-at-rest-threat-model-for-managed-exchanges), [Egress hardening and its limits](#egress-hardening-and-its-limits)).
+
+### What the deploying agency is responsible for
+
+- **At-rest confidentiality** -- storage or full-disk encryption over the input file, the result, the key file, and any backup of them.
+- **The environment** -- the host, the container engine, the network path, and the SFTP server or shared directory the parties rendezvous through, including a directory scoped to the one exchange.
+- **The credentials** -- carrying the shared secret and the server's host-key fingerprint to the partner over a trusted channel, and protecting both thereafter.
+- **Retention and disposition** of the result, the exchange records, and the rendezvous directory's contents.
+- **The decision to disclose**, its legal basis, and the risk assessment or authorization that covers it.
+
+The complete split, stated separately for the container deployment and the hosted web application, is in [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md).
+
+### Where a reviewer's usual questions are answered
+
+| A reviewer asks | The short answer | Where it is set out |
+|-----------------|------------------|---------------------|
+| Is PSI-Link suitable for our data class? | Designed for PII; PHI and education records are conditional on the agency's own determination; CJI and FTI have not been assessed. | [COMPLIANCE.md](COMPLIANCE.md#intended-use-and-data-classification) |
+| Is our data encrypted at rest? | No -- the software encrypts nothing on disk. It writes its files owner-only, and at-rest confidentiality is the agency's storage or full-disk encryption. | [Key file security](#key-file-security) |
+| Is our data encrypted in transit? | On a recurring exchange, yes: application-layer AES-256-GCM on top of the channel's own encryption. A zero-setup exchange relies on the channel alone. | [Channel security](#channel-security) |
+| What is our agency still responsible for? | Everything around the exchange: at-rest confidentiality, the environment, the credentials, retention, and the decision to disclose. | [What the deploying agency is responsible for](#what-the-deploying-agency-is-responsible-for) above, and [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md) |
+| What happens if the shared secret leaks? | Treat it as invalid immediately, notify the partner, delete both key files, and re-invite over an uncompromised channel. | [Compromise response](#compromise-response) |
+| Which NIST controls does it address, and is the cryptography FIPS 140-validated? | The control mapping and the scoped FIPS 140 claim, with its conditions and the places an unqualified version of it fails. | [COMPLIANCE.md](COMPLIANCE.md#nist-sp-800-53) and [COMPLIANCE.md](COMPLIANCE.md#fips-140) |
+
+### How to read the rest of this document
+
+- [Overview](#overview) and [Private set intersection](#private-set-intersection) -- the four layers protecting an exchange, and the primitive the privacy guarantee rests on.
+- [Threat model](#threat-model) -- who is assumed to do what, what a party can learn by choosing its own inputs, and the trust boundaries around a configuration file and the local console.
+- [Authentication](#authentication) and [Key file security](#key-file-security) -- the key-agreement design, invitation confidentiality, host-key pinning, and how the persistent secret is stored, rotated, backed up, and recovered.
+- [Channel security](#channel-security) -- what the application-layer encryption covers, the bounds that hold a hostile server admin in check, and the web signaling surface.
+- [Hosted at-rest threat model for managed exchanges](#hosted-at-rest-threat-model-for-managed-exchanges) -- the weaker posture of a secret persisted in a browser, and the controls that bound it.
+- [Receipt signing identities](#receipt-signing-identities), [Canonical encoding](#canonical-encoding), and [Data handling](#data-handling) -- what a receipt proves and how trust in a signing key is anchored, why the byte encoding is fixed, and what crosses the wire, reaches a log, or lands in the output.
+
 What lives elsewhere:
 
 - The PSI and PSI-C algorithms and the wire-level key exchange: [PROTOCOL.md](spec/PROTOCOL.md).

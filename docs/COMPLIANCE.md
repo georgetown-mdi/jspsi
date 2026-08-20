@@ -1,7 +1,7 @@
 ---
 title: "PSI-Link Compliance"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-18"
+last_reviewed: "2026-08-20"
 ---
 
 # PSI-Link compliance
@@ -9,6 +9,57 @@ last_reviewed: "2026-08-18"
 This document collects the regulatory and policy framings most often raised by agency security, compliance, and privacy reviewers. It is not a certification or an attestation of compliance with any specific framework. PSI-Link is open-source software; the deploying agency is responsible for its own risk assessments, authority-to-operate (ATO) determinations, and any required third-party assessments under applicable federal, state, or local regulations.
 
 Where another document in this repository covers a topic in detail, this document links there rather than duplicating it.
+
+## Start here
+
+This is the plain-language layer: what the software does, what it protects and from whom, what your agency still owns, and where a reviewer's usual questions are answered. Everything below it is the evidence a technical assessor drills into -- the control mapping, the standards citations, and the FIPS 140 position -- and none of it is a prerequisite for reading this section.
+
+### What PSI-Link does
+
+Two agencies operating under a signed data sharing agreement each hold a file of records about people. PSI-Link tells each agency which of those people appear in both files, and hands over -- for the matched people only -- the columns each agency designated in advance for disclosure. Neither agency sends the other its file, and neither learns anything about the records that did not match.
+
+No vendor sits in the middle. Each agency runs the software itself, in a container on its own machine or in its own browser; the project operates nothing on an agency's behalf and receives no agency data ([SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md)).
+
+### What it protects, and from whom
+
+- **From the partner agency.** The identifiers used to match records -- names, dates of birth, Social Security numbers, and the like -- are never sent to the partner. Matching runs on encrypted values, so the partner learns the overlap and the payload columns you designated, and nothing about the records that did not match ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#data-handling)).
+- **From whoever carries the traffic.** On a recurring (authenticated) exchange, the SFTP server operator, the shared-folder administrator, and anyone on the network see ciphertext rather than the exchange's contents; the peer-coordination server the web application uses sees connection metadata and never data-channel content ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security)). The [SC-8](#nist-sp-800-53) row states what that wrap covers and the one part of the exchange it does not.
+- **From someone posing as your partner.** A recurring exchange authenticates both parties against a secret established out of band before any data moves, and a failed authentication exchanges nothing ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#authentication)).
+- **Not from your own storage.** PSI-Link encrypts nothing on disk. It writes its files with owner-only permissions and leaves at-rest confidentiality to your storage or full-disk encryption ([SC-28](#nist-sp-800-53)).
+- **Not to the same degree on a zero-setup exchange.** A one-off exchange carries no shared secret, so there is no application-layer encryption over it and no key-exchange authentication; what protects it is the channel's own encryption and the trust you place in whoever administers the server or shared folder ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#transport-layer-authentication)).
+
+### What your agency remains responsible for
+
+PSI-Link is software an agency runs, not a service the project operates, so everything around the exchange stays with the deploying agency:
+
+- **The decision to disclose** -- the legal basis for it, the data sharing agreement behind it, and which columns are designated for disclosure.
+- **At-rest confidentiality** -- storage or full-disk encryption covering the input file, the result, the key file, and any backup of them.
+- **The environment** -- the host, the container engine, the network path, and the SFTP server or shared directory the two parties rendezvous through.
+- **The credentials** -- carrying the shared secret and the server's host-key fingerprint to the partner out of band, and protecting both thereafter.
+- **Retention and disposition** of the result, the exchange records, and the contents of the rendezvous directory.
+- **The assessment itself** -- your risk assessment, your privacy impact assessment, and your ATO determination. Nothing in this document is a certification or an attestation.
+
+The complete split, stated separately for the container deployment and the hosted web application in the form a security questionnaire asks for, is in [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md).
+
+### Where a reviewer's usual questions are answered
+
+| A reviewer asks | The short answer | Where it is set out |
+|-----------------|------------------|---------------------|
+| Is PSI-Link suitable for our data class? | Designed for PII. PHI under HIPAA and education records under FERPA are conditional and rest on your own determination. CJI under CJIS and FTI under IRS Publication 1075 have not been assessed. Classified information is out of scope. | [Intended use and data classification](#intended-use-and-data-classification) |
+| Is our data encrypted at rest? | No -- the software encrypts nothing on disk. It writes its files owner-only, and at-rest confidentiality is your storage or full-disk encryption. | [SC-28](#nist-sp-800-53) and [Where an unqualified claim fails](#where-an-unqualified-claim-fails) |
+| Is our data encrypted in transit? | On a recurring exchange, yes: the exchange is wrapped in AES-256-GCM on top of the channel's own encryption. A zero-setup exchange relies on the channel alone. | [SC-8](#nist-sp-800-53) and [SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security) |
+| What is our agency still responsible for? | Everything around the exchange: the decision to disclose, at-rest confidentiality, the environment, the credentials, retention, and the assessment. | [What your agency remains responsible for](#what-your-agency-remains-responsible-for) above, and [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md) |
+| Do you use FIPS 140-validated cryptography? | A scoped claim, and the scope is the whole of the answer: the default container image and the browser application embed no validated cryptographic module, and a separate `-fips` image embeds one, which is not the same as being one. Read the section before relying on it either way. | [FIPS 140](#fips-140) |
+| Do you hold an ATO, or a FedRAMP authorization? | Neither, and neither is available to software as such: an ATO is granted to a deployment in an authorizing environment. | [Authority to Operate](#authority-to-operate) and [FedRAMP and StateRAMP](#fedramp-and-stateramp) |
+| Where do we report a gap this document does not address? | A public issue for a compliance gap, the private process for a security-sensitive one. | [Reporting compliance gaps](#reporting-compliance-gaps) |
+
+### How the rest of this document is arranged
+
+- [Intended use and data classification](#intended-use-and-data-classification) -- the data classes the software is and is not designed for, and where the responsibility split is stated in full.
+- [Federal frameworks](#federal-frameworks) -- the technical layer: the NIST SP 800-53 control mapping, the FIPS 140 position with its scope and conditions, FedRAMP and StateRAMP, accessibility, and export control.
+- [Sector-specific framings](#sector-specific-framings) -- HIPAA, FERPA, CJIS, and IRS Publication 1075, each with what the software does and does not settle for that sector.
+- [State and local laws](#state-and-local-laws) and [Supply chain](#supply-chain) -- jurisdictional applicability, and release signing, provenance, and the SBOM.
+- [Authority to Operate](#authority-to-operate) and [Privacy review](#privacy-review) -- what an agency's own authorization and privacy processes draw from this repository, and what they cannot draw from it.
 
 ## Intended use and data classification
 
@@ -30,6 +81,8 @@ The following table summarizes the data classifications PSI-Link is and is not d
 <!-- TODO: confirm whether any deployments have completed a CJIS or IRS 1075 assessment and document the result. -->
 
 ## Federal frameworks
+
+These are the framework-level positions an assessor works through control by control: what each control family maps to in the design, what the FIPS 140 claim is scoped to and where an unqualified version of it fails, and the authorization, accessibility, and export-control postures. The policy-level answers they support are in [Start here](#start-here) above.
 
 ### NIST SP 800-53
 
