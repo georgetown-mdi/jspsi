@@ -828,6 +828,19 @@ function anchoredSlot(
         "unanchored: the verdict would claim both certificates were anchored " +
         "when one was not",
     );
+  // The two anchored kinds are the only sources this verification establishes,
+  // so a status outside them anchors nothing at all -- it reaches here only from
+  // a caller that stepped past the type. Naming it would put an anchor that does
+  // not exist under a verified headline on every surface at once.
+  if (
+    party.certificateAnchor !== "partner-pin" &&
+    party.certificateAnchor !== "local-identity"
+  )
+    throw new Error(
+      `a verified dual-signed record reports the ${party.role}'s certificate ` +
+        `anchor as ${party.certificateAnchor}: the verdict would name an ` +
+        "anchor that does not exist",
+    );
   return { role: party.role, anchor: party.certificateAnchor };
 }
 
@@ -892,22 +905,56 @@ function decideGuidance(
   return guidance;
 }
 
+/** What a verdict states beside the headline, the guidance, and the binder
+ * decided over it: the rows themselves. */
+type DecidedVerdictRows = Omit<
+  SignedReceiptVerdict,
+  "headline" | "guidance" | "binder"
+>;
+
+function partyRows(
+  party: SignedReceiptVerdictParty,
+): Array<[string, SignedReceiptVerdictCheck<string>]> {
+  const rows: Record<
+    Exclude<
+      keyof SignedReceiptVerdictParty,
+      "role" | "identity" | "fingerprint"
+    >,
+    [string, SignedReceiptVerdictCheck<string>]
+  > = {
+    certificateAnchor: [
+      `the ${party.role}'s certificate anchor`,
+      party.certificateAnchor,
+    ],
+    certificateBinding: [
+      `the ${party.role}'s certificate binding`,
+      party.certificateBinding,
+    ],
+    signature: [`the ${party.role}'s receipt signature`, party.signature],
+    assertedIdentity: [
+      `the ${party.role}'s asserted identity`,
+      party.assertedIdentity,
+    ],
+  };
+  return Object.values(rows);
+}
+
 /** Every decided row under the headline, named as a reader meets it. */
 function decidedRows(
-  verdict: Omit<SignedReceiptVerdict, "headline" | "guidance" | "binder">,
+  verdict: DecidedVerdictRows,
 ): Array<[string, SignedReceiptVerdictCheck<string>]> {
-  return [
-    ["the agreed-terms hash", verdict.termsHash],
-    ["the receipt-record pairing", verdict.runBinding],
-    ...verdict.parties.flatMap(
-      (party): Array<[string, SignedReceiptVerdictCheck<string>]> => [
-        [`the ${party.role}'s certificate anchor`, party.certificateAnchor],
-        [`the ${party.role}'s certificate binding`, party.certificateBinding],
-        [`the ${party.role}'s receipt signature`, party.signature],
-        [`the ${party.role}'s asserted identity`, party.assertedIdentity],
-      ],
-    ),
-  ];
+  // Keyed by the members the rows are drawn from rather than listed loose, so a
+  // row added to the verdict later cannot fall outside the refusals that read
+  // this list: the mapping stops compiling until it names the new member.
+  const rows: Record<
+    keyof DecidedVerdictRows,
+    Array<[string, SignedReceiptVerdictCheck<string>]>
+  > = {
+    termsHash: [["the agreed-terms hash", verdict.termsHash]],
+    runBinding: [["the receipt-record pairing", verdict.runBinding]],
+    parties: verdict.parties.flatMap(partyRows),
+  };
+  return Object.values(rows).flat();
 }
 
 /**
@@ -947,10 +994,7 @@ export function decideSignedReceiptVerdict(
   const unanchored = parties.filter(
     (party) => party.certificateAnchor === "unanchored",
   );
-  const decided: Omit<
-    SignedReceiptVerdict,
-    "headline" | "guidance" | "binder"
-  > = {
+  const decided: DecidedVerdictRows = {
     parties: [
       decideParty(report.initiator, report.responder, report),
       decideParty(report.responder, report.initiator, report),
