@@ -13,6 +13,7 @@ import { decodeInvitation } from "@psilink/core";
 
 import { InviterBench } from "@bench/InviterBench";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
+import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
 import styles from "@bench/bench.module.css";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
@@ -277,13 +278,38 @@ async function openExchangeFiles() {
   await page.getByRole("button", { name: /How files are handled/ }).click();
 }
 
+/**
+ * Drive the retain-mode checkbox on the open file-handling card to `on`, from
+ * whichever state it is in.
+ *
+ * The click sits inside the poll rather than ahead of it because a click the
+ * browser reports as delivered can leave this control in the state it started in
+ * under the CPU contention of the full browser suite -- the split-rendezvous gate
+ * below reddened in CI that way while every local run passed. Re-reading before
+ * each click is what makes that safe: a change that has already landed ends the
+ * poll instead of being toggled back, so only a delivery that did nothing is
+ * retried. The intended state is the only exit, so a UI that genuinely refuses
+ * the change still fails here.
+ */
+async function setRetainMode(on: boolean) {
+  const retain = page.getByLabelText("Keep every exchange file");
+  const checked = () => (retain.element() as HTMLInputElement).checked;
+  await expect
+    .poll(
+      async () => {
+        if (checked() !== on) await retain.click();
+        return checked();
+      },
+      { interval: 500, timeout: 5_000 },
+    )
+    .toBe(on);
+}
+
 /** Turn retain mode on the way an operator does: the file-handling card on
  * Review & create, before the invitation is minted. */
 async function turnRetainModeOn() {
   await openExchangeFiles();
-  const retain = page.getByLabelText("Keep every exchange file");
-  await retain.click();
-  await expect.element(retain).toBeChecked();
+  await setRetainMode(true);
 }
 
 /** State the lockless rendezvous on its own, from the same card: the operator's
@@ -561,6 +587,71 @@ describe("console inviter file-handling gate", () => {
     await expect
       .element(page.getByText("Ready to create."))
       .toBeInTheDocument();
+  });
+});
+
+describe("console inviter split-rendezvous retain gate", () => {
+  /** A console mounted with two rendezvous folders, both of them named. */
+  const SPLIT_RENDEZVOUS = {
+    configured: true,
+    split: true,
+    locator: "from-partner",
+    folderName: "from-partner",
+    outboundLocator: "to-partner",
+    outboundFolderName: "to-partner",
+  };
+
+  test("a split appliance blocks Create until retain mode is on", async () => {
+    stubJobApi({ sftp: { configured: false }, rendezvous: SPLIT_RENDEZVOUS });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    // The two mounts make filedrop the default transport, and retain mode starts
+    // off -- the state the appliance's provisioning and the operator's own choice
+    // disagree in, which the create gate holds.
+    await expect
+      .element(page.getByLabelText("Over a shared directory, run here"))
+      .toBeChecked();
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeDisabled();
+    expect(app.container.textContent).toContain(
+      SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT,
+    );
+
+    await turnRetainModeOn();
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeEnabled();
+  });
+
+  test("retain mode turned off after the transport was chosen holds the mint", async () => {
+    // The ordering the gate exists for: the transport is settled on the chooser
+    // and retain mode on a card below it, so the requirement can be satisfied and
+    // then withdrawn. Nothing partner-facing may be minted after that -- neither
+    // the endpoint nor the accept kit's disclosure -- for a rendezvous the run
+    // would refuse.
+    stubJobApi({ sftp: { configured: false }, rendezvous: SPLIT_RENDEZVOUS });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await turnRetainModeOn();
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeEnabled();
+
+    await setRetainMode(false);
+    await expect
+      .element(page.getByLabelText("Keep every exchange file"))
+      .not.toBeChecked();
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeDisabled();
+    expect(app.container.textContent).toContain(
+      SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT,
+    );
+    // The terms stay unsealed: no invitation was minted.
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
   });
 });
 

@@ -18,6 +18,7 @@ import {
 import { AcceptorBench } from "@bench/AcceptorBench";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
 import { SERVER_JOB_KEEP_OPEN_BODY } from "@bench/BenchRunSurface";
+import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -91,6 +92,15 @@ const FILEDROP_ENDPOINT: ConnectionEndpoint = {
   channel: "filedrop",
   path: "/drops/psilink",
 };
+// The split shape of the same invitation: the inviting party's inbound and outbound
+// folders. An accept runs over the mounts on THIS appliance rather than these paths,
+// so a split accept needs the appliance mounted the same shape -- and the pair here
+// is stated from the inviter's side, which is why neither path is shown to this seat.
+const SPLIT_FILEDROP_ENDPOINT: ConnectionEndpoint = {
+  channel: "filedrop",
+  inboundPath: "/drops/psilink-in",
+  outboundPath: "/drops/psilink-out",
+};
 const WEBRTC_ENDPOINT: ConnectionEndpoint = {
   channel: "webrtc",
   host: "127.0.0.1",
@@ -126,7 +136,9 @@ describe("console acceptor unsupported-shape gate", () => {
       .toBeInTheDocument();
     await expect
       .element(
-        page.getByText(acceptUnsupported(FILEDROP_ENDPOINT, false)!.message),
+        page.getByText(
+          acceptUnsupported(FILEDROP_ENDPOINT, { configured: false })!.message,
+        ),
       )
       .toBeInTheDocument();
     expect(
@@ -148,7 +160,9 @@ describe("console acceptor unsupported-shape gate", () => {
       .toBeInTheDocument();
     await expect
       .element(
-        page.getByText(acceptUnsupported(WEBRTC_ENDPOINT, false)!.message),
+        page.getByText(
+          acceptUnsupported(WEBRTC_ENDPOINT, { configured: false })!.message,
+        ),
       )
       .toBeInTheDocument();
     expect(
@@ -187,15 +201,35 @@ describe("console acceptor never renders the recurring-save offer", () => {
 // The name THIS appliance's own rendezvous report gives the mounted directory --
 // the only value the console may show as the shared folder's name.
 const APPLIANCE_FOLDER_NAME = "county-exchange";
+// The two names a split-provisioned appliance reports for its own mounts: the
+// inbound leg the partner writes into, and the outbound one this seat writes.
+const APPLIANCE_INBOUND_NAME = "from-partner";
+const APPLIANCE_OUTBOUND_NAME = "to-partner";
 
-// The appliance HERE reports a configured rendezvous mount, so a single-directory
-// filedrop accept is runnable and reaches the consent step. `folderName` is reported
-// only when this console can name its own mount, which is the branch the confirm
-// alert turns on.
-function stubRendezvousMounted(folderName?: string): void {
+/** The split pair this appliance reports, named or (with `named` false) carrying
+ * locators only -- the launcher-chosen mount points the console cannot name. */
+function splitRendezvousBody(named = true): Record<string, unknown> {
+  return {
+    configured: true,
+    split: true,
+    locator: named ? APPLIANCE_INBOUND_NAME : "inbound-mount",
+    outboundLocator: named ? APPLIANCE_OUTBOUND_NAME : "outbound-mount",
+    ...(named
+      ? {
+          folderName: APPLIANCE_INBOUND_NAME,
+          outboundFolderName: APPLIANCE_OUTBOUND_NAME,
+        }
+      : {}),
+  };
+}
+
+/** Serve the appliance's own rendezvous report (`body`) and an empty work directory,
+ * which is all the review and consent steps read. Every other job URL 404s; anything
+ * off the job API falls through to the real fetch. */
+function stubRendezvousReport(body: unknown): void {
   const realFetch = window.fetch.bind(window);
-  const jsonResponse = (body: unknown) =>
-    new Response(JSON.stringify(body), {
+  const jsonResponse = (payload: unknown) =>
+    new Response(JSON.stringify(payload), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -204,13 +238,7 @@ function stubRendezvousMounted(folderName?: string): void {
     (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = String(input);
       if (url === "/api/jobs/rendezvous")
-        return Promise.resolve(
-          jsonResponse({
-            configured: true,
-            locator: folderName ?? "rendezvous-folder",
-            ...(folderName === undefined ? {} : { folderName }),
-          }),
-        );
+        return Promise.resolve(jsonResponse(body));
       if (url === "/api/jobs/inputs")
         return Promise.resolve(jsonResponse({ configured: true, files: [] }));
       if (url.startsWith("/api/jobs"))
@@ -218,6 +246,18 @@ function stubRendezvousMounted(folderName?: string): void {
       return realFetch(input, init);
     },
   );
+}
+
+// The appliance HERE reports a configured rendezvous mount, so a single-directory
+// filedrop accept is runnable and reaches the consent step. `folderName` is reported
+// only when this console can name its own mount, which is the branch the confirm
+// alert turns on.
+function stubRendezvousMounted(folderName?: string): void {
+  stubRendezvousReport({
+    configured: true,
+    locator: folderName ?? "rendezvous-folder",
+    ...(folderName === undefined ? {} : { folderName }),
+  });
 }
 
 describe("console acceptor shared-folder confirmation", () => {
@@ -266,6 +306,59 @@ describe("console acceptor shared-folder confirmation", () => {
       .toBeInTheDocument();
     expect(page.getByText(FILEDROP_ENDPOINT.path!).query()).toBeNull();
   });
+
+  test("a split accept confirms BOTH folders, naming which leg is read and which written", async () => {
+    stubRendezvousReport(splitRendezvousBody());
+    window.location.hash = await encodeToken(SPLIT_FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorBench));
+
+    await page
+      .getByRole("button", { name: "Continue: consent & your file" })
+      .click();
+
+    // A split rendezvous has no single shared folder, so the singular confirmation
+    // would ask the partner to agree on a folder that does not exist; both legs are
+    // named, with the direction that tells the partner which of theirs is which.
+    await expect
+      .element(page.getByText("Confirm the shared folders"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("reads your partner's files out of one and writes", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    const alertText = app.container.textContent;
+    expect(alertText).toContain(`You read from ${APPLIANCE_INBOUND_NAME}`);
+    expect(alertText).toContain(`write to ${APPLIANCE_OUTBOUND_NAME}`);
+    expect(alertText).toContain("the other way round");
+    // The invitation's own paths name the INVITER's folders, so this seat renders
+    // neither -- the same rule the single-folder confirmation holds.
+    expect(alertText).not.toContain("/drops/psilink-in");
+    expect(alertText).not.toContain("/drops/psilink-out");
+  });
+
+  test("asks for the same two-folder confirmation where this console cannot name its mounts", async () => {
+    stubRendezvousReport(splitRendezvousBody(false));
+    window.location.hash = await encodeToken(SPLIT_FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorBench));
+
+    await page
+      .getByRole("button", { name: "Continue: consent & your file" })
+      .click();
+
+    await expect
+      .element(page.getByText("Confirm the shared folders"))
+      .toBeInTheDocument();
+    // Both names or neither: naming one folder of a two-folder rendezvous would
+    // read as though the other did not exist.
+    const alertText = app.container.textContent;
+    expect(alertText).toContain("the other way round");
+    expect(alertText).not.toContain("You read from");
+    expect(alertText).not.toContain("inbound-mount");
+    expect(alertText).not.toContain("outbound-mount");
+  });
 });
 
 // A profiled mounted file whose columns satisfy the invitation's linkage fields
@@ -298,6 +391,9 @@ interface AcceptStubOptions {
   /** The body `GET /api/jobs/:id/handoff` serves (the recurring-run hand-off); a
    * 404 when unset, so the panel renders nothing. */
   handoff?: unknown;
+  /** The appliance's rendezvous report; a single named mount when unset. A split
+   * pair here is the provisioning a split filedrop accept runs over. */
+  rendezvous?: unknown;
 }
 
 // The full same-origin job API a console server-job accept drives: a mounted
@@ -345,7 +441,12 @@ function stubServerJobAccept(options: AcceptStubOptions = {}): {
       captured.push({ url, method: init?.method ?? "GET" });
       if (url === "/api/jobs/rendezvous")
         return Promise.resolve(
-          jsonResponse({ configured: true, locator: "rendezvous-folder" }),
+          jsonResponse(
+            options.rendezvous ?? {
+              configured: true,
+              locator: "rendezvous-folder",
+            },
+          ),
         );
       if (url === "/api/jobs/inputs")
         return Promise.resolve(
@@ -506,6 +607,29 @@ describe("console acceptor file-handling gate", () => {
       page.getByLabelText("Lockless rendezvous"),
       "auto",
     );
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeEnabled();
+  });
+
+  test("a split rendezvous blocks the launch until retain mode is on", async () => {
+    stubServerJobAccept({ rendezvous: splitRendezvousBody() });
+    window.location.hash = await encodeToken(SPLIT_FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorBench));
+    await reachAcceptColumns();
+
+    // Every filedrop exchange on a split appliance carries the inbound/outbound
+    // pair, which core refuses without retain mode: the operator meets the control
+    // to turn on here rather than a job the appliance refuses at composition.
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeDisabled();
+    await expect
+      .element(page.getByText(SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: /How files are handled/ }).click();
+    await page.getByLabelText("Keep every exchange file").click();
     await expect
       .element(page.getByRole("button", { name: "Start the exchange" }))
       .toBeEnabled();

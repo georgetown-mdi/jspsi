@@ -17,6 +17,7 @@ import {
 } from "@bench/acceptorModel";
 import { AcceptorBench } from "@bench/AcceptorBench";
 import { SERVER_JOB_KEEP_OPEN_BODY } from "@bench/BenchRunSurface";
+import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -119,11 +120,24 @@ interface CapturedRequest {
   body?: string;
 }
 
+// A split-provisioned appliance: two rendezvous mounts, which the operator set up for
+// their own shared-folder exchanges. An SFTP accept takes its directories from the
+// partner's endpoint, so this provisioning is none of its business.
+const SPLIT_RENDEZVOUS = {
+  configured: true,
+  split: true,
+  locator: "from-partner",
+  folderName: "from-partner",
+  outboundLocator: "to-partner",
+  outboundFolderName: "to-partner",
+};
+
 /** The same-origin job API a console SFTP accept drives: the mounted work file and
  * its profile, the sftp connection endpoints (GET reports the effective connection,
  * PUT authors it and flips GET to report it), and the job POST plus event stream.
- * PUT/POST bodies are captured so the test can assert what left the browser. */
-function stubSftpAccept(): {
+ * PUT/POST bodies are captured so the test can assert what left the browser.
+ * `rendezvous` is the appliance's own filedrop provisioning, unmounted by default. */
+function stubSftpAccept(rendezvous: unknown = { configured: false }): {
   captured: Array<CapturedRequest>;
   emitEvent: (event: object) => void;
   closeEvents: () => void;
@@ -151,7 +165,7 @@ function stubSftpAccept(): {
         body: typeof init?.body === "string" ? init.body : undefined,
       });
       if (url === "/api/jobs/rendezvous")
-        return Promise.resolve(jsonResponse({ configured: false }));
+        return Promise.resolve(jsonResponse(rendezvous));
       if (url === "/api/jobs/inputs")
         return Promise.resolve(
           jsonResponse({ configured: true, files: [ACCEPT_FILE] }),
@@ -249,7 +263,10 @@ describe("console SFTP accept unsupported-shape gate", () => {
       .toBeInTheDocument();
     await expect
       .element(
-        page.getByText(acceptUnsupported(SPLIT_SFTP_ENDPOINT, false)!.message),
+        page.getByText(
+          acceptUnsupported(SPLIT_SFTP_ENDPOINT, { configured: false })!
+            .message,
+        ),
       )
       .toBeInTheDocument();
     expect(
@@ -366,5 +383,36 @@ describe("console SFTP accept: author-then-launch", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Exchange complete");
+  });
+
+  test("a split-provisioned appliance does not gate a single-directory SFTP accept", async () => {
+    stubSftpAccept(SPLIT_RENDEZVOUS);
+    window.location.hash = await encodeToken(SFTP_ENDPOINT);
+    app.render(createElement(AcceptorBench));
+    await reachColumnsStep();
+
+    await page.getByRole("button", { name: "Set up connection" }).click();
+    await userEvent.fill(page.getByLabelText("Username"), "linkage");
+    await userEvent.fill(
+      page.getByLabelText("Server identity fingerprint"),
+      FINGERPRINT,
+    );
+    await userEvent.fill(
+      page.getByLabelText("File reference"),
+      "@/run/secrets/partner-key",
+    );
+    await page.getByRole("button", { name: "Save connection" }).click();
+    await expect.element(page.getByText("Ready to try")).toBeInTheDocument();
+
+    // The appliance's two rendezvous mounts are its FILEDROP provisioning. This
+    // accept meets the partner on the server the invitation names, in the one
+    // remote directory it names, so the split-rendezvous retain requirement is not
+    // its rule and cannot stand between the operator and the launch.
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeEnabled();
+    expect(app.container.textContent).not.toContain(
+      SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT,
+    );
   });
 });

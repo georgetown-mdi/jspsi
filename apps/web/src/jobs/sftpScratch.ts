@@ -45,8 +45,8 @@ export function resolveSftpCredentialScratchDir(
 
 /**
  * Prepare the pasted-credential scratch directory at server start, fail-closed:
- * assert it resolves strictly OUTSIDE every operator mount -- the data root, the
- * rendezvous directory, the secrets mount, and the work-input directory, each in
+ * assert it resolves strictly OUTSIDE every operator mount -- the data root, every
+ * rendezvous mount, the secrets mount, and the work-input directory, each in
  * both nesting directions -- create it owner-only, and SWEEP any credential a
  * prior run orphaned. A scratch dir that coincides with, nests under, or contains
  * any of those mounts would either expose a pasted secret through it or be
@@ -63,14 +63,14 @@ export function resolveSftpCredentialScratchDir(
 export function setupSftpCredentialScratchDir(
   scratchDir: string,
   dataRoot: string,
-  rendezvousDir: string | undefined,
+  rendezvousDirs: ReadonlyArray<string>,
   secretsDir?: string,
   inputDir?: string,
 ): string {
   const resolved = path.resolve(scratchDir);
   const exclusions = scratchExclusions(
     dataRoot,
-    rendezvousDir,
+    rendezvousDirs,
     secretsDir,
     inputDir,
   );
@@ -141,14 +141,15 @@ interface ScratchExclusion {
 
 /**
  * The operator mounts the scratch directory must resolve strictly outside: the
- * data root, and -- when configured -- the rendezvous directory, the secrets
- * mount, and the work-input directory. Each is added both as its lexical resolve
- * and, when it exists, its realpath, so a symlinked mount is caught too.
+ * data root, every configured rendezvous mount (one on a single-mount console,
+ * both legs on a split-provisioned appliance), and -- when configured -- the
+ * secrets mount and the work-input directory. Each is added both as its lexical
+ * resolve and, when it exists, its realpath, so a symlinked mount is caught too.
  * Duplicates are dropped.
  */
 function scratchExclusions(
   dataRoot: string,
-  rendezvousDir: string | undefined,
+  rendezvousDirs: ReadonlyArray<string>,
   secretsDir: string | undefined,
   inputDir: string | undefined,
 ): Array<ScratchExclusion> {
@@ -158,7 +159,7 @@ function scratchExclusions(
       exclusions.push({ dir: form, label });
   };
   add(dataRoot, "the job data root");
-  if (rendezvousDir !== undefined)
+  for (const rendezvousDir of rendezvousDirs)
     add(rendezvousDir, "the rendezvous directory");
   if (secretsDir !== undefined) add(secretsDir, "the secrets mount");
   if (inputDir !== undefined) add(inputDir, "the work-input directory");

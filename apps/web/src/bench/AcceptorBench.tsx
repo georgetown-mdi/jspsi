@@ -93,6 +93,7 @@ import { acceptorTimelineSteps } from "./exchangeRun";
 import { consoleAcquiredCsv } from "./consoleAcquiredCsv";
 import { restorablePosition } from "./stepRestore";
 import { seedRows } from "./inviterModel";
+import { splitRendezvousRetainProblem } from "./filedropRendezvousChoice";
 import styles from "./bench.module.css";
 import { useAcceptorExchange } from "./useAcceptorExchange";
 import { useStepHistory } from "./useStepHistory";
@@ -329,17 +330,18 @@ export function AcceptorBench() {
   }, []);
 
   // A console accept whose endpoint the appliance cannot run, decided by the endpoint
-  // SHAPE ({@link acceptUnsupported}): a WebRTC accept is out of scope here, a
-  // split-directory file-drop needs the command-line tool, and a single-directory
-  // file-drop needs a rendezvous mount. Surfaced at the review step BEFORE consent or
-  // intake, so the operator meets an honest block naming where it CAN run rather than a
-  // doomed run. Off the console every admitted endpoint runs in the browser, so this is
-  // undefined there.
+  // SHAPE against this appliance's own provisioning ({@link acceptUnsupported}): a
+  // WebRTC accept is out of scope here, a split-directory SFTP accept needs the
+  // command-line tool, and a file-drop accept needs mounts of the shape the
+  // invitation names. Surfaced at the review step BEFORE consent or intake, so the
+  // operator meets an honest block naming where it CAN run rather than a doomed run.
+  // Off the console every admitted endpoint runs in the browser, so this is undefined
+  // there.
   const unsupported =
     consoleBuild && decode.status === "ready"
       ? acceptUnsupported(
           decode.invitation.endpoint,
-          rendezvous?.configured === true,
+          rendezvous ?? { configured: false },
         )
       : undefined;
 
@@ -670,6 +672,17 @@ export function AcceptorBench() {
     ready && decode.invitation.endpoint.channel === "sftp"
       ? SFTP_CONNECTION_TUNING
       : FILEDROP_CONNECTION_TUNING;
+  // The split precondition belongs to the channel the accept runs on, so the
+  // accept's own channel decides it before the appliance's mounts are consulted:
+  // a filedrop accept rendezvouses through those mounts, and a split pair needs
+  // retain mode, while an SFTP accept connects to the partner-named server and
+  // reaches no such rule -- it authors no outbound directory of its own, and a
+  // split-directory SFTP endpoint is refused at review (see acceptUnsupported),
+  // so it never reaches this step at all.
+  const splitDirectoryProblem =
+    acceptServerJob && decode.invitation.endpoint.channel === "filedrop"
+      ? splitRendezvousRetainProblem(rendezvous, exchangeFiles.retainFiles)
+      : undefined;
   const linkageTerms = token?.linkageTerms;
   // The sanitized legal-agreement values the consent step displays beside the
   // attestation; undefined when the invitation attaches none (no fieldset then).
@@ -1259,20 +1272,60 @@ export function AcceptorBench() {
               <Alert
                 color="blue"
                 icon={<IconAlertCircle aria-hidden />}
-                title="Confirm the shared folder"
+                title={
+                  rendezvous?.split === true
+                    ? "Confirm the shared folders"
+                    : "Confirm the shared folder"
+                }
                 mt="md"
               >
-                {rendezvous?.folderName === undefined ? (
-                  <>This exchange runs through the shared folder mounted on</>
+                {/* A split rendezvous has no single folder to agree on: the two
+                    differ, and this seat's inbound leg is the partner's outbound
+                    one, so the confirmation names both legs with their direction.
+                    Both names or neither, for the reason the accept kit gives:
+                    naming one folder of a two-folder rendezvous reads as though
+                    the other did not exist. */}
+                {rendezvous?.split === true ? (
+                  <>
+                    This exchange runs through the two shared folders mounted on
+                    this appliance: it reads your partner&apos;s files out of
+                    one and writes yours into the other.{" "}
+                    {rendezvous.folderName !== undefined &&
+                    rendezvous.outboundFolderName !== undefined ? (
+                      <>
+                        You read from{" "}
+                        <span className={styles.mono}>
+                          {rendezvous.folderName}
+                        </span>{" "}
+                        and write to{" "}
+                        <span className={styles.mono}>
+                          {rendezvous.outboundFolderName}
+                        </span>
+                        .{" "}
+                      </>
+                    ) : null}
+                    Check with your partner that they are using the same two
+                    folders, the other way round.
+                  </>
                 ) : (
                   <>
-                    This exchange runs through{" "}
-                    <span className={styles.mono}>{rendezvous.folderName}</span>
-                    , the shared folder mounted on
+                    {rendezvous?.folderName === undefined ? (
+                      <>
+                        This exchange runs through the shared folder mounted on
+                      </>
+                    ) : (
+                      <>
+                        This exchange runs through{" "}
+                        <span className={styles.mono}>
+                          {rendezvous.folderName}
+                        </span>
+                        , the shared folder mounted on
+                      </>
+                    )}{" "}
+                    this appliance. Check with your partner that you are both
+                    using the same synced folder.
                   </>
-                )}{" "}
-                this appliance. Check with your partner that you are both using
-                the same synced folder.
+                )}
               </Alert>
             )}
             {acceptAssuranceLine !== undefined && (
@@ -1401,6 +1454,7 @@ export function AcceptorBench() {
                 acceptServerJob &&
                 connectionTuningProblems(connectionTuning).length > 0
               }
+              splitDirectoryProblem={splitDirectoryProblem}
               onMetadataChange={changeMetadata}
               onRemap={remapColumn}
               onReset={resetColumns}

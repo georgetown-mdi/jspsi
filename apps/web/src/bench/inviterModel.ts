@@ -293,11 +293,29 @@ export interface TransportChooserCopy {
   capabilityNote: string;
 }
 
+/**
+ * What the appliance's rendezvous mounts add to the filedrop card's copy beyond
+ * "configured or not": whether they are a split inbound/outbound pair, and the
+ * reason a configured pair still cannot run. Both come from the appliance's own
+ * provisioning, so both are absent off a console build.
+ *
+ * Separate from `rendezvousConfigured` rather than folded into it because neither
+ * changes which cards are OFFERED -- an appliance whose pair is incoherent reports
+ * itself unconfigured, and the filedrop card is disabled by that alone. They change
+ * only what the card SAYS, which is where an operator with two mounts and one
+ * unusable card needs the difference.
+ */
+export interface RendezvousShape {
+  split?: boolean;
+  problem?: string;
+}
+
 export function transportChooserCopy(
   consoleBuild: boolean,
   sftpConfigured: boolean,
   rendezvousConfigured: boolean,
   sftpSaveFilePreferred = false,
+  rendezvousShape: RendezvousShape = {},
 ): TransportChooserCopy {
   const available = availableTransports(
     consoleBuild,
@@ -320,9 +338,16 @@ export function transportChooserCopy(
       ? "Over a shared directory, run here"
       : "Over a shared directory, run by the command-line tool",
     filedropDescription: filedropRunsHere
-      ? "Runs the exchange here against the shared directory mounted on this appliance. Your file is read on this appliance, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same synced folder."
+      ? rendezvousShape.split === true
+        ? 'Runs the exchange here against the two shared folders mounted on this appliance: it reads your partner\'s files out of one and writes yours into the other. That needs retain mode -- turn on "Keep every exchange file" below. Your file is read on this appliance, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same two folders.'
+        : "Runs the exchange here against the shared directory mounted on this appliance. Your file is read on this appliance, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same synced folder."
       : consoleBuild
-        ? "Unavailable: mount a rendezvous directory and set JOB_RENDEZVOUS_DIR to run a shared-directory exchange here."
+        ? // The appliance's own reason wins where it has one: an incoherent pair
+          // reports itself unconfigured, and the generic mount-a-directory
+          // sentence would send an operator who already mounted two to add a
+          // third.
+          (rendezvousShape.problem ??
+          "Unavailable: mount a rendezvous directory and set JOB_RENDEZVOUS_DIR to run a shared-directory exchange here.")
         : "Saves an exchange file the command-line tool runs against a directory both parties can reach.",
     sftpLabel: sftpRunsHere
       ? "Over SFTP, run here"

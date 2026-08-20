@@ -756,6 +756,32 @@ describe("transport chooser copy by deployment", () => {
     expect(copy.filedropDescription).toContain("JOB_RENDEZVOUS_DIR");
   });
 
+  test("a split-provisioned console names both folders and the retain requirement", () => {
+    const copy = transportChooserCopy(true, false, true, false, {
+      split: true,
+    });
+    // The card still runs here; what changes is what it SAYS, since a split pair
+    // meets the partner in two folders and cannot run without retain mode.
+    expect(copy.filedropLabel).toBe("Over a shared directory, run here");
+    expect(copy.filedropDescription).toContain("two shared folders");
+    expect(copy.filedropDescription).toContain("Keep every exchange file");
+    // The single-folder sentence would tell an operator with two mounts to meet
+    // their partner in a folder neither side has.
+    expect(copy.filedropDescription).not.toContain("the same synced folder");
+  });
+
+  test("an unavailable console relays the appliance's own reason over the generic one", () => {
+    const problem =
+      "JOB_RENDEZVOUS_OUTBOUND_DIR resolves inside the rendezvous directory";
+    const copy = transportChooserCopy(true, false, false, false, { problem });
+    expect(copy.filedropDescription).toBe(problem);
+    // The generic remedy would send an operator who already mounted two folders
+    // to add a third.
+    expect(copy.filedropDescription).not.toContain(
+      "mount a rendezvous directory",
+    );
+  });
+
   test("a hosted build keeps SFTP a command-line save", () => {
     const copy = transportChooserCopy(false, false, false);
     expect(copy.sftpLabel).toBe(

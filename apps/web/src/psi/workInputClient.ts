@@ -75,15 +75,30 @@ function profileErrorReasonOf(body: unknown): JobInputProfileUnavailableReason {
 }
 
 /** The console's rendezvous configuration read off `GET /api/jobs/rendezvous`: the
- * mounted directory a filedrop exchange runs against. `configured: false` (no mount
- * is resolved, the request failed, or the body named no locator) leaves the filedrop
- * transport unavailable; `locator` is the advisory locator the inviter mints into the
- * invitation, and `folderName` the shared folder's own name -- present only where the
- * console can name it, and the only one of the two that may be shown as that name. */
+ * mounted directory (or directories) a filedrop exchange runs against.
+ * `configured: false` (no mount is resolved, the request failed, or the body named no
+ * locator) leaves the filedrop transport unavailable; `locator` is the advisory
+ * locator the inviter mints into the invitation, and `folderName` the shared folder's
+ * own name -- present only where the console can name it, and the only one of the two
+ * that may be shown as that name.
+ *
+ * `split` reports an appliance provisioned with a separate outbound mount: every
+ * filedrop exchange it runs reads the peer's files from the inbound folder
+ * (`locator`/`folderName`) and writes its own into the outbound one
+ * (`outboundLocator`/`outboundFolderName`), and requires retain mode. Both locators
+ * are present whenever `split` is, since an invitation needs a name for each leg.
+ *
+ * `problem` is why the appliance cannot run a filedrop exchange as provisioned, in
+ * the operator's own terms; it accompanies `configured: false`, so a surface that
+ * shows the unavailable state has the remedy to show with it. */
 export interface JobRendezvousConfig {
   configured: boolean;
+  split?: boolean;
   locator?: string;
   folderName?: string;
+  outboundLocator?: string;
+  outboundFolderName?: string;
+  problem?: string;
 }
 
 function isStringArray(value: unknown): value is Array<string> {
@@ -226,7 +241,15 @@ async function probeJobRendezvous(
     if (!response.ok) return null;
     const body: unknown = await response.json();
     if (!isRecord(body) || typeof body.configured !== "boolean") return null;
-    if (!body.configured) return { configured: false };
+    if (!body.configured) {
+      const problem = body.problem;
+      // An unavailable mount the appliance gave a reason for carries it through, so
+      // the seat that reports the state names the variable to set rather than the
+      // generic "nothing is mounted".
+      return typeof problem === "string" && problem.length > 0
+        ? { configured: false, problem }
+        : { configured: false };
+    }
     const locator = body.locator;
     // A configured mount the body names no locator for cannot mint an invitation,
     // so it reads as unavailable rather than as a filedrop card that refuses at
@@ -234,6 +257,17 @@ async function probeJobRendezvous(
     if (typeof locator !== "string" || locator.length === 0)
       return { configured: false };
     const folderName = body.folderName;
+    const split = body.split === true;
+    const outboundLocator =
+      typeof body.outboundLocator === "string" &&
+      body.outboundLocator.length > 0
+        ? body.outboundLocator
+        : undefined;
+    // A split appliance whose body names no outbound locator could mint only half
+    // a pair, which core refuses at the mint; degrade to unavailable rather than
+    // offering a card that fails there.
+    if (split && outboundLocator === undefined) return { configured: false };
+    const outboundFolderName = body.outboundFolderName;
     return {
       configured: true,
       locator,
@@ -241,6 +275,16 @@ async function probeJobRendezvous(
       // is the direction the accept kit is safe to fail in.
       ...(typeof folderName === "string" && folderName.length > 0
         ? { folderName }
+        : {}),
+      ...(split && outboundLocator !== undefined
+        ? {
+            split: true,
+            outboundLocator,
+            ...(typeof outboundFolderName === "string" &&
+            outboundFolderName.length > 0
+              ? { outboundFolderName }
+              : {}),
+          }
         : {}),
     };
   } catch {

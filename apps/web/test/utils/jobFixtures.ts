@@ -168,6 +168,19 @@ export function composedServer(composed: string): Record<string, unknown> {
   return server;
 }
 
+/** The `connection` block of a composed `psilink.yaml`, for the filedrop channel's
+ * assertions (which carry their directories at the top level rather than under a
+ * `server` block). */
+export function composedConnection(composed: string): Record<string, unknown> {
+  const parsed = parseYaml(composed) as {
+    connection?: Record<string, unknown>;
+  };
+  const connection = parsed.connection;
+  if (connection === undefined)
+    throw new Error("composed psilink.yaml has no connection");
+  return connection;
+}
+
 /** How long {@link awaitJobTerminalState} waits for a spawned child to exit. The
  * stub exits in milliseconds; a caller driving the real built CLI, whose startup
  * dominates, passes a longer bound. */

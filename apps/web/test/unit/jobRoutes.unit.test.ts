@@ -65,8 +65,9 @@ afterEach(() => {
     undefined;
   (globalThis as { jobSftpServer?: unknown }).jobSftpServer = undefined;
   (globalThis as { jobInputDirConfig?: unknown }).jobInputDirConfig = undefined;
-  (globalThis as { jobRendezvousDirConfig?: unknown }).jobRendezvousDirConfig =
-    undefined;
+  (
+    globalThis as { jobRendezvousProvisioning?: unknown }
+  ).jobRendezvousProvisioning = undefined;
   (globalThis as { jobSecretsDirConfig?: unknown }).jobSecretsDirConfig =
     undefined;
   (
@@ -879,6 +880,57 @@ describe("POST /api/jobs rejects a concurrent filedrop job", () => {
   });
 });
 
+describe("POST /api/jobs on a split-provisioned appliance", () => {
+  /** The retain trio a split rendezvous requires, as the console's file-handling
+   * card resolves it before it POSTs. */
+  const RETAIN_OPTIONS = {
+    retainFiles: true,
+    timestampInFilename: true,
+    locklessRendezvous: true,
+  };
+
+  /** Seed the global manager with both rendezvous legs mounted, so every filedrop
+   * create it serves carries the inbound/outbound pair. */
+  function enableSplitRendezvous(): void {
+    const root = tempDataRoot("routes-split");
+    roots.push(root);
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rvzRoot(),
+      jobRendezvousOutboundDir: rvzRoot(),
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+  }
+
+  test("a filedrop intent without retain mode is an empty-bodied 400", async () => {
+    enableSplitRendezvous();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    // The documented rejection for the precondition, not the generic 500 a
+    // compose failure would be: the browser reads a 400 as an actionable
+    // local-configuration fault and says which control to turn on.
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe("");
+  });
+
+  test("the same intent with retain mode is created (so the 400 was the retain gate)", async () => {
+    enableSplitRendezvous();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent({ options: RETAIN_OPTIONS })),
+      params: {},
+    })) as Response;
+    // Only the file-handling options differ from the 400 above, so that 400 was
+    // the split rendezvous meeting a run that would not keep its files.
+    expect(response.status).toBe(201);
+  });
+});
+
 describe("DELETE frees the slot for a new POST", () => {
   test("a terminal exchange is 409 until DELETE, then a POST succeeds", async () => {
     const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
@@ -1045,6 +1097,58 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
       "locator",
       "folderName",
     ]);
+  });
+
+  test("a split appliance reports both legs' names, and never either path", async () => {
+    const root = enableJobApi();
+    const inbound = path.join(root, "from-partner");
+    const outbound = path.join(root, "to-partner");
+    fs.mkdirSync(inbound, { recursive: true });
+    fs.mkdirSync(outbound, { recursive: true });
+    vi.stubEnv("JOB_RENDEZVOUS_DIR", inbound);
+    vi.stubEnv("JOB_RENDEZVOUS_OUTBOUND_DIR", outbound);
+    const body = await (await getRendezvous()).text();
+    expect(JSON.parse(body)).toEqual({
+      configured: true,
+      split: true,
+      locator: "from-partner",
+      folderName: "from-partner",
+      outboundLocator: "to-partner",
+      outboundFolderName: "to-partner",
+    });
+    expect(body).not.toContain(root);
+  });
+
+  test("a single-mount console names no outbound leg, whatever the name variable says", async () => {
+    // A split body always carries an outboundLocator, so a body that carried one
+    // without a second mount would announce a split this appliance cannot run. The
+    // mount decides the shape; the name variable only names a leg that exists.
+    const root = enableJobApi();
+    const mount = path.join(root, "agency-drop");
+    fs.mkdirSync(mount, { recursive: true });
+    vi.stubEnv("JOB_RENDEZVOUS_DIR", mount);
+    vi.stubEnv("JOB_RENDEZVOUS_OUTBOUND_NAME", "to-partner");
+    expect(await (await getRendezvous()).json()).toEqual({
+      configured: true,
+      locator: "agency-drop",
+      folderName: "agency-drop",
+    });
+  });
+
+  test("an incoherent pair reports unavailable WITH the remedy", async () => {
+    const root = enableJobApi();
+    const mount = path.join(root, "share");
+    fs.mkdirSync(path.join(mount, "out"), { recursive: true });
+    vi.stubEnv("JOB_RENDEZVOUS_DIR", mount);
+    vi.stubEnv("JOB_RENDEZVOUS_OUTBOUND_DIR", path.join(mount, "out"));
+    const body = (await (await getRendezvous()).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(body.configured).toBe(false);
+    expect(body.problem).toContain("JOB_RENDEZVOUS_OUTBOUND_DIR");
+    // The reason names variables, never the appliance's own paths.
+    expect(JSON.stringify(body)).not.toContain(root);
   });
 });
 

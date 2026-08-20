@@ -20,6 +20,7 @@ import {
   workdirDirectoryExists,
   writeJobFile,
 } from "./workdir";
+import { jobRendezvousLegs, rendezvousStartupWarnings } from "./jobRendezvous";
 import {
   resolveCliBinaryPath,
   spawnExchangeJob,
@@ -28,7 +29,6 @@ import {
 import { buildJobHandoff } from "./handoff";
 import { probeSftpHostKey } from "./sftpProbe";
 import { removeSftpCredentialFile } from "./sftpScratch";
-import { rendezvousStartupWarnings } from "./jobRendezvous";
 import { validateAuthoredSftpServer } from "./sftpServer";
 
 import type {
@@ -44,6 +44,7 @@ import type {
 } from "./intent";
 import type { JobHandoff } from "./handoff";
 import type { JobSftpServerEntry } from "./sftpServer";
+import type { RendezvousLeg } from "./jobRendezvous";
 import type { SftpProbeResult } from "./sftpProbe";
 
 /**
@@ -97,16 +98,37 @@ export class SftpProbeBusyError extends Error {
 }
 
 /**
- * Thrown by {@link JobManager.createJob} when a filedrop intent arrives but no
- * rendezvous directory is resolved (neither `JOB_RENDEZVOUS_DIR` nor its
- * `JOB_DATA_ROOT` fallback is set). The console UI disables the filedrop transport in
- * that state, so this is the server-side backstop for an intent that reached the API
- * anyway; the route maps it to a 400.
+ * Thrown by {@link JobManager.createJob} when a filedrop intent arrives but this
+ * appliance cannot rendezvous one: no rendezvous directory is resolved (neither
+ * `JOB_RENDEZVOUS_DIR` nor its `JOB_DATA_ROOT` fallback is set), or the split pair a
+ * second mount provisions is incoherent (see `rendezvousSplitProblem`). The console
+ * UI disables the filedrop transport in either state and states the remedy, so this
+ * is the server-side backstop for an intent that reached the API anyway; the route
+ * maps it to a 400.
  */
 export class JobRendezvousUnavailableError extends Error {
   constructor() {
     super("no rendezvous directory is configured for a filedrop exchange");
     this.name = "JobRendezvousUnavailableError";
+  }
+}
+
+/**
+ * Thrown by {@link JobManager.createJob} when a filedrop intent reaches a
+ * split-provisioned appliance without retain mode. A separate outbound directory
+ * requires `retain_files` -- core's connection schema and the CLI both refuse the
+ * pair without it -- and on a split appliance EVERY filedrop exchange carries the
+ * pair, so the file-handling choice is a precondition of running one at all rather
+ * than of a connection the operator authored. The console states the requirement in
+ * its own words at every gate that knows both; this is the server-side backstop,
+ * mapped by the route to a 400 rather than reaching core's compose as a 500.
+ */
+export class JobRendezvousRetainRequiredError extends Error {
+  constructor() {
+    super(
+      "a split rendezvous (inbound and outbound directories) requires retain mode",
+    );
+    this.name = "JobRendezvousRetainRequiredError";
   }
 }
 
@@ -216,9 +238,26 @@ export interface JobManagerOptions {
    * The resolved rendezvous directory (from {@link useJobRendezvousDir}) a filedrop
    * exchange reads and writes, which falls back to the data root when
    * `JOB_RENDEZVOUS_DIR` is unset. Absent only when neither resolves; a filedrop intent
-   * then fails with {@link JobRendezvousUnavailableError}. Never derived from a request.
+   * then fails with {@link JobRendezvousUnavailableError}. On a split-provisioned
+   * appliance it is the INBOUND (peer-written) leg. Never derived from a request.
    */
   jobRendezvousDir?: string;
+  /**
+   * The resolved outbound (self-written) rendezvous leg (from
+   * {@link useJobRendezvousOutboundDir}), present only when
+   * `JOB_RENDEZVOUS_OUTBOUND_DIR` names one. Its presence is what makes every
+   * filedrop exchange this appliance runs a split one: the composed config carries
+   * `inbound_path`/`outbound_path` instead of a single `path`, and the zero-setup
+   * argv gains `--outbound-path`. Never derived from a request.
+   */
+  jobRendezvousOutboundDir?: string;
+  /**
+   * Why a filedrop exchange cannot run as this appliance is provisioned (from
+   * {@link JobRendezvousProvisioning.problem}) -- an incoherent split pair. Present
+   * only in that state, and a filedrop intent then fails with
+   * {@link JobRendezvousUnavailableError} rather than running against half a layout.
+   */
+  jobRendezvousProblem?: string;
   /**
    * The resolved secrets mount (from {@link useJobSecretsDir}) the operator browses
    * for an authored connection's file-reference credential -- with NO data-root
@@ -281,6 +320,8 @@ export class JobManager {
   private readonly childEnv: NodeJS.ProcessEnv | undefined;
   private readonly jobInputDir: string | undefined;
   private readonly jobRendezvousDir: string | undefined;
+  private readonly jobRendezvousOutboundDir: string | undefined;
+  private readonly jobRendezvousProblem: string | undefined;
   private readonly jobSecretsDir: string | undefined;
   private readonly credentialScratchDir: string | undefined;
   /**
@@ -323,6 +364,8 @@ export class JobManager {
       options.cancelSigkillGraceMs ?? CANCEL_SIGKILL_GRACE_MS;
     this.jobInputDir = options.jobInputDir;
     this.jobRendezvousDir = options.jobRendezvousDir;
+    this.jobRendezvousOutboundDir = options.jobRendezvousOutboundDir;
+    this.jobRendezvousProblem = options.jobRendezvousProblem;
     this.jobSecretsDir = options.jobSecretsDir;
     this.credentialScratchDir = options.credentialScratchDir;
     this.childEnv = options.childEnv;
@@ -354,8 +397,22 @@ export class JobManager {
         throw new SftpUnavailableError();
       serverEntry = this.authoredSftpServer;
     }
-    if (intent.channel === "filedrop" && this.jobRendezvousDir === undefined)
-      throw new JobRendezvousUnavailableError();
+    if (intent.channel === "filedrop") {
+      if (
+        this.jobRendezvousDir === undefined ||
+        this.jobRendezvousProblem !== undefined
+      )
+        throw new JobRendezvousUnavailableError();
+      // Every filedrop exchange on a split-provisioned appliance carries the
+      // inbound/outbound pair, which core refuses without retain mode. Refused
+      // here, before the slot is claimed, so the operator meets a 400 the console
+      // can explain rather than a compose failure after a workdir exists.
+      if (
+        this.jobRendezvousOutboundDir !== undefined &&
+        intent.options?.retainFiles !== true
+      )
+        throw new JobRendezvousRetainRequiredError();
+    }
 
     // Claim the slot with no await between the null check and the assignment, so
     // two concurrent POSTs cannot both observe a free slot. The busy rejection
@@ -398,6 +455,19 @@ export class JobManager {
   }
 
   /**
+   * The rendezvous mounts a filedrop job preflights and a credential `@path` is
+   * excluded from, each paired with the leg it is. Routed through the shared
+   * enumeration so the manager and the boot-time containment surfaces cannot state
+   * different rules about which mounts this appliance has.
+   */
+  private rendezvousLegs(): Array<[string, RendezvousLeg]> {
+    return jobRendezvousLegs(
+      this.jobRendezvousDir,
+      this.jobRendezvousOutboundDir,
+    );
+  }
+
+  /**
    * The active record the slot holds (in either deleted state), else null. Read
    * through a method so the create-failure catch sees the record even where
    * control-flow narrowing would otherwise hide the slot's `active` phase.
@@ -435,7 +505,7 @@ export class JobManager {
     const result = validateAuthoredSftpServer(
       rawBody,
       this.dataRoot,
-      this.jobRendezvousDir,
+      this.rendezvousLegs().map(([dir]) => dir),
       this.jobSecretsDir,
       this.credentialScratchDir,
     );
@@ -547,6 +617,7 @@ export class JobManager {
       intent,
       serverEntry,
       this.authoredMaterializedCredentialPath !== undefined,
+      this.jobRendezvousOutboundDir !== undefined,
     );
 
     const record: JobRecord = {
@@ -566,14 +637,19 @@ export class JobManager {
     };
     this.slot = { phase: "active", record, deleted: false };
 
+    // Each leg preflights independently and names itself, so a split appliance's
+    // two mounts raise their own notices rather than one set the operator cannot
+    // attribute to a folder.
     if (intent.channel === "filedrop" && this.jobRendezvousDir !== undefined)
-      for (const message of rendezvousStartupWarnings(
-        this.jobRendezvousDir,
-        this.jobInputDir,
-        this.dataRoot,
-        workdir,
-      ))
-        this.appendEvent(record, { v: 1, type: "warning", message });
+      for (const [dir, leg] of this.rendezvousLegs())
+        for (const message of rendezvousStartupWarnings(
+          dir,
+          leg,
+          this.jobInputDir,
+          this.dataRoot,
+          workdir,
+        ))
+          this.appendEvent(record, { v: 1, type: "warning", message });
 
     const handlers: CliDriverHandlers = {
       onEvent: (event) => this.appendEvent(record, event),
@@ -615,6 +691,7 @@ export class JobManager {
     const configDocument = composeDocumentByChannel(
       intent,
       this.jobRendezvousDir,
+      this.jobRendezvousOutboundDir,
       serverEntry,
     );
     const keyDocument = composeKeyFileDocument(intent);
@@ -707,7 +784,10 @@ export class JobManager {
       throw new Error(
         "filedrop zero-setup job reached spawn without a rendezvous directory",
       );
-    return zeroSetupFiledropArgv(this.jobRendezvousDir);
+    return zeroSetupFiledropArgv(
+      this.jobRendezvousDir,
+      this.jobRendezvousOutboundDir,
+    );
   }
 
   /**
@@ -1103,6 +1183,7 @@ function liveJobView(record: JobRecord): JobView {
 function composeDocumentByChannel(
   intent: JobExchangeIntent,
   rendezvousDir: string | undefined,
+  outboundRendezvousDir: string | undefined,
   serverEntry: JobSftpServerEntry | undefined,
 ): string {
   if (intent.channel === "sftp") {
@@ -1114,5 +1195,5 @@ function composeDocumentByChannel(
     throw new Error(
       "filedrop job reached compose without a rendezvous directory",
     );
-  return composeConfigDocument(intent, rendezvousDir);
+  return composeConfigDocument(intent, rendezvousDir, outboundRendezvousDir);
 }

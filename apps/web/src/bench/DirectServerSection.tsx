@@ -17,6 +17,7 @@ import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
 import { directServerBlockedReason } from "./directExchangeModel";
 import { splitDirectoryRetainProblem } from "./sftpConnectionChoice";
+import { splitRendezvousRetainProblem } from "./filedropRendezvousChoice";
 import styles from "./bench.module.css";
 
 import type { ConnectionTuningDraft } from "./connectionTuningModel";
@@ -89,14 +90,15 @@ export function DirectServerSection({
   // withholds it on the shared-directory transport.
   const tuningCapabilities =
     transport === "sftp" ? SFTP_CONNECTION_TUNING : FILEDROP_CONNECTION_TUNING;
-  // The connection and the retain-mode toggle are authored on separate cards
-  // here, so the split-directory precondition is re-asked at the step's exit,
-  // where both are known, rather than only inside the authoring form the
-  // operator has already left.
+  // The rendezvous and the retain-mode toggle are settled on separate cards here,
+  // so the split precondition is re-asked at the step's exit, where both are
+  // known, rather than only inside the authoring form the operator has already
+  // left -- or, on the shared-directory transport, nowhere at all, since the
+  // appliance's two mounts are provisioning the operator never authors here.
   const splitDirectoryProblem =
     transport === "sftp"
       ? splitDirectoryRetainProblem(sftpConnection, exchangeFiles.retainFiles)
-      : undefined;
+      : splitRendezvousRetainProblem(rendezvous, exchangeFiles.retainFiles);
   // A value either card's run would refuse is a form problem here, on the step
   // that authors it, rather than a run that fails at rendezvous. The two cards
   // block separately so the sentence below names the one to open.
@@ -158,16 +160,42 @@ export function DirectServerSection({
           {/* Named only where the console can name the shared folder: where the
               rendezvous mount point was chosen by a launcher rather than by the
               operator, it names the launcher's layout, not their folder. */}
-          {rendezvous.folderName === undefined ? (
-            <>Runs through the shared directory mounted on this appliance.</>
+          {rendezvous.split === true ? (
+            <>
+              Runs through the two shared folders mounted on this appliance: it
+              reads your partner&apos;s files out of one and writes yours into
+              the other.{" "}
+              {rendezvous.folderName !== undefined &&
+              rendezvous.outboundFolderName !== undefined ? (
+                <>
+                  You read from{" "}
+                  <span className={styles.mono}>{rendezvous.folderName}</span>{" "}
+                  and write to{" "}
+                  <span className={styles.mono}>
+                    {rendezvous.outboundFolderName}
+                  </span>
+                  .{" "}
+                </>
+              ) : null}
+              Point your partner&apos;s console at the same two folders, the
+              other way round.
+            </>
           ) : (
             <>
-              Runs through the shared directory{" "}
-              <span className={styles.mono}>{rendezvous.folderName}</span> on
-              this appliance.
+              {rendezvous.folderName === undefined ? (
+                <>
+                  Runs through the shared directory mounted on this appliance.
+                </>
+              ) : (
+                <>
+                  Runs through the shared directory{" "}
+                  <span className={styles.mono}>{rendezvous.folderName}</span>{" "}
+                  on this appliance.
+                </>
+              )}{" "}
+              Point your partner&apos;s console at the same synced folder.
             </>
-          )}{" "}
-          Point your partner's console at the same synced folder.
+          )}
         </Text>
       ) : (
         <Alert
@@ -175,9 +203,12 @@ export function DirectServerSection({
           icon={<IconAlertCircle aria-hidden />}
           title="No shared directory is mounted"
         >
-          This appliance has no rendezvous directory mounted, so a
-          shared-directory exchange cannot run here. Choose SFTP, or mount a
-          rendezvous directory and restart the appliance.
+          {/* The appliance's own reason wins where it has one: an incoherent
+              pair of mounts reports itself unconfigured, and the generic
+              sentence would send an operator who already mounted two folders to
+              add a third. */}
+          {rendezvous?.problem ??
+            "This appliance has no rendezvous directory mounted, so a shared-directory exchange cannot run here. Choose SFTP, or mount a rendezvous directory and restart the appliance."}
         </Alert>
       )}
 

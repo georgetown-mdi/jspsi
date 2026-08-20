@@ -64,7 +64,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
         { kind: "ref", ref: `@${secretPath}`, credType: "password" },
       ),
       dataRoot,
-      undefined,
+      [],
     );
     expect(entry.host).toBe("sftp.partner.example");
     expect(entry.port).toBe(2222);
@@ -87,7 +87,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
         { kind: "ref", ref: `@${keyPath}`, credType: "private_key" },
       ),
       dataRoot,
-      undefined,
+      [],
     );
     expect(entry.privateKey).toBe(`@${keyPath}`);
     expect(entry.password).toBeUndefined();
@@ -102,7 +102,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
           { kind: "inline", ref: "hunter2", credType: "password" },
         ),
         path.join(dir, "data-root"),
-        undefined,
+        [],
       ),
     ).toThrowError(
       expect.objectContaining({
@@ -125,7 +125,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
             { kind: "ref", ref: `@${secretPath}`, credType: "password" },
           ),
           dataRoot,
-          undefined,
+          [],
         );
       } catch (error) {
         caught = error as Error;
@@ -148,7 +148,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
           { kind: "ref", ref: `@${secretPath}`, credType: "password" },
         ),
         dataRoot,
-        undefined,
+        [],
       );
       expect(entry.host).toBe(host);
     }
@@ -160,7 +160,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
       validateAuthoredSftpServer(
         authoredBody({ remote: "prod_east" }),
         path.join(dir, "data-root"),
-        undefined,
+        [],
       ),
     ).toThrow(JobApiConfigError);
   });
@@ -179,7 +179,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
           },
         },
         path.join(dir, "data-root"),
-        undefined,
+        [],
       ),
     ).toThrow(JobApiConfigError);
   });
@@ -194,7 +194,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
           { kind: "ref", ref: `@${secretPath}`, credType: "password" },
         ),
         path.join(dir, "data-root"),
-        undefined,
+        [],
       ),
     ).toThrowError(
       expect.objectContaining({
@@ -214,7 +214,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
           { kind: "ref", ref: `@${secretPath}`, credType: "password" },
         ),
         path.join(dir, "data-root"),
-        undefined,
+        [],
       ),
     ).toThrow(JobApiConfigError);
   });
@@ -228,7 +228,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
           { kind: "ref", ref: "@secrets/pw", credType: "password" },
         ),
         path.join(dir, "data-root"),
-        undefined,
+        [],
       ),
     ).toThrowError(
       expect.objectContaining({
@@ -249,7 +249,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
           { kind: "ref", ref: `@${missing}`, credType: "password" },
         ),
         path.join(dir, "data-root"),
-        undefined,
+        [],
       );
     } catch (error) {
       caught = error as Error;
@@ -268,7 +268,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     const { entry, credentialWarnings } = validateAuthoredSftpServer(
       authoredBody({}, { kind: "ref", ref: `@${ref}`, credType: "password" }),
       dataRoot,
-      undefined,
+      [],
     );
     // Accepted (the connection is authored), with a single non-blocking warning
     // that names the field and the directory only, never the reference.
@@ -289,7 +289,29 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     const { credentialWarnings } = validateAuthoredSftpServer(
       authoredBody({}, { kind: "ref", ref: `@${ref}`, credType: "password" }),
       dataRoot,
-      rendezvousDir,
+      [rendezvousDir],
+    );
+    expect(credentialWarnings).toHaveLength(1);
+    expect(credentialWarnings[0]).toContain("rendezvous");
+    expect(credentialWarnings[0]).not.toContain(ref);
+  });
+
+  test("a credential ref under the OUTBOUND leg of a split pair warns too", () => {
+    // The outbound mount is as partner-synced as the inbound one -- the party
+    // writes into it and the partner's sync tool reads it -- so a leg that reached
+    // the exclusion list only through the first would leave a credential
+    // referenced out of the second unremarked.
+    const dir = scratchDir();
+    const dataRoot = path.join(dir, "data-root");
+    const inbound = path.join(dir, "from-partner");
+    const outbound = path.join(dir, "to-partner");
+    fs.mkdirSync(path.join(outbound, "planted"), { recursive: true });
+    const ref = path.join(outbound, "planted", "pw");
+    fs.writeFileSync(ref, "x");
+    const { credentialWarnings } = validateAuthoredSftpServer(
+      authoredBody({}, { kind: "ref", ref: `@${ref}`, credType: "password" }),
+      dataRoot,
+      [inbound, outbound],
     );
     expect(credentialWarnings).toHaveLength(1);
     expect(credentialWarnings[0]).toContain("rendezvous");
@@ -310,7 +332,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     const { entry, credentialWarnings } = validateAuthoredSftpServer(
       authoredBody({}, { kind: "ref", ref: `@${link}`, credType: "password" }),
       dataRoot,
-      undefined,
+      [],
     );
     // Lexically outside, so only the realpath arm catches it -- and it warns.
     expect(entry.password).toBe(`@${link}`);
@@ -334,7 +356,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
         { kind: "ref", ref: `@${keyPath}`, credType: "private_key" },
       ),
       dataRoot,
-      undefined,
+      [],
     );
     expect(entry.privateKeyPassphrase).toBe(`@${passphrase}`);
     expect(credentialWarnings).toHaveLength(1);
@@ -348,7 +370,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
       validateAuthoredSftpServer(
         authoredBody({}, { kind: "ref", ref: "hunter2", credType: "password" }),
         path.join(dir, "data-root"),
-        undefined,
+        [],
       ),
     ).toThrow(JobApiConfigError);
   });
@@ -362,7 +384,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
         { kind: "ref", ref: `@${secretPath}`, credType: "password" },
       ),
       path.join(dir, "data-root"),
-      undefined,
+      [],
     );
     expect(entry.inboundPath).toBe("/exchange/in");
     expect(entry.outboundPath).toBe("/exchange/out");
@@ -383,7 +405,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
           { kind: "ref", ref: `@${secretPath}`, credType: "password" },
         ),
         path.join(dir, "data-root"),
-        undefined,
+        [],
       ),
     ).not.toThrow();
   });
@@ -415,7 +437,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
         validateAuthoredSftpServer(
           authoredBody(overrides, credential),
           path.join(dir, "data-root"),
-          undefined,
+          [],
         ),
       ).toThrow(JobApiConfigError);
   });
@@ -430,7 +452,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
           { kind: "ref", ref: `@${keyPath}`, credType: "private_key" },
         ),
         path.join(dir, "data-root"),
-        undefined,
+        [],
       ),
     ).toThrow(JobApiConfigError);
   });
@@ -463,7 +485,7 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
     const { entry } = validateAuthoredSftpServer(
       mountBody(["partner-password"]),
       path.join(dir, "data-root"),
-      undefined,
+      [],
       secretsDir,
     );
     expect(entry.password).toBe(
@@ -477,7 +499,7 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
     const { entry } = validateAuthoredSftpServer(
       mountBody([".ssh", "id_ed25519"], "private_key"),
       path.join(dir, "data-root"),
-      undefined,
+      [],
       secretsDir,
     );
     expect(entry.privateKey).toBe(
@@ -494,7 +516,7 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
       validateAuthoredSftpServer(
         mountBody([".."]),
         path.join(dir, "data-root"),
-        undefined,
+        [],
         secretsDir,
       );
     } catch (error) {
@@ -512,7 +534,7 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
       validateAuthoredSftpServer(
         mountBody(["absent"]),
         path.join(dir, "data-root"),
-        undefined,
+        [],
         secretsDir,
       ),
     ).toThrow(JobApiConfigError);
@@ -525,7 +547,7 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
       validateAuthoredSftpServer(
         mountBody([".ssh"]),
         path.join(dir, "data-root"),
-        undefined,
+        [],
         secretsDir,
       ),
     ).toThrow(JobApiConfigError);
@@ -538,7 +560,7 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
       validateAuthoredSftpServer(
         mountBody(["partner-password"]),
         path.join(dir, "data-root"),
-        undefined,
+        [],
         undefined,
       );
     } catch (error) {
@@ -566,7 +588,7 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
           },
         },
         path.join(dir, "data-root"),
-        undefined,
+        [],
         secretsDir,
       );
     } catch (error) {
@@ -588,7 +610,7 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
     const { credentialWarnings } = validateAuthoredSftpServer(
       mountBody(["pw"]),
       dataRoot,
-      undefined,
+      [],
       secretsDir,
     );
     expect(credentialWarnings).toHaveLength(1);
@@ -622,7 +644,7 @@ describe("validateAuthoredSftpServer raw (pasted) credential path", () => {
     const result = validateAuthoredSftpServer(
       rawBody("s3cret-password"),
       path.join(dir, "data-root"),
-      undefined,
+      [],
       undefined,
       scratch,
     );
@@ -642,7 +664,7 @@ describe("validateAuthoredSftpServer raw (pasted) credential path", () => {
     const result = validateAuthoredSftpServer(
       rawBody("-----BEGIN KEY-----", "private_key"),
       path.join(dir, "data-root"),
-      undefined,
+      [],
       undefined,
       scratch,
     );
@@ -659,7 +681,7 @@ describe("validateAuthoredSftpServer raw (pasted) credential path", () => {
       validateAuthoredSftpServer(
         rawBody("s3cret"),
         path.join(dir, "data-root"),
-        undefined,
+        [],
         undefined,
         undefined,
       );
@@ -680,7 +702,7 @@ describe("validateAuthoredSftpServer raw (pasted) credential path", () => {
       validateAuthoredSftpServer(
         rawBody(""),
         path.join(dir, "data-root"),
-        undefined,
+        [],
         undefined,
         scratch,
       );
@@ -701,7 +723,7 @@ describe("validateAuthoredSftpServer raw (pasted) credential path", () => {
       validateAuthoredSftpServer(
         rawBody({ nested: "leak-me" }),
         path.join(dir, "data-root"),
-        undefined,
+        [],
         undefined,
         scratch,
       );
@@ -727,7 +749,7 @@ describe("validateAuthoredSftpServer raw (pasted) credential path", () => {
           credential: { kind: "raw", value: "s3cret", credType: "password" },
         },
         path.join(dir, "data-root"),
-        undefined,
+        [],
         undefined,
         scratch,
       );
@@ -745,7 +767,7 @@ describe("validateAuthoredSftpServer raw (pasted) credential path", () => {
     const result = validateAuthoredSftpServer(
       rawBody("s3cret"),
       dataRoot,
-      undefined,
+      [],
       undefined,
       scratch,
     );

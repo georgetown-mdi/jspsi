@@ -116,10 +116,12 @@ The job API is **off by default.** It does nothing -- serves no endpoint, spawns
 
 - `JOB_DATA_ROOT` -- the directory under which each job's working files are created, and the run-time half of the feature gate. On the console image, set it to turn the API on; leave it unset to keep it off. The input and rendezvous directories both default to it, so setting `JOB_DATA_ROOT` alone -- one mounted directory -- lights up the full console. Enabling the API also requires the `console` build profile the published image already carries: the hosted `apps/web` deployment can never expose the API, because the app refuses to serve the job routes in a hosted build even if `JOB_DATA_ROOT` is set. This app-layer refusal is the primary guard; the Elastic Beanstalk reference's `/api/jobs` denial (below) is redundant defense-in-depth.
 - `JOB_INPUT_DIR` -- the mounted work-input directory the console lists and profiles for this party's input CSVs; the CLI reads the file you select in place (see [Mounted work-input directory](#mounted-work-input-directory)). Set it to give the inputs their own mount.
-- `JOB_RENDEZVOUS_DIR` -- the mounted synced-folder rendezvous directory a shared-directory (`filedrop`) exchange runs over. Set it to a separate mount to keep the partner-synced directory apart from your working files, which is recommended (see [Mounted work-input directory](#mounted-work-input-directory)).
+- `JOB_RENDEZVOUS_DIR` -- the mounted synced-folder rendezvous directory a shared-directory (`filedrop`) exchange runs over. Set it to a separate mount to keep the partner-synced directory apart from your working files, which is recommended (see [Mounted work-input directory](#mounted-work-input-directory)). On an appliance that also sets `JOB_RENDEZVOUS_OUTBOUND_DIR` this names the **inbound** folder alone -- the one your partner writes into, and there it is required rather than optional.
 
   Both of these fall back to `JOB_DATA_ROOT` when unset, so a single mounted directory with only `JOB_DATA_ROOT` set runs a full console. The resolution rule is normative in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md); the choice here is whether one mount or three suits your layout.
+- `JOB_RENDEZVOUS_OUTBOUND_DIR` -- an optional second rendezvous mount, the **outbound** folder this party writes its own files into, for a deployment whose partner-shared mailbox is two folders rather than one (see [Split inbound and outbound rendezvous folders](#split-inbound-and-outbound-rendezvous-folders)). Unlike the input and inbound rendezvous directories it has NO `JOB_DATA_ROOT` fallback: the variable being set is the one and only signal that this appliance rendezvouses over a split pair, so a single-mount console is never silently turned into a split one. A split takes both folders from their own variables, so setting this one while `JOB_RENDEZVOUS_DIR` is unset is refused rather than run: the console reports the missing variable and offers no shared-directory exchange, instead of syncing the data root itself to your partner as the inbound folder.
 - `JOB_RENDEZVOUS_NAME` -- an optional name for the shared folder the rendezvous mount stands for, as you and your partner know it: what a shared-directory invitation carries as its advisory locator and what the partner accept kit prints. Leave it unset when the mount point is your own naming -- the console then takes the mount point's last segment. Set it when the mount point is named for the container's layout instead, which is what a launcher does when it binds every operator's folder at a fixed path (see [Running the web console appliance](#running-the-web-console-appliance) for an example). A value that is not a plain folder name leaves the console with no name for the folder rather than falling back to the mount point: the invitation still carries a locator, and the accept kit prints no folder name at all.
+- `JOB_RENDEZVOUS_OUTBOUND_NAME` -- the same, for the outbound folder of a split rendezvous. Set it whenever the two mounts' last segments would coincide (`/mnt/in/psilink` and `/mnt/out/psilink`): an invitation carries a name per folder and the two must differ, so the console refuses to offer a shared-directory exchange until they do, naming this variable.
 - `JOB_SECRETS_DIR` -- an optional, mounted read-only directory the console browses for a connection's credential file (a password file or an SSH private key). Unlike the input and rendezvous directories it has NO `JOB_DATA_ROOT` fallback: the browse surface is deliberately never defaulted into the client-writable data root. The credential guidance that goes with it is under "SFTP runs against one connection the operator authors in the console" below.
 - `JOB_ALLOWED_HOSTS` -- an optional, comma-separated list of extra `Host` header hostnames the API accepts, beyond the loopback names (`127.0.0.1`, `localhost`, `::1`) it always accepts. Leave it unset for the default posture, where the API is reached only over host loopback (see "Reachable only where you publish it" below). Set it only when you deliberately front the console behind a reverse proxy or reach it by a LAN name -- an unsupported, explicit-choice path -- and list the hostname the browser sends in `Host` (the port is ignored). It is the escape hatch for that deliberate exposure, not a widening of reach on its own: the publish binding and the host firewall still govern who can connect.
 
@@ -168,6 +170,20 @@ The console lists this party's input CSVs out of `JOB_INPUT_DIR`, falling back t
 A shared-directory (`filedrop`) exchange runs over the rendezvous directory at `JOB_RENDEZVOUS_DIR`, which the remote partner writes into over the synced folder; it too falls back to `JOB_DATA_ROOT` when unset, so the single-folder console rendezvouses out of the data root. Setting `JOB_RENDEZVOUS_DIR` to a dedicated mount -- separate from, and not nested with, the working directory that holds your key, input, and results -- is recommended, because the rendezvous directory is partner-writable: a dedicated mount keeps the partner's write access to the rendezvous mailbox and away from your own secrets. The console warns at job start when the rendezvous path overlaps the work-input directory or the data root (as it does in the single-folder layout), but the operator's own directory layout is theirs to choose, so the exchange still runs; a dedicated rendezvous directory is the reliable safeguard, not a requirement.
 
 The console also warns at job start when the rendezvous directory is not empty, naming what it holds. Every shared-directory exchange on this console rendezvouses out of the same mount, and an exchange refuses to start on files an earlier exchange left there -- which a run you asked to keep its files (retain mode) leaves behind after finishing normally, no crash required. Delete those on the host before launching the next exchange. Files that are not part of an exchange -- your input CSVs, your results, the per-job working directories -- are not what the refusal is about, so the warning names them without asking you to remove them, and the launch stays your call. It reaches every console surface that watches an exchange run: the flow that mints an invitation, the flow that accepts a partner's, Direct exchange, and the panel that reconnects to an exchange already under way. That enumeration is about which surfaces display a warning, not a promise that every notice arrives whole: the console escapes each warning and caps its displayed length, so a long one -- a notice relayed from the CLI rather than raised by the console itself -- can reach the seat abbreviated.
+
+### Split inbound and outbound rendezvous folders
+
+Some deployments bridge two folders rather than sharing one: this party reads its partner's files out of an **inbound** folder and writes its own into an **outbound** one, and the bridge makes each party's outbound the other's inbound. Set both `JOB_RENDEZVOUS_DIR` (inbound) and `JOB_RENDEZVOUS_OUTBOUND_DIR` (outbound) and every shared-directory exchange the console runs uses that pair, composing the CLI's `inbound_path`/`outbound_path` instead of a single `path` (see [FILE_SYNC.md](spec/FILE_SYNC.md#split-inboundoutbound-directories)).
+
+Five things follow from provisioning the pair, and the console states each where you meet it:
+
+- **Both variables are required.** Set `JOB_RENDEZVOUS_OUTBOUND_DIR` alone -- or mistype `JOB_RENDEZVOUS_DIR` -- and the console refuses to offer a shared-directory exchange and names the missing variable. `JOB_RENDEZVOUS_DIR`'s fallback to `JOB_DATA_ROOT` is for the single-mount console only; it never stands in for the inbound folder of a split, which would hand your partner the folder holding your key, input, and results as the one they write into.
+- **It requires retain mode.** A separate outbound folder keeps everything written into it -- nothing is deleted after it is read -- so the console holds the exchange until "Keep every exchange file" is on, and the command-line tool refuses the same pair without `--retain-files`. Both folders must start empty on both sides.
+- **The two folders must differ, and neither may sit inside the other.** Either would have the appliance read its own writes as your partner's. The console refuses to offer a shared-directory exchange while they do, naming the variable to move.
+- **Each folder needs a name, and the two names must differ.** The invitation carries a name per folder; where the mount points' last segments coincide, set `JOB_RENDEZVOUS_OUTBOUND_NAME` (and, if you like, `JOB_RENDEZVOUS_NAME`).
+- **Your partner runs the mirror image.** Their inbound is your outbound. The accept kit the console downloads with the invitation gives them the two-folder commands; the Windows launcher scripts provision a single shared folder and cannot start a split exchange, so a partner on a network drive needs both folders reachable as ordinary paths (the accept kit says so).
+
+Both folders are partner-synced, so both carry the whole of the single mount's guidance: keep them out of the working directory that holds your key, input, and results, and keep a credential file out of either. The console's job-start preflight runs over each folder independently and names which of the two a notice is about.
 
 ## SFTP server
 
@@ -321,6 +337,24 @@ docker run --rm \
 ```
 
 `JOB_RENDEZVOUS_NAME` is what a shared-directory invitation tells the partner to look for. The mount point above is named for the container's layout, so without it the invitation and the accept kit would call the shared folder `rendezvous`; name the mount point after the folder instead and it can be left unset.
+
+A deployment whose partner-shared mailbox is two folders (see [Split inbound and outbound rendezvous folders](#split-inbound-and-outbound-rendezvous-folders)) mounts both and names both:
+
+```sh
+docker run --rm \
+  -p 127.0.0.1:3000:3000 \
+  --env JOB_DATA_ROOT=/data/jobs \
+  --env JOB_INPUT_DIR=/data/input \
+  --env JOB_RENDEZVOUS_DIR=/data/rendezvous-in \
+  --env JOB_RENDEZVOUS_OUTBOUND_DIR=/data/rendezvous-out \
+  --env JOB_RENDEZVOUS_NAME=agency-b-to-agency-a \
+  --env JOB_RENDEZVOUS_OUTBOUND_NAME=agency-a-to-agency-b \
+  -v /host/jobs:/data/jobs \
+  -v /host/input:/data/input \
+  -v /host/from-agency-b:/data/rendezvous-in \
+  -v /host/to-agency-b:/data/rendezvous-out \
+  vdorie/psi-link:latest serve
+```
 
 `JOB_CLI_BINARY` is pre-set in the image and needs no operator value. Setting `JOB_DATA_ROOT` turns the job API on; leave it unset and `serve` runs the web UI and peer-coordination server only. The `-p 127.0.0.1:3000:3000` publish binding is what keeps the unauthenticated API reachable only from the operator's own machine, and what widening it costs is in [Server job API](#server-job-api).
 

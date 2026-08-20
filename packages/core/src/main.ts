@@ -40,6 +40,13 @@ export { retryPromise, withTimeout, TimeoutError } from "./utils/promise";
 // feed -- and that parse must be the same structurally-bounded one, not a second
 // implementation of it (CONTRIBUTING.md, Untrusted-JSON parsing).
 export { parseBoundedJson, JsonStructureBoundError } from "./utils/boundedJson";
+// The split-directory distinctness comparison. Barrelled because the console
+// decides, ahead of a mint, whether the two rendezvous locators it would put on an
+// invitation endpoint are distinct -- and that verdict has to be the one core's own
+// endpoint and connection refines will reach, so the operator meets the name to set
+// rather than core's refusal at mint. Comparison only: never the path used on disk
+// (see the module header).
+export { pathsResolveToSameDir } from "./utils/pathCompare";
 // @internal: the CLI config writer (saveConfig) delegates to this snakeize
 // direction so the read and write paths share one recurse-and-skip traversal;
 // not a stable public API (see the declaration's JSDoc).
