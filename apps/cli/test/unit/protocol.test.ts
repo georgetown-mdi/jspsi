@@ -3887,6 +3887,53 @@ test("a count-only run's terminal event carries the count beside resultWritten:f
   expect(lines[2].countReportedByPartner).toBe(true);
 }, 20_000);
 
+test("a receiver seat's count-only event reports the count as computed here", async () => {
+  // The other seat of the same pairing: this party ran the count-only round under
+  // a mode the wire enforces, so its event states the provenance as false rather
+  // than omitting the field. Omission is reserved for a run carrying no count at
+  // all, so a consumer separating the two seats reads this value, not the field's
+  // presence.
+  mockCountOnlyRun("receiver");
+
+  mockFd3Open();
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        path.join(tmpDir, "count-only-receiver-stream.csv"),
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const lines = takeFd3Lines();
+  expect(lines.map((line) => line.type)).toEqual([
+    "stages",
+    "metrics",
+    "result",
+  ]);
+  expect(lines[2].resultWritten).toBe(false);
+  expect(lines[2].intersectionCount).toBe(7);
+  expect(lines[2].countReportedByPartner).toBe(false);
+}, 20_000);
+
 test("a withheld result's terminal event carries no count at all", async () => {
   // The other side of the same discriminant: a helper whose terms give it no
   // output table has no count either, so the field is absent rather than zero.

@@ -1714,9 +1714,15 @@ describe("inviter bench", () => {
       "psilink-record-x.json",
       "psilink-record-x.keys.json",
     ]);
-    expect(
-      document.querySelector('aside[aria-label="This exchange"]')?.textContent,
-    ).toContain("1,847 records in common - the size of the overlap only");
+    const ledger = document.querySelector(
+      'aside[aria-label="This exchange"]',
+    )?.textContent;
+    expect(ledger).toContain(
+      "1,847 records in common - the size of the overlap only",
+    );
+    // The receive row states a locally computed count with no provenance clause:
+    // this party ran the round, so naming a partner for the number would be false.
+    expect(ledger).not.toContain("reported by your partner");
   });
 
   test("post-create: a count the partner reported carries the trust caveat", async () => {
@@ -1744,6 +1750,15 @@ describe("inviter bench", () => {
         ),
       )
       .toBeInTheDocument();
+    // The ledger restates the count in its own words, so it carries the row-sized
+    // form of the same fact: the condensed summary cannot read as a number this
+    // party computed.
+    expect(
+      document.querySelector('aside[aria-label="This exchange"]')?.textContent,
+    ).toContain(
+      "1,847 records in common - the size of the overlap only, no matched " +
+        "rows and no shared columns; reported by your partner",
+    );
   });
 
   test("post-create: a retryable failure offers one more try on the same invitation", async () => {

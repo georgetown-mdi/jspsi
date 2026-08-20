@@ -35,6 +35,7 @@ import {
   inviterRailFacts,
   isCliTransport,
   keySatisfiabilityFor,
+  ledgerOutcomeOf,
   lifetimeLabel,
   resetToRecommended,
   reviewValidation,
@@ -854,7 +855,11 @@ describe("after the exchange completes", () => {
     // exactly what its terms promised, and no matched rows or shared columns
     // reached anyone -- so the row claims neither.
     const value = outcomeRow(
-      { kind: "counted", intersectionCount: 1847 },
+      {
+        kind: "counted",
+        intersectionCount: 1847,
+        countReportedByPartner: false,
+      },
       "You will receive",
     )?.value;
     expect(value).toBe(
@@ -865,14 +870,61 @@ describe("after the exchange completes", () => {
     // it does not claim the terms withheld anything.
     expect(value).not.toContain("matched rows + ");
     expect(value).not.toContain("withheld");
+    // The seat that computed its own count claims no partner for it: this row is
+    // the whole statement of where the number came from, and a provenance clause
+    // here would be false.
+    expect(value).not.toContain("partner");
+  });
+
+  test("a partner-reported count names its provenance in the row", () => {
+    // The ledger is the condensed summary an operator skims, so the sender seat's
+    // number cannot read there exactly as a number this party computed does --
+    // the same asymmetry the result inset's caveat states at full length.
+    expect(
+      outcomeRow(
+        {
+          kind: "counted",
+          intersectionCount: 1847,
+          countReportedByPartner: true,
+        },
+        "You will receive",
+      )?.value,
+    ).toBe(
+      "1,847 records in common - the size of the overlap only, no matched " +
+        "rows and no shared columns; reported by your partner",
+    );
+  });
+
+  test("the outcome fold carries the count's provenance out of the run outputs", () => {
+    // Both seats' ledgers read the outcome through this fold, so a row that names
+    // the provenance is only as good as what survives here.
+    for (const countReportedByPartner of [true, false]) {
+      expect(
+        ledgerOutcomeOf({
+          kind: "counted",
+          intersectionCount: 1847,
+          countReportedByPartner,
+        }),
+      ).toEqual({
+        kind: "counted",
+        intersectionCount: 1847,
+        countReportedByPartner,
+      });
+    }
   });
 
   test("a zero-count count-only result is still the counted row", () => {
     // The count rides its own field, so an empty intersection reports as a count
     // of zero rather than falling back to either of the other two rows.
     expect(
-      outcomeRow({ kind: "counted", intersectionCount: 0 }, "You will receive")
-        ?.value,
+      outcomeRow(
+        {
+          kind: "counted",
+          intersectionCount: 0,
+          countReportedByPartner: false,
+        },
+        "You will receive",
+      )?.value,
     ).toBe(
       "0 records in common - the size of the overlap only, no matched rows " +
         "and no shared columns",

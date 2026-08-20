@@ -969,7 +969,15 @@ export interface InviterLedgerRow {
 export type LedgerOutcome =
   | { kind: "matched"; matchedRecordCount?: number }
   | { kind: "withheld" }
-  | { kind: "counted"; intersectionCount: number };
+  | {
+      kind: "counted";
+      intersectionCount: number;
+      /** Whether the count arrived as the PARTNER's report rather than as a figure
+       * this party computed, carried from {@link RunOutputs} rather than dropped:
+       * the ledger states the count in its own words, so a ledger without it would
+       * repeat the number stripped of the one fact that qualifies it. */
+      countReportedByPartner: boolean;
+    };
 
 /** Fold a completed run's outputs into the ledger outcome, dropping the download
  * URLs the ledger has no use for. Shared by both seats so neither maps the
@@ -984,7 +992,11 @@ export function ledgerOutcomeOf(outputs: RunOutputs): LedgerOutcome {
     case "withheld":
       return { kind: "withheld" };
     case "counted":
-      return { kind: "counted", intersectionCount: outputs.intersectionCount };
+      return {
+        kind: "counted",
+        intersectionCount: outputs.intersectionCount,
+        countReportedByPartner: outputs.countReportedByPartner,
+      };
   }
 }
 
@@ -994,11 +1006,24 @@ export function ledgerOutcomeOf(outputs: RunOutputs): LedgerOutcome {
  * vocabulary: the count is what arrived, and the matched rows and shared columns the
  * other outcomes name are what did not -- a run that reports the size of the overlap
  * produces neither, for either party.
+ *
+ * A count this party did not compute closes with the provenance clause, so the
+ * ledger -- the condensed summary an operator skims or screenshots, away from the
+ * result inset carrying the full caveat -- does not state a partner's figure and a
+ * locally computed one in the same words. The clause is the row-sized form of the
+ * inset's vocabulary rather than a second wording of it: this row states who
+ * produced the number, and the inset states what that means. The seat that computed
+ * its own count takes the sentence unchanged, since a provenance note there would
+ * be false.
  */
-export function countOnlyLedgerValue(intersectionCount: number): string {
+export function countOnlyLedgerValue(
+  intersectionCount: number,
+  countReportedByPartner: boolean,
+): string {
   return (
     `${new Intl.NumberFormat("en-US").format(intersectionCount)} records in ` +
-    "common - the size of the overlap only, no matched rows and no shared columns"
+    "common - the size of the overlap only, no matched rows and no shared columns" +
+    (countReportedByPartner ? "; reported by your partner" : "")
   );
 }
 
@@ -1014,7 +1039,10 @@ export function settledReceiveValue(
 ): string {
   switch (outcome.kind) {
     case "counted":
-      return countOnlyLedgerValue(outcome.intersectionCount);
+      return countOnlyLedgerValue(
+        outcome.intersectionCount,
+        outcome.countReportedByPartner,
+      );
     case "withheld":
       return "No result table - withheld by the agreed terms";
     case "matched":
