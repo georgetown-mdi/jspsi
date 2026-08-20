@@ -466,8 +466,9 @@ export interface RunProtocolResult {
  * `saveIntent` carries this party's zero-setup `--save` intent into the
  * exchange's in-band bootstrap (see {@link runExchange}). Pass `undefined`
  * (the default) on every authenticated path; pass a boolean only from the
- * zero-setup command, which then reads {@link RunProtocolResult.bootstrap} to
- * provision the saved config/key. It is only meaningful with `auth: null`.
+ * zero-setup command, whose `onOutputComplete` hook then reads
+ * {@link OutputCompleteContext.bootstrap} to provision the saved config/key. It
+ * is only meaningful with `auth: null`.
  *
  * `onAuthenticated` is an optional post-handshake hook invoked exactly once, on
  * the authenticated path only, after the rotated token is saved to the key file

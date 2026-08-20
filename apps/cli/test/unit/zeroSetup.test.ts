@@ -997,6 +997,54 @@ test("handler --save: a config that appeared after the pre-flight is the same lo
   }
 });
 
+test("handler --save: a completed exchange carrying no bootstrap result reports the loss rather than saving in silence", async () => {
+  // The hook's internal-contradiction branch. runProtocol drove the
+  // completed-exchange hook -- so the exchange finished and its results are
+  // written -- yet handed it no bootstrap result, though this command always
+  // passes a boolean --save intent. There is nothing to provision from, and the
+  // config path here is an ordinary writable one, so a run that skipped the save
+  // in silence would exit clean with nothing on disk and no way for a supervisor
+  // to tell. It takes the same persistence-loss report as a failed write.
+  const f = saveFailureFixture();
+  getLogger("psilink").setLevel("error");
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
+    driveCompletedExchange(callArgs, undefined)) as never);
+  try {
+    const { lines } = await captureFd3(() =>
+      handler({
+        _: ["sftp://userb@localhost:2222/drop", f.input],
+        $0: "psilink",
+        save: true,
+        "event-stream": true,
+        "config-file": f.configFile,
+        "key-file": f.keyFile,
+        identity: "Tester",
+        record: false,
+        "log-level": "error",
+      } as unknown as Arguments),
+    );
+    const exitCode = process.exitCode;
+    const stderr = f.stderr();
+    expect(exitCode).toBe(PERSISTENCE_LOSS_EXIT_CODE);
+    expect(f.exitSpy).not.toHaveBeenCalled();
+    expect(lines.map((l) => l.type)).toEqual(["warning"]);
+    const notice = String(lines[0].message);
+    expect(notice).toContain(f.configFile);
+    expect(notice).toContain("do not re-run");
+    // Operator-facing and well-formed: the absent result reaches the notice as
+    // neither an interpolated hole nor the internal wording, both of which stay
+    // on the human log with the rest of the cause.
+    expect(notice).not.toContain("undefined");
+    expect(notice).not.toContain("internal error");
+    expect(stderr).toContain("internal error");
+    // Nothing was provisioned from the contradiction.
+    expect(fs.existsSync(f.configFile)).toBe(false);
+    expect(fs.existsSync(f.keyFile)).toBe(false);
+  } finally {
+    f.restore();
+  }
+});
+
 test("handler --save: the save rides the pre-terminal hook, not the return from runProtocol", async () => {
   // WHERE the save happens is the contract, not just that it happens: run after
   // runProtocol returns, the warning above lands BEHIND the run's terminal
