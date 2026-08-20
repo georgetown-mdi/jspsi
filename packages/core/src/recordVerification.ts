@@ -450,9 +450,10 @@ export function reproductionMismatchCauses(
   return [
     "the re-supplied received payload carries empty cells, and a result cell " +
       "cannot distinguish a committed empty string from a committed null -- " +
-      "the result writes both as an empty cell. If the partner sent a null in " +
-      "one of those cells, that difference alone explains the " +
-      "partnerPayloadReceived mismatch, and the result is otherwise intact.",
+      "the result writes both as an empty cell. A partner-sent null in one of " +
+      "those cells would reproduce here as an empty string and report this " +
+      "mismatch; the commitment covers the whole payload, so this is one " +
+      "possible cause, not a confirmation that nothing else differs.",
   ];
 }
 
