@@ -1,9 +1,12 @@
+import { Readable } from "node:stream";
+
 import { describe, expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
 import { buildExchangeRecord } from "../src/exchangeRecord";
 import { prepareForExchange, runExchange } from "../src/exchange";
+import { loadCSVFile } from "../src/file";
 import {
   buildOutputTable,
   preparePayload,
@@ -11,6 +14,7 @@ import {
 } from "../src/payloadExchange";
 import {
   reconstructCommittedData,
+  toRetainedResult,
   verifyExchangeRecord,
 } from "../src/recordVerification";
 import { createMessagePipe } from "../src/connection/messageConnection";
@@ -18,6 +22,7 @@ import { createMessagePipe } from "../src/connection/messageConnection";
 import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
 import type { PartnerPayload } from "../src/payloadExchange";
+import type { RetainedResult } from "../src/recordVerification";
 import type { AssociationTable } from "../src/types";
 import type { CSVRow } from "../src/file";
 
@@ -36,9 +41,29 @@ const termsA: LinkageTerms = {
 };
 const termsB: LinkageTerms = { ...termsA, identity: "Party B" };
 
+// What a party retains is a result FILE, so the round trip below goes through
+// one: buildOutputTable emits RFC 4180 escaped cells, every writer only joins
+// them with commas and newlines (the CLI's writeOutput, the web bench's
+// download), and reconstruction consumes the LOGICAL values a reader hands back.
+// Serializing and re-reading here puts the escaper and the parser inside the
+// claim -- handing buildOutputTable's escaped cells straight to reconstruction
+// would verify with a broken escaper on either side.
+async function writeAndReadBack(table: {
+  headers: string[];
+  rows: Array<Array<string>>;
+}): Promise<RetainedResult> {
+  const csv = [table.headers, ...table.rows]
+    .map((cells) => cells.join(",") + "\n")
+    .join("");
+  const stream = new Readable({ read() {} });
+  stream.push(Buffer.from(csv, "utf8"));
+  stream.push(null);
+  return toRetainedResult(await loadCSVFile(stream));
+}
+
 // Reconstruct the committed data from the record + retained input + result the
-// real build path produces, then verify. A "verified" outcome means the
-// reconstruction reproduced the exact committed bytes end to end.
+// real build/write/parse path produces, then verify. A "verified" outcome means
+// the reconstruction reproduced the exact committed bytes end to end.
 async function roundTrip(opts: {
   rawRows: CSVRow[];
   metadata: Metadata;
@@ -60,11 +85,13 @@ async function roundTrip(opts: {
     partnerPayloadReceived,
     createdAt: "2026-01-02T03:04:05.000Z",
   });
-  const result = buildOutputTable(
-    opts.associationTable,
-    opts.rawRows,
-    opts.metadata,
-    opts.partnerPayload,
+  const result = await writeAndReadBack(
+    buildOutputTable(
+      opts.associationTable,
+      opts.rawRows,
+      opts.metadata,
+      opts.partnerPayload,
+    ),
   );
   const { data, warnings } = reconstructCommittedData({
     record,
@@ -77,7 +104,7 @@ async function roundTrip(opts: {
     localTerms: termsA,
     partnerTerms: termsB,
   });
-  return { report, warnings };
+  return { report, warnings, result };
 }
 
 const idMeta: Metadata = [
@@ -93,7 +120,60 @@ const idRows: CSVRow[] = [
   { pid: "P2", dose: "30mg" },
 ];
 
+// The characters that make the result file's escaping load-bearing, plus the
+// empty cell. Named so each is visible in a failure's diff.
+const COMMA_VALUE = "Doe, Jane";
+const QUOTE_VALUE = 'she said "hi"';
+const NEWLINE_VALUE = "line one\nline two";
+
 describe("reconstructCommittedData round-trips through the real build path", () => {
+  test("a comma, a double quote, a newline, and an empty cell survive the file", async () => {
+    // The commitments bind the canonical encoding of the LOGICAL values, so a
+    // dropped quote (splitting a field) or a doubled one (leaving quotes in the
+    // value) reproduces different bytes and reports a mismatch here. Core's own
+    // consumers -- anything holding a result file that is not the CLI -- rest on
+    // this, so it is pinned here rather than only in the CLI's writer suite.
+    const specialRows: CSVRow[] = [
+      { pid: COMMA_VALUE, dose: NEWLINE_VALUE },
+      { pid: "P1", dose: "20mg" },
+      { pid: QUOTE_VALUE, dose: "" },
+    ];
+    // `blank` is a declared partner column whose cell is empty: it must read back
+    // as an empty value rather than as a dropped column.
+    const partnerPayload: PartnerPayload = {
+      columns: ["note", "blank"],
+      rowIndices: [0, 1],
+      rows: [
+        [COMMA_VALUE, ""],
+        [`${QUOTE_VALUE} / ${NEWLINE_VALUE}`, ""],
+      ],
+    };
+    const { report, warnings, result } = await roundTrip({
+      rawRows: specialRows,
+      metadata: idMeta,
+      associationTable: [
+        [0, 2],
+        [1, 0],
+      ],
+      partnerPayload,
+      ourIdColumn: "pid",
+    });
+    // The reader's own verdict first, so an escaping fault localizes to the hop
+    // rather than surfacing only as an opaque commitment mismatch.
+    expect(result.headers).toEqual(["pid", "row_id", "note", "blank"]);
+    expect(result.rows).toEqual([
+      [COMMA_VALUE, "1", `${QUOTE_VALUE} / ${NEWLINE_VALUE}`, ""],
+      [QUOTE_VALUE, "0", COMMA_VALUE, ""],
+    ]);
+    expect(warnings).toEqual([]);
+    expect(report.outcome).toBe("verified");
+    expect(report.commitments).toEqual({
+      localPayloadSent: "verified",
+      partnerPayloadReceived: "verified",
+      associationTable: "verified",
+    });
+  });
+
   test("identifier column, both payloads, misaligned partner send order", async () => {
     // The crucial case: our matched rows are [0, 2]; the partner's matched rows
     // are [2, 0] in OUR order, but the partner SENT its payload in ascending order
@@ -359,11 +439,13 @@ describe("reconstructCommittedData round-trips a live PSI exchange", () => {
     ] as const) {
       const audit = result.audit!;
       const table = result.associationTable!;
-      const output = buildOutputTable(
-        table,
-        dataPrep.rawRows,
-        dataPrep.metadata,
-        result.partnerPayload,
+      const output = await writeAndReadBack(
+        buildOutputTable(
+          table,
+          dataPrep.rawRows,
+          dataPrep.metadata,
+          result.partnerPayload,
+        ),
       );
       const ourIdColumn = dataPrep.metadata.find(
         (c) => c.role === "identifier",
