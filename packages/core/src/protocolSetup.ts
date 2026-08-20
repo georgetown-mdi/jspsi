@@ -483,9 +483,11 @@ function assertPartnerEffectiveKeyCount(
  * imply, rather than one recomputed from the frame that prompted the notice.
  *
  * Held under the per-value display cap (`DEFAULT_MAX_DISPLAY_LENGTH`, 256) at its
- * widest admissible pair of counts (5,120 against 256), because the CLI escapes a
- * terms warning at that cap on its way to stderr and a longer notice would reach
- * the operator cut short.
+ * widest admissible pair of counts: 5,120 advertised against the 5,101 the agreed
+ * terms imply when all but one of MAX_LINKAGE_ENTRIES keys declares a fan-out of
+ * its own -- the longest rendering, since both counts reach four digits and no
+ * admissible pair carries more. The CLI escapes a terms warning at that cap on its
+ * way to stderr, so a longer notice would reach the operator cut short.
  */
 function partnerWidthAboveAgreedNotice(
   partnerEffectiveKeyCount: number,

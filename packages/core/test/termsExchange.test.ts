@@ -745,14 +745,27 @@ test("the width notice reaches the operator whole at the widest admissible count
   // stderr (apps/cli/src/protocol.ts), which truncates rather than wraps, so a
   // notice longer than that cap reaches the operator cut short -- and the numbers
   // it exists to name sit at its front, where a truncation would spare them but
-  // drop the explanation. The widest pair the advertisement checks admit is
-  // MAX_LINKAGE_ENTRIES agreed keys against MAX_LINKAGE_ENTRIES *
-  // MAX_KEY_CANDIDATES_PER_ROW advertised.
+  // drop the explanation.
+  //
+  // The notice's length is set by the two counts it interpolates, so the widest
+  // pair is the one that renders both at their longest. The advertisement is
+  // capped at MAX_LINKAGE_ENTRIES * MAX_KEY_CANDIDATES_PER_ROW, and the agreed
+  // terms fan out on their own account too -- so the agreed width is not stuck at
+  // the plain key count but runs up to one fan-out key below the advertisement,
+  // which is where it still trips the notice. That pair (every agreed key but one
+  // declaring split_on) renders four digits against four, and no admissible pair
+  // renders more.
+  const advertised = MAX_LINKAGE_ENTRIES * MAX_KEY_CANDIDATES_PER_ROW;
+  const agreedWidth = advertised - (MAX_KEY_CANDIDATES_PER_ROW - 1);
+  const fanOutElement = {
+    field: "ssn",
+    transform: [{ function: "split_on", params: { delimiter: "/" } }],
+  };
   const wideTerms: LinkageTerms = {
     ...singlePassTermsA,
     linkageKeys: Array.from({ length: MAX_LINKAGE_ENTRIES }, (_, i) => ({
       name: `key ${i}`,
-      elements: [{ field: "ssn" }],
+      elements: [i === 0 ? { field: "ssn" } : fanOutElement],
     })),
   };
   const [connA, connB] = makeConnections();
@@ -760,13 +773,22 @@ test("the width notice reaches the operator whole at the widest admissible count
   await connA.send({
     linkageTerms: wideTerms,
     recordCount: 100,
-    effectiveKeyCount: MAX_LINKAGE_ENTRIES * MAX_KEY_CANDIDATES_PER_ROW,
+    effectiveKeyCount: advertised,
     protocolVersion: PROTOCOL_VERSION,
   });
   await connA.receive(); // msg 2
   await connA.send({ decision: "proceed" });
   const notice = (await responder).warnings.find((w) => WIDTH_NOTICE.test(w));
   expect(notice).toBeDefined();
+  // Asserted so a fixture that quietly stopped driving the widest pair -- an
+  // agreed width back at the plain key count, say -- fails here rather than
+  // passing the cap check on a shorter notice.
+  expect(notice).toContain(
+    `partner advertised ${advertised} value slot(s) per record`,
+  );
+  expect(notice).toContain(
+    `against the ${agreedWidth} the agreed linkage keys imply`,
+  );
   expect(redactAndSanitizeForDisplay(notice!)).toBe(notice);
 });
 
