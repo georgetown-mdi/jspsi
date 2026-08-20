@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 
 import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms.js";
-import { summarizeInvitation } from "../src/invitationSummary.js";
+import {
+  summarizeInvitation,
+  TRANSFORM_FUNCTION_GLOSSARY,
+} from "../src/invitationSummary.js";
 import { disclosedColumnNames, inferMetadata } from "../src/config/metadata.js";
 
 import type { ConnectionEndpoint } from "../src/config/invitation.js";
@@ -213,5 +216,67 @@ describe("the consent summary's retain disclosure", () => {
         inviterRetainsFiles: false,
       }).disclosesRetainedFiles,
     ).toBe(true);
+  });
+});
+
+describe("the consent summary's fan-out register", () => {
+  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS);
+  const baseTerms = getDefaultLinkageTerms("Inviter", metadata);
+  const fanOutTerms = {
+    ...baseTerms,
+    linkageKeys: [
+      {
+        name: "last name",
+        elements: [
+          {
+            field: "last_name",
+            transform: [{ function: "split_on", params: { delimiter: " " } }],
+          },
+        ],
+      },
+    ],
+  };
+
+  test("a fan-out element under single-pass is marked as matching on several values", () => {
+    // The element matches on every candidate it realizes, so the header marker
+    // names that breadth. The two flags beside it are what selects the consent
+    // fact each surface renders.
+    const summary = summarizeInvitation({
+      linkageTerms: { ...fanOutTerms, linkageStrategy: "single-pass" },
+    });
+    expect(summary.linkageKeys[0].headerFields).toEqual([
+      "last name (multiple)",
+    ]);
+    expect(summary.fansOut).toBe(true);
+    expect(summary.fanOutApplied).toBe(true);
+  });
+
+  test("the same element under cascade is marked as not supported", () => {
+    // Refused before the exchange runs, so no matching of any breadth happens
+    // and naming one would describe a run that does not occur.
+    const summary = summarizeInvitation({
+      linkageTerms: { ...fanOutTerms, linkageStrategy: "cascade" },
+    });
+    expect(summary.linkageKeys[0].headerFields).toEqual([
+      "last name (not supported)",
+    ]);
+    expect(summary.fansOut).toBe(true);
+    expect(summary.fanOutApplied).toBe(false);
+  });
+
+  test("terms declaring no fan-out are in neither register", () => {
+    const summary = summarizeInvitation({
+      linkageTerms: { ...baseTerms, linkageStrategy: "single-pass" },
+    });
+    expect(summary.fansOut).toBe(false);
+  });
+
+  test("the glossary line for the splitting step describes what it does to matching", () => {
+    // The line an acceptor reads beside the step, which must state the widening
+    // rather than a refusal that no longer covers every strategy.
+    expect(TRANSFORM_FUNCTION_GLOSSARY.split_on).toMatch(
+      /each able to match independently/,
+    );
+    expect(TRANSFORM_FUNCTION_GLOSSARY.split_on).not.toMatch(/refuses/);
   });
 });

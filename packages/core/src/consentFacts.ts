@@ -279,6 +279,49 @@ export const CONSENT_FACTS = {
       "The keys, their elements, and every declared matching rule are what the " +
       "run computes; under `psi` they decide which identifiers are revealed.",
   },
+  fanOutCandidates: {
+    basis: "enforced",
+    reason:
+      "What the run does with a record that has several candidate values for " +
+      "one key, not what the partner does with it. Every candidate enters that " +
+      "key's round as its own entry; a record appearing in any of the round's " +
+      "candidate pairs leaves candidacy for every later key, paired or not; and " +
+      "the index table the single-pass receiver holds carries each sender " +
+      "record's candidate grouping for every key, matched or not. All three are " +
+      "properties of the round rather than of anyone's conduct. The normative " +
+      "rows are docs/spec/PROTOCOL.md's (Fan-out matching, and the disclosure " +
+      "delta fan-out pays), so a row reclassified there and not here is a " +
+      "divergence between a specification and the sentence an acceptor consents " +
+      "on.",
+    note:
+      "A linkage key here splits a value into several candidates, and each one " +
+      "is matched on its own -- so a record matches when any single candidate " +
+      "does, which can be as little as one part of a name and is weaker " +
+      "evidence than a match on the whole value. A record that matches this way " +
+      "is paired at most once and then takes no part in the later, less precise " +
+      "keys, whether or not that pairing stands. Matching on candidates runs " +
+      "under single-pass linkage, so the party that receives the other's key " +
+      "structure also learns how many candidates each of the other's records " +
+      "contributed for each key and which of its values belong to the same " +
+      "record.",
+  },
+  fanOutRefused: {
+    basis: "enforced",
+    reason:
+      "The other case of the same line, and enforced for the same reason the " +
+      "`deduplicate` refusal is: matching on several candidates per record is " +
+      "specified for the single-pass strategy alone, so terms declaring one " +
+      "under any other strategy are refused when they are authored or minted, " +
+      "at the local prepare step, and again at the agreed-terms run boundary. " +
+      "The exchange this invitation proposes does not run at all, which is a " +
+      "fact of the run rather than of the partner's conduct.",
+    note:
+      "Your partner proposes splitting a value into several candidates to match " +
+      "on, which runs under single-pass linkage only, and this invitation names " +
+      "a different linkage strategy -- so the exchange will refuse to run. Ask " +
+      "your partner for an invitation that either drops the split or uses " +
+      "single-pass linkage.",
+  },
   inboundPayloadColumnsCarried: {
     basis: "enforced",
     reason:

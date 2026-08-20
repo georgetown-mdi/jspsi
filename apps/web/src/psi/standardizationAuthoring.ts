@@ -203,20 +203,21 @@ export const expertFunctionNames: ReadonlySet<string> = new Set(
 
 /**
  * The advanced groups as the add-step menu offers them: the raw-pattern family
- * minus every function core classes as fan-out (`FAN_OUT_FUNCTION_NAMES`). Core
- * refuses an exchange whose standardization or element transforms declare one
- * (`assertFanOutImplemented`) because matching runs on a single value per record,
- * so offering the step would let an operator author -- and mint -- a pipeline the
- * run cannot honor. The same gating shape as the `APPLIED_SETTINGS` controls: the
- * schema admits the step, the implementation does not yet, so the control is
- * withheld until it does.
+ * minus every function core classes as fan-out (`FAN_OUT_FUNCTION_NAMES`). A
+ * fan-out matches under the single-pass strategy alone and carries consequences
+ * of its own -- matching per candidate, the removal that follows a match, and the
+ * candidate grouping the single-pass receiver is handed -- which this editor has
+ * no control for the operator to weigh them on, so it offers no step that
+ * declares one and its Generate gate refuses one an imported document carries
+ * (`advancedInviteValidation.ts`). That gate is wider than core's own refusal by
+ * design, not by drift.
  *
  * Derived from core's list rather than a second web-side one, so the menu follows
- * whatever core refuses; a fan-out function that ships (or a refusal that lifts)
- * moves this without a web edit. An imported document's fan-out step still
- * RENDERS -- {@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS} keeps the full family
- * for the descriptor-backed read-only row and its parity test -- so the operator
- * can see and remove it rather than meet an unlabeled step.
+ * whatever core classes as a fan-out with no edit here. An imported document's
+ * fan-out step still RENDERS -- {@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS}
+ * keeps the full family for the descriptor-backed read-only row and its parity
+ * test -- so the operator can see and remove it rather than meet an unlabeled
+ * step.
  */
 export const OFFERED_EXPERT_FUNCTION_GROUPS: Array<StandardizationFunctionGroup> =
   STANDARDIZATION_EXPERT_FUNCTION_GROUPS.map((group) => ({

@@ -557,6 +557,19 @@ export function displayInvitation(params: {
   if (summary.deduplicate && !summary.deduplicateApplied)
     emit(`    ${PROPOSED_NOT_APPLIED_NOTES.deduplicate}`);
 
+  // Value-level matching multiplicity, stated beside the record-level line above
+  // because the two are easily read as one: a key element that splits its value
+  // matches on each candidate, and the removal rule then decides how many
+  // pairings that can produce. Rendered only when the terms declare a fan-out --
+  // the element transforms are all an invitation carries, the inviter's own
+  // standardization being invisible to it -- and which of the two facts is
+  // stated follows the strategy, like the partner-receipt pair above.
+  if (summary.fansOut) {
+    const fact = summary.fanOutApplied ? "fanOutCandidates" : "fanOutRefused";
+    emit(`  ${marked("several values per record", fact)}:`);
+    emit(`    ${CONSENT_FACTS[fact].note}`);
+  }
+
   // The fields the keys actually match on, one short line ahead of the two long
   // matching blocks, so the single fact consent most depends on is legible without
   // scrolling back through the keys and their combinations. Each entry is a fixed

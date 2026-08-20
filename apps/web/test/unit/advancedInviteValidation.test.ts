@@ -41,9 +41,12 @@ describe("the fan-out gate (the run refuses what the schema admits)", () => {
     const result = validateAdvancedInvite(fanning, seed, now);
     expect(result.canGenerate).toBe(false);
     expect(result.terms).toBeUndefined();
-    // The message names the missing capability rather than reporting a schema
-    // fault -- the step is well-formed, and the run is what cannot honor it.
-    expect(result.errors.standardization).toMatch(/not built yet/);
+    // The message names the surface that does author a fan-out rather than
+    // reporting a schema fault -- the step is well-formed, and this editor is
+    // what does not author it.
+    expect(result.errors.standardization).toMatch(
+      /this editor does not author/,
+    );
     expect(result.errors.standardization).toMatch(/several values/);
   });
 
@@ -68,7 +71,7 @@ describe("the fan-out gate (the run refuses what the schema admits)", () => {
     };
     const result = validateAdvancedInvite(fanning, seed, now);
     expect(result.canGenerate).toBe(false);
-    expect(result.errors.keys).toMatch(/not built yet/);
+    expect(result.errors.keys).toMatch(/this editor does not author/);
   });
 
   test("a disabled key's fan-out transform does not block Generate", () => {

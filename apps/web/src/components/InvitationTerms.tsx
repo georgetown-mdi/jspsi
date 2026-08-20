@@ -1272,6 +1272,26 @@ export function InvitationTerms({
             </Term>
           )}
 
+          {/* Value-level matching multiplicity, beside the strategy it is coupled
+            to: a key element that splits its value is matched on each candidate,
+            and which of the two facts applies follows the strategy -- the one
+            that matches candidates, or the refusal every other one takes. The
+            copy is read from CONSENT_FACTS rather than written here, so this
+            surface and the CLI accept prompt state the consequence in the same
+            words. Rendered from the element transforms the invitation carries;
+            the inviter's own data standardization can fan out a field no
+            invitation shows, which is why this claims nothing about the whole of
+            what the inviter runs. */}
+          {summary.fansOut && (
+            <Term label="Several values per record">
+              <Text size="sm">
+                {summary.fanOutApplied
+                  ? CONSENT_FACTS.fanOutCandidates.note
+                  : CONSENT_FACTS.fanOutRefused.note}
+              </Text>
+            </Term>
+          )}
+
           {/* The matching list as a default-collapsed disclosure, mirroring the
             per-key and "Other details" disclosures below: aria-expanded +
             aria-controls on the toggle, the id on the always-mounted wrapper (not

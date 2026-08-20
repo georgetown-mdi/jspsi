@@ -997,6 +997,36 @@ describe("summarizeInvitation", () => {
     ]);
   });
 
+  test("re-attributes a fan-out marker across a swap where the strategy matches candidates", () => {
+    // The other half of the rule above. Under single-pass the key does run, and
+    // what runs is the declaring element's candidate set against the OTHER
+    // element's field -- so the marker re-attributes like any other breadth, and
+    // the operator reads which field is matched on several values.
+    const key = summarizeInvitation(
+      makeToken({
+        linkageStrategy: "single-pass",
+        linkageFields: [
+          { name: "first_name", type: "first_name" },
+          { name: "last_name", type: "last_name" },
+        ],
+        linkageKeys: [
+          {
+            name: "Name",
+            elements: [
+              { field: "first_name", transform: soundAlike },
+              { field: "last_name", transform: fanOut },
+            ],
+            swap: ["first_name", "last_name"],
+          },
+        ],
+      }),
+    ).linkageKeys[0];
+    expect(key.headerFields).toEqual([
+      "first name (multiple)",
+      "last name (sound-alike)",
+    ]);
+  });
+
   test("keeps a refused rule on its own field without a swap", () => {
     // The plain shape, where no re-attribution runs at all: the marker sits on the
     // declaring element's field, and the sibling element is unmarked.
@@ -1806,8 +1836,10 @@ describe("summarizeInvitation", () => {
       substring: "partial",
       phonetic: "sound-alike",
       coalesce: "fallback",
-      // Refused rather than named for a breadth: the exchange does not run at all
-      // with a declared fan-out step.
+      // Refused rather than named for a breadth: under these cascade terms the
+      // exchange does not run at all with a declared fan-out step. Its other
+      // marker, under the strategy that matches the candidate set, has its own
+      // test below.
       split_on: "not supported",
       // Rule named directly where a partner pattern or value list makes the
       // direction indeterminate.
