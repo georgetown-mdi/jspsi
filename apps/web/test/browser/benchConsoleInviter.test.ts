@@ -278,13 +278,38 @@ async function openExchangeFiles() {
   await page.getByRole("button", { name: /How files are handled/ }).click();
 }
 
+/**
+ * Drive the retain-mode checkbox on the open file-handling card to `on`, from
+ * whichever state it is in.
+ *
+ * The click sits inside the poll rather than ahead of it because a click the
+ * browser reports as delivered can leave this control in the state it started in
+ * under the CPU contention of the full browser suite -- the split-rendezvous gate
+ * below reddened in CI that way while every local run passed. Re-reading before
+ * each click is what makes that safe: a change that has already landed ends the
+ * poll instead of being toggled back, so only a delivery that did nothing is
+ * retried. The intended state is the only exit, so a UI that genuinely refuses
+ * the change still fails here.
+ */
+async function setRetainMode(on: boolean) {
+  const retain = page.getByLabelText("Keep every exchange file");
+  const checked = () => (retain.element() as HTMLInputElement).checked;
+  await expect
+    .poll(
+      async () => {
+        if (checked() !== on) await retain.click();
+        return checked();
+      },
+      { interval: 500, timeout: 5_000 },
+    )
+    .toBe(on);
+}
+
 /** Turn retain mode on the way an operator does: the file-handling card on
  * Review & create, before the invitation is minted. */
 async function turnRetainModeOn() {
   await openExchangeFiles();
-  const retain = page.getByLabelText("Keep every exchange file");
-  await retain.click();
-  await expect.element(retain).toBeChecked();
+  await setRetainMode(true);
 }
 
 /** State the lockless rendezvous on its own, from the same card: the operator's
@@ -613,9 +638,10 @@ describe("console inviter split-rendezvous retain gate", () => {
       .element(page.getByRole("button", { name: "Create the invitation" }))
       .toBeEnabled();
 
-    const retain = page.getByLabelText("Keep every exchange file");
-    await retain.click();
-    await expect.element(retain).not.toBeChecked();
+    await setRetainMode(false);
+    await expect
+      .element(page.getByLabelText("Keep every exchange file"))
+      .not.toBeChecked();
     await expect
       .element(page.getByRole("button", { name: "Create the invitation" }))
       .toBeDisabled();
