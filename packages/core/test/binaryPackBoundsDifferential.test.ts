@@ -1049,7 +1049,7 @@ describe("scanFrameStructure on a frame of boxed numbers", () => {
 
   test("refuses a frame whose declared numbers exceed the production budget", async () => {
     // The frame is sized to the budget rather than scaled down, because the whole
-    // point of the boxed charge is where the two bounds now sit relative to each
+    // point of the boxed charge is where the two bounds sit relative to each
     // other: the wire a budget-filling number frame must spend is INSIDE the
     // wire-byte cap, so the structure budget is what refuses it and the retention
     // is bounded there rather than by the wire.

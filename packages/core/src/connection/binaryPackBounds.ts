@@ -218,11 +218,11 @@ export const WEBRTC_VALUE_WEIGHTS = {
  * needs ~16.7M elements and ~16 MiB of wire to meet the same refusal (the
  * per-container byte check ties cost to wire), and a frame of the cheapest boxed
  * numbers needs ~213 MiB of wire -- inside the wire cap, so this budget is what
- * refuses it. Any of them is freed once the schema layer rejects the frame. A tighter budget is available
- * only by making the weights less conservative (e.g. crediting key-string
- * internalization); that aggressiveness is a security-review judgment (see
- * docs/spec/CHANNEL_SECURITY.md). Fixed, not configurable: a configurable bound
- * risks being raised to reintroduce the denial of service.
+ * refuses it. Any of them is freed once the schema layer rejects the frame. A
+ * tighter budget is available only by making the weights less conservative (e.g.
+ * crediting key-string internalization); that aggressiveness is a security-review
+ * judgment (see docs/spec/CHANNEL_SECURITY.md). Fixed, not configurable: a
+ * configurable bound risks being raised to reintroduce the denial of service.
  */
 export const MAX_WEBRTC_FRAME_STRUCTURE_BYTES = 1_073_741_824;
 
