@@ -36,7 +36,7 @@ export const EVENT_STREAM_VERSION = 1;
  * each stage transition; `stageEnd` reports a completed stage's wall-clock
  * duration; `warning` carries a non-fatal warning (a terms-exchange warning, the
  * cross-party host-key divergence notice, the signing-without-a-record notice, a
- * missing audit artifact, or any post-authentication persistence failure);
+ * missing audit artifact, or any post-exchange persistence failure);
  * `metrics` is the one-shot operational-counter summary emitted just before the
  * terminal event; `result` and `error` are the two terminal events (exactly one
  * fires per run).
@@ -117,11 +117,12 @@ export interface StageEndEvent extends EventBase {
  * A non-fatal warning: a terms-exchange warning, the cross-party host-key
  * divergence notice, the pre-exchange notice that a signing identity is
  * configured while record writing is off, an audit artifact the run was asked
- * for and could not produce, or a post-authentication persistence failure that
- * leaves an otherwise complete online invite/accept short of what it was asked
- * to write -- its configuration, one of the acceptance's consent records on a
- * reused configuration, or the observed received-payload set a later recurring
- * exchange would have been held to.
+ * for and could not produce, or a persistence failure that leaves an otherwise
+ * complete run short of what it was asked to write -- an online invite/accept's
+ * configuration, one of the acceptance's consent records on a reused
+ * configuration, the observed received-payload set a later recurring exchange
+ * would have been held to, or a zero-setup `--save` run's configuration and key
+ * file.
  */
 export interface WarningEvent extends EventBase {
   type: "warning";
@@ -483,10 +484,10 @@ export function openEventStream(
 
 /**
  * The exit code a run reports when the exchange itself completed and a local
- * write did not: the result file, an audit artifact, or the configuration and
- * consent records an online `invite`/`accept` writes. `EX_CANTCREAT` (73) in the
- * BSD `sysexits` convention -- an output the command was asked to create could
- * not be created.
+ * write did not: the result file, an audit artifact, the configuration and
+ * consent records an online `invite`/`accept` writes, or the configuration and
+ * key a zero-setup `--save` writes. `EX_CANTCREAT` (73) in the BSD `sysexits`
+ * convention -- an output the command was asked to create could not be created.
  *
  * Deliberately NOT `EX_UNAVAILABLE` (69), the transport-failure code. The two
  * demand opposite operator responses -- re-run the exchange, versus do not

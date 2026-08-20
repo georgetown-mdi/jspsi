@@ -371,6 +371,16 @@ export interface OutputCompleteContext {
    * (it is empty when the partner transmitted nothing).
    */
   observedReceivedPayloadColumns: string[];
+  /**
+   * The zero-setup `--save` bootstrap outcome, the same value
+   * {@link RunProtocolResult.bootstrap} carries -- settled by the terms exchange
+   * long before this call, so the hook that performs the save runs inside this
+   * frame rather than after {@link runProtocol} returns. Defined whenever a
+   * boolean `saveIntent` was passed (including `false`, which carries the
+   * partner's intent) and `undefined` on every authenticated exchange, which
+   * runs no bootstrap.
+   */
+  bootstrap?: ExchangeBootstrapResult;
 }
 
 /** The value {@link runProtocol} resolves with. */
@@ -381,12 +391,12 @@ export interface RunProtocolResult {
    * `false`, where it carries `partnerSaveIntent` with `sharedSecret` undefined,
    * which the caller needs to drive its no-save notice. `undefined` only when
    * `saveIntent` was `undefined` (every authenticated exchange) or when the run
-   * is short-circuited by a signal (the interrupt path returns `{}`). The
-   * zero-setup caller relies on this: it passes the raw `--save` boolean so a
-   * non-saving party still receives a defined result, and reads `undefined` as
-   * "interrupted, do nothing" -- see the guard in the zeroSetup handler. Do not
-   * collapse a `false` saveIntent to `undefined`; that would silently suppress
-   * the no-save notices.
+   * is short-circuited by a signal (the interrupt path returns `{}`). The same
+   * value reaches the zero-setup save through
+   * {@link OutputCompleteContext.bootstrap}, which is where that caller consumes
+   * it; it passes the raw `--save` boolean so a non-saving party still receives a
+   * defined result. Do not collapse a `false` saveIntent to `undefined`; that
+   * would silently suppress the no-save notices.
    */
   bootstrap?: ExchangeBootstrapResult;
   /**
@@ -1781,6 +1791,7 @@ export async function runProtocol(
       try {
         await fileSyncRuntime.onOutputComplete({
           observedReceivedPayloadColumns: partnerPayload.columns,
+          bootstrap,
         });
       } catch (hookErr) {
         // The hook reports its own losses; reaching here means one escaped it.

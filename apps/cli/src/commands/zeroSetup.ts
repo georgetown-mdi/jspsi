@@ -2,7 +2,12 @@ import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
 import { userInfo } from "node:os";
 
-import { getLogger, prepareForExchange, UsageError } from "@psilink/core";
+import {
+  getLogger,
+  prepareForExchange,
+  sanitizeErrorForDisplay,
+  UsageError,
+} from "@psilink/core";
 import type {
   ConnectionConfig,
   ExchangeBootstrapResult,
@@ -17,6 +22,7 @@ import {
   saveConfig,
   DEFAULT_CONFIG_PATH,
 } from "../config";
+import { openEventStream, reportPersistenceLoss } from "../eventStream";
 import { detectFileConflicts, expandTilde } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
@@ -342,6 +348,12 @@ export function buildSaveSpec(
  * config only, instruct to invite), we-did-not-save + partner-did (save nothing,
  * explain), and neither-saved (the standard recurring-exchange hint).
  *
+ * A throw from here does not fail the run: the exchange it follows has already
+ * completed, so the handler reports the failure as a persistence loss on both
+ * machine channels. An error raised here therefore steers the operator to
+ * `psilink invite` rather than to a re-run, which would conduct a second
+ * exchange.
+ *
  * @internal exported for testing
  */
 export function finalizeBootstrap(params: {
@@ -397,7 +409,9 @@ export function finalizeBootstrap(params: {
     if (conflicts.length > 0)
       throw new UsageError(
         `refusing to overwrite ${conflicts.join(", ")}, which appeared after ` +
-          "the pre-flight check; move or remove it and re-run with --save",
+          "the pre-flight check; the exchange itself completed, so move or " +
+          "remove that file (or pass --config-file) and run 'psilink invite' " +
+          "to set up the recurring exchange rather than re-running this one",
       );
     saveConfig(configFile, spec);
     log.info(
@@ -425,6 +439,41 @@ export function finalizeBootstrap(params: {
     "To establish a recurring exchange with this partner, run 'psilink " +
       "invite URL INPUT_FILE' and share the invitation string, or coordinate " +
       "with your partner to re-run with --save.",
+  );
+}
+
+/**
+ * The persistence-loss notice a `--save` bootstrap that did not reach disk
+ * reports on the machine-interface stream, naming the files this run was asked
+ * to write: both parties saving provisions a config and a key file, a partner
+ * that declined to save leaves the config alone, and a party that passed no
+ * `--save` writes nothing at all (see {@link finalizeBootstrap}). The CAUSE is
+ * deliberately absent -- it goes to the human log beside the call, because the
+ * emitter escapes its message exactly once and pre-rendered error text would
+ * reach a supervisor double-escaped.
+ */
+function unsavedBootstrapNotice(params: {
+  save: boolean;
+  sharedSecret: string | undefined;
+  configFile: string;
+  keyFile: string;
+}): string {
+  if (!params.save)
+    return (
+      "the exchange completed and its results are written, but the " +
+      "post-exchange bootstrap step did not complete; this run was asked to " +
+      "save nothing, and the exchange must not be re-run"
+    );
+  const files =
+    params.sharedSecret !== undefined
+      ? `the configuration at ${params.configFile} and the key file at ` +
+        `${params.keyFile}`
+      : `the configuration at ${params.configFile}`;
+  return (
+    `the exchange completed and its results are written, but ${files} did ` +
+    "not reach disk, so no recurring exchange is set up; do not re-run this " +
+    "exchange -- run 'psilink invite' and share the invitation with your " +
+    "partner instead"
   );
 }
 
@@ -596,8 +645,17 @@ export async function handler(argv: Arguments): Promise<void> {
 
     announceRetainMode(connection, log);
 
-    let runResult: Awaited<ReturnType<typeof runProtocol>>;
     try {
+      // The --save bootstrap persists from the onOutputComplete hook below and
+      // reports what it loses on the machine-interface stream, so this command
+      // opens that stream itself and hands runProtocol the emitter rather than
+      // the flag: both sources then ride the one stream that carries the run's
+      // terminal event. openEventStream runs the same fail-closed fd-3 preflight
+      // runProtocol would have run, at the same point in the run, so an unwired
+      // descriptor stays a usage error (exit 64) raised before any connection is
+      // opened and after the command-level work ahead of it (see
+      // docs/spec/CLI_EVENTS.md).
+      const eventStreamEmitter = openEventStream(eventStream);
       // Cast: `liveConnection` is `ConnectionConfig` (which includes the webrtc
       // channel), so TypeScript cannot verify it fits `ProtocolConnectionConfig`
       // (constrained to sftp and filedrop). The double cast through `unknown` is
@@ -605,7 +663,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // channels at runtime.
       // auth: null is the explicit opt-out that tells runProtocol to proceed
       // without authentication and without a warning.
-      runResult = await runProtocol(
+      await runProtocol(
         liveConnection as unknown as ProtocolConnectionConfig,
         null,
         prepared,
@@ -617,58 +675,85 @@ export async function handler(argv: Arguments): Promise<void> {
           recordFile: options.recordFile,
         }),
         // Carry this party's --save intent into the in-band bootstrap. The
-        // exchange advertises it to the partner and, when both saved, returns the
-        // established secret on runResult.bootstrap. Pass the raw boolean, never
+        // exchange advertises it to the partner and, when both saved, hands the
+        // established secret to the hook below. Pass the raw boolean, never
         // `options.save || undefined`: a non-saving party (options.save === false)
         // must still receive a defined bootstrap so finalizeBootstrap can emit the
         // "your partner wanted to save" notice. Collapsing false to undefined
-        // would route it through the interrupt guard below and silently swallow
-        // that notice. The wire is unaffected either way -- the save field only
-        // rides the terms frame when intent is true (see exchangeTerms).
+        // would leave the hook with nothing to act on and silently swallow that
+        // notice. The wire is unaffected either way -- the save field only rides
+        // the terms frame when intent is true (see exchangeTerms).
         options.save,
         // onAuthenticated is undefined on the unauthenticated zero-setup path; the
-        // trailing object carries the CLI-only sweep controls and the
-        // --event-stream toggle.
+        // trailing object carries the CLI-only sweep controls, the stream opened
+        // above, and this command's own post-exchange persistence.
         undefined,
-        { sweepExchangeFiles, forceRetainSweep, eventStream },
+        {
+          sweepExchangeFiles,
+          forceRetainSweep,
+          eventStream: eventStreamEmitter,
+          // The --save provisioning, run inside runProtocol's frame rather than
+          // after it returns so that a loss is reported BEFORE the terminal event
+          // -- the only ordering a supervisor that stops reading there observes.
+          onOutputComplete: ({ bootstrap, observedReceivedPayloadColumns }) => {
+            try {
+              // The hook runs only on the fully-completed path, and this command
+              // always passes a boolean --save intent, so an absent bootstrap
+              // result is an internal contradiction rather than the interrupt it
+              // marks on the returned result. Fail it into the report below
+              // instead of skipping the save in silence.
+              if (bootstrap === undefined)
+                throw new Error(
+                  "internal error: the completed exchange returned no " +
+                    "bootstrap result, though a --save intent was passed",
+                );
+              finalizeBootstrap({
+                save: options.save,
+                bootstrap,
+                // Record the received-payload set observed in this first exchange
+                // so a later `psilink exchange` on the saved config fails closed
+                // on a divergent payload; buildSaveSpec drops the ambiguous empty
+                // observation and stays lazy. Only persisted when this party
+                // actually saves (finalizeBootstrap).
+                spec: buildSaveSpec(
+                  connection,
+                  prepared,
+                  observedReceivedPayloadColumns,
+                ),
+                configFile: options.configFile,
+                keyFile: options.keyFile,
+                log,
+              });
+            } catch (err) {
+              // The exchange has already succeeded and written its output, so a
+              // failure here cannot undo the linkage: what is lost is the
+              // recurring-exchange setup, which is the persistence-loss class,
+              // not a transport failure a supervisor should retry -- a retried
+              // zero-setup run conducts a second exchange and re-sends this
+              // party's records. The config conflict that appeared after the
+              // pre-flight takes the same report rather than its own usage code:
+              // the pre-flight passed when the run began, so there is nothing
+              // about the invocation for the operator to correct, and 64 would
+              // invite that same re-run.
+              const notice = unsavedBootstrapNotice({
+                save: options.save,
+                sharedSecret: bootstrap?.sharedSecret,
+                configFile: options.configFile,
+                keyFile: options.keyFile,
+              });
+              log.error(`${notice}: ${sanitizeErrorForDisplay(err)}`);
+              reportPersistenceLoss(notice, eventStreamEmitter);
+            }
+          },
+        },
       );
     } catch (err) {
       exitWithError(log, err, exitCodeForError(err));
     }
-
-    const { bootstrap, observedReceivedPayloadColumns } = runResult;
-    // bootstrap is undefined only when a signal cut the run short and the process
-    // is already exiting; there is nothing to save or announce in that case.
-    if (bootstrap === undefined) return;
-
-    // The exchange has already succeeded and written its output by this point, so
-    // a provisioning failure here (a config/key conflict that appeared in the
-    // post-exchange window, or a disk error) cannot undo the linkage -- but it
-    // must still exit cleanly with a diagnostic rather than crash as an unhandled
-    // rejection. A conflict is a UsageError (exit 64); anything else exits 69.
-    try {
-      finalizeBootstrap({
-        save: options.save,
-        bootstrap,
-        // Record the received-payload set observed in this first exchange so a
-        // later `psilink exchange` on the saved config fails closed on a divergent
-        // payload; buildSaveSpec drops the ambiguous empty observation and stays
-        // lazy. Only persisted when this party actually saves (finalizeBootstrap).
-        spec: buildSaveSpec(
-          connection,
-          prepared,
-          observedReceivedPayloadColumns,
-        ),
-        configFile: options.configFile,
-        keyFile: options.keyFile,
-        log,
-      });
-    } catch (err) {
-      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
-    }
   } finally {
     // Restore the loglevel factory (and close the log-file descriptor, for the
-    // file sink) on the normal exit path (including the early return above).
+    // file sink) on the normal exit path, including a run that took a
+    // persistence loss and returns with the exit code already set.
     // Writes are synchronous and already durable, so exitWithError's process.exit
     // (which bypasses this finally) loses nothing -- this is only
     // factory/descriptor cleanup.
