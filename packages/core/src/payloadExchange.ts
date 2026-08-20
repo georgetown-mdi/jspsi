@@ -37,7 +37,12 @@ export interface PartnerPayload {
    * parse. Empty when partner had no data.
    */
   rowIndices: number[];
-  /** Payload rows, one per matched record. Empty when partner had no data. */
+  /**
+   * Payload rows, one per matched record. Positional against {@link columns}:
+   * `rows[i][j]` is the value the column named at `columns[j]` contributed, so
+   * every row carries exactly one cell per column and a received message whose
+   * rows do not is refused at parse. Empty when partner had no data.
+   */
   rows: Array<Array<string | null>>;
 }
 
@@ -77,6 +82,23 @@ const hasDistinctRowIndices = (rowIndices: ReadonlyArray<number>): boolean => {
   }
   return true;
 };
+
+// A payload row is positional against `columns`: its cell at each offset is the
+// value of the column named at that offset, so a row of any other width carries a
+// value no column names or leaves a named column without one -- and a frame
+// naming NO column while carrying rows is the whole of one row's values against
+// none. The record commits the column names and the row VALUES together
+// (toCommittedPayload) while its readable governance list is the names alone, so
+// the two halves of one exchange record describe the same disclosure only while
+// the widths agree. That is a structural property of the frame, refused here
+// alongside every other malformed shape rather than at the record or output stage
+// that reads it. preparePayload emits exactly one cell per transmitted column, so
+// no honest frame is narrowed by this. The scan reads only the row lengths the
+// frame already materialized and stops at the first offender.
+const hasOneCellPerColumn = (
+  columnCount: number,
+  rows: ReadonlyArray<ReadonlyArray<string | null>>,
+): boolean => rows.every((row) => row.length === columnCount);
 
 const payloadWireSchema = z.discriminatedUnion("hasData", [
   z.object({ hasData: z.literal(false) }),
@@ -128,12 +150,20 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
       ),
     })
     .superRefine((v, ctx) => {
-      // Parity first: a frame that fails it is refused without paying the
-      // distinctness scan's Set over entries the refusal never needed.
+      // Ordered by cost, so a frame refused on one check never pays the next:
+      // parity is a length comparison, the width scan reads lengths and allocates
+      // nothing, and only the distinctness scan builds a Set over the entries.
       if (v.rowIndices.length !== v.rows.length) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: "rowIndices and rows must have the same length",
+        });
+        return;
+      }
+      if (!hasOneCellPerColumn(v.columns.length, v.rows)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "each payload row must have one value per declared column",
         });
         return;
       }
@@ -774,7 +804,10 @@ export function assertOutboundPayloadConsented(
  *   transmittable columns, or no matched rows) cannot exceed any consent, so it is
  *   accepted even against a non-empty `declared`. This is also what lets a
  *   correctly-gated no-output party (declared empty, received empty) pass, and
- *   avoids a false abort on a zero-match exchange.
+ *   avoids a false abort on a zero-match exchange. It is a consent comparison over
+ *   column NAMES, and the values that ride with them are held to the names by the
+ *   wire schema, which admits no row a column does not name -- so an empty
+ *   received set reaches here carrying nothing to consent to.
  *
  * @throws {ConnectionError} of kind `"protocol"` when `declared` is present and
  *   the received non-empty column set is not exactly it. A protocol error because
