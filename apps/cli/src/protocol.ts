@@ -2026,8 +2026,7 @@ export async function runProtocol(
         `error in flight when ${signalReceived} arrived: ` +
           sanitizeErrorForDisplay(err),
       );
-      // The run was cut short by a signal and the process is exiting; the
-      // caller guards against an absent bootstrap result. Preserve
+      // The run was cut short by a signal and the process is exiting. Preserve
       // onAuthenticatedError so a hook failure recorded before the signal is not
       // silently dropped here -- otherwise the caller would treat the run as a
       // clean config write.
