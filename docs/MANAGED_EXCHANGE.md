@@ -377,6 +377,15 @@ because the secret just rotated, offered as the natural final step rather than
 a later nagging prompt. On that path, with a fresh backup taken, **no standing
 warnings are shown** -- green and quiet.
 
+One notice can join those results: a re-run whose connection closed without the
+partner confirming they took the final message says so beside them, in the same
+words a one-shot run uses, because this side's own results are complete while
+the partner's copy is in doubt (the exits and their wording:
+[WEBRTC_TRANSPORT.md](spec/WEBRTC_TRANSPORT.md#the-clean-close)). It is raised
+at the moment the close resolves, so it is a completion-surface notice for
+whoever is present rather than a state the next visit reads -- the run
+bookkeeping carries no close outcome.
+
 ### The input file each run
 
 Where the File System Access API exists (Chromium), the record persists the

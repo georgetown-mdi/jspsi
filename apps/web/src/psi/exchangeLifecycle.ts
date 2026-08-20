@@ -73,10 +73,11 @@ export const FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING =
  * silence. The peer's own close is the delivery signal, so a run that got it has
  * nothing to report; every other exit ends with no such signal, so the partner's
  * copy is in doubt and the operator hears which kind of doubt it is. This map
- * says what an exit MEANS; which notices reach an operator is the emit gate's
- * decision in {@link runExchangeLifecycle} (it withholds every notice from a
- * failed or cancelled run), so a cancelled run's entry here is not a claim that
- * anyone reads it.
+ * says what an exit MEANS; which notices reach an operator is each run wiring's
+ * emit gate -- {@link runExchangeLifecycle} for a one-shot run and the managed
+ * re-run driver for a recurring one, both withholding every notice from a failed
+ * or cancelled run -- so a cancelled run's entry here is not a claim that anyone
+ * reads it.
  *
  * A total map rather than a chain of comparisons: a new outcome fails to compile
  * here until this layer has decided what a run says about it, instead of

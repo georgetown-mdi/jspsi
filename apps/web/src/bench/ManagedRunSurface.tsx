@@ -38,6 +38,7 @@ import {
   DonePanel,
   DownloadRow,
   NoResultFileInset,
+  RunWarningsAlert,
 } from "./BenchRunSurface";
 import {
   classifyManagedRunFailure,
@@ -49,6 +50,7 @@ import { dateLabel, dateTimeLabel } from "./inviterModel";
 import { BenchPage } from "./BenchPage";
 import { DeleteExchangeButton } from "./SavedExchanges";
 import { ManagedExchangeDetail } from "./ManagedExchangeDetail";
+import { appendSanitizedRunWarning } from "./runWarnings";
 import styles from "./bench.module.css";
 
 import type { Ref } from "react";
@@ -102,6 +104,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [finishedAt, setFinishedAt] = useState<Date>();
   const [failure, setFailure] = useState<ManagedRunFailure>();
+  // The run's non-fatal notices, in arrival order. The driver raises one only for
+  // a run that produced its outputs, and its close resolves after those outputs
+  // reach here, so a notice lands on the completion surface beside the results.
+  const [runWarnings, setRunWarnings] = useState<ReadonlyArray<string>>([]);
   // The Tier-2 confirmation gate: once the operator confirms a real partner-side
   // failure, the surface proceeds to re-invite; a "does not add up" reply routes to
   // the compromise-response copy instead.
@@ -210,6 +216,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
     abortRef.current = controller;
     setRunning(true);
     setFailure(undefined);
+    setRunWarnings([]);
     setConfirmationGated(false);
     setCompromiseResponse(false);
     setReinvite(undefined);
@@ -227,6 +234,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
           // Attended: fail fast when a run is already in progress elsewhere,
           // surfacing the benign "already running" state rather than waiting.
           options: { lock: { ifAvailable: true } },
+          onWarning: (message) =>
+            setRunWarnings((current) =>
+              appendSanitizedRunWarning(current, message),
+            ),
         });
         if (controller.signal.aborted) return;
         setOutputs(result.exchange);
@@ -462,6 +473,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
               matchedRecordCount={outputs.matchedRecordCount}
               finishedAt={finishedAt}
             />
+            <RunWarningsAlert warnings={runWarnings} />
             {outputs.resultsUrl === undefined ? (
               <NoResultFileInset
                 intersectionCount={outputs.intersectionCount}
