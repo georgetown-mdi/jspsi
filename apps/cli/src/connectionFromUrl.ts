@@ -5,36 +5,65 @@ import type {
   ConnectionConfig,
   FileDropConnectionConfig,
   SFTPConnectionConfig,
+  WebRTCConnectionConfig,
 } from "@psilink/core";
 
 import { applyConnectionOverrides, type ConnectionOverrides } from "./config";
 import { decodeUrlComponent, redactUrlCredentials } from "./util/connectionUrl";
 
-// The connection channels a URL can be turned into here: the file-sync pair.
-// `runProtocol` also runs webrtc, but a URL is not where a webrtc connection
-// comes from. It comes from an invitation endpoint (connectionFromEndpoint,
-// which the accept path stamps a role onto) -- and the CLI mints none of its
-// own, since endpointFromConnection is file-sync-only, so the endpoints that
-// exist are the web app's. Narrowing to this keeps a webrtc config from reaching
-// runOnlineBootstrap by the URL route, where it would only fail at runtime.
+// The connection channels connectionFromURL turns a URL into: the file-sync
+// pair. `runProtocol` also runs webrtc, but a webrtc connection needs
+// a `role` that says which end of the rendezvous this party is, and no URL
+// carries one. The commands that know their own end supply it themselves --
+// `psilink accept` from an invitation endpoint (connectionFromEndpoint) and
+// `psilink invite` from its own URL (inviterConnectionFromURL, which stamps
+// `inviter`) -- so the channel stays outside this builder's range and cannot
+// reach a command that would have no end to register under.
 export type RunnableConnectionConfig = Extract<
   ConnectionConfig,
   { channel: "sftp" | "filedrop" }
 >;
 
 /**
- * The refusal a `ws:`/`wss:` URL gets on the invitation and zero-setup paths.
+ * The connection an online `psilink invite` builds from its URL: the file-sync
+ * pair plus webrtc. Invite is the one URL-driven command that can stand up a
+ * webrtc rendezvous, because it is the side that both takes the `inviter` end
+ * and mints the invitation carrying the coordination server for its partner.
+ */
+export type InviterConnectionConfig =
+  RunnableConnectionConfig | WebRTCConnectionConfig;
+
+/**
+ * The refusal a `ws:`/`wss:` URL gets on the acceptance and zero-setup paths.
  *
- * The channel runs -- `psilink exchange` dispatches it -- but not from a URL:
- * the connection needs a `role` no URL carries. It names the two routes that do
- * produce one, so this does not read as "the CLI cannot do WebRTC", which it
- * can.
+ * The channel runs -- `psilink exchange` dispatches it -- but on these paths not
+ * from a URL: the connection needs a `role` no URL carries, and an acceptor's
+ * comes from the invitation it was sent. The message names the routes that do
+ * produce a webrtc connection, so this does not read as "the CLI cannot do
+ * WebRTC", which it can.
  */
 export const WEBRTC_URL_REFUSED =
-  "a ws:// or wss:// URL cannot be used here: the CLI runs a webrtc exchange " +
-  "from a saved connection, not from a URL. Accepting a web invitation writes " +
-  "one; otherwise author `channel: webrtc` in psilink.yaml and run " +
-  "'psilink exchange'.";
+  "a ws:// or wss:// URL cannot be used here: this command runs a webrtc " +
+  "exchange from a saved connection, not from a URL. 'psilink invite' takes " +
+  "one and mints an invitation naming that coordination server; accepting an " +
+  "invitation writes the connection block, and 'psilink exchange' then runs it.";
+
+/**
+ * The refusal a `ws:`/`wss:` URL carrying anything past the broker's location
+ * gets on the invite path.
+ *
+ * A webrtc URL names where the coordination server is and nothing else: the
+ * PeerJS API key is a `server.key` on the connection block, and neither it nor a
+ * username has a URL form the CLI reads. Dropping such a component silently
+ * would leave the run dialing under the default key and report only the
+ * broker's own rejection later, so a URL carrying userinfo, a query, or a
+ * fragment is refused where it was typed.
+ */
+export const WEBRTC_URL_EXTRAS_REFUSED =
+  "a ws:// or wss:// URL names only the coordination server's host, port, and " +
+  "path; it cannot carry a user, an API key, or any other query. For a " +
+  "coordination server that needs a key, author `channel: webrtc` (with " +
+  "`server.key`) in psilink.yaml and run 'psilink exchange'.";
 
 /**
  * Maps a server URL protocol to a connection channel identifier.
@@ -60,10 +89,12 @@ export function channelFromURL(url: URL): ConnectionConfig["channel"] {
 }
 
 /**
- * Build a connection config from a server URL, for every CLI path that maps a
- * URL to a connection (the online invite/accept paths and the zero-setup
- * exchange). Constrained to the file-sync channels: a `webrtc` (ws/wss) URL or
- * an unsupported scheme is a usage error. The returned config carries no
+ * Build a connection config from a server URL, for the CLI paths that map a URL
+ * to a connection and take no end of a rendezvous of their own (the online
+ * accept path and the zero-setup exchange). Constrained to the file-sync
+ * channels: a `webrtc` (ws/wss) URL or an unsupported scheme is a usage error.
+ * The online invite path goes through {@link inviterConnectionFromURL}, which
+ * adds the webrtc channel over this. The returned config carries no
  * `authentication`; the caller adds the shared secret separately for the
  * handshake and never persists it to the config.
  *
@@ -134,4 +165,63 @@ export function connectionFromURL(
     },
   };
   return applyConnectionOverrides(base, overrides) as RunnableConnectionConfig;
+}
+
+/**
+ * Build the connection an online `psilink invite` runs on from its server URL:
+ * {@link connectionFromURL}'s file-sync channels, plus a `ws:`/`wss:` URL as the
+ * webrtc coordination server this party will meet its partner through. The
+ * caller stamps the `inviter` role (withWebRTCPeerRole) and mints the
+ * invitation, whose credential-free endpoint carries the same locator so the
+ * acceptor reaches this coordination server rather than a hard-coded default.
+ *
+ * A webrtc URL maps scheme to `secure` (`wss:` leaves the field unset, whose
+ * default is TLS; `ws:` sets it false, which the dial then warns about), and its
+ * host, port, and path to the `server` block the broker location resolves from.
+ * A bare-host URL leaves `path` unset so the broker's default mount point is
+ * used, exactly as the sftp branch leaves the remote working directory unset.
+ * Nothing else on the URL is read: see {@link WEBRTC_URL_EXTRAS_REFUSED}.
+ *
+ * There is no host check to match the sftp branch's, because `ws:`/`wss:` are
+ * SPECIAL schemes to the URL parser and `sftp:` is not: a special-scheme URL
+ * with nothing where the host goes fails to parse at all, and one written with
+ * an empty authority takes its first path segment as the host instead. The
+ * parse this receives therefore always names one (asserted in the unit suite,
+ * against the parser itself rather than a reading of it).
+ *
+ * @internal exported for testing
+ */
+export function inviterConnectionFromURL(
+  url: URL,
+  overrides: ConnectionOverrides,
+): InviterConnectionConfig {
+  if (channelFromURL(url) !== "webrtc")
+    return connectionFromURL(url, overrides);
+
+  if (url.username || url.password || url.search || url.hash)
+    throw new UsageError(WEBRTC_URL_EXTRAS_REFUSED);
+
+  const base: WebRTCConnectionConfig = {
+    channel: "webrtc",
+    server: {
+      host: decodeUrlComponent(url.hostname, url),
+      // ws:/wss: are special schemes to the URL parser, so a port equal to the
+      // scheme's default is already normalized away here and the connection's
+      // own default (443 or 80, to match `secure`) covers it.
+      port: url.port ? Number(url.port) : undefined,
+      path:
+        url.pathname && url.pathname !== "/"
+          ? decodeUrlComponent(url.pathname, url)
+          : undefined,
+      // Only the plaintext choice is recorded: leaving `secure` unset on a wss:
+      // URL keeps the config's TLS default, which is what the field means when
+      // omitted, rather than restating it.
+      ...(url.protocol === "ws:" ? { secure: false } : {}),
+    },
+  };
+  // applyConnectionOverrides applies the shared timeouts (the invite's
+  // --accept-timeout arrives as peerTimeout) on every channel and ignores the
+  // file-sync-only ones here; --outbound-path, which has no meaning without a
+  // directory, is refused there rather than dropped.
+  return applyConnectionOverrides(base, overrides) as WebRTCConnectionConfig;
 }

@@ -141,21 +141,26 @@ test("a `-`-leading positional is kept as the offline input file", () => {
 
 // --- validateInvite (the no-commit phase) ------------------------------------
 
-test("validateInvite: an unsupported (webrtc) URL is rejected with no side effect", async () => {
+test("validateInvite: an unusable URL is rejected with no side effect", async () => {
+  // A ws:/wss: URL names where the coordination server is and nothing else; an
+  // API key or user on it would otherwise be dropped silently and surface only
+  // as the broker's own rejection mid-run, so it is refused where it was typed.
   // Online dispatch validates the URL before reading input or minting a token,
-  // so an unrunnable scheme aborts before the caller can disclose anything.
-  await expect(
-    validateInvite({
-      resolved: {
-        mode: "online",
-        url: new URL("ws://host/path"),
-        input: "input.csv",
-      },
-      options: testOptions(),
-      acceptTimeout: 900,
-      log: silentLog,
-    }),
-  ).rejects.toBeInstanceOf(UsageError);
+  // so this aborts before the caller can disclose anything: the input file
+  // named here does not exist, and its (exit-69) read error is what would
+  // surface instead if the URL were checked second.
+  for (const raw of [
+    "wss://someone@peers.example.org/psi",
+    "wss://peers.example.org/psi?key=private",
+  ])
+    await expect(
+      validateInvite({
+        resolved: { mode: "online", url: new URL(raw), input: "input.csv" },
+        options: testOptions(),
+        acceptTimeout: 900,
+        log: silentLog,
+      }),
+    ).rejects.toBeInstanceOf(UsageError);
 });
 
 test("validateInvite: offline rejects a missing input file, preserving its exit code", async () => {
@@ -389,6 +394,141 @@ test("validateInvite: online sftp emits a credential-free endpoint the acceptor 
   expect(connection.server.path).toBe("/exchanges/drop");
   expect(connection.server.username).toMatch(/REPLACE_WITH/);
   expect(connection.server.password).toBeUndefined();
+});
+
+test("validateInvite: online webrtc emits the coordination server as a credential-free endpoint", async () => {
+  const { input, options } = onlineFixture();
+  const ready = await validateInvite({
+    resolved: {
+      mode: "online",
+      // A self-hosted coordination server on its own port and mount point: the
+      // locator no printed hint could convey, and the reason this endpoint is
+      // emitted at all.
+      url: new URL("wss://peers.example.org:8443/psi"),
+      input,
+    },
+    // Credential-shaped overrides: they are file-sync flags this channel has no
+    // use for, and must not appear on the endpoint under any name.
+    options: { ...options, serverUsername: "alice", serverPassword: "hunter2" },
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.connectionEndpoint).toEqual({
+    channel: "webrtc",
+    host: "peers.example.org",
+    port: 8443,
+    path: "/psi",
+  });
+  // Nothing but the locator rode along -- no credential, and no ICE or scheme
+  // field the endpoint has no place for.
+  const encodedEndpoint = JSON.stringify(token.connectionEndpoint);
+  for (const leak of ["hunter2", "alice", "key", "secure", "turn", "stun"])
+    expect(encodedEndpoint).not.toContain(leak);
+  // The acceptor seeds its connection block from the embedded endpoint and
+  // stamps the complementary role, which no invitation can carry.
+  const { connection, seeded } = connectionFromEndpoint(
+    token.connectionEndpoint,
+  );
+  expect(seeded).toBe(true);
+  if (connection.channel !== "webrtc") throw new Error("expected webrtc");
+  expect(connection.server).toEqual({
+    host: "peers.example.org",
+    port: 8443,
+    path: "/psi",
+  });
+  expect(connection.role).toBeUndefined();
+});
+
+test("validateInvite: the online webrtc connection takes the inviter end of the rendezvous", async () => {
+  // The URL carries no role, so the invitation's own side is stamped by the
+  // command that mints it; without one `psilink exchange` refuses to dial.
+  const { input, options } = onlineFixture();
+  const ready = await validateInvite({
+    resolved: {
+      mode: "online",
+      url: new URL("wss://peers.example.org/psi"),
+      input,
+    },
+    options,
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  if (ready.mode !== "online") throw new Error("expected online mode");
+  if (ready.connection.channel !== "webrtc") throw new Error("expected webrtc");
+  expect(ready.connection.role).toBe("inviter");
+  // --accept-timeout bounds the rendezvous wait on this channel as it bounds
+  // the file-sync one.
+  expect(ready.connection.options?.peerTimeoutMs).toBe(900_000);
+  // A default-scheme port is normalized away by the URL parser, and `secure`
+  // stays unset so the connection's TLS default stands.
+  expect(ready.connection.server.port).toBeUndefined();
+  expect(ready.connection.server.secure).toBeUndefined();
+});
+
+test("validateInvite: a plaintext webrtc invite warns that the endpoint cannot carry the scheme", async () => {
+  // An endpoint has no `secure` field, so an acceptor seeded from this one
+  // dials TLS and meets nobody; the operator is told while they can still act.
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-ws-plaintext-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  const ready = await validateInvite({
+    resolved: {
+      mode: "online",
+      url: new URL("ws://127.0.0.1:9000/psi"),
+      input,
+    },
+    options,
+    acceptTimeout: 900,
+    log,
+  });
+  expect(
+    warnSpy.mock.calls.some(
+      (c) => typeof c[0] === "string" && c[0].includes("secure: false"),
+    ),
+  ).toBe(true);
+  // The plaintext choice is kept on this party's own connection (where the dial
+  // warns about it in turn); only the invitation cannot express it.
+  if (ready.mode !== "online") throw new Error("expected online mode");
+  if (ready.connection.channel !== "webrtc") throw new Error("expected webrtc");
+  expect(ready.connection.server.secure).toBe(false);
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.connectionEndpoint).toEqual({
+    channel: "webrtc",
+    host: "127.0.0.1",
+    port: 9000,
+    path: "/psi",
+  });
+  warnSpy.mockRestore();
+});
+
+test("validateInvite: a webrtc invite declares no retain mode and reports the flag ignored", async () => {
+  // retain_files is a file-sync setting the webrtc channel does not have, and
+  // the invitation schema refuses the declaration beside a webrtc endpoint, so
+  // the flag must neither reach the token nor be dropped silently.
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-ws-retain-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  const ready = await validateInvite({
+    resolved: {
+      mode: "online",
+      url: new URL("wss://peers.example.org/psi"),
+      input,
+    },
+    options: { ...options, retainFiles: true },
+    acceptTimeout: 900,
+    log,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.inviterRetainsFiles).toBeUndefined();
+  expect(
+    warnSpy.mock.calls.some(
+      (c) => typeof c[0] === "string" && c[0].includes("--retain-files"),
+    ),
+  ).toBe(true);
+  warnSpy.mockRestore();
 });
 
 test("validateInvite: online carries the disclosed-columns subset from the inferred metadata", async () => {
@@ -2445,6 +2585,40 @@ test("handler: a clean config write leaves the exchange's own exit 73 in place",
     expect(stderr).toContain(`saved config to ${options.configFile}`);
   } finally {
     process.exitCode = previousExitCode;
+    stdio.restore();
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
+  }
+});
+
+test("handler: a webrtc online invite tells the partner to accept and then exchange, with no URL", async () => {
+  // The partner types no coordination server: the invitation's endpoint carries
+  // it, so the template is the plain accept plus the exchange that dials it
+  // while this command waits. Echoing the inviter's URL here would invite the
+  // partner to retype a locator they already hold, on a command that refuses it.
+  const { input, options } = onlineFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockImplementation(async () => ({}));
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: ["wss://peers.example.org/psi", input],
+      "config-file": options.configFile,
+      "key-file": options.keyFile,
+      "log-level": "info",
+      record: false,
+    } as unknown as Arguments);
+    const stderr = stdio.stderrWrites.join("");
+    expect(exit).not.toHaveBeenCalled();
+    expect(stderr).toContain("psilink accept <INVITATION> <INPUT_FILE>");
+    expect(stderr).toContain("psilink exchange");
+    expect(stderr).not.toContain("wss://peers.example.org");
+  } finally {
     stdio.restore();
     exit.mockRestore();
     runOnlineBootstrapMock.mockReset();

@@ -45,8 +45,8 @@ import {
 import { redactUrlCredentials } from "../util/connectionUrl";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
-  connectionFromURL,
-  type RunnableConnectionConfig,
+  inviterConnectionFromURL,
+  type InviterConnectionConfig,
 } from "../connectionFromUrl";
 import { withWebRTCPeerRole } from "../webrtcPeerRole";
 import {
@@ -211,7 +211,7 @@ type InviteReady =
       mode: "online";
       url: URL;
       output?: string;
-      connection: RunnableConnectionConfig;
+      connection: InviterConnectionConfig;
       dataSpec: ResolvedDataSpec;
       prepared: PreparedExchange;
       invitation: string;
@@ -331,47 +331,70 @@ export async function validateInvite(params: {
           "overwritten by the rotated token if the partner accepts. Delete it " +
           "or pass --key-file if reusing that secret was not intended.",
       );
-    // Validate the URL before the token is minted, so an unusable URL (e.g. a
-    // not-yet-supported webrtc scheme, or one with no host) fails before the
-    // caller can disclose the token.
+    // Validate the URL before the token is minted, so an unusable URL (e.g. one
+    // with no host) fails before the caller can disclose the token. The role is
+    // stamped here because this command IS the inviting end; on a ws:/wss: URL
+    // that is what makes the connection dialable, since a URL carries no role.
     const connection = withWebRTCPeerRole(
-      connectionFromURL(
+      inviterConnectionFromURL(
         url,
         connectionOverridesFrom(options, { peerTimeout: acceptTimeout }),
       ),
       "inviter",
     );
+    // The file-sync half of this connection's options, absent on webrtc (whose
+    // options block is the shared timeouts alone). The diagnostics and the retain
+    // declaration below all read file-sync facts, so each reads it through here
+    // rather than off a connection that may carry no such field.
+    const fileSyncOptions =
+      connection.channel === "webrtc" ? undefined : connection.options;
     // Only on this online path -- the offline path reports the override ignored
-    // (see below). connectionFromURL has already rejected a webrtc URL, so
-    // `connection` is a file-sync channel here and the channel gate always passes.
+    // (see below). A no-op on webrtc, which polls nothing.
     warnLowPollingFrequency(
       connection.channel,
       options.pollingFrequencyMs,
       log,
     );
-    // Warn when --connection-per-poll resolves to a channel that ignores it (a
-    // file:// URL is filedrop, which holds no session). connectionFromURL applies
-    // the override only on sftp, so on filedrop the raw flag is the only carrier
-    // of the operator's intent; read it too, not just the merged value that a
-    // future persisted source would set. A no-op on sftp (the mode's own channel),
-    // where warnConnectionPerPollShortInterval covers the short-interval case
-    // instead -- the two are channel-exclusive and never double-warn.
+    // Warn when a file-sync flag resolves to a channel that ignores it (a file://
+    // URL is filedrop, which holds no session; a ws:// URL is webrtc, which has
+    // no directory to poll or retain). applyConnectionOverrides drops each on the
+    // channels that cannot use it, so the raw flag is the only carrier of the
+    // operator's intent; read it alongside the merged value a future persisted
+    // source would set. --connection-per-poll on sftp is a no-op here, where
+    // warnConnectionPerPollShortInterval covers the short-interval case instead
+    // -- the two are channel-exclusive and never double-warn.
     warnUnsupportedFileSyncFlags(
       connection.channel,
       {
+        locklessRendezvous: options.locklessRendezvous,
+        retainFiles: options.retainFiles,
+        pollingFrequencyMs: options.pollingFrequencyMs,
         connectionPerPoll:
           options.connectionPerPoll === true ||
-          connection.options?.connectionPerPoll === true,
+          fileSyncOptions?.connectionPerPoll === true,
       },
       log,
     );
+    // A webrtc endpoint carries no scheme, so a plaintext coordination server is
+    // one thing this invitation cannot convey: the acceptor seeded from it
+    // resolves TLS and would meet nobody. Name it where the operator can still
+    // act, beside the disclosure warning the dial itself raises.
+    if (connection.channel === "webrtc" && connection.server.secure === false)
+      log.warn(
+        "this invitation's connection endpoint names the coordination server " +
+          "but not the plaintext (ws://) scheme, which an endpoint has no " +
+          "field for; your partner's configuration will be seeded to dial it " +
+          "over TLS (wss://). Have them set `secure: false` on the connection " +
+          "block before running 'psilink exchange', or invite over a wss:// " +
+          "coordination server.",
+      );
     // Warn when --connection-per-poll is paired with a short poll interval. Built
     // from the URL with no loaded config, so `connection` carries the effective
-    // mode and interval (the CLI overrides applied by connectionFromURL).
+    // mode and interval (the CLI overrides applied when it was built).
     warnConnectionPerPollShortInterval(
       connection.channel,
-      connection.options?.connectionPerPoll,
-      connection.options?.pollIntervalMs,
+      fileSyncOptions?.connectionPerPoll,
+      fileSyncOptions?.pollIntervalMs,
       log,
     );
 
@@ -436,7 +459,9 @@ export async function validateInvite(params: {
       // Embed the credential-free locator for the connection this invite is
       // using, so the acceptor seeds its connection block from it (the same path
       // web-originated invitations exercise) rather than reconstructing it by
-      // hand. Derived from the post-override `connection`, so a `--server-port`
+      // hand. On webrtc that locator is the whole of what the acceptor needs to
+      // reach this party's own coordination server, which no printed hint could
+      // convey. Derived from the post-override `connection`, so a `--server-port`
       // or `--outbound-path` override is reflected; carries no credentials by
       // construction (see endpointFromConnection).
       connectionEndpoint: endpointFromConnection(connection),
@@ -446,8 +471,11 @@ export async function validateInvite(params: {
       // Declare retain mode where this invite's own connection runs it, so the
       // acceptor is told before consenting that the exchange leaves a permanent
       // transcript. Read from the post-override connection, so `--retain-files`
-      // is reflected; a declaration only, never applied on the accept side.
-      ...(connection.options?.retainFiles === true
+      // is reflected; a declaration only, never applied on the accept side. A
+      // webrtc run has no retain mode to declare, and the invitation schema
+      // refuses the declaration beside a webrtc endpoint, so the two agree by
+      // reading the file-sync options alone.
+      ...(fileSyncOptions?.retainFiles === true
         ? { inviterRetainsFiles: true }
         : {}),
     });
@@ -793,7 +821,10 @@ export async function handler(argv: Arguments): Promise<void> {
         // The token is disclosed only now -- after all validation and prep above
         // succeeded. Nothing fallible runs after this print except the network
         // wait it is meant to precede.
-        printInvitation(ready.invitation, { url: ready.url });
+        printInvitation(ready.invitation, {
+          url: ready.url,
+          channel: ready.connection.channel,
+        });
         // State the invitation's validity contract before announcing the wait. The
         // inviter's exit (cancel, connection timeout, or accept-timeout) already
         // makes the printed invitation unacceptable -- the setup secret is held
@@ -1012,15 +1043,19 @@ const INVITATION_PLACEHOLDER = "<INVITATION>";
 
 /**
  * Print the invitation string (to stdout, so it is captured even at a quiet log
- * level) with the usage instructions for the partner. When `online.url` is
- * present, the accept template references the shared server.
+ * level) with the usage instructions for the partner. An online file-sync
+ * invitation's accept template references the shared server the partner reaches
+ * it at; an online webrtc invitation's does not, because there is no shared
+ * server the partner types -- the invitation's own endpoint names the
+ * coordination server, and the partner's accept writes it into a connection
+ * block `psilink exchange` then dials while this command waits.
  *
  * The templates name the invitation by {@link INVITATION_PLACEHOLDER} rather than
  * carrying it.
  */
 function printInvitation(
   invitation: string,
-  online: { url: URL } | undefined,
+  online: { url: URL; channel: ConnectionConfig["channel"] } | undefined,
 ): void {
   const log = getLogger("invite");
   log.info(
@@ -1030,20 +1065,29 @@ function printInvitation(
   // The invitation is the primary artifact; emit it on stdout regardless of log
   // level so it is reliably captured for copy/paste.
   console.log(invitation);
-  if (online !== undefined) {
-    // Strip any credentials embedded in the URL before echoing it: the partner
-    // supplies their own, and a password must not reach the terminal or logs.
-    log.info(
-      `Your partner accepts and runs the exchange with:\n  psilink accept ` +
-        `${redactUrlCredentials(online.url)} ${INVITATION_PLACEHOLDER} ` +
-        `<INPUT_FILE>\nwhere ${INVITATION_PLACEHOLDER} is the invitation ` +
-        "printed above.",
-    );
-  } else {
+  if (online === undefined) {
     log.info(
       `Your partner accepts with:\n  psilink accept ` +
         `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nwhere ` +
         `${INVITATION_PLACEHOLDER} is the invitation printed above.`,
     );
+    return;
   }
+  if (online.channel === "webrtc") {
+    log.info(
+      `Your partner accepts with:\n  psilink accept ` +
+        `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nand then, while this command ` +
+        `is still waiting, runs:\n  psilink exchange\nwhere ` +
+        `${INVITATION_PLACEHOLDER} is the invitation printed above.`,
+    );
+    return;
+  }
+  // Strip any credentials embedded in the URL before echoing it: the partner
+  // supplies their own, and a password must not reach the terminal or logs.
+  log.info(
+    `Your partner accepts and runs the exchange with:\n  psilink accept ` +
+      `${redactUrlCredentials(online.url)} ${INVITATION_PLACEHOLDER} ` +
+      `<INPUT_FILE>\nwhere ${INVITATION_PLACEHOLDER} is the invitation ` +
+      "printed above.",
+  );
 }

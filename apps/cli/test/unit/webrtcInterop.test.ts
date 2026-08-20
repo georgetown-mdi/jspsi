@@ -29,8 +29,10 @@ import type {
  * handshake role it takes. This file drives only the CLI's own constructions,
  * against the shared known-answer vectors in
  * packages/core/test/vectors/webrtc-interop-vectors.json -- whose invitation is
- * minted in the shape the WEB app emits, since the web app is the side that
- * mints a webrtc invitation.
+ * minted in the shape the WEB app emits, that being the direction this file
+ * drives: a CLI acceptor consuming a browser-minted invitation. (Both apps mint
+ * one; what the CLI's own mint emits is asserted in invite.test.ts, against the
+ * connection it will run rather than against a fixed vector.)
  *
  * The remaining CLI element, the request-encryption flag each party puts on the
  * handshake wire, is asserted against the same vectors in webrtcDispatch.test.ts,

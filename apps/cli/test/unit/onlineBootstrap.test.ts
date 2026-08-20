@@ -26,11 +26,13 @@ import type {
   PartnerPayload,
   PreparedExchange,
   SFTPConnectionConfig,
+  WebRTCConnectionConfig,
 } from "@psilink/core";
 
 import { saveConfig } from "../../src/config";
 import {
   connectionFromURL,
+  inviterConnectionFromURL,
   type RunnableConnectionConfig,
 } from "../../src/connectionFromUrl";
 import { diffConnectionAgainstTarget } from "../../src/reconcile";
@@ -1327,6 +1329,107 @@ test("applyEndpointSplitDirectories: rejects a degenerate (relative-path) filedr
   );
 });
 
+// --- inviterConnectionFromURL ------------------------------------------------
+
+test("inviterConnectionFromURL: a file-sync URL is built exactly as connectionFromURL builds it", () => {
+  for (const raw of ["sftp://alice@host:2222/drop", "file:///mnt/share/drop"])
+    expect(inviterConnectionFromURL(new URL(raw), {})).toEqual(
+      connectionFromURL(new URL(raw), {}),
+    );
+});
+
+test("inviterConnectionFromURL: a wss URL maps to the coordination server's location", () => {
+  const conn = inviterConnectionFromURL(
+    new URL("wss://peers.example.org:8443/psi"),
+    {},
+  );
+  expect(conn).toEqual({
+    channel: "webrtc",
+    server: { host: "peers.example.org", port: 8443, path: "/psi" },
+  });
+});
+
+test("inviterConnectionFromURL: a ws URL records the plaintext choice", () => {
+  // `secure` is the one thing a wss: URL leaves unset -- the config default is
+  // already TLS -- while ws: has to say so, since the socket is otherwise built
+  // over TLS and reaches nothing.
+  const conn = inviterConnectionFromURL(new URL("ws://127.0.0.1:9000/psi"), {});
+  if (conn.channel !== "webrtc") throw new Error("expected webrtc");
+  expect(conn.server.secure).toBe(false);
+  expect(
+    inviterConnectionFromURL(new URL("wss://peers.example.org/psi"), {})
+      .channel,
+  ).toBe("webrtc");
+});
+
+test("inviterConnectionFromURL: a bare-host webrtc URL leaves port and path unset", () => {
+  // Both defaults live in the broker-location resolution (443/80 and "/"), so
+  // pinning them here would restate one place's answer in another. The scheme's
+  // own default port is normalized away by the URL parser before it is read.
+  for (const raw of [
+    "wss://peers.example.org",
+    "wss://peers.example.org/",
+    "wss://peers.example.org:443/",
+  ]) {
+    const conn = inviterConnectionFromURL(new URL(raw), {});
+    if (conn.channel !== "webrtc") throw new Error("expected webrtc");
+    expect(conn.server.port).toBeUndefined();
+    expect(conn.server.path).toBeUndefined();
+  }
+});
+
+test("inviterConnectionFromURL: a webrtc URL carrying anything past the location is refused", () => {
+  // Each of these has no field in the connection this builds, so accepting the
+  // URL would drop the operator's own input silently.
+  for (const raw of [
+    "wss://someone@peers.example.org/psi",
+    "wss://someone:secret@peers.example.org/psi",
+    "wss://peers.example.org/psi?key=private",
+    "wss://peers.example.org/psi#fragment",
+  ]) {
+    expect(() => inviterConnectionFromURL(new URL(raw), {})).toThrow(
+      UsageError,
+    );
+    expect(() => inviterConnectionFromURL(new URL(raw), {})).toThrow(
+      /host, port, and path/,
+    );
+  }
+});
+
+test("inviterConnectionFromURL: the parser itself makes a host-less webrtc URL unreachable", () => {
+  // Why the builder carries no empty-host guard where the sftp branch does:
+  // ws:/wss: are SPECIAL schemes, so the parse either fails outright or takes
+  // the first path segment as the host. Asserted against the parser rather than
+  // read off its documentation.
+  expect(() => new URL("wss://")).toThrow();
+  expect(new URL("wss:///psi").hostname).toBe("psi");
+  const conn = inviterConnectionFromURL(new URL("wss:///psi"), {});
+  if (conn.channel !== "webrtc") throw new Error("expected webrtc");
+  expect(conn.server.host).toBe("psi");
+});
+
+test("inviterConnectionFromURL: the shared timeouts apply on webrtc, the file-sync options do not", () => {
+  // peer_timeout carries the invite's --accept-timeout onto the rendezvous wait;
+  // the poll interval belongs to a channel that polls, and webrtc does not.
+  const conn = inviterConnectionFromURL(
+    new URL("wss://peers.example.org/psi"),
+    {
+      options: { peerTimeout: 900, pollIntervalMs: 5_000 },
+    },
+  );
+  expect(conn.options).toEqual({ peerTimeoutMs: 900_000 });
+});
+
+test("inviterConnectionFromURL: --outbound-path on a webrtc URL is refused, not dropped", () => {
+  // A split directory has no meaning on a channel with no directory at all.
+  expect(() =>
+    inviterConnectionFromURL(new URL("wss://peers.example.org/psi"), {
+      options: { retainFiles: true },
+      server: { outboundPath: "/out" },
+    }),
+  ).toThrow(/only supported on the sftp and filedrop channels/);
+});
+
 // --- endpointFromConnection --------------------------------------------------
 
 test("endpointFromConnection: an sftp connection emits the host/port/path locator", () => {
@@ -1433,6 +1536,109 @@ test("endpointFromConnection -> connectionFromEndpoint round-trips a split pair 
   if (seeded.channel !== "filedrop") throw new Error("expected filedrop");
   expect(seeded.inboundPath).toBe("/inviter-out");
   expect(seeded.outboundPath).toBe("/inviter-in");
+});
+
+test("endpointFromConnection: a webrtc connection emits the signaling locator", () => {
+  const endpoint = endpointFromConnection(
+    inviterConnectionFromURL(new URL("wss://peers.example.org:8443/psi"), {}),
+  );
+  expect(endpoint).toEqual({
+    channel: "webrtc",
+    host: "peers.example.org",
+    port: 8443,
+    path: "/psi",
+  });
+});
+
+test("endpointFromConnection: nothing but the webrtc locator survives the emit", () => {
+  // The producer side of the no-credentials invariant on this channel: a
+  // hand-authored connection carrying the broker API key, a TURN relay's
+  // credential, an ICE provisioning secret, and the plaintext scheme emits the
+  // locator alone. `secure` is dropped with them -- the endpoint schema has no
+  // field for it -- which is why an acceptor seeded from one resolves TLS.
+  const endpoint = endpointFromConnection({
+    channel: "webrtc",
+    server: {
+      host: "peers.example.org",
+      port: 8443,
+      path: "/psi",
+      username: "alice",
+      key: "broker-api-key",
+      secure: false,
+      provision: {
+        host: "provision.example.org",
+        auth: { bearer: "topsecret" },
+      },
+    },
+    role: "inviter",
+    turn: [
+      {
+        url: "turns:relay.example.org:443",
+        username: "psilink",
+        credential: "relaysecret",
+      },
+    ],
+  });
+  expect(Object.keys(endpoint).sort()).toEqual([
+    "channel",
+    "host",
+    "path",
+    "port",
+  ]);
+  const serialized = JSON.stringify(endpoint);
+  for (const leak of [
+    "alice",
+    "broker-api-key",
+    "topsecret",
+    "relaysecret",
+    "relay.example.org",
+    "secure",
+    "role",
+  ])
+    expect(serialized).not.toContain(leak);
+});
+
+test("endpointFromConnection: webrtc values the endpoint schema rejects are dropped", () => {
+  // Port 0 and an empty path are both connection-permits / endpoint-rejects
+  // shapes: emitting either would fail the whole invite at encode with an opaque
+  // schema error, and neither is a locator a partner could dial.
+  const endpoint = endpointFromConnection({
+    channel: "webrtc",
+    server: { host: "peers.example.org", port: 0, path: "" },
+  });
+  expect(endpoint).toEqual({ channel: "webrtc", host: "peers.example.org" });
+});
+
+test("endpointFromConnection -> connectionFromEndpoint round-trips a webrtc locator", () => {
+  // End-to-end producer -> consumer: the acceptor's seeded connection names the
+  // inviter's own coordination server rather than any hard-coded default, and
+  // carries no credential field to fill in (this channel authenticates from the
+  // shared secret).
+  const endpoint = endpointFromConnection(
+    inviterConnectionFromURL(new URL("wss://peers.example.org:8443/psi"), {}),
+  );
+  const { connection: seeded, seeded: wasSeeded } =
+    connectionFromEndpoint(endpoint);
+  expect(wasSeeded).toBe(true);
+  expect(seeded).toEqual({
+    channel: "webrtc",
+    server: { host: "peers.example.org", port: 8443, path: "/psi" },
+  });
+});
+
+test("endpointFromConnection: an over-long webrtc host is a clean usage error", () => {
+  expect(() =>
+    endpointFromConnection({
+      channel: "webrtc",
+      server: { host: "a".repeat(257) },
+    }),
+  ).toThrow(/host is too long/);
+  expect(() =>
+    endpointFromConnection({
+      channel: "webrtc",
+      server: { host: "peers.example.org", path: `/${"p".repeat(4097)}` },
+    }),
+  ).toThrow(/path is too long/);
 });
 
 test("endpointFromConnection: an over-long host is a clean usage error, not an opaque encode failure", () => {
@@ -1635,6 +1841,45 @@ test("runOnlineBootstrap does not write the config when the handshake fails", as
       runOnlineBootstrap(onlineBootstrapParams(configPath)),
     ).rejects.toThrow("partner declined");
     expect(fs.existsSync(configPath)).toBe(false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap carries a webrtc connection through to the exchange and the saved config", async () => {
+  // The inviter's own webrtc connection reaches runProtocol unchanged (role
+  // included -- without it the dial refuses) and is what the hook persists, so
+  // the recurring `psilink exchange` this bootstrap sets up meets the same
+  // coordination server the invitation named.
+  const connection: WebRTCConnectionConfig = {
+    channel: "webrtc",
+    server: { host: "peers.example.org", port: 8443, path: "/psi" },
+    role: "inviter",
+    options: { peerTimeoutMs: 900_000 },
+  };
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    await soleFunctionArg(callArgs)();
+    return {};
+  }) as never);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      connection,
+    });
+    expect(vi.mocked(runProtocol).mock.lastCall?.[0]).toEqual(connection);
+    // Reloaded through the schema, which materializes its own option defaults,
+    // so the assertion is on what this bootstrap wrote rather than on those.
+    const saved = parseExchangeSpec(
+      YAML.parse(fs.readFileSync(configPath, "utf8")),
+    );
+    expect(saved.connection).toMatchObject({
+      channel: "webrtc",
+      server: connection.server,
+      role: "inviter",
+    });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

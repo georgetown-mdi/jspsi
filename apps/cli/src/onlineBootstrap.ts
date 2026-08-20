@@ -44,7 +44,11 @@ import { openEventStream, reportPersistenceLoss } from "./eventStream";
 import { resolveConnectionCredentials } from "./util/atSignRefs";
 import { establishHostKeyTrust, type HostKeyPersistence } from "./hostKeyTrust";
 import { openInputSource, singleValue } from "./util/cli";
-import { runProtocol, type AuthPersist } from "./protocol";
+import {
+  runProtocol,
+  type AuthPersist,
+  type ProtocolConnectionConfig,
+} from "./protocol";
 import type { RunnableConnectionConfig } from "./connectionFromUrl";
 import type { RecordOutput } from "./recordFile";
 
@@ -356,9 +360,10 @@ export function applyEndpointSplitDirectories(
 // The credential-free connection-endpoint producer lives in @psilink/core (one
 // definition shared with the web mint layer, next to the endpoint schemas);
 // re-exported here so the CLI's invitation call sites keep importing it from
-// this module. Its FileSyncConnectionConfig parameter is structurally the CLI's
-// RunnableConnectionConfig (both narrow ConnectionConfig to sftp/filedrop), so
-// the invite-side callers pass their connection unchanged.
+// this module. Its EndpointSourceConnectionConfig parameter is structurally the
+// CLI's ProtocolConnectionConfig (both narrow ConnectionConfig to the three
+// channels an exchange runs on), so the invite-side callers pass their
+// connection unchanged.
 export { endpointFromConnection } from "@psilink/core";
 
 // --- shared secret --------------------------------------------------------------
@@ -673,7 +678,7 @@ export function observedReceivedColumnsForSave(
  * `configWriteError` rather than aborting the already-completed exchange.
  */
 export async function runOnlineBootstrap(params: {
-  connection: RunnableConnectionConfig;
+  connection: ProtocolConnectionConfig;
   dataSpec: ResolvedDataSpec;
   prepared: PreparedExchange;
   sharedSecret: string;
@@ -770,7 +775,7 @@ export async function runOnlineBootstrap(params: {
     );
 
   // `connection` is already narrowed to the channels runProtocol supports
-  // (RunnableConnectionConfig); authentication is passed to runProtocol on its
+  // (ProtocolConnectionConfig); authentication is passed to runProtocol on its
   // own parameter rather than embedded in the connection config.
   const auth: AuthPersist = {
     sharedSecret: params.sharedSecret,
@@ -807,12 +812,12 @@ export async function runOnlineBootstrap(params: {
   // not the secret -- the @path is re-resolved at the next `psilink exchange`'s
   // config load. A missing or unreadable referenced file is a UsageError (exit
   // 64) surfaced here, before any credential is sent. The cast restores the
-  // RunnableConnectionConfig narrowing the resolver widens to ConnectionConfig;
+  // ProtocolConnectionConfig narrowing the resolver widens to ConnectionConfig;
   // it is safe because the resolver preserves the channel (it only reads the SFTP
   // credential fields).
   const liveConnection = resolveConnectionCredentials(
     params.connection,
-  ) as RunnableConnectionConfig;
+  ) as ProtocolConnectionConfig;
 
   // Set inside the hook once saveConfig returns, so the catch below can tell a
   // "config is on disk, retry without re-inviting" recovery from a run where the
