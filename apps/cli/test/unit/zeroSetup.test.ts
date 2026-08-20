@@ -96,7 +96,9 @@ async function driveCompletedExchange(
     observedReceivedPayloadColumns,
     bootstrap,
   });
-  return { bootstrap, observedReceivedPayloadColumns };
+  // The bootstrap outcome reaches the caller through the hook alone, so the
+  // resolved result carries only what RunProtocolResult declares.
+  return { observedReceivedPayloadColumns };
 }
 
 // --- builder help overrides --------------------------------------------------
@@ -1049,14 +1051,14 @@ test("handler --save: the save rides the pre-terminal hook, not the return from 
   // WHERE the save happens is the contract, not just that it happens: run after
   // runProtocol returns, the warning above lands BEHIND the run's terminal
   // event, which the stream spec forbids and a supervisor that stops reading
-  // there discards outright. So a runProtocol that resolves with a bootstrap
-  // result but never invokes the hook must leave nothing on disk. This is the
-  // one test the hook's invocation is visible to -- every other --save test
+  // there discards outright. So a runProtocol that completes its exchange but
+  // never invokes the hook must leave nothing on disk -- and its resolved result
+  // holds no bootstrap material a post-return save could provision from. This is
+  // the one test the hook's invocation is visible to -- every other --save test
   // drives it and would pass just as well with the save back on the
   // post-return path.
   const f = saveFailureFixture();
   vi.mocked(runProtocol).mockImplementation((async () => ({
-    bootstrap: { partnerSaveIntent: false },
     observedReceivedPayloadColumns: [],
   })) as never);
   try {

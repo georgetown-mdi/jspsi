@@ -373,33 +373,24 @@ export interface OutputCompleteContext {
    */
   observedReceivedPayloadColumns: string[];
   /**
-   * The zero-setup `--save` bootstrap outcome, the same value
-   * {@link RunProtocolResult.bootstrap} carries -- settled by the terms exchange
+   * The zero-setup `--save` bootstrap outcome, settled by the terms exchange
    * long before this call, so the hook that performs the save runs inside this
    * frame rather than after {@link runProtocol} returns. Defined whenever a
    * boolean `saveIntent` was passed (including `false`, which carries the
    * partner's intent) and `undefined` on every authenticated exchange, which
-   * runs no bootstrap.
+   * runs no bootstrap. Do not collapse a `false` saveIntent to `undefined`; that
+   * would silently suppress the no-save notices.
+   *
+   * This hook is the only route the bootstrap outcome takes out of
+   * {@link runProtocol} -- {@link RunProtocolResult} carries none of it -- so the
+   * established shared secret reaches the one caller that provisions from it
+   * rather than every caller of an exchange.
    */
   bootstrap?: ExchangeBootstrapResult;
 }
 
 /** The value {@link runProtocol} resolves with. */
 export interface RunProtocolResult {
-  /**
-   * Outcome of the zero-setup `--save` bootstrap, forwarded from
-   * {@link runExchange}. Defined whenever `saveIntent` is a boolean -- including
-   * `false`, where it carries `partnerSaveIntent` with `sharedSecret` undefined,
-   * which the caller needs to drive its no-save notice. `undefined` only when
-   * `saveIntent` was `undefined` (every authenticated exchange) or when the run
-   * is short-circuited by a signal (the interrupt path returns `{}`). The same
-   * value reaches the zero-setup save through
-   * {@link OutputCompleteContext.bootstrap}, which is where that caller consumes
-   * it; it passes the raw `--save` boolean so a non-saving party still receives a
-   * defined result. Do not collapse a `false` saveIntent to `undefined`; that
-   * would silently suppress the no-save notices.
-   */
-  bootstrap?: ExchangeBootstrapResult;
   /**
    * The error thrown or rejected by `onAuthenticated`, when the post-handshake
    * hook failed but the run otherwise resolved. The hook is non-fatal, so its
@@ -1828,8 +1819,6 @@ export async function runProtocol(
       }
     }
 
-    // bootstrap is undefined on every authenticated path (saveIntent unset) and
-    // populated on the zero-setup --save path; the caller branches on it.
     // onAuthenticatedError is set only when a post-handshake hook failed but the
     // exchange above still succeeded (a hook failure followed by an exchange
     // failure rethrows from the catch below instead of reaching here).
@@ -1864,7 +1853,6 @@ export async function runProtocol(
       ),
     );
     return {
-      bootstrap,
       onAuthenticatedError,
       observedReceivedPayloadColumns: partnerPayload.columns,
     };
