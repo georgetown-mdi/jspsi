@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { getDefaultLinkageTerms, UsageError } from "@psilink/core";
 import type { ExchangeSpec } from "@psilink/core";
 import {
   assertNoProvisionConflicts,
   provisionConfigAndKey,
+  provisionLeftConfigOnDisk,
 } from "../../src/commands/provision";
 import { loadKeyFile } from "../../src/keyFile";
 
@@ -164,6 +165,63 @@ test("provisionConfigAndKey rolls back the written config when the key write fai
   // The config that was written is removed; neither file is left behind.
   expect(fs.existsSync(configPath)).toBe(false);
   expect(fs.existsSync(keyPath)).toBe(false);
+});
+
+test("provisionConfigAndKey leaves the error unmarked when the rollback succeeds", () => {
+  // The negative half of the marking contract: the config really was removed, so
+  // a caller's report is right to name it as never having reached disk.
+  let thrown: unknown;
+  try {
+    provisionConfigAndKey(
+      sampleSpec(),
+      { sharedSecret: "too-short" },
+      { configPath, keyPath },
+    );
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(Error);
+  expect(provisionLeftConfigOnDisk(thrown)).toBe(false);
+  expect(fs.existsSync(configPath)).toBe(false);
+});
+
+test("provisionConfigAndKey marks the error when the config rollback also fails", () => {
+  // The key write fails for real (the malformed token above); its rollback is
+  // stubbed, because no portable filesystem state makes a removal fail while the
+  // write that placed the file, in the same directory moments earlier,
+  // succeeds. What the caller must be able to tell apart is the two files'
+  // outcomes: the key never landed, the config did and is still there.
+  const realRmSync = fs.rmSync;
+  const rmSpy = vi.spyOn(fs, "rmSync").mockImplementation(((
+    target: fs.PathLike,
+    options?: fs.RmOptions,
+  ) => {
+    if (target === configPath)
+      throw Object.assign(new Error("EACCES: permission denied, unlink"), {
+        code: "EACCES",
+      });
+    return realRmSync(target, options);
+  }) as typeof fs.rmSync);
+  try {
+    let thrown: unknown;
+    try {
+      provisionConfigAndKey(
+        sampleSpec(),
+        { sharedSecret: "too-short" },
+        { configPath, keyPath },
+      );
+    } catch (err) {
+      thrown = err;
+    }
+    // The key-write error still propagates: the failed rollback is recorded on
+    // it, never substituted for it.
+    expect((thrown as Error).message).toContain("base64url-encoded 32-byte");
+    expect(provisionLeftConfigOnDisk(thrown)).toBe(true);
+    expect(fs.existsSync(configPath)).toBe(true);
+    expect(fs.existsSync(keyPath)).toBe(false);
+  } finally {
+    rmSpy.mockRestore();
+  }
 });
 
 test("provisionConfigAndKey writes no key file when the config write fails", () => {

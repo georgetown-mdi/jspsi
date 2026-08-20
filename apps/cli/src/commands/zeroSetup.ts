@@ -57,7 +57,11 @@ import {
   WEBRTC_RENDEZVOUS_SECRET_REQUIRED,
   type ProtocolConnectionConfig,
 } from "../protocol";
-import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
+import {
+  assertNoProvisionConflicts,
+  provisionConfigAndKey,
+  provisionLeftConfigOnDisk,
+} from "./provision";
 import { warnOnValueConstraints } from "./valueConstraintWarnings";
 
 // channelFromURL is used by the handler's pre-connection flag-warning path (and
@@ -451,10 +455,17 @@ export function finalizeBootstrap(params: {
  * deliberately absent -- it goes to the human log beside the call, because the
  * emitter escapes its message exactly once and pre-rendered error text would
  * reach a supervisor double-escaped.
+ *
+ * `configLeftOnDisk` is the both-saved corner where the config was written, the
+ * key file then failed, and the rollback of that config failed too
+ * ({@link provisionLeftConfigOnDisk}): the file is on disk, so the notice names
+ * it as written and steers the operator past the conflict it would otherwise
+ * hit on the `psilink invite` this very notice advises.
  */
 function unsavedBootstrapNotice(params: {
   save: boolean;
   sharedSecret: string | undefined;
+  configLeftOnDisk: boolean;
   configFile: string;
   keyFile: string;
 }): string {
@@ -463,6 +474,15 @@ function unsavedBootstrapNotice(params: {
       "the exchange completed and its results are written, but the " +
       "post-exchange bootstrap step did not complete; this run was asked to " +
       "save nothing, and the exchange must not be re-run"
+    );
+  if (params.configLeftOnDisk)
+    return (
+      `the exchange completed and its results are written, but the key file ` +
+      `at ${params.keyFile} did not reach disk, so no recurring exchange is ` +
+      `set up; the configuration at ${params.configFile} was written and ` +
+      `could not be removed, so move or remove it, then run 'psilink invite' ` +
+      `and share the invitation with your partner -- do not re-run this ` +
+      `exchange`
     );
   const files =
     params.sharedSecret !== undefined
@@ -738,6 +758,7 @@ export async function handler(argv: Arguments): Promise<void> {
               const notice = unsavedBootstrapNotice({
                 save: options.save,
                 sharedSecret: bootstrap?.sharedSecret,
+                configLeftOnDisk: provisionLeftConfigOnDisk(err),
                 configFile: options.configFile,
                 keyFile: options.keyFile,
               });

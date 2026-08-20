@@ -842,17 +842,20 @@ test("handler refuses a webrtc URL by naming the missing rendezvous secret", asy
 const SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 /** The fixture the save-failure tests share: a temp directory holding an input
- *  CSV, plus the process spies each of them reads. `configFile` is an ordinary
- *  path the run is told to write; `unwritableConfigFile` sits under a dangling
- *  symlink, which reads as absent to the conflict gate (`lstat` resolves through
- *  it and reports ENOENT) yet fails the write that follows -- a real fault, not
- *  a stubbed writer, and one no file mode or process uid can mask. */
+ *  CSV, plus the process spies each of them reads. `configFile` and `keyFile`
+ *  are ordinary paths the run is told to write; the `unwritable*` pair sits
+ *  under a dangling symlink, which reads as absent to the conflict gate (`lstat`
+ *  resolves through it and reports ENOENT) yet fails the write that follows -- a
+ *  real fault, not a stubbed writer, and one no file mode or process uid can
+ *  mask. Pairing an ordinary config path with the unwritable key path drives the
+ *  provisioner past its config write into the key failure. */
 function saveFailureFixture(): {
   dir: string;
   input: string;
   configFile: string;
   unwritableConfigFile: string;
   keyFile: string;
+  unwritableKeyFile: string;
   stderr: () => string;
   exitSpy: MockInstance;
   restore: () => void;
@@ -886,6 +889,7 @@ function saveFailureFixture(): {
     configFile: path.join(dir, "psilink.yaml"),
     unwritableConfigFile: path.join(unreachable, "psilink.yaml"),
     keyFile: path.join(dir, ".psilink.key"),
+    unwritableKeyFile: path.join(unreachable, ".psilink.key"),
     stderr: () => stderrChunks.join(""),
     exitSpy,
     restore: () => {
@@ -952,6 +956,75 @@ test("handler --save: a save that cannot reach disk warns on fd 3 and exits 73, 
         .eventStream,
     ).toBe("object");
   } finally {
+    f.restore();
+  }
+});
+
+test("handler --save: a failed key save whose rollback also fails names the config as written, not lost", async () => {
+  // The both-saved corner where the two files end in DIFFERENT states: the
+  // config was written, the key file then failed, and the rollback of that
+  // config failed too, so the config is on disk. A notice that reported it as
+  // unsaved would misstate what persisted and send the operator into the
+  // conflict its own 'psilink invite' advice would hit.
+  //
+  // The key-write failure is real (the dangling-symlink path). Its rollback is
+  // stubbed: no portable filesystem state makes a removal fail while the write
+  // that placed the file, in the same directory moments earlier, succeeds.
+  const f = saveFailureFixture();
+  getLogger("psilink").setLevel("error");
+  const realRmSync = fs.rmSync;
+  const rmSpy = vi.spyOn(fs, "rmSync").mockImplementation(((
+    target: fs.PathLike,
+    options?: fs.RmOptions,
+  ) => {
+    if (target === f.configFile)
+      throw Object.assign(new Error("EACCES: permission denied, unlink"), {
+        code: "EACCES",
+      });
+    return realRmSync(target, options);
+  }) as typeof fs.rmSync);
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
+    driveCompletedExchange(callArgs, {
+      partnerSaveIntent: true,
+      sharedSecret: SECRET,
+    })) as never);
+  try {
+    const { lines } = await captureFd3(() =>
+      handler({
+        _: ["sftp://userb@localhost:2222/drop", f.input],
+        $0: "psilink",
+        save: true,
+        "event-stream": true,
+        "config-file": f.configFile,
+        "key-file": f.unwritableKeyFile,
+        identity: "Tester",
+        record: false,
+        "log-level": "error",
+      } as unknown as Arguments),
+    );
+    const exitCode = process.exitCode;
+    const stderr = f.stderr();
+    expect(exitCode).toBe(PERSISTENCE_LOSS_EXIT_CODE);
+    expect(f.exitSpy).not.toHaveBeenCalled();
+    expect(lines.map((l) => l.type)).toEqual(["warning"]);
+    // The claim made about each file, against what is actually on disk.
+    const notice = String(lines[0].message);
+    expect(notice).toContain(
+      `the key file at ${f.unwritableKeyFile} did not reach disk`,
+    );
+    expect(notice).toContain(
+      `the configuration at ${f.configFile} was written and could not be ` +
+        "removed",
+    );
+    expect(fs.existsSync(f.configFile)).toBe(true);
+    expect(fs.existsSync(f.unwritableKeyFile)).toBe(false);
+    // Still the same class of loss: no re-run, and the cause stays on the human
+    // log rather than reaching the supervisor double-escaped.
+    expect(notice).toContain("do not re-run");
+    expect(notice).not.toContain("ENOENT");
+    expect(stderr).toContain("ENOENT");
+  } finally {
+    rmSpy.mockRestore();
     f.restore();
   }
 });
