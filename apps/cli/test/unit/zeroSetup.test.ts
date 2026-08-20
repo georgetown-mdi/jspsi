@@ -17,6 +17,7 @@ import {
   UsageError,
 } from "@psilink/core";
 import type {
+  ExchangeBootstrapResult,
   FileDropConnectionConfig,
   SFTPConnectionConfig,
 } from "@psilink/core";
@@ -32,6 +33,7 @@ import { resolveConnectionCredentials } from "../../src/util/atSignRefs";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
 import { PERSISTENCE_LOSS_EXIT_CODE } from "../../src/eventStream";
+import { captureFd3 } from "../eventStreamTestSupport";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 
 // The handler hands the resolved connection to runProtocol; mock it so the happy
@@ -61,6 +63,41 @@ beforeEach(() => {
 afterEach(() => {
   existsSyncSpy.mockRestore();
 });
+
+/** Locate the trailing FileSyncRuntimeOptions among runProtocol's call arguments
+ *  by the key under test rather than by position, and assert it is the only
+ *  argument carrying one. */
+function runtimeOptionsArg(callArgs: unknown[]): {
+  eventStream?: unknown;
+  onOutputComplete?: (context: {
+    observedReceivedPayloadColumns: string[];
+    bootstrap?: ExchangeBootstrapResult;
+  }) => void | Promise<void>;
+} {
+  const runtimeArgs = callArgs.filter(
+    (a): a is Record<string, unknown> =>
+      typeof a === "object" && a !== null && "eventStream" in a,
+  );
+  expect(runtimeArgs).toHaveLength(1);
+  return runtimeArgs[0];
+}
+
+/** Drive the completed-exchange half of runProtocol's contract from the mock:
+ *  invoke the caller's pre-terminal onOutputComplete hook, then resolve the way
+ *  the real function does. The zero-setup `--save` persistence rides that hook,
+ *  so a mock that resolves without calling it drives a run that saves nothing --
+ *  which is what the placement test below turns on. */
+async function driveCompletedExchange(
+  callArgs: unknown[],
+  bootstrap: ExchangeBootstrapResult | undefined,
+  observedReceivedPayloadColumns: string[] = [],
+): Promise<unknown> {
+  await runtimeOptionsArg(callArgs).onOutputComplete?.({
+    observedReceivedPayloadColumns,
+    bootstrap,
+  });
+  return { bootstrap, observedReceivedPayloadColumns };
+}
 
 // --- builder help overrides --------------------------------------------------
 
@@ -416,7 +453,7 @@ test("handler hands the resolved credential to the exchange while persisting not
       connToRunProtocol = callArgs[0] as SFTPConnectionConfig;
       // bootstrap present but no secret and no partner intent: finalizeBootstrap
       // (save === false) only logs the recurring-exchange hint, writing nothing.
-      return { bootstrap: { partnerSaveIntent: false } };
+      return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
     }) as never);
 
     await handler({
@@ -522,9 +559,10 @@ test("handler with --save carries the first-use pin into the written config", as
     }) as never);
     // --save with no partner save-intent: finalizeBootstrap writes the config
     // alone (no shared secret, no key file).
-    vi.mocked(runProtocol).mockImplementationOnce((async () => ({
-      bootstrap: { partnerSaveIntent: false },
-    })) as never);
+    vi.mocked(runProtocol).mockImplementationOnce((async (
+      ...callArgs: unknown[]
+    ) =>
+      driveCompletedExchange(callArgs, { partnerSaveIntent: false })) as never);
 
     await handler({
       _: ["sftp://userb@localhost:2222/drop", input],
@@ -591,9 +629,8 @@ test("handler --save: the selected strategy flows into the saved config (single-
   ) => {
     throw new Error(`exit:${code ?? 0}`);
   }) as never);
-  vi.mocked(runProtocol).mockImplementation((async () => ({
-    bootstrap: { partnerSaveIntent: false },
-  })) as never);
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
+    driveCompletedExchange(callArgs, { partnerSaveIntent: false })) as never);
   try {
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(
@@ -653,9 +690,8 @@ test("handler: zero-setup surfaces the single-pass disclosure note at selection"
     throw new Error(`exit:${code ?? 0}`);
   }) as never);
   getLogger("psilink").setLevel("info");
-  vi.mocked(runProtocol).mockImplementation((async () => ({
-    bootstrap: { partnerSaveIntent: false },
-  })) as never);
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
+    driveCompletedExchange(callArgs, { partnerSaveIntent: false })) as never);
   try {
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(
@@ -706,7 +742,7 @@ test("handler: a zero-setup retain run states no consent fact about the retained
   let ran: FileDropConnectionConfig | undefined;
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     ran = callArgs[0] as FileDropConnectionConfig;
-    return { bootstrap: { partnerSaveIntent: false } };
+    return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
   }) as never);
   try {
     const input = path.join(dir, "input.csv");
@@ -794,5 +830,252 @@ test("handler refuses a webrtc URL by naming the missing rendezvous secret", asy
     stderrSpy.mockRestore();
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- handler --save: a lost save is a persistence loss, not a failed run -----
+
+/** A 43-character base64url token satisfying the sharedSecret format, standing
+ *  in for the secret the initiator generates in-band when both parties save. */
+const SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+/** The fixture the save-failure tests share: a temp directory holding an input
+ *  CSV, plus the process spies each of them reads. `configFile` is an ordinary
+ *  path the run is told to write; `unwritableConfigFile` sits under a dangling
+ *  symlink, which reads as absent to the conflict gate (`lstat` resolves through
+ *  it and reports ENOENT) yet fails the write that follows -- a real fault, not
+ *  a stubbed writer, and one no file mode or process uid can mask. */
+function saveFailureFixture(): {
+  dir: string;
+  input: string;
+  configFile: string;
+  unwritableConfigFile: string;
+  keyFile: string;
+  stderr: () => string;
+  exitSpy: MockInstance;
+  restore: () => void;
+} {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroloss-"));
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+  );
+  const unreachable = path.join(dir, "unreachable");
+  fs.symlinkSync(path.join(dir, "gone"), unreachable);
+  const stderrChunks: string[] = [];
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write);
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  const previousExitCode = process.exitCode;
+  process.exitCode = undefined;
+  vi.mocked(runProtocol).mockClear();
+  return {
+    dir,
+    input,
+    configFile: path.join(dir, "psilink.yaml"),
+    unwritableConfigFile: path.join(unreachable, "psilink.yaml"),
+    keyFile: path.join(dir, ".psilink.key"),
+    stderr: () => stderrChunks.join(""),
+    exitSpy,
+    restore: () => {
+      process.exitCode = previousExitCode;
+      getLogger("psilink").setLevel("silent");
+      stderrSpy.mockRestore();
+      exitSpy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+test("handler --save: a save that cannot reach disk warns on fd 3 and exits 73, not 69", async () => {
+  // The exchange completed and its results are written; only the local
+  // config/key write failed. That is the persistence-loss class, and a
+  // supervisor reading the transport-failure code would retry -- which for a
+  // zero-setup run means conducting a SECOND exchange and re-sending this
+  // party's records. Both machine channels carry it: the warning names what is
+  // missing, the exit code says do not re-run.
+  const f = saveFailureFixture();
+  getLogger("psilink").setLevel("error");
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
+    driveCompletedExchange(callArgs, {
+      partnerSaveIntent: true,
+      sharedSecret: SECRET,
+    })) as never);
+  try {
+    const { lines } = await captureFd3(() =>
+      handler({
+        _: ["sftp://userb@localhost:2222/drop", f.input],
+        $0: "psilink",
+        save: true,
+        "event-stream": true,
+        "config-file": f.unwritableConfigFile,
+        "key-file": f.keyFile,
+        identity: "Tester",
+        record: false,
+        "log-level": "error",
+      } as unknown as Arguments),
+    );
+    // Read before restore() puts the process exit code back.
+    const exitCode = process.exitCode;
+    const stderr = f.stderr();
+    expect(exitCode).toBe(PERSISTENCE_LOSS_EXIT_CODE);
+    // The run itself did not fail, so no error boundary exited it: 69 and 64
+    // both reach the process through exitWithError.
+    expect(f.exitSpy).not.toHaveBeenCalled();
+    expect(lines.map((l) => l.type)).toEqual(["warning"]);
+    // Both artifacts this branch was asked to write are named, and the operator
+    // is steered to invite rather than to a re-run.
+    expect(String(lines[0].message)).toContain(f.unwritableConfigFile);
+    expect(String(lines[0].message)).toContain(f.keyFile);
+    expect(String(lines[0].message)).toContain("do not re-run");
+    // The cause stays on the human log: the emitter escapes its message exactly
+    // once, so pre-rendered error text would reach a supervisor double-escaped.
+    expect(String(lines[0].message)).not.toContain("ENOENT");
+    expect(stderr).toContain("ENOENT");
+    // Nothing was half-written at the key path either.
+    expect(fs.existsSync(f.keyFile)).toBe(false);
+    // The run's own events and this loss ride one stream: runProtocol received
+    // the emitter this command opened, not the raw flag.
+    expect(
+      typeof runtimeOptionsArg(vi.mocked(runProtocol).mock.calls[0])
+        .eventStream,
+    ).toBe("object");
+  } finally {
+    f.restore();
+  }
+});
+
+test("handler --save: a config that appeared after the pre-flight is the same loss, not a usage error", async () => {
+  // The other way the save fails: the up-front conflict gate passed, and a file
+  // materialized at the config path in the window before the post-exchange
+  // write. It stays a refusal to clobber -- but the exchange behind it
+  // completed, so there is nothing about the invocation for the operator to
+  // correct and exit 64 would invite the re-run 73 exists to prevent.
+  const f = saveFailureFixture();
+  getLogger("psilink").setLevel("error");
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    fs.writeFileSync(f.configFile, "preexisting: true\n");
+    return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
+  }) as never);
+  try {
+    const { lines } = await captureFd3(() =>
+      handler({
+        _: ["sftp://userb@localhost:2222/drop", f.input],
+        $0: "psilink",
+        save: true,
+        "event-stream": true,
+        "config-file": f.configFile,
+        "key-file": f.keyFile,
+        identity: "Tester",
+        record: false,
+        "log-level": "error",
+      } as unknown as Arguments),
+    );
+    const exitCode = process.exitCode;
+    const stderr = f.stderr();
+    expect(exitCode).toBe(PERSISTENCE_LOSS_EXIT_CODE);
+    expect(f.exitSpy).not.toHaveBeenCalled();
+    expect(lines.map((l) => l.type)).toEqual(["warning"]);
+    // The partner declined to save, so only the config was due; the notice must
+    // not claim a key file that was never going to be written.
+    expect(String(lines[0].message)).toContain(f.configFile);
+    expect(String(lines[0].message)).not.toContain(f.keyFile);
+    // The conflicting file is named on the human log and left exactly as it was.
+    expect(stderr).toContain("refusing to overwrite");
+    expect(fs.readFileSync(f.configFile, "utf8")).toBe("preexisting: true\n");
+  } finally {
+    f.restore();
+  }
+});
+
+test("handler --save: a completed exchange carrying no bootstrap result reports the loss rather than saving in silence", async () => {
+  // The hook's internal-contradiction branch. runProtocol drove the
+  // completed-exchange hook -- so the exchange finished and its results are
+  // written -- yet handed it no bootstrap result, though this command always
+  // passes a boolean --save intent. There is nothing to provision from, and the
+  // config path here is an ordinary writable one, so a run that skipped the save
+  // in silence would exit clean with nothing on disk and no way for a supervisor
+  // to tell. It takes the same persistence-loss report as a failed write.
+  const f = saveFailureFixture();
+  getLogger("psilink").setLevel("error");
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
+    driveCompletedExchange(callArgs, undefined)) as never);
+  try {
+    const { lines } = await captureFd3(() =>
+      handler({
+        _: ["sftp://userb@localhost:2222/drop", f.input],
+        $0: "psilink",
+        save: true,
+        "event-stream": true,
+        "config-file": f.configFile,
+        "key-file": f.keyFile,
+        identity: "Tester",
+        record: false,
+        "log-level": "error",
+      } as unknown as Arguments),
+    );
+    const exitCode = process.exitCode;
+    const stderr = f.stderr();
+    expect(exitCode).toBe(PERSISTENCE_LOSS_EXIT_CODE);
+    expect(f.exitSpy).not.toHaveBeenCalled();
+    expect(lines.map((l) => l.type)).toEqual(["warning"]);
+    const notice = String(lines[0].message);
+    expect(notice).toContain(f.configFile);
+    expect(notice).toContain("do not re-run");
+    // Operator-facing and well-formed: the absent result reaches the notice as
+    // neither an interpolated hole nor the internal wording, both of which stay
+    // on the human log with the rest of the cause.
+    expect(notice).not.toContain("undefined");
+    expect(notice).not.toContain("internal error");
+    expect(stderr).toContain("internal error");
+    // Nothing was provisioned from the contradiction.
+    expect(fs.existsSync(f.configFile)).toBe(false);
+    expect(fs.existsSync(f.keyFile)).toBe(false);
+  } finally {
+    f.restore();
+  }
+});
+
+test("handler --save: the save rides the pre-terminal hook, not the return from runProtocol", async () => {
+  // WHERE the save happens is the contract, not just that it happens: run after
+  // runProtocol returns, the warning above lands BEHIND the run's terminal
+  // event, which the stream spec forbids and a supervisor that stops reading
+  // there discards outright. So a runProtocol that resolves with a bootstrap
+  // result but never invokes the hook must leave nothing on disk. This is the
+  // one test the hook's invocation is visible to -- every other --save test
+  // drives it and would pass just as well with the save back on the
+  // post-return path.
+  const f = saveFailureFixture();
+  vi.mocked(runProtocol).mockImplementation((async () => ({
+    bootstrap: { partnerSaveIntent: false },
+    observedReceivedPayloadColumns: [],
+  })) as never);
+  try {
+    await handler({
+      _: ["sftp://userb@localhost:2222/drop", f.input],
+      $0: "psilink",
+      save: true,
+      "config-file": f.configFile,
+      "key-file": f.keyFile,
+      identity: "Tester",
+      record: false,
+      "log-level": "silent",
+    } as unknown as Arguments);
+    expect(fs.existsSync(f.configFile)).toBe(false);
+    // The hook was offered to runProtocol; it simply was not called.
+    expect(
+      runtimeOptionsArg(vi.mocked(runProtocol).mock.calls[0]).onOutputComplete,
+    ).toBeTypeOf("function");
+  } finally {
+    f.restore();
   }
 });
