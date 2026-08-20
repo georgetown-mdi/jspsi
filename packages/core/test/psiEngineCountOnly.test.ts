@@ -436,6 +436,46 @@ test("the count-only contribution filter and the cascade agree on the singleton 
   ]);
 });
 
+test("a duplicated response does not inflate the reported cardinality", async () => {
+  // The sender's cheapest inflation attempt on the one figure a count-only run
+  // produces: repeat the response's encrypted elements. psilink's own frame guard
+  // does not close that class -- the response element bound is the raw
+  // `keyCount * recordCount` product (psiElementBounds, connection/frameSize.ts),
+  // which upper-bounds a party's DISTINCT values, so a dataset holding any repeated
+  // or empty key value leaves room for more elements than the receiver contributed.
+  // What refuses the inflation is the vendored library's own cardinality operation, a
+  // measured property of that library rather than something psilink enforces: driven
+  // here at the engine seam, with every element repeated five times, the count is
+  // unchanged. A library bump that changed the property fails here rather than
+  // silently raising a reported count.
+  const countOnlySender = inProcess(wasm, "starter", "sender", "count-only");
+  const countOnlyReceiver = inProcess(wasm, "joiner", "receiver", "count-only");
+
+  const { setup } = await countOnlySender.createServerSetup(senderValues);
+  await countOnlyReceiver.receiveServerSetup(setup);
+  const request = await countOnlyReceiver.createClientRequest(receiverValues);
+  const response = await countOnlySender.processClientRequest(request);
+
+  const inflated = wasm.response.deserializeBinary(response);
+  const elements = inflated.getEncryptedElementsList_asU8();
+  expect(elements.length).toBe(receiverValues.length);
+  inflated.setEncryptedElementsList(
+    Array.from({ length: 5 }, () => elements).flat(),
+  );
+  const inflatedBytes = inflated.serializeBinary();
+  expect(
+    wasm.response.deserializeBinary(inflatedBytes).getEncryptedElementsList()
+      .length,
+  ).toBe(receiverValues.length * 5);
+
+  await expect(
+    countOnlyReceiver.computeIntersectionCardinality(inflatedBytes),
+  ).resolves.toBe(expectedCount);
+
+  countOnlySender.dispose();
+  countOnlyReceiver.dispose();
+});
+
 test("the library's cardinality operation reports the multiset size the filter excludes", () => {
   // The premise behind the uniqueness filter, driven against the real library: a
   // raw column passed through counts a value repeated on both sides once per

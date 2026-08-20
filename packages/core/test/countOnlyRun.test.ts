@@ -1,4 +1,4 @@
-import { expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 // The count-only run path is gated on APPLIED_SETTINGS.psiC, which is false in the
 // shipped build: `psi-c` terms are refused at every boundary, and that refusal is
@@ -13,13 +13,22 @@ vi.mock("../src/appliedSettings", () => ({
 
 import PSI from "@openmined/psi.js";
 
-import { prepareForExchange, runExchange } from "../src/exchange";
-import { createMessagePipe } from "../src/connection/messageConnection";
+import {
+  AlgorithmDivergenceError,
+  prepareForExchange,
+  resolveCountOnlyRun,
+  runExchange,
+} from "../src/exchange";
+import { receiveCountReport } from "../src/protocolSetup";
+import {
+  ConnectionError,
+  createMessagePipe,
+} from "../src/connection/messageConnection";
 
 import type { MessageConnection } from "../src/connection/messageConnection";
 import type { ExchangeResult, PreparedExchange } from "../src/exchange";
 import type { Algorithm } from "../src/types";
-import type { Output } from "../src/config/linkageTerms";
+import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 
 const psiLibrary = await PSI();
 
@@ -346,29 +355,96 @@ test("an over-broad count-only run is refused at the agreed-terms boundary, neve
   ).rejects.toThrow(/exactly one linkage key/);
 });
 
-test("a partner running the other algorithm aborts both parties before any round", async () => {
-  // The two algorithms' dispatches never meet: `algorithm` is a mandatory-consistency
-  // agreed term, so a psi-c party facing a psi partner aborts at the terms exchange
-  // rather than starting a round the other side would run differently.
-  const [connInitiator, connResponder] = createMessagePipe();
-  const outcomes = await Promise.allSettled([
-    runExchange(
-      connInitiator,
-      "initiator",
-      prepared("Initiator Co", both, initiatorRows, "psi-c"),
-      { psiLibrary },
-    ),
-    runExchange(
-      connResponder,
-      "responder",
-      prepared("Responder Co", both, responderRows, "psi"),
-      { psiLibrary },
-    ),
-  ]);
-  expect(outcomes.map((outcome) => outcome.status)).toEqual([
-    "rejected",
-    "rejected",
-  ]);
+// The PSI round's frames are the only binary ones a run puts on the wire: the terms
+// exchange, the count-report leg, and the payload exchange all send plain objects.
+const psiFrames = (frames: Array<unknown>): Array<unknown> =>
+  frames.filter((frame) => frame instanceof Uint8Array);
+
+test.each([
+  { initiator: "psi-c" as Algorithm, responder: "psi" as Algorithm },
+  { initiator: "psi" as Algorithm, responder: "psi-c" as Algorithm },
+])(
+  "a divergent pair aborts both parties before any round (initiator $initiator, responder $responder)",
+  async ({ initiator: initiatorAlgorithm, responder: responderAlgorithm }) => {
+    // The two algorithms' dispatches never meet: `algorithm` is a
+    // mandatory-consistency agreed term, so a psi-c party facing a psi partner aborts
+    // at the terms exchange rather than starting a round the other side would run
+    // differently. Either orientation, since either party can be the one holding the
+    // count-only terms.
+    const [connInitiator, connResponder] = createMessagePipe();
+    const initiatorSent: Array<unknown> = [];
+    const responderSent: Array<unknown> = [];
+    const outcomes = await Promise.allSettled([
+      runExchange(
+        recording(connInitiator, initiatorSent),
+        "initiator",
+        prepared("Initiator Co", both, initiatorRows, initiatorAlgorithm),
+        { psiLibrary },
+      ),
+      runExchange(
+        recording(connResponder, responderSent),
+        "responder",
+        prepared("Responder Co", both, responderRows, responderAlgorithm),
+        { psiLibrary },
+      ),
+    ]);
+    expect(outcomes.map((outcome) => outcome.status)).toEqual([
+      "rejected",
+      "rejected",
+    ]);
+
+    // The abort lands before any engine work reaches the wire: neither party's setup
+    // nor request frame was sent, so no masked value of either dataset crossed under
+    // an algorithm the two had not agreed.
+    expect(psiFrames(initiatorSent)).toEqual([]);
+    expect(psiFrames(responderSent)).toEqual([]);
+  },
+);
+
+test("an algorithm divergence is refused at the agreed-terms run boundary", () => {
+  // The invariant behind the terms-exchange abort above, encoded at the boundary the
+  // run turns on: a pair that diverged anyway must refuse rather than resolve to "not
+  // count-only", which would run the identifier-revealing engine while the psi-c
+  // party's own record attested the count-only algorithm its terms named.
+  const countOnlyTerms = prepared(
+    "Initiator Co",
+    both,
+    initiatorRows,
+    "psi-c",
+  ).linkageTerms;
+  const revealingTerms = prepared(
+    "Responder Co",
+    both,
+    responderRows,
+    "psi",
+  ).linkageTerms;
+
+  // Symmetric over the agreed pair: each party calls it with its own terms first, so
+  // both refuse at this same point rather than one starting a round the other refuses.
+  const orientations: Array<[LinkageTerms, LinkageTerms]> = [
+    [countOnlyTerms, revealingTerms],
+    [revealingTerms, countOnlyTerms],
+  ];
+  for (const [localTerms, partnerTerms] of orientations) {
+    let refusal: unknown;
+    try {
+      resolveCountOnlyRun(localTerms, partnerTerms);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(AlgorithmDivergenceError);
+    // A peer that proceeded past the compatibility abort, not a local
+    // misconfiguration: the kind is what a consumer branches on.
+    expect((refusal as ConnectionError).kind).toBe("protocol");
+    expect((refusal as Error).message).toContain(
+      `this party runs "${localTerms.algorithm}" and the partner runs ` +
+        `"${partnerTerms.algorithm}"`,
+    );
+  }
+
+  // The agreed pair still resolves to its own algorithm's run.
+  expect(resolveCountOnlyRun(countOnlyTerms, countOnlyTerms)).toBe(true);
+  expect(resolveCountOnlyRun(revealingTerms, revealingTerms)).toBe(false);
 });
 
 test("a count-only exchange whose input metadata would transmit a column is refused at prepare", async () => {
@@ -392,4 +468,53 @@ test("a count-only exchange whose input metadata would transmit a column is refu
       ["first_name", "note"],
     ),
   ).toThrow(/transmits no data columns/);
+});
+
+// --- The count-report frame on receipt ---------------------------------------
+// The one figure a partner supplies on a count-only run: the receiver's tally,
+// which the sender takes on trust as a NUMBER but not as an arbitrary value
+// (docs/spec/PROTOCOL.md, PSI-C). The bound is the smaller of the two exchanged
+// record counts, authenticated session state on both sides. These drive the parse
+// itself with the shapes a non-conforming or hostile receiver can put on the frame:
+// each is refused as a protocol violation on receipt, and none resolves a count the
+// sender would go on to report as the run's result.
+describe("a hostile count-report frame", () => {
+  const maxCount = Math.min(initiatorRows.length, responderRows.length);
+
+  const hostileFrames: Array<[string, unknown]> = [
+    ["a count over the exchange's bound", { intersectionCount: maxCount + 1 }],
+    ["a negative count", { intersectionCount: -1 }],
+    ["a fractional count", { intersectionCount: 1.5 }],
+    ["a count as a string", { intersectionCount: "2" }],
+    ["a frame with no count at all", {}],
+  ];
+
+  test.each(hostileFrames)(
+    "%s is refused on receipt",
+    async (_label, frame) => {
+      const [receiverEnd, senderEnd] = createMessagePipe();
+      await receiverEnd.send(frame);
+
+      const [outcome] = await Promise.allSettled([
+        receiveCountReport(senderEnd, maxCount),
+      ]);
+      // Rejected rather than resolved: no count reaches the sender at all, so there is
+      // none for it to record or report.
+      expect(outcome.status).toBe("rejected");
+      const refusal =
+        outcome.status === "rejected" ? outcome.reason : undefined;
+      expect(refusal).toBeInstanceOf(ConnectionError);
+      expect((refusal as ConnectionError).kind).toBe("protocol");
+    },
+  );
+
+  test("a count at the bound is still delivered", async () => {
+    // The refusals above are the frame's shape, not a parse that rejects everything:
+    // the largest count this exchange could legitimately produce still arrives.
+    const [receiverEnd, senderEnd] = createMessagePipe();
+    await receiverEnd.send({ intersectionCount: maxCount });
+    await expect(receiveCountReport(senderEnd, maxCount)).resolves.toBe(
+      maxCount,
+    );
+  });
 });

@@ -1103,9 +1103,10 @@ export const COUNT_ONLY_SHAPE_REFUSALS: Readonly<
  * a document breaking several rules reports the first, and fixing it surfaces
  * the next.
  *
- * A document already in the specified shape is NOT a violation here: it is
- * refused by the algorithm gate (`assertAlgorithmImplemented`) until a
- * count-only run path exists, which is a statement about what is implemented
+ * A document already in the specified shape is NOT a violation here: whether such
+ * a document may run at all is the algorithm gate's question
+ * (`assertAlgorithmImplemented`, which admits `psi-c` exactly while
+ * `APPLIED_SETTINGS.psiC` is true), a statement about what this build enables
  * rather than about the document.
  */
 export function countOnlyShapeViolation(

@@ -698,19 +698,24 @@ function countOnlyResultCount(event: RelayEvent): number | undefined {
  * withheld result is the withheld variant exactly as the browser driver
  * produces it.
  *
- * A count-only run reports no result file either, and its count is checked FIRST
- * for the same reason `buildRunOutputs` checks it first on the browser-direct path
- * (`@bench/runOutputs`): the run withheld nothing from this party -- the count is
- * what its terms promised -- so reading it as the withheld shape would report the
- * outcome as the wrong one. The count doubles as the completion header's matched
- * figure, exactly as it does there. */
+ * `resultWritten` is the outer discriminant, exactly as the contract states it
+ * (docs/spec/CLI_EVENTS.md, `result`): a written result is a written result, and a
+ * count rides only the `false` arm. Reading the count first would let an
+ * out-of-contract event that carries both cost this party the download link for a
+ * result the appliance did in fact write.
+ *
+ * Within that arm the count separates the two outcomes the contract gives it: a
+ * count-only run withheld nothing from this party -- the count is what its terms
+ * promised, and there is no result file for either party -- while its absence is the
+ * helper's withheld result. The count doubles as the completion header's matched
+ * figure, as it does on the browser-direct path (`buildRunOutputs`,
+ * `@bench/runOutputs`). */
 function baseResultOutputs(event: RelayEvent, jobId: string): RunOutputs {
+  if (event.resultWritten !== false) return { resultsUrl: jobResultUrl(jobId) };
   const intersectionCount = countOnlyResultCount(event);
-  if (intersectionCount !== undefined)
-    return { intersectionCount, matchedRecordCount: intersectionCount };
-  return event.resultWritten === false
-    ? { resultWithheld: true }
-    : { resultsUrl: jobResultUrl(jobId) };
+  return intersectionCount !== undefined
+    ? { intersectionCount, matchedRecordCount: intersectionCount }
+    : { resultWithheld: true };
 }
 
 /** Attach the record-pair downloads to the base outputs, pointed at the

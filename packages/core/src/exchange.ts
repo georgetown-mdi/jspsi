@@ -68,6 +68,7 @@ import type {
   Prettify,
   Algorithm,
 } from "./types.js";
+import { ConnectionError } from "./connection/messageConnection.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
 import type { PresentedHostKey } from "./connection/fileSyncConnection.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
@@ -192,6 +193,25 @@ export function assertAlgorithmImplemented(algorithm: Algorithm): void {
 }
 
 /**
+ * The refusal raised when the two parties' agreed terms name different algorithms
+ * at the run boundary ({@link resolveCountOnlyRun}).
+ *
+ * A {@link ConnectionError} of kind `protocol` rather than a {@link UsageError}:
+ * this party's own algorithm is its own config, so a divergence is the partner
+ * having proceeded past the terms-exchange compatibility abort that refuses one --
+ * a peer violating the message protocol, not a local misconfiguration. The CLI's
+ * `instanceof UsageError ? 64 : 69` mapping therefore yields 69, and a consumer
+ * keeping per-failure bookkeeping can branch on the type. The message names only
+ * the fixed algorithm literals of `AlgorithmSchema`, never partner free text.
+ */
+export class AlgorithmDivergenceError extends ConnectionError {
+  constructor(message: string) {
+    super(message, "protocol");
+    this.name = "AlgorithmDivergenceError";
+  }
+}
+
+/**
  * Resolve whether this exchange runs the count-only (`psi-c`) path, from BOTH
  * parties' agreed terms, and refuse a count-only exchange outside the shape the
  * specification admits.
@@ -205,11 +225,14 @@ export function assertAlgorithmImplemented(algorithm: Algorithm): void {
  * {@link resolveLinkageCardinality}, which resolves the matching cardinality
  * immediately after the terms exchange.
  *
- * The verdict is the CONJUNCTION rather than either party's own value, so two
- * parties can never disagree about which round they are running: `algorithm` is a
- * mandatory-consistency term (`validateCompatibility` aborts a mismatch before this
- * is reached), and a divergence surviving that resolves to "not count-only" on both
- * sides rather than to a count-only round on one and a revealing round on the other.
+ * The pair must name ONE algorithm, and a divergent pair is refused here with an
+ * {@link AlgorithmDivergenceError} rather than resolved to either party's value:
+ * resolving would run the revealing engine while this party's record attested the
+ * count-only algorithm its own terms named -- the substitution docs/spec/PROTOCOL.md
+ * forbids. `algorithm` is a mandatory-consistency term, so `validateCompatibility`
+ * aborts a divergent pair at the terms exchange upstream; this is that invariant
+ * encoded at the boundary the run turns on rather than asserted about it. The verdict
+ * is then simply whether the agreed algorithm is `psi-c`.
  */
 export function resolveCountOnlyRun(
   localTerms: LinkageTerms,
@@ -217,9 +240,18 @@ export function resolveCountOnlyRun(
 ): boolean {
   assertAlgorithmImplemented(localTerms.algorithm);
   assertAlgorithmImplemented(partnerTerms.algorithm);
+  if (localTerms.algorithm !== partnerTerms.algorithm)
+    throw new AlgorithmDivergenceError(
+      "the two parties' agreed linkage terms name different algorithms: this " +
+        `party runs "${localTerms.algorithm}" and the partner runs ` +
+        `"${partnerTerms.algorithm}". The algorithm settles what the run ` +
+        "discloses and what each party's exchange record attests, so a " +
+        "divergent pair is refused before the round begins rather than " +
+        "resolved to either party's value.",
+    );
   assertCountOnlyTermsShape(localTerms);
   assertCountOnlyTermsShape(partnerTerms);
-  return localTerms.algorithm === "psi-c" && partnerTerms.algorithm === "psi-c";
+  return localTerms.algorithm === "psi-c";
 }
 
 /**
@@ -1047,10 +1079,11 @@ export async function runExchange(
   // building the engine first and disposing it in the finally when the participant
   // never took ownership makes "the worker is never orphaned" a structural guarantee
   // rather than a comment resting on the constructor happening not to throw. The
-  // default in-process engine is built inside the constructor from `library`, so
-  // `engine` is undefined on that path and the else-branch is a no-op (a constructor
-  // throw there allocates nothing to dispose). Nothing above depends on the
-  // participant, so this ordering is free.
+  // default in-process engine is built here too, from `library`, so the engine the
+  // finally disposes is a real one on every path -- it holds the library's server or
+  // client objects (the secret key among them) whether or not the participant took
+  // ownership of it. Nothing above depends on the participant, so this ordering is
+  // free.
   const psiRole = isReceiver ? "joiner" : "starter";
   const psiId = isReceiver ? "client" : "server";
   // The disclosure this round is built for, settled once from the agreed algorithm
@@ -1126,10 +1159,11 @@ export async function runExchange(
     // (the secret key among the WASM-heap state they hold), and a worker-backed engine
     // terminates its worker, so a ref'd worker handle can never hold the process open
     // at teardown. If the constructor threw before the participant took ownership,
-    // dispose the bare injected engine so the worker psiEngineFactory already spawned
-    // is still terminated, never orphaned.
+    // dispose the engine directly -- whether psiEngineFactory spawned a worker or the
+    // default in-process engine was built above, it is a live engine here and never
+    // orphaned.
     if (participant !== undefined) participant.dispose();
-    else engine?.dispose();
+    else engine.dispose();
   }
 
   // Send-gate: transmit payload only to a partner entitled to the result. A party

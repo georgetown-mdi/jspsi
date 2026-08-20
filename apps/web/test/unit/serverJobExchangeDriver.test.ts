@@ -279,6 +279,25 @@ describe("createServerJobExchangeDriver event mapping", () => {
     expect(outputs.resultWithheld).toBe(true);
   });
 
+  test("a written result outranks a count the same event carries", async () => {
+    // An out-of-contract event: the contract carries a count only on the
+    // resultWritten:false arm (docs/spec/CLI_EVENTS.md, `result`). Reading the count
+    // first would cost the operator the download link for a result the appliance did
+    // write, so resultWritten stays the outer discriminant.
+    const { client } = scriptedClient([
+      { v: 1, type: "result", resultWritten: true, intersectionCount: 7 },
+    ]);
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(outputs.intersectionCount).toBeUndefined();
+    expect(outputs.resultWithheld).toBeUndefined();
+  });
+
   test("a security error passes its category through VERBATIM", async () => {
     // The single most important fidelity requirement: a CLI-classified security
     // terminal must never be downgraded to the retryable 'exchange'.
