@@ -1979,9 +1979,9 @@ test("displayInvitation: shows each matching rule the acceptor is consenting to"
 });
 
 test("displayInvitation: a proposed setting the run does not apply is marked, not stated as in force", () => {
-  // deduplicate and psi-c are declarable but unimplemented, and core refuses both
-  // on every run path. Printing either as a plain fact would have the operator
-  // consent to a behavior the run does not perform.
+  // deduplicate is declarable but unimplemented, and core refuses it on every
+  // run path. Printing it as a plain fact would have the operator consent to a
+  // behavior the run does not perform.
   const log = getLogger("accept-display-proposed-test");
   log.setLevel("silent");
   const base = sampleToken(FUTURE());
