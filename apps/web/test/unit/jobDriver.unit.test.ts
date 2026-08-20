@@ -10,6 +10,7 @@ import {
 
 import {
   JOB_CLI_BINARY_ENV,
+  PERSISTENCE_LOSS_EXIT_CODE,
   classifyExit,
   resolveCliBinaryPath,
   validateAndSanitizeEvent,
@@ -48,6 +49,28 @@ describe("classifyExit maps CLI exit codes to terminal states", () => {
 
   test("64 / 69 / 1 -> failed with the code recorded", () => {
     for (const code of [64, 69, 1]) {
+      expect(classifyExit(code, null)).toEqual({
+        outcome: "failed",
+        exitCode: code,
+        signal: null,
+      });
+    }
+  });
+
+  test("73 -> completedWithPersistenceLoss, not failed", () => {
+    expect(PERSISTENCE_LOSS_EXIT_CODE).toBe(73);
+    expect(classifyExit(PERSISTENCE_LOSS_EXIT_CODE, null)).toEqual({
+      outcome: "completedWithPersistenceLoss",
+      exitCode: 73,
+      signal: null,
+    });
+  });
+
+  // The persistence-loss code is one value, not a range: the sysexits codes on
+  // either side of 73 are ordinary failures, and widening the branch would tell
+  // an operator not to re-run a run that never completed its exchange.
+  test("every other non-zero exit stays failed", () => {
+    for (const code of [2, 70, 71, 72, 74, 75, 76, 77, 78, 126, 127, 255]) {
       expect(classifyExit(code, null)).toEqual({
         outcome: "failed",
         exitCode: code,

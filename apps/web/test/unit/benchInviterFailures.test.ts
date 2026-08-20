@@ -51,6 +51,18 @@ describe("failureFor", () => {
     expect(failure.message).toContain("start over with a fresh invitation");
   });
 
+  test("the output message forbids the re-run and still carries the cause", () => {
+    // The exchange itself completed, so the alert withholds every run-again
+    // control -- and says why, rather than leaving the operator to look for the
+    // control somewhere else. The local cause stays in the message.
+    const failure = failureFor("output", new Error("blob quota exceeded"));
+    expect(failure.message).toContain("do not run this exchange again");
+    expect(failure.message).toContain("already happened");
+    expect(failure.message).toContain(
+      "a local write failed: blob quota exceeded",
+    );
+  });
+
   test("the exchange message makes no on-device data claim", () => {
     expect(failureFor("exchange", new Error("ICE failed")).message).toBe(
       "The exchange could not be completed - usually a temporary " +

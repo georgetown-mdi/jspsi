@@ -56,7 +56,8 @@ The job id is a server-generated v4 UUID; the client never supplies it. Every id
 {
   "id": "<uuid>",
   "status": "running" | "succeeded" | "failed" | "cancelled",
-  "terminal": { "outcome": "...", "exitCode": <int|null>, "signal": "<sig|null>" } | null,
+  "terminal": { "outcome": "succeeded" | "failed" | "cancelled" | "completedWithPersistenceLoss",
+                "exitCode": <int|null>, "signal": "<sig|null>" } | null,
   "terminalEmitted": <bool>,
   "eventCount": <int>,
   "resultAvailable": <bool>,
@@ -67,9 +68,11 @@ The job id is a server-generated v4 UUID; the client never supplies it. Every id
 
 `terminal` is null until the child exits; `resultAvailable` is true exactly when `status` is `succeeded`. `recordAvailable` is true only when the job succeeded, both the record and its verification-keys file are on disk, and the record validates and yields a `createdAt`; the record pair is offered all-or-nothing. `recordCreatedAt` is the record's own timestamp, present exactly when `recordAvailable` is true -- a client derives the download filename from it, matching the in-browser exchange path. Because the CLI's record write is non-fatal (a disk failure after a successful exchange is warned, not thrown), a job can be `resultAvailable: true` with `recordAvailable: false`.
 
+The two fields answer different questions and are read together. `status` is the ARTIFACT promise, set by the terminal event the CLI emitted, and it is what the result, record, and keys routes gate on. `terminal.outcome` is the RUN classification, set by the child's exit (see [Exit-code reconciliation](#exit-code-reconciliation)). They diverge on exactly one condition: `completedWithPersistenceLoss`, the CLI's persistence-loss exit ([CLI_EVENTS.md](CLI_EVENTS.md#persistence-loss)) -- the exchange completed and a local write did not. A run that took one and still emitted its `result` terminal is `succeeded` with `terminal.outcome: "completedWithPersistenceLoss"`, and its artifacts are served: the exchange happened and the result file is on disk. The `warning` events that preceded the terminal name what was lost; the outcome is what tells a supervisor -- or the console seat -- that the run must not be repeated, because repeating it would re-send this party's data for an exchange that already happened.
+
 ### The `GET /api/jobs/:jobId/result` response
 
-Served only when `status === "succeeded"` and the output file exists and is readable; any other case (unfinished, failed, cancelled, or missing file) is `404` rather than leaking whether an unfinished job exists. The body is the job's server-chosen output file inside its workdir -- never a client-named path. Headers: `Content-Type: text/csv; charset=utf-8`, `Content-Disposition: attachment; filename="result-<id>.csv"` (a fixed, server-derived download name), and `X-Content-Type-Options: nosniff`, plus the `no-store` discipline.
+Served only when `status === "succeeded"` and the output file exists and is readable; any other case (unfinished, failed, cancelled, or missing file) is `404` rather than leaking whether an unfinished job exists. The gate is on `status` alone, never on `terminal.outcome`, which is what makes a persistence loss servable rather than withheld: such a run completed its exchange and usually wrote its result file, and the loss is an audit artifact or a configuration record beside it. The one persistence loss that is the result file itself arrives as the CLI's own `output` `error` terminal, so its `status` is `failed` and this route `404`s -- decided by the terminal event the CLI actually emitted, not by the exit code both cases share. The body is the job's server-chosen output file inside its workdir -- never a client-named path. Headers: `Content-Type: text/csv; charset=utf-8`, `Content-Disposition: attachment; filename="result-<id>.csv"` (a fixed, server-derived download name), and `X-Content-Type-Options: nosniff`, plus the `no-store` discipline.
 
 ### The `GET /api/jobs/:jobId/record` and `/api/jobs/:jobId/keys` responses
 
@@ -393,7 +396,9 @@ Degradation is fail-safe, never a crash:
 
 ## Exit-code reconciliation
 
-The child's exit is classified from the exit code and signal, per the CLI's terminal contract ([CLI_EVENTS.md](CLI_EVENTS.md#terminal-event-guarantees)): exit `0` is `succeeded`; an interrupt -- exit `130` or `143`, or death to `SIGINT`/`SIGTERM` -- is `cancelled`; any other exit or signal is `failed`, with the exit code recorded. An interrupt legitimately carries no terminal fd-3 event, so a `cancelled` job's stream is not a broken one.
+The child's exit is classified from the exit code and signal, per the CLI's terminal contract ([CLI_EVENTS.md](CLI_EVENTS.md#terminal-event-guarantees)): exit `0` is `succeeded`; an interrupt -- exit `130` or `143`, or death to `SIGINT`/`SIGTERM` -- is `cancelled`; exit `73` is `completedWithPersistenceLoss`; any other exit or signal is `failed`, with the exit code recorded. An interrupt legitimately carries no terminal fd-3 event, so a `cancelled` job's stream is not a broken one.
+
+`completedWithPersistenceLoss` is the CLI's persistence-loss code ([CLI_EVENTS.md](CLI_EVENTS.md#persistence-loss)): the exchange completed and a local write did not. It is a terminal outcome of its own rather than a `failed` one because the two demand opposite operator responses -- a failed run is re-run, and this one must not be, since re-running re-sends this party's data for an exchange that already happened. The classifier reads only the exit code, so it does not distinguish the two shapes the code covers; the terminal event does, and it is what sets `status` (see [The `GET /api/jobs/:jobId` status body](#the-get-apijobsjobid-status-body)). The value `73` is mirrored from the CLI rather than imported -- the CLI is a separate workspace this server drives as a subprocess -- so the pair is aligned by review, as the retry-budget bound above is.
 
 **Close-not-exit ordering.** The classifier fires on the child's `close` event, not `exit`. `close` fires only after every stdio stream has drained, so the CLI's own terminal fd-3 event is always parsed before the exit is classified. On `exit` the terminal line can still sit in the pipe buffer, and the manager would synthesize a misclassified terminal in its place. A spawn or process `error` classifies as `failed` (exit code recorded as 1) with a sanitized diagnostic, so a terminal state is always reached.
 
@@ -401,7 +406,10 @@ The child's exit is classified from the exit code and signal, per the CLI's term
 
 - `cancelled`: a `cancelled`-flavored `error` terminal (`category: "exchange"`, `cancelled: true`, message naming SIGINT or SIGTERM).
 - `succeeded` with no terminal event: a `result` terminal (`resultWritten: true`).
+- `completedWithPersistenceLoss` with no terminal event: an `error` terminal with `category: "output"`, the local-output-stage category, whose message states that a local write was lost and that the appliance cannot say which one. The category is load-bearing rather than cosmetic: it is the one a console seat renders with no way to run the exchange again, while the `exchange` category below is retryable and would invite the re-run this exit code exists to prevent.
 - any other exit with no terminal event: a `failed` terminal (`category: "exchange"`) noting the stream broke and, when known, the exit code.
+
+A synthesized `result` terminal sets `status` to `succeeded` and a synthesized `error` to `failed` -- except the interrupt case above, whose `status` is already `cancelled` before synthesis and keeps it. A persistence loss with no terminal event is therefore `failed`: the console never saw an artifact announced, so it promises none, which is the rule every broken stream takes regardless of exit code. The outcome still carries the do-not-repeat signal, and the synthesized message points the operator at the workdir.
 
 ## Cancellation escalation
 

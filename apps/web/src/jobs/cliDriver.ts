@@ -30,14 +30,30 @@ export interface RelayEvent {
 }
 
 /**
+ * The exit code the CLI reports when the exchange itself completed and a local
+ * write did not -- an audit artifact, a configuration or consent record, or the
+ * result file (docs/spec/CLI_EVENTS.md, Persistence loss). Mirrored here rather
+ * than imported, exactly as the fd-3 vocabulary above is: the CLI is a separate
+ * workspace this server drives as a subprocess. The pair is therefore aligned by
+ * review, not by the module graph.
+ */
+export const PERSISTENCE_LOSS_EXIT_CODE = 73;
+
+/**
  * How a driven CLI run terminated, reconciled with the CLI's terminal-event
  * contract (docs/spec/CLI_EVENTS.md, Terminal-event guarantees):
  * - `succeeded`: exit 0.
  * - `failed`: an organic failure (exit 64/69/1), with the code recorded.
  * - `cancelled`: an interrupt (exit 130 for SIGINT, 143 for SIGTERM), the
  *   legitimate "no terminal event + signal exit" case.
+ * - `completedWithPersistenceLoss`: {@link PERSISTENCE_LOSS_EXIT_CODE}. The
+ *   exchange completed and a local write did not, so the run must not be
+ *   repeated -- re-running would re-send this party's data for an exchange that
+ *   already happened. What was lost is named by the `warning` events the CLI
+ *   emitted before its terminal event, which the relay already carries.
  */
-export type JobOutcome = "succeeded" | "failed" | "cancelled";
+export type JobOutcome =
+  "succeeded" | "failed" | "cancelled" | "completedWithPersistenceLoss";
 
 /** The reconciled terminal state of a CLI run. */
 export interface JobTerminalState {
@@ -461,6 +477,8 @@ function attachStderrTail(child: ChildProcess): { get: () => string } {
  * - 0 -> succeeded.
  * - 130 (SIGINT) / 143 (SIGTERM) -> cancelled; a signal exit legitimately has no
  *   terminal fd-3 event, so this is not treated as a broken stream.
+ * - 73 -> completedWithPersistenceLoss; the exchange completed and a local write
+ *   did not.
  * - any other exit / a death to a signal -> failed, with the code recorded.
  *
  * Whether the CLI emitted its own terminal fd-3 event is the manager's concern
@@ -504,6 +522,12 @@ export function classifyExit(
     return { outcome: "succeeded", exitCode: 0, signal: null };
   if (exitCode === 130 || exitCode === 143)
     return { outcome: "cancelled", exitCode, signal: null };
+  if (exitCode === PERSISTENCE_LOSS_EXIT_CODE)
+    return {
+      outcome: "completedWithPersistenceLoss",
+      exitCode,
+      signal: null,
+    };
   if (signal === "SIGINT")
     return { outcome: "cancelled", exitCode: null, signal };
   if (signal === "SIGTERM")

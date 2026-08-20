@@ -1720,11 +1720,7 @@ describe("inviter bench", () => {
       .element(page.getByText("Results unavailable"))
       .toBeInTheDocument();
     await expect
-      .element(
-        page.getByText(
-          /generating the results file failed: blob quota exceeded/,
-        ),
-      )
+      .element(page.getByText(/a local write failed: blob quota exceeded/))
       .toBeInTheDocument();
     expect(page.getByRole("button", { name: "Try again" }).query()).toBeNull();
     expect(
