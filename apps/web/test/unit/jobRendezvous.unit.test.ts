@@ -239,7 +239,7 @@ describe("the shared folder's name the invitation is minted from", () => {
 });
 
 describe("the split rendezvous a second mount provisions", () => {
-  test("the outbound leg has no data-root fallback, so a half-pair is unrepresentable", () => {
+  test("the outbound leg has no data-root fallback, so the variable is the whole signal", () => {
     // Set the variable and the appliance is split; leave it unset and it is not,
     // whatever else is mounted. That is the whole signal.
     expect(
@@ -358,20 +358,70 @@ describe("the split rendezvous a second mount provisions", () => {
     // reduces to no last segment is a filesystem root, which contains any other
     // mount and so trips the containment refusal first. The guard is what makes a
     // split with an unnameable leg unrepresentable rather than minted half-formed.
-    const problem = rendezvousSplitProblem({
-      dir: "/mnt/in",
-      outboundDir: "/mnt/out",
-      locator: "in",
-    });
+    const problem = rendezvousSplitProblem(
+      { dir: "/mnt/in", outboundDir: "/mnt/out", locator: "in" },
+      true,
+    );
     expect(problem).toContain("cannot name both rendezvous folders");
     expect(problem).toContain("JOB_RENDEZVOUS_OUTBOUND_NAME");
   });
 
-  test("an outbound mount with no inbound one at all is refused", () => {
+  test("an outbound mount with an inbound leg on the fallback is refused", () => {
+    // The production shape of a half-provisioned split: JOB_DATA_ROOT is the job
+    // API's own feature gate, so a console that runs at all has one, and the
+    // inbound leg always resolves through its fallback. Were the fallback allowed
+    // to stand in for the inbound leg, an operator who set only the outbound
+    // variable would get a split whose partner-synced inbound folder is the data
+    // root -- every job workdir's config, key, input, and results.
     const problem = resolveJobRendezvousProvisioning({
-      JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out",
+      JOB_DATA_ROOT: "/data/jobs",
+      JOB_RENDEZVOUS_OUTBOUND_DIR: "/data/out",
     }).problem;
     expect(problem).toContain("JOB_RENDEZVOUS_DIR");
+    expect(problem).toContain("JOB_RENDEZVOUS_OUTBOUND_DIR");
+  });
+
+  test("a mistyped inbound variable is the same refusal", () => {
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: "/data/jobs",
+        JOB_RENDEVOUS_DIR: "/mnt/in",
+        JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out",
+      }).problem,
+    ).toContain("JOB_RENDEZVOUS_DIR");
+  });
+
+  test("an outbound mount with no data root behind it is refused too", () => {
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out",
+      }).problem,
+    ).toContain("JOB_RENDEZVOUS_DIR");
+  });
+
+  test("both legs named explicitly provisions the split beside a data root", () => {
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: "/data/jobs",
+        JOB_RENDEZVOUS_DIR: "/mnt/in",
+        JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out",
+      }),
+    ).toEqual({
+      dir: path.resolve("/mnt/in"),
+      outboundDir: path.resolve("/mnt/out"),
+      folderName: "in",
+      outboundFolderName: "out",
+      locator: "in",
+      outboundLocator: "out",
+    });
+  });
+
+  test("the inbound leg's data-root fallback still runs an unsplit console", () => {
+    const provisioning = resolveJobRendezvousProvisioning({
+      JOB_DATA_ROOT: "/data/jobs",
+    });
+    expect(provisioning.dir).toBe(path.resolve("/data/jobs"));
+    expect(provisioning.problem).toBeUndefined();
   });
 
   test("both legs are enumerated for the containment surfaces", () => {
@@ -400,6 +450,18 @@ describe("the split rendezvous a second mount provisions", () => {
     });
     expect(provisioning.problem).toBeDefined();
     expect(jobRendezvousDirs(provisioning)).toHaveLength(2);
+  });
+
+  test("a half-provisioned split reports both mounts too", () => {
+    const provisioning = resolveJobRendezvousProvisioning({
+      JOB_DATA_ROOT: "/data/jobs",
+      JOB_RENDEZVOUS_OUTBOUND_DIR: "/data/out",
+    });
+    expect(provisioning.problem).toBeDefined();
+    expect(jobRendezvousDirs(provisioning)).toEqual([
+      path.resolve("/data/jobs"),
+      path.resolve("/data/out"),
+    ]);
   });
 });
 

@@ -36,9 +36,11 @@ export const JOB_RENDEZVOUS_DIR_ENV = "JOB_RENDEZVOUS_DIR";
  *
  * Deliberately WITHOUT a {@link JOB_DATA_ROOT_ENV} fallback, unlike the inbound leg:
  * the variable being set is the one and only signal that this appliance provisions a
- * split rendezvous, so a fallback would make a half-provisioned appliance -- one
- * mount, two legs -- representable, and every filedrop exchange on a plain
- * single-mount console would silently become a split one.
+ * split rendezvous, and a fallback would turn every filedrop exchange on a plain
+ * single-mount console into a split one. Setting it alone provisions no split
+ * either: a split takes both legs from their own variables, so an inbound leg that
+ * arrived through the data-root fallback is refused (see
+ * {@link rendezvousSplitProblem}) rather than synced to the partner.
  *
  * Server-side configuration, never a browser-sent path.
  */
@@ -97,9 +99,10 @@ declare global {
  *
  * `problem` is why a filedrop exchange CANNOT run as provisioned, in the operator's
  * own terms and naming the variable to fix. It is a refusal rather than a warning:
- * the faults it reports -- two legs that are one directory, or two legs the console
- * cannot name apart -- are configurations under which the exchange would read its
- * own writes as the partner's or could not mint an invitation at all, neither of
+ * the faults it reports -- two legs that are one directory, two legs the console
+ * cannot name apart, or one leg of a split nobody named -- are configurations under
+ * which the exchange would read its own writes as the partner's, could not mint an
+ * invitation at all, or would sync a folder the operator never offered, none of
  * which the operator's own directory-layout latitude covers. When it is set, no
  * filedrop exchange is offered or created.
  */
@@ -118,6 +121,25 @@ export interface JobRendezvousProvisioning {
   problem?: string;
 }
 
+/** The inbound (or single shared) rendezvous mount together with WHERE it came
+ * from: {@link JOB_RENDEZVOUS_DIR_ENV} itself, or the {@link JOB_DATA_ROOT_ENV}
+ * fallback that lets one mount run a full console. The source is what separates a
+ * provisioned split from a half-provisioned one, since the data root is the job
+ * API's own feature gate and so resolves on every console that runs at all. */
+function resolveInboundRendezvousMount(env: NodeJS.ProcessEnv): {
+  dir: string | undefined;
+  fromOwnVariable: boolean;
+} {
+  const configured = (env[JOB_RENDEZVOUS_DIR_ENV] ?? "").trim();
+  if (configured.length > 0)
+    return { dir: path.resolve(configured), fromOwnVariable: true };
+  const dataRoot = (env[JOB_DATA_ROOT_ENV] ?? "").trim();
+  return {
+    dir: dataRoot.length > 0 ? path.resolve(dataRoot) : undefined,
+    fromOwnVariable: false,
+  };
+}
+
 /** Resolve the rendezvous directory to an absolute path from
  * {@link JOB_RENDEZVOUS_DIR_ENV}, falling back to {@link JOB_DATA_ROOT_ENV} when it is
  * unset so one mount runs a full console, or undefined when both are unset. A plain
@@ -128,11 +150,7 @@ export interface JobRendezvousProvisioning {
 export function resolveJobRendezvousDir(
   env: NodeJS.ProcessEnv,
 ): string | undefined {
-  const configured = (env[JOB_RENDEZVOUS_DIR_ENV] ?? "").trim();
-  const resolved =
-    configured.length > 0 ? configured : (env[JOB_DATA_ROOT_ENV] ?? "").trim();
-  if (resolved.length === 0) return undefined;
-  return path.resolve(resolved);
+  return resolveInboundRendezvousMount(env).dir;
 }
 
 /** Resolve the outbound rendezvous leg from
@@ -243,6 +261,12 @@ function containsOrEqual(parent: string, child: string): boolean {
  * when the pair is coherent. Each case is a refusal with the variable to set named
  * in it, because none of them is a layout choice the operator can be left to make:
  *
+ * - An outbound leg beside an inbound one that nobody named -- the data-root
+ *   fallback resolves on every console that runs at all, so an operator who sets
+ *   only the outbound variable, or mistypes the inbound one, would otherwise get a
+ *   split whose partner-synced INBOUND folder is the data root, holding every job
+ *   workdir's config, key, input, and results. A split takes both legs from their
+ *   own variables; the fallback stays what it is for an unsplit appliance.
  * - Two legs that are one directory, or one nested inside the other, would have
  *   this party read its own writes as the partner's. Core's `pathsResolveToSameDir`
  *   refine catches only textual same-directory equality on the composed config, so
@@ -259,14 +283,16 @@ function containsOrEqual(parent: string, child: string): boolean {
  */
 export function rendezvousSplitProblem(
   provisioning: JobRendezvousProvisioning,
+  inboundDirFromOwnVariable: boolean,
 ): string | undefined {
   const { dir, outboundDir, locator, outboundLocator } = provisioning;
   if (outboundDir === undefined) return undefined;
-  if (dir === undefined)
+  if (dir === undefined || !inboundDirFromOwnVariable)
     return (
-      `${JOB_RENDEZVOUS_OUTBOUND_DIR_ENV} is set but no inbound rendezvous ` +
-      `directory resolves. Set ${JOB_RENDEZVOUS_DIR_ENV} to the folder your ` +
-      "partner writes into and restart the appliance."
+      `${JOB_RENDEZVOUS_OUTBOUND_DIR_ENV} is set but ${JOB_RENDEZVOUS_DIR_ENV} ` +
+      "is not, so this appliance has only one leg of a split rendezvous. Set " +
+      `${JOB_RENDEZVOUS_DIR_ENV} to the folder your partner writes into and ` +
+      "restart the appliance."
     );
   if (containsOrEqual(dir, outboundDir) || containsOrEqual(outboundDir, dir))
     return (
@@ -301,7 +327,7 @@ export function rendezvousSplitProblem(
 export function resolveJobRendezvousProvisioning(
   env: NodeJS.ProcessEnv,
 ): JobRendezvousProvisioning {
-  const dir = resolveJobRendezvousDir(env);
+  const { dir, fromOwnVariable } = resolveInboundRendezvousMount(env);
   const outboundDir = resolveJobRendezvousOutboundDir(env);
   const folderName = resolveJobRendezvousFolderName(env, dir);
   const outboundFolderName = resolveJobRendezvousOutboundFolderName(
@@ -322,7 +348,7 @@ export function resolveJobRendezvousProvisioning(
   );
   if (outboundLocator !== undefined)
     provisioning.outboundLocator = outboundLocator;
-  const problem = rendezvousSplitProblem(provisioning);
+  const problem = rendezvousSplitProblem(provisioning, fromOwnVariable);
   if (problem !== undefined) provisioning.problem = problem;
   return provisioning;
 }
