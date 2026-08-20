@@ -147,7 +147,7 @@ Retain mode and the lockless rendezvous are agreements, not negotiations: your p
 **Tuning the connection.** Beside it, a "Connection tuning" section carries the same connection settings the CLI exposes as flags, also collapsed by default. Leave a field blank to take the default, which the field shows as its placeholder.
 
 - **How often to check for your partner's files** is the poll interval. Checking less often is gentler on the server; checking more often finds your partner's files sooner.
-- **How long to wait for your partner** and **how long to wait for each connection attempt** are the peer and connect timeouts. The connect timeout applies to each attempt, not to all of them together.
+- **How long to wait for your partner** and **how long to wait for each connection attempt** are the peer and connect timeouts. The connect timeout applies to each attempt, not to all of them together. Neither may exceed seven days, the longest wait the command line itself accepts.
 - **How many times to retry a failed connection** is the reconnect budget. Raise it for a link that drops often.
 - **Open a new connection for each check** is offered on SFTP only, and connects afresh for each check instead of holding one connection for the whole exchange. Use it when the server limits how long a connection may stay open and the exchange spans long waits. Unlike retain mode, it is this side's choice alone -- your partner neither sees it nor has to match it.
 

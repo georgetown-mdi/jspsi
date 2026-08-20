@@ -19,6 +19,7 @@ import {
   TUNING_DEFAULT_MS,
   connectionTuningAdvisories,
   connectionTuningProblems,
+  connectionTuningSummary,
   defaultPlaceholder,
 } from "./connectionTuningModel";
 
@@ -35,18 +36,6 @@ const UNIT_LABELS: Record<DurationUnit, string> = {
   m: "minutes",
   h: "hours",
 };
-
-/** The collapsed summary, so a closed card is not a blind box: it says whether
- * anything here departs from the defaults the run would otherwise take. */
-function draftSummary(draft: ConnectionTuningDraft): string {
-  const touched =
-    draft.pollInterval.magnitude.trim() !== "" ||
-    draft.peerTimeout.magnitude.trim() !== "" ||
-    draft.serverConnectTimeout.magnitude.trim() !== "" ||
-    draft.maxReconnectAttempts.trim() !== "" ||
-    draft.connectionPerPoll;
-  return touched ? "Tuned" : "Default";
-}
 
 /** One duration control: the magnitude beside the unit it is authored in. The
  * unit select carries no visible label -- the pairing is visual -- so its
@@ -135,7 +124,7 @@ export function ConnectionTuningCard({
   return (
     <DisclosureSection
       label="Connection tuning"
-      summary={draftSummary(draft)}
+      summary={connectionTuningSummary(draft, capabilities)}
       open={open}
       onToggle={onToggleOpen}
       headingOrder={2}

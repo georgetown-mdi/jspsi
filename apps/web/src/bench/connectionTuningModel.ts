@@ -6,6 +6,7 @@ import {
   DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
   LOW_POLLING_FREQUENCY_WARN_MS,
   MAX_RECONNECT_ATTEMPTS,
+  MAX_TIMEOUT_SECONDS,
 } from "@psilink/core";
 
 import type { JobExchangeOptions } from "@jobs/intent";
@@ -123,6 +124,29 @@ function durationMs(field: DurationField): number | undefined | null {
 }
 
 /**
+ * The longest wait either timeout field may state: core's seven-day
+ * {@link MAX_TIMEOUT_SECONDS}, in the milliseconds the job intent speaks. Both
+ * fields ride the CLI's `--peer-timeout` / `--connection-timeout` on a zero-setup
+ * run, where the same ceiling is a usage error (exit 64), so a larger value here
+ * would create a job whose child exits immediately -- accepted and then dropped.
+ * The poll interval takes no ceiling, exactly as `--polling-frequency` takes
+ * none: a long interval is merely slow.
+ */
+const MAX_TIMEOUT_MS = MAX_TIMEOUT_SECONDS * 1000;
+
+/**
+ * A timeout field's value in milliseconds, held to {@link MAX_TIMEOUT_MS} on top
+ * of {@link durationMs}'s shape rule. `null` for either refusal;
+ * {@link connectionTuningProblems} distinguishes the two so the operator is told
+ * which rule the value broke.
+ */
+function timeoutMs(field: DurationField): number | undefined | null {
+  const ms = durationMs(field);
+  if (typeof ms !== "number") return ms;
+  return ms > MAX_TIMEOUT_MS ? null : ms;
+}
+
+/**
  * The retry budget the draft states, or `undefined` when blank. `null` for a value
  * that is not an integer within core's accepted range, reported as a form problem.
  * Zero is admissible and meaningful -- "connect once, do not reconnect" -- so this
@@ -148,8 +172,8 @@ export function connectionTuningOptions(
   capabilities: ConnectionTuningCapabilities = { connectionPerPoll: true },
 ): JobExchangeOptions | undefined {
   const pollIntervalMs = durationMs(draft.pollInterval);
-  const peerTimeoutMs = durationMs(draft.peerTimeout);
-  const serverConnectTimeoutMs = durationMs(draft.serverConnectTimeout);
+  const peerTimeoutMs = timeoutMs(draft.peerTimeout);
+  const serverConnectTimeoutMs = timeoutMs(draft.serverConnectTimeout);
   const maxReconnectAttempts = reconnectAttempts(draft.maxReconnectAttempts);
   const stated: JobExchangeOptions = {
     ...(typeof pollIntervalMs === "number" ? { pollIntervalMs } : {}),
@@ -192,14 +216,39 @@ function durationProblem(label: string): string {
   return `${label} must be a whole number greater than zero, or left blank for the default.`;
 }
 
+/** The problem a timeout field past {@link MAX_TIMEOUT_MS} reports, stated in the
+ * whole days the ceiling is set in. */
+function timeoutCeilingProblem(label: string): string {
+  return (
+    `${label} cannot be longer than ${MAX_TIMEOUT_SECONDS / 86_400} days, ` +
+    "the longest wait an exchange accepts."
+  );
+}
+
+/**
+ * What one timeout field states wrongly, or `undefined` when it is admissible.
+ * The shape rule is reported ahead of the ceiling, so a value breaking both is
+ * named once and by the rule the operator meets first.
+ */
+function timeoutProblem(
+  field: DurationField,
+  label: string,
+): string | undefined {
+  if (durationMs(field) === null) return durationProblem(label);
+  if (timeoutMs(field) === null) return timeoutCeilingProblem(label);
+  return undefined;
+}
+
 /**
  * Everything wrong with the draft, as messages to show beside the card -- empty
  * when it is admissible. The run is blocked while this is non-empty, so a value
  * the intent schema would refuse is caught here, at authoring time, instead of
  * failing the create.
  *
- * These are shape rules on what the operator typed, not judgements about the
- * values: an aggressive poll interval or a huge retry budget is admissible and
+ * These are shape rules on what the operator typed plus the two ceilings the run
+ * itself refuses -- core's {@link MAX_RECONNECT_ATTEMPTS} and the seven-day
+ * {@link MAX_TIMEOUT_MS} the timeout flags cap -- never a judgement about a value
+ * both boundaries accept: an aggressive poll interval or a large retry budget
  * draws an advisory ({@link connectionTuningAdvisories}) rather than a block.
  */
 export function connectionTuningProblems(
@@ -208,10 +257,16 @@ export function connectionTuningProblems(
   const problems: Array<string> = [];
   if (durationMs(draft.pollInterval) === null)
     problems.push(durationProblem("The check interval"));
-  if (durationMs(draft.peerTimeout) === null)
-    problems.push(durationProblem("The wait for your partner"));
-  if (durationMs(draft.serverConnectTimeout) === null)
-    problems.push(durationProblem("The connection attempt timeout"));
+  const peerProblem = timeoutProblem(
+    draft.peerTimeout,
+    "The wait for your partner",
+  );
+  if (peerProblem !== undefined) problems.push(peerProblem);
+  const connectProblem = timeoutProblem(
+    draft.serverConnectTimeout,
+    "The connection attempt timeout",
+  );
+  if (connectProblem !== undefined) problems.push(connectProblem);
   if (reconnectAttempts(draft.maxReconnectAttempts) === null)
     problems.push(
       "The retry budget must be a whole number from 0 to " +
@@ -279,6 +334,28 @@ export function connectionTuningAdvisories(
   )
     advisories.push(CONNECTION_PER_POLL_SHORT_INTERVAL_ADVISORY);
   return advisories;
+}
+
+/**
+ * The card's collapsed summary, so a closed card is not a blind box: whether
+ * anything here departs from the defaults the run would otherwise take. It reads
+ * the same capabilities {@link connectionTuningOptions} emits under, so a field
+ * the flow drops -- the SFTP session mode on a shared-directory transport -- is
+ * not counted as a departure the run would never make. Lives with the model
+ * rather than the card for exactly that reason: which fields count is the
+ * capabilities rule, not a presentation choice.
+ */
+export function connectionTuningSummary(
+  draft: ConnectionTuningDraft,
+  capabilities: ConnectionTuningCapabilities,
+): string {
+  const touched =
+    draft.pollInterval.magnitude.trim() !== "" ||
+    draft.peerTimeout.magnitude.trim() !== "" ||
+    draft.serverConnectTimeout.magnitude.trim() !== "" ||
+    draft.maxReconnectAttempts.trim() !== "" ||
+    (capabilities.connectionPerPoll && draft.connectionPerPoll);
+  return touched ? "Tuned" : "Default";
 }
 
 /**

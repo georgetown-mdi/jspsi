@@ -8,6 +8,7 @@ import {
   ExchangeSpecSchema,
   LinkageTermsSchema,
   MAX_NAME_LENGTH,
+  MAX_TIMEOUT_SECONDS,
   MetadataSchema,
   SHARED_SECRET_REGEX,
   StandardizationSchema,
@@ -142,12 +143,24 @@ const jobSftpExchangeOptionsSchema: z.ZodType<JobExchangeOptions> = z
  * grammar takes a second-or-coarser unit and rejects a millisecond one. A value
  * that is not a whole number of seconds has no faithful flag form, so it is
  * refused here rather than rounded into one the operator did not author.
+ *
+ * Both flags are also capped at core's {@link MAX_TIMEOUT_SECONDS} (seven days),
+ * which the CLI enforces as a usage error, so a value past it is refused here
+ * too: accepting one would create a job -- occupying the appliance's single run
+ * slot -- whose spawned child then exits 64 on the very argv the job exists to
+ * run.
  */
 function wholeSecondFlagMs(field: string) {
   return z
     .number()
     .int()
     .positive()
+    .max(
+      MAX_TIMEOUT_SECONDS * 1000,
+      `${field} must not exceed ${MAX_TIMEOUT_SECONDS / 86_400} days on a ` +
+        "zero-setup exchange: the duration flag it is carried on refuses a " +
+        "longer value",
+    )
     .refine((ms) => ms % 1000 === 0, {
       message:
         `${field} must be a whole number of seconds on a zero-setup ` +
@@ -585,10 +598,10 @@ function withDefaultExchangeMode(raw: unknown): unknown {
  * `path`, a `host`, a `server` block, an `@path` credential, or a
  * connection-selecting `remote`) past validation, and each arm admits only its own
  * fields. The sftp arm carries no connection field at all (the appliance runs one
- * authored connection), and its options variant floors `pollIntervalMs` at 1000 ms
- * because its poll lists a remote authored server, not a job-local directory.
- * A missing `mode` defaults to `"exchange"`, so a merged exchange client parses
- * unchanged.
+ * authored connection), and its options variant differs from the filedrop arm's
+ * only in admitting `connectionPerPoll`, the dialing mode a connectionless
+ * filedrop client cannot honour. A missing `mode` defaults to `"exchange"`, so a
+ * merged exchange client parses unchanged.
  *
  * A union-level refine enforces exactly one input source -- inline `inputCsv` or
  * the mounted `inputFile` reference -- on both arms: the arm's strict parse runs
@@ -803,8 +816,8 @@ export function composeConfigDocument(
  * reach the file exactly as they do on the filedrop path -- as schema-validated
  * YAML values -- the acceptance's `outbound_payload_consent` is derived exactly as
  * it is there (see {@link outboundPayloadConsentFor}), and the tuning `options`
- * are the same numeric/boolean/enum subset (with the sftp poll floor already
- * enforced by the intent schema).
+ * are the same numeric/boolean/enum subset, plus the `connectionPerPoll` dialing
+ * mode this channel is the only one to admit.
  *
  * This path deliberately does NOT use `mintExchangeFile`: its
  * {@link ExchangeFileInput} typing makes credentials unrepresentable, an

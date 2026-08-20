@@ -8,6 +8,7 @@ import {
   DEFAULT_POLLING_FREQUENCY_MS,
   LOW_POLLING_FREQUENCY_WARN_MS,
   MAX_RECONNECT_ATTEMPTS,
+  MAX_TIMEOUT_SECONDS,
 } from "@psilink/core";
 
 import {
@@ -19,6 +20,7 @@ import {
   connectionTuningAdvisories,
   connectionTuningOptions,
   connectionTuningProblems,
+  connectionTuningSummary,
   defaultPlaceholder,
   withConnectionTuning,
 } from "@bench/connectionTuningModel";
@@ -259,6 +261,43 @@ describe("a malformed value is a form problem, not a failed job", () => {
     ).toEqual([]);
   });
 
+  test("a wait past the command line's seven-day ceiling is refused, in days", () => {
+    const ceilingHours = MAX_TIMEOUT_SECONDS / 3600;
+    const past = draft({
+      peerTimeout: { magnitude: String(ceilingHours + 1), unit: "h" },
+    });
+    const problems = connectionTuningProblems(past);
+    expect(problems.length).toBe(1);
+    expect(problems[0]).toContain("7 days");
+    // A refused field never reaches an option block, so the job is never created
+    // on a value the spawned CLI would exit 64 on.
+    expect(connectionTuningOptions(past)).toBeUndefined();
+    // The ceiling itself is admissible: the CLI's own cap is inclusive.
+    const atCeiling = draft({
+      peerTimeout: { magnitude: String(ceilingHours), unit: "h" },
+    });
+    expect(connectionTuningProblems(atCeiling)).toEqual([]);
+    expect(connectionTuningOptions(atCeiling)).toEqual({
+      peerTimeoutMs: MAX_TIMEOUT_SECONDS * 1000,
+    });
+  });
+
+  test("the connection attempt wait carries the same ceiling; the check interval carries none", () => {
+    const pastHours = String(MAX_TIMEOUT_SECONDS / 3600 + 1);
+    expect(
+      connectionTuningProblems(
+        draft({ serverConnectTimeout: { magnitude: pastHours, unit: "h" } }),
+      ).length,
+    ).toBe(1);
+    // `--polling-frequency` takes no ceiling -- a long interval is merely slow --
+    // so neither does the field that becomes it.
+    expect(
+      connectionTuningProblems(
+        draft({ pollInterval: { magnitude: "999999999", unit: "m" } }),
+      ),
+    ).toEqual([]);
+  });
+
   test("each malformed field reports once, and a sound draft reports nothing", () => {
     expect(
       connectionTuningProblems(
@@ -377,6 +416,39 @@ describe("the CLI's two advisories are raised at authoring time", () => {
         FILEDROP_CONNECTION_TUNING,
       ),
     ).toEqual([]);
+  });
+});
+
+describe("the collapsed summary counts only what the flow carries", () => {
+  test("an untouched draft reads as default and a tuned one as tuned", () => {
+    expect(
+      connectionTuningSummary(
+        CONNECTION_TUNING_DEFAULT,
+        SFTP_CONNECTION_TUNING,
+      ),
+    ).toBe("Default");
+    expect(
+      connectionTuningSummary(
+        draft({ maxReconnectAttempts: "12" }),
+        FILEDROP_CONNECTION_TUNING,
+      ),
+    ).toBe("Tuned");
+  });
+
+  test("the session mode counts only where the flow carries it", () => {
+    // The operator ticks the box on sftp, then switches the transport to a shared
+    // directory: the field is dropped from the emitted options, so a closed card
+    // still reading "Tuned" would name a departure the run does not make.
+    const authored = draft({ connectionPerPoll: true });
+    expect(connectionTuningSummary(authored, SFTP_CONNECTION_TUNING)).toBe(
+      "Tuned",
+    );
+    expect(connectionTuningSummary(authored, FILEDROP_CONNECTION_TUNING)).toBe(
+      "Default",
+    );
+    expect(
+      connectionTuningOptions(authored, FILEDROP_CONNECTION_TUNING),
+    ).toBeUndefined();
   });
 });
 

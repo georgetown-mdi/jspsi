@@ -4,10 +4,13 @@ import path from "node:path";
 
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 
+import { MAX_TIMEOUT_SECONDS } from "@psilink/core";
+
 import {
   CONNECTION_TUNING_DEFAULT,
   SFTP_CONNECTION_TUNING,
   connectionTuningOptions,
+  connectionTuningProblems,
 } from "@bench/connectionTuningModel";
 import {
   EXCHANGE_FILES_DEFAULT,
@@ -301,6 +304,72 @@ describe(
       const parsed = parseWithRealCli(argv, dir);
       expect(parsed.status).toBe(EXIT_USAGE);
       expect(parsed.stderr).toContain("--peer-timeout");
+    });
+
+    test("the longest wait the card admits survives a real parse", async () => {
+      // The console holds its two timeout fields to core's MAX_TIMEOUT_SECONDS
+      // because the CLI caps the flags they ride at it. That the ceiling itself
+      // is admissible -- the cap being inclusive -- is the tool's answer, not
+      // this file's.
+      const optionArgs = zeroSetupOptionsArgv(
+        connectionTuningOptions(
+          {
+            ...CONNECTION_TUNING_DEFAULT,
+            peerTimeout: {
+              magnitude: String(MAX_TIMEOUT_SECONDS / 3600),
+              unit: "h",
+            },
+          },
+          SFTP_CONNECTION_TUNING,
+        ),
+      );
+      expect(optionArgs).toEqual([`--peer-timeout=${MAX_TIMEOUT_SECONDS}s`]);
+      const { dir, connectionArgs } = splitSftpConnection();
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs,
+        optionArgs: [...retainModeFileSyncArgs(), ...optionArgs],
+        eventStream: true,
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+
+      const parsed = parseWithRealCli(argv, dir);
+      expect(parsed.status).not.toBe(EXIT_USAGE);
+      expect(parsed.stderr).toContain("input.csv does not exist");
+    });
+
+    test("an hour past that ceiling is a usage error, which is why the card refuses it", async () => {
+      // The refusal the console makes at authoring time, driven at the boundary
+      // it is about: the card emits no such token, so the over-ceiling one is
+      // placed on the argv here to see what the tool does with it.
+      const { dir, connectionArgs } = splitSftpConnection();
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs,
+        optionArgs: [
+          ...retainModeFileSyncArgs(),
+          `--peer-timeout=${MAX_TIMEOUT_SECONDS + 3600}s`,
+        ],
+        eventStream: true,
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+      const parsed = parseWithRealCli(argv, dir);
+      expect(parsed.status).toBe(EXIT_USAGE);
+      expect(parsed.stderr).toContain("--peer-timeout");
+
+      // And the console refuses the same value while the operator can still
+      // change it, rather than creating a job whose child exits on it.
+      const past = {
+        ...CONNECTION_TUNING_DEFAULT,
+        peerTimeout: {
+          magnitude: String(MAX_TIMEOUT_SECONDS / 3600 + 1),
+          unit: "h" as const,
+        },
+      };
+      expect(connectionTuningProblems(past).length).toBe(1);
+      expect(
+        connectionTuningOptions(past, SFTP_CONNECTION_TUNING),
+      ).toBeUndefined();
     });
 
     test("a token the parser does not know is refused, so the check above discriminates", async () => {

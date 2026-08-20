@@ -7,6 +7,7 @@ import type { Arguments } from "yargs";
 import {
   getDiagnosticSink,
   getLogger,
+  MAX_TIMEOUT_SECONDS,
   sanitizeErrorForDisplay,
   setDiagnosticSink,
   setLogLevel,
@@ -71,22 +72,14 @@ export function assertNoUnknownOptions(positionals: Array<unknown>): void {
 }
 
 /**
- * Sanity ceiling, in seconds, for the duration-valued CLI timeout flags
- * (`--connection-timeout`, `--peer-timeout`, `--accept-timeout`): seven days. A
- * timeout is a coordination window, and even a generous async setup waits hours,
- * not days, for a connection, a peer, or a partner to accept -- so a value past a
- * week is a typo or a misunderstanding, not an intent. The human-readable
- * `<int><unit>` duration syntax makes a value like `30d` trivially typeable, so
- * each capped flag rejects an over-ceiling value with a flag-named usage error
- * before any side effect, mirroring the `--expires-in` ceiling
- * (`MAX_INVITATION_LIFETIME_SECONDS`, 365d) that bounds the invitation lifetime.
- * This is a deliberately lower, product-level sanity bound layered on top of
- * parseDuration's safe-integer overflow guard, not a replacement for it, and a
- * usability cap rather than a security control: the accept window is
- * independently bounded by the invitation token's lifetime, and an over-long
- * connect/peer wait only makes the user's own exchange hang longer.
+ * The sanity ceiling the duration-valued timeout flags (`--connection-timeout`,
+ * `--peer-timeout`, `--accept-timeout`) are capped at, re-exported from core --
+ * the console's zero-setup authoring surface holds its timeout fields to the same
+ * value, and core is the only module both apps can import. Its rationale lives
+ * with the option fields it qualifies, in
+ * `packages/core/src/config/connection.ts`.
  */
-export const MAX_TIMEOUT_SECONDS = 7 * 24 * 60 * 60;
+export { MAX_TIMEOUT_SECONDS };
 
 /**
  * Read a duration-valued CLI option from parsed `Arguments` and return it as a

@@ -4,6 +4,7 @@ import { parse as parseYaml } from "yaml";
 
 import {
   MAX_NAME_LENGTH,
+  MAX_TIMEOUT_SECONDS,
   assessOutboundPayloadConsent,
   disclosedColumnNames,
   safeParseExchangeSpec,
@@ -1182,6 +1183,35 @@ describe("the zero-setup arms admit only what their argv can carry", () => {
         jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ options }))
           .success,
       ).toBe(false);
+  });
+
+  test("refuses a timeout past the seven-day ceiling its flag is capped at", () => {
+    // Accepting one would create a job -- occupying the appliance's single run
+    // slot -- whose spawned CLI refuses the argv it was created to run.
+    const overCeilingMs = (MAX_TIMEOUT_SECONDS + 1) * 1000;
+    for (const options of [
+      { peerTimeoutMs: overCeilingMs },
+      { serverConnectTimeoutMs: overCeilingMs },
+    ])
+      expect(
+        jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ options }))
+          .success,
+      ).toBe(false);
+    // The ceiling itself is admissible: the CLI's own cap is inclusive.
+    expect(
+      jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupIntent({
+          options: { peerTimeoutMs: MAX_TIMEOUT_SECONDS * 1000 },
+        }),
+      ).success,
+    ).toBe(true);
+    // The ceiling is the duration FLAG's, so the exchange mode -- which composes
+    // a configuration document and passes no such flag -- keeps admitting it.
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ options: { peerTimeoutMs: overCeilingMs } }),
+      ).success,
+    ).toBe(true);
   });
 
   test("accepts a whole-second timeout and every other tuning knob", () => {

@@ -282,11 +282,16 @@ export interface AcceptorLaunchStepBlocks {
   connectionBlocked: boolean;
   /** A file-handling combination core refuses. */
   exchangeFilesBlocked: boolean;
+  /** A connection-tuning value the run would refuse. Separate from
+   * {@link exchangeFilesBlocked} because the two are separate cards: folding them
+   * together would send the operator to the wrong one. */
+  connectionTuningBlocked: boolean;
 }
 
 const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
   connectionBlocked: false,
   exchangeFilesBlocked: false,
+  connectionTuningBlocked: false,
 };
 
 /**
@@ -316,9 +321,10 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  * unresolved surface and an operator working down the screen is sent to the first
  * thing they meet: the verdict, then the count-only refusal, then the
  * declaration conflict, then the over-long name notice, then the grid's
- * identifier rule, then the cleaning steps, then the connection and
- * file-handling cards below them. Each names what to fix on this screen, in the
- * words of the notice it points at.
+ * identifier rule, then the cleaning steps, then the connection, file-handling,
+ * and connection-tuning cards below them. Each names what to fix on this screen,
+ * in the words of the notice it points at -- naming the card it is about, since
+ * the collapsed cards below show no problem of their own until opened.
  */
 export function acceptorLaunchBlockedReason(
   verdict: AcceptorVerdictViewModel,
@@ -360,6 +366,8 @@ export function acceptorLaunchBlockedReason(
     return "Set up the SFTP connection above before you can start.";
   if (stepBlocks.exchangeFilesBlocked)
     return "Resolve the file-handling settings above before you can start.";
+  if (stepBlocks.connectionTuningBlocked)
+    return "Resolve the connection-tuning settings above before you can start.";
   return undefined;
 }
 

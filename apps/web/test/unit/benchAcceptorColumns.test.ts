@@ -24,6 +24,16 @@ import {
 } from "@bench/acceptorColumnsModel";
 
 import {
+  CONFIG_EXCHANGE_FILES,
+  EXCHANGE_FILES_DEFAULT,
+  exchangeFilesProblems,
+} from "@bench/exchangeFilesModel";
+import {
+  CONNECTION_TUNING_DEFAULT,
+  connectionTuningProblems,
+} from "@bench/connectionTuningModel";
+
+import {
   setColumnDisclosure,
   setColumnTypeForMatching,
 } from "@psi/metadataEditing";
@@ -327,7 +337,8 @@ describe("acceptor launch gates", () => {
   });
 
   // The step's own gates, which the model cannot derive: an SFTP accept with no
-  // connection authored, and a file-handling combination core refuses.
+  // connection authored, a file-handling combination core refuses, and a
+  // connection-tuning value the run would refuse.
   const satisfiableColumns = ["first_name", "last_name"];
   const satisfiable = editorFor(satisfiableColumns, nameTerms);
   const satisfiableVerdict = acceptorVerdict(
@@ -342,7 +353,11 @@ describe("acceptor launch gates", () => {
         satisfiableVerdict,
         satisfiable.editorState,
         nameTerms,
-        { connectionBlocked: true, exchangeFilesBlocked: false },
+        {
+          connectionBlocked: true,
+          exchangeFilesBlocked: false,
+          connectionTuningBlocked: false,
+        },
       ),
     ).toBe("Set up the SFTP connection above before you can start.");
   });
@@ -353,9 +368,44 @@ describe("acceptor launch gates", () => {
         satisfiableVerdict,
         satisfiable.editorState,
         nameTerms,
-        { connectionBlocked: false, exchangeFilesBlocked: true },
+        {
+          connectionBlocked: false,
+          exchangeFilesBlocked: true,
+          connectionTuningBlocked: false,
+        },
       ),
     ).toBe("Resolve the file-handling settings above before you can start.");
+  });
+
+  test("a refused connection-tuning value names that card rather than the file-handling one", () => {
+    // Both cards sit in the one section below the columns, so a shared flag would
+    // send the operator to the wrong one -- and each is a collapsed disclosure
+    // whose own problem notice is invisible until it is opened. Driven through
+    // both cards' models exactly as the bench drives them, rather than by setting
+    // the flags by hand.
+    const stepBlocks = {
+      connectionBlocked: false,
+      exchangeFilesBlocked:
+        exchangeFilesProblems(EXCHANGE_FILES_DEFAULT, CONFIG_EXCHANGE_FILES)
+          .length > 0,
+      connectionTuningBlocked:
+        connectionTuningProblems({
+          ...CONNECTION_TUNING_DEFAULT,
+          peerTimeout: { magnitude: "soon", unit: "m" },
+        }).length > 0,
+    };
+    expect(stepBlocks.exchangeFilesBlocked).toBe(false);
+    expect(stepBlocks.connectionTuningBlocked).toBe(true);
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        stepBlocks,
+      ),
+    ).toBe(
+      "Resolve the connection-tuning settings above before you can start.",
+    );
   });
 
   test("omitting the step's own gates is the same as none of them being set", () => {
@@ -372,7 +422,11 @@ describe("acceptor launch gates", () => {
         satisfiableVerdict,
         satisfiable.editorState,
         nameTerms,
-        { connectionBlocked: false, exchangeFilesBlocked: false },
+        {
+          connectionBlocked: false,
+          exchangeFilesBlocked: false,
+          connectionTuningBlocked: false,
+        },
       ),
     );
   });
@@ -390,6 +444,7 @@ describe("acceptor launch gates", () => {
       acceptorLaunchBlockedReason(verdict, editorState, nameTerms, {
         connectionBlocked: true,
         exchangeFilesBlocked: true,
+        connectionTuningBlocked: true,
       }),
     ).toBe(
       "Set your columns to the missing field types above before you can start.",

@@ -1394,9 +1394,12 @@ export function AcceptorBench() {
               }
               exchangeFilesBlocked={
                 acceptServerJob &&
-                (exchangeFilesProblems(exchangeFiles, CONFIG_EXCHANGE_FILES)
-                  .length > 0 ||
-                  connectionTuningProblems(connectionTuning).length > 0)
+                exchangeFilesProblems(exchangeFiles, CONFIG_EXCHANGE_FILES)
+                  .length > 0
+              }
+              connectionTuningBlocked={
+                acceptServerJob &&
+                connectionTuningProblems(connectionTuning).length > 0
               }
               onMetadataChange={changeMetadata}
               onRemap={remapColumn}

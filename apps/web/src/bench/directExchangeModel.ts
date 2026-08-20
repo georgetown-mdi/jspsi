@@ -14,9 +14,10 @@ import type { LinkageField, LinkageTerms, Metadata } from "@psilink/core";
 
 /**
  * The pure model behind the console "Direct exchange" bench: the symmetric spine's
- * steps and the browser-side terms preview the confirm screen renders. No React,
- * no I/O -- the tested boundary for "the previewed terms match what the CLI infers
- * from the same columns".
+ * steps, the agreed-server step's continue gate, and the browser-side terms
+ * preview the confirm screen renders. No React, no I/O -- the tested boundary for
+ * "the previewed terms match what the CLI infers from the same columns" and for
+ * which unresolved surface the step names.
  */
 
 /** The transport a direct exchange runs over. SFTP composes its connection from
@@ -56,6 +57,54 @@ export const DIRECT_STEP_ORDER: ReadonlyArray<DirectStep> = [
  * runs as the appliance user.
  */
 export const DEFAULT_PREVIEW_IDENTITY = "you";
+
+/** What the agreed-server step is waiting on, by the reading order of the screen
+ * itself: the transport at the top, then the two authoring cards below it, then
+ * the retain-mode precondition stated just above the button. */
+export interface DirectServerGates {
+  transport: DirectTransport;
+  /** Whether the chosen transport is usable: an authored SFTP connection, or a
+   * mounted rendezvous directory. */
+  transportReady: boolean;
+  /** Whether the file-handling card holds a combination core refuses. */
+  exchangeFilesBlocked: boolean;
+  /** Whether the connection-tuning card holds a value the run would refuse.
+   * Separate from {@link exchangeFilesBlocked} because the two are separate
+   * cards, and the sentence below names the one to open. */
+  connectionTuningBlocked: boolean;
+  /** Whether the authored connection and the retain choice disagree over the
+   * split-directory precondition. The remedy is stated in full by the step's own
+   * alert, so the gate carries the state rather than a second copy of it. */
+  splitDirectoryBlocked: boolean;
+}
+
+/**
+ * Why the agreed-server step cannot be left yet, as the sentence shown beside the
+ * disabled Continue button -- `undefined` exactly when nothing blocks, which is
+ * what the step enables on. The gate and the explanation are ONE derivation, so a
+ * state that disables the button while saying nothing is unrepresentable rather
+ * than merely tested against.
+ *
+ * The chain follows the step's own reading order, so an operator working down the
+ * screen is sent to the first unresolved surface they meet, and each sentence
+ * names the card to open: both authoring cards are collapsed disclosures whose
+ * own problem notice is invisible until they are.
+ */
+export function directServerBlockedReason(
+  gates: DirectServerGates,
+): string | undefined {
+  if (!gates.transportReady)
+    return gates.transport === "sftp"
+      ? "Set up the SFTP connection above to continue."
+      : "Mount a shared directory on this appliance, or choose SFTP, to continue.";
+  if (gates.exchangeFilesBlocked)
+    return "Resolve the file-handling settings above to continue.";
+  if (gates.connectionTuningBlocked)
+    return "Resolve the connection-tuning settings above to continue.";
+  if (gates.splitDirectoryBlocked)
+    return "Resolve the retain-mode requirement above to continue.";
+  return undefined;
+}
 
 /** The browser-side preview of the terms this file is EXPECTED to produce at run
  * time, computed from its columns exactly as the CLI's zero-setup command does

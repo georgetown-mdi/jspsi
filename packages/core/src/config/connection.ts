@@ -544,6 +544,31 @@ export const DEFAULT_SERVER_CONNECT_TIMEOUT_MS = 30000;
 export const DEFAULT_MAX_RECONNECT_ATTEMPTS = 3;
 
 /**
+ * Sanity ceiling, in seconds, for a coordination timeout an operator states:
+ * seven days. A timeout is a coordination window, and even a generous async setup
+ * waits hours, not days, for a connection, a peer, or a partner to accept -- so a
+ * value past a week is a typo or a misunderstanding, not an intent. The CLI's
+ * human-readable `<int><unit>` duration syntax makes a value like `30d` trivially
+ * typeable, so each capped flag (`--connection-timeout`, `--peer-timeout`,
+ * `--accept-timeout`) rejects an over-ceiling value with a flag-named usage error
+ * before any side effect, mirroring the `--expires-in` ceiling
+ * (`MAX_INVITATION_LIFETIME_SECONDS`, 365d) that bounds the invitation lifetime.
+ * This is a deliberately lower, product-level sanity bound layered on top of the
+ * duration parser's safe-integer overflow guard, not a replacement for it, and a
+ * usability cap rather than a security control: the accept window is
+ * independently bounded by the invitation token's lifetime, and an over-long
+ * connect/peer wait only makes the operator's own exchange hang longer.
+ *
+ * Defined in core, as {@link MAX_RECONNECT_ATTEMPTS} is and for the same reason:
+ * two authoring boundaries must agree on it -- the CLI's duration-flag parse
+ * guard, and the console's zero-setup authoring surface, whose timeout fields
+ * become those very flags on the child's argv. A console value past this ceiling
+ * would be accepted into a job whose spawned CLI then exits 64, so the console
+ * refuses it while the operator can still change it.
+ */
+export const MAX_TIMEOUT_SECONDS = 7 * 24 * 60 * 60;
+
+/**
  * Upper bound on {@link SharedOptions.maxReconnectAttempts}: 604800 attempts.
  * Derived, not arbitrary -- it is the connect-retry phase's existing wall-clock
  * ceiling expressed as a count. The connect-retry loop (`retryPromise` at every
@@ -551,8 +576,8 @@ export const DEFAULT_MAX_RECONNECT_ATTEMPTS = 3;
  * `maxReconnectAttempts` delays across `maxReconnectAttempts + 1` attempts -- so
  * against an endpoint that refuses fast the attempts themselves are ~instant and
  * the wall clock is essentially the delay total, about `maxReconnectAttempts`
- * seconds. The largest count whose delay total stays within the CLI's 7-day
- * timeout ceiling (`MAX_TIMEOUT_SECONDS` = 604800 s, the sanity cap the duration
+ * seconds. The largest count whose delay total stays within the 7-day timeout
+ * ceiling ({@link MAX_TIMEOUT_SECONDS} = 604800 s, the sanity cap the duration
  * flags already enforce) is therefore `604800 s / 1 s = 604800`. Bounding the
  * count here bounds the fast-fail connect phase to that same ~7-day wall clock
  * the timeouts speak, instead of letting a fat-fingered value near
@@ -565,12 +590,12 @@ export const DEFAULT_MAX_RECONNECT_ATTEMPTS = 3;
  * does NOT tightly bound a slow-but-answering endpoint, whose attempts each run
  * up to `serverConnectTimeoutMs`; that case is already held per-attempt by
  * `serverConnectTimeoutMs` and is left to a wall-clock deadline should it ever
- * prove to matter. Defined in core (not the CLI, where `MAX_TIMEOUT_SECONDS`
- * lives) because both validation boundaries that must agree on this field consume
- * it -- the schema `.max()` below and the CLI's `nonNegativeIntFlag` parse guard,
- * which imports it -- and core cannot import from the CLI. An over-ceiling value
- * is rejected with a flag-named `UsageError` (exit 64) whether it arrives from
- * `psilink.yaml` or `--max-reconnect-attempts`. See docs/spec/CHANNEL_SECURITY.md.
+ * prove to matter. Defined in core because both validation boundaries that must
+ * agree on this field consume it -- the schema `.max()` below and the CLI's
+ * `nonNegativeIntFlag` parse guard, which imports it -- and core cannot import
+ * from the CLI. An over-ceiling value is rejected with a flag-named `UsageError`
+ * (exit 64) whether it arrives from `psilink.yaml` or
+ * `--max-reconnect-attempts`. See docs/spec/CHANNEL_SECURITY.md.
  */
 export const MAX_RECONNECT_ATTEMPTS = 7 * 24 * 60 * 60;
 
