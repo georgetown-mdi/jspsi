@@ -15,6 +15,7 @@ import {
   runExchange,
 } from "../src/exchange";
 import { receiveCountReport } from "../src/protocolSetup";
+import { UsageError } from "../src/errors";
 import {
   ConnectionError,
   createMessagePipe,
@@ -385,22 +386,35 @@ test("one-sided: the receiver holds a count its own record does not carry", asyn
   expect(responder.audit!.record.governance.algorithm).toBe("psi-c");
 });
 
-test("an over-broad count-only run is refused at the agreed-terms boundary, never narrowed", async () => {
-  // Both parties carry the same out-of-shape terms, so neither is stopped by the
-  // partner's parse alone: the run boundary refuses on each side rather than running
-  // the round over the first of the two keys.
-  const secondKey = {
-    name: "firstNameAgain",
-    elements: [{ field: "firstName" }],
-  };
-  await expect(
-    runBoth(both, both, "psi-c", (p) => {
-      p.linkageTerms = {
-        ...p.linkageTerms,
-        linkageKeys: [...p.linkageTerms.linkageKeys, secondKey],
-      };
-    }),
-  ).rejects.toThrow(/exactly one linkage key/);
+// A second key over the same field: the shape rule an over-broad count-only terms
+// document breaks first (docs/spec/PROTOCOL.md, PSI-C: one key, one round).
+const secondKey = {
+  name: "firstNameAgain",
+  elements: [{ field: "firstName" }],
+};
+
+const withSecondKey = (terms: LinkageTerms): LinkageTerms => ({
+  ...terms,
+  linkageKeys: [...terms.linkageKeys, secondKey],
+});
+
+test("an over-broad count-only run is refused before any round, never narrowed", async () => {
+  // Both parties carry the same out-of-shape terms, mutated past their own prepare
+  // step. Each copy still travels to the other party on the terms exchange, whose
+  // parse carries these same shape rules, so that parse is what refuses a live
+  // two-party round -- upstream of the agreed-terms boundary, which sees a partner's
+  // terms only once they have passed it. The round is refused whole rather than
+  // narrowed to the first of the two keys.
+  const refusal = await runBoth(both, both, "psi-c", (p) => {
+    p.linkageTerms = withSecondKey(p.linkageTerms);
+  }).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+
+  expect(refusal).toBeInstanceOf(Error);
+  expect((refusal as Error).message).toContain("failed to parse");
+  expect((refusal as Error).message).toMatch(/exactly one linkage key/);
 });
 
 // The PSI round's frames are the only binary ones a run puts on the wire: the terms
@@ -493,6 +507,70 @@ test("an algorithm divergence is refused at the agreed-terms run boundary", () =
   // The agreed pair still resolves to its own algorithm's run.
   expect(resolveCountOnlyRun(countOnlyTerms, countOnlyTerms)).toBe(true);
   expect(resolveCountOnlyRun(revealingTerms, revealingTerms)).toBe(false);
+});
+
+// --- The agreed-terms boundary's own guards ----------------------------------
+// The refusals the boundary carries besides resolving which run this is, driven
+// through the exported seam because a two-party round does not reach them: a
+// partner's terms arrive through the terms-exchange parse and this party's own
+// through prepareForExchange, both of which apply the same rules first. What the
+// boundary covers alone is a PreparedExchange assembled or mutated past that
+// prepare step, which is what these hand it (docs/spec/PROTOCOL.md, PSI-C).
+
+const agreedCountOnlyTerms = prepared(
+  "Initiator Co",
+  both,
+  initiatorRows,
+  "psi-c",
+).linkageTerms;
+
+// An algorithm value outside the implemented pair, as prepareForExchange.test.ts
+// drives the shared guard with: the shape a member later added to AlgorithmSchema
+// takes here before a run path exists for it. Cast through the type, because the
+// enum admits no such member today.
+const unimplementedAlgorithm = "psi-x" as Algorithm;
+
+test("an unimplemented algorithm is refused whichever party's terms name it", () => {
+  const unimplementedTerms: LinkageTerms = {
+    ...agreedCountOnlyTerms,
+    algorithm: unimplementedAlgorithm,
+  };
+
+  // Both parties' terms are guarded, and the refusal's IDENTITY is what tells the
+  // two guards apart: either pair below also diverges, so a boundary that guarded
+  // only one side would still refuse -- as a divergence, over a value no run path
+  // exists for and no record could attest.
+  const orientations: Array<[LinkageTerms, LinkageTerms]> = [
+    [unimplementedTerms, agreedCountOnlyTerms],
+    [agreedCountOnlyTerms, unimplementedTerms],
+  ];
+  for (const [localTerms, partnerTerms] of orientations) {
+    let refusal: unknown;
+    try {
+      resolveCountOnlyRun(localTerms, partnerTerms);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(UsageError);
+    expect((refusal as Error).message).toContain("not yet implemented");
+    // The refusal names the implemented literals, never the value it was handed,
+    // which on the partner's side is its content rather than this operator's.
+    expect((refusal as Error).message).not.toContain(unimplementedAlgorithm);
+  }
+});
+
+test("an out-of-shape count-only pair is refused whichever party's terms carry it", () => {
+  // The shape rules over the agreed pair, in both orientations: a pair carrying an
+  // out-of-shape document is refused here rather than run over the first of its two
+  // keys, whether the document is this party's own or the partner's.
+  const overBroadTerms = withSecondKey(agreedCountOnlyTerms);
+
+  expect(() =>
+    resolveCountOnlyRun(overBroadTerms, agreedCountOnlyTerms),
+  ).toThrow(/exactly one linkage key/);
+  expect(() =>
+    resolveCountOnlyRun(agreedCountOnlyTerms, overBroadTerms),
+  ).toThrow(/exactly one linkage key/);
 });
 
 test("a count-only exchange whose input metadata would transmit a column is refused at prepare", async () => {
