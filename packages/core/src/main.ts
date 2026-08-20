@@ -77,6 +77,7 @@ export {
   sanitizeForDisplay,
   displayText,
   renderedDisplayCost,
+  clipToRenderedCost,
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,

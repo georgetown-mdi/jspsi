@@ -1928,16 +1928,16 @@ test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => 
   );
 });
 
-// The three parse-error formatters route every issue-path segment through
-// the display boundary, like describeDecodeError, so a control/ANSI or
-// deceptive-Unicode byte in a path can never reach the operator raw. No reachable
-// failure produces such a path today (the linkage schemas are non-strict, so
-// unrecognized keys are stripped before they can appear), so this drives the one
-// schema position that can carry a partner-style string into a path -- a
-// transform `params` record key, whose key schema bounds length -- with an
-// over-long key built from control and bidi-override bytes. The guard must escape
-// it; the two tests below pin both the escaping and the absence of over-escaping.
-test("loadConfigLinkageSource escapes control/ANSI bytes in a linkage_terms issue path", () => {
+// A camelized issue path names every segment in the spelling the file writes,
+// and it can do that only for a key the camelize pass itself built. The one
+// schema position holding a key it did not -- a transform `params` record key,
+// the schema's only free-form record and the only position whose key schema
+// bounds length, so the only one that can surface a key in a path at all -- is
+// where the path stops instead: `_evil_key` and `EvilKey` on disk both arrive as
+// the camelized `EvilKey`, so naming either spelling names a key one of those
+// files does not contain. The three tests below pin the stop, what survives it,
+// and the absence of over-escaping on the segments that do get named.
+test("loadConfigLinkageSource stops a linkage_terms issue path at the params block", () => {
   const configPath = path.join(dir, "psilink.yaml");
   const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
   // An ESC-driven ANSI sequence and a right-to-left override (U+202E). The key
@@ -1957,14 +1957,43 @@ test("loadConfigLinkageSource escapes control/ANSI bytes in a linkage_terms issu
   expect(caught).toBeInstanceOf(UsageError);
   const rendered = sanitizeErrorForDisplay(caught);
   expect(rendered).toContain("invalid linkage_terms");
-  // The fixed path prefix passes through verbatim; only the partner-style key
-  // segment is escaped.
-  expect(rendered).toContain("linkage_keys.0.elements.0.transform.0.params.");
-  // The raw bytes are neutralized: their escaped forms appear, never the bytes.
+  // Every segment before the block still locates the problem, and it is fixed
+  // schema structure the whole way.
+  expect(rendered).toContain("linkage_keys.0.elements.0.transform.0.params: ");
+  // The key itself reaches the operator in no form: not raw, which the display
+  // boundary would have had to escape, and not as the escape either.
   expect(rendered).not.toContain("\x1b");
   expect(rendered).not.toContain("\u202e");
-  expect(rendered).toContain("\\x1b");
-  expect(rendered).toContain("\\u202e");
+  expect(rendered).not.toContain("\\x1b");
+  expect(rendered).not.toContain("\\u202e");
+});
+
+test("loadConfigLinkageSource names no spelling of a params key it cannot invert", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+  // Capitals the camelize pass leaves untouched, so the segment reaching the
+  // formatter is the file's own spelling -- and is equally the spelling a file
+  // writing `_evil_key` would have arrived as. Over MAX_NAME_LENGTH so the key
+  // reaches the issue path at all.
+  const authorKey = "EvilKey" + "x".repeat(MAX_NAME_LENGTH);
+  terms.linkageKeys[0].elements[0].transform = [
+    { function: "noop", params: { [authorKey]: 1 } },
+  ];
+  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+  let caught: unknown;
+  try {
+    loadConfigLinkageSource(configPath);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as Error).message;
+  expect(message).toContain("linkage_keys.0.elements.0.transform.0.params: ");
+  // Neither the rewrite the schema-fixed segments take, which would name
+  // `_evil_key...` -- a key this file does not contain -- nor the raw segment,
+  // which would name it for this file while mis-naming the other one.
+  expect(message).not.toContain("_evil_key");
+  expect(message).not.toContain(authorKey);
 });
 
 test("loadConfigLinkageSource leaves a schema-fixed linkage_terms issue path unescaped", () => {

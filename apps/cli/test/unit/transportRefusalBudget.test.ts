@@ -1,9 +1,11 @@
 import { expect, test } from "vitest";
 import {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  DEFAULT_MAX_DISPLAY_LENGTH,
   DirectoryListingBoundsError,
   DISPLAY_TRUNCATION_MARKER,
   FrameSizeExceededError,
+  MAX_ENDPOINT_PATH_LENGTH,
   MAX_ERROR_CAUSE_DEPTH,
   sanitizeErrorForDisplay,
   TransportOperationStalledError,
@@ -213,28 +215,14 @@ for (const site of CLI_SITES) {
   });
 }
 
-// The cap is kept rather than widened: a fragment somebody else chose still
-// truncates, and what it can spend is the budget of the link it sits alone on.
+// The cap is kept rather than widened: a fragment nothing bounds before the
+// renderer still truncates THERE, and what it can spend is the budget of the
+// link it sits alone on.
 const FLOODED_SITES: Array<[string, () => Error, string]> = [
   [
     "the frame-size guard's path",
     () => frameSizeExceededError("/rv/" + "p".repeat(100_000), 1),
     FRAME_SIZE_RECOVERY_STEP,
-  ],
-  [
-    "the listing guard's directory",
-    () => directoryTooLargeError("/rv/" + "p".repeat(100_000), 1),
-    LISTING_RECOVERY_STEP,
-  ],
-  [
-    "the listing guard's entry name and directory at once",
-    () =>
-      filenameTooLongError(
-        "/rv/" + "p".repeat(100_000),
-        "n".repeat(100_000),
-        MAX_FILENAME_LENGTH,
-      ),
-    LISTING_RECOVERY_STEP,
   ],
   [
     "the liveness guard's path",
@@ -258,6 +246,55 @@ for (const [label, raise, recoveryStep] of FLOODED_SITES) {
       expect(link).not.toBe(recoveryStep);
     expect(truncatedLinks(rendered).length).toBeGreaterThan(0);
     expect(linksOf(rendered).length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
+  });
+}
+
+// The listing guard's two fragments are cut at their COMPOSITION site instead,
+// each to the per-value budget a chooser's own value is given everywhere else,
+// so neither reaches the renderer at a size the renderer has to cut. Driven at
+// the widest a partner can make the directory -- an offline-accept config seeds
+// it from the invitation endpoint, whose schema is what bounds it -- and at a
+// width no bound covers at all, since the operator's own path answers to
+// neither. The assertion is on the link as it RENDERS: a bound held only inside
+// the builder is one the escape at the boundary can still overrun.
+const ENDPOINT_WIDTH_PATH = "/rv/" + "p".repeat(MAX_ENDPOINT_PATH_LENGTH - 4);
+const COMPOSITION_CLIPPED_SITES: Array<[string, () => Error]> = [
+  [
+    "an entry-count refusal whose directory fills the endpoint schema's width",
+    () => directoryTooLargeError(ENDPOINT_WIDTH_PATH, MAX_DIRECTORY_ENTRIES),
+  ],
+  [
+    "an entry-count refusal whose directory is bounded by nothing",
+    () => directoryTooLargeError("/rv/" + "p".repeat(100_000), 1),
+  ],
+  [
+    "a filename refusal whose entry name and directory are both flooded",
+    () =>
+      filenameTooLongError(
+        "/rv/" + "p".repeat(100_000),
+        "n".repeat(100_000),
+        MAX_FILENAME_LENGTH,
+      ),
+  ],
+];
+
+for (const [label, raise] of COMPOSITION_CLIPPED_SITES) {
+  test(`every fragment is cut before the renderer at ${label}`, () => {
+    const rendered = sanitizeErrorForDisplay(raise());
+    const links = linksOf(rendered);
+
+    // Nothing arrives at the renderer needing to be cut: no link spends even
+    // its own budget, let alone deletes the step behind it.
+    expect(truncatedLinks(rendered)).toEqual([]);
+    expect(links).toContain(LISTING_RECOVERY_STEP);
+    expect(links.length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
+
+    const directory = links.find((link) => link.startsWith("directory: "));
+    expect(directory).toBeDefined();
+    expect(directory).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect((directory as string).length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
   });
 }
 

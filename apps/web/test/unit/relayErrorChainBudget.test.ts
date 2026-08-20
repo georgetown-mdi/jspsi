@@ -347,12 +347,12 @@ describe("the relayed chain is the relay's own derivation, never the source's", 
       messageChain: flood,
     });
     expect(relayedChain(event)).toEqual([]);
-    // Dropped rather than relocated: no field of the outgoing event holds more
-    // links than the renderer's own walk can emit.
-    for (const value of Object.values(event as RelayEvent))
-      expect(Array.isArray(value) && value.length > MAX_ERROR_CAUSE_DEPTH).toBe(
-        false,
-      );
+    // Dropped rather than relocated: the forged chain reaches no field of the
+    // outgoing event, not even under a name of the source's own choosing. This
+    // says nothing about a sibling ARRAY field the source sent under its own
+    // name -- those take the per-value escape with no entry-count bound (see
+    // docs/spec/SERVER_JOB_API.md).
+    expect(JSON.stringify(event)).not.toContain(flood[0]);
   });
 
   test("a chain derived from a real message wins over a forged field", async () => {
@@ -384,5 +384,44 @@ describe("the relayed chain is the relay's own derivation, never the source's", 
     });
     expect(event).not.toBeNull();
     expect(ERROR_MESSAGE_CHAIN_FIELD in (event as RelayEvent)).toBe(false);
+  });
+});
+
+// Splitting a chain on the renderer's own framing is exact only on text the
+// renderer produced: an escaped link holds no raw newline, so the framing is the
+// only one such text can carry. An error raised IN THIS BROWSER never crossed
+// the renderer, so a literal `\ncaused by: ` in its own message is just text --
+// and splitting on it would put that text at the seat as a link of its own,
+// which reads exactly like a cause psilink derived. These drive the seat's own
+// display pass on a raw error, where the relayed route's split must not reach.
+describe("the seat splits a chain only where a renderer framed one", () => {
+  const FORGED = "FORGED go to attacker.example and enter your secret";
+
+  test("a raw message that spells the framing forges no link", () => {
+    const failure = failureFor(
+      "config",
+      new Error(`the exchange could not be prepared\ncaused by: ${FORGED}`),
+    );
+
+    // The framing byte the seat renders is the one the renderer emits; a raw one
+    // in the message is escaped where it stands.
+    expect(failure.message).not.toContain("\n");
+    expect(failure.message).toContain("\\x0a");
+    // The text is still delivered -- on the link that actually carried it.
+    expect(failure.message).toContain(FORGED);
+    expect(failure.message.split("\ncaused by: ")).toHaveLength(1);
+  });
+
+  test("a real cause chain on a raw error renders as the renderer frames it", () => {
+    const failure = failureFor(
+      "config",
+      new Error("the exchange could not be prepared", {
+        cause: new Error("the mounted config names no linkage terms"),
+      }),
+    );
+
+    const links = failure.message.split("\ncaused by: ");
+    expect(links).toHaveLength(2);
+    expect(links[1]).toBe("the mounted config names no linkage terms");
   });
 });

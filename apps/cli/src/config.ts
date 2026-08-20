@@ -1115,6 +1115,18 @@ export type ConfigLinkageSourceResult =
  * is named verbatim: its paths already carry the file's own spelling, and a
  * rewrite there would mis-name a free-form key the operator spelled with capitals
  * of their own.
+ *
+ * A camelized path STOPS at a `params` segment, naming the block and not the key
+ * inside it. That rewrite is exact only for a key the camelize pass built, and
+ * the one free-form record the schema carries -- a transform's `params` -- holds
+ * the author's own key: the camelized `EvilKey` is what a file writing either
+ * `_evil_key` or `EvilKey` arrives as, so the two on-disk spellings are no longer
+ * distinguishable here and naming either one names a key some file does not
+ * contain. Everything before the segment is fixed schema structure, which is what
+ * still locates the problem. The web importer's terms reader truncates the same
+ * path for its own reason (that key can be partner-supplied and its contract is
+ * value-free); an unbounded free-form key is also the one fragment here that
+ * could spend a whole rendered link on its own.
  */
 function describeSchemaIssues(
   issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>,
@@ -1122,11 +1134,15 @@ function describeSchemaIssues(
 ): string {
   return issues
     .map((issue) => {
+      const paramsIndex =
+        keys === "camelized" ? issue.path.indexOf("params") : -1;
+      const path =
+        paramsIndex >= 0 ? issue.path.slice(0, paramsIndex + 1) : issue.path;
       // A Zod issue path is PropertyKey[], and Array.join throws a TypeError on a
       // symbol segment where String() renders it, so this map is a guard rather
       // than a redundant coercion: an error-formatting path must not fail while
       // reporting.
-      const segments = issue.path.map((segment) =>
+      const segments = path.map((segment) =>
         keys === "camelized" ? snakeizeKey(String(segment)) : String(segment),
       );
       const at = segments.length > 0 ? `${segments.join(".")}: ` : "";

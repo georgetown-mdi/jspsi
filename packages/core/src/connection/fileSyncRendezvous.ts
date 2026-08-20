@@ -34,9 +34,9 @@ import * as z from "zod";
 import { NIL as NIL_UUID } from "uuid";
 
 import {
+  clipToRenderedCost,
   renderedDisplayCost,
   DEFAULT_MAX_DISPLAY_LENGTH,
-  DISPLAY_TRUNCATION_MARKER,
 } from "../utils/sanitizeForDisplay";
 import {
   redactAndSanitizeForDisplay,
@@ -449,30 +449,6 @@ const ENTRY_GUARD_NAME_BUDGET_FLOOR = renderedDisplayCost(
 );
 
 const andMoreSuffix = (count: number): string => ` (and ${count} more)`;
-
-// Longest prefix of `value` whose rendered cost fits `budget`, with the
-// truncation marker appended -- and paid for out of that same budget -- when
-// anything was dropped. sanitizeForDisplay's own maxLength does not serve here:
-// it appends the marker ON TOP of the cap, and it escapes, which is the sink's
-// job rather than this one's.
-//
-// `value` arrives raw, and a code point is kept only when its WHOLE rendered
-// cost fits, so the clip falls on a code-point boundary and what the sink then
-// escapes can never end inside a partial escape sequence. That is pinned by a
-// test rather than asserted here.
-const clipToRenderedCost = (value: string, budget: number): string => {
-  if (renderedDisplayCost(value) <= budget) return value;
-  const room = budget - DISPLAY_TRUNCATION_MARKER.length;
-  let kept = "";
-  let cost = 0;
-  for (const ch of value) {
-    const next = cost + renderedDisplayCost(ch);
-    if (next > room) break;
-    kept += ch;
-    cost = next;
-  }
-  return `${kept}${DISPLAY_TRUNCATION_MARKER}`;
-};
 
 // Composes a strict-empty entry-guard refusal: `refusalAndRecovery` -- the
 // sentence naming what is wrong and the step that clears it -- becomes the

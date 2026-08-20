@@ -194,6 +194,26 @@ export class JobApiRequestError extends Error {
   }
 }
 
+/** The failure a relayed terminal `error` event raises, whose `message` is a
+ * RENDERED cause chain rather than a raw one: every piece of it came off the
+ * relay's own display pass -- the links {@link ERROR_MESSAGE_CHAIN_FIELD}
+ * carried apart, rejoined by the renderer's own framing, or the escaped flat
+ * field when the relay derived no chain (see {@link errorMessageOf}).
+ *
+ * The type is what carries that provenance to a seat, and the provenance is what
+ * makes splitting the message back into links exact: an escaped link cannot hold
+ * a raw newline, so the only one the message can carry is the framing. A seat
+ * that split a RAW message on the same framing would turn a literal
+ * `\ncaused by:` in the text into a forged link of its own, which is why the
+ * seat renders anything that is not one of these through the escaping renderer
+ * instead (`sanitizedFailureMessage` in `@bench/useInviterExchange`). */
+export class RelayedTerminalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RelayedTerminalError";
+  }
+}
+
 /** The result CSV of a server-driven job lives on the appliance, retrievable
  * through this endpoint rather than as a browser object URL. */
 function jobResultUrl(jobId: string): string {
@@ -1084,7 +1104,7 @@ async function consumeJobStream(
         case "error":
           onError({
             category: errorCategoryOf(event),
-            error: new Error(errorMessageOf(event)),
+            error: new RelayedTerminalError(errorMessageOf(event)),
           });
           return;
         default:
