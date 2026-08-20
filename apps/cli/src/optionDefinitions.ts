@@ -603,12 +603,13 @@ export function warnUnsupportedFileSyncFlags(
  *
  * `--server-port` and `--server-username` carry remedies of their own, so each
  * warns for itself: the coordination server's port is part of the location the
- * URL already gives, while its `username` has no URL form at all and is authored
- * in the connection block (the same remedy {@link WEBRTC_URL_EXTRAS_REFUSED}
- * gives for `server.key`). The rest are SSH authentication material with no
- * counterpart on a signaling socket at all, so they share one line -- and they
- * are the ones that most need it: a credential typed at a channel that discards
- * it looks, from the terminal, exactly like one that was used.
+ * URL already gives, while its `username` has no webrtc form at all -- the
+ * server is reached by location and its API key alone (the same remedy
+ * {@link WEBRTC_URL_EXTRAS_REFUSED} gives for `server.key`). The rest are SSH
+ * authentication material with no counterpart on a signaling socket at all, so
+ * they share one line -- and they are the ones that most need it: a credential
+ * typed at a channel that discards it looks, from the terminal, exactly like
+ * one that was used.
  */
 export function warnUnsupportedWebRTCServerFlags(
   channel: ConnectionConfig["channel"],
@@ -638,9 +639,10 @@ export function warnUnsupportedWebRTCServerFlags(
     log.warn(
       "--server-username has no effect on the webrtc channel and will be " +
         "ignored; a webrtc invitation reaches its coordination server by " +
-        "location alone. For a coordination server that needs a user, author " +
-        "`channel: webrtc` (with `server.username`) in psilink.yaml and run " +
-        "'psilink exchange'.",
+        "location and its API key alone. For a coordination server that " +
+        "needs a key, author `channel: webrtc` (with `server.key`) in " +
+        "psilink.yaml and run 'psilink exchange'. A username has no webrtc " +
+        "form and is never sent.",
     );
   const sshAuthenticationFlags: ReadonlyArray<readonly [string, boolean]> = [
     ["--server-password", flags.serverPassword !== undefined],

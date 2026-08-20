@@ -654,9 +654,10 @@ test("validateInvite: a webrtc invite reports every dropped --server-* flag", as
     port: 8443,
     path: "/psi",
   });
+  const token = await decodeInvitation(ready.invitation);
+  const decodedToken = JSON.stringify(token);
   for (const value of Object.values(secrets))
-    if (typeof value === "string")
-      expect(ready.invitation).not.toContain(value);
+    if (typeof value === "string") expect(decodedToken).not.toContain(value);
   warnSpy.mockRestore();
 });
 

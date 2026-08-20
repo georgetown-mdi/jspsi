@@ -85,9 +85,19 @@ an absent `path` to the web app's own broker mount (`/api/`) rather than to `/`.
 An invitation endpoint therefore carries the mount point resolved -- `psilink
 invite` records the path it will itself dial, `/` included, even where the
 `ws:`/`wss:` URL wrote none -- so a locator crossing between the two
-applications leaves no field for the consumer to fill in from a default the
-producer does not share. Both mint directions are pinned by the
-cross-application conformance vectors (see
+applications leaves no field for the consumer to fill in the mount point from a
+default the producer does not share.
+
+The port, and with it the scheme, is not resolved the same way: the endpoint
+carries `port` only when the connection names one, and an omitted port stays
+omitted on the wire rather than being filled from the producer's own default.
+The consumer resolves it from its own side instead -- a browser acceptor fills
+an absent port from the page's own protocol, and PeerJS infers `secure` from
+that same resolved scheme -- so an http-served page (local dev) resolves a
+different socket than the CLI's own `wss://` default for a bare-host endpoint,
+while a production `https` deployment agrees with it. This is a remaining
+consumer-side default, not a gap this endpoint closes. Both mint directions are
+pinned by the cross-application conformance vectors (see
 [PROTOCOL.md](PROTOCOL.md#webrtc-rendezvous-peer-id-derivation)).
 
 The address is built through the URL API, with `path` assigned as a pathname
