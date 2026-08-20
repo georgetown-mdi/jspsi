@@ -11,6 +11,7 @@ import {
 } from "../src/connection/messageConnection";
 import { UsageError } from "../src/errors";
 
+import type { Algorithm } from "../src/types";
 import type { BuiltExchangeRecord } from "../src/exchangeRecord";
 import type { Output } from "../src/config/linkageTerms";
 import type { ExchangeResult } from "../src/exchange";
@@ -89,6 +90,41 @@ function built(result: ExchangeResult): BuiltExchangeRecord {
   expect(result.audit).toBeDefined();
   return result.audit!;
 }
+
+test("run boundary: an algorithm with no run path is refused before anything goes on the wire", async () => {
+  // The run-side half of the record-integrity guarantee: a PreparedExchange
+  // carrying an algorithm outside the implemented allowlist -- constructed here by
+  // overriding the prepared terms, the way a caller that skipped prepareForExchange
+  // and the same guard it drives could -- is refused at the run boundary, so no
+  // round runs under whichever path the dispatch would otherwise fall through to
+  // and no record attests a disclosure the run did not make.
+  const both: Output = { expectsOutput: true, shareWithPartner: true };
+  const unimplementedPrepared = prepared("Initiator Co", both, clientRows);
+  unimplementedPrepared.linkageTerms = {
+    ...unimplementedPrepared.linkageTerms,
+    // The enum admits no such member, so the cast reaches the shape a member
+    // later added to AlgorithmSchema takes here before a run path exists for it.
+    algorithm: "psi-x" as Algorithm,
+  };
+  const [conn] = createMessagePipe();
+  // Every connection call throws, so a frame the refusal failed to stop surfaces
+  // as this distinct error rather than parking on a pipe with no partner.
+  const unusableConnection = new Proxy(conn, {
+    get: () => {
+      throw new Error("the connection was used past the algorithm refusal");
+    },
+  });
+  const run = runExchange(
+    unusableConnection,
+    "initiator",
+    unimplementedPrepared,
+    {
+      psiLibrary,
+    },
+  );
+  await expect(run).rejects.toThrow(UsageError);
+  await expect(run).rejects.toThrow(/not yet implemented/);
+});
 
 test("run boundary: a psi-c run whose metadata transmits a column is refused before anything goes on the wire", async () => {
   // These fixtures' inferred metadata makes the non-linkage `note` column a
