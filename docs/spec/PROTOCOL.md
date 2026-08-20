@@ -240,7 +240,7 @@ in exact integer arithmetic, selected on whether the sender's `effectiveKeyCount
 
 **The exact-integer premise tightens.** The cell-count gate's soundness depends on its product being exact ([the ceiling section](#the-single-pass-dataset-ceiling-receiver-memory-and-masking-compute)). With `effectiveKeyCount` bounded at `keyCount * 20` -- at most 5,120 for the 256 keys `MAX_LINKAGE_ENTRIES` permits -- the product with `MAX_RECORD_COUNT` (10^12) is 5.12 x 10^15, still below 2^53 (about 9.01 x 10^15) and so still exact, but the headroom falls from about 35x to about 1.8x. The invariant that pins that headroom is therefore pinned against the effective key count, not the raw key count, and raising either the candidate cap or `MAX_LINKAGE_ENTRIES` requires re-deriving it.
 
-#### Wire-format deltas: existing frames only, and a protocol-version event
+#### Wire-format deltas: existing frames only, and no version bump
 
 Fan-out changes the CONTENT of two frames the exchange already sends. It adds no frame, no round, and no message ordering.
 
@@ -252,7 +252,7 @@ The receiver validates the ragged table against authenticated state before it dr
 
 Nothing else on the wire changes. Message 1, message 3 (the resolved association table, whose entries are record-level row-index pairs), the withholding rule for a blind helper, and every cascade frame are untouched.
 
-Landing this is a **protocol-version event**: `PROTOCOL_VERSION` bumps with the capability, and a mixed pair fails closed on either route -- the [version reconcile](#protocol-version-reconcile-at-the-terms-exchange) refuses the skew, and a build that predates the capability refuses the terms through its own fan-out refusal.
+Landing this is deliberately **not** a protocol-version event: `PROTOCOL_VERSION` holds at 1. Version bumps are reserved for wire-incompatible changes after the software is officially published, and pre-release there are no deployed peers for the [version reconcile](#protocol-version-reconcile-at-the-terms-exchange) to hold apart. A mixed pair needs no version gate meanwhile: a fan-out-free exchange is byte-identical to the pre-change wire on both sides, a build predating the capability refuses fan-out terms through its own refusal, and the standing fan-out refusal (**Limits of the fan-out refusal** under [Key input data](#key-input-data)) keeps every production exchange off the ragged layout until that refusal is narrowed -- at which point a wire incompatibility once again takes a bump.
 
 #### The disclosure delta fan-out pays
 
@@ -293,7 +293,7 @@ where `D_large` / `D_small` and `rows_large` / `rows_small` are the two parties'
 
 ### Protocol-version reconcile at the terms exchange
 
-Both parties advertise a build-level protocol version -- `PROTOCOL_VERSION` (`packages/core/src/protocolSetup.ts`), an integer bumped only on a wire-incompatible protocol change -- on their terms-exchange message, beside `linkageTerms` and the record count, and reconcile the partner's before weighing the terms. It rides the one bidirectional round-trip both parties already perform (message 1 for the initiator, message 2 for the responder), so the check adds no round trip; on the authenticated path it rides the AEAD channel and cannot be forged.
+Both parties advertise a build-level protocol version -- `PROTOCOL_VERSION` (`packages/core/src/protocolSetup.ts`), an integer bumped only on a wire-incompatible protocol change, and only once the software is officially published (pre-release deltas hold it at 1: there are no deployed peers to reconcile) -- on their terms-exchange message, beside `linkageTerms` and the record count, and reconcile the partner's before weighing the terms. It rides the one bidirectional round-trip both parties already perform (message 1 for the initiator, message 2 for the responder), so the check adds no round trip; on the authenticated path it rides the AEAD channel and cannot be forged.
 
 The reconcile is **fail-closed**: a partner advertising anything other than this build's exact version aborts the exchange with the actionable `the partner is running an incompatible psilink version; both parties must run the same version` -- sent to the partner as the abort reason and thrown locally, so both sides name the real cause before the linkage rounds begin, instead of failing later with a cryptic frame-parse error. Any PRESENT value that is not the exact version is a mismatch: a different integer, or a garbled/wrong-typed value from a non-conforming or corrupted peer -- the field is read as `unknown` rather than a typed number precisely so such a value reconciles to the named skew instead of a generic "linkage terms failed to parse". This matches the mode-flag fast-fail precedent, not the fail-soft observed-host-key advisory. A partner advertising NO version is a build that predates the field: adding the field is itself wire-compatible (an older peer strips the unknown key and this build reads an absent advertisement as legacy), so an absent version proceeds rather than aborts. The durable, forward-looking guarantee is that any two builds that both carry the field fail cleanly the moment their versions differ.
 

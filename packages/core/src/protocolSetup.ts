@@ -205,14 +205,13 @@ const effectiveKeyCountField = z
 // parse (see protocolVersionProbe), so a reshaped sibling field cannot throw the
 // parse before the version is read and bury the skew diagnosis. The version is
 // read independently of the rest of the envelope on both message paths.
-// Version 2 carries the fan-out capability: the `effectiveKeyCount` field above,
-// the value-slot arithmetic every single-pass bound derives from it, and the
-// conditional ragged layout of single-pass message 2 (docs/spec/PROTOCOL.md,
-// Wire-format deltas). A mixed pair fails closed on either route -- this reconcile
-// refuses the skew, and a build predating the capability refuses fan-out terms
-// through its own refusal.
+// Held at 1 through pre-release wire deltas: no deployed peers exist for this
+// reconcile to hold apart, so a bump is reserved for the first wire-incompatible
+// change after the software is officially published. A build predating the
+// fan-out capability is held closed by its own fan-out refusal, not by this
+// reconcile (docs/spec/PROTOCOL.md, Wire-format deltas).
 /** @internal exported for the protocol-version reconcile tests. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 1;
 
 /**
  * The operator-facing diagnosis surfaced -- and sent to the partner as the abort
