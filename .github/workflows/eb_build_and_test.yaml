@@ -70,7 +70,10 @@ jobs:
     # applies, and since eb_deploy.yaml gates its deploy on this job via
     # workflow_call, a hang would also stall a production deploy. 30 min sits far
     # above a normal run (install + builds + tests + browser provisioning) yet
-    # cuts a true hang short.
+    # cuts a true hang short. It must also clear the worst case the browser
+    # provisioning step below is allowed: its 22 min plus the ~4 min the rest of
+    # the job measures, so an upstream stall there ends on that step's own named
+    # failure rather than on this cap, which GitHub reports as a cancellation.
     timeout-minutes: 30
     outputs:
       artifactName: ${{steps.artifact-name.outputs.artifactName}}
@@ -110,6 +113,36 @@ jobs:
           echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99-ci-retry
           echo 'Acquire::http::Timeout "15";' | sudo tee -a /etc/apt/apt.conf.d/99-ci-retry
           echo 'Acquire::https::Timeout "15";' | sudo tee -a /etc/apt/apt.conf.d/99-ci-retry
+      # The browser build a playwright release drives is keyed to that release, so
+      # the cache below is keyed on the version `npm ci` actually installed rather
+      # than the range apps/web declares. Resolved from apps/web, which owns the
+      # dependency, so a layout that stops hoisting playwright to the repository
+      # root still finds it.
+      - name: Resolve the installed Playwright version
+        id: playwright
+        working-directory: apps/web
+        run: |
+          version="$(node -p "require('playwright/package.json').version")"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      # A hit restores the browser build into the directory the install step below
+      # reads, taking the download CDN out of the run entirely; the apt libraries
+      # --with-deps installs are not in this cache and are installed on every run
+      # regardless. No restore-keys: a build saved under another playwright version
+      # is not the one this version drives, and restoring it would only carry it
+      # into the next save.
+      - name: Cache the Playwright browser build
+        id: browser-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{runner.os}}-${{runner.arch}}-${{steps.playwright.outputs.version}}
+      # A hit that restores nothing falls through to a silent re-download -- the
+      # cost this cache exists to remove -- so fail on the empty restore instead of
+      # paying it unremarked.
+      - name: Verify the restored browser build
+        if: steps.browser-cache.outputs.cache-hit == 'true'
+        run: test -n "$(ls -A ~/.cache/ms-playwright)"
       # The browser project (below) drives real Chromium; the stock ubuntu-latest
       # runner ships none, so provision it and the apt libraries it links against
       # here, before that project runs. --with-deps installs those apt libraries;
@@ -118,12 +151,39 @@ jobs:
       # >= 1.61, so do not downgrade. (The dev container provisions Chromium
       # separately and is maintained independently.)
       #
-      # A mirror that trickles rather than falls silent keeps the timeouts set
-      # above from ever firing, so bound this step rather than letting it eat
-      # the whole job budget.
+      # An upstream that trickles rather than falls silent -- the apt mirror the
+      # timeouts above cannot catch, or the browser CDN -- stalls this command
+      # instead of failing it, and a plain rerun has been enough to clear it, so
+      # each attempt bounds the whole command and a stalled attempt is retried here
+      # rather than costing a human rerun of the workflow. The 10m per-attempt
+      # bound clears the slowest measured success (7m24s) with headroom; two
+      # attempts, each with timeout's 30s kill-after grace, plus the 15s backoff
+      # between them total 21m15s, inside timeout-minutes, so the per-attempt
+      # bound is what fires and names the failure, and timeout-minutes fits
+      # inside the job bound above.
       - name: Install Playwright Chromium
-        timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 22
+        run: |
+          attempts=2
+          attempt_timeout=10m
+          for attempt in $(seq 1 "$attempts"); do
+            status=0
+            timeout --kill-after=30s "$attempt_timeout" npx playwright install --with-deps chromium || status=$?
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+            if [ "$status" -eq 124 ]; then
+              outcome="hit the $attempt_timeout bound"
+            else
+              outcome="failed with exit status $status"
+            fi
+            echo "::warning::Playwright provisioning attempt $attempt $outcome"
+            if [ "$attempt" -lt "$attempts" ]; then
+              sleep 15
+            fi
+          done
+          echo "::error::Playwright provisioning failed on all $attempts attempts; the last one $outcome"
+          exit "$status"
       # Integration and browser tests both stand up the web dev server through a
       # shared, self-managing vitest globalSetup (it spawns the server, waits for
       # readiness, reuses a running one, and tears it down -- no manual step and no
