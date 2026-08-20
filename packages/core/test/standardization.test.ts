@@ -2610,15 +2610,19 @@ describe("assertFanOutImplemented", () => {
         'refusal narrows -- see docs/spec/PROTOCOL.md, "Wire-format deltas: ' +
         'existing frames only, and no version bump"';
 
+      const singlePassTerms: LinkageTerms = {
+        ...minimalTerms,
+        linkageStrategy: "single-pass",
+      };
       const standardization = [
         { output: "last_name", input: "LN", steps: [fanOutStep] },
       ];
       expect(() => {
-        assertFanOutImplemented(minimalTerms, standardization);
+        assertFanOutImplemented(singlePassTerms, standardization);
       }, message).toThrow();
 
       const elementTerms: LinkageTerms = {
-        ...minimalTerms,
+        ...singlePassTerms,
         linkageKeys: [
           {
             name: "LN+DOB",
