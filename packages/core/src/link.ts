@@ -487,6 +487,12 @@ export async function linkViaCountOnlyPSI(
 // factor, or splitting the dataset, is the actionable remedy, and removing a
 // fan-out is another when either party declares one. See
 // docs/spec/PROTOCOL.md (the single-pass dataset ceiling).
+//
+// Every remedy it names is a configuration one of the two operators can change,
+// so both of its raise sites are a UsageError (CLI exit 64) rather than a
+// transport or internal fault -- the same class as the width refusals below. It
+// interpolates the agreed key count and the two record counts and nothing else,
+// all of them authenticated session state.
 function singlePassOverCapMessage(
   id: string,
   numLinkageKeys: number,
@@ -725,7 +731,7 @@ export async function linkViaSinglePassPSI(
   // and does not recommend cascade. The prepareForExchange pre-flight is the
   // coarse one-party shadow of this; this is the precise two-party check.
   if (singlePassExchangeExceedsCap(senderSize, receiverSize)) {
-    throw new Error(
+    throw new UsageError(
       singlePassOverCapMessage(
         participant.id,
         numLinkageKeys,
@@ -776,7 +782,7 @@ export async function linkViaSinglePassPSI(
       receiverSize,
     );
     if (reply.byteLength > replyCap) {
-      throw new Error(
+      throw new UsageError(
         singlePassOverCapMessage(
           participant.id,
           numLinkageKeys,

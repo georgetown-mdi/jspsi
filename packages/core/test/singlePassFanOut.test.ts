@@ -497,6 +497,7 @@ test("an over-ceiling fan-out exchange aborts on both sides before any frame mov
       false,
       -1,
     );
+    await expect(run).rejects.toThrow(UsageError);
     await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
     await expect(run).rejects.toThrow(/fans out counts as 20/);
     await expect(run).rejects.not.toThrow(/cascade/);

@@ -392,6 +392,15 @@ export interface TermsExchangeResult {
  * the same floor, and each holds the other to the value the other holds it to.
  * The checks (docs/spec/PROTOCOL.md, Wire-format deltas):
  *
+ * - nothing above `keyCount` at all unless the agreed `linkageStrategy` is
+ *   `single-pass`: an advertisement above the plain key count declares a fan-out,
+ *   and fan-out matching is specified for single-pass alone
+ *   (docs/spec/PROTOCOL.md, Fan-out runs under single-pass only), so this is that
+ *   rule's run-boundary half -- a symmetric function of the agreed pair, which
+ *   both parties refuse in lockstep. It is checked ahead of the shape checks
+ *   below because on such an exchange no advertisement above the plain count is
+ *   admissible whatever its shape. A count-only exchange needs no separate line:
+ *   `psi-c` terms are refused off `cascade` by the terms schema itself;
  * - `keyCount <= effectiveKeyCount <= keyCount * MAX_KEY_CANDIDATES_PER_ROW`, the
  *   range a sum of per-key factors of 1 or 20 can occupy;
  * - `effectiveKeyCount - keyCount` divisible by `MAX_KEY_CANDIDATES_PER_ROW - 1`,
@@ -423,6 +432,11 @@ function assertPartnerEffectiveKeyCount(
       "protocol",
     );
   };
+  if (advertised > keyCount && agreedTerms.linkageStrategy !== "single-pass")
+    refuse(
+      `a fan-out advertisement on a ${agreedTerms.linkageStrategy} exchange, ` +
+        "which matches one value per record",
+    );
   if (
     advertised < keyCount ||
     advertised > keyCount * MAX_KEY_CANDIDATES_PER_ROW

@@ -928,7 +928,9 @@ test("single-pass aborts symmetrically when the exchange exceeds the ceiling", a
   // Both parties compute the over-ceiling verdict from the exchanged counts alone,
   // before any single-pass frame moves, and both abort with the same guidance --
   // which does not recommend cascade. Drive a tiny local dataset whose keyCount *
-  // partnerRecordCount exceeds the budget.
+  // partnerRecordCount exceeds the budget. The class is asserted with the
+  // guidance: every remedy the message offers is a configuration change, so the
+  // CLI must exit 64 rather than treat the refusal as a transport fault.
   const [conn, peer] = createMessagePipe();
   const receiver = new PSIParticipant(
     "client",
@@ -945,6 +947,7 @@ test("single-pass aborts symmetrically when the exchange exceeds the ceiling", a
     false,
     -1,
   );
+  await expect(run).rejects.toThrow(UsageError);
   await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
   await expect(run).rejects.not.toThrow(/cascade/);
   // The abort happened before any frame was exchanged: the peer saw nothing.
@@ -974,6 +977,7 @@ test("single-pass aborts symmetrically from the starter side too", async () => {
     false,
     -1,
   );
+  await expect(run).rejects.toThrow(UsageError);
   await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
   await expect(run).rejects.not.toThrow(/cascade/);
   // The starter aborted before receiving the request: the peer saw nothing.

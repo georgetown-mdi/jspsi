@@ -593,11 +593,16 @@ export function prepareForExchange(
   // build would refuse at any size. The order needs no revisiting when that
   // refusal narrows to the cascade: a runnable single-pass fan-out then reaches
   // this gate, whose fan-out remedy is a real one for it.
+  //
+  // Every remedy the message names is a configuration the operator can change --
+  // fewer keys, fewer records, smaller batches, one less fan-out -- so it is a
+  // usage fault (CLI exit 64), like the width refusals the single-pass build
+  // raises for the same class of over-declared size.
   if (
     linkageTerms.linkageStrategy === "single-pass" &&
     singlePassDatasetExceedsCap(effectiveKeyCount, rawRows.length)
   ) {
-    throw new Error(
+    throw new UsageError(
       `single-pass linkage cannot carry this dataset: ${rawRows.length} ` +
         `record(s) across ${linkageTerms.linkageKeys.length} linkage key(s) ` +
         "exceed the single-pass ceiling. Reduce the number of linkage keys or " +

@@ -470,7 +470,7 @@ describe("prepareForExchange: a fan-out transform is refused", () => {
   });
 });
 
-// --- The single-pass ceiling pre-flight offers no refused remedy --------------
+// --- The single-pass ceiling pre-flight, and the refusals ahead of it ---------
 
 describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
   const singlePassTerms: LinkageTerms = {
@@ -509,6 +509,9 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
         rowsOverCeiling(1),
         columns,
       );
+    // Every remedy the message names is a configuration change, so the class is
+    // the one the CLI maps to EX_USAGE rather than to a transport failure.
+    expect(prepare).toThrow(UsageError);
     expect(prepare).toThrow(/exceed the single-pass ceiling/);
     expect(prepare).not.toThrow(/removing a fan-out/);
   });
@@ -539,6 +542,44 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
       );
     expect(prepare).toThrow(UsageError);
     expect(prepare).toThrow(/split_on/);
+    expect(prepare).not.toThrow(/single-pass ceiling/);
+  });
+
+  test("a standardization contradicting its terms is refused ahead of the ceiling", () => {
+    // A config with both faults meets the standardization refusal, not the
+    // ceiling. Both are fail-closed prepare-time refusals, so an operator meets
+    // exactly one of them and the precedence is the decision: the standardization
+    // fault is the better-typed of the two (an OperatorConfigError, which the web
+    // renders as an actionable config alert) and it names a contradiction the
+    // operator must fix at any dataset size, while the ceiling's remedies would
+    // send them to shrink a dataset that is not what stops this run.
+    const inconsistentStandardization: Standardization = [
+      { output: "not_a_field", input: "first_name" },
+    ];
+    const effectiveKeyCount = declaredEffectiveKeyCount(
+      singlePassTerms,
+      inconsistentStandardization,
+    );
+    const overCeilingRows = rowsOverCeiling(effectiveKeyCount);
+    // The dataset really is over the ceiling at the width this config declares, so
+    // what arrives below is the ordering's doing rather than a fixture that never
+    // reached the gate.
+    expect(
+      singlePassDatasetExceedsCap(effectiveKeyCount, overCeilingRows.length),
+    ).toBe(true);
+    const prepare = () =>
+      prepareForExchange(
+        {
+          linkageTerms: singlePassTerms,
+          metadata,
+          standardization: inconsistentStandardization,
+        },
+        "Tester",
+        overCeilingRows,
+        columns,
+      );
+    expect(prepare).toThrow(StandardizationTermsError);
+    expect(prepare).toThrow(/not_a_field/);
     expect(prepare).not.toThrow(/single-pass ceiling/);
   });
 });
