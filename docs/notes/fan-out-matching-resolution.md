@@ -4,13 +4,13 @@ title: "Fan-Out Matching: Local Resolution, and the Strategy It Runs Under"
 
 # Fan-out matching: why resolution is local, single-pass, and greedy
 
-*Status: decided, not built. The construction described here is normatively specified in [PROTOCOL.md](../spec/PROTOCOL.md#fan-out-matching-multi-value-key-candidates), with the operator-facing description in [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#fan-out-multi-value-fields); no run path implements it yet, and an exchange whose standardization or linkage-key transforms declare `split_on` is still refused before it runs. This note records why the rules have that shape, the alternatives weighed and set aside, and what remains open. See [docs/notes/README.md](README.md).*
+*Status: built under `single-pass`. The construction is normatively specified in [PROTOCOL.md](../spec/PROTOCOL.md#fan-out-matching-multi-value-key-candidates), with the operator-facing description in [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#fan-out-multi-value-fields); a fan-out declared under any other strategy is refused before the exchange runs, and the cascade realization stays open work. This note records why the rules have that shape, the alternatives weighed and set aside, and what remains open. See [docs/notes/README.md](README.md).*
 
 This is design rationale. Nothing here binds an implementation; the normative rows live in the spec documents linked above, and this note does not restate them.
 
 ## The problem, and the two constraints that shape it
 
-A fan-out transform gives one individual several candidate values for one linkage key: a hyphenated surname becomes the whole name plus each part, so one record enters a round with three ways to match instead of one. That is a widening -- it exists to catch the same person recorded two ways -- and the matching layer has never carried it: it takes one value per record per round, so today a splitting row is refused rather than silently matched on nothing.
+A fan-out transform gives one individual several candidate values for one linkage key: a hyphenated surname becomes the whole name plus each part, so one record enters a round with three ways to match instead of one. That is a widening -- it exists to catch the same person recorded two ways -- and the matching layer as it stood took one value per record per round, so a splitting row was refused rather than silently matched on nothing.
 
 Two constraints were fixed before any design was weighed, and everything below follows from them:
 
@@ -33,7 +33,7 @@ The cascade cannot reach the same place on its existing frames, and the reason i
 
 So the alternative that looked cheapest -- carry the matched-value record grouping on the cascade's existing final table exchange -- is not merely more disclosive, it is incorrect for the cascade removal semantics. A correct cascade fan-out has to extend the PER-ROUND frames instead, so that round `j`'s resolution is known before round `j+1`'s candidate set is formed. That is a larger change, and it lands in the innermost security-reviewed loop of the protocol. It remains open as future work and would be its own protocol-version event; the resolution rule is fixed normatively now precisely so that work reproduces this table rather than inventing a second one.
 
-Narrowing the feature to one strategy also reuses machinery that already exists and is already symmetric. `split_on` is refused universally today by the interim guard, and `linkage_strategy` is a mandatory-consistency agreed term, so a strategy-conditional refusal narrows an existing refusal rather than inventing a control: both parties refuse in lockstep from the agreed pair.
+Narrowing the feature to one strategy also reuses machinery that already exists and is already symmetric. `linkage_strategy` is a mandatory-consistency agreed term, so a strategy-conditional refusal narrows the standing `split_on` refusal rather than inventing a control: both parties refuse in lockstep from the agreed pair.
 
 **The cost, stated plainly.** `cascade` is the schema default and the web application's ordinary path. Fan-out therefore becomes a feature an operator opts into a *different strategy* to get, inheriting single-pass's larger disclosure (the receiver sees the sender's whole per-key value structure and the weaker-key matches the lockstep cascade filters out) and its tighter dataset ceiling. That coupling is a real reduction in reach, which is why it is stated in the disclosure rows of the spec rather than left for an operator to discover.
 
@@ -63,7 +63,7 @@ That is the intended reading of the cascade, not a compromise. The keys are orde
 
 It fans out. The two surfaces already share one refusal, one recovery message, and one consent glossary line; an operator who writes `split_on` in an element transform means the same thing they mean in a standardization step. Keeping them different would mean two semantics, two width bounds, and a permanent asymmetry to explain in the reference. The key builder already assembles a cross-product over per-element candidate lists, so the element path's candidates enter at their element's position in that product, and the width cap applies to the assembled product either way.
 
-The consent surface follows the same decision. An element declaring a fan-out earns the "not supported" marker today, which is honest while the exchange refuses the terms outright. When fan-out lands, that marker becomes a breadth marker on both surfaces -- the element fans out, so the marker must say so rather than continuing to say the run does not happen.
+The consent surface follows the same decision, and it carries both cases rather than one: an element declaring a fan-out earns a breadth marker where the strategy matches its candidates, since the element fans out and the marker must say so, and keeps the "not supported" marker where the exchange refuses the terms outright, since a run that does not happen has no breadth to name.
 
 ## The width bound: value, and what happens above it
 

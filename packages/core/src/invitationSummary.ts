@@ -488,7 +488,9 @@ export interface InvitationSummary {
   deduplicateApplied: boolean;
   /**
    * Whether any linkage key's element transforms split one value into several
-   * match candidates -- the fan-out the "multiple" element markers name.
+   * match candidates -- the fan-out an element marker names, as "multiple" where
+   * the strategy matches those candidates and "not supported" where it refuses
+   * the exchange.
    *
    * Read from the AGREED terms alone, which is all an invitation carries: the
    * inviting party's own data standardization can fan out a field the terms do
