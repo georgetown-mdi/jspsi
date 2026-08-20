@@ -9,7 +9,11 @@ import { isBareSftpHost } from "@psi/sftpHost";
 
 import { isolatedColumnName } from "@components/ColumnName";
 
-import { TRANSPORT_LEDGER_LABELS, dateTimeLabel } from "./inviterModel";
+import {
+  TRANSPORT_LEDGER_LABELS,
+  countOnlyLedgerValue,
+  dateTimeLabel,
+} from "./inviterModel";
 import { saveRailNote } from "./saveExchangeModel";
 
 import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
@@ -283,11 +287,15 @@ export function acceptorDoneLedgerFooter(serverJob: boolean): string {
 }
 
 /** What a completed exchange settled for the acceptor's ledger: the matched-row
- * count that actually arrived, or that the agreed terms withheld the result table
- * from this party. */
+ * count that actually arrived, the size of the overlap a count-only exchange
+ * reported, or that the agreed terms withheld the result table from this party. */
 export interface AcceptorLedgerOutcome {
   matchedRecordCount?: number;
   resultWithheld?: boolean;
+  /** The count a count-only (`psi-c`) exchange reported, present only for such a
+   * run -- a distinct outcome from both of the others, since no result table
+   * exists for either party to have received or been denied. */
+  intersectionCount?: number;
 }
 
 /** The settled ledger tag once the exchange completes, naming the partner it was
@@ -317,12 +325,16 @@ export function acceptorDoneLedgerRows(
   const summary = summarizeInvitation(token);
   const received = summary.payload?.send ?? [];
   const receivedSuffix = received.length > 0 ? ` + ${received.join(", ")}` : "";
+  // The count-only case is read first: it holds no result table either, so the
+  // withheld row and the matched row would each report it as something it is not.
   const receivedValue =
-    outcome.resultWithheld === true
-      ? "No result table - withheld by the agreed terms"
-      : `${new Intl.NumberFormat("en-US").format(
-          outcome.matchedRecordCount ?? 0,
-        )} matched rows${receivedSuffix}`;
+    outcome.intersectionCount !== undefined
+      ? countOnlyLedgerValue(outcome.intersectionCount)
+      : outcome.resultWithheld === true
+        ? "No result table - withheld by the agreed terms"
+        : `${new Intl.NumberFormat("en-US").format(
+            outcome.matchedRecordCount ?? 0,
+          )} matched rows${receivedSuffix}`;
   return [
     acceptorSendRow("You sent", disclosedColumnNames(metadata)),
     // The expiry row is gone (the invitation is consumed), so the settled

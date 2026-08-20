@@ -1285,10 +1285,12 @@ export async function runExchange(
     // a non-receiving helper does not get the result table to write; the receiver
     // and both-output parties get it as before. Same predicate as the record gate.
     associationTable: heldResult ? associationTable : undefined,
-    // The count-only run's whole result, under the same entitlement gate: a party
-    // whose terms give it no output does not receive the count either, including the
-    // count-only receiver of a run in which neither party expects output -- it
-    // computed one, and does not get it.
+    // The count-only run's whole result, under the same entitlement gate the table
+    // takes: a party whose agreed terms give it no output does not receive the count
+    // either. In a one-sided count-only run that party is the PSI sender, and the
+    // count-report leg is suppressed for it upstream (reportsCountToSender), so this
+    // gate is the entitlement predicate applied once more at the boundary rather than
+    // the only thing standing between a helper and a count.
     intersectionCount: heldResult ? intersectionCount : undefined,
     partnerTerms,
     resolvedRole,

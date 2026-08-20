@@ -153,9 +153,19 @@ export interface ResultEvent extends EventBase {
   /**
    * Whether this party received a matched result table. False for a one-sided
    * exchange in which this party is the helper and its agreed terms give it no
-   * output -- it contributed to the match but receives no result file.
+   * output -- it contributed to the match but receives no result file -- and
+   * false for a count-only exchange, which produces no matched pairing for
+   * anyone, in which case {@link intersectionCount} carries the outcome.
    */
   resultWritten: boolean;
+  /**
+   * The size of the intersection a count-only (`psi-c`) exchange reported,
+   * present exactly when this party's agreed terms gave it the count and absent
+   * on every other run. It is what separates the two `resultWritten: false`
+   * outcomes: with the field, this party received exactly what its terms
+   * promised; without it, the terms withheld the result table.
+   */
+  intersectionCount?: number;
 }
 
 /** The failure terminal event. Exactly one terminal event fires per run. */
@@ -299,9 +309,29 @@ export function buildMetricsEvent(
   };
 }
 
-/** Build the success terminal event. */
-export function buildResultEvent(resultWritten: boolean): ResultEvent {
-  return { v: EVENT_STREAM_VERSION, type: "result", resultWritten };
+/**
+ * Build the success terminal event. `intersectionCount` is passed only for a
+ * count-only run this party's terms entitle it to read, and the field is omitted
+ * entirely otherwise: its presence is what a consumer keys the count-only
+ * outcome off, so a zero count and an absent one must stay distinguishable.
+ */
+export function buildResultEvent(
+  resultWritten: boolean,
+  intersectionCount?: number,
+): ResultEvent {
+  return {
+    v: EVENT_STREAM_VERSION,
+    type: "result",
+    resultWritten,
+    // The one numeric field of this stream that a partner can influence (the
+    // count-report leg carries the receiver's tally to the sender), so it takes
+    // the same non-negative whole-number floor the metrics counters take. Core
+    // bounds the reported figure to the smaller of the two exchanged record
+    // counts before it gets here.
+    ...(intersectionCount !== undefined
+      ? { intersectionCount: toCount(intersectionCount) }
+      : {}),
+  };
 }
 
 /** Build the classified failure terminal event. */
@@ -396,7 +426,7 @@ export interface EventStreamEmitter {
     transportRetries: number,
     reconnects: number,
   ): void;
-  result(resultWritten: boolean): void;
+  result(resultWritten: boolean, intersectionCount?: number): void;
   error(error: unknown, phase: ErrorPhase): void;
 }
 
@@ -420,7 +450,8 @@ function createEventStreamEmitter(): EventStreamEmitter {
       writer.emit(
         buildMetricsEvent(recordsProcessed, transportRetries, reconnects),
       ),
-    result: (resultWritten) => writer.emit(buildResultEvent(resultWritten)),
+    result: (resultWritten, intersectionCount) =>
+      writer.emit(buildResultEvent(resultWritten, intersectionCount)),
     error: (error, phase) => writer.emit(buildErrorEvent(error, phase)),
   };
 }

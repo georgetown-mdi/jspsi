@@ -102,11 +102,32 @@ interface RunOutcome {
   responderSent: Array<unknown>;
 }
 
+// Which party holds which dataset. The default puts the smaller set on the
+// initiator, which makes it the receiver in a both-entitled round; swapping the two
+// moves the receiver -- and with it the count-report leg's direction -- to the
+// responder. The same pair of sets is exchanged either way, so the round still
+// matches the one value (Carol) and still drops the duplicate (Elizabeth), and the
+// expected count is unchanged.
+interface Datasets {
+  initiator: Array<Record<string, string>>;
+  responder: Array<Record<string, string>>;
+}
+
+const initiatorHoldsSmallerDataset: Datasets = {
+  initiator: initiatorRows,
+  responder: responderRows,
+};
+const responderHoldsSmallerDataset: Datasets = {
+  initiator: responderRows,
+  responder: initiatorRows,
+};
+
 async function runBoth(
   initiatorOutput: Output,
   responderOutput: Output,
   algorithm: Algorithm = "psi-c",
   mutate: (prepared: PreparedExchange) => void = () => {},
+  datasets: Datasets = initiatorHoldsSmallerDataset,
 ): Promise<RunOutcome> {
   const [connInitiator, connResponder] = createMessagePipe();
   const initiatorSent: Array<unknown> = [];
@@ -114,13 +135,13 @@ async function runBoth(
   const initiatorPrepared = prepared(
     "Initiator Co",
     initiatorOutput,
-    initiatorRows,
+    datasets.initiator,
     algorithm,
   );
   const responderPrepared = prepared(
     "Responder Co",
     responderOutput,
-    responderRows,
+    datasets.responder,
     algorithm,
   );
   mutate(initiatorPrepared);
@@ -167,6 +188,54 @@ test("both entitled: the count reaches both parties and no pairing reaches eithe
   expect(countReports(initiatorSent)).toEqual([
     { intersectionCount: expectedCount },
   ]);
+  expect(countReports(responderSent)).toEqual([]);
+});
+
+test("both entitled: the report leg runs the same way with the responder receiving", async () => {
+  // The mirror of the round above, and the orientation the delivery leg is otherwise
+  // never driven in: the responder holds the smaller dataset, so IT is the receiver
+  // and the count travels responder -> initiator. The leg is driven by the resolved
+  // PSI role rather than by which party opened the exchange, and this is what holds
+  // that claim to a run rather than to a reading of the role rule.
+  const { initiator, responder, initiatorSent, responderSent } = await runBoth(
+    both,
+    both,
+    "psi-c",
+    () => {},
+    responderHoldsSmallerDataset,
+  );
+
+  expect(responder.resolvedRole).toBe("receiver");
+  expect(initiator.resolvedRole).toBe("sender");
+
+  // The sender's count arrived over the leg; the receiver computed its own.
+  expect(initiator.intersectionCount).toBe(expectedCount);
+  expect(responder.intersectionCount).toBe(expectedCount);
+  expect(initiator.associationTable).toBeUndefined();
+  expect(responder.associationTable).toBeUndefined();
+
+  // Exactly one count-report frame, sent by the receiver alone -- the direction
+  // followed the role, not the handshake.
+  expect(countReports(responderSent)).toEqual([
+    { intersectionCount: expectedCount },
+  ]);
+  expect(countReports(initiatorSent)).toEqual([]);
+});
+
+test("one-sided: no count-report frame either, with the initiator receiving", async () => {
+  // The suppression case in the other orientation: the entitled party is the
+  // INITIATOR here, so the role rule makes it the receiver and it holds the count
+  // already. The absence is on the wire in this orientation too -- a frame suppressed
+  // in one direction only would still mark that a count existed to report.
+  const { initiator, responder, initiatorSent, responderSent } = await runBoth(
+    receives,
+    helps,
+  );
+
+  expect(initiator.resolvedRole).toBe("receiver");
+  expect(initiator.intersectionCount).toBe(expectedCount);
+  expect(responder.intersectionCount).toBeUndefined();
+  expect(countReports(initiatorSent)).toEqual([]);
   expect(countReports(responderSent)).toEqual([]);
 });
 

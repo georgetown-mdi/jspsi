@@ -1815,10 +1815,12 @@ export async function runProtocol(
     // terminal event has now fired. resultWritten is false for a helper whose
     // agreed terms give it no output table (associationTable withheld) and for a
     // count-only exchange, which writes no result file at all, and true when a
-    // result CSV was produced. The metrics summary precedes it so the terminal
-    // event stays last on the stream.
+    // result CSV was produced. The count rides the same event so the two
+    // resultWritten:false outcomes stay distinguishable to a supervisor that reads
+    // only fd 3 -- it is present exactly when this party held a count. The metrics
+    // summary precedes it so the terminal event stays last on the stream.
     emitMetrics();
-    emit((e) => e.result(associationTable !== undefined));
+    emit((e) => e.result(associationTable !== undefined, intersectionCount));
     return {
       bootstrap,
       onAuthenticatedError,

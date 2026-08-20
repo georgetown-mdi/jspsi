@@ -3804,6 +3804,101 @@ test("a main-try failure under --event-stream emits exactly one terminal error e
   expect(lines[1].v).toBe(1);
 });
 
+test("a count-only run's terminal event carries the count beside resultWritten:false", async () => {
+  // The outcome a supervisor reading only fd 3 would otherwise misreport: a
+  // count-only run writes no result file, so its terminal event carries the same
+  // resultWritten:false a withheld helper's does. The count is what separates
+  // them, and it must ride the machine event rather than only the human log.
+  async function runExchangeCountOnly(): Promise<unknown> {
+    await defaultRunExchange();
+    return {
+      associationTable: undefined,
+      intersectionCount: 7,
+      partnerPayload: {},
+    };
+  }
+  vi.mocked(runExchange).mockImplementation(runExchangeCountOnly as never);
+
+  mockFd3Open();
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        path.join(tmpDir, "count-only-stream.csv"),
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const lines = takeFd3Lines();
+  expect(lines.map((line) => line.type)).toEqual([
+    "stages",
+    "metrics",
+    "result",
+  ]);
+  expect(lines[2].resultWritten).toBe(false);
+  expect(lines[2].intersectionCount).toBe(7);
+}, 20_000);
+
+test("a withheld result's terminal event carries no count at all", async () => {
+  // The other side of the same discriminant: a helper whose terms give it no
+  // output table has no count either, so the field is absent rather than zero.
+  vi.mocked(runExchange).mockImplementation((async () => {
+    await defaultRunExchange();
+    return { associationTable: undefined, partnerPayload: {} };
+  }) as never);
+
+  mockFd3Open();
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        path.join(tmpDir, "withheld-stream.csv"),
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const lines = takeFd3Lines();
+  expect(lines[lines.length - 1].type).toBe("result");
+  expect(lines[lines.length - 1].resultWritten).toBe(false);
+  expect("intersectionCount" in lines[lines.length - 1]).toBe(false);
+}, 20_000);
+
 test("an emitter passed instead of the flag carries every event, and no second stream is opened", async () => {
   // The object-reuse branch, which the online bootstrap takes: that caller opens
   // the stream itself (it emits persistence warnings from outside this frame)
@@ -3858,8 +3953,10 @@ test("an emitter passed instead of the flag carries every event, and no second s
   }
 
   // The whole run reported through the caller's object, terminal event included.
+  // A matched run passes no count, so the terminal call carries the written flag
+  // and an absent count (the builder omits the field entirely for it).
   expect(emitted.map((e) => e.event)).toEqual(["stages", "metrics", "result"]);
-  expect(emitted[2].args).toEqual([true]);
+  expect(emitted[2].args).toEqual([true, undefined]);
   // Nothing re-ran the preflight and nothing reached the descriptor: the
   // already-preflighted emitter was reused rather than re-opened.
   expect(fd3.preflightProbes).toBe(0);

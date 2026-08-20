@@ -678,13 +678,36 @@ function stagesOf(event: RelayEvent): Array<StageDefinition> {
   });
 }
 
+/** The intersection size a count-only (`psi-c`) `result` event reports, or
+ * undefined when the run reported none. The field's PRESENCE is the discriminant
+ * the CLI's contract defines (docs/spec/CLI_EVENTS.md, `result`), so a zero count
+ * is a count and a missing one is not; a value outside the non-negative safe
+ * integers is treated as absent, keeping a malformed frame off the counted shape
+ * rather than rendering a nonsense figure. */
+function countOnlyResultCount(event: RelayEvent): number | undefined {
+  const count = event.intersectionCount;
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= 0
+    ? count
+    : undefined;
+}
+
 /** The base bench {@link RunOutputs} for a `result` relay event, before the
  * record pair is attached. A server job writes its result on the appliance, so
  * there is no browser object URL: a received result points `resultsUrl` at the
  * job's appliance result endpoint (a real same-origin download href), and a
  * withheld result is the withheld variant exactly as the browser driver
- * produces it. */
+ * produces it.
+ *
+ * A count-only run reports no result file either, and its count is checked FIRST
+ * for the same reason `buildRunOutputs` checks it first on the browser-direct path
+ * (`@bench/runOutputs`): the run withheld nothing from this party -- the count is
+ * what its terms promised -- so reading it as the withheld shape would report the
+ * outcome as the wrong one. The count doubles as the completion header's matched
+ * figure, exactly as it does there. */
 function baseResultOutputs(event: RelayEvent, jobId: string): RunOutputs {
+  const intersectionCount = countOnlyResultCount(event);
+  if (intersectionCount !== undefined)
+    return { intersectionCount, matchedRecordCount: intersectionCount };
   return event.resultWritten === false
     ? { resultWithheld: true }
     : { resultsUrl: jobResultUrl(jobId) };

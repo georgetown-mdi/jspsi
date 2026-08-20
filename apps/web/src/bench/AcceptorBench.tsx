@@ -857,6 +857,7 @@ export function AcceptorBench() {
               {
                 matchedRecordCount: outputs.matchedRecordCount,
                 resultWithheld: outputs.resultWithheld,
+                intersectionCount: outputs.intersectionCount,
               },
               launched.edits.metadata,
               howItRuns,
