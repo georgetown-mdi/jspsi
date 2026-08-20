@@ -319,6 +319,15 @@ const sharedSecretMessage = z.object({
 
 export interface TermsExchangeResult {
   partnerTerms: LinkageTerms;
+  /**
+   * Non-fatal observations from this terms exchange, for the caller to surface at
+   * the run boundary (runExchange hands each to its `onWarning`, which the CLI
+   * puts on both stderr and the machine-readable warning event). Display text,
+   * carrying no `Error` of its own: any partner-controlled fragment is escaped
+   * where it is composed. Currently the terms-compatibility warnings
+   * (`validateCompatibility`) and the partner-width notice
+   * ({@link partnerWidthAboveAgreedNotice}).
+   */
   warnings: string[];
   /**
    * The partner's raw dataset record count, read off the terms message envelope
@@ -407,7 +416,8 @@ export interface TermsExchangeResult {
  * - at least the floor the agreed terms imply -- the value derived from the
  *   partner's element transforms alone, which both parties can see. A party may
  *   advertise MORE than that floor, because its own local standardization can fan
- *   out a field the terms do not show.
+ *   out a field the terms do not show; that width is accepted here and surfaced to
+ *   the operator by {@link partnerWidthAboveAgreedNotice}.
  *
  * An advertisement failing any of them is a protocol violation, like every other
  * partner-supplied count: a `"protocol"` {@link ConnectionError}, and the caller
@@ -446,6 +456,49 @@ function assertPartnerEffectiveKeyCount(
   if (advertised < declaredEffectiveKeyCount(agreedTerms))
     refuse("below the floor the agreed linkage keys' own transforms imply");
   return advertised;
+}
+
+/**
+ * The run-boundary notice for a partner running WIDER than the agreed terms alone
+ * imply, or `undefined` for one running at exactly the width they imply.
+ *
+ * The agreed terms fix a floor rather than a width (see
+ * {@link assertPartnerEffectiveKeyCount}): a partner's own standardization can fan
+ * out a field the terms do not show, so the terms a consent surface displayed can
+ * imply one width while the partner legitimately runs at up to
+ * `MAX_KEY_CANDIDATES_PER_ROW` times it. Both widths are authenticated session
+ * state, and every derived single-pass bound -- and this party's share of the
+ * dataset ceiling -- is computed from the ADVERTISED one, so an operator who saw
+ * only the terms is told when the two differ.
+ *
+ * Warn-don't-block: the advertisement is admissible, so this rides the terms
+ * warnings the caller surfaces at the run boundary
+ * ({@link TermsExchangeResult.warnings}) and never aborts. It interpolates the two
+ * integers and no partner-authored text.
+ *
+ * `agreedTerms` is THIS party's own copy. The compatibility check has already
+ * proven the two copies canonically identical -- so the floor here is the same one
+ * {@link assertPartnerEffectiveKeyCount} held the advertisement to -- and reading
+ * it locally keeps the number the operator is shown as the width THEIR terms
+ * imply, rather than one recomputed from the frame that prompted the notice.
+ *
+ * Held under the per-value display cap (`DEFAULT_MAX_DISPLAY_LENGTH`, 256) at its
+ * widest admissible pair of counts (5,120 against 256), because the CLI escapes a
+ * terms warning at that cap on its way to stderr and a longer notice would reach
+ * the operator cut short.
+ */
+function partnerWidthAboveAgreedNotice(
+  partnerEffectiveKeyCount: number,
+  agreedTerms: LinkageTerms,
+): string | undefined {
+  const agreedWidth = declaredEffectiveKeyCount(agreedTerms);
+  if (partnerEffectiveKeyCount <= agreedWidth) return undefined;
+  return (
+    "effective key count above the agreed terms: partner advertised " +
+    `${partnerEffectiveKeyCount} value slot(s) per record against the ` +
+    `${agreedWidth} the agreed linkage keys imply; the extra width is a ` +
+    "fan-out only the partner's own standardization holds"
+  );
 }
 
 /**
@@ -755,11 +808,19 @@ export async function exchangeTerms(
       throw err;
     }
 
+    // Accepted, and above the width the agreed terms alone imply: the run
+    // proceeds, and the operator hears about the gap at the run boundary.
+    const widthNotice = partnerWidthAboveAgreedNotice(
+      partnerEffectiveKeyCount,
+      localTerms,
+    );
+
     await conn.send({ decision: "proceed" });
 
     return {
       partnerTerms,
-      warnings,
+      warnings:
+        widthNotice === undefined ? warnings : [...warnings, widthNotice],
       partnerRecordCount: msg.recordCount,
       partnerEffectiveKeyCount,
       partnerSaveIntent: msg.save === true,
@@ -843,6 +904,13 @@ export async function exchangeTerms(
       throw err;
     }
 
+    // See the initiator branch: an admissible width above the agreed floor is
+    // surfaced at the run boundary rather than refused.
+    const widthNotice = partnerWidthAboveAgreedNotice(
+      partnerEffectiveKeyCount,
+      localTerms,
+    );
+
     await conn.send({
       linkageTerms: localTerms,
       decision: "proceed",
@@ -864,7 +932,8 @@ export async function exchangeTerms(
 
     return {
       partnerTerms: partnerTerms!,
-      warnings,
+      warnings:
+        widthNotice === undefined ? warnings : [...warnings, widthNotice],
       partnerRecordCount,
       partnerEffectiveKeyCount,
       partnerSaveIntent,

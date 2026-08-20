@@ -4485,6 +4485,67 @@ test("a host-key divergence under --event-stream emits a warning event and still
   expect(mockState.warnings).toContain(divergence);
 }, 20_000);
 
+test("a terms-exchange warning under --event-stream reaches the fd-3 warning event", async () => {
+  // The partner-width notice (packages/core/src/protocolSetup.ts) is a
+  // terms-exchange warning, so it rides onWarning. An unattended run is the case
+  // it exists for -- nobody is watching the terminal when a scheduled exchange
+  // runs wider than the terms its operator agreed to -- so it has to land on the
+  // machine-readable stream a supervisor reads, not only on stderr.
+  const widthNotice =
+    "effective key count above the agreed terms: partner advertised 21 " +
+    "value slot(s) per record against the 2 the agreed linkage keys imply; " +
+    "the extra width is a fan-out only the partner's own standardization holds";
+
+  vi.mocked(runExchange).mockImplementation((async (...args: unknown[]) => {
+    const options = args[3] as { onWarning?: (msg: string) => void };
+    options.onWarning?.(widthNotice);
+    return defaultRunExchange();
+  }) as never);
+
+  mockFd3Open();
+  try {
+    // Party A runs flag-on, party B flag-off, so every captured fd-3 line is A's.
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const lines = takeFd3Lines();
+  const warning = lines.find((line) => line.type === "warning");
+  expect(warning).toBeDefined();
+  expect(warning!.v).toBe(1);
+  // Numbers and first-party prose only, and short of the per-value display cap,
+  // so both sinks carry the notice whole: neither escape rewrites or cuts it.
+  expect(warning!.message).toBe(widthNotice);
+  // Present on the human log too, under the terms-exchange prefix.
+  expect(
+    mockState.warnings.some(
+      (line) => line.includes("terms exchange:") && line.includes(widthNotice),
+    ),
+  ).toBe(true);
+}, 20_000);
+
 test("a failed onAuthenticated hook under --event-stream emits a warning event before the success terminal event", async () => {
   // The run completes and writes its result, so the terminal event is a success:
   // a supervisor that discards stderr would read the whole stream as a clean

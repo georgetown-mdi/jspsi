@@ -7,7 +7,12 @@ import {
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_MISMATCH_MESSAGE,
 } from "../src/protocolSetup";
-import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
+import {
+  MAX_LINKAGE_ENTRIES,
+  MAX_NAME_LENGTH,
+} from "../src/config/linkageTerms";
+import { MAX_KEY_CANDIDATES_PER_ROW } from "../src/fanOutFunctions";
+import { redactAndSanitizeForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
 import type { PsiRole } from "../src/types";
@@ -689,6 +694,92 @@ test("a party may advertise more than the agreed terms' floor", async () => {
   expect((await responder).partnerEffectiveKeyCount).toBe(20);
 });
 
+// --- The run-boundary notice for a width above the agreed floor --------------
+// Accepting the wider advertisement silently would leave the operator with only
+// the terms a consent surface displayed, which imply the narrower width, while
+// every derived single-pass bound -- and this party's share of the dataset
+// ceiling -- is computed from the wider one. The gap rides the terms warnings the
+// caller surfaces at the run boundary; it never blocks, because the
+// advertisement is admissible.
+
+const WIDTH_NOTICE = /effective key count above the agreed terms/;
+
+test("the responder warns when the partner's advertised width is above the agreed floor", async () => {
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", singlePassTermsB, 200);
+  await connA.send({
+    linkageTerms: singlePassTermsA,
+    recordCount: 100,
+    effectiveKeyCount: 20,
+    protocolVersion: PROTOCOL_VERSION,
+  });
+  await connA.receive(); // msg 2
+  await connA.send({ decision: "proceed" });
+  const notice = (await responder).warnings.find((w) => WIDTH_NOTICE.test(w));
+  expect(notice).toBeDefined();
+  // Both widths are named: the advertised one the run's bounds are derived from,
+  // and the one the agreed linkage keys imply.
+  expect(notice).toContain("partner advertised 20 value slot(s) per record");
+  expect(notice).toContain("against the 1 the agreed linkage keys imply");
+});
+
+test("the initiator warns on a width above the floor advertised on message 2", async () => {
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", singlePassTermsA, 100);
+  await connB.receive(); // msg 1
+  await connB.send({
+    linkageTerms: singlePassTermsB,
+    decision: "proceed",
+    recordCount: 200,
+    effectiveKeyCount: 20,
+    protocolVersion: PROTOCOL_VERSION,
+  });
+  const notice = (await initiator).warnings.find((w) => WIDTH_NOTICE.test(w));
+  expect(notice).toBeDefined();
+  expect(notice).toContain("partner advertised 20 value slot(s) per record");
+  expect(notice).toContain("against the 1 the agreed linkage keys imply");
+});
+
+test("the width notice reaches the operator whole at the widest admissible counts", async () => {
+  // The CLI escapes a terms warning at the per-value display cap on its way to
+  // stderr (apps/cli/src/protocol.ts), which truncates rather than wraps, so a
+  // notice longer than that cap reaches the operator cut short -- and the numbers
+  // it exists to name sit at its front, where a truncation would spare them but
+  // drop the explanation. The widest pair the advertisement checks admit is
+  // MAX_LINKAGE_ENTRIES agreed keys against MAX_LINKAGE_ENTRIES *
+  // MAX_KEY_CANDIDATES_PER_ROW advertised.
+  const wideTerms: LinkageTerms = {
+    ...singlePassTermsA,
+    linkageKeys: Array.from({ length: MAX_LINKAGE_ENTRIES }, (_, i) => ({
+      name: `key ${i}`,
+      elements: [{ field: "ssn" }],
+    })),
+  };
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", wideTerms, 200);
+  await connA.send({
+    linkageTerms: wideTerms,
+    recordCount: 100,
+    effectiveKeyCount: MAX_LINKAGE_ENTRIES * MAX_KEY_CANDIDATES_PER_ROW,
+    protocolVersion: PROTOCOL_VERSION,
+  });
+  await connA.receive(); // msg 2
+  await connA.send({ decision: "proceed" });
+  const notice = (await responder).warnings.find((w) => WIDTH_NOTICE.test(w));
+  expect(notice).toBeDefined();
+  expect(redactAndSanitizeForDisplay(notice!)).toBe(notice);
+});
+
+test("a fan-out-free partner at the plain key count stays quiet", async () => {
+  const [connA, connB] = makeConnections();
+  const [a, b] = await Promise.all([
+    exchangeTerms(connA, "initiator", termsA, 100),
+    exchangeTerms(connB, "responder", termsB, 200),
+  ]);
+  expect(a.warnings.filter((w) => WIDTH_NOTICE.test(w))).toEqual([]);
+  expect(b.warnings.filter((w) => WIDTH_NOTICE.test(w))).toEqual([]);
+});
+
 // The 39 case is the one the range check alone can refuse: it sits a whole
 // number of fan-out keys above the ceiling (1 + 2 * 19), so it clears the
 // divisibility check and clears the fan-out-free floor of 1 as well. The other
@@ -796,6 +887,26 @@ test("the responder refuses an advertisement below the agreed terms' floor", asy
   expect(err).toBeInstanceOf(ConnectionError);
   expect((err as ConnectionError).kind).toBe("protocol");
   expect((err as ConnectionError).message).toContain(FLOOR_REFUSAL);
+});
+
+test("a partner advertising exactly the agreed floor stays quiet", async () => {
+  // The fan-out these terms declare is one both parties can see, so a partner
+  // running at exactly the width they imply has taken no width the operator has
+  // not already agreed to: the run-boundary notice fires on the gap, and here
+  // there is none.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", fanOutTermsB, 200);
+  await connA.send({
+    linkageTerms: fanOutTermsA,
+    recordCount: 100,
+    effectiveKeyCount: 20,
+    protocolVersion: PROTOCOL_VERSION,
+  });
+  await connA.receive(); // msg 2
+  await connA.send({ decision: "proceed" });
+  const result = await responder;
+  expect(result.partnerEffectiveKeyCount).toBe(20);
+  expect(result.warnings.filter((w) => WIDTH_NOTICE.test(w))).toEqual([]);
 });
 
 test("the initiator refuses an advertisement below the floor on message 2 too", async () => {

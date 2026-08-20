@@ -214,7 +214,14 @@ export interface SinglePassPartySize {
   readonly recordCount: number;
 }
 
-function valueSlots(party: SinglePassPartySize): number {
+/**
+ * One party's **value slot** count: its declared effective key count times its
+ * record count. This is the exact product every gate below weighs, exported so an
+ * operator-facing diagnosis states the quantity the gate multiplied rather than a
+ * neighbouring pair (the agreed key count and the record counts) whose product can
+ * sit under a ceiling the same exchange exceeds.
+ */
+export function valueSlots(party: SinglePassPartySize): number {
   return party.effectiveKeyCount * party.recordCount;
 }
 
@@ -259,6 +266,45 @@ export function singlePassDatasetExceedsCap(
 }
 
 /**
+ * Which side of an exchange breached the single-pass ceiling, named from the point
+ * of view of the party asking. See {@link singlePassCeilingBreach}.
+ */
+export type SinglePassCeilingBreach = "local" | "partner" | "both";
+
+/**
+ * Which side of an exchange breached the single-pass ceiling, as the two parties
+ * named from the point of view of the party asking: `"local"` when only the asking
+ * party's own value slot count is over the budget, `"partner"` when only the other
+ * party's is, `"both"` when each is, and `undefined` when the exchange is within
+ * it.
+ *
+ * The two parties reach MIRRORED verdicts, never conflicting ones: the per-party
+ * predicate is {@link singlePassDatasetExceedsCap} over authenticated session state
+ * both hold, so a `"partner"` breach on one side is a `"local"` breach on the
+ * other and `"both"`/`undefined` are the same on each. That is what lets an
+ * over-ceiling diagnosis name the side whose declaration reached the ceiling while
+ * the abort itself stays symmetric -- {@link singlePassExchangeExceedsCap} is this
+ * verdict with the orientation dropped.
+ */
+export function singlePassCeilingBreach(
+  local: SinglePassPartySize,
+  partner: SinglePassPartySize,
+): SinglePassCeilingBreach | undefined {
+  const localOver = singlePassDatasetExceedsCap(
+    local.effectiveKeyCount,
+    local.recordCount,
+  );
+  const partnerOver = singlePassDatasetExceedsCap(
+    partner.effectiveKeyCount,
+    partner.recordCount,
+  );
+  if (localOver && partnerOver) return "both";
+  if (localOver) return "local";
+  if (partnerOver) return "partner";
+  return undefined;
+}
+
+/**
  * Does this exchange exceed the single-pass ceiling? True when EITHER party's
  * value slot count exceeds {@link MAX_SINGLE_PASS_CELLS}.
  * Computed identically on both parties from authenticated session state alone --
@@ -271,13 +317,7 @@ export function singlePassExchangeExceedsCap(
   sender: SinglePassPartySize,
   receiver: SinglePassPartySize,
 ): boolean {
-  return (
-    singlePassDatasetExceedsCap(sender.effectiveKeyCount, sender.recordCount) ||
-    singlePassDatasetExceedsCap(
-      receiver.effectiveKeyCount,
-      receiver.recordCount,
-    )
-  );
+  return singlePassCeilingBreach(sender, receiver) !== undefined;
 }
 
 /**
