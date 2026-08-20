@@ -179,10 +179,11 @@ export function spawnExchangeJob(args: {
  * positional and, for sftp, the `--server-*` flags -- built server-side by
  * {@link zeroSetupSftpArgv} / {@link zeroSetupFiledropArgv}; every credential in it
  * is an `@path` reference the CLI child resolves at live-use, so no secret byte is
- * on argv. `fileSyncArgs` is the file-sync toggle portion -- the retain-mode trio
- * and `--peer-id` -- built server-side by {@link zeroSetupFileSyncArgv} from the
- * intent's validated `options`, standing in for the composed config's `options`
- * block a zero-setup run has no document to carry. `identity` and
+ * on argv. `optionArgs` is the tuning portion -- the retain-mode trio,
+ * `--peer-id`, and the connection-tuning flags -- built server-side by
+ * {@link zeroSetupOptionsArgv} from the intent's validated `options`, standing
+ * in for the composed config's `options` block a zero-setup run has no document
+ * to carry. `identity` and
  * `linkageStrategy`, when set, are a bounded label and a closed enum, forwarded
  * as single `--identity=<value>` / `--linkage-strategy=<value>` tokens (the `=`
  * form so a `-`-leading value cannot be misparsed by yargs as its own flag).
@@ -194,7 +195,7 @@ export function spawnExchangeJob(args: {
 export function spawnZeroSetupJob(args: {
   binaryPath: string;
   connectionArgs: Array<string>;
-  fileSyncArgs: Array<string>;
+  optionArgs: Array<string>;
   inputPath: string;
   outputPath: string;
   recordPath: string;
@@ -208,7 +209,7 @@ export function spawnZeroSetupJob(args: {
 }): CliDriverHandle {
   const { binaryPath, connectionArgs, inputPath, outputPath } = args;
   const { recordPath, workdir, handlers, eventStream, extraEnv } = args;
-  const { identity, linkageStrategy, fileSyncArgs } = args;
+  const { identity, linkageStrategy, optionArgs } = args;
 
   // The URL is the first positional (connectionArgs[0]); input and output are the
   // trailing positionals. Every value-bearing flag is emitted as a single
@@ -220,7 +221,7 @@ export function spawnZeroSetupJob(args: {
   const argv: Array<string> = [
     binaryPath,
     ...connectionArgs,
-    ...fileSyncArgs,
+    ...optionArgs,
     ...(identity !== undefined ? [`--identity=${identity}`] : []),
     ...(linkageStrategy !== undefined
       ? [`--linkage-strategy=${linkageStrategy}`]

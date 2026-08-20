@@ -2,8 +2,10 @@ import type { Argv, Arguments } from "yargs";
 import logLibrary from "loglevel";
 
 import {
+  CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS,
   DEFAULT_POLLING_FREQUENCY_MS,
   HOST_KEY_FINGERPRINT_REGEX,
+  LOW_POLLING_FREQUENCY_WARN_MS,
   MAX_RECONNECT_ATTEMPTS,
   UsageError,
 } from "@psilink/core";
@@ -571,13 +573,14 @@ export function warnUnsupportedFileSyncFlags(
 }
 
 /**
- * Millisecond threshold below which a `--polling-frequency` override draws the
- * anti-flood warning ({@link warnLowPollingFrequency}). One second: at or above
- * it a poll cadence stays within the anti-flood budgets commercial SFTP servers
- * enforce, so it is silent; below it the operator is warned but not blocked (a
- * demo against a controlled server legitimately wants a sub-second poll).
+ * The advisory thresholds {@link warnLowPollingFrequency} and
+ * {@link warnConnectionPerPollShortInterval} measure against, re-exported from
+ * core -- the console's authoring-time advisories name the same two values, and
+ * core is the only module both apps can import. Their rationale lives with the
+ * option fields they qualify, in `packages/core/src/config/connection.ts`.
  */
-export const LOW_POLLING_FREQUENCY_WARN_MS = 1000;
+export { CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS };
+export { LOW_POLLING_FREQUENCY_WARN_MS };
 
 /**
  * Warn -- but do not block -- when a `--polling-frequency` override is set
@@ -624,21 +627,6 @@ export function warnLowPollingFrequency(
       "a sub-second interval only against a controlled server (for example a demo).",
   );
 }
-
-/**
- * Millisecond threshold below which pairing `--connection-per-poll` with the
- * poll interval draws the wasteful-dialing warning
- * ({@link warnConnectionPerPollShortInterval}). One minute: connection-per-poll
- * pays a full SSH handshake every cycle, which is negligible at the minutes-scale
- * interval the mode is meant for but wasteful at a seconds-scale one (the 5s
- * default included) -- the mode exists to survive a server session-lifetime cap
- * across long idle gaps, so it is only sane paired with a long interval (see
- * docs/notes/connection-per-poll-sftp.md). Higher than
- * {@link LOW_POLLING_FREQUENCY_WARN_MS}, which flags an aggressively-low poll for
- * anti-flood reasons; this flags a poll merely too short to justify per-cycle
- * dialing.
- */
-export const CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS = 60_000;
 
 /**
  * Warn -- but do not block -- when `--connection-per-poll` is set with a poll

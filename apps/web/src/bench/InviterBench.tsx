@@ -45,6 +45,12 @@ import {
   exchangeFilesOptions,
 } from "./exchangeFilesModel";
 import {
+  CONNECTION_TUNING_DEFAULT,
+  FILEDROP_CONNECTION_TUNING,
+  SFTP_CONNECTION_TUNING,
+  withConnectionTuning,
+} from "./connectionTuningModel";
+import {
   EMPTY_SAVE_FIELDS,
   endpointRequestFor,
   exchangeFileInputFor,
@@ -139,6 +145,7 @@ import type {
 import type { AlertContent } from "@components/csvIntake";
 import type { BenchCoverageInput } from "@components/useNonEmptyRates";
 import type { ColumnSamples } from "@psi/columnSamples";
+import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { ManageOfferChoices } from "./manageOfferModel";
@@ -303,6 +310,12 @@ export function InviterBench() {
     EXCHANGE_FILES_DEFAULT,
   );
   const [exchangeFilesOpen, setExchangeFilesOpen] = useState(false);
+  // The operator's connection-tuning choices for the same run (polling, timeouts,
+  // the retry budget, and the SFTP session mode), held beside the file-handling
+  // draft for the same reasons.
+  const [connectionTuning, setConnectionTuning] =
+    useState<ConnectionTuningDraft>(CONNECTION_TUNING_DEFAULT);
+  const [connectionTuningOpen, setConnectionTuningOpen] = useState(false);
   const [demoActive, setDemoActive] = useState(false);
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
 
@@ -369,10 +382,18 @@ export function InviterBench() {
   // for a saved exchange. A `server-job` run mode runs live too -- the console
   // appliance carries it out -- so it drives the hook exactly as `browser` does.
   const runsLive = chosenRunMode !== "save-file";
-  // The tuning options the run carries, resolved from the authored draft in one
+  // Which tuning controls the chosen transport can carry: the SFTP session mode
+  // applies only where a session exists.
+  const tuningCapabilities =
+    transport === "sftp" ? SFTP_CONNECTION_TUNING : FILEDROP_CONNECTION_TUNING;
+  // The tuning options the run carries, resolved from both authored drafts in one
   // place: the run and the partner's accept kit read the same block, so the
   // sheet cannot describe a file-handling regime the run does not have.
-  const runOptions = exchangeFilesOptions(exchangeFiles, CONFIG_EXCHANGE_FILES);
+  const runOptions = withConnectionTuning(
+    exchangeFilesOptions(exchangeFiles, CONFIG_EXCHANGE_FILES),
+    connectionTuning,
+    tuningCapabilities,
+  );
   const {
     run,
     outputs,
@@ -1247,6 +1268,10 @@ export function InviterBench() {
                 exchangeFilesOpen={exchangeFilesOpen}
                 onExchangeFiles={setExchangeFiles}
                 onExchangeFilesOpen={setExchangeFilesOpen}
+                connectionTuning={connectionTuning}
+                connectionTuningOpen={connectionTuningOpen}
+                onConnectionTuning={setConnectionTuning}
+                onConnectionTuningOpen={setConnectionTuningOpen}
                 onLifetime={(seconds) =>
                   applyEditor(editorWithLifetime(editor, seconds))
                 }

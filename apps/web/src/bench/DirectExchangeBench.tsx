@@ -11,6 +11,12 @@ import { fetchSftpConnection } from "@psi/serverJobExchangeDriver";
 
 import { isConsoleBuild } from "@utils/clientConfig";
 
+import {
+  CONNECTION_TUNING_DEFAULT,
+  FILEDROP_CONNECTION_TUNING,
+  SFTP_CONNECTION_TUNING,
+  withConnectionTuning,
+} from "./connectionTuningModel";
 import { DIRECT_STEP_LABELS, DIRECT_STEP_ORDER } from "./directExchangeModel";
 import {
   EXCHANGE_FILES_DEFAULT,
@@ -38,6 +44,7 @@ import type {
   ProfiledJobInput,
 } from "@psi/workInputClient";
 import type { AlertContent } from "@components/csvIntake";
+import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { RailStep } from "./inviterModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
@@ -77,6 +84,11 @@ export function DirectExchangeBench() {
     EXCHANGE_FILES_DEFAULT,
   );
   const [exchangeFilesOpen, setExchangeFilesOpen] = useState(false);
+  // The operator's connection-tuning choices for this run, authored beside the
+  // file-handling ones and settled out of band the same way.
+  const [connectionTuning, setConnectionTuning] =
+    useState<ConnectionTuningDraft>(CONNECTION_TUNING_DEFAULT);
+  const [connectionTuningOpen, setConnectionTuningOpen] = useState(false);
 
   // Fetch the appliance's authored SFTP connection once on a console build; one
   // fetch per bench serves the session. The helper resolves to a null connection on
@@ -134,7 +146,13 @@ export function DirectExchangeBench() {
     channel: transport,
     inputSource,
     ...(identity.trim().length > 0 ? { identity: identity.trim() } : {}),
-    options: exchangeFilesOptions(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES),
+    options: withConnectionTuning(
+      exchangeFilesOptions(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES),
+      connectionTuning,
+      transport === "sftp"
+        ? SFTP_CONNECTION_TUNING
+        : FILEDROP_CONNECTION_TUNING,
+    ),
   });
 
   // Move focus to the incoming section's h1 on a step change (skip mount), so a
@@ -280,6 +298,10 @@ export function DirectExchangeBench() {
             exchangeFilesOpen={exchangeFilesOpen}
             onExchangeFiles={setExchangeFiles}
             onExchangeFilesOpen={setExchangeFilesOpen}
+            connectionTuning={connectionTuning}
+            connectionTuningOpen={connectionTuningOpen}
+            onConnectionTuning={setConnectionTuning}
+            onConnectionTuningOpen={setConnectionTuningOpen}
             onAuthorConnection={authorSftpConnection}
             onClearConnection={clearSftpConnection}
             onContinue={() => goTo("confirm")}

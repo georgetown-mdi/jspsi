@@ -9,7 +9,7 @@ import {
   exchangeFilesOptions,
   exchangeFilesProblems,
 } from "@bench/exchangeFilesModel";
-import { composeConfigDocument, zeroSetupFileSyncArgv } from "@jobs/intent";
+import { composeConfigDocument, zeroSetupOptionsArgv } from "@jobs/intent";
 import { PEER_ID_SHAPE_MESSAGE } from "@psi/peerIdLabel";
 
 import { validIntent } from "../utils/jobFixtures";
@@ -63,7 +63,7 @@ describe("the authored draft becomes an option block", () => {
       draft({ retainFiles: true }),
       ZERO_SETUP_EXCHANGE_FILES,
     );
-    expect(zeroSetupFileSyncArgv(options)).toEqual([
+    expect(zeroSetupOptionsArgv(options)).toEqual([
       "--retain-files",
       "--lockless-rendezvous",
       "--timestamp-in-filename",

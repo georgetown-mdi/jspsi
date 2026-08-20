@@ -758,6 +758,39 @@ export interface FileSyncOptions extends SharedOptions {
   connectionPerPoll?: boolean;
 }
 
+/**
+ * Millisecond threshold below which a {@link FileSyncOptions.pollIntervalMs}
+ * draws the anti-flood advisory. One second: at or above it a poll cadence stays
+ * within the anti-flood budgets commercial SFTP servers enforce; below it a
+ * sub-second poll hammers the shared directory with listings and can trip a
+ * server's anti-flood/DoS protection and drop the connection (the
+ * partner-deployment failure that motivated the conservative default).
+ *
+ * Advisory, never a bound: {@link FileSyncOptionsSchema} floors the field at 1,
+ * not here, because a demo against a controlled server legitimately polls at
+ * ~100ms. Defined in core rather than at either authoring boundary because both
+ * consume it -- the CLI's `--polling-frequency` warning and the console's
+ * authoring-time advisory must name the same threshold, and core cannot import
+ * from either app.
+ */
+export const LOW_POLLING_FREQUENCY_WARN_MS = 1000;
+
+/**
+ * Millisecond threshold below which pairing {@link FileSyncOptions.connectionPerPoll}
+ * with the effective poll interval draws the wasteful-dialing advisory. One
+ * minute: connection-per-poll pays a full SSH handshake every cycle, which is
+ * negligible at the minutes-scale interval the mode is meant for but wasteful at
+ * a seconds-scale one (the `DEFAULT_POLLING_FREQUENCY_MS` default included) --
+ * the mode exists to survive a server session-lifetime cap across long idle gaps,
+ * so it is only sane paired with a long interval (see
+ * docs/notes/connection-per-poll-sftp.md).
+ *
+ * Higher than {@link LOW_POLLING_FREQUENCY_WARN_MS}, which flags an
+ * aggressively-low poll for anti-flood reasons; this flags a poll merely too
+ * short to justify per-cycle dialing. Advisory and shared for the same reasons.
+ */
+export const CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS = 60_000;
+
 const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
   .object({
     ...sharedOptionsFields,

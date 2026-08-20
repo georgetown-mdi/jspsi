@@ -5,12 +5,17 @@ import path from "node:path";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 
 import {
+  CONNECTION_TUNING_DEFAULT,
+  SFTP_CONNECTION_TUNING,
+  connectionTuningOptions,
+} from "@bench/connectionTuningModel";
+import {
   EXCHANGE_FILES_DEFAULT,
   ZERO_SETUP_EXCHANGE_FILES,
   exchangeFilesOptions,
 } from "@bench/exchangeFilesModel";
 import { resolveCliBinaryPath, spawnZeroSetupJob } from "@jobs/cliDriver";
-import { zeroSetupFileSyncArgv, zeroSetupSftpArgv } from "@jobs/intent";
+import { zeroSetupOptionsArgv, zeroSetupSftpArgv } from "@jobs/intent";
 
 import {
   awaitJobTerminalState,
@@ -131,13 +136,38 @@ function scratchDir(label: string): string {
  * The zero-setup file-sync tokens the console emits for an operator who switched
  * retain mode on and named this party, taken through the card's own model
  * ({@link exchangeFilesOptions}) and the intent's builder
- * ({@link zeroSetupFileSyncArgv}) rather than written out here.
+ * ({@link zeroSetupOptionsArgv}) rather than written out here.
  */
 function retainModeFileSyncArgs(): Array<string> {
-  return zeroSetupFileSyncArgv(
+  return zeroSetupOptionsArgv(
     exchangeFilesOptions(
       { ...EXCHANGE_FILES_DEFAULT, retainFiles: true, peerId: "clinic-a" },
       ZERO_SETUP_EXCHANGE_FILES,
+    ),
+  );
+}
+
+/**
+ * The zero-setup connection-tuning tokens the console emits for an operator who
+ * tuned every knob the card offers, taken through the card's own model
+ * ({@link connectionTuningOptions}) and the intent's builder
+ * ({@link zeroSetupOptionsArgv}) rather than written out here. The units are the
+ * card's, not this file's: whether a millisecond poll interval and a
+ * seconds-scaled timeout are grammars the CLI's own duration flags accept is
+ * exactly what the parse below settles.
+ */
+function tunedOptionArgs(): Array<string> {
+  return zeroSetupOptionsArgv(
+    connectionTuningOptions(
+      {
+        ...CONNECTION_TUNING_DEFAULT,
+        pollInterval: { magnitude: "10", unit: "m" },
+        peerTimeout: { magnitude: "2", unit: "h" },
+        serverConnectTimeout: { magnitude: "45", unit: "s" },
+        maxReconnectAttempts: "12",
+        connectionPerPoll: true,
+      },
+      SFTP_CONNECTION_TUNING,
     ),
   );
 }
@@ -147,13 +177,13 @@ function retainModeFileSyncArgs(): Array<string> {
  * scratch directory the parse step below then runs the real CLI in.
  */
 async function captureFiledropArgv(
-  fileSyncArgs: Array<string>,
+  optionArgs: Array<string>,
 ): Promise<{ argv: Array<string>; dir: string }> {
   const dir = scratchDir("zs-argv");
   const argv = await captureZeroSetupArgv({
     workdir: dir,
     connectionArgs: [RENDEZVOUS_URL],
-    fileSyncArgs,
+    optionArgs,
     eventStream: true,
     timeoutMs: CHILD_EXIT_TIMEOUT_MS,
   });
@@ -200,16 +230,16 @@ describe(
   { timeout: SPAWN_TEST_TIMEOUT_MS },
   () => {
     test("every emitted file-sync token survives a real parse", async () => {
-      const fileSyncArgs = retainModeFileSyncArgs();
+      const optionArgs = retainModeFileSyncArgs();
       // The card's model resolves retain mode's implications, so the emitted set is
       // the trio plus the party name -- the argv the appliance really builds.
-      expect(fileSyncArgs.length).toBe(4);
-      const { argv, dir } = await captureFiledropArgv(fileSyncArgs);
+      expect(optionArgs.length).toBe(4);
+      const { argv, dir } = await captureFiledropArgv(optionArgs);
 
       // Where the driver put them: after the connection positional and ahead of the
       // record flag and the trailing input/output positionals.
       expect(argv[0]).toBe(RENDEZVOUS_URL);
-      expect(argv.slice(1, 1 + fileSyncArgs.length)).toEqual(fileSyncArgs);
+      expect(argv.slice(1, 1 + optionArgs.length)).toEqual(optionArgs);
       expect(argv[argv.length - 2].endsWith("input.csv")).toBe(true);
       expect(argv[argv.length - 1].endsWith("output.csv")).toBe(true);
 
@@ -223,9 +253,59 @@ describe(
       expect(parsed.stderr).toContain("input.csv does not exist");
     });
 
+    test("every emitted connection-tuning token survives a real parse", async () => {
+      // The console composes durations in the units its own controls offer; the
+      // CLI's duration flags have two different grammars (only the poll interval
+      // takes a millisecond suffix). Whether what the card emits is in each
+      // flag's grammar is the tool's answer to give, not this file's.
+      const optionArgs = tunedOptionArgs();
+      expect(optionArgs).toEqual([
+        "--polling-frequency=600000ms",
+        "--peer-timeout=7200s",
+        "--connection-timeout=45s",
+        "--max-reconnect-attempts=12",
+        "--connection-per-poll",
+      ]);
+      const { dir, connectionArgs } = splitSftpConnection();
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs,
+        // The split connection the sftp arm authors needs retain mode, which the
+        // CLI's own guard enforces, so both cards' tokens ride together here.
+        optionArgs: [...retainModeFileSyncArgs(), ...optionArgs],
+        eventStream: true,
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+
+      const parsed = parseWithRealCli(argv, dir);
+      expect(parsed.stderr).not.toContain("Unknown argument");
+      expect(parsed.status).not.toBe(EXIT_USAGE);
+      // Parsing ran to completion: every duration value was in its flag's
+      // grammar, so the run reached the input file this argv does not create.
+      expect(parsed.stderr).toContain("input.csv does not exist");
+    });
+
+    test("a millisecond value on a coarse duration flag is refused, which is why the schema holds those to whole seconds", async () => {
+      // The zero-setup arms refuse a timeout that is not a whole number of
+      // seconds because this is what the tool does with the alternative: the
+      // coarse grammar has no millisecond unit, so a faithful emission is
+      // impossible rather than merely inconvenient.
+      const { dir, connectionArgs } = splitSftpConnection();
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs,
+        optionArgs: [...retainModeFileSyncArgs(), "--peer-timeout=1500ms"],
+        eventStream: true,
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+      const parsed = parseWithRealCli(argv, dir);
+      expect(parsed.status).toBe(EXIT_USAGE);
+      expect(parsed.stderr).toContain("--peer-timeout");
+    });
+
     test("a token the parser does not know is refused, so the check above discriminates", async () => {
-      const fileSyncArgs = retainModeFileSyncArgs();
-      const { argv, dir } = await captureFiledropArgv(fileSyncArgs);
+      const optionArgs = retainModeFileSyncArgs();
+      const { argv, dir } = await captureFiledropArgv(optionArgs);
       const mistyped = argv.map((token) =>
         token === "--retain-files" ? "--retain-file" : token,
       );
@@ -261,7 +341,7 @@ describe(
       const argv = await captureZeroSetupArgv({
         workdir: dir,
         connectionArgs,
-        fileSyncArgs: retainModeFileSyncArgs(),
+        optionArgs: retainModeFileSyncArgs(),
         eventStream: true,
         timeoutMs: CHILD_EXIT_TIMEOUT_MS,
       });
@@ -296,7 +376,7 @@ describe(
           spawnZeroSetupJob({
             binaryPath: CLI_ENTRY,
             connectionArgs: [RENDEZVOUS_URL],
-            fileSyncArgs: retainModeFileSyncArgs(),
+            optionArgs: retainModeFileSyncArgs(),
             inputPath: path.join(dir, "input.csv"),
             outputPath: path.join(dir, "output.csv"),
             recordPath: path.join(dir, "record.json"),

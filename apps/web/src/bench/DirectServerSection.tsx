@@ -2,14 +2,21 @@ import { Alert, Button, Group, Radio, Stack, Text } from "@mantine/core";
 import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 
 import {
+  FILEDROP_CONNECTION_TUNING,
+  SFTP_CONNECTION_TUNING,
+  connectionTuningProblems,
+} from "./connectionTuningModel";
+import {
   ZERO_SETUP_EXCHANGE_FILES,
   exchangeFilesProblems,
 } from "./exchangeFilesModel";
+import { ConnectionTuningCard } from "./ConnectionTuningCard";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
 import { splitDirectoryRetainProblem } from "./sftpConnectionChoice";
 import styles from "./bench.module.css";
 
+import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { DirectTransport } from "./directExchangeModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { JobRendezvousConfig } from "@psi/workInputClient";
@@ -38,6 +45,10 @@ export function DirectServerSection({
   exchangeFilesOpen,
   onExchangeFiles,
   onExchangeFilesOpen,
+  connectionTuning,
+  connectionTuningOpen,
+  onConnectionTuning,
+  onConnectionTuningOpen,
   onAuthorConnection,
   onClearConnection,
   onContinue,
@@ -55,6 +66,12 @@ export function DirectServerSection({
   exchangeFilesOpen: boolean;
   onExchangeFiles: (draft: ExchangeFilesDraft) => void;
   onExchangeFilesOpen: (open: boolean) => void;
+  /** The operator's connection-tuning choices, authored here for the same reason
+   * the file-handling ones are. */
+  connectionTuning: ConnectionTuningDraft;
+  connectionTuningOpen: boolean;
+  onConnectionTuning: (draft: ConnectionTuningDraft) => void;
+  onConnectionTuningOpen: (open: boolean) => void;
   onAuthorConnection: (connection: SftpConnectionProjection) => void;
   onClearConnection: () => void;
   onContinue: () => void;
@@ -67,7 +84,12 @@ export function DirectServerSection({
   // A combination core refuses is a form problem here, on the step that authors
   // it, rather than a run that fails at rendezvous.
   const exchangeFilesBlocked =
-    exchangeFilesProblems(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES).length > 0;
+    exchangeFilesProblems(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES).length >
+      0 || connectionTuningProblems(connectionTuning).length > 0;
+  // The SFTP session mode applies only where a session exists, so the tuning card
+  // withholds it on the shared-directory transport.
+  const tuningCapabilities =
+    transport === "sftp" ? SFTP_CONNECTION_TUNING : FILEDROP_CONNECTION_TUNING;
   // The connection and the retain-mode toggle are authored on separate cards
   // here, so the split-directory precondition is re-asked at the step's exit,
   // where both are known, rather than only inside the authoring form the
@@ -156,6 +178,14 @@ export function DirectServerSection({
         open={exchangeFilesOpen}
         onToggleOpen={onExchangeFilesOpen}
         onChange={onExchangeFiles}
+      />
+
+      <ConnectionTuningCard
+        draft={connectionTuning}
+        capabilities={tuningCapabilities}
+        open={connectionTuningOpen}
+        onToggleOpen={onConnectionTuningOpen}
+        onChange={onConnectionTuning}
       />
 
       {splitDirectoryProblem !== undefined && (
