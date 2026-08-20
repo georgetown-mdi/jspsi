@@ -734,15 +734,27 @@ function countOnlyResultCount(event: RelayEvent): number | undefined {
  * Within that arm the count separates the two outcomes the contract gives it: a
  * count-only run withheld nothing from this party -- the count is what its terms
  * promised, and there is no result file for either party -- while its absence is the
- * helper's withheld result. The count doubles as the completion header's matched
- * figure, as it does on the browser-direct path (`buildRunOutputs`,
- * `@bench/runOutputs`). */
+ * helper's withheld result.
+ *
+ * `countReportedByPartner` rides the same event and decides whether the count-only
+ * surface carries the trust-contingent caveat. It is read strictly: only a literal
+ * `true` caveats, so a frame that omits it or carries a non-boolean renders the
+ * count as this party's own reading. That is the direction the CLI's contract fixes
+ * -- the field is emitted with every count, and the seat that computes its own count
+ * emits `false` -- and it keeps a malformed frame from putting a caveat on a
+ * locally computed count, which would be a false statement about an enforced
+ * outcome. */
 function baseResultOutputs(event: RelayEvent, jobId: string): RunOutputs {
-  if (event.resultWritten !== false) return { resultsUrl: jobResultUrl(jobId) };
+  if (event.resultWritten !== false)
+    return { kind: "matched", resultsUrl: jobResultUrl(jobId) };
   const intersectionCount = countOnlyResultCount(event);
   return intersectionCount !== undefined
-    ? { intersectionCount, matchedRecordCount: intersectionCount }
-    : { resultWithheld: true };
+    ? {
+        kind: "counted",
+        intersectionCount,
+        countReportedByPartner: event.countReportedByPartner === true,
+      }
+    : { kind: "withheld" };
 }
 
 /** Attach the record-pair downloads to the base outputs, pointed at the

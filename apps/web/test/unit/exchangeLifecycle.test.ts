@@ -163,6 +163,7 @@ function seams() {
 }
 
 const OUTPUTS = {
+  kind: "matched",
   resultsUrl: "blob:results",
   record: {
     recordUrl: "blob:record",

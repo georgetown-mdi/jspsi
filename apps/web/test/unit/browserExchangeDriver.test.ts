@@ -27,7 +27,10 @@ function driverConfig() {
     exchangeRole: "initiator" as const,
     sharedSecret: "test-shared-secret",
     expires: "2999-01-01T00:00:00.000Z",
-    generateOutput: vi.fn(() => ({ resultsUrl: "blob:results" })),
+    generateOutput: vi.fn(() => ({
+      kind: "matched" as const,
+      resultsUrl: "blob:results",
+    })),
   };
 }
 

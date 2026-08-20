@@ -299,7 +299,7 @@ describe("acceptor completion ledger", () => {
   test("rows relabel past tense, drop the expiry, and report the matched count", () => {
     const rows = acceptorDoneLedgerRows(
       makeToken(),
-      { matchedRecordCount: 1847 },
+      { kind: "matched", matchedRecordCount: 1847 },
       DISCLOSING_METADATA,
       HOW_IT_RUNS,
     );
@@ -327,7 +327,7 @@ describe("acceptor completion ledger", () => {
   test("a launched metadata that discloses nothing reads no additional columns", () => {
     const rows = acceptorDoneLedgerRows(
       makeToken(),
-      { matchedRecordCount: 1847 },
+      { kind: "matched", matchedRecordCount: 1847 },
       NON_DISCLOSING_METADATA,
       HOW_IT_RUNS,
     );
@@ -338,7 +338,7 @@ describe("acceptor completion ledger", () => {
   test("a withheld result states the caveat instead of a count", () => {
     const rows = acceptorDoneLedgerRows(
       makeToken(),
-      { resultWithheld: true },
+      { kind: "withheld" },
       DISCLOSING_METADATA,
       HOW_IT_RUNS,
     );
@@ -353,36 +353,64 @@ describe("acceptor completion ledger", () => {
     // either, since the count is what the agreed terms promised this party.
     const rows = acceptorDoneLedgerRows(
       makeToken(),
-      { intersectionCount: 1847, matchedRecordCount: 1847 },
+      {
+        kind: "counted",
+        intersectionCount: 1847,
+        countReportedByPartner: false,
+      },
       DISCLOSING_METADATA,
       HOW_IT_RUNS,
     );
     const value = rowValue(rows, "You received");
     expect(value).toBe(
-      "1,847 matched - the size of the overlap only, no result table",
+      "1,847 records in common - the size of the overlap only, no matched " +
+        "rows and no shared columns",
     );
     // Not the matched row: the invitation's disclosed columns are not appended,
     // because a count-only run transmits no payload in either direction.
     expect(value).not.toContain("enrollment_date");
     expect(value).not.toContain("withheld");
+    // A count this seat computed itself claims no partner for it.
+    expect(value).not.toContain("partner");
+  });
+
+  test("a partner-reported count names its provenance in the row", () => {
+    // Both seats read the same ledger copy, so the acceptor's condensed summary
+    // separates a number its partner sent from one it computed exactly as the
+    // inviter's does.
+    const rows = acceptorDoneLedgerRows(
+      makeToken(),
+      {
+        kind: "counted",
+        intersectionCount: 1847,
+        countReportedByPartner: true,
+      },
+      DISCLOSING_METADATA,
+      HOW_IT_RUNS,
+    );
+    expect(rowValue(rows, "You received")).toBe(
+      "1,847 records in common - the size of the overlap only, no matched " +
+        "rows and no shared columns; reported by your partner",
+    );
   });
 
   test("a zero-count count-only result is still the counted row", () => {
     const rows = acceptorDoneLedgerRows(
       makeToken(),
-      { intersectionCount: 0, matchedRecordCount: 0 },
+      { kind: "counted", intersectionCount: 0, countReportedByPartner: false },
       DISCLOSING_METADATA,
       HOW_IT_RUNS,
     );
     expect(rowValue(rows, "You received")).toBe(
-      "0 matched - the size of the overlap only, no result table",
+      "0 records in common - the size of the overlap only, no matched rows " +
+        "and no shared columns",
     );
   });
 
   test("a zero-count result reads as zero matched rows", () => {
     const rows = acceptorDoneLedgerRows(
       makeToken({ payload: { send: [], receive: [] } }),
-      { matchedRecordCount: 0 },
+      { kind: "matched", matchedRecordCount: 0 },
       NON_DISCLOSING_METADATA,
       HOW_IT_RUNS,
     );
@@ -395,7 +423,7 @@ describe("acceptor completion ledger", () => {
     // subset is what left, what arrived, and what matched -- "You sent" first.
     const marked = acceptorDoneLedgerRows(
       makeToken(),
-      { matchedRecordCount: 1847 },
+      { kind: "matched", matchedRecordCount: 1847 },
       DISCLOSING_METADATA,
       HOW_IT_RUNS,
     )

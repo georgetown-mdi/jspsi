@@ -67,7 +67,10 @@ import type { RunOutputs } from "@bench/runOutputs";
 /** The outputs the mocked builder returns; identity is all the assertions need.
  * Hoisted so the mock factory below (lifted above the imports) can close over
  * it. */
-const OUTPUTS: RunOutputs = vi.hoisted(() => ({ resultsUrl: "blob:results" }));
+const OUTPUTS: RunOutputs = vi.hoisted(() => ({
+  kind: "matched" as const,
+  resultsUrl: "blob:results",
+}));
 
 vi.mock("../../src/psi/managedRun.js", () => ({
   runManagedRerun: vi.fn(

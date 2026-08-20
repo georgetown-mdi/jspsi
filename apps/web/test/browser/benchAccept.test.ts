@@ -110,8 +110,10 @@ interface CapturedLifecycle {
   onStages: (stages: Array<unknown>) => void;
   onStage: (stageId: string) => void;
   onResult: (outputs: {
+    kind: "matched" | "withheld" | "counted";
     resultsUrl?: string;
-    resultWithheld?: boolean;
+    intersectionCount?: number;
+    countReportedByPartner?: boolean;
     matchedRecordCount?: number;
     record?: {
       recordUrl: string;
@@ -1710,6 +1712,7 @@ describe("acceptor bench: run and completion", () => {
     call.onStage("waiting for peer");
     call.onStage("confirming protocol");
     call.onResult({
+      kind: "matched" as const,
       resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
       matchedRecordCount: 1847,
       record: {
@@ -1785,6 +1788,7 @@ describe("acceptor bench: run and completion", () => {
       call.onStage("waiting for peer");
       call.onStage("confirming protocol");
       call.onResult({
+        kind: "matched" as const,
         resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
         matchedRecordCount: 1847,
         record: {
@@ -1861,6 +1865,7 @@ describe("acceptor bench: run and completion", () => {
     await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
 
     lifecycleCall(0).onResult({
+      kind: "matched" as const,
       resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
       matchedRecordCount: 12,
       record: {
@@ -1892,7 +1897,7 @@ describe("acceptor bench: run and completion", () => {
     const call = lifecycleCall(0);
     call.onStage("waiting for peer");
     call.onResult({
-      resultWithheld: true,
+      kind: "withheld" as const,
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
         recordFileName: "psilink-record-x.json",
@@ -1923,6 +1928,96 @@ describe("acceptor bench: run and completion", () => {
     expect(
       document.querySelector('aside[aria-label="This exchange"]')?.textContent,
     ).toContain("No result table - withheld by the agreed terms");
+  });
+
+  test("a count-only result states its count, not the withheld copy", async () => {
+    await reachRun();
+    const call = lifecycleCall(0);
+    call.onStage("waiting for peer");
+    call.onResult({
+      kind: "counted" as const,
+      intersectionCount: 1847,
+      countReportedByPartner: false,
+      record: {
+        recordUrl: URL.createObjectURL(new Blob(["{}"])),
+        recordFileName: "psilink-record-x.json",
+        keysUrl: URL.createObjectURL(new Blob(["{}"])),
+        keysFileName: "psilink-record-x.keys.json",
+      },
+    });
+
+    // The count is the run's whole result, stated once where the download would
+    // be; the headline names the mode rather than repeating the figure.
+    await expect
+      .element(page.getByText("Count only", { exact: true }))
+      .toBeInTheDocument();
+    // Scoped to the inset: the settled ledger states the same count in its own
+    // words, so a bare figure match resolves to both.
+    await expect
+      .element(page.getByText(/1,847\s+records in common\. This exchange/))
+      .toBeInTheDocument();
+    expect(document.querySelector(`.${styles.bigCount}`)?.textContent).toBe(
+      "Exchange complete - count only",
+    );
+    // Not the withheld helper's outcome: this party received exactly what its
+    // terms promised.
+    expect(document.body.textContent).not.toContain(
+      "Your records contributed to the match",
+    );
+    // And the count it computed itself carries no partner caveat, in the inset or
+    // in the ledger's condensed restatement of it.
+    expect(document.body.textContent).not.toContain(
+      "psilink does not check a count it is sent",
+    );
+    const links = Array.from(
+      document.querySelectorAll<HTMLAnchorElement>("a[download]"),
+    ).map((link) => link.textContent);
+    expect(links).toEqual([
+      "psilink-record-x.json",
+      "psilink-record-x.keys.json",
+    ]);
+    const ledger = document.querySelector(
+      'aside[aria-label="This exchange"]',
+    )?.textContent;
+    expect(ledger).toContain(
+      "1,847 records in common - the size of the overlap only",
+    );
+    expect(ledger).not.toContain("reported by your partner");
+  });
+
+  test("a count the partner reported carries the trust caveat", async () => {
+    // The sender seat's number arrived over the partner's count-report leg and is
+    // checked against no round of this party's own, so the reminder lands where
+    // the number is read rather than only at consent time.
+    await reachRun();
+    const call = lifecycleCall(0);
+    call.onStage("waiting for peer");
+    call.onResult({
+      kind: "counted" as const,
+      intersectionCount: 1847,
+      countReportedByPartner: true,
+    });
+
+    await expect
+      .element(page.getByText(/1,847\s+records in common\. This exchange/))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          "Your partner ran the match and sent you this number. psilink does " +
+            "not check a count it is sent against a run of its own, so the " +
+            "figure is your partner's word for it.",
+        ),
+      )
+      .toBeInTheDocument();
+    // The ledger restates the count in its own words, so it carries the row-sized
+    // form of the same fact.
+    expect(
+      document.querySelector('aside[aria-label="This exchange"]')?.textContent,
+    ).toContain(
+      "1,847 records in common - the size of the overlap only, no matched " +
+        "rows and no shared columns; reported by your partner",
+    );
   });
 
   test("a retryable exchange failure offers Try again on the same invitation", async () => {

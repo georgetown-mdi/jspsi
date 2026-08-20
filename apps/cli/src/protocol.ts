@@ -6,6 +6,7 @@ import {
   getLogger,
   describeExchangeStages,
   runExchange,
+  countIsPartnerReported,
   buildOutputTable,
   authenticateConnection,
   assertSharedSecretReadyForHandshake,
@@ -1529,6 +1530,7 @@ export async function runProtocol(
     const {
       associationTable,
       intersectionCount,
+      resolvedRole,
       partnerPayload,
       audit,
       bootstrap,
@@ -1667,10 +1669,23 @@ export async function runProtocol(
     // result is the count, reported here. Checked first, since a count-only receiver
     // holds no association table either and would otherwise be told it receives
     // nothing.
+    //
+    // The sender seat's copy carries the trust-contingent caveat at the moment the
+    // number is read: its count arrived over the partner's count-report leg rather
+    // than from a round it ran, and psi-c is the instrument parties reach for BEFORE
+    // an agreement, so the reminder belongs here and not only at consent time. The
+    // receiver seat computed its own count under an enforced mode, so the same
+    // caveat there would be false.
     if (intersectionCount !== undefined) {
       log.info(
-        `exchange complete: ${intersectionCount} record(s) matched. The ` +
-          "agreed terms asked for a count only, so no result file was written.",
+        countIsPartnerReported({ intersectionCount, resolvedRole })
+          ? `exchange complete: your partner reported ${intersectionCount} ` +
+              "record(s) in common. Only your partner computed the count; " +
+              "psilink does not check a count it is sent against a run of its " +
+              "own. The agreed terms asked for a count only, so no result file " +
+              "was written."
+          : `exchange complete: ${intersectionCount} record(s) in common. The ` +
+              "agreed terms asked for a count only, so no result file was written.",
       );
     }
     // The result table is withheld (associationTable undefined) when this party's
@@ -1829,10 +1844,25 @@ export async function runProtocol(
     // count-only exchange, which writes no result file at all, and true when a
     // result CSV was produced. The count rides the same event so the two
     // resultWritten:false outcomes stay distinguishable to a supervisor that reads
-    // only fd 3 -- it is present exactly when this party held a count. The metrics
-    // summary precedes it so the terminal event stays last on the stream.
+    // only fd 3 -- it is present exactly when this party held a count -- and it
+    // travels with the provenance the human line states, so a console rendering the
+    // stream states the same trust posture the terminal does. The metrics summary
+    // precedes it so the terminal event stays last on the stream.
     emitMetrics();
-    emit((e) => e.result(associationTable !== undefined, intersectionCount));
+    emit((e) =>
+      e.result(
+        associationTable !== undefined,
+        intersectionCount === undefined
+          ? undefined
+          : {
+              intersectionCount,
+              reportedByPartner: countIsPartnerReported({
+                intersectionCount,
+                resolvedRole,
+              }),
+            },
+      ),
+    );
     return {
       bootstrap,
       onAuthenticatedError,

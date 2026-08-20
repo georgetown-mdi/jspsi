@@ -73,6 +73,14 @@ interface CapturedRun {
   result?: ExchangeResult;
 }
 
+/** The result url a captured `matched` outputs shape carries, and undefined for
+ * the shapes that have no result file. */
+function resultsUrlOf(
+  outputs: ExchangeOutputs | undefined,
+): string | undefined {
+  return outputs?.kind === "matched" ? outputs.resultsUrl : undefined;
+}
+
 /** Drive runExchangeLifecycle for one role over an already-open connection,
  * capturing every callback. The connection is supplied via a trivial `acquire`
  * (the role-specific dialing is exercised by the live rendezvous setup and by
@@ -108,7 +116,10 @@ async function driveRole(
     signal: controller.signal,
     generateOutput: (result) => {
       captured.result = result;
-      return { resultsUrl: `blob:results-${exchangeRole}` };
+      return {
+        kind: "matched" as const,
+        resultsUrl: `blob:results-${exchangeRole}`,
+      };
     },
     onStages: () => {},
     onStage: (id) => captured.stages.push(id),
@@ -186,8 +197,8 @@ test("both roles complete with a result and no error", (ctx) => {
   expect(initiator.warnings).toEqual([]);
   expect(responder.results).toHaveLength(1);
   expect(initiator.results).toHaveLength(1);
-  expect(responder.results[0]?.resultsUrl).toBe("blob:results-responder");
-  expect(initiator.results[0]?.resultsUrl).toBe("blob:results-initiator");
+  expect(resultsUrlOf(responder.results[0])).toBe("blob:results-responder");
+  expect(resultsUrlOf(initiator.results[0])).toBe("blob:results-initiator");
 });
 
 test("the lifecycle forwards the real protocol-stage progression", (ctx) => {

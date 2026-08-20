@@ -124,10 +124,11 @@ The success **terminal event**. Emitted exactly once, after the exchange complet
 | ----- | ---- | ------- |
 | `resultWritten` | boolean | `true` when a matched result CSV was produced; `false` for a helper whose agreed terms give it no output table (it contributed to the match but receives no result file), and `false` for a count-only (`psi-c`) exchange, which produces no matched pairing for either party. |
 | `intersectionCount` | integer | The size of the intersection a count-only exchange reported: the run's whole result. Present exactly when this party's agreed terms entitled it to the count, absent on every other run (including a count-only helper's, whose terms give it no output). It is what separates the two `resultWritten: false` outcomes -- present means this party received what its terms promised, absent means the terms withheld the result table -- so a consumer keys on the field's presence rather than on a zero value. |
+| `countReportedByPartner` | boolean | Whether `intersectionCount` arrived as the partner's report rather than as a figure this party computed: `true` on the PSI sender seat of a both-entitled count-only run, whose number travels over the count-report leg, and `false` on the receiver that computed it. Emitted with `intersectionCount` and omitted with it, so a consumer reads the pair or neither. A consumer that presents the count states the trust posture from this field -- a sender's number is checked against no run of its own ([PROTOCOL.md](PROTOCOL.md#psi-c)) -- and reads a missing or non-boolean value as `false` rather than caveating a locally computed count. |
 
 ```json
 {"v":1,"type":"result","resultWritten":true}
-{"v":1,"type":"result","resultWritten":false,"intersectionCount":42}
+{"v":1,"type":"result","resultWritten":false,"intersectionCount":42,"countReportedByPartner":false}
 ```
 
 ### `error`

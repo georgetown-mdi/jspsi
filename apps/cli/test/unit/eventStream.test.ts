@@ -86,12 +86,15 @@ function validateEvent(event: unknown): event is StreamEvent {
     case "result":
       return (
         typeof event.resultWritten === "boolean" &&
-        // The count-only field is optional, and a present one is a non-negative
-        // integer like every other numeric field of this stream.
-        (event.intersectionCount === undefined ||
-          (typeof event.intersectionCount === "number" &&
+        // The count-only fields are optional and paired: a present count is a
+        // non-negative integer like every other numeric field of this stream,
+        // and its provenance flag travels with it or not at all.
+        (event.intersectionCount === undefined
+          ? event.countReportedByPartner === undefined
+          : typeof event.intersectionCount === "number" &&
             Number.isInteger(event.intersectionCount) &&
-            event.intersectionCount >= 0))
+            event.intersectionCount >= 0 &&
+            typeof event.countReportedByPartner === "boolean")
       );
     case "error":
       return (
@@ -122,7 +125,8 @@ test("every event type validates against the schema and carries a version", () =
     buildMetricsEvent(1000, 2, 1),
     buildResultEvent(true),
     buildResultEvent(false),
-    buildResultEvent(false, 7),
+    buildResultEvent(false, { intersectionCount: 7, reportedByPartner: false }),
+    buildResultEvent(false, { intersectionCount: 7, reportedByPartner: true }),
     buildErrorEvent(new Error("boom"), "run"),
   ];
   for (const event of events) {
@@ -162,15 +166,20 @@ test("the result event carries a count-only run's count, and omits the field oth
   // The field's PRESENCE is the discriminant between the two resultWritten:false
   // outcomes, so a zero count must be emitted as a present zero rather than
   // collapsing into the withheld shape a missing field means.
-  const counted = buildResultEvent(false, 0);
+  const counted = buildResultEvent(false, {
+    intersectionCount: 0,
+    reportedByPartner: false,
+  });
   expect(validateEvent(counted)).toBe(true);
   expect(counted.resultWritten).toBe(false);
   expect("intersectionCount" in counted).toBe(true);
   expect(counted.intersectionCount).toBe(0);
+  expect(counted.countReportedByPartner).toBe(false);
 
   const withheld = buildResultEvent(false);
   expect(validateEvent(withheld)).toBe(true);
   expect("intersectionCount" in withheld).toBe(false);
+  expect("countReportedByPartner" in withheld).toBe(false);
 
   const written = buildResultEvent(true);
   expect("intersectionCount" in written).toBe(false);
@@ -186,9 +195,12 @@ test("the result event carries a count-only run's count, and omits the field oth
 test("a malformed count is floored like every other numeric field", () => {
   // The count is the one numeric field a partner can influence (the count-report
   // leg), so the builder floors it rather than trusting the value it is handed.
-  expect(buildResultEvent(false, -3).intersectionCount).toBe(0);
-  expect(buildResultEvent(false, Number.NaN).intersectionCount).toBe(0);
-  expect(buildResultEvent(false, 4.7).intersectionCount).toBe(4);
+  const floored = (intersectionCount: number) =>
+    buildResultEvent(false, { intersectionCount, reportedByPartner: false })
+      .intersectionCount;
+  expect(floored(-3)).toBe(0);
+  expect(floored(Number.NaN)).toBe(0);
+  expect(floored(4.7)).toBe(4);
 });
 
 test("a stageEnd event pairs an id with a whole-millisecond duration", () => {

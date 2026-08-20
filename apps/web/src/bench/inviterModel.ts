@@ -51,6 +51,7 @@ import type { DeploymentProfile } from "@utils/clientConfig";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { ExchangeDriverSelection } from "./exchangeDriverSelection";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { RunOutputs } from "./runOutputs";
 
 /**
  * Where a step stands in the exchange's progression, rendered by the bench's
@@ -962,27 +963,93 @@ export interface InviterLedgerRow {
  * is consumed (its expiry no longer means anything), and the receive row can
  * state what actually arrived -- the matched-row count, the size of the overlap a
  * count-only exchange reported, or that the agreed terms withheld the result table
- * from this party. */
-export interface LedgerOutcome {
-  matchedRecordCount?: number;
-  resultWithheld?: boolean;
-  /** The count a count-only (`psi-c`) exchange reported, present only for such a
-   * run. It is a distinct outcome from both of the others: this party received
-   * exactly what its terms promised, and no result table exists for anyone. */
-  intersectionCount?: number;
+ * from this party. Discriminated on the same `kind` the run's outputs carry
+ * ({@link RunOutputs}), so the three outcomes cannot be read as one another and a
+ * ledger that stops handling one is a compile error. */
+export type LedgerOutcome =
+  | { kind: "matched"; matchedRecordCount?: number }
+  | { kind: "withheld" }
+  | {
+      kind: "counted";
+      intersectionCount: number;
+      /** Whether the count arrived as the PARTNER's report rather than as a figure
+       * this party computed, carried from {@link RunOutputs} rather than dropped:
+       * the ledger states the count in its own words, so a ledger without it would
+       * repeat the number stripped of the one fact that qualifies it. */
+      countReportedByPartner: boolean;
+    };
+
+/** Fold a completed run's outputs into the ledger outcome, dropping the download
+ * URLs the ledger has no use for. Shared by both seats so neither maps the
+ * outcome its own way. */
+export function ledgerOutcomeOf(outputs: RunOutputs): LedgerOutcome {
+  switch (outputs.kind) {
+    case "matched":
+      return {
+        kind: "matched",
+        matchedRecordCount: outputs.matchedRecordCount,
+      };
+    case "withheld":
+      return { kind: "withheld" };
+    case "counted":
+      return {
+        kind: "counted",
+        intersectionCount: outputs.intersectionCount,
+        countReportedByPartner: outputs.countReportedByPartner,
+      };
+  }
 }
 
 /**
  * The receive row's value for a count-only exchange, shared by both seats' ledgers
- * so one wording covers the outcome: the run reported the size of the overlap and
- * nothing else, so the row states the count and denies the result table rather than
- * naming matched rows and shared columns neither party received.
+ * so one wording covers the outcome. It answers the row's question in the row's own
+ * vocabulary: the count is what arrived, and the matched rows and shared columns the
+ * other outcomes name are what did not -- a run that reports the size of the overlap
+ * produces neither, for either party.
+ *
+ * A count this party did not compute closes with the provenance clause, so the
+ * ledger -- the condensed summary an operator skims or screenshots, away from the
+ * result inset carrying the full caveat -- does not state a partner's figure and a
+ * locally computed one in the same words. The clause is the row-sized form of the
+ * inset's vocabulary rather than a second wording of it: this row states who
+ * produced the number, and the inset states what that means. The seat that computed
+ * its own count takes the sentence unchanged, since a provenance note there would
+ * be false.
  */
-export function countOnlyLedgerValue(intersectionCount: number): string {
+export function countOnlyLedgerValue(
+  intersectionCount: number,
+  countReportedByPartner: boolean,
+): string {
   return (
-    `${new Intl.NumberFormat("en-US").format(intersectionCount)} matched - ` +
-    "the size of the overlap only, no result table"
+    `${new Intl.NumberFormat("en-US").format(intersectionCount)} records in ` +
+    "common - the size of the overlap only, no matched rows and no shared columns" +
+    (countReportedByPartner ? "; reported by your partner" : "")
   );
+}
+
+/**
+ * The settled receive row's value for whichever outcome the run produced, shared by
+ * both seats so the three readings stay one set of words. `matchedRowsSuffix` is the
+ * only seat-specific part -- what rode along with the matched rows, which the inviter
+ * states generically and the acceptor names from the invitation.
+ */
+export function settledReceiveValue(
+  outcome: LedgerOutcome,
+  matchedRowsSuffix: string,
+): string {
+  switch (outcome.kind) {
+    case "counted":
+      return countOnlyLedgerValue(
+        outcome.intersectionCount,
+        outcome.countReportedByPartner,
+      );
+    case "withheld":
+      return "No result table - withheld by the agreed terms";
+    case "matched":
+      return `${new Intl.NumberFormat("en-US").format(
+        outcome.matchedRecordCount ?? 0,
+      )} matched rows${matchedRowsSuffix}`;
+  }
 }
 
 /**
@@ -1037,14 +1104,7 @@ export function inviterLedgerRows(
       value:
         outcome === undefined
           ? "Matched rows + your partner's shared columns"
-          : // The count-only case is read before the withheld one and before the
-            // matched one: it holds no result table either, so both of those would
-            // report it as something it is not.
-            outcome.intersectionCount !== undefined
-            ? countOnlyLedgerValue(outcome.intersectionCount)
-            : outcome.resultWithheld === true
-              ? "No result table - withheld by the agreed terms"
-              : `${new Intl.NumberFormat("en-US").format(outcome.matchedRecordCount ?? 0)} matched rows + shared columns`,
+          : settledReceiveValue(outcome, " + shared columns"),
     },
     keys.length > 0
       ? {

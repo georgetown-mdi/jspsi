@@ -11,13 +11,13 @@ import { isolatedColumnName } from "@components/ColumnName";
 
 import {
   TRANSPORT_LEDGER_LABELS,
-  countOnlyLedgerValue,
   dateTimeLabel,
+  settledReceiveValue,
 } from "./inviterModel";
 import { saveRailNote } from "./saveExchangeModel";
 
 import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
-import type { RailFact, RailStepState } from "./inviterModel";
+import type { LedgerOutcome, RailFact, RailStepState } from "./inviterModel";
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
 
 /**
@@ -286,18 +286,6 @@ export function acceptorDoneLedgerFooter(serverJob: boolean): string {
     : ACCEPTOR_DONE_LEDGER_FOOTER;
 }
 
-/** What a completed exchange settled for the acceptor's ledger: the matched-row
- * count that actually arrived, the size of the overlap a count-only exchange
- * reported, or that the agreed terms withheld the result table from this party. */
-export interface AcceptorLedgerOutcome {
-  matchedRecordCount?: number;
-  resultWithheld?: boolean;
-  /** The count a count-only (`psi-c`) exchange reported, present only for such a
-   * run -- a distinct outcome from both of the others, since no result table
-   * exists for either party to have received or been denied. */
-  intersectionCount?: number;
-}
-
 /** The settled ledger tag once the exchange completes, naming the partner it was
  * agreed with. The identity is already sanitized ({@link invitingPartyName}). */
 export function acceptorDoneLedgerTag(invitingParty: string): string {
@@ -308,8 +296,9 @@ export function acceptorDoneLedgerTag(invitingParty: string): string {
  * The acceptor's disclosure ledger after the exchange settles: the forward-looking
  * rows are relabelled past tense ("You sent", "You received", "Results went to"),
  * the expiry row drops (the invitation is consumed), and the receive row reports
- * what actually arrived -- the matched-row count, or that the terms withheld the
- * result table. Every partner string is sanitized by {@link summarizeInvitation}.
+ * what actually arrived -- the matched-row count, the size of the overlap a
+ * count-only run reported, or that the terms withheld the result table. Every
+ * partner string is sanitized by {@link summarizeInvitation}.
  *
  * `metadata` is the LAUNCHED metadata -- the frozen pair that actually ran -- so the
  * "You sent" row names the exact disclosed set ({@link disclosedColumnNames}) core
@@ -318,23 +307,14 @@ export function acceptorDoneLedgerTag(invitingParty: string): string {
  */
 export function acceptorDoneLedgerRows(
   token: InvitationToken,
-  outcome: AcceptorLedgerOutcome,
+  outcome: LedgerOutcome,
   metadata: Metadata,
   howItRuns: string,
 ): Array<AcceptorLedgerRow> {
   const summary = summarizeInvitation(token);
   const received = summary.payload?.send ?? [];
   const receivedSuffix = received.length > 0 ? ` + ${received.join(", ")}` : "";
-  // The count-only case is read first: it holds no result table either, so the
-  // withheld row and the matched row would each report it as something it is not.
-  const receivedValue =
-    outcome.intersectionCount !== undefined
-      ? countOnlyLedgerValue(outcome.intersectionCount)
-      : outcome.resultWithheld === true
-        ? "No result table - withheld by the agreed terms"
-        : `${new Intl.NumberFormat("en-US").format(
-            outcome.matchedRecordCount ?? 0,
-          )} matched rows${receivedSuffix}`;
+  const receivedValue = settledReceiveValue(outcome, receivedSuffix);
   return [
     acceptorSendRow("You sent", disclosedColumnNames(metadata)),
     // The expiry row is gone (the invitation is consumed), so the settled

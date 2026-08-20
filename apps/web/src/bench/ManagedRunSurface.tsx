@@ -165,7 +165,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
   useEffect(() => {
     if (outputs === undefined) return;
     return () => {
-      if (outputs.resultsUrl !== undefined)
+      if (outputs.kind === "matched")
         window.URL.revokeObjectURL(outputs.resultsUrl);
       if (outputs.record !== undefined) {
         window.URL.revokeObjectURL(outputs.record.recordUrl);
@@ -469,21 +469,16 @@ export function ManagedRunSurface({ id }: { id: string }) {
         ) : outputs !== undefined ? (
           <>
             <h1>Run complete</h1>
-            <DonePanel
-              matchedRecordCount={outputs.matchedRecordCount}
-              finishedAt={finishedAt}
-            />
+            <DonePanel outputs={outputs} finishedAt={finishedAt} />
             <RunWarningsAlert warnings={runWarnings} />
-            {outputs.resultsUrl === undefined ? (
-              <NoResultFileInset
-                intersectionCount={outputs.intersectionCount}
-              />
-            ) : (
+            {outputs.kind === "matched" ? (
               <DownloadRow
                 label="Download result"
                 href={outputs.resultsUrl}
                 fileName="results.csv"
               />
+            ) : (
+              <NoResultFileInset outputs={outputs} />
             )}
             {outputs.record !== undefined && (
               <>

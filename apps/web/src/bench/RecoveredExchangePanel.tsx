@@ -289,14 +289,14 @@ export function RecoveredExchangePanel() {
       {outputs !== undefined && (
         <>
           <h3>Downloads</h3>
-          {outputs.resultsUrl === undefined ? (
-            <NoResultFileInset intersectionCount={outputs.intersectionCount} />
-          ) : (
+          {outputs.kind === "matched" ? (
             <DownloadRow
               label="Download result"
               href={outputs.resultsUrl}
               fileName="results.csv"
             />
+          ) : (
+            <NoResultFileInset outputs={outputs} />
           )}
           {outputs.record !== undefined && (
             <>

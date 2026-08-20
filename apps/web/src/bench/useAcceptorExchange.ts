@@ -312,7 +312,7 @@ export function useAcceptorExchange({
   useEffect(() => {
     if (outputs === undefined) return;
     return () => {
-      if (outputs.resultsUrl !== undefined)
+      if (outputs.kind === "matched")
         window.URL.revokeObjectURL(outputs.resultsUrl);
       if (outputs.record !== undefined) {
         window.URL.revokeObjectURL(outputs.record.recordUrl);

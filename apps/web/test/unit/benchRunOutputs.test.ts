@@ -45,6 +45,7 @@ const audit = {
 function receivedResult(withAudit: boolean): ExchangeResult {
   return {
     associationTable: [[0], [5]],
+    resolvedRole: "receiver",
     partnerPayload: { columns: ["program"], rowIndices: [5], rows: [["B"]] },
     audit: withAudit ? audit : undefined,
   } as unknown as ExchangeResult;
@@ -53,17 +54,20 @@ function receivedResult(withAudit: boolean): ExchangeResult {
 function withheldResult(): ExchangeResult {
   return {
     associationTable: undefined,
+    resolvedRole: "sender",
     partnerPayload: { columns: [], rowIndices: [], rows: [] },
     audit,
   } as unknown as ExchangeResult;
 }
 
 // A count-only (psi-c) run: no matched pairing for anyone, and the intersection size
-// as the party's whole result.
-function countOnlyResult(): ExchangeResult {
+// as the party's whole result. The PSI seat decides whether the count was computed
+// here (the receiver) or arrived as the partner's report (the sender).
+function countOnlyResult(resolvedRole: "receiver" | "sender"): ExchangeResult {
   return {
     associationTable: undefined,
     intersectionCount: 4,
+    resolvedRole,
     partnerPayload: { columns: [], rowIndices: [], rows: [] },
     audit,
   } as unknown as ExchangeResult;
@@ -74,9 +78,9 @@ describe("buildRunOutputs", () => {
     const { urls, created, revoked } = recordingUrls();
     const outputs = buildRunOutputs(receivedResult(true), prepared, urls);
 
-    expect(outputs.resultsUrl).toBe(created[0]);
+    expect(outputs.kind).toBe("matched");
+    expect(outputs.kind === "matched" && outputs.resultsUrl).toBe(created[0]);
     expect(outputs.matchedRecordCount).toBe(1);
-    expect(outputs.resultWithheld).toBeUndefined();
     expect(outputs.record).toEqual({
       recordUrl: created[1],
       recordFileName: "psilink-record-2026-07-08T14-32-00-000Z.json",
@@ -91,27 +95,43 @@ describe("buildRunOutputs", () => {
     const { urls, created } = recordingUrls();
     const outputs = buildRunOutputs(withheldResult(), prepared, urls);
 
-    expect(outputs.resultWithheld).toBe(true);
-    expect(outputs.resultsUrl).toBeUndefined();
+    expect(outputs.kind).toBe("withheld");
     expect(outputs.matchedRecordCount).toBeUndefined();
     expect(outputs.record?.recordUrl).toBe(created[0]);
     expect(created).toHaveLength(2);
   });
 
-  test("a count-only result reports its count rather than reading as withheld", () => {
+  test("a count-only result yields the counted shape with no results blob", () => {
     const { urls, created } = recordingUrls();
-    const outputs = buildRunOutputs(countOnlyResult(), prepared, urls);
+    const outputs = buildRunOutputs(
+      countOnlyResult("receiver"),
+      prepared,
+      urls,
+    );
 
     // The count-only receiver got exactly what its terms promised, so nothing was
     // withheld from it -- reporting it as withheld would state the opposite.
-    expect(outputs.resultWithheld).toBeUndefined();
-    expect(outputs.intersectionCount).toBe(4);
-    expect(outputs.matchedRecordCount).toBe(4);
-    // No pairing exists to write, so no results file is created; the record pair is
-    // still offered.
-    expect(outputs.resultsUrl).toBeUndefined();
-    expect(outputs.record?.recordUrl).toBe(created[0]);
+    expect(outputs.kind).toBe("counted");
+    expect(outputs.kind === "counted" && outputs.intersectionCount).toBe(4);
+    // The completion headline states the count off the counted shape's own field,
+    // so restating it as a matched-row figure would print the same number twice.
+    expect(outputs.matchedRecordCount).toBeUndefined();
+    // No pairing exists to write, so no results blob is created at all: the two
+    // urls handed out are the record pair.
     expect(created).toHaveLength(2);
+    expect(outputs.record?.recordUrl).toBe(created[0]);
+  });
+
+  test("the counted shape marks a count that arrived as the partner's report", () => {
+    // The seat that computed the count and the seat that was handed one must not
+    // render alike: only the latter's number is the partner's word.
+    const { urls } = recordingUrls();
+    expect(
+      buildRunOutputs(countOnlyResult("receiver"), prepared, urls),
+    ).toMatchObject({ kind: "counted", countReportedByPartner: false });
+    expect(
+      buildRunOutputs(countOnlyResult("sender"), prepared, urls),
+    ).toMatchObject({ kind: "counted", countReportedByPartner: true });
   });
 
   test("a throw after the results url was created revokes it before propagating", () => {
@@ -129,7 +149,7 @@ describe("buildRunOutputs", () => {
     const outputs = buildRunOutputs(receivedResult(false), prepared, urls);
 
     expect(outputs.record).toBeUndefined();
-    expect(outputs.resultsUrl).toBe(created[0]);
+    expect(outputs.kind === "matched" && outputs.resultsUrl).toBe(created[0]);
     expect(created).toHaveLength(1);
     expect(revoked).toEqual([]);
   });

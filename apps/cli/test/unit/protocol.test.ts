@@ -1114,23 +1114,25 @@ test("writes no result file for a non-receiving party when the exchange withhold
   expect(vi.mocked(buildOutputTable)).not.toHaveBeenCalled();
 }, 20_000);
 
-test("reports a count-only exchange's count instead of reading as withheld", async () => {
-  // A count-only run hands back no association table for anyone, so it lands in the
-  // same no-result-file branch a withheld table does -- and must not be reported the
-  // same way: this party received exactly what its terms promised.
+// Mock a count-only run for the given PSI seat: the receiver computed the count
+// itself, the sender was handed one over the count-report leg.
+function mockCountOnlyRun(resolvedRole: "receiver" | "sender") {
   async function runExchangeCountOnly(): Promise<unknown> {
     await defaultRunExchange();
     return {
       associationTable: undefined,
       intersectionCount: 7,
+      resolvedRole,
       partnerPayload: {},
     };
   }
   vi.mocked(runExchange).mockImplementation(runExchangeCountOnly as never);
   vi.mocked(buildOutputTable).mockClear();
+}
 
-  const output = path.join(tmpDir, "count-only.csv");
-  await Promise.all([
+// Drive both halves of a filedrop run, writing this party's result to `output`.
+function runBothHalves(output: string) {
+  return Promise.all([
     runProtocol(
       { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
       null,
@@ -1143,20 +1145,53 @@ test("reports a count-only exchange's count instead of reading as withheld", asy
       { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
       null,
       minimalPrepared,
-      path.join(tmpDir, "count-only-b.csv"),
+      `${output}.partner`,
       -1,
       "test-b",
     ),
   ]);
+}
+
+test("reports a count-only exchange's count instead of reading as withheld", async () => {
+  // A count-only run hands back no association table for anyone, so it lands in the
+  // same no-result-file branch a withheld table does -- and must not be reported the
+  // same way: this party received exactly what its terms promised.
+  mockCountOnlyRun("receiver");
+
+  const output = path.join(tmpDir, "count-only.csv");
+  await runBothHalves(output);
 
   expect(fs.existsSync(output)).toBe(false);
   expect(vi.mocked(buildOutputTable)).not.toHaveBeenCalled();
   expect(
-    mockState.infos.some((line) => line.includes("7 record(s) matched")),
+    mockState.infos.some((line) => line.includes("7 record(s) in common")),
   ).toBe(true);
   expect(
     mockState.infos.some((line) => line.includes("you receive no result")),
   ).toBe(false);
+  // The receiver computed its own count under an enforced mode, so it gets no
+  // trust-contingent caveat -- one there would be false.
+  expect(mockState.infos.some((line) => line.includes("your partner"))).toBe(
+    false,
+  );
+}, 20_000);
+
+test("caveats a count-only count the partner reported rather than computed", async () => {
+  // The sender seat's number arrives over the partner's count-report leg and is
+  // checked against no run of its own, so the reminder lands where the operator
+  // reads the number rather than only at consent time.
+  mockCountOnlyRun("sender");
+
+  const output = path.join(tmpDir, "count-only-sender.csv");
+  await runBothHalves(output);
+
+  expect(fs.existsSync(output)).toBe(false);
+  const line = mockState.infos.find((entry) =>
+    entry.includes("7 record(s) in common"),
+  );
+  expect(line).toContain("your partner reported 7 record(s) in common");
+  expect(line).toContain("psilink does not check a count it is sent");
+  expect(line).toContain("no result file was written");
 }, 20_000);
 
 // --- Expired token via runProtocol -------------------------------------------
@@ -3809,15 +3844,7 @@ test("a count-only run's terminal event carries the count beside resultWritten:f
   // count-only run writes no result file, so its terminal event carries the same
   // resultWritten:false a withheld helper's does. The count is what separates
   // them, and it must ride the machine event rather than only the human log.
-  async function runExchangeCountOnly(): Promise<unknown> {
-    await defaultRunExchange();
-    return {
-      associationTable: undefined,
-      intersectionCount: 7,
-      partnerPayload: {},
-    };
-  }
-  vi.mocked(runExchange).mockImplementation(runExchangeCountOnly as never);
+  mockCountOnlyRun("sender");
 
   mockFd3Open();
   try {
@@ -3855,6 +3882,56 @@ test("a count-only run's terminal event carries the count beside resultWritten:f
   ]);
   expect(lines[2].resultWritten).toBe(false);
   expect(lines[2].intersectionCount).toBe(7);
+  // The provenance the human line states rides the same event, so a console
+  // rendering only fd 3 caveats the number exactly where the terminal does.
+  expect(lines[2].countReportedByPartner).toBe(true);
+}, 20_000);
+
+test("a receiver seat's count-only event reports the count as computed here", async () => {
+  // The other seat of the same pairing: this party ran the count-only round under
+  // a mode the wire enforces, so its event states the provenance as false rather
+  // than omitting the field. Omission is reserved for a run carrying no count at
+  // all, so a consumer separating the two seats reads this value, not the field's
+  // presence.
+  mockCountOnlyRun("receiver");
+
+  mockFd3Open();
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        path.join(tmpDir, "count-only-receiver-stream.csv"),
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const lines = takeFd3Lines();
+  expect(lines.map((line) => line.type)).toEqual([
+    "stages",
+    "metrics",
+    "result",
+  ]);
+  expect(lines[2].resultWritten).toBe(false);
+  expect(lines[2].intersectionCount).toBe(7);
+  expect(lines[2].countReportedByPartner).toBe(false);
 }, 20_000);
 
 test("a withheld result's terminal event carries no count at all", async () => {
@@ -3897,6 +3974,9 @@ test("a withheld result's terminal event carries no count at all", async () => {
   expect(lines[lines.length - 1].type).toBe("result");
   expect(lines[lines.length - 1].resultWritten).toBe(false);
   expect("intersectionCount" in lines[lines.length - 1]).toBe(false);
+  // With no count there is nothing to qualify, so the provenance field is absent
+  // rather than a false that would read as a locally computed count.
+  expect("countReportedByPartner" in lines[lines.length - 1]).toBe(false);
 }, 20_000);
 
 test("an emitter passed instead of the flag carries every event, and no second stream is opened", async () => {

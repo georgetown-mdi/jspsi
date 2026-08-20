@@ -174,24 +174,21 @@ export function DirectRunSection({
         </div>
       )}
       {outputs !== undefined && (
-        <DonePanel
-          matchedRecordCount={outputs.matchedRecordCount}
-          finishedAt={run.finishedAt}
-        />
+        <DonePanel outputs={outputs} finishedAt={run.finishedAt} />
       )}
       <RunWarningsAlert warnings={warnings} />
       <StatusPanel run={run} done={done} halted={failure !== undefined} />
       {outputs !== undefined && (
         <>
           <h2>Downloads</h2>
-          {outputs.resultsUrl === undefined ? (
-            <NoResultFileInset intersectionCount={outputs.intersectionCount} />
-          ) : (
+          {outputs.kind === "matched" ? (
             <DownloadRow
               label="Download result"
               href={outputs.resultsUrl}
               fileName="results.csv"
             />
+          ) : (
+            <NoResultFileInset outputs={outputs} />
           )}
           {outputs.record !== undefined && (
             <>

@@ -9,6 +9,7 @@ import { DEFAULT_PEER_TIMEOUT_MS } from "@psilink/core";
 import { dateTimeLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
+import type { NoResultFileOutputs, RunOutputs } from "./runOutputs";
 import type { ReactNode } from "react";
 import type { RunFailure } from "./useInviterExchange";
 
@@ -223,26 +224,66 @@ export function DownloadRow({
   );
 }
 
-/** The completion panel: the big "Exchange complete" line with the matched-row
- * count when one exists, and the finished-at timestamp. */
+/**
+ * What the completion headline names after "Exchange complete", or undefined when
+ * this run produced nothing for it to name. A matched run names its row count; a
+ * count-only run names the MODE and not the figure, because the count is stated
+ * once, in the inset that stands where the result would be -- the one block every
+ * surface renders, including the recovery panel, which carries no completion
+ * headline at all. A withheld helper names neither, having received neither.
+ *
+ * `count`, when present, renders in the mono voice ahead of `label`.
+ *
+ * Exported for the copy-pin test.
+ *
+ * @internal
+ */
+export function completionOutcome(
+  outputs: RunOutputs | undefined,
+): { count?: number; label: string } | undefined {
+  if (outputs === undefined) return undefined;
+  switch (outputs.kind) {
+    case "counted":
+      return { label: "count only" };
+    case "matched":
+      // Absent on the console's server-job path, which holds the result on the
+      // appliance and counts no rows: the headline states completion alone rather
+      // than inventing a figure.
+      return outputs.matchedRecordCount === undefined
+        ? undefined
+        : { count: outputs.matchedRecordCount, label: "matched records" };
+    case "withheld":
+      return undefined;
+  }
+}
+
+/** The completion panel: the big "Exchange complete" line naming whatever this run
+ * produced ({@link completionOutcome}), and the finished-at timestamp. It takes the
+ * whole outputs shape rather than a bare number so the three outcomes cannot
+ * collapse into one another here. */
 export function DonePanel({
-  matchedRecordCount,
+  outputs,
   finishedAt,
 }: {
-  matchedRecordCount: number | undefined;
+  outputs: RunOutputs | undefined;
   finishedAt: Date | undefined;
 }) {
+  const outcome = completionOutcome(outputs);
   return (
     <div className={styles.donePanel}>
       <p className={styles.bigCount}>
         Exchange complete
-        {matchedRecordCount !== undefined && (
+        {outcome !== undefined && (
           <>
             {" - "}
-            <span className={styles.mono}>
-              {new Intl.NumberFormat("en-US").format(matchedRecordCount)}
-            </span>{" "}
-            matched records
+            {outcome.count !== undefined && (
+              <>
+                <span className={styles.mono}>
+                  {new Intl.NumberFormat("en-US").format(outcome.count)}
+                </span>{" "}
+              </>
+            )}
+            {outcome.label}
           </>
         )}
       </p>
@@ -269,37 +310,77 @@ function WithheldResultInset() {
   );
 }
 
-/** The count-only inset: a count-only exchange reports the size of the
- * intersection and nothing else, so there is no result file for either party. */
-function CountOnlyResultInset({ count }: { count: number }) {
+/**
+ * The trust-contingent caveat a count this party did NOT compute carries, stated
+ * where the number is read rather than only where the exchange was accepted: only
+ * one party runs the count-only round, and the other's copy travels back as that
+ * party's word over a leg psilink does not check against a run of its own. The
+ * seat that computed its own count gets no such line -- the count-only mode is
+ * enforced for it, and a caveat there would be false.
+ *
+ * The sentence is pinned as literals in the bench browser cases rather than
+ * through this export.
+ *
+ * @internal
+ */
+export const REPORTED_COUNT_CAVEAT =
+  "Your partner ran the match and sent you this number. psilink does not " +
+  "check a count it is sent against a run of its own, so the figure is your " +
+  "partner's word for it.";
+
+/** The count-only inset, standing where the result download would be and carrying
+ * the run's whole result: the count itself, what the run did not produce, and -- on
+ * a seat handed a number it did not compute -- the caveat that figure comes with.
+ * The count is stated HERE rather than in the completion headline because this block
+ * is the one every surface renders; the recovery panel has no headline, and a count
+ * stated only there would vanish on re-attachment. */
+function CountOnlyResultInset({
+  count,
+  countReportedByPartner,
+}: {
+  count: number;
+  countReportedByPartner: boolean;
+}) {
   return (
     <div className={styles.stateInset}>
       <p className={styles.stateLabel}>Count only</p>
       <p className={styles.small} style={{ margin: 0 }}>
-        {new Intl.NumberFormat("en-US").format(count)} record(s) matched. This
-        exchange reported the size of the overlap and nothing else, so there is
-        no result table to download.
+        <span className={styles.mono}>
+          {new Intl.NumberFormat("en-US").format(count)}
+        </span>{" "}
+        records in common. This exchange reported the size of the overlap and
+        nothing else -- no records were matched to each other and no columns
+        were shared -- so there is no result table to download.
       </p>
+      {countReportedByPartner && (
+        <p className={styles.small} style={{ marginBottom: 0 }}>
+          {REPORTED_COUNT_CAVEAT}
+        </p>
+      )}
     </div>
   );
 }
 
 /**
  * What stands where the result download would be when this run produced no result
- * file: the count a count-only exchange reported, or the statement that the agreed
- * terms withheld the result table. The two cases are distinct outcomes -- a
- * count-only party received exactly what its terms promised -- so a surface picks
- * between them here rather than reporting either as the other.
+ * file: what a count-only exchange did and did not produce, or the statement that
+ * the agreed terms withheld the result table. The two cases are distinct outcomes
+ * -- a count-only party received exactly what its terms promised -- so a surface
+ * picks between them here rather than reporting either as the other. A `matched`
+ * run has a download to offer and never reaches this inset.
  */
 export function NoResultFileInset({
-  intersectionCount,
+  outputs,
 }: {
-  intersectionCount: number | undefined;
+  outputs: NoResultFileOutputs;
 }) {
-  return intersectionCount === undefined ? (
+  return outputs.kind === "withheld" ? (
     <WithheldResultInset />
   ) : (
-    <CountOnlyResultInset count={intersectionCount} />
+    <CountOnlyResultInset
+      count={outputs.intersectionCount}
+      countReportedByPartner={outputs.countReportedByPartner}
+    />
   );
 }
 
