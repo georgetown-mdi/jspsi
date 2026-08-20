@@ -33,6 +33,19 @@ import type { DataConnection } from "peerjs";
  * a packed frame is split into `_handleChunk` slices on the wire. */
 const PEERJS_CHUNK_MTU = 16300;
 
+/**
+ * The budget for the whole-corpus differential below, vitest's 5s default being
+ * the wrong scale for it: it re-chunks every corpus frame a byte at a time
+ * through a fresh reassembler, which is pure CPU and stretches with whatever
+ * else the machine is running -- 0.7s idle here, 3.4s with the unit project
+ * running against sixteen competing workers, and 6.2s at worst under container
+ * load. The default leaves that last figure under a second of room, and what it
+ * buys is a bare test timeout in place of the divergence the case reports.
+ * Not a timing assertion: nothing waits for it to elapse on a healthy run, and
+ * it is an order of magnitude clear of the worst run measured.
+ */
+const CORPUS_DIFFERENTIAL_TIMEOUT_MS = 60_000;
+
 /** Encode a value with the real BinaryPack packer and return the wire bytes. The
  * packer returns a Promise only for `Blob` inputs, which the corpus never uses, so
  * the buffer is always available synchronously; the await keeps the type honest. */
@@ -418,35 +431,39 @@ async function corpus(): Promise<Array<{ label: string; packed: Uint8Array }>> {
 }
 
 describe("boundedReassembly differential: real peerjs-js-binarypack", () => {
-  test("delivers the exact wire bytes and unpacks to the real unpacker's result", async () => {
-    for (const { label, packed } of await corpus()) {
-      const conn = new FakeChunkedConnection();
-      const fail = installProduction(conn);
-      for (const chunk of chunkAtMtu(packed, 1)) conn._handleChunk(chunk);
+  test(
+    "delivers the exact wire bytes and unpacks to the real unpacker's result",
+    { timeout: CORPUS_DIFFERENTIAL_TIMEOUT_MS },
+    async () => {
+      for (const { label, packed } of await corpus()) {
+        const conn = new FakeChunkedConnection();
+        const fail = installProduction(conn);
+        for (const chunk of chunkAtMtu(packed, 1)) conn._handleChunk(chunk);
 
-      expect(
-        fail,
-        `${label}: pre-scan rejected a real-encoded frame`,
-      ).not.toHaveBeenCalled();
-      expect(
-        conn.delivered,
-        `${label}: not delivered exactly once`,
-      ).toHaveLength(1);
+        expect(
+          fail,
+          `${label}: pre-scan rejected a real-encoded frame`,
+        ).not.toHaveBeenCalled();
+        expect(
+          conn.delivered,
+          `${label}: not delivered exactly once`,
+        ).toHaveLength(1);
 
-      const delivered = conn.delivered[0];
-      expect(
-        Array.from(delivered),
-        `${label}: reassembled bytes diverge from the packed frame`,
-      ).toEqual(Array.from(packed));
+        const delivered = conn.delivered[0];
+        expect(
+          Array.from(delivered),
+          `${label}: reassembled bytes diverge from the packed frame`,
+        ).toEqual(Array.from(packed));
 
-      const reassembledValue = normalizeBinary(unpackFrame(delivered));
-      const referenceValue = normalizeBinary(unpackFrame(packed));
-      expect(
-        reassembledValue,
-        `${label}: reassembled frame unpacks differently than the real unpacker`,
-      ).toEqual(referenceValue);
-    }
-  });
+        const reassembledValue = normalizeBinary(unpackFrame(delivered));
+        const referenceValue = normalizeBinary(unpackFrame(packed));
+        expect(
+          reassembledValue,
+          `${label}: reassembled frame unpacks differently than the real unpacker`,
+        ).toEqual(referenceValue);
+      }
+    },
+  );
 
   test("reassembles a genuinely multi-chunk frame the same as one delivery", async () => {
     // A frame large enough to cross the real 16300-byte MTU into several chunks, so

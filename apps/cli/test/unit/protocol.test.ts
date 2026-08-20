@@ -315,6 +315,18 @@ const minimalPrepared = {} as unknown as PreparedExchange;
 // prettier keeps a test's callback hugged only for a numeric-literal timeout;
 // the cases that also hold both parties at a barrier spell the same 20 s as
 // BOTH_ARMED_HANG_BACKSTOP_MS + 5_000, the wait their run actually sits in.
+//
+// A second group carries that same 20 s for a different reason: the four cases
+// that point a filedrop connection at a path which does not exist, to end the
+// run after the part they assert about. The local-FS connect reads that ENOENT
+// as the transient a share whose permissions are still settling raises, and
+// re-attempts it maxReconnectAttempts times on a fixed one-second delay, so each
+// of them spends three seconds inside a retry schedule none of them is about.
+// The floor is timer-driven and barely moves under load -- 3.01 s idle, 3.15 s
+// at worst pinned to a contended core -- but it leaves the 5 s default under two
+// seconds for everything else the case does, the thinnest margin in this file,
+// and what the default buys once that runs out is a bare test timeout in place
+// of the rejection the case reads.
 const PEER_WAIT_HANG_BACKSTOP_MS = 15_000;
 
 // Both parties of every two-party case: a 1 ms poll so the rendezvous and key
@@ -324,6 +336,18 @@ const TWO_PARTY_OPTIONS = {
   pollIntervalMs: 1,
   peerTimeoutMs: PEER_WAIT_HANG_BACKSTOP_MS,
 };
+
+// The peer budget for the lone-party cases that wait for a partner who never
+// arrives: each spends it in full, so it is that case's whole cost, and core
+// races every single transport op against a fresh copy of it as well. That
+// second role is what sizes it. A budget near the cost of one loaded transport
+// op is spent by that op instead, and the run then reports a stalled-transport
+// error rather than the peer-wait timeout these cases read their advice off --
+// a misreport, not a failure of the thing under test. On a container whose cores
+// are contended a single local-FS op has been measured at 196 ms, so this stands
+// an order of magnitude above it, and short enough that a case spending it in
+// full still costs about two seconds.
+const LONE_PARTY_PEER_BUDGET_MS = 2_000;
 
 let tmpDir: string;
 let dropDir: string;
@@ -577,7 +601,7 @@ test("creates the keyFilePath parent directory when it does not yet exist", asyn
   ).rejects.toThrow();
   // The probe succeeded only if the parent was created.
   expect(fs.existsSync(createdParent)).toBe(true);
-});
+}, 20_000);
 
 test("rejects before opening a connection when keyFilePath itself is a directory", async () => {
   // Pre-flight must reject when keyFilePath points at an existing directory:
@@ -631,7 +655,7 @@ test("does not mutate the caller-supplied auth object when trimming whitespace f
     ),
   ).rejects.toThrow();
   expect(auth.keyFilePath).toBe(originalPath);
-});
+}, 20_000);
 
 test("rejects before opening a connection when keyFilePath parent is a dangling symlink", async () => {
   // statSync follows symlinks, so a dangling-symlink parent surfaces as
@@ -677,7 +701,7 @@ test("rejects and cleans up when conn.open() itself throws (opened=false cleanup
       "test",
     ),
   ).rejects.toThrow();
-});
+}, 20_000);
 
 // --- Unauthenticated exchange paths ------------------------------------------
 
@@ -1281,8 +1305,9 @@ test("runProtocol rejects an already-expired token before opening any connection
   // authenticateConnection (which runs only after the connection is open), this
   // lone party would instead write its hello and block at the rendezvous until
   // peerTimeoutMs, then reject with a timeout rather than "expired" -- failing the
-  // message and empty-directory assertions below. The short peerTimeoutMs keeps
-  // that regression mode fast rather than letting it hang the suite. This is also
+  // message and empty-directory assertions below. The lone-party peerTimeoutMs
+  // keeps that regression mode fast rather than letting it hang the suite; the
+  // healthy path never opens a connection, so it spends none of it. This is also
   // why the two-party expired-token test above is now deterministic: neither side
   // reaches the rendezvous, so its loser can no longer race into a "peer abandoned
   // the handshake" error in place of "expired".
@@ -1297,7 +1322,10 @@ test("runProtocol rejects an already-expired token before opening any connection
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1, peerTimeoutMs: 200 },
+        options: {
+          pollIntervalMs: 1,
+          peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
+        },
       },
       {
         sharedSecret: TOKEN_A,
@@ -1329,16 +1357,19 @@ test("runProtocol rejects an already-expired token before opening any connection
 // These two tests lock that in for the lone-inviter case.
 
 test("runProtocol writes no key when the partner never arrives (accept-timeout)", async () => {
-  // A lone inviter waits at the rendezvous and the accept-timeout (modeled by a
-  // short peerTimeoutMs) elapses with no peer. The run rejects with a timeout and
-  // must persist nothing: the key file is never created.
+  // A lone inviter waits at the rendezvous and the accept-timeout (modeled by
+  // the lone-party peerTimeoutMs) elapses with no peer. The run rejects with a
+  // timeout and must persist nothing: the key file is never created.
   const keyFile = path.join(tmpDir, "a.key");
   await expect(
     runProtocol(
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1, peerTimeoutMs: 200 },
+        options: {
+          pollIntervalMs: 1,
+          peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
+        },
       },
       { sharedSecret: TOKEN_A, keyFilePath: keyFile },
       minimalPrepared,
@@ -1533,7 +1564,10 @@ async function runLonePartyWithNoPartner(
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1, peerTimeoutMs: 200 },
+        options: {
+          pollIntervalMs: 1,
+          peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
+        },
       },
       { sharedSecret: TOKEN_A, keyFilePath: path.join(tmpDir, "a.key") },
       minimalPrepared,
@@ -2746,7 +2780,20 @@ test("SIGINT mid-synchronize exits with 130 and cleans up the hello file (starte
   // takes the started=false branch and conn.stop() is skipped. The hello
   // file written by synchronize() must be cleaned up by conn.cleanup()
   // before process.exit(130) is called.
-  const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
+  //
+  // "Before" is read off the exit itself: the spy captures the drop directory as
+  // it stands at the instant the handler calls exit, which is the ordering the
+  // case is about. A directory read taken later, once the interrupted run has
+  // been polled to completion, is satisfied by a cleanup that finished after the
+  // exit too, and so cannot carry that claim.
+  let helloFilesAtExit: string[] | undefined;
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation((code) => {
+    if (code === 130 && helloFilesAtExit === undefined)
+      helloFilesAtExit = fs
+        .readdirSync(dropDir)
+        .filter((f) => f.endsWith("-hello.json"));
+    return undefined as never;
+  });
 
   const pA = runProtocol(
     {
@@ -2771,7 +2818,7 @@ test("SIGINT mid-synchronize exits with 130 and cleans up the hello file (starte
           .filter((f) => f.endsWith("-hello.json"));
         expect(entries.length).toBeGreaterThanOrEqual(1);
       },
-      { timeout: 5_000 },
+      { timeout: 10_000 },
     );
     expect(vi.mocked(runExchange).mock.calls.length).toBe(0);
 
@@ -2780,16 +2827,14 @@ test("SIGINT mid-synchronize exits with 130 and cleans up the hello file (starte
       timeout: 5_000,
     });
 
-    // After cleanup runs the hello file must be gone -- otherwise a retry
-    // would trip the "preexisting hello or lock files" guard.
-    expect(
-      fs.readdirSync(dropDir).filter((f) => f.endsWith("-hello.json")),
-    ).toHaveLength(0);
+    // Cleanup ran before the exit and the hello file is gone -- otherwise a
+    // retry would trip the "preexisting hello or lock files" guard.
+    expect(helloFilesAtExit).toEqual([]);
   } finally {
     exitSpy.mockRestore();
     await Promise.allSettled([pA]);
   }
-});
+}, 20_000);
 
 test("SIGTERM logs recovery message when tokenRotated=true", async () => {
   const keyFileA = path.join(tmpDir, "a.key");
@@ -3837,7 +3882,7 @@ test("a main-try failure under --event-stream emits exactly one terminal error e
   expect(lines[1].type).toBe("error");
   expect(lines[1].category).toBe("exchange");
   expect(lines[1].v).toBe(1);
-});
+}, 20_000);
 
 test("a count-only run's terminal event carries the count beside resultWritten:false", async () => {
   // The outcome a supervisor reading only fd 3 would otherwise misreport: a
