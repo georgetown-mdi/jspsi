@@ -46,6 +46,7 @@ import {
   isListedFanOutFunction,
   withNoListedFanOutFunctions,
 } from "../src/fanOutFunctions";
+import { PROTOCOL_VERSION } from "../src/protocolSetup";
 
 const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
   name,
@@ -2592,6 +2593,51 @@ describe("assertFanOutImplemented", () => {
     ).not.toThrow();
     expect(() => assertFanOutImplemented(minimalTerms)).not.toThrow();
   });
+
+  // docs/spec/PROTOCOL.md's "Wire-format deltas: existing frames only, and no
+  // version bump" paragraph holds PROTOCOL_VERSION at 1 only because this
+  // refusal keeps every production exchange off the ragged single-pass wire
+  // layout that fan-out introduces. Narrowing this refusal while the version
+  // is still 1 would ship a build that interoperates at version 1 yet
+  // degrades a standardization-only fan-out to a generic frame error against
+  // an unpatched peer, instead of the version reconcile catching it. Once
+  // PROTOCOL_VERSION moves past 1, runIf skips this test with no edit here.
+  test.runIf(PROTOCOL_VERSION === 1)(
+    "a declared fan-out is still refused before the exchange runs while PROTOCOL_VERSION is 1",
+    () => {
+      const message =
+        "PROTOCOL_VERSION must move past 1 before the standing fan-out " +
+        'refusal narrows -- see docs/spec/PROTOCOL.md, "Wire-format deltas: ' +
+        'existing frames only, and no version bump"';
+
+      const singlePassTerms: LinkageTerms = {
+        ...minimalTerms,
+        linkageStrategy: "single-pass",
+      };
+      const standardization = [
+        { output: "last_name", input: "LN", steps: [fanOutStep] },
+      ];
+      expect(() => {
+        assertFanOutImplemented(singlePassTerms, standardization);
+      }, message).toThrow();
+
+      const elementTerms: LinkageTerms = {
+        ...singlePassTerms,
+        linkageKeys: [
+          {
+            name: "LN+DOB",
+            elements: [
+              { field: "last_name", transform: [fanOutStep] },
+              { field: "date_of_birth" },
+            ],
+          },
+        ],
+      };
+      expect(() => {
+        assertFanOutImplemented(elementTerms);
+      }, message).toThrow();
+    },
+  );
 });
 
 // --- resolveFieldColumns -----------------------------------------------------
