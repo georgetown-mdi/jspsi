@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import {
   camelizeKeys,
   OPAQUE_VALUE_KEYS,
+  snakeizeKey,
   snakeizeKeys,
   NestingDepthExceededError,
   MAX_NESTING_DEPTH,
@@ -161,6 +162,37 @@ test("snakeizeKeys is the inverse of camelizeKeys for schema keys", () => {
   };
   // snake -> camel -> snake reproduces the original snake form byte-for-byte.
   expect(snakeizeKeys(camelizeKeys(onDisk))).toEqual(onDisk);
+});
+
+// The scalar half of the write direction, which the schema-error render seams
+// name ONE key with: validation runs on the camelized shape, so an issue path
+// carries the camelCase name while the operator is reading the snake_case
+// document. What holds it to the document is that the deep writer is this same
+// function, so a key it names is spelled as psilink's own writer spells it.
+test("snakeizeKey names a key exactly as the deep writer spells it", () => {
+  const onDisk = {
+    linkage_fields: [{ affixes_allowed: true }],
+    legal_agreement: { expiration_date: "2030-01-01" },
+  };
+  const camelized = camelizeKeys(onDisk) as {
+    linkageFields: Array<Record<string, unknown>>;
+    legalAgreement: Record<string, unknown>;
+  };
+  for (const key of [
+    ...Object.keys(camelized),
+    ...Object.keys(camelized.linkageFields[0]),
+    ...Object.keys(camelized.legalAgreement),
+  ]) {
+    const written = Object.keys(
+      snakeizeKeys({ [key]: null }) as Record<string, unknown>,
+    )[0];
+    expect(snakeizeKey(key)).toBe(written);
+  }
+  expect(snakeizeKey("affixesAllowed")).toBe("affixes_allowed");
+  // A key with no camel hump, and an array index rendered as a path segment,
+  // are left exactly as they arrived.
+  expect(snakeizeKey("params")).toBe("params");
+  expect(snakeizeKey("0")).toBe("0");
 });
 
 test("only keys are rewritten; string values are left verbatim, both directions", () => {

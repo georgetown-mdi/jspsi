@@ -126,8 +126,27 @@ function snakeToCamel(s: string): string {
   return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 }
 
-function camelToSnake(s: string): string {
-  return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+/**
+ * Rewrite ONE camelCase key to the snake_case spelling the user-facing document
+ * writes, the scalar half of {@link snakeizeKeys} and the exact inverse of the
+ * read direction for the keys the exchange schema uses.
+ *
+ * Exported for the schema-error render seams: validation runs on the camelized
+ * shape ({@link camelizeKeys} before Zod), so a Zod issue locates its field by
+ * the camelCase name, while the operator is reading a document that writes the
+ * key in snake_case. A seam that names a key to a human passes each path segment
+ * through this, so it names the key as the file spells it -- and as psilink's own
+ * writer would spell it, since that writer is {@link snakeizeKeys} over this same
+ * function.
+ *
+ * It carries {@link snakeizeKeys}'s limit: not a general camelCase inverse, so a
+ * key with an embedded acronym (`URL`) renders `u_r_l`. Every key the exchange
+ * schema defines is lowercase words, so the inverse is exact for them; a key from
+ * a free-form record (a transform's `params`) is the operator's own and can be
+ * spelled outside that convention.
+ */
+export function snakeizeKey(key: string): string {
+  return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 }
 
 /**
@@ -315,5 +334,5 @@ export function camelizeKeys(
  * @internal
  */
 export function snakeizeKeys(value: unknown): unknown {
-  return transformKeysDeep(value, camelToSnake, 0, { nodes: 0 });
+  return transformKeysDeep(value, snakeizeKey, 0, { nodes: 0 });
 }

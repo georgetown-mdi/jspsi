@@ -10,6 +10,7 @@ import {
   NestingDepthExceededError,
   parseExchangeSpec,
   sanitizeErrorForDisplay,
+  snakeizeKeys,
   UsageError,
 } from "@psilink/core";
 import {
@@ -1958,7 +1959,7 @@ test("loadConfigLinkageSource escapes control/ANSI bytes in a linkage_terms issu
   expect(rendered).toContain("invalid linkage_terms");
   // The fixed path prefix passes through verbatim; only the partner-style key
   // segment is escaped.
-  expect(rendered).toContain("linkageKeys.0.elements.0.transform.0.params.");
+  expect(rendered).toContain("linkage_keys.0.elements.0.transform.0.params.");
   // The raw bytes are neutralized: their escaped forms appear, never the bytes.
   expect(rendered).not.toContain("\x1b");
   expect(rendered).not.toContain("\u202e");
@@ -1970,7 +1971,7 @@ test("loadConfigLinkageSource leaves a schema-fixed linkage_terms issue path une
   const configPath = path.join(dir, "psilink.yaml");
   const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
   // An empty name fails the linkage-key `name` min-length, locating the issue
-  // at the schema-fixed path linkageKeys.0.name (field names + a numeric index).
+  // at the schema-fixed path linkage_keys.0.name (field names + a numeric index).
   terms.linkageKeys[0].name = "";
   fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
   let caught: unknown;
@@ -1982,7 +1983,69 @@ test("loadConfigLinkageSource leaves a schema-fixed linkage_terms issue path une
   expect(caught).toBeInstanceOf(UsageError);
   // Ordinary path components survive untouched: the `.` separators and the
   // numeric index are not over-escaped.
-  expect((caught as Error).message).toContain("linkageKeys.0.name");
+  expect((caught as Error).message).toContain("linkage_keys.0.name");
+});
+
+// Validation runs on the camelized shape, so a Zod issue names its field in
+// camelCase while the operator is reading a file that writes those keys in
+// snake_case. These pin the render seam that reconciles the two: a NESTED path
+// (not just a top-level key) is named as the file writes it, and the file the
+// error names is one the CLI's own writer produced, so the key it points at is
+// literally in the bytes on disk.
+test("a nested linkage_terms schema error names its key as the file writes it", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+  // A path with two segments whose spellings differ between the file and the
+  // parsed shape, one of them under an array index: `linkage_fields.2.
+  // constraints.affixes_allowed` on disk against `linkageFields.2.constraints.
+  // affixesAllowed` once camelized.
+  const constraints = terms.linkageFields[2].constraints as {
+    affixesAllowed?: unknown;
+  };
+  constraints.affixesAllowed = "no";
+  // Written in the on-disk form the CLI's own writer produces, so the file the
+  // error names its key against is the snake_case one an operator reads.
+  fs.writeFileSync(
+    configPath,
+    YAML.stringify({ linkage_terms: snakeizeKeys(terms) }),
+  );
+
+  let caught: unknown;
+  try {
+    loadConfigLinkageSource(configPath);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as Error).message;
+  expect(message).toContain("linkage_fields.2.constraints.affixes_allowed");
+  expect(message).not.toContain("linkageFields");
+  expect(message).not.toContain("affixesAllowed");
+  // The key the message names is one the operator can find in the file.
+  expect(fs.readFileSync(configPath, "utf8")).toContain("affixes_allowed");
+});
+
+test("a nested metadata schema error names its key as the file writes it", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    YAML.stringify({
+      linkage_terms: getDefaultLinkageTerms("Agency A"),
+      metadata: [{ name: "ssn", type: "ssn", role: "linkage", is_payload: 7 }],
+    }),
+  );
+
+  let caught: unknown;
+  try {
+    loadConfigLinkageSource(configPath);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as Error).message;
+  expect(message).toContain("0.is_payload");
+  expect(message).not.toContain("isPayload");
+  expect(fs.readFileSync(configPath, "utf8")).toContain("is_payload");
 });
 
 test("loadConfigLinkageSource rejects an invalid standardization block", () => {

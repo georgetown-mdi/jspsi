@@ -51,6 +51,10 @@ export { pathsResolveToSameDir } from "./utils/pathCompare";
 // direction so the read and write paths share one recurse-and-skip traversal;
 // not a stable public API (see the declaration's JSDoc).
 export { snakeizeKeys } from "./utils/camelizeKeys";
+// The scalar half of that direction, for a seam that names ONE key to an
+// operator: a schema error locates its field on the camelized shape, and the
+// operator is reading the snake_case document (see the declaration's JSDoc).
+export { snakeizeKey } from "./utils/camelizeKeys";
 // The camelize/snakeize nesting-depth discipline. The invitation decode path
 // normalizes transform.params through this bounded camelizeKeys chokepoint (the
 // camelize pre-pass in config/invitation.ts), so a pathologically deep params is
