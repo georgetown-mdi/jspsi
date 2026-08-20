@@ -8,6 +8,7 @@ import {
   ExchangeSpecSchema,
   LinkageTermsSchema,
   MAX_NAME_LENGTH,
+  MAX_RECONNECT_ATTEMPTS,
   MAX_TIMEOUT_SECONDS,
   MetadataSchema,
   SHARED_SECRET_REGEX,
@@ -105,7 +106,12 @@ const jobExchangeOptionsFields = {
   pollIntervalMs: z.number().int().positive().optional(),
   peerTimeoutMs: z.number().int().positive().optional(),
   serverConnectTimeoutMs: z.number().int().positive().optional(),
-  maxReconnectAttempts: z.number().int().min(0).max(604800).optional(),
+  maxReconnectAttempts: z
+    .number()
+    .int()
+    .min(0)
+    .max(MAX_RECONNECT_ATTEMPTS)
+    .optional(),
   timestampInFilename: z.boolean().optional(),
   locklessRendezvous: z.boolean().optional(),
   peerId: z
