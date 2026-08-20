@@ -7,6 +7,7 @@ import {
   SIGNING_IDENTITY_VERSION,
   computeCertificateFingerprint,
   computeTermsHash,
+  decideSignedReceiptVerdict,
   parseCertificate,
   parseDualSignedRecord,
   parseExchangeRecord,
@@ -19,8 +20,9 @@ import {
 } from "@psilink/core";
 
 import type {
+  AnchoredCertificateSlot,
+  AnchoredCertificateStatus,
   AssertedIdentityStatus,
-  CertificateAnchorStatus,
   CertificateBindingStatus,
   CommitmentName,
   CommitmentStatus,
@@ -32,9 +34,15 @@ import type {
   ReceiptSignatureStatus,
   RecordVerificationReport,
   RunBindingStatus,
-  SignedReceiptPartyReport,
+  SignedReceiptVerdictAnchor,
+  SignedReceiptVerdictCheck,
+  SignedReceiptVerdictGuidance,
+  SignedReceiptVerdictHeadline,
+  SignedReceiptVerdictParty,
+  SignedReceiptVerdictRunBinding,
   SigningCertificate,
   TermsHashStatus,
+  UnanchoredCertificateClause,
   VerificationKeys,
 } from "@psilink/core";
 
@@ -49,10 +57,12 @@ import type {
  * tamper, and the anchoring sentences an unanchored certificate does and does not
  * support -- is tested here directly rather than through the DOM.
  *
- * Both verdicts come from `@psilink/core` as-is. In particular the assignment of
- * anchoring values over the dual-signed record's two certificate slots is not
- * re-derived here: this model supplies what the verifier holds and renders the
- * report core returns.
+ * Both verdicts come from `@psilink/core` as-is. Neither the assignment of
+ * anchoring values over the dual-signed record's two certificate slots nor the
+ * verdict decided over it -- the tier each row carries, the clauses an unanchored
+ * slot supports, the remediation a run has earned -- is re-derived here: this
+ * model supplies what the verifier holds and puts this page's words to the
+ * decision core returns, which is the same decision the CLI renders.
  *
  * No private signing key is accepted, required, imported, or used on any path
  * here. The verifier's own slot is anchored by the fingerprint of a dropped
@@ -625,16 +635,26 @@ export interface SignedVerdictViewModel {
   binderNote: string;
 }
 
-const SIGNED_ROLE_LABELS: Record<SignedReceiptPartyReport["role"], string> = {
+const SIGNED_ROLE_LABELS: Record<SignedReceiptVerdictParty["role"], string> = {
   initiator: "Initiator",
   responder: "Responder",
 };
 
-// core reports an empty fingerprint for a certificate whose canonical bytes
-// cannot be produced (an identity string the canonical encoder refuses); that
-// certificate is reported with a failed binding, and this stands in for the
-// blank value rather than rendering nothing where a fingerprint belongs.
+// core reports no fingerprint for a certificate whose canonical bytes cannot be
+// produced (an identity string the canonical encoder refuses); that certificate is
+// reported with a failed binding, and this stands in for the absent value rather
+// than rendering nothing where a fingerprint belongs.
 const UNCOMPUTABLE_FINGERPRINT = "could not be computed";
+
+/**
+ * The label and any explanation one decided row carries. The tone is deliberately
+ * absent: core's verdict grades every row, so a table here cannot colour two rows
+ * reporting the same status differently from the CLI's.
+ */
+interface RowCopy {
+  status: string;
+  explanation?: string;
+}
 
 const SIGNED_FAILED_HEADLINE: VerdictHeadline = {
   tone: "failed",
@@ -645,36 +665,27 @@ const SIGNED_FAILED_HEADLINE: VerdictHeadline = {
     "exchange or the partner you are checking it against.",
 };
 
-const CERTIFICATE_BINDING_ROWS: Record<
-  CertificateBindingStatus,
-  { status: string; tone: VerdictTone; explanation: string }
-> = {
+const CERTIFICATE_BINDING_COPY: Record<CertificateBindingStatus, RowCopy> = {
   verified: {
     status: "Self-signature verifies",
-    tone: "verified",
     explanation: "The certificate binds this identity to this key.",
   },
   failed: {
     status: "Self-signature does not verify",
-    tone: "failed",
     explanation:
       "The certificate does not bind this identity to this key, so nothing it " +
       "carries can be attributed to that identity.",
   },
 };
 
-const RECEIPT_SIGNATURE_ROWS: Record<
-  ReceiptSignatureStatus,
-  { status: string; tone: VerdictTone; explanation?: string }
-> = {
+const RECEIPT_SIGNATURE_COPY: Record<ReceiptSignatureStatus, RowCopy> = {
   verified: {
     status: "Verifies over this receipt's content",
-    tone: "verified",
     explanation:
       "The signature is bound to this party's role and to the certificate " +
       "above it.",
   },
-  failed: { status: "Does not verify", tone: "failed" },
+  failed: { status: "Does not verify" },
 };
 
 // Where the two identities and the agreed-terms hash come from, named the same
@@ -683,42 +694,24 @@ const EXPECTATIONS_REMEDIATION =
   "Load the exchange record for this exchange, or paste both parties' linkage " +
   "terms, to supply it.";
 
-const ASSERTED_IDENTITY_ROWS: Record<
-  AssertedIdentityStatus,
-  { status: string; tone: VerdictTone; explanation?: string }
-> = {
-  verified: {
-    status: "Matches an identity expected for this exchange",
-    tone: "verified",
-  },
+const ASSERTED_IDENTITY_COPY: Record<AssertedIdentityStatus, RowCopy> = {
+  verified: { status: "Matches an identity expected for this exchange" },
   mismatch: {
     status: "Does not match an identity expected for this exchange",
-    tone: "failed",
   },
   "not-checked": {
     status: "Not checked",
-    tone: "incomplete",
     explanation:
       "Nothing outside the record states who this exchange was between. " +
       EXPECTATIONS_REMEDIATION,
   },
 };
 
-const SIGNED_TERMS_ROWS: Record<
-  TermsHashStatus,
-  { status: string; tone: VerdictTone; explanation?: string }
-> = {
-  verified: {
-    status: "Matches the terms this exchange agreed",
-    tone: "verified",
-  },
-  mismatch: {
-    status: "Does not match the terms this exchange agreed",
-    tone: "failed",
-  },
+const SIGNED_TERMS_COPY: Record<TermsHashStatus, RowCopy> = {
+  verified: { status: "Matches the terms this exchange agreed" },
+  mismatch: { status: "Does not match the terms this exchange agreed" },
   "not-checked": {
     status: "Not checked",
-    tone: "incomplete",
     explanation:
       "Nothing outside the record states the terms this exchange agreed. " +
       EXPECTATIONS_REMEDIATION,
@@ -729,28 +722,21 @@ const SIGNED_TERMS_ROWS: Record<
 // pairing, so a remediation here names it alone -- unlike the rows above, whose
 // EXPECTATIONS_REMEDIATION offers linkage terms as the other route: terms belong to
 // a partnership and repeat across every run of it.
-const RUN_BINDING_ROWS: Record<
-  RunBindingStatus,
-  { status: string; tone: VerdictTone; explanation: string }
-> = {
+const RUN_BINDING_COPY: Record<RunBindingStatus, RowCopy> = {
   verified: {
     status: "This receipt and this record are the same run",
-    tone: "verified",
     explanation:
       "Both carry one run's binder, which is what tells one run of a " +
       "partnership from the next.",
   },
   mismatch: {
     status: "Does not match the record's run binder",
-    tone: "failed",
     explanation:
       "The receipt and the record you loaded are from different runs, not from " +
-      "one exchange. An exchange writes both artifacts together, under one " +
-      "timestamp stamp by default, so pair them by that stamp.",
+      "one exchange.",
   },
   unpaired: {
     status: "The record carries no run binder",
-    tone: "failed",
     explanation:
       "The record you loaded is of an exchange that produced no signed receipt, " +
       "so this receipt is not that run's. Load the record written alongside " +
@@ -758,7 +744,6 @@ const RUN_BINDING_ROWS: Record<
   },
   "not-checked": {
     status: "Not checked",
-    tone: "incomplete",
     explanation:
       "Load the exchange record for this run to pair the receipt to it. " +
       "Without it, the signed values that can be checked here repeat across " +
@@ -767,10 +752,14 @@ const RUN_BINDING_ROWS: Record<
   },
 };
 
-const ANCHORED_CERTIFICATE_ROWS: Record<
-  Exclude<CertificateAnchorStatus, "unanchored">,
-  { status: string; explanation: string }
-> = {
+// Where to look when the record in hand contradicts the pairing, on the runs the
+// verdict says have earned it: the two artifacts of one exchange are written
+// together, so the likely cause is two files from different runs.
+const PAIR_BY_STAMP =
+  "An exchange writes both artifacts together, under one timestamp stamp by " +
+  "default, so pair them by that stamp.";
+
+const ANCHORED_CERTIFICATE_COPY: Record<AnchoredCertificateStatus, RowCopy> = {
   "partner-pin": {
     status: "Matches the fingerprint you pinned out-of-band",
     explanation:
@@ -787,211 +776,194 @@ const ANCHORED_CERTIFICATE_ROWS: Record<
   },
 };
 
-function signedParties(
-  report: DualSignedRecordVerificationReport,
-): Array<SignedReceiptPartyReport> {
-  return [report.initiator, report.responder];
+// What an unanchored slot says, one clause per finding the verdict states. Which
+// of them a run supports is core's decision: a check that did not run, or one
+// that ran and matched this very certificate, is not narrated here as a check
+// this certificate failed.
+const UNANCHORED_CLAUSE_COPY: Record<UnanchoredCertificateClause, string> = {
+  "no-pinned-value-matches": "no fingerprint you pinned matches it",
+  "not-your-own-certificate":
+    "it is not the certificate you supplied as your own",
+};
+
+// How the verified verdict's sentence names each anchor. That verdict carries
+// only slots something anchored, so there is no unanchored case to leave unnamed.
+const ANCHOR_SOURCE_PHRASES: Record<AnchoredCertificateStatus, string> = {
+  "partner-pin": "a fingerprint you pinned out-of-band",
+  "local-identity": "the certificate you supplied as your own",
+};
+
+function verdictRow<TStatus extends string>(
+  label: string,
+  check: SignedReceiptVerdictCheck<TStatus>,
+  copy: Record<TStatus, RowCopy>,
+): VerdictRow {
+  return { label, tone: check.tone, ...copy[check.status] };
 }
 
-/**
- * What an unanchored slot says, in the clauses the report supports and no
- * others: a check that did not run, or one that ran and matched this very
- * certificate, must not be narrated as a check this certificate failed. A pinned
- * value that matches this certificate and no other would have anchored this
- * slot, so while the other slot carries a different certificate the report does
- * support "no pinned value matches it"; when both slots carry one certificate it
- * does not, because what left this slot unanchored is that each value claims a
- * single slot.
- */
-function unanchoredExplanation(
-  party: SignedReceiptPartyReport,
-  other: SignedReceiptPartyReport,
-  report: DualSignedRecordVerificationReport,
-): string {
-  const clauses: Array<string> = [];
-  if (
-    report.pinnedFingerprints !== "not-supplied" &&
-    other.fingerprint !== party.fingerprint
-  )
-    clauses.push("no fingerprint you pinned matches it");
-  if (report.localIdentity === "unmatched")
-    clauses.push("it is not the certificate you supplied as your own");
-  const supported = clauses.length === 0 ? "" : ` -- ${clauses.join(", and ")}`;
-  return (
-    `Nothing you supplied anchors it${supported}. Whoever assembled this ` +
-    "record could have minted this certificate, so the verdict cannot speak " +
-    "for this slot."
-  );
+function anchorRow(anchor: SignedReceiptVerdictAnchor): VerdictRow {
+  const label = "What anchors this certificate";
+  if (anchor.status !== "unanchored")
+    return {
+      label,
+      tone: anchor.tone,
+      ...ANCHORED_CERTIFICATE_COPY[anchor.status],
+    };
+  const supported =
+    anchor.unanchoredClauses.length === 0
+      ? ""
+      : ` -- ${anchor.unanchoredClauses
+          .map((clause) => UNANCHORED_CLAUSE_COPY[clause])
+          .join(", and ")}`;
+  return {
+    label,
+    status: "Not anchored",
+    tone: anchor.tone,
+    explanation:
+      `Nothing you supplied anchors it${supported}. Whoever assembled this ` +
+      "record could have minted this certificate, so the verdict cannot speak " +
+      "for this slot.",
+  };
 }
 
 function signedPartyViewModel(
-  party: SignedReceiptPartyReport,
-  other: SignedReceiptPartyReport,
-  report: DualSignedRecordVerificationReport,
+  party: SignedReceiptVerdictParty,
 ): SignedPartyViewModel {
-  const anchorRow =
-    party.certificateAnchor === "unanchored"
-      ? {
-          status: "Not anchored",
-          tone: "incomplete" as VerdictTone,
-          explanation: unanchoredExplanation(party, other, report),
-        }
-      : {
-          ...ANCHORED_CERTIFICATE_ROWS[party.certificateAnchor],
-          tone: "verified" as VerdictTone,
-        };
-  const binding = CERTIFICATE_BINDING_ROWS[party.certificateBinding];
-  const signature = RECEIPT_SIGNATURE_ROWS[party.signature];
-  const identity = ASSERTED_IDENTITY_ROWS[party.assertedIdentity];
   return {
     label: SIGNED_ROLE_LABELS[party.role],
     identity: sanitizeForDisplay(party.identity),
-    fingerprint:
-      party.fingerprint.length === 0
-        ? UNCOMPUTABLE_FINGERPRINT
-        : party.fingerprint,
+    fingerprint: party.fingerprint ?? UNCOMPUTABLE_FINGERPRINT,
     rows: [
-      { label: "What anchors this certificate", ...anchorRow },
-      { label: "Certificate identity binding", ...binding },
-      { label: "Receipt signature", ...signature },
-      { label: "Asserted identity", ...identity },
+      anchorRow(party.certificateAnchor),
+      verdictRow(
+        "Certificate identity binding",
+        party.certificateBinding,
+        CERTIFICATE_BINDING_COPY,
+      ),
+      verdictRow("Receipt signature", party.signature, RECEIPT_SIGNATURE_COPY),
+      verdictRow(
+        "Asserted identity",
+        party.assertedIdentity,
+        ASSERTED_IDENTITY_COPY,
+      ),
     ],
   };
 }
 
-// Name what anchored each certificate, for the verified verdict's sentence.
-const ANCHOR_SOURCE_PHRASES: Partial<Record<CertificateAnchorStatus, string>> =
-  {
-    "partner-pin": "a fingerprint you pinned out-of-band",
-    "local-identity": "the certificate you supplied as your own",
-  };
-
-function anchorsPhrase(
-  parties: ReadonlyArray<SignedReceiptPartyReport>,
-): string {
-  return parties
-    .map((party) => {
-      const source = ANCHOR_SOURCE_PHRASES[party.certificateAnchor];
-      // A verified verdict means every certificate was anchored, and core
-      // withholds that verdict while either slot is unanchored. An unanchored
-      // slot here would leave the sentence claiming an anchor that does not
-      // exist -- evidence overstated -- so it is refused rather than phrased.
-      if (source === undefined)
-        throw new Error(
-          `a verified dual-signed record leaves the ${party.role}'s certificate ` +
-            "unanchored: the verdict would claim both certificates were " +
-            "anchored when one was not",
-        );
-      return `the ${party.role}'s by ${source}`;
-    })
+function anchorsPhrase(slots: ReadonlyArray<AnchoredCertificateSlot>): string {
+  return slots
+    .map(
+      (slot) => `the ${slot.role}'s by ${ANCHOR_SOURCE_PHRASES[slot.anchor]}`,
+    )
     .join(", and ");
 }
 
 function signedHeadline(
-  report: DualSignedRecordVerificationReport,
+  headline: SignedReceiptVerdictHeadline,
 ): VerdictHeadline {
-  if (report.outcome === "failed") return SIGNED_FAILED_HEADLINE;
-  const parties = signedParties(report);
-  if (report.outcome === "incomplete") {
-    // The record carries two certificates and a verdict speaks for both, so the
-    // headline names the slot nothing outside the record reaches rather than
-    // leaving the reader to find it in the rows.
-    const unanchored = parties
-      .filter((party) => party.certificateAnchor === "unanchored")
-      .map(
-        (party) =>
-          ` Nothing outside the record anchors the ${party.role}'s certificate.`,
-      )
-      .join("");
+  if (headline.tone === "failed") return SIGNED_FAILED_HEADLINE;
+  if (headline.tone === "incomplete")
     return {
       tone: "incomplete",
       title: "Signed receipt incomplete",
       detail:
         "Nothing contradicted the dual-signed record, but not everything could " +
         "be checked. See the rows below for what is still open." +
-        unanchored,
+        // The record carries two certificates and a verdict speaks for both, so
+        // the headline names the slot nothing outside the record reaches rather
+        // than leaving the reader to find it in the rows.
+        headline.unanchoredRoles
+          .map(
+            (role) =>
+              ` Nothing outside the record anchors the ${role}'s certificate.`,
+          )
+          .join(""),
     };
-  }
   return {
     tone: "verified",
     title: "Signed receipt verified",
     detail:
       "Both signatures verify, and both certificates are anchored outside the " +
-      `record -- ${anchorsPhrase(parties)}.`,
+      `record -- ${anchorsPhrase(headline.anchoredSlots)}.`,
   };
 }
 
-// What to do about a certificate nothing outside the record vouches for, and
-// what a supplied anchor that reached neither certificate means. Each line
-// stands on its own: the run may be short one anchor, or hold one that belongs
-// to another exchange entirely. Telling the operator to supply more while a
-// value they did supply reached neither certificate would talk past that value,
-// so a contradicted anchor ends the guidance.
-function anchoringGuidance(
-  report: DualSignedRecordVerificationReport,
-): Array<string> {
-  const lines: Array<string> = [];
-  if (report.pinnedFingerprints === "unmatched")
-    lines.push(
-      "The fingerprint you pinned matches neither certificate in this record: " +
-        "this is not the record of the party you pinned.",
-    );
-  if (report.localIdentity === "unmatched")
-    lines.push(
-      "The certificate you supplied as your own is neither certificate in " +
-        "this record: this is not a receipt you signed.",
-    );
-  if (lines.length > 0) return lines;
-  const parties = signedParties(report);
-  const unanchored = parties.filter(
-    (party) => party.certificateAnchor === "unanchored",
+function runBindingRow(runBinding: SignedReceiptVerdictRunBinding): VerdictRow {
+  const row = verdictRow(
+    "The receipt-record pairing",
+    runBinding,
+    RUN_BINDING_COPY,
   );
-  if (unanchored.length === 0) return lines;
-  if (unanchored.length === parties.length)
-    lines.push(
-      "Certificate fingerprint trust is not established: nothing you supplied " +
-        "ties either certificate to a party you know. Enter your partner's " +
-        "pinned fingerprint, and load your own exported certificate when one " +
-        "of these slots is yours.",
-    );
-  else
-    lines.push(
-      `The ${unanchored[0].role}'s certificate is anchored by nothing outside ` +
+  if (!runBinding.pairByStamp) return row;
+  return { ...row, explanation: `${row.explanation} ${PAIR_BY_STAMP}` };
+}
+
+// What to do about a certificate nothing outside the record vouches for, and what
+// a supplied anchor that reached neither certificate means, in this page's
+// vocabulary. Which of them a run has earned, and in what order, is the verdict's
+// decision.
+function guidanceLine(guidance: SignedReceiptVerdictGuidance): string {
+  switch (guidance.kind) {
+    case "pinned-fingerprint-unmatched":
+      return (
+        "The fingerprint you pinned matches neither certificate in this " +
+        "record: this is not the record of the party you pinned."
+      );
+    case "named-local-identity-unmatched":
+      return (
+        "The certificate you supplied as your own is neither certificate in " +
+        "this record: this is not a receipt you signed."
+      );
+    case "resolved-local-identity-unmatched":
+      return (
+        "The certificate taken as your own is neither certificate in this " +
+        "record, so it anchors nothing: you were not a party to this " +
+        "exchange, or you have re-keyed since."
+      );
+    case "no-certificate-anchored":
+      return (
+        "Certificate fingerprint trust is not established: nothing you " +
+        "supplied ties either certificate to a party you know. Enter your " +
+        "partner's pinned fingerprint, and load your own exported certificate " +
+        "when one of these slots is yours."
+      );
+    case "certificate-unanchored":
+      return (
+        `The ${guidance.role}'s certificate is anchored by nothing outside ` +
         "this record, which is what holds the verdict short of verified: enter " +
         "that party's pinned fingerprint, or load your own exported " +
-        "certificate when that slot is yours.",
-    );
-  return lines;
+        "certificate when that slot is yours."
+      );
+  }
 }
 
 /**
- * Build the signed verdict view-model from core's
- * {@link DualSignedRecordVerificationReport}. Pure over the report: every tier,
- * per-slot sentence, and remediation line is decided by what the report states,
- * so nothing here can claim an anchor or a check the verification did not make.
+ * Build the signed verdict view-model over core's decided verdict: which tier
+ * every row carries, which sentences an unanchored slot supports, and what
+ * remediation the run has earned are decided there and rendered here, so this
+ * page and the CLI cannot reach different verdicts on one receipt. What this
+ * model owns is the words.
  */
 export function signedVerdictViewModel(
   report: DualSignedRecordVerificationReport,
 ): SignedVerdictViewModel {
-  const termsRow = SIGNED_TERMS_ROWS[report.termsHash];
+  const verdict = decideSignedReceiptVerdict(report);
   return {
-    headline: signedHeadline(report),
-    parties: [
-      signedPartyViewModel(report.initiator, report.responder, report),
-      signedPartyViewModel(report.responder, report.initiator, report),
-    ],
-    termsHash: { label: "The agreed-terms hash", ...termsRow },
-    runBinding: {
-      label: "The receipt-record pairing",
-      ...RUN_BINDING_ROWS[report.runBinding],
-    },
-    guidance: anchoringGuidance(report),
+    headline: signedHeadline(verdict.headline),
+    parties: verdict.parties.map(signedPartyViewModel),
+    termsHash: verdictRow(
+      "The agreed-terms hash",
+      verdict.termsHash,
+      SIGNED_TERMS_COPY,
+    ),
+    runBinding: runBindingRow(verdict.runBinding),
+    guidance: verdict.guidance.map(guidanceLine),
     // Never RECOMPUTED: deriving the binder needs the exchange session key. What
     // is checked against it is the pairing row above -- that it is the value the
     // run's own record carries.
     binderNote:
-      `The per-exchange binder ${sanitizeForDisplay(report.binder)} is covered ` +
-      "by both signatures and is never recomputed here: deriving it needs the " +
-      "exchange session key, which only the two parties held.",
+      `The per-exchange binder ${sanitizeForDisplay(verdict.binder)} is ` +
+      "covered by both signatures and is never recomputed here: deriving it " +
+      "needs the exchange session key, which only the two parties held.",
   };
 }

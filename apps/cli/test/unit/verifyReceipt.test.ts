@@ -375,8 +375,9 @@ describe("formatSignedRecordReport", () => {
         outcome: "incomplete",
         initiator: party("initiator", { certificateAnchor: "unanchored" }),
         localIdentity: "unmatched",
+        localIdentitySource: "resolved",
       }),
-      { localTerms: true, partnerTerms: true, localIdentity: "resolved" },
+      { localTerms: true, partnerTerms: true },
     );
     expect(lines.join("\n")).toContain(
       "not anchored (nothing you supplied anchors it -- no pinned value " +
@@ -445,12 +446,9 @@ describe("formatSignedRecordReport", () => {
         outcome: "failed",
         initiator: party("initiator", { certificateAnchor: "unanchored" }),
         localIdentity: "unmatched",
+        localIdentitySource: "named",
       }),
-      {
-        localTerms: true,
-        partnerTerms: true,
-        localIdentity: "named",
-      },
+      { localTerms: true, partnerTerms: true },
     );
     expect(lines.join("\n")).toContain(
       "the signing identity you named is neither certificate in this record",
@@ -463,12 +461,9 @@ describe("formatSignedRecordReport", () => {
         outcome: "incomplete",
         initiator: party("initiator", { certificateAnchor: "unanchored" }),
         localIdentity: "unmatched",
+        localIdentitySource: "resolved",
       }),
-      {
-        localTerms: true,
-        partnerTerms: true,
-        localIdentity: "resolved",
-      },
+      { localTerms: true, partnerTerms: true },
     );
     const out = lines.join("\n");
     expect(out).toContain(
