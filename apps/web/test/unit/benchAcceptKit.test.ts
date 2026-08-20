@@ -14,6 +14,16 @@ import type { InvitationLocation } from "@psi/invitation";
 
 const FILEDROP: AcceptKitEndpoint = { channel: "filedrop", path: "psilink" };
 const UNNAMED_FILEDROP: AcceptKitEndpoint = { channel: "filedrop" };
+const FILEDROP_SPLIT: AcceptKitEndpoint = {
+  channel: "filedrop",
+  split: true,
+  inboundPath: "to-clinic",
+  outboundPath: "from-clinic",
+};
+const UNNAMED_FILEDROP_SPLIT: AcceptKitEndpoint = {
+  channel: "filedrop",
+  split: true,
+};
 const SFTP: AcceptKitEndpoint = {
   channel: "sftp",
   host: "sftp.example.gov",
@@ -65,18 +75,31 @@ function locklessSheet(endpoint: AcceptKitEndpoint, version = "1.4.2"): string {
 const RELEASES_URL = "https://github.com/georgetown-mdi/jspsi/releases";
 
 /** Every channel shape the console can mint a kit for. */
-const ENDPOINTS = [FILEDROP, UNNAMED_FILEDROP, SFTP, SFTP_SPLIT];
+const ENDPOINTS = [
+  FILEDROP,
+  UNNAMED_FILEDROP,
+  FILEDROP_SPLIT,
+  UNNAMED_FILEDROP_SPLIT,
+  SFTP,
+  SFTP_SPLIT,
+];
 
 /** The exchange command as it stands in the default file-handling mode: the one
  * line a bilateral setting rewrites rather than adds. */
 function plainExchangeCommand(endpoint: AcceptKitEndpoint): string {
-  return endpoint.channel === "filedrop"
-    ? '     docker run --rm -v "$PWD":/work -v "/path/to/your/shared/folder":' +
+  if (endpoint.channel !== "filedrop")
+    return (
+      '     docker run --rm -it -v "$PWD":/work -v "/your/secrets":' +
+      "/run/secrets:ro docker.io/vdorie/psi-link:1.4.2 exchange " +
+      "your-file.csv results.csv"
+    );
+  return endpoint.split === true
+    ? '     docker run --rm -v "$PWD":/work -v "/path/to/the/folder/you/read":' +
+        '/sync-in -v "/path/to/the/folder/you/write":/sync-out ' +
+        "docker.io/vdorie/psi-link:1.4.2 exchange your-file.csv results.csv"
+    : '     docker run --rm -v "$PWD":/work -v "/path/to/your/shared/folder":' +
         "/sync docker.io/vdorie/psi-link:1.4.2 exchange your-file.csv " +
-        "results.csv"
-    : '     docker run --rm -it -v "$PWD":/work -v "/your/secrets":' +
-        "/run/secrets:ro docker.io/vdorie/psi-link:1.4.2 exchange " +
-        "your-file.csv results.csv";
+        "results.csv";
 }
 
 /** The lines `variant` carries that `base` does not: one setting's whole
@@ -436,6 +459,76 @@ describe("accept kit, printable-ASCII enforcement", () => {
     expect(splitText).toContain("You write to:   h?llo?from-partner");
     expect(splitText).toContain("You read from:  /exchange/psi?link");
     for (const ch of splitText) {
+      const code = ch.charCodeAt(0);
+      expect(code === 10 || (code >= 32 && code <= 126)).toBe(true);
+    }
+  });
+});
+
+describe("accept kit, a split filedrop rendezvous", () => {
+  test("names both folders by what the READER does with each", () => {
+    // The endpoint states the pair from the INVITER's side, which is the direction
+    // the partner's own tool mirrors: the inviter's inbound is where the reader
+    // WRITES, and the inviter's outbound is where the reader READS.
+    const text = sheet(FILEDROP_SPLIT);
+    expect(text).toContain("You write to:   to-clinic");
+    expect(text).toContain("You read from:  from-clinic");
+    expect(text).toContain("two folders you and your partner can both reach");
+    // The single-shared-folder wording never crosses onto it.
+    expect(text).not.toContain("Shared folder:");
+  });
+
+  test("describes two folders even where it can name neither", () => {
+    // The SHAPE is not the names: a split rendezvous the console cannot name still
+    // has to be set up as two folders, so the sheet must not fall back to the
+    // single-shared-folder body.
+    const text = sheet(UNNAMED_FILEDROP_SPLIT);
+    expect(text).toContain("two folders rather than one");
+    expect(text).toContain(
+      "Use the two folders you and your partner agreed on.",
+    );
+    expect(text).not.toContain("Shared folder:");
+    expect(text).not.toContain("path: /sync\n");
+  });
+
+  test("directs a two-mount run, and says the launcher route cannot serve it", () => {
+    const text = retainSheet(FILEDROP_SPLIT);
+    expect(text).toContain("inbound_path: /sync-in");
+    expect(text).toContain("outbound_path: /sync-out");
+    expect(text).toContain('-v "/path/to/the/folder/you/read":/sync-in');
+    expect(text).toContain('-v "/path/to/the/folder/you/write":/sync-out');
+    // The PowerShell launchers provision one rendezvous folder, so route A is
+    // honest about not serving this exchange rather than sending the reader to a
+    // console that cannot run it.
+    expect(text).toContain("cover a single shared");
+    expect(text).toContain("cannot start this one");
+    // The single-folder route's own mount never appears.
+    expect(text).not.toContain('":/sync ');
+  });
+
+  test("states what a split retain-mode run leaves in both folders", () => {
+    const text = retainSheet(FILEDROP_SPLIT);
+    expect(text).toContain("THIS EXCHANGE KEEPS ITS FILES");
+    expect(text).toContain(
+      "The files stay in both folders above -- the one you write into and",
+    );
+    expect(text).toContain("both folders\nmust start empty on both sides");
+    // The single-folder wording never crosses over.
+    expect(text).not.toContain(
+      "The files stay in the shared folder the two of you meet in",
+    );
+  });
+
+  test("holds both folder names to the printable-ASCII contract", () => {
+    const text = sheet({
+      channel: "filedrop",
+      split: true,
+      inboundPath: "h\u00e9llo\nto-clinic",
+      outboundPath: "from\u2013clinic",
+    });
+    expect(text).toContain("You write to:   h?llo?to-clinic");
+    expect(text).toContain("You read from:  from?clinic");
+    for (const ch of text) {
       const code = ch.charCodeAt(0);
       expect(code === 10 || (code >= 32 && code <= 126)).toBe(true);
     }

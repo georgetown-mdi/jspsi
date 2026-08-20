@@ -531,36 +531,66 @@ const SPLIT_SFTP: SFTPEndpoint = {
   outboundPath: "/out",
 };
 
+/** The appliance's provisioning as the accept gate reads it: no mount, one shared
+ * mount, or the split pair. */
+const NO_MOUNT = { configured: false };
+const SHARED_MOUNT = { configured: true };
+const SPLIT_MOUNT = { configured: true, split: true };
+
 describe("acceptUnsupported (runnability by endpoint shape)", () => {
   test("a WebRTC endpoint is out of scope on the appliance, pointing at the web app", () => {
-    const unsupported = acceptUnsupported(WEBRTC_ENDPOINT, true);
+    const unsupported = acceptUnsupported(WEBRTC_ENDPOINT, SHARED_MOUNT);
     expect(unsupported?.message).toContain("out of scope");
     expect(unsupported?.message).toContain("web app");
   });
 
-  test("a split-directory filedrop endpoint points at the command-line tool", () => {
-    const unsupported = acceptUnsupported(SPLIT_FILEDROP, true);
-    expect(unsupported?.message).toContain("command-line tool");
+  test("a split-directory filedrop endpoint runs on a split-provisioned appliance", () => {
+    expect(acceptUnsupported(SPLIT_FILEDROP, SPLIT_MOUNT)).toBeUndefined();
+  });
+
+  test("a split-directory filedrop on a single-mount appliance names the second mount", () => {
+    const unsupported = acceptUnsupported(SPLIT_FILEDROP, SHARED_MOUNT);
+    expect(unsupported?.message).toContain("JOB_RENDEZVOUS_OUTBOUND_DIR");
+  });
+
+  test("a single-directory filedrop on a split appliance says it has no folder to meet in", () => {
+    const unsupported = acceptUnsupported(SINGLE_DIR_FILEDROP, SPLIT_MOUNT);
+    expect(unsupported?.message).toContain("no single");
   });
 
   test("a single-directory filedrop with no rendezvous names JOB_RENDEZVOUS_DIR", () => {
-    const unsupported = acceptUnsupported(SINGLE_DIR_FILEDROP, false);
+    const unsupported = acceptUnsupported(SINGLE_DIR_FILEDROP, NO_MOUNT);
     expect(unsupported?.message).toContain("JOB_RENDEZVOUS_DIR");
   });
 
+  test("a filedrop accept relays the appliance's own reason for an unusable pair", () => {
+    // An incoherent pair reports itself unconfigured with a reason; relaying it is
+    // what keeps an operator who already mounted two folders from being told to
+    // mount a first one.
+    const unsupported = acceptUnsupported(SPLIT_FILEDROP, {
+      configured: false,
+      problem: "the two rendezvous folders resolve to the same name",
+    });
+    expect(unsupported?.message).toBe(
+      "the two rendezvous folders resolve to the same name",
+    );
+  });
+
   test("a single-directory filedrop with a rendezvous mount is runnable", () => {
-    expect(acceptUnsupported(SINGLE_DIR_FILEDROP, true)).toBeUndefined();
+    expect(
+      acceptUnsupported(SINGLE_DIR_FILEDROP, SHARED_MOUNT),
+    ).toBeUndefined();
   });
 
   test("a single-directory SFTP endpoint is runnable, needing no rendezvous mount", () => {
     // The SFTP accept connects to the partner-named server, so it needs no
     // JOB_RENDEZVOUS_DIR -- runnable whether or not a rendezvous mount is set.
-    expect(acceptUnsupported(SINGLE_DIR_SFTP, false)).toBeUndefined();
-    expect(acceptUnsupported(SFTP_NO_PATH, false)).toBeUndefined();
+    expect(acceptUnsupported(SINGLE_DIR_SFTP, NO_MOUNT)).toBeUndefined();
+    expect(acceptUnsupported(SFTP_NO_PATH, NO_MOUNT)).toBeUndefined();
   });
 
   test("a split-directory SFTP endpoint points at the command-line tool", () => {
-    const unsupported = acceptUnsupported(SPLIT_SFTP, true);
+    const unsupported = acceptUnsupported(SPLIT_SFTP, SHARED_MOUNT);
     expect(unsupported?.message).toContain("command-line tool");
   });
 
@@ -573,7 +603,10 @@ describe("acceptUnsupported (runnability by endpoint shape)", () => {
       "sftp.evil.example/drop",
       "sftp evil.example",
     ]) {
-      const unsupported = acceptUnsupported({ channel: "sftp", host }, false);
+      const unsupported = acceptUnsupported(
+        { channel: "sftp", host },
+        NO_MOUNT,
+      );
       expect(unsupported?.message).toContain("not a plain address");
       expect(unsupported?.message).toContain("command-line tool");
     }
@@ -582,7 +615,7 @@ describe("acceptUnsupported (runnability by endpoint shape)", () => {
   test("a bare host, an IPv4, and a bracketed IPv6 literal are admitted", () => {
     for (const host of ["sftp.partner.example", "10.0.0.5", "[2001:db8::1]"]) {
       expect(
-        acceptUnsupported({ channel: "sftp", host }, false),
+        acceptUnsupported({ channel: "sftp", host }, NO_MOUNT),
       ).toBeUndefined();
     }
   });

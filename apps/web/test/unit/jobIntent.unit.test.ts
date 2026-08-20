@@ -1534,6 +1534,63 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
   });
 });
 
+/** The `connection` block of a composed filedrop config, for the directory-shape
+ * assertions. */
+function composedFiledropConnection(yaml: string): Record<string, unknown> {
+  const parsed = parseYaml(yaml) as { connection?: Record<string, unknown> };
+  const connection = parsed.connection;
+  if (connection === undefined)
+    throw new Error("composed psilink.yaml has no connection");
+  return connection;
+}
+
+describe("composeConfigDocument on a split-provisioned appliance", () => {
+  test("carries the inbound/outbound pair and never a shared path beside it", () => {
+    const connection = composedFiledropConnection(
+      composeConfigDocument(
+        validIntent({
+          options: {
+            retainFiles: true,
+            timestampInFilename: true,
+            locklessRendezvous: true,
+          },
+        }),
+        "/mnt/from-partner",
+        "/mnt/to-partner",
+      ),
+    );
+    expect(connection.channel).toBe("filedrop");
+    expect(connection.inbound_path).toBe("/mnt/from-partner");
+    expect(connection.outbound_path).toBe("/mnt/to-partner");
+    expect(connection.path).toBeUndefined();
+  });
+
+  test("core refuses the pair without retain mode, so the console never composes one", () => {
+    // The rule is core's, applied by mintExchangeFile's own schema on the composed
+    // connection; the console states it in its own words at every gate ahead of
+    // this so an operator never meets the throw.
+    expect(() =>
+      composeConfigDocument(validIntent(), "/mnt/in", "/mnt/out"),
+    ).toThrow();
+  });
+
+  test("core refuses two legs that resolve to one directory", () => {
+    expect(() =>
+      composeConfigDocument(
+        validIntent({
+          options: {
+            retainFiles: true,
+            timestampInFilename: true,
+            locklessRendezvous: true,
+          },
+        }),
+        "/mnt/share",
+        "/mnt/share/",
+      ),
+    ).toThrow();
+  });
+});
+
 describe("zeroSetupFiledropArgv builds the file:// locator", () => {
   test("builds a file:// URL via pathToFileURL from the server-side directory", () => {
     const argv = zeroSetupFiledropArgv("/srv/jobs/abc/rendezvous");
@@ -1543,5 +1600,15 @@ describe("zeroSetupFiledropArgv builds the file:// locator", () => {
   test("carries no host or credential (filedrop has neither)", () => {
     const argv = zeroSetupFiledropArgv("/srv/jobs/abc/rendezvous");
     expect(argv.join(" ")).not.toContain("--server-");
+  });
+
+  test("a split appliance carries the outbound leg on --outbound-path", () => {
+    // The positional is the inbound leg (the CLI maps it to inbound_path); the
+    // flag takes the plain absolute directory, not a file:// URL, because the CLI
+    // copies it straight into outbound_path where core requires an absolute path.
+    expect(zeroSetupFiledropArgv("/mnt/in", "/mnt/out")).toEqual([
+      "file:///mnt/in",
+      "--outbound-path=/mnt/out",
+    ]);
   });
 });

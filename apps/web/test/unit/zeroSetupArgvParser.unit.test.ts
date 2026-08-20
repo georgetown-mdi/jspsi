@@ -18,7 +18,11 @@ import {
   exchangeFilesOptions,
 } from "@bench/exchangeFilesModel";
 import { resolveCliBinaryPath, spawnZeroSetupJob } from "@jobs/cliDriver";
-import { zeroSetupOptionsArgv, zeroSetupSftpArgv } from "@jobs/intent";
+import {
+  zeroSetupFiledropArgv,
+  zeroSetupOptionsArgv,
+  zeroSetupSftpArgv,
+} from "@jobs/intent";
 
 import {
   awaitJobTerminalState,
@@ -462,6 +466,50 @@ describe(
       const argv = await captureZeroSetupArgv({
         workdir: dir,
         connectionArgs,
+        eventStream: true,
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+      const parsed = parseWithRealCli(argv, dir);
+      expect(parsed.status).toBe(EXIT_USAGE);
+      expect(parsed.stderr).toContain("requires retain mode");
+    });
+
+    test("a split-directory filedrop argv survives a real parse under retain mode", async () => {
+      // The console's split-rendezvous mapping, driven rather than asserted: the
+      // inbound mount rides the file:// positional and the outbound one rides
+      // `--outbound-path` as a plain absolute directory, which is what the CLI's
+      // own override reads them as.
+      const dir = scratchDir("zs-filedrop-split");
+      const connectionArgs = zeroSetupFiledropArgv(
+        path.join(dir, "from-partner"),
+        path.join(dir, "to-partner"),
+      );
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs,
+        optionArgs: retainModeFileSyncArgs(),
+        eventStream: true,
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+      const parsed = parseWithRealCli(argv, dir);
+      // The parser took every token, and the run got past the connection
+      // overrides to the input file this argv deliberately does not create.
+      expect(parsed.stderr).not.toContain("Unknown argument");
+      expect(parsed.status).not.toBe(EXIT_USAGE);
+      expect(parsed.stderr).toContain("input.csv does not exist");
+    });
+
+    test("the CLI itself refuses the same filedrop split without retain mode", async () => {
+      // Why the console states the retain precondition while the operator is
+      // still at the controls: the tool's own guard is a hard refusal, and it
+      // arrives only once the run has been launched.
+      const dir = scratchDir("zs-filedrop-split-delete");
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs: zeroSetupFiledropArgv(
+          path.join(dir, "from-partner"),
+          path.join(dir, "to-partner"),
+        ),
         eventStream: true,
         timeoutMs: CHILD_EXIT_TIMEOUT_MS,
       });

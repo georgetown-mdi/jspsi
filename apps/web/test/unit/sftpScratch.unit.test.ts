@@ -43,11 +43,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
     const base = sandbox("scratch-ok");
     const scratchDir = path.join(base, "scratch");
     const dataRoot = path.join(base, "data-root");
-    const resolved = setupSftpCredentialScratchDir(
-      scratchDir,
-      dataRoot,
-      undefined,
-    );
+    const resolved = setupSftpCredentialScratchDir(scratchDir, dataRoot, []);
     expect(resolved).toBe(path.resolve(scratchDir));
     expect(fs.statSync(resolved).mode & 0o777).toBe(WORKDIR_MODE);
   });
@@ -58,7 +54,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
     fs.mkdirSync(dataRoot, { recursive: true });
     const scratchDir = path.join(dataRoot, "sftp-credentials");
     expect(() =>
-      setupSftpCredentialScratchDir(scratchDir, dataRoot, undefined),
+      setupSftpCredentialScratchDir(scratchDir, dataRoot, []),
     ).toThrowError(
       expect.objectContaining({
         name: "JobApiConfigError",
@@ -73,7 +69,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
     const scratchDir = path.join(base, "scratch");
     const dataRoot = path.join(scratchDir, "data-root");
     expect(() =>
-      setupSftpCredentialScratchDir(scratchDir, dataRoot, undefined),
+      setupSftpCredentialScratchDir(scratchDir, dataRoot, []),
     ).toThrow(JobApiConfigError);
   });
 
@@ -84,7 +80,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
     fs.mkdirSync(rendezvousDir, { recursive: true });
     const scratchDir = path.join(rendezvousDir, "sftp-credentials");
     expect(() =>
-      setupSftpCredentialScratchDir(scratchDir, dataRoot, rendezvousDir),
+      setupSftpCredentialScratchDir(scratchDir, dataRoot, [rendezvousDir]),
     ).toThrowError(
       expect.objectContaining({
         name: "JobApiConfigError",
@@ -101,7 +97,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
     const scratchDir = path.join(base, "scratch-link");
     fs.symlinkSync(path.join(dataRoot, "inside"), scratchDir);
     expect(() =>
-      setupSftpCredentialScratchDir(scratchDir, dataRoot, undefined),
+      setupSftpCredentialScratchDir(scratchDir, dataRoot, []),
     ).toThrowError(
       expect.objectContaining({
         name: "JobApiConfigError",
@@ -120,7 +116,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
     const scratchDir = path.join(base, "scratch-link");
     fs.symlinkSync(inside, scratchDir);
     expect(() =>
-      setupSftpCredentialScratchDir(scratchDir, dataRoot, undefined),
+      setupSftpCredentialScratchDir(scratchDir, dataRoot, []),
     ).toThrow(JobApiConfigError);
     // The realpath check ran before any side effect: the target keeps its mode
     // and nothing was created inside it.
@@ -150,7 +146,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
     });
     try {
       expect(() =>
-        setupSftpCredentialScratchDir(scratchDir, dataRoot, undefined),
+        setupSftpCredentialScratchDir(scratchDir, dataRoot, []),
       ).toThrowError(
         expect.objectContaining({
           name: "JobApiConfigError",
@@ -174,7 +170,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
       setupSftpCredentialScratchDir(
         secretsDir,
         dataRoot,
-        undefined,
+        [],
         secretsDir,
         undefined,
       ),
@@ -195,7 +191,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
       setupSftpCredentialScratchDir(
         scratchDir,
         dataRoot,
-        undefined,
+        [],
         secretsDir,
         undefined,
       ),
@@ -212,7 +208,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
       setupSftpCredentialScratchDir(
         scratchDir,
         dataRoot,
-        undefined,
+        [],
         undefined,
         inputDir,
       ),
@@ -232,7 +228,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
     fs.mkdirSync(dataRoot, { recursive: true });
     const scratchDir = path.join(dataRoot, "..creds");
     expect(() =>
-      setupSftpCredentialScratchDir(scratchDir, dataRoot, undefined),
+      setupSftpCredentialScratchDir(scratchDir, dataRoot, []),
     ).toThrowError(
       expect.objectContaining({
         name: "JobApiConfigError",
@@ -263,11 +259,7 @@ describe("setupSftpCredentialScratchDir sweep", () => {
     fs.mkdirSync(scratchDir, { recursive: true });
     const orphan = path.join(scratchDir, "orphaned-secret");
     fs.writeFileSync(orphan, "left-over-password\n");
-    setupSftpCredentialScratchDir(
-      scratchDir,
-      path.join(base, "data-root"),
-      undefined,
-    );
+    setupSftpCredentialScratchDir(scratchDir, path.join(base, "data-root"), []);
     expect(fs.existsSync(orphan)).toBe(false);
     expect(fs.readdirSync(scratchDir)).toEqual([]);
   });

@@ -19,14 +19,20 @@ import { appendSanitizedRunWarning } from "@bench/runWarnings";
 import {
   MAX_NAMED_RENDEZVOUS_ENTRIES,
   RENDEZVOUS_NOTICE_BUDGET,
+  jobRendezvousDirs,
   notEmptyLead,
+  rendezvousSplitProblem,
   rendezvousStartupWarnings,
   resolveJobRendezvousDir,
   resolveJobRendezvousFolderName,
   resolveJobRendezvousLocator,
+  resolveJobRendezvousOutboundDir,
+  resolveJobRendezvousProvisioning,
   useJobRendezvousDir,
   useJobRendezvousFolderName,
 } from "@jobs/jobRendezvous";
+
+import type { RendezvousLeg } from "@jobs/jobRendezvous";
 
 const dirs: Array<string> = [];
 
@@ -55,8 +61,9 @@ function subDir(parent: string, name: string): string {
 afterEach(() => {
   for (const dir of dirs.splice(0))
     fs.rmSync(dir, { recursive: true, force: true });
-  (globalThis as { jobRendezvousDirConfig?: unknown }).jobRendezvousDirConfig =
-    undefined;
+  (
+    globalThis as { jobRendezvousProvisioning?: unknown }
+  ).jobRendezvousProvisioning = undefined;
 });
 
 describe("useJobRendezvousDir", () => {
@@ -231,6 +238,219 @@ describe("the shared folder's name the invitation is minted from", () => {
   });
 });
 
+describe("the split rendezvous a second mount provisions", () => {
+  test("the outbound leg has no data-root fallback, so a half-pair is unrepresentable", () => {
+    // Set the variable and the appliance is split; leave it unset and it is not,
+    // whatever else is mounted. That is the whole signal.
+    expect(
+      resolveJobRendezvousOutboundDir({ JOB_DATA_ROOT: "/data" }),
+    ).toBeUndefined();
+    expect(resolveJobRendezvousOutboundDir({})).toBeUndefined();
+    expect(
+      resolveJobRendezvousOutboundDir({
+        JOB_RENDEZVOUS_OUTBOUND_DIR: "  /mnt/out  ",
+      }),
+    ).toBe(path.resolve("/mnt/out"));
+    expect(
+      resolveJobRendezvousOutboundDir({ JOB_RENDEZVOUS_OUTBOUND_DIR: "   " }),
+    ).toBeUndefined();
+  });
+
+  test("a coherent pair carries both legs, both names, and both locators", () => {
+    const provisioning = resolveJobRendezvousProvisioning({
+      JOB_RENDEZVOUS_DIR: "/mnt/from-partner",
+      JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/to-partner",
+    });
+    expect(provisioning).toEqual({
+      dir: path.resolve("/mnt/from-partner"),
+      outboundDir: path.resolve("/mnt/to-partner"),
+      folderName: "from-partner",
+      outboundFolderName: "to-partner",
+      locator: "from-partner",
+      outboundLocator: "to-partner",
+    });
+  });
+
+  test("a name variable overrides each leg's mount point independently", () => {
+    const provisioning = resolveJobRendezvousProvisioning({
+      JOB_RENDEZVOUS_DIR: "/sync-in",
+      JOB_RENDEZVOUS_OUTBOUND_DIR: "/sync-out",
+      JOB_RENDEZVOUS_NAME: "study-a-in",
+      JOB_RENDEZVOUS_OUTBOUND_NAME: "study-a-out",
+    });
+    expect(provisioning.folderName).toBe("study-a-in");
+    expect(provisioning.outboundFolderName).toBe("study-a-out");
+    expect(provisioning.problem).toBeUndefined();
+  });
+
+  test("no outbound mount is no split, and raises no problem", () => {
+    expect(
+      resolveJobRendezvousProvisioning({ JOB_RENDEZVOUS_DIR: "/rendezvous" })
+        .problem,
+    ).toBeUndefined();
+  });
+
+  test("two legs that are one directory are refused, naming the variable to move", () => {
+    const problem = resolveJobRendezvousProvisioning({
+      JOB_RENDEZVOUS_DIR: "/mnt/share",
+      JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/share",
+    }).problem;
+    expect(problem).toContain("JOB_RENDEZVOUS_OUTBOUND_DIR");
+    expect(problem).toContain("read its own writes");
+  });
+
+  test("an outbound leg NESTED in the inbound one is refused too", () => {
+    // Core's own distinctness refine is textual same-directory only, so nesting --
+    // which would have this party read its own writes as the partner's just the
+    // same -- is caught here, where the appliance's mounts are known.
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_RENDEZVOUS_DIR: "/mnt/share",
+        JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/share/out",
+      }).problem,
+    ).toContain("one is inside the other");
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_RENDEZVOUS_DIR: "/mnt/share/in",
+        JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/share",
+      }).problem,
+    ).toContain("one is inside the other");
+  });
+
+  test("two mounts ending in the same segment are refused at boot, not at mint", () => {
+    // Core refuses a filedrop endpoint whose halves resolve alike, and the console
+    // mints single-segment locators; without this the operator would meet core's
+    // refusal at the mint with nothing to act on.
+    const problem = resolveJobRendezvousProvisioning({
+      JOB_RENDEZVOUS_DIR: "/mnt/in/psilink",
+      JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out/psilink",
+    }).problem;
+    expect(problem).toContain("JOB_RENDEZVOUS_OUTBOUND_NAME");
+    expect(problem).toContain("same name");
+  });
+
+  test("the name override clears a derived-name collision", () => {
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_RENDEZVOUS_DIR: "/mnt/in/psilink",
+        JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out/psilink",
+        JOB_RENDEZVOUS_OUTBOUND_NAME: "psilink-out",
+      }).problem,
+    ).toBeUndefined();
+  });
+
+  test("an unusable name variable withholds the name, not the locator", () => {
+    // The name variable governs only what the sheet may PRINT as the folder's
+    // name; the locator the invitation carries still falls back to the mount's own
+    // last segment, exactly as it does on a single-mount console.
+    const provisioning = resolveJobRendezvousProvisioning({
+      JOB_RENDEZVOUS_DIR: "/rendezvous",
+      JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out",
+      JOB_RENDEZVOUS_OUTBOUND_NAME: "not/a/segment",
+    });
+    expect(provisioning.outboundFolderName).toBeUndefined();
+    expect(provisioning.outboundLocator).toBe("out");
+    expect(provisioning.problem).toBeUndefined();
+  });
+
+  test("a leg with no locator at all is refused, naming both name variables", () => {
+    // Driven through the predicate rather than the environment: the only mount that
+    // reduces to no last segment is a filesystem root, which contains any other
+    // mount and so trips the containment refusal first. The guard is what makes a
+    // split with an unnameable leg unrepresentable rather than minted half-formed.
+    const problem = rendezvousSplitProblem({
+      dir: "/mnt/in",
+      outboundDir: "/mnt/out",
+      locator: "in",
+    });
+    expect(problem).toContain("cannot name both rendezvous folders");
+    expect(problem).toContain("JOB_RENDEZVOUS_OUTBOUND_NAME");
+  });
+
+  test("an outbound mount with no inbound one at all is refused", () => {
+    const problem = resolveJobRendezvousProvisioning({
+      JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out",
+    }).problem;
+    expect(problem).toContain("JOB_RENDEZVOUS_DIR");
+  });
+
+  test("both legs are enumerated for the containment surfaces", () => {
+    expect(
+      jobRendezvousDirs(
+        resolveJobRendezvousProvisioning({
+          JOB_RENDEZVOUS_DIR: "/mnt/in",
+          JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/out",
+        }),
+      ),
+    ).toEqual([path.resolve("/mnt/in"), path.resolve("/mnt/out")]);
+    expect(
+      jobRendezvousDirs(
+        resolveJobRendezvousProvisioning({ JOB_RENDEZVOUS_DIR: "/mnt/share" }),
+      ),
+    ).toEqual([path.resolve("/mnt/share")]);
+    expect(jobRendezvousDirs(resolveJobRendezvousProvisioning({}))).toEqual([]);
+  });
+
+  test("an incoherent pair still reports both mounts, so neither escapes containment", () => {
+    // The mounts stay partner-synced folders whether or not an exchange can run
+    // over them, so the credential-containment surfaces must still see both.
+    const provisioning = resolveJobRendezvousProvisioning({
+      JOB_RENDEZVOUS_DIR: "/mnt/share",
+      JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/share/out",
+    });
+    expect(provisioning.problem).toBeDefined();
+    expect(jobRendezvousDirs(provisioning)).toHaveLength(2);
+  });
+});
+
+describe("each leg's preflight names the mount it is about", () => {
+  test("a split appliance's notices distinguish the two folders", () => {
+    const dataRoot = tempDir("data");
+    const inbound = tempDir("inbound");
+    fs.writeFileSync(path.join(inbound, "console-hello.json"), "");
+    const workdir = path.join(dataRoot, "current-job");
+    const inboundWarnings = rendezvousStartupWarnings(
+      inbound,
+      "inbound",
+      undefined,
+      dataRoot,
+      workdir,
+    );
+    expect(
+      inboundWarnings.some((warning) =>
+        warning.startsWith("the inbound rendezvous directory"),
+      ),
+    ).toBe(true);
+    const missingOutbound = path.join(tempDir("outbound"), "not-created");
+    const outboundWarnings = rendezvousStartupWarnings(
+      missingOutbound,
+      "outbound",
+      undefined,
+      dataRoot,
+      workdir,
+    );
+    expect(
+      outboundWarnings.some((warning) =>
+        warning.startsWith("the outbound rendezvous directory"),
+      ),
+    ).toBe(true);
+  });
+
+  test("a single-mount console keeps the unqualified wording", () => {
+    const dataRoot = tempDir("data");
+    const missing = path.join(tempDir("rendezvous"), "not-created");
+    expect(
+      rendezvousStartupWarnings(
+        missing,
+        "shared",
+        undefined,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+      )[0],
+    ).toContain("the rendezvous directory");
+  });
+});
+
 /** The overlap warnings alone, isolating the containment branch from the stat-based
  * preflight warnings (which the fixtures avoid by using real writable directories). */
 function overlapWarnings(warnings: Array<string>): Array<string> {
@@ -244,6 +464,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const warnings = overlapWarnings(
       rendezvousStartupWarnings(
         rendezvous,
+        "shared",
         undefined,
         dataRoot,
         path.join(dataRoot, "current-job"),
@@ -259,6 +480,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const warnings = overlapWarnings(
       rendezvousStartupWarnings(
         rendezvous,
+        "shared",
         undefined,
         dataRoot,
         path.join(dataRoot, "current-job"),
@@ -274,6 +496,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const warnings = overlapWarnings(
       rendezvousStartupWarnings(
         shared,
+        "shared",
         shared,
         dataRoot,
         path.join(dataRoot, "current-job"),
@@ -290,6 +513,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const warnings = overlapWarnings(
       rendezvousStartupWarnings(
         rendezvous,
+        "shared",
         jobInput,
         dataRoot,
         path.join(dataRoot, "current-job"),
@@ -306,6 +530,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     const warnings = overlapWarnings(
       rendezvousStartupWarnings(
         rendezvous,
+        "shared",
         jobInput,
         dataRoot,
         path.join(dataRoot, "current-job"),
@@ -327,6 +552,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     expect(
       rendezvousStartupWarnings(
         rendezvous,
+        "shared",
         jobInput,
         dataRoot,
         path.join(dataRoot, "current-job"),
@@ -357,6 +583,7 @@ function contentWarnings(entries: Array<string>): Array<string> {
     fs.writeFileSync(path.join(rendezvous, entry), "");
   return rendezvousStartupWarnings(
     rendezvous,
+    "shared",
     tempDir("input"),
     dataRoot,
     path.join(dataRoot, "current-job"),
@@ -417,7 +644,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
   });
 
   test("a console mount path rides in the lead", () => {
-    const lead = notEmptyLead("/data");
+    const lead = notEmptyLead("/data", "shared");
     expect(lead).toContain("/data");
     expect(sanitizeForDisplay(lead)).not.toContain(DISPLAY_TRUNCATION_MARKER);
   });
@@ -426,7 +653,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     // The path is the lead's only unbounded part, and the recovery is what a
     // truncation would cut, so the path is what gives way.
     const deepMount = `/mnt/${"d".repeat(300)}`;
-    const lead = notEmptyLead(deepMount);
+    const lead = notEmptyLead(deepMount, "shared");
     expect(lead).not.toContain(deepMount);
     expect(lead).toContain("the rendezvous directory is not empty");
     expect(lead).toContain(
@@ -443,11 +670,11 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     const escapedMount = `/mnt/${WIDE_ESCAPING_CHAR.repeat(35)}`;
     const asciiMount = `/mnt/${"d".repeat(35)}`;
     expect(escapedMount.length).toBe(asciiMount.length);
-    expect(notEmptyLead(asciiMount)).toContain(asciiMount);
-    expect(notEmptyLead(escapedMount)).not.toContain(escapedMount);
-    expect(sanitizeForDisplay(notEmptyLead(escapedMount))).not.toContain(
-      DISPLAY_TRUNCATION_MARKER,
-    );
+    expect(notEmptyLead(asciiMount, "shared")).toContain(asciiMount);
+    expect(notEmptyLead(escapedMount, "shared")).not.toContain(escapedMount);
+    expect(
+      sanitizeForDisplay(notEmptyLead(escapedMount, "shared")),
+    ).not.toContain(DISPLAY_TRUNCATION_MARKER);
   });
 
   test("files the exchange has no claim on are reported the same way", () => {
@@ -465,6 +692,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     fs.mkdirSync(path.join(rendezvous, "prior-job"));
     const warnings = rendezvousStartupWarnings(
       rendezvous,
+      "shared",
       tempDir("input"),
       dataRoot,
       path.join(dataRoot, "current-job"),
@@ -481,6 +709,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     const workdir = subDir(shared, "0f6e2c1a-current");
     const warnings = rendezvousStartupWarnings(
       shared,
+      "shared",
       undefined,
       shared,
       workdir,
@@ -494,6 +723,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     fs.writeFileSync(path.join(shared, "console-hello.json"), "");
     const warnings = rendezvousStartupWarnings(
       shared,
+      "shared",
       undefined,
       shared,
       workdir,
@@ -589,6 +819,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
       const dataRoot = tempDir("data");
       const warnings = rendezvousStartupWarnings(
         rendezvous,
+        "shared",
         tempDir("input"),
         dataRoot,
         path.join(dataRoot, "current-job"),
@@ -620,9 +851,9 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
 interface NoticeShape {
   label: string;
   /** Set the mount up so this branch is the one that fires, and hand back the
-   * preflight's four arguments plus any mode to restore. */
+   * preflight's five arguments plus any mode to restore. */
   arrange: (mount: string) => {
-    args: [string, string | undefined, string, string];
+    args: PreflightArgs;
     restore?: () => void;
   };
   /** Selects this shape's notice out of the warnings the call raised. */
@@ -636,6 +867,16 @@ interface NoticeShape {
   unprivilegedOnly?: boolean;
 }
 
+/** The preflight's own argument list: the mount, which leg it is, the work-input
+ * directory, the data root, and this launch's workdir. */
+type PreflightArgs = [
+  string,
+  RendezvousLeg,
+  string | undefined,
+  string,
+  string,
+];
+
 /** A mount path whose own rendered cost is far past the notice budget, under a
  * fresh temp root. Nothing is created: each shape creates what its branch needs. */
 function overlongMount(segment: string): string {
@@ -646,10 +887,12 @@ function overlongMount(segment: string): string {
  * work-input directory that are siblings of the mount, never its ancestors. */
 function isolatedArgs(
   mount: string,
-): [string, string | undefined, string, string] {
+  leg: RendezvousLeg = "shared",
+): PreflightArgs {
   const dataRoot = tempDir("data");
   return [
     mount,
+    leg,
     tempDir("input"),
     dataRoot,
     path.join(dataRoot, "current-job"),
@@ -738,10 +981,11 @@ const NOTICE_SHAPES: Array<NoticeShape> = [
       return {
         args: [
           mount,
+          "shared",
           undefined,
           dataRoot,
           path.join(dataRoot, "current-job"),
-        ] as [string, string | undefined, string, string],
+        ] as PreflightArgs,
       };
     },
     match: /overlaps/,
@@ -861,6 +1105,7 @@ describe("every preflight notice fits its budget once rendered", () => {
 
     const warnings = rendezvousStartupWarnings(
       mount,
+      "shared",
       jobInput,
       dataRoot,
       path.join(dataRoot, "current-job"),

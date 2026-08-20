@@ -60,6 +60,11 @@ import {
   saveRailNote,
   saveTrustFooter,
 } from "./saveExchangeModel";
+import {
+  acceptKitEndpointForRendezvous,
+  filedropEndpointForRendezvous,
+  splitRendezvousRetainProblem,
+} from "./filedropRendezvousChoice";
 import { acceptKitFileName, buildAcceptKit } from "./acceptKit";
 import {
   availableTransports,
@@ -899,25 +904,28 @@ export function InviterBench() {
       connectionEndpoint = sftpEndpoint;
       kitEndpoint = sftpEndpoint;
     } else if (transport === "filedrop") {
-      // A console filedrop server-job carries a NAME as the invitation's advisory
-      // locator, never the appliance's absolute path; the server decides which name
-      // that is. The mount is server-side, so a missing locator means the rendezvous
-      // state changed mid-create: refuse rather than mint a code with none.
-      if (rendezvous?.locator === undefined) return;
-      connectionEndpoint = {
-        channel: "filedrop",
-        path: rendezvous.locator,
-      };
-      // The sheet is the one place that CALLS the locator the shared folder's name,
-      // so it gets the name only where the console has one; where the locator is
+      // The create gate holds a split rendezvous whose retain mode was turned off
+      // after the transport was chosen; repeated here because everything past this
+      // point is partner-facing -- the minted endpoint and the accept kit's
+      // file-handling disclosure -- for a rendezvous the run would refuse.
+      if (
+        splitRendezvousRetainProblem(rendezvous, exchangeFiles.retainFiles) !==
+        undefined
+      )
+        return;
+      // A console filedrop server-job carries NAMES as the invitation's advisory
+      // locator -- one, or the split pair -- never the appliance's absolute paths;
+      // the server decides which names those are. The mounts are server-side, so a
+      // missing locator means the rendezvous state changed mid-create: refuse
+      // rather than mint a code with none.
+      const filedropEndpoint = filedropEndpointForRendezvous(rendezvous);
+      if (filedropEndpoint === undefined) return;
+      connectionEndpoint = filedropEndpoint;
+      // The sheet is the one place that CALLS a locator the shared folder's name,
+      // so it gets the names only where the console has them; where a locator is
       // the mount point it was bound at, the sheet says nothing rather than
       // asking the partner to match a name that is not the folder's.
-      kitEndpoint = {
-        channel: "filedrop",
-        ...(rendezvous.folderName === undefined
-          ? {}
-          : { path: rendezvous.folderName }),
-      };
+      kitEndpoint = acceptKitEndpointForRendezvous(rendezvous);
     }
     setMinting(true);
     setCreateAlert(undefined);
@@ -1263,7 +1271,7 @@ export function InviterBench() {
                 minting={minting}
                 sftpConnection={sftpConnection}
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
-                rendezvousConfigured={rendezvousConfigured}
+                rendezvous={rendezvous}
                 exchangeFiles={exchangeFiles}
                 exchangeFilesOpen={exchangeFilesOpen}
                 onExchangeFiles={setExchangeFiles}

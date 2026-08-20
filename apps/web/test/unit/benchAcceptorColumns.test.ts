@@ -32,6 +32,10 @@ import {
   CONNECTION_TUNING_DEFAULT,
   connectionTuningProblems,
 } from "@bench/connectionTuningModel";
+import {
+  SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT,
+  splitRendezvousRetainProblem,
+} from "@bench/filedropRendezvousChoice";
 
 import {
   setColumnDisclosure,
@@ -360,6 +364,29 @@ describe("acceptor launch gates", () => {
         },
       ),
     ).toBe("Set up the SFTP connection above before you can start.");
+  });
+
+  test("a split rendezvous without retain mode disables launch, in the console's words", () => {
+    // The acceptor's directories are the appliance's own mounts, so a split
+    // appliance carries the retain precondition into every accept it runs -- and
+    // the sentence the operator meets is the one naming the control to turn on,
+    // taken from the shared predicate rather than restated here.
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        {
+          connectionBlocked: false,
+          exchangeFilesBlocked: false,
+          connectionTuningBlocked: false,
+          splitDirectoryProblem: splitRendezvousRetainProblem(
+            { configured: true, split: true, locator: "in" },
+            false,
+          ),
+        },
+      ),
+    ).toBe(SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT);
   });
 
   test("a refused file-handling combination disables launch and names those settings", () => {

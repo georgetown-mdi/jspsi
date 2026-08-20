@@ -23,6 +23,7 @@ import {
   bootSftpCredentialScratchDir,
   shutdownJobManager,
   warnJobApiProfileMismatch,
+  warnJobRendezvousProblem,
 } from "../src/jobs/index";
 import { ConfigManager } from "../src/utils/serverConfig";
 import { registerServer } from "../src/httpServer";
@@ -69,6 +70,11 @@ bootSftpCredentialScratchDir();
 // Warn (non-fatal) when JOB_DATA_ROOT is set on a non-console build, so the job
 // API stays disabled: the app enables it only in a console build.
 warnJobApiProfileMismatch();
+
+// Warn (non-fatal) when the rendezvous mounts cannot run a filedrop exchange as
+// provisioned, so an incoherent split pair is reported at boot rather than only at
+// the invite chooser. SFTP on the same appliance is unaffected.
+warnJobRendezvousProblem();
 
 // @ts-ignore part of preset
 const listener = server.listen(path ? { path } : { port, host }, (err) => {

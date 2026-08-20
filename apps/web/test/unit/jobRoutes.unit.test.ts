@@ -65,8 +65,9 @@ afterEach(() => {
     undefined;
   (globalThis as { jobSftpServer?: unknown }).jobSftpServer = undefined;
   (globalThis as { jobInputDirConfig?: unknown }).jobInputDirConfig = undefined;
-  (globalThis as { jobRendezvousDirConfig?: unknown }).jobRendezvousDirConfig =
-    undefined;
+  (
+    globalThis as { jobRendezvousProvisioning?: unknown }
+  ).jobRendezvousProvisioning = undefined;
   (globalThis as { jobSecretsDirConfig?: unknown }).jobSecretsDirConfig =
     undefined;
   (
@@ -1045,6 +1046,42 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
       "locator",
       "folderName",
     ]);
+  });
+
+  test("a split appliance reports both legs' names, and never either path", async () => {
+    const root = enableJobApi();
+    const inbound = path.join(root, "from-partner");
+    const outbound = path.join(root, "to-partner");
+    fs.mkdirSync(inbound, { recursive: true });
+    fs.mkdirSync(outbound, { recursive: true });
+    vi.stubEnv("JOB_RENDEZVOUS_DIR", inbound);
+    vi.stubEnv("JOB_RENDEZVOUS_OUTBOUND_DIR", outbound);
+    const body = await (await getRendezvous()).text();
+    expect(JSON.parse(body)).toEqual({
+      configured: true,
+      split: true,
+      locator: "from-partner",
+      folderName: "from-partner",
+      outboundLocator: "to-partner",
+      outboundFolderName: "to-partner",
+    });
+    expect(body).not.toContain(root);
+  });
+
+  test("an incoherent pair reports unavailable WITH the remedy", async () => {
+    const root = enableJobApi();
+    const mount = path.join(root, "share");
+    fs.mkdirSync(path.join(mount, "out"), { recursive: true });
+    vi.stubEnv("JOB_RENDEZVOUS_DIR", mount);
+    vi.stubEnv("JOB_RENDEZVOUS_OUTBOUND_DIR", path.join(mount, "out"));
+    const body = (await (await getRendezvous()).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(body.configured).toBe(false);
+    expect(body.problem).toContain("JOB_RENDEZVOUS_OUTBOUND_DIR");
+    // The reason names variables, never the appliance's own paths.
+    expect(JSON.stringify(body)).not.toContain(root);
   });
 });
 

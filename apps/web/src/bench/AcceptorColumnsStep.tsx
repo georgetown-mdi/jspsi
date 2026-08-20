@@ -90,6 +90,7 @@ export function AcceptorColumnsStep({
   exchangeFilesSection,
   exchangeFilesBlocked = false,
   connectionTuningBlocked = false,
+  splitDirectoryProblem,
   onMetadataChange,
   onRemap,
   onReset,
@@ -129,6 +130,11 @@ export function AcceptorColumnsStep({
    * are separate cards in {@link exchangeFilesSection}, and the blocked reason
    * names the one to open. */
   connectionTuningBlocked?: boolean;
+  /** The requirement a split rendezvous makes of the file-handling choices, in the
+   * console's own words, or undefined when it is met. Gates launch and IS the
+   * blocked reason, so the operator meets the control to turn on rather than a
+   * job that fails at composition. */
+  splitDirectoryProblem?: string;
   onMetadataChange: (next: Metadata) => void;
   /** Bind a missing field type to a chosen column, forcing role linkage. */
   onRemap: (type: SemanticType, columnName: string) => void;
@@ -208,7 +214,12 @@ export function AcceptorColumnsStep({
     verdict,
     editorState,
     linkageTerms,
-    { connectionBlocked, exchangeFilesBlocked, connectionTuningBlocked },
+    {
+      connectionBlocked,
+      exchangeFilesBlocked,
+      connectionTuningBlocked,
+      ...(splitDirectoryProblem !== undefined ? { splitDirectoryProblem } : {}),
+    },
   );
   const launchDisabled = launchBlockedReason !== undefined;
 

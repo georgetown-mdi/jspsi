@@ -442,19 +442,33 @@ export const ACCEPT_UNSUPPORTED_TITLE =
 /** The honest unsupported-accept copy for a console build, deciding runnability by
  * the endpoint's SHAPE rather than a channel kill-switch: a WebRTC accept has no
  * in-tab exchange on the appliance (WebRTC is the public web app's domain); a
- * split-directory file-drop uses inbound/outbound mailboxes the console does not
- * offer (collapsing the mirror-swapped pair would break the read-where-the-peer-
- * writes invariant); and a single-directory file-drop needs `JOB_RENDEZVOUS_DIR`
- * mounted. */
+ * split-directory SFTP accept needs the command-line tool; and a file-drop accept
+ * needs the appliance's own mounts to be the shape the invitation names. */
 export interface AcceptUnsupported {
   title: string;
   message: string;
 }
 
-/** Whether a file-drop endpoint carries the single shared-directory form the console
- * runs, rather than the inbound/outbound split it does not offer. */
-function isSingleDirectoryFiledrop(endpoint: AcceptEndpoint): boolean {
-  return endpoint.channel === "filedrop" && endpoint.path !== undefined;
+/** Whether a file-drop endpoint carries the split inbound/outbound pair rather than
+ * a single shared directory. Read as the endpoint's SHAPE, which the appliance's own
+ * provisioning has to match: unlike SFTP's remote directories, a file-drop accept
+ * takes its directories from the appliance's mounts rather than from the partner's
+ * endpoint, and those mounts are already oriented from THIS party's side -- so a
+ * split accept needs no mirror swap here, only two mounts to run over. */
+function isSplitDirectoryFiledrop(endpoint: AcceptEndpoint): boolean {
+  return endpoint.channel === "filedrop" && endpoint.inboundPath !== undefined;
+}
+
+/**
+ * The appliance's rendezvous provisioning, as the accept gate reads it: whether a
+ * mount resolves at all, whether it is a split pair, and the appliance's own reason
+ * when a filedrop exchange cannot run as provisioned. The shape the browser client
+ * reports, narrowed to what this decision needs.
+ */
+export interface AcceptRendezvous {
+  configured: boolean;
+  split?: boolean;
+  problem?: string;
 }
 
 /** Whether an SFTP endpoint carries the inbound/outbound split the console does not
@@ -470,16 +484,24 @@ function isSplitDirectorySftp(endpoint: AcceptEndpoint): boolean {
 
 /**
  * The unsupported-accept state for a console build, or undefined when the appliance
- * can run the accepted endpoint. Determined by the endpoint SHAPE and whether the
- * rendezvous mount is configured, not a static kill-switch: a runnable console accept
- * is a single-directory file-drop with `JOB_RENDEZVOUS_DIR` set, or a
+ * can run the accepted endpoint. Determined by the endpoint SHAPE and the
+ * appliance's own rendezvous provisioning, not a static kill-switch: a runnable
+ * console accept is a file-drop whose shape MATCHES the mounts (a single shared
+ * directory against one mount, the inbound/outbound pair against a split pair), or a
  * single-directory SFTP endpoint (the operator authors the connection to the
  * partner-named server before launch). The caller consults this only on a console
  * build; off the console every admitted endpoint runs in the browser.
+ *
+ * The shapes have to match in both directions, because the file-handling regimes do:
+ * a split appliance cannot run a single shared directory (it has no one folder to
+ * meet in), and a single-mount appliance cannot run a split rendezvous (it has no
+ * second folder to write into). Either mismatch names the mount to add or the
+ * invitation to ask for instead, rather than leaving the operator at a run that
+ * stops when the two sides meet.
  */
 export function acceptUnsupported(
   endpoint: AcceptEndpoint,
-  rendezvousConfigured: boolean,
+  rendezvous: AcceptRendezvous,
 ): AcceptUnsupported | undefined {
   if (endpoint.channel === "webrtc")
     return {
@@ -516,21 +538,42 @@ export function acceptUnsupported(
       };
     return undefined;
   }
-  if (!isSingleDirectoryFiledrop(endpoint))
+  const split = isSplitDirectoryFiledrop(endpoint);
+  if (!rendezvous.configured)
     return {
       title: ACCEPT_UNSUPPORTED_TITLE,
+      // The appliance's own reason wins where it has one: a pair of mounts the
+      // console refuses reports itself unconfigured, and the generic
+      // set-JOB_RENDEZVOUS_DIR sentence would send an operator who already
+      // mounted two folders to add a third.
       message:
-        "This invitation uses separate inbound and outbound directories, which " +
-        "this appliance does not run. Accept it with the psilink command-line " +
-        "tool instead.",
+        rendezvous.problem ??
+        (split
+          ? "This invitation runs over separate inbound and outbound folders, but " +
+            "this appliance has no rendezvous directories configured. Set " +
+            "JOB_RENDEZVOUS_DIR to the folder your partner writes into and " +
+            "JOB_RENDEZVOUS_OUTBOUND_DIR to the one you write into, then reload."
+          : "This invitation runs over a shared directory, but this appliance has no " +
+            "rendezvous directory configured. Set JOB_RENDEZVOUS_DIR to a directory " +
+            "both parties can reach and reload."),
     };
-  if (!rendezvousConfigured)
+  if (split && rendezvous.split !== true)
     return {
       title: ACCEPT_UNSUPPORTED_TITLE,
       message:
-        "This invitation runs over a shared directory, but this appliance has no " +
-        "rendezvous directory configured. Set JOB_RENDEZVOUS_DIR to a directory " +
-        "both parties can reach and reload.",
+        "This invitation runs over separate inbound and outbound folders, but this " +
+        "appliance is mounted with a single shared directory. Mount the second " +
+        "folder and set JOB_RENDEZVOUS_OUTBOUND_DIR to it, then reload -- or ask " +
+        "your partner for an invitation over one shared directory instead.",
+    };
+  if (!split && rendezvous.split === true)
+    return {
+      title: ACCEPT_UNSUPPORTED_TITLE,
+      message:
+        "This invitation runs over one shared directory, but this appliance is " +
+        "mounted with separate inbound and outbound folders and has no single " +
+        "folder to meet in. Ask your partner for an invitation over separate " +
+        "inbound and outbound folders instead.",
     };
   return undefined;
 }

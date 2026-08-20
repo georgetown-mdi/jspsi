@@ -756,6 +756,14 @@ function outboundPayloadConsentFor(
  * reach. The directory is server-side environment configuration, never a
  * browser-sent string.
  *
+ * On a split-provisioned appliance (`JOB_RENDEZVOUS_OUTBOUND_DIR` set) the caller
+ * passes both mounts and the connection carries the CLI's
+ * `inbound_path`/`outbound_path` pair INSTEAD of the single `path` -- never the two
+ * forms together, which `mintExchangeFile`'s own schema refuses. The pair's own
+ * rules (both halves set, the two resolving to different directories, and the
+ * retain-mode precondition) are core's single statement on the composed connection,
+ * so nothing here restates them.
+ *
  * The connection is built as a credential-free filedrop locator, so by core's
  * {@link ExchangeFileInput} typing no credential is representable; `mintExchangeFile`
  * validates the assembled spec through the CLI's own schema and never assembles
@@ -783,6 +791,7 @@ function outboundPayloadConsentFor(
 export function composeConfigDocument(
   intent: JobFiledropExchangeIntent,
   rendezvousPath: string,
+  outboundRendezvousPath?: string,
 ): string {
   const options = intentOptionsToFileSyncOptions(intent.options);
   const { metadata, standardization, expectedPayloadColumns } = intent;
@@ -790,7 +799,12 @@ export function composeConfigDocument(
   const fileInput: ExchangeFileInput = {
     connection: {
       channel: "filedrop",
-      path: rendezvousPath,
+      ...(outboundRendezvousPath === undefined
+        ? { path: rendezvousPath }
+        : {
+            inboundPath: rendezvousPath,
+            outboundPath: outboundRendezvousPath,
+          }),
       ...(options !== undefined ? { options } : {}),
     },
     linkageTerms: intent.linkageTerms,
@@ -976,9 +990,25 @@ export function zeroSetupSftpArgv(
  * {@link pathToFileURL} from the server-side directory, so no client string is ever
  * a path and the URL is always well formed. The filedrop channel has no host or
  * credential, so this is the whole connection.
+ *
+ * A split-provisioned appliance adds `--outbound-path`, the CLI's own name for the
+ * same split: the positional carries the inbound leg (which the CLI maps to
+ * `inbound_path`) and this flag the outbound one. The flag's value is the plain
+ * absolute directory, not a `file://` URL -- the CLI copies it straight into the
+ * connection's `outbound_path`, where core requires an absolute path. The CLI's own
+ * guard on the flag then holds the run to retain mode, which
+ * {@link zeroSetupOptionsArgv} emits from the operator's file-handling choice. The
+ * `=value` form matches every other value-bearing flag, so a directory beginning
+ * with `-` cannot be misparsed by yargs as its own flag.
  */
-export function zeroSetupFiledropArgv(rendezvousDir: string): Array<string> {
-  return [pathToFileURL(rendezvousDir).href];
+export function zeroSetupFiledropArgv(
+  rendezvousDir: string,
+  outboundRendezvousDir?: string,
+): Array<string> {
+  const argv = [pathToFileURL(rendezvousDir).href];
+  if (outboundRendezvousDir !== undefined)
+    argv.push(`--outbound-path=${outboundRendezvousDir}`);
+  return argv;
 }
 
 /**

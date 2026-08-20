@@ -126,7 +126,9 @@ describe("console acceptor unsupported-shape gate", () => {
       .toBeInTheDocument();
     await expect
       .element(
-        page.getByText(acceptUnsupported(FILEDROP_ENDPOINT, false)!.message),
+        page.getByText(
+          acceptUnsupported(FILEDROP_ENDPOINT, { configured: false })!.message,
+        ),
       )
       .toBeInTheDocument();
     expect(
@@ -148,7 +150,9 @@ describe("console acceptor unsupported-shape gate", () => {
       .toBeInTheDocument();
     await expect
       .element(
-        page.getByText(acceptUnsupported(WEBRTC_ENDPOINT, false)!.message),
+        page.getByText(
+          acceptUnsupported(WEBRTC_ENDPOINT, { configured: false })!.message,
+        ),
       )
       .toBeInTheDocument();
     expect(

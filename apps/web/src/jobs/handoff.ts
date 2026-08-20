@@ -30,9 +30,10 @@ import type { JobSftpServerEntry } from "./sftpServer";
  *   the exchange config the compose functions emit carries the credential only as
  *   an `@path` reference (the secret rides the key file), and the zero-setup
  *   command carries no secret at all.
- * - No container-internal path is ever present: the credential `@path` and the
- *   filedrop rendezvous directory are replaced with fixed placeholder tokens
- *   before the template is composed, so the real container path is never emitted.
+ * - No container-internal path is ever present: the credential `@path` and every
+ *   filedrop rendezvous mount -- the single shared directory, or both legs of a
+ *   split appliance's pair -- are replaced with fixed placeholder tokens before the
+ *   template is composed, so the real container path is never emitted.
  */
 export interface JobHandoff {
   /** The mode the run used: `exchange` (invitation, config-and-key driven) or
@@ -87,6 +88,24 @@ export const HANDOFF_SHARED_DIRECTORY_PLACEHOLDER =
  * filedrop positional). */
 export const HANDOFF_SHARED_DIRECTORY_URL_PLACEHOLDER =
   "file:///path/to/your/shared-directory";
+
+/** The placeholder a split appliance's INBOUND (peer-written) rendezvous mount is
+ * shown as, in the exchange config's `connection.inbound_path`. Named for the
+ * direction rather than "shared", because the whole point of the pair is that the
+ * two folders are not one. */
+export const HANDOFF_INBOUND_DIRECTORY_PLACEHOLDER =
+  "/path/to/your/inbound-directory";
+
+/** The placeholder a split appliance's OUTBOUND (self-written) rendezvous mount is
+ * shown as, in `connection.outbound_path` and on `--outbound-path`. */
+export const HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER =
+  "/path/to/your/outbound-directory";
+
+/** The placeholder the inbound mount is shown as in a zero-setup command's
+ * `file://` locator, the split counterpart to
+ * {@link HANDOFF_SHARED_DIRECTORY_URL_PLACEHOLDER}. */
+export const HANDOFF_INBOUND_DIRECTORY_URL_PLACEHOLDER =
+  "file:///path/to/your/inbound-directory";
 
 /** The input/output positionals the recurring command template names, matching the
  * console's `results.csv` download name so the two flows read consistently. */
@@ -143,6 +162,7 @@ function placeholderServerEntry(entry: JobSftpServerEntry): JobSftpServerEntry {
 function buildExchangeHandoffTemplate(
   intent: JobExchangeIntent,
   serverEntry: JobSftpServerEntry | undefined,
+  filedropSplit: boolean,
 ): JobHandoffTemplate {
   if (intent.channel === "sftp") {
     if (serverEntry === undefined)
@@ -157,7 +177,13 @@ function buildExchangeHandoffTemplate(
   }
   return {
     kind: "config",
-    yaml: composeConfigDocument(intent, HANDOFF_SHARED_DIRECTORY_PLACEHOLDER),
+    yaml: filedropSplit
+      ? composeConfigDocument(
+          intent,
+          HANDOFF_INBOUND_DIRECTORY_PLACEHOLDER,
+          HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER,
+        )
+      : composeConfigDocument(intent, HANDOFF_SHARED_DIRECTORY_PLACEHOLDER),
   };
 }
 
@@ -178,6 +204,7 @@ function buildExchangeHandoffTemplate(
 function buildZeroSetupHandoffTemplate(
   intent: JobZeroSetupIntent,
   serverEntry: JobSftpServerEntry | undefined,
+  filedropSplit: boolean,
 ): JobHandoffTemplate {
   let connectionArgs: Array<string>;
   if (intent.channel === "sftp") {
@@ -186,6 +213,14 @@ function buildZeroSetupHandoffTemplate(
         "sftp zero-setup handoff reached compose without a resolved server",
       );
     connectionArgs = zeroSetupSftpArgv(placeholderServerEntry(serverEntry));
+  } else if (filedropSplit) {
+    // Composed literally rather than through zeroSetupFiledropArgv: that builder
+    // turns a real directory into a `file://` URL, and a placeholder is not a
+    // directory to convert. The flag form and the ordering are the ones it emits.
+    connectionArgs = [
+      HANDOFF_INBOUND_DIRECTORY_URL_PLACEHOLDER,
+      `--outbound-path=${HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER}`,
+    ];
   } else {
     connectionArgs = [HANDOFF_SHARED_DIRECTORY_URL_PLACEHOLDER];
   }
@@ -210,21 +245,26 @@ function buildZeroSetupHandoffTemplate(
  * arm recomposes the config template; the zero-setup arm the command template. The
  * `credentialPasted` flag is supplied by the manager (true only for an sftp run
  * whose credential was a pasted, materialized value); it is forced false on the
- * filedrop channel, which carries no credential.
+ * filedrop channel, which carries no credential. `filedropSplit` is likewise the
+ * manager's -- whether this appliance provisions the inbound/outbound pair -- and is
+ * read only on the filedrop channel, whose template it decides between the single
+ * shared directory and the two-directory form.
  */
 export function buildJobHandoff(
   intent: JobCreateIntent,
   serverEntry: JobSftpServerEntry | undefined,
   credentialPasted: boolean,
+  filedropSplit: boolean,
 ): JobHandoff {
   const zeroSetup = intent.mode === "zeroSetup";
+  const split = intent.channel === "filedrop" && filedropSplit;
   return {
     mode: zeroSetup ? "zeroSetup" : "exchange",
     channel: intent.channel,
     usedKeyFile: !zeroSetup,
     credentialPasted: intent.channel === "sftp" && credentialPasted,
     template: zeroSetup
-      ? buildZeroSetupHandoffTemplate(intent, serverEntry)
-      : buildExchangeHandoffTemplate(intent, serverEntry),
+      ? buildZeroSetupHandoffTemplate(intent, serverEntry, split)
+      : buildExchangeHandoffTemplate(intent, serverEntry, split),
   };
 }

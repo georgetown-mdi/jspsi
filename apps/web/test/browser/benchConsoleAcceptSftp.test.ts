@@ -249,7 +249,10 @@ describe("console SFTP accept unsupported-shape gate", () => {
       .toBeInTheDocument();
     await expect
       .element(
-        page.getByText(acceptUnsupported(SPLIT_SFTP_ENDPOINT, false)!.message),
+        page.getByText(
+          acceptUnsupported(SPLIT_SFTP_ENDPOINT, { configured: false })!
+            .message,
+        ),
       )
       .toBeInTheDocument();
     expect(

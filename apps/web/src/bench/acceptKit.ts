@@ -11,9 +11,10 @@
  * accept kit").
  *
  * The sheet is a DISCLOSURE SURFACE: whatever it interpolates is written to
- * disk and handed to the partner. Exactly two dynamic values are representable
- * here, each justified where it is interpolated -- the rendezvous locator the
- * invitation already carries, which is free text held to the sheet's ASCII
+ * disk and handed to the partner. Exactly two KINDS of dynamic value are
+ * representable here, each justified where it is interpolated -- the rendezvous
+ * locator the invitation already carries (its host and directory fields, or a split
+ * rendezvous's two folder names), which is free text held to the sheet's ASCII
  * contract by {@link printable}, and this build's public release version, which
  * is interpolated only in the release shape {@link RELEASE_VERSION} admits.
  * Everything else is fixed text, so no secret, no invitation token, and no path
@@ -29,17 +30,20 @@
  */
 
 /**
- * The rendezvous locator the sheet prints back, in the two shapes the console
+ * The rendezvous locator the sheet prints back, in the shapes the console
  * mints: an sftp locator (host, optional port, and either the single shared
  * remote directory or the split inbound/outbound pair) or a filedrop locator
- * (the shared folder's NAME, never the appliance's absolute path).
- * Credential-free by construction, as the invitation endpoint it is copied from
- * is.
+ * (the shared folder's NAME, or the split pair's two names, never the appliance's
+ * absolute path). Credential-free by construction, as the invitation endpoint it is
+ * copied from is.
  *
- * The filedrop name is optional because the console cannot always name the
+ * Every filedrop name is optional because the console cannot always name the
  * shared folder: where the rendezvous mount point was chosen by a launcher
  * rather than by the operator, the mount point is not the folder's name, and the
  * sheet omits the name rather than telling the partner to match one that is not.
+ * `split` therefore carries the SHAPE independently of the names: a split
+ * rendezvous the console cannot name still has to be described as two folders, or
+ * the sheet would send the partner to set up a single shared one.
  */
 import { PLACEHOLDER_SSH_USERNAME } from "@psilink/core";
 
@@ -52,7 +56,13 @@ export type AcceptKitEndpoint =
       inboundPath?: string;
       outboundPath?: string;
     }
-  | { channel: "filedrop"; path?: string };
+  | {
+      channel: "filedrop";
+      split?: boolean;
+      path?: string;
+      inboundPath?: string;
+      outboundPath?: string;
+    };
 
 /**
  * The minted exchange the sheet describes, as the mint fixed it: where the two
@@ -149,6 +159,13 @@ const WORK_MOUNT = "/work";
  * shared folder to. Fixed, like {@link WORK_MOUNT}. */
 const SYNC_MOUNT = "/sync";
 
+/** The container mount points a split filedrop's commands bind the partner's own
+ * two folders to -- the one they read the inviter's files out of, and the one they
+ * write their own into. Fixed, like {@link SYNC_MOUNT}, and named for the direction
+ * they have on the PARTNER's side, which is the side the sheet is written for. */
+const INBOUND_SYNC_MOUNT = "/sync-in";
+const OUTBOUND_SYNC_MOUNT = "/sync-out";
+
 const RULE = "=".repeat(66);
 
 function heading(title: string): Array<string> {
@@ -168,7 +185,32 @@ function heading(title: string): Array<string> {
  * check the name against what they were told rather than to match it.
  */
 function rendezvousLines(endpoint: AcceptKitEndpoint): Array<string> {
-  if (endpoint.channel === "filedrop")
+  if (endpoint.channel === "filedrop") {
+    // A split rendezvous names both folders from the INVITER's side, which is the
+    // direction the partner's own tool mirrors: the inviter's inbound is where the
+    // partner writes, and the inviter's outbound is where the partner reads.
+    // Labelling them by what the READER does with them, rather than by
+    // "inbound"/"outbound", is what keeps the sheet from stating the pair
+    // backwards for its reader.
+    if (endpoint.split === true)
+      return endpoint.inboundPath === undefined ||
+        endpoint.outboundPath === undefined
+        ? [
+            "You and your partner meet through two folders rather than one: you",
+            "write into one and read their files out of the other. Your partner's",
+            "console could not put a name to either, so there is no name here to",
+            "check. Use the two folders you and your partner agreed on.",
+          ]
+        : [
+            `  You write to:   ${printable(endpoint.inboundPath)}`,
+            `  You read from:  ${printable(endpoint.outboundPath)}`,
+            "",
+            "You and your partner meet through two folders rather than one. Those",
+            "are what your partner calls them; your own names for them can differ",
+            "-- a mapped drive letter, or folders you named yourself -- so check",
+            "them against the folders you were told to use rather than expecting",
+            "the names to match.",
+          ];
     return endpoint.path === undefined
       ? [
           "Your partner's console could not put a name to the shared folder, so",
@@ -183,6 +225,7 @@ function rendezvousLines(endpoint: AcceptKitEndpoint): Array<string> {
           "yourself -- so check it against the folder you were told to use",
           "rather than expecting the two to match.",
         ];
+  }
   const port = endpoint.port === undefined ? "" : `:${endpoint.port}`;
   return [
     `  SFTP server:    ${printable(endpoint.host)}${port}`,
@@ -355,13 +398,21 @@ function retainLines(endpoint: AcceptKitEndpoint): Array<string> {
     endpoint.outboundPath !== undefined;
   const persistence =
     endpoint.channel === "filedrop"
-      ? [
-          "The files stay in the shared folder the two of you meet in -- your",
-          "copy of it and your partner's alike. Nothing removes them when the",
-          "exchange ends, so both of you must start from an empty shared folder,",
-          "and clearing it afterwards is a decision the two of you make",
-          "deliberately.",
-        ]
+      ? endpoint.split === true
+        ? [
+            "The files stay in both folders above -- the one you write into and",
+            "the one you read from -- your copies of them and your partner's",
+            "alike. Nothing removes them when the exchange ends, so both folders",
+            "must start empty on both sides, and clearing them afterwards is a",
+            "decision the two of you make deliberately.",
+          ]
+        : [
+            "The files stay in the shared folder the two of you meet in -- your",
+            "copy of it and your partner's alike. Nothing removes them when the",
+            "exchange ends, so both of you must start from an empty shared folder,",
+            "and clearing it afterwards is a decision the two of you make",
+            "deliberately.",
+          ]
       : split
         ? [
             "The files stay in both directories above -- the one you write to",
@@ -414,12 +465,17 @@ function opening(
   { retainFiles }: BilateralSettings,
 ): Array<string> {
   const channelLines =
-    endpoint.channel === "filedrop"
-      ? [
-          "This one runs over a shared folder you and your partner can both",
-          "reach.",
-        ]
-      : ["This one runs over an SFTP server."];
+    endpoint.channel !== "filedrop"
+      ? ["This one runs over an SFTP server."]
+      : endpoint.split === true
+        ? [
+            "This one runs over two folders you and your partner can both reach:",
+            "you write your half into one and read their half out of the other.",
+          ]
+        : [
+            "This one runs over a shared folder you and your partner can both",
+            "reach.",
+          ];
   return [
     RULE,
     "PSILINK -- HOW TO ACCEPT THIS EXCHANGE",
@@ -460,21 +516,28 @@ function opening(
     '  --user "$(id -u):$(id -g)"',
     "",
     "That runs psilink as you: every folder you can use, it can use --",
-    ...(endpoint.channel === "filedrop"
+    ...(endpoint.channel !== "filedrop"
       ? [
-          "the folder holding your CSV file and your own copy of the shared",
-          "folder -- and everything it writes stays yours afterwards.",
-        ]
-      : [
           "the folder holding your CSV file and the folder holding your",
           "password file -- and everything it writes stays yours afterwards.",
-        ]),
+        ]
+      : endpoint.split === true
+        ? [
+            "the folder holding your CSV file and your own copies of the two",
+            "shared folders -- and everything it writes stays yours afterwards.",
+          ]
+        : [
+            "the folder holding your CSV file and your own copy of the shared",
+            "folder -- and everything it writes stays yours afterwards.",
+          ]),
     "",
     "If you cannot change the commands, the other way is to hand a single",
     "folder over to user 1000. From inside the folder that holds your CSV",
-    ...(endpoint.channel === "filedrop"
-      ? ["file -- your own folder, never the shared one -- run:"]
-      : ["file, run:"]),
+    ...(endpoint.channel !== "filedrop"
+      ? ["file, run:"]
+      : endpoint.split === true
+        ? ["file -- your own folder, never a shared one -- run:"]
+        : ["file -- your own folder, never the shared one -- run:"]),
     "",
     "  sudo chown 1000:1000 .",
     "",
@@ -525,6 +588,136 @@ function repointStepOpening(named: boolean): Array<string> {
         "   psilink needs is where that folder is on your machine. Open",
         "   psilink.yaml and set:",
       ];
+}
+
+/** The split rendezvous's counterpart to {@link repointStepOpening}. Accepting
+ * mirror-swaps the inviter's pair, so what it wrote is already this reader's own
+ * inbound and outbound; only the machine-local locations are theirs to fill in. */
+function splitRepointStepOpening(named: boolean): Array<string> {
+  return named
+    ? [
+        "2. Point psilink at your own copies of the two folders. Accepting wrote",
+        "   your partner's own names for them; what psilink needs is where those",
+        "   folders are on your machine. Open psilink.yaml and set:",
+      ]
+    : [
+        "2. Point psilink at your own copies of the two folders. Accepting wrote",
+        "   placeholders for them, not names either of you chose; what psilink",
+        "   needs is where those folders are on your machine. Open psilink.yaml",
+        "   and set:",
+      ];
+}
+
+/** The accept step both filedrop bodies open on: run accept, then the three
+ * caveats a reader needs before the next step (what to substitute, keeping the
+ * code out of the shell history, and the Windows path form). */
+function filedropAcceptStep(version: string | undefined): Array<string> {
+  return [
+    "1. Accept the invitation. This prints the terms, asks you to confirm,",
+    "   and on a yes writes psilink.yaml and .psilink.key into the folder:",
+    "",
+    `     ${acceptCommand(version)}`,
+    "",
+    `   Replace ${INVITATION_PLACEHOLDER} with the invitation code your`,
+    "   partner sent -- the long block of letters and numbers, not the web",
+    "   link -- and your-file.csv with your CSV file's name. Naming your",
+    "   file is what lets the display list the columns you would send",
+    "   before you confirm; without it, that list is worked out from your",
+    "   file only when the exchange runs, and you are not asked again.",
+    "",
+    "   To keep the code out of your command history, save it into a file",
+    "   named invitation.txt next to your CSV and write @invitation.txt in",
+    "   its place.",
+    "",
+    '   On Windows PowerShell, replace "$PWD" with the folder\'s full path in',
+    "   every command on this sheet, for example",
+    `   -v "C:\\Users\\you\\exchange":${WORK_MOUNT}`,
+    "",
+  ];
+}
+
+/**
+ * The split filedrop body: the same two commands as the single-folder route, over
+ * two mounts instead of one.
+ *
+ * Its situation A differs from the single-folder route's in the one way that
+ * matters: the PowerShell launchers provision a single rendezvous folder, so they
+ * cannot start this exchange. Saying so plainly, with the two ways forward, is what
+ * keeps a Windows network-drive partner from following a route that ends in a
+ * console the exchange cannot run.
+ */
+function filedropSplitBody(
+  version: string | undefined,
+  named: boolean,
+  settings: BilateralSettings,
+): Array<string> {
+  return [
+    ...heading("STEP 1 -- WHICH KIND OF FOLDERS ARE YOURS?"),
+    "This exchange meets through two folders rather than one. The answer",
+    "decides everything below. Pick one.",
+    "",
+    "  A. A Windows network drive or a DFS path. Either folder opens in File",
+    "     Explorer as Z:\\Exchange, \\\\fileserver\\exchange, or a DFS namespace",
+    "     your IT department set up.",
+    "",
+    "  B. Folders that sync on this PC, or any other folders Docker can open:",
+    "     synced folders under your own user folder (OneDrive, Dropbox,",
+    "     Egnyte and the like), plain local folders, or shares you mounted",
+    "     yourself on macOS or Linux.",
+    "",
+    ...heading("A -- A WINDOWS NETWORK DRIVE OR A DFS PATH"),
+    "Docker cannot see drive letters or network paths: they belong to",
+    "Windows, not to the small Linux virtual machine Docker runs inside. The",
+    "psilink launcher scripts that settle that for you cover a single shared",
+    "folder, not the two this exchange uses, so they cannot start this one.",
+    "",
+    "Two ways forward, and either is fine:",
+    "",
+    "  * Ask your IT department to make both folders reachable as ordinary",
+    "    paths on this machine. Once they open as folders rather than as",
+    "    drive letters or network paths, they are situation B below.",
+    "",
+    "  * Ask your partner for a new invitation over a single shared folder",
+    "    instead. Nothing is lost by starting again.",
+    "",
+    "(On macOS or Linux a network share is not situation A: mount it the way",
+    'you usually do -- Finder\'s "Connect to Server", or your file manager --',
+    "and once it shows as a folder, it is situation B below.)",
+    "",
+    ...heading("B -- FOLDERS DOCKER CAN OPEN"),
+    "Two commands, both run from the folder that holds your CSV file. Use a",
+    "folder of your own, neither of the shared folders: accepting writes",
+    "psilink.yaml and .psilink.key (your key file) beside your CSV, and",
+    "anything inside a shared folder can be read and changed by everyone",
+    "with access to it.",
+    "",
+    ...filedropAcceptStep(version),
+    ...splitRepointStepOpening(named),
+    "",
+    "     connection:",
+    "       channel: filedrop",
+    `       inbound_path: ${INBOUND_SYNC_MOUNT}`,
+    `       outbound_path: ${OUTBOUND_SYNC_MOUNT}`,
+    "",
+    "   Then mount your two folders there when you run the exchange -- the",
+    `   one you READ your partner's files out of at ${INBOUND_SYNC_MOUNT}, the one you`,
+    `   WRITE your own into at ${OUTBOUND_SYNC_MOUNT}:`,
+    "",
+    `     docker run --rm -v "$PWD":${WORK_MOUNT} ` +
+      `-v "/path/to/the/folder/you/read":${INBOUND_SYNC_MOUNT} ` +
+      `-v "/path/to/the/folder/you/write":${OUTBOUND_SYNC_MOUNT} ` +
+      `${imageReference(version)} exchange${bilateralFlag(settings)} ` +
+      `your-file.csv results.csv`,
+    "",
+    "   Getting the two the wrong way round is the one mistake to watch for:",
+    "   the exchange would then wait for files in the folder it is writing",
+    "   into and never meet your partner. Replace your-file.csv with your",
+    "   CSV file's name. The matched result is written to results.csv beside",
+    "   your input. You and your partner each run your own half; whichever",
+    "   runs first waits for the other.",
+    "",
+    ...bilateralFlagLines(settings),
+  ];
 }
 
 /** The filedrop routing decision: a network drive or DFS path needs the
@@ -591,26 +784,7 @@ function filedropBody(
     "anything inside the shared folder can be read and changed by everyone",
     "with access to it.",
     "",
-    "1. Accept the invitation. This prints the terms, asks you to confirm,",
-    "   and on a yes writes psilink.yaml and .psilink.key into the folder:",
-    "",
-    `     ${acceptCommand(version)}`,
-    "",
-    `   Replace ${INVITATION_PLACEHOLDER} with the invitation code your`,
-    "   partner sent -- the long block of letters and numbers, not the web",
-    "   link -- and your-file.csv with your CSV file's name. Naming your",
-    "   file is what lets the display list the columns you would send",
-    "   before you confirm; without it, that list is worked out from your",
-    "   file only when the exchange runs, and you are not asked again.",
-    "",
-    "   To keep the code out of your command history, save it into a file",
-    "   named invitation.txt next to your CSV and write @invitation.txt in",
-    "   its place.",
-    "",
-    '   On Windows PowerShell, replace "$PWD" with the folder\'s full path in',
-    "   every command on this sheet, for example",
-    `   -v "C:\\Users\\you\\exchange":${WORK_MOUNT}`,
-    "",
+    ...filedropAcceptStep(version),
     ...repointStepOpening(named),
     "",
     "     connection:",
@@ -749,9 +923,16 @@ export function buildAcceptKit({
   const version = releaseVersion(buildVersion);
   const lines = [
     ...opening(endpoint, settings),
-    ...(endpoint.channel === "filedrop"
-      ? filedropBody(version, endpoint.path !== undefined, settings)
-      : sftpBody(version, settings)),
+    ...(endpoint.channel !== "filedrop"
+      ? sftpBody(version, settings)
+      : endpoint.split === true
+        ? filedropSplitBody(
+            version,
+            endpoint.inboundPath !== undefined &&
+              endpoint.outboundPath !== undefined,
+            settings,
+          )
+        : filedropBody(version, endpoint.path !== undefined, settings)),
     ...closing(version),
   ];
   return `${lines.join("\n")}\n`;

@@ -286,6 +286,11 @@ export interface AcceptorLaunchStepBlocks {
    * {@link exchangeFilesBlocked} because the two are separate cards: folding them
    * together would send the operator to the wrong one. */
   connectionTuningBlocked: boolean;
+  /** The requirement a split rendezvous makes of the file-handling choices, in the
+   * console's own words, or undefined when it is met. Carried as its own SENTENCE
+   * rather than a flag, because the remedy is the one control to turn on and the
+   * blocked-launch line is where the operator meets it. */
+  splitDirectoryProblem?: string;
 }
 
 const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
@@ -321,8 +326,9 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  * unresolved surface and an operator working down the screen is sent to the first
  * thing they meet: the verdict, then the count-only refusal, then the
  * declaration conflict, then the over-long name notice, then the grid's
- * identifier rule, then the cleaning steps, then the connection, file-handling,
- * and connection-tuning cards below them. Each names what to fix on this screen,
+ * identifier rule, then the cleaning steps, then the connection, the split
+ * rendezvous's retain-mode requirement, and the file-handling and
+ * connection-tuning cards below them. Each names what to fix on this screen,
  * in the words of the notice it points at -- naming the card it is about, since
  * the collapsed cards below show no problem of their own until opened.
  */
@@ -364,6 +370,8 @@ export function acceptorLaunchBlockedReason(
     return "Finish or fix the highlighted cleaning steps above before you can start.";
   if (stepBlocks.connectionBlocked)
     return "Set up the SFTP connection above before you can start.";
+  if (stepBlocks.splitDirectoryProblem !== undefined)
+    return stepBlocks.splitDirectoryProblem;
   if (stepBlocks.exchangeFilesBlocked)
     return "Resolve the file-handling settings above before you can start.";
   if (stepBlocks.connectionTuningBlocked)

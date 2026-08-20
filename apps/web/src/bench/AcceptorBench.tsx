@@ -93,6 +93,7 @@ import { acceptorTimelineSteps } from "./exchangeRun";
 import { consoleAcquiredCsv } from "./consoleAcquiredCsv";
 import { restorablePosition } from "./stepRestore";
 import { seedRows } from "./inviterModel";
+import { splitRendezvousRetainProblem } from "./filedropRendezvousChoice";
 import styles from "./bench.module.css";
 import { useAcceptorExchange } from "./useAcceptorExchange";
 import { useStepHistory } from "./useStepHistory";
@@ -329,17 +330,18 @@ export function AcceptorBench() {
   }, []);
 
   // A console accept whose endpoint the appliance cannot run, decided by the endpoint
-  // SHAPE ({@link acceptUnsupported}): a WebRTC accept is out of scope here, a
-  // split-directory file-drop needs the command-line tool, and a single-directory
-  // file-drop needs a rendezvous mount. Surfaced at the review step BEFORE consent or
-  // intake, so the operator meets an honest block naming where it CAN run rather than a
-  // doomed run. Off the console every admitted endpoint runs in the browser, so this is
-  // undefined there.
+  // SHAPE against this appliance's own provisioning ({@link acceptUnsupported}): a
+  // WebRTC accept is out of scope here, a split-directory SFTP accept needs the
+  // command-line tool, and a file-drop accept needs mounts of the shape the
+  // invitation names. Surfaced at the review step BEFORE consent or intake, so the
+  // operator meets an honest block naming where it CAN run rather than a doomed run.
+  // Off the console every admitted endpoint runs in the browser, so this is undefined
+  // there.
   const unsupported =
     consoleBuild && decode.status === "ready"
       ? acceptUnsupported(
           decode.invitation.endpoint,
-          rendezvous?.configured === true,
+          rendezvous ?? { configured: false },
         )
       : undefined;
 
@@ -1400,6 +1402,14 @@ export function AcceptorBench() {
               connectionTuningBlocked={
                 acceptServerJob &&
                 connectionTuningProblems(connectionTuning).length > 0
+              }
+              splitDirectoryProblem={
+                acceptServerJob
+                  ? splitRendezvousRetainProblem(
+                      rendezvous,
+                      exchangeFiles.retainFiles,
+                    )
+                  : undefined
               }
               onMetadataChange={changeMetadata}
               onRemap={remapColumn}

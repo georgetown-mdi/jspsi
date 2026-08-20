@@ -24,6 +24,7 @@ import { ConnectionTuningCard } from "./ConnectionTuningCard";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
 import { splitDirectoryRetainProblem } from "./sftpConnectionChoice";
+import { splitRendezvousRetainProblem } from "./filedropRendezvousChoice";
 import styles from "./bench.module.css";
 
 import type {
@@ -35,6 +36,7 @@ import type {
 } from "./inviterModel";
 import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
+import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { OutputDirection } from "@psi/advancedInvite";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
@@ -66,7 +68,7 @@ export function ReviewCreateSection({
   minting,
   sftpConnection,
   sftpSaveFilePreferred,
-  rendezvousConfigured,
+  rendezvous,
   exchangeFiles,
   exchangeFilesOpen,
   onExchangeFiles,
@@ -97,10 +99,12 @@ export function ReviewCreateSection({
   /** Whether the operator deliberately chose to run SFTP through their own
    * command-line tool (save-a-file) instead of authoring a connection here. */
   sftpSaveFilePreferred: boolean;
-  /** Whether the appliance has a rendezvous directory mounted (`JOB_RENDEZVOUS_DIR`
-   * set). The filedrop card runs here when true and renders disabled with a config
-   * hint when false. Off a console build it is unused (filedrop saves a file). */
-  rendezvousConfigured: boolean;
+  /** The appliance's rendezvous provisioning, or undefined before it resolves (or
+   * off a console). The filedrop card runs here when it reports a mount and renders
+   * disabled with the appliance's own reason when it does not; a split pair also
+   * carries the retain-mode precondition into this step's create gate. Off a console
+   * build it is unused (filedrop saves a file). */
+  rendezvous: JobRendezvousConfig | undefined;
   /** The operator's file-handling choices for a run the appliance conducts. Only
    * the console's file-sync transports carry them, so the card renders there. */
   exchangeFiles: ExchangeFilesDraft;
@@ -134,6 +138,7 @@ export function ReviewCreateSection({
 }) {
   const consoleBuild = isConsoleBuild();
   const sftpConfigured = sftpConnection != null;
+  const rendezvousConfigured = rendezvous?.configured === true;
   const available = availableTransports(
     consoleBuild,
     sftpConfigured,
@@ -162,6 +167,12 @@ export function ReviewCreateSection({
     sftpConfigured,
     rendezvousConfigured,
     sftpSaveFilePreferred,
+    {
+      ...(rendezvous?.split === true ? { split: true } : {}),
+      ...(rendezvous?.problem !== undefined
+        ? { problem: rendezvous.problem }
+        : {}),
+    },
   );
   // An sftp exchange chosen to run here cannot be created until a connection is
   // set up: block the seal and say so, rather than minting a code with no
@@ -188,16 +199,18 @@ export function ReviewCreateSection({
   // withholds it on the shared-directory transport.
   const tuningCapabilities =
     transport === "sftp" ? SFTP_CONNECTION_TUNING : FILEDROP_CONNECTION_TUNING;
-  // The authored connection and the retain-mode toggle are separate cards, so a
-  // split-directory connection can outlive the retain choice it required: hold
-  // the create here, where both are known, rather than minting a partner-facing
-  // accept kit for a rendezvous the run would then refuse. Read only where this
-  // console conducts the run, since the file-handling choices reach no other
-  // transport's run.
-  const splitDirectoryProblem =
-    exchangeFilesOffered && transport === "sftp"
+  // The rendezvous and the retain-mode toggle are settled in separate places, so
+  // a split rendezvous -- an authored split SFTP connection, or an appliance
+  // provisioned with two filedrop mounts -- can outlive the retain choice it
+  // required: hold the create here, where both are known, rather than minting a
+  // partner-facing accept kit for a rendezvous the run would then refuse. Read
+  // only where this console conducts the run, since the file-handling choices
+  // reach no other transport's run.
+  const splitDirectoryProblem = !exchangeFilesOffered
+    ? undefined
+    : transport === "sftp"
       ? splitDirectoryRetainProblem(sftpConnection, exchangeFiles.retainFiles)
-      : undefined;
+      : splitRendezvousRetainProblem(rendezvous, exchangeFiles.retainFiles);
   const canCreate =
     problems.length === 0 &&
     !minting &&

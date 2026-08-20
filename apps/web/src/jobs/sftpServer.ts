@@ -230,14 +230,15 @@ interface CredentialRefExclusion {
 
 /**
  * The directories a credential `@path` reference must not resolve under: the job
- * data root (client-written per job) and, when configured distinctly, the
- * rendezvous mount (partner-reachable through folder sync). Each is added both as
- * its lexical resolve and -- when it exists -- its realpath, so a symlinked
- * exclusion dir is caught too. Duplicates are dropped.
+ * data root (client-written per job) and every configured rendezvous mount
+ * (partner-reachable through folder sync) -- one on a single-mount console, both
+ * legs on a split-provisioned appliance, since either leg is a folder the partner
+ * syncs. Each is added both as its lexical resolve and -- when it exists -- its
+ * realpath, so a symlinked exclusion dir is caught too. Duplicates are dropped.
  */
 function credentialRefExclusions(
   dataRoot: string,
-  rendezvousDir: string | undefined,
+  rendezvousDirs: ReadonlyArray<string>,
 ): Array<CredentialRefExclusion> {
   const exclusions: Array<CredentialRefExclusion> = [];
   const seen = new Set<string>();
@@ -253,7 +254,7 @@ function credentialRefExclusions(
     }
   };
   add(path.resolve(dataRoot), "the job data root", "dataRoot");
-  if (rendezvousDir !== undefined)
+  for (const rendezvousDir of rendezvousDirs)
     add(path.resolve(rendezvousDir), "the rendezvous directory", "rendezvous");
   return exclusions;
 }
@@ -342,7 +343,7 @@ export interface ValidatedAuthoredSftpServer {
 export function validateAuthoredSftpServer(
   rawBody: unknown,
   dataRoot: string,
-  rendezvousDir: string | undefined,
+  rendezvousDirs: ReadonlyArray<string>,
   secretsDir?: string,
   scratchDir?: string,
 ): ValidatedAuthoredSftpServer {
@@ -392,7 +393,7 @@ export function validateAuthoredSftpServer(
   try {
     const { entry, credentialWarnings } = validateServerEntry(
       rawEntry,
-      credentialRefExclusions(dataRoot, rendezvousDir),
+      credentialRefExclusions(dataRoot, rendezvousDirs),
     );
     return resolved.materializedPath !== undefined
       ? {

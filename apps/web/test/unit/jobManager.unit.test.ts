@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -7,15 +8,21 @@ import * as cliDriver from "@jobs/cliDriver";
 import {
   ExchangeBusyError,
   JobManager,
+  JobRendezvousRetainRequiredError,
   JobRendezvousUnavailableError,
   SftpUnavailableError,
 } from "@jobs/jobManager";
+import {
+  HANDOFF_INBOUND_DIRECTORY_PLACEHOLDER,
+  HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER,
+} from "@jobs/handoff";
 import { generateJobId, writeJobFile } from "@jobs/workdir";
 import { JobInputNotFoundError } from "@jobs/workInputs";
 
 import {
   STUB_CLI_PATH,
   TEST_HOST_KEY_FINGERPRINT,
+  composedConnection,
   composedServer,
   tempDataRoot,
   validInputFileIntent,
@@ -58,6 +65,8 @@ function makeManager(options: {
   eventBufferCap?: number;
   jobInputDir?: string;
   jobRendezvousDir?: string;
+  jobRendezvousOutboundDir?: string;
+  jobRendezvousProblem?: string;
   jobSecretsDir?: string;
   credentialScratchDir?: string;
   recordJson?: string;
@@ -100,6 +109,8 @@ function makeManager(options: {
     eventBufferCap: options.eventBufferCap,
     jobInputDir: options.jobInputDir,
     jobRendezvousDir: rendezvousDir,
+    jobRendezvousOutboundDir: options.jobRendezvousOutboundDir,
+    jobRendezvousProblem: options.jobRendezvousProblem,
     jobSecretsDir: options.jobSecretsDir,
     credentialScratchDir: options.credentialScratchDir,
     childEnv,
@@ -1067,6 +1078,137 @@ describe("filedrop rendezvous facilitation", () => {
       (entry) => entry.event.type === "warning",
     );
     expect(warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe("a split-provisioned filedrop appliance", () => {
+  /** A manager mounted with two disjoint, existing rendezvous legs. */
+  function splitManager(options: { events?: Array<unknown> } = {}): {
+    manager: JobManager;
+    inbound: string;
+    outbound: string;
+  } {
+    const inbound = rendezvousRoot();
+    const outbound = rendezvousRoot();
+    return {
+      manager: makeManager({
+        ...options,
+        exitCode: 0,
+        jobRendezvousDir: inbound,
+        jobRendezvousOutboundDir: outbound,
+      }),
+      inbound,
+      outbound,
+    };
+  }
+
+  /** The retain trio a split rendezvous requires, as the console's file-handling
+   * card resolves it. */
+  const RETAIN_OPTIONS = {
+    retainFiles: true,
+    timestampInFilename: true,
+    locklessRendezvous: true,
+  };
+
+  test("composes both mounts as the inbound/outbound pair, never a shared path", async () => {
+    const { manager, inbound, outbound } = splitManager({
+      events: [RESULT_EVENT],
+    });
+    const id = await manager.createJob(
+      validIntent({ options: RETAIN_OPTIONS }),
+    );
+    const record = manager.getJob(id)!;
+    const connection = composedConnection(
+      fs.readFileSync(`${record.workdir}/psilink.yaml`, "utf8"),
+    );
+    expect(connection.channel).toBe("filedrop");
+    expect(connection.inbound_path).toBe(inbound);
+    expect(connection.outbound_path).toBe(outbound);
+    expect(connection.path).toBeUndefined();
+  });
+
+  test("refuses a job created without retain mode, leaving nothing on disk", async () => {
+    const { manager } = splitManager();
+    await expect(manager.createJob(validIntent())).rejects.toBeInstanceOf(
+      JobRendezvousRetainRequiredError,
+    );
+    // The refusal lands before the slot is claimed, so the next create is free to
+    // take it rather than meeting a busy exchange.
+    expect(manager.occupiedSlotId()).toBeNull();
+  });
+
+  test("refuses every filedrop create while the provisioning is incoherent", async () => {
+    const manager = makeManager({
+      jobRendezvousProblem:
+        "the two rendezvous folders resolve to one directory",
+    });
+    await expect(
+      manager.createJob(validIntent({ options: RETAIN_OPTIONS })),
+    ).rejects.toBeInstanceOf(JobRendezvousUnavailableError);
+  });
+
+  test("preflights each leg by name, so a fault names the folder it is in", async () => {
+    const inbound = rendezvousRoot();
+    const outbound = path.join(tempDataRoot("rvz-out-missing"), "not-created");
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      jobRendezvousDir: inbound,
+      jobRendezvousOutboundDir: outbound,
+    });
+    fs.writeFileSync(path.join(inbound, "console-hello.json"), "");
+    const id = await manager.createJob(
+      validIntent({ options: RETAIN_OPTIONS }),
+    );
+    const record = manager.getJob(id)!;
+    // The relay event's payload is an open record, so the message reads as
+    // unknown; narrow it here rather than asserting on a cast.
+    const warnings = record.events
+      .map((entry) => entry.event)
+      .filter((event) => event.type === "warning")
+      .map((event) => event.message)
+      .filter((message) => typeof message === "string");
+    expect(
+      warnings.some(
+        (message) =>
+          message.includes("the inbound rendezvous directory") &&
+          message.includes("is not empty"),
+      ),
+    ).toBe(true);
+    expect(
+      warnings.some(
+        (message) =>
+          message.includes("the outbound rendezvous directory") &&
+          message.includes("does not exist yet"),
+      ),
+    ).toBe(true);
+  });
+
+  test("carries the outbound leg to a zero-setup run as --outbound-path", async () => {
+    const spawnZeroSetup = vi.spyOn(cliDriver, "spawnZeroSetupJob");
+    const { manager, inbound, outbound } = splitManager({
+      events: [RESULT_EVENT],
+    });
+    await manager.createJob(validZeroSetupIntent({ options: RETAIN_OPTIONS }));
+    const connectionArgs = spawnZeroSetup.mock.calls[0][0].connectionArgs;
+    expect(connectionArgs[0]).toBe(pathToFileURL(inbound).href);
+    expect(connectionArgs).toContain(`--outbound-path=${outbound}`);
+  });
+
+  test("places both legs on the hand-off template as placeholders", async () => {
+    const { manager, inbound, outbound } = splitManager({
+      events: [RESULT_EVENT],
+    });
+    const id = await manager.createJob(
+      validIntent({ options: RETAIN_OPTIONS }),
+    );
+    const handoff = manager.getJobHandoff(id)!;
+    const yaml =
+      handoff.template.kind === "config" ? handoff.template.yaml : "";
+    expect(yaml).toContain(HANDOFF_INBOUND_DIRECTORY_PLACEHOLDER);
+    expect(yaml).toContain(HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER);
+    expect(yaml).not.toContain(inbound);
+    expect(yaml).not.toContain(outbound);
   });
 });
 

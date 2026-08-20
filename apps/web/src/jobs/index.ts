@@ -7,7 +7,11 @@ import {
   isJobApiEnabled,
   readJobApiConfig,
 } from "./gate";
-import { resolveJobRendezvousDir, useJobRendezvousDir } from "./jobRendezvous";
+import {
+  jobRendezvousDirs,
+  resolveJobRendezvousProvisioning,
+  useJobRendezvousProvisioning,
+} from "./jobRendezvous";
 import {
   resolveSftpCredentialScratchDir,
   setupSftpCredentialScratchDir,
@@ -35,7 +39,7 @@ declare global {
  * Prepare the pasted-credential scratch directory at server startup when the job
  * API is enabled, memoizing the resolved path for the lazy manager construction.
  * Fail-closed: the setup asserts the directory resolves strictly outside every
- * operator mount -- the data root, the rendezvous directory, the secrets mount,
+ * operator mount -- the data root, every rendezvous mount, the secrets mount,
  * and the work-input directory (a misconfiguration refuses the boot) -- creates it
  * owner-only, and sweeps any credential a prior run orphaned. A no-op when the API
  * is disabled -- no manager is constructed, so no paste can be authored. The
@@ -51,10 +55,29 @@ export function bootSftpCredentialScratchDir(
   globalThis.jobSftpCredentialScratchDir = setupSftpCredentialScratchDir(
     resolveSftpCredentialScratchDir(env),
     config.dataRoot,
-    resolveJobRendezvousDir(env),
+    jobRendezvousDirs(resolveJobRendezvousProvisioning(env)),
     useJobSecretsDir(env),
     useJobInputDir(env),
   );
+}
+
+/**
+ * Log a startup diagnostic when a filedrop exchange cannot run as this appliance is
+ * provisioned -- an incoherent split rendezvous pair (see `rendezvousSplitProblem`).
+ * Non-fatal, and deliberately not a refused boot: the fault stops only the filedrop
+ * transport, which the console disables with the same sentence, while an SFTP
+ * exchange on the same appliance is unaffected. Logged all the same, because an
+ * operator who provisioned a second mount and never opened the invite chooser would
+ * otherwise learn of it only from a create that refuses. A no-op when the job API is
+ * disabled and when the provisioning is coherent.
+ */
+export function warnJobRendezvousProblem(
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  if (!isJobApiEnabled(readJobApiConfig(env))) return;
+  const { problem } = useJobRendezvousProvisioning(env);
+  if (problem === undefined) return;
+  log.warn(problem);
 }
 
 /**
@@ -92,7 +115,7 @@ export function useJobManager(
   if (!isJobApiEnabled(config)) return null;
   if (globalThis.jobManagerInstance === undefined) {
     const jobInputDir = useJobInputDir();
-    const jobRendezvousDir = useJobRendezvousDir();
+    const rendezvous = useJobRendezvousProvisioning();
     const jobSecretsDir = useJobSecretsDir();
     // The scratch dir is prepared at boot (bootSftpCredentialScratchDir); read the
     // memoized path so a paste materializes there. Absent only if the boot setup
@@ -101,7 +124,15 @@ export function useJobManager(
     globalThis.jobManagerInstance = new JobManager({
       dataRoot: config.dataRoot,
       ...(jobInputDir !== undefined ? { jobInputDir } : {}),
-      ...(jobRendezvousDir !== undefined ? { jobRendezvousDir } : {}),
+      ...(rendezvous.dir !== undefined
+        ? { jobRendezvousDir: rendezvous.dir }
+        : {}),
+      ...(rendezvous.outboundDir !== undefined
+        ? { jobRendezvousOutboundDir: rendezvous.outboundDir }
+        : {}),
+      ...(rendezvous.problem !== undefined
+        ? { jobRendezvousProblem: rendezvous.problem }
+        : {}),
       ...(jobSecretsDir !== undefined ? { jobSecretsDir } : {}),
       ...(credentialScratchDir !== undefined ? { credentialScratchDir } : {}),
     });
