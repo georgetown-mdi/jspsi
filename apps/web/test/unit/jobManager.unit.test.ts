@@ -252,6 +252,87 @@ describe("JobManager end-to-end via the stub CLI", () => {
     expect(String(terminal.message)).toContain("stream broke");
   });
 
+  test("exit 73 beside the CLI's result terminal completes with a persistence loss", async () => {
+    const manager = makeManager({
+      events: [
+        {
+          v: 1,
+          type: "warning",
+          message: "the exchange record was not written",
+        },
+        RESULT_EVENT,
+      ],
+      exitCode: 73,
+      outputFile: "a,b\n1,2\n",
+    });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    await vi.waitFor(() => expect(record.terminal).not.toBeNull());
+    expect(record.terminal).toEqual({
+      outcome: "completedWithPersistenceLoss",
+      exitCode: 73,
+      signal: null,
+    });
+    // The exchange completed and its result file is on disk, so the artifact
+    // promise stands: the loss rides the outcome, never the download gate.
+    expect(record.status).toBe("succeeded");
+    expect(manager.getJobView(id)?.resultAvailable).toBe(true);
+    // The CLI's own warning is the prose naming what was lost, relayed as it
+    // stands; the manager composes nothing over the terminal it emitted.
+    expect(record.events[record.events.length - 1].event.type).toBe("result");
+    expect(
+      record.events.some(
+        (entry) =>
+          entry.event.type === "warning" &&
+          String(entry.event.message).includes("exchange record"),
+      ),
+    ).toBe(true);
+  });
+
+  test("exit 73 beside an output error terminal keeps the loss outcome", async () => {
+    // The one persistence loss that is the result file itself: the CLI reports it
+    // as its terminal error, so there is no artifact to promise -- but the run
+    // still must not be repeated.
+    const manager = makeManager({
+      events: [
+        {
+          v: 1,
+          type: "error",
+          category: "output",
+          message: "no space left on device",
+        },
+      ],
+      exitCode: 73,
+    });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    await vi.waitFor(() => expect(record.terminal).not.toBeNull());
+    expect(record.terminal?.outcome).toBe("completedWithPersistenceLoss");
+    expect(record.status).toBe("failed");
+    expect(manager.getJobView(id)?.resultAvailable).toBe(false);
+    const terminal = record.events[record.events.length - 1].event;
+    expect(terminal.category).toBe("output");
+  });
+
+  test("exit 73 without a terminal event synthesizes an output terminal", async () => {
+    const manager = makeManager({ exitCode: 73 });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    await vi.waitFor(() => expect(record.terminal).not.toBeNull());
+    expect(record.terminal?.outcome).toBe("completedWithPersistenceLoss");
+    expect(record.status).toBe("failed");
+    const terminal = record.events[record.events.length - 1].event;
+    expect(terminal.type).toBe("error");
+    // `output`, not the retryable `exchange` every other broken stream takes:
+    // that one renders a Try again control, which is the response this exit code
+    // exists to prevent.
+    expect(terminal.category).toBe("output");
+    expect(String(terminal.message)).toContain("lost local write");
+  });
+
   test("an interrupt without a terminal event synthesizes a cancelled error", async () => {
     const manager = makeManager({ exitCode: 130 });
     const id = await manager.createJob(validIntent());

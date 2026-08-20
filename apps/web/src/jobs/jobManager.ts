@@ -926,8 +926,21 @@ export class JobManager {
    *   synthesize a `cancelled`-flavored error terminal;
    * - a succeeded exit with no terminal event (the CLI normally emits a `result`;
    *   this covers a supervisor that missed it) synthesizes a `result`;
+   * - a persistence-loss exit with no terminal event synthesizes an `output`
+   *   terminal, the category whose seat rendering offers no way to run again:
+   *   the exchange completed, so the one response the exit code exists to
+   *   prevent is a re-run, and the retryable `exchange` terminal below invites
+   *   exactly that;
    * - any other exit without a terminal event means the stream broke, so
    *   synthesize a failure terminal.
+   *
+   * The exit decides the OUTCOME; the terminal event decides the STATUS, which is
+   * what the result, record, and keys routes gate on. A persistence loss with the
+   * CLI's own `result` terminal is therefore `succeeded` and serves its artifacts
+   * -- the exchange completed and the result file is on disk -- while the loss is
+   * carried on `terminal.outcome` and named by the run's warnings. With no
+   * terminal event at all the console saw no artifact announced, so the status
+   * stays `failed` and nothing is offered, exactly as for any other broken stream.
    *
    * This is the only slot-release point besides the pre-spawn create failure: it
    * fires on the child's `close` (or a spawn `error`), so a killed child is
@@ -962,6 +975,17 @@ export class JobManager {
           v: 1,
           type: "result",
           resultWritten: true,
+        });
+      else if (state.outcome === "completedWithPersistenceLoss")
+        this.synthesizeTerminal(record, {
+          v: 1,
+          type: "error",
+          category: "output",
+          message:
+            "the run reported a lost local write and its event stream broke " +
+            "before naming which one, so this appliance cannot confirm which " +
+            "files reached disk; look in the folder it writes its exchange " +
+            "files to",
         });
       else
         this.synthesizeTerminal(record, {

@@ -128,16 +128,21 @@ export function failureFor(
     };
   }
   if (category === "output") {
-    // The exchange succeeded; only results-file generation failed. The user
-    // must not be told to re-run a privacy-sensitive exchange, so unlike the
-    // other categories this alert offers no way to run again. Sanitized at
-    // the display boundary: the output error is local, but the alert is
-    // operator-facing, so escape it like any other.
+    // The exchange succeeded; only a local write failed. The user must not be
+    // told to re-run a privacy-sensitive exchange, so unlike the other
+    // categories this alert offers no way to run again -- and it says so, since
+    // an operator who reads a failure and finds no retry control looks for one
+    // elsewhere (the console's own start-over, or the command line) rather than
+    // concluding the run must not be repeated. Sanitized at the display
+    // boundary: the output error is local, but the alert is operator-facing, so
+    // escape it like any other.
     return {
       category,
       title: "Results unavailable",
       message:
-        "The linkage completed, but generating the results file failed: " +
+        "The linkage completed, so do not run this exchange again - a second " +
+        "run would send your data for an exchange that already happened. On " +
+        "this machine, generating the results file failed: " +
         sanitizeForDisplay(errorMessage(error)),
     };
   }
