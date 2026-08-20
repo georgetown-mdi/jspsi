@@ -77,7 +77,7 @@ Date these linkage terms were last modified. A mismatch produces a warning indic
 *Consistency:* mandatory
 
 - `psi` -- reveals the intersection (matched records and their identifiers). Intended for operational data exchange.
-- `psi-c` -- reveals only the cardinality of the intersection (how many records match). Intended for research and program planning.
+- `psi-c` -- reveals only the cardinality of the intersection (how many records match).
 
 A count-only exchange is one round over one key, so `psi-c` narrows what the rest of the document may say. Terms setting it are refused, naming what to change, when they declare any of:
 
