@@ -341,10 +341,9 @@ export function useJobRendezvousProvisioning(
 
 /**
  * The memoized inbound (or single shared) rendezvous directory, or undefined when
- * the variable is unset. Reported whatever {@link JobRendezvousProvisioning.problem}
- * says: a mount an incoherent pair makes unrunnable is still a mount a pasted
- * credential must not be referenced out of, so the containment surfaces that consume
- * this see it either way.
+ * the variable is unset. Delegates to {@link useJobRendezvousProvisioning}; retained
+ * for its unit-test consumers, since the containment surfaces read
+ * {@link jobRendezvousDirs} instead.
  */
 export function useJobRendezvousDir(
   env: NodeJS.ProcessEnv = process.env,
@@ -353,7 +352,8 @@ export function useJobRendezvousDir(
 }
 
 /** The memoized outbound rendezvous leg, or undefined on a single-mount appliance.
- * Reported whatever the problem is, for the reason {@link useJobRendezvousDir} is. */
+ * A thin wrapper over {@link useJobRendezvousProvisioning}, retained for the same
+ * unit-test consumers {@link useJobRendezvousDir} is. */
 export function useJobRendezvousOutboundDir(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
@@ -361,7 +361,9 @@ export function useJobRendezvousOutboundDir(
 }
 
 /** The shared folder's name for the memoized rendezvous mount, or undefined when
- * the console cannot name it. See {@link resolveJobRendezvousFolderName}. */
+ * the console cannot name it (see {@link resolveJobRendezvousFolderName} for how it
+ * resolves). Delegates to {@link useJobRendezvousProvisioning}; retained for its
+ * unit-test consumers, not read by production code. */
 export function useJobRendezvousFolderName(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
