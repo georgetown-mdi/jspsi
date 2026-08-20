@@ -27,10 +27,8 @@ import { loadNativeAddonOrSkip } from "./utils/nativeAddon";
 // receiver cannot attribute, and the uniqueness filter that makes the count
 // comparable to a single-key `psi` run.
 //
-// No shipped exchange reaches the mode while APPLIED_SETTINGS.psiC is false: linkage
-// terms setting `algorithm: psi-c` are refused before a run begins
-// (assertAlgorithmImplemented, src/exchange.ts). These tests exercise the seam
-// directly; countOnlyRun.test.ts drives the exchange that sits on it.
+// These tests exercise the seam directly; countOnlyRun.test.ts drives the exchange
+// that sits on it.
 //
 // A refusal the library raises is asserted as a refusal wherever a WebAssembly party
 // raises it: that build surfaces the association-table condition as an opaque embind

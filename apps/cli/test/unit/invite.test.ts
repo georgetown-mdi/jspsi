@@ -1194,29 +1194,24 @@ test("validateInvite: offline config-source refuses a standardization that contr
   }
 });
 
-test("validateInvite: offline config-source refuses a psi-c algorithm before minting", async () => {
-  // The mint-boundary counterpart of the run-side count-only refusal: a config
-  // whose `algorithm` is `psi-c` (advertised but not yet runnable) must be refused
-  // BEFORE the token is disclosed, so `invite` never mints an invitation the
-  // config's own `psilink exchange` would then reject (exit 64) -- the same
-  // fail-fast, mint-mirrors-run posture as the payload and standardization guards
-  // above. No input is passed, so it exercises the check in isolation.
-  //
-  // The terms are in the count-only SHAPE (one key, cascade, no deduplication, no
-  // payload), so the count-only shape rules pass them through and this exercises
-  // the algorithm gate itself rather than one of those.
+test("validateInvite: offline config-source mints a conforming psi-c config", async () => {
+  // The mint boundary mirrors the run: the exchange conducts a count-only run, so a
+  // config in the count-only SHAPE (one key, cascade, no deduplication, no payload)
+  // reaches a token rather than the algorithm gate. What the shape rules refuse
+  // instead is covered by the cases below. No input is passed, so this exercises the
+  // mint-boundary checks in isolation.
   const terms: LinkageTerms = countOnlyTerms();
   const { dir, configPath, keyPath } = withConfig(terms);
   try {
-    const invite = () =>
-      validateInvite({
-        resolved: { mode: "offline" },
-        options: testOptions({ configFile: configPath, keyFile: keyPath }),
-        acceptTimeout: 900,
-        log: silentLog,
-      });
-    await expect(invite()).rejects.toBeInstanceOf(UsageError);
-    await expect(invite()).rejects.toThrow(/psi-c/);
+    const minted = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    if (minted.mode !== "offlineFromConfig")
+      throw new Error(`expected an offline config mint, got ${minted.mode}`);
+    expect(minted.linkageTerms.algorithm).toBe("psi-c");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

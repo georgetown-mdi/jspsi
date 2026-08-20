@@ -9,7 +9,7 @@
  *   reconciliation, expert key/element authoring, and import-to-draft.
  * - {@link ./advancedInviteTerms} -- the linkage-terms mapping: a draft to the
  *   {@link LinkageTerms} it represents, and the inviter's own exchange spec. The
- *   gated-setting clamp (psi-c / dedup / fuzzy) lives here.
+ *   gated-setting clamp (dedup / fuzzy) lives here.
  * - {@link ./advancedInviteValidation} -- the Generate gate and the import-refusal
  *   messages.
  */

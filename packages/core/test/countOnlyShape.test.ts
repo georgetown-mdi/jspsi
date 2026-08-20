@@ -24,9 +24,9 @@ import { UsageError } from "../src/errors";
 // refused as it is read, and the ACCEPT path, so terms built or mutated without a
 // parse are refused before the mirror is derived. Each rule is exercised at both.
 //
-// The rules only NARROW: a psi-c document breaking one is refused later by the
-// algorithm gate as well, which is what makes them safe to hold before a
-// count-only run path exists -- pinned by the last block below.
+// These rules are the whole of what holds an out-of-shape count-only document
+// back: the algorithm gate answers only whether a run path exists and admits
+// `psi-c` regardless of shape -- pinned by the last block below.
 
 /** A count-only document in exactly the shape the specification admits: one
  * linkage key, cascade, no deduplication, and no payload in either direction. */
@@ -307,22 +307,21 @@ test("psi terms are untouched by every count-only rule", () => {
   expect(countOnlyTransmitsColumn("psi", transmitting)).toBe(false);
 });
 
-test("a count-only document already in shape is refused by the algorithm gate, not by these rules", () => {
+test("a count-only document already in shape passes every rule and the algorithm gate", () => {
   expect(countOnlyShapeViolation(inShapeCountOnly)).toBeUndefined();
   expect(() => parseLinkageTerms(inShapeCountOnly)).not.toThrow();
   expect(() => assertCountOnlyTermsShape(inShapeCountOnly)).not.toThrow();
   expect(() =>
     deriveAcceptedLinkageTerms(inShapeCountOnly, "Accepting Org"),
   ).not.toThrow();
-  // The narrowing claim: what these rules pass, today's algorithm gate still
-  // refuses, so nothing they let through reaches a run.
-  expect(() => assertAlgorithmImplemented(inShapeCountOnly.algorithm)).toThrow(
-    /not yet implemented/,
-  );
+  // The division of labour these rules rest on: the algorithm gate answers only
+  // whether a run path exists, so it admits `psi-c` whatever the document's shape,
+  // and holding an out-of-shape document back is these rules' work alone.
+  expect(() =>
+    assertAlgorithmImplemented(inShapeCountOnly.algorithm),
+  ).not.toThrow();
   for (const { terms } of outOfShape)
-    expect(() => assertAlgorithmImplemented(terms.algorithm)).toThrow(
-      /not yet implemented/,
-    );
+    expect(() => assertAlgorithmImplemented(terms.algorithm)).not.toThrow();
 });
 
 // Appends a valid 4-byte checksum over an arbitrary token object, reproducing

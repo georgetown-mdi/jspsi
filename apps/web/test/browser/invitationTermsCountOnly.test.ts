@@ -10,7 +10,6 @@ import {
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
-  PROPOSED_NOT_APPLIED_NOTES,
 } from "@psilink/core";
 
 import { InvitationTerms } from "@components/InvitationTerms";
@@ -20,31 +19,13 @@ import { createAppMount } from "./renderApp";
 
 import type { ComponentProps, ReactNode } from "react";
 
-import type * as PsilinkCore from "@psilink/core";
 import type { LinkageTerms } from "@psilink/core";
 
-// The consent screen renders the count-only tier's five gated notes behind the
-// summary's `psiCApplied`, which `APPLIED_SETTINGS.psiC` holds false until the
-// count-only run path lands -- so those sentences are unreachable from the terms
-// alone. The tier's headline is not gated here: this screen renders it for any psi-c
-// invitation, beside the refusal caveat, which invitationTerms.test.ts pins. The flag
-// is moved where the component reads it, by wrapping the summarizer it renders from:
-// core's own binding is internal to the built bundle this app consumes, so overriding
-// an export would not reach the read.
-//
-// What that leaves this file measuring is the renderer: which sentences it shows,
-// in which tier, for which entitlements. That the gate itself holds -- that no gated
-// note reaches an operator while the exchange refuses a psi-c invitation -- is
-// pinned in invitationTerms.test.ts, on the unmocked path.
-vi.mock("@psilink/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof PsilinkCore>();
-  return {
-    ...actual,
-    summarizeInvitation: (
-      params: Parameters<typeof actual.summarizeInvitation>[0],
-    ) => ({ ...actual.summarizeInvitation(params), psiCApplied: true }),
-  };
-});
+// What this file measures is the renderer: which count-only sentences the consent
+// screen shows, in which tier, for which entitlements. The whole tier is reached
+// from the algorithm alone, so every rendering here is driven from a psi-c terms
+// document with nothing forced. The CLI accept prompt's half of the same pairs is
+// in apps/cli/test/unit/accept.test.ts.
 
 const app = createAppMount();
 
@@ -120,7 +101,7 @@ function tier(name: string) {
   return page.getByRole("group", { name });
 }
 
-describe("InvitationTerms: the count-only tier a run that honors psi-c renders", () => {
+describe("InvitationTerms: the count-only tier a psi-c invitation renders", () => {
   test("states what the run reveals, what it still discloses, and what it does not bound -- all with the headline", async () => {
     renderCountOnly();
     await expect
@@ -130,14 +111,14 @@ describe("InvitationTerms: the count-only tier a run that honors psi-c renders",
     expect(produces).toContain(COUNT_ONLY_DISCLOSURE_STATEMENT);
     expect(produces).toContain(CONSENT_FACTS.countOnlyResult.note);
     expect(produces).toContain(CONSENT_FACTS.countOnlyRoundDisclosures.note);
-    // The bound belongs beside the guarantee it qualifies, by the same placement
-    // rule the refusal caveat follows: a reader who takes "only a number" for the
-    // safe option must not be able to reach that reading without meeting this.
+    // The bound belongs beside the guarantee it qualifies, by the placement rule
+    // the screen applies to a disclosure guarantee: a reader who takes "only a
+    // number" for the safe option must not be able to reach that reading without
+    // meeting this.
     expect(produces).toContain(CONSENT_FACTS.countOnlyInputChoice.note);
-    // And the caveat this tier replaces is gone: a run that honors the algorithm
-    // does not refuse it.
+    // And the psi consequence is gone: a count-only run reveals no identifier.
     expect(app.container.textContent).not.toContain(
-      PROPOSED_NOT_APPLIED_NOTES.psiC,
+      "shared identifiers of records you have in common are revealed",
     );
   });
 
@@ -193,9 +174,6 @@ describe("InvitationTerms: the count-only tier a run that honors psi-c renders",
     // false here: by the role rule the entitled party IS the receiver, so the
     // partner receiving no count is the SENDER, which computes nothing from the
     // round and is sent no count-report frame (docs/spec/PROTOCOL.md, PSI-C).
-    // Measured with the flag forced on, which is the state the ungate produces --
-    // the moment the refusal caveat that blunts the claim today is gone and a live
-    // count-only run is what the screen describes.
     renderCountOnly({
       output: { expectsOutput: false, shareWithPartner: true },
     });
@@ -261,9 +239,9 @@ describe("InvitationTerms: the count-only tier a run that honors psi-c renders",
     // puts "A count-only exchange carries no data columns in either direction"
     // directly beside this screen's own "You will receive 1 data column from your
     // partner" / "Your partner requests 1 data column from you" -- a guarantee stated
-    // over the declaration contradicting it. Driven on each direction with the flag
-    // forced on, so the check is measured firing rather than assumed; the conforming
-    // document below is the positive control.
+    // over the declaration contradicting it. Driven on each direction, so the check
+    // is measured firing rather than assumed; the conforming document below is the
+    // positive control.
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => {});

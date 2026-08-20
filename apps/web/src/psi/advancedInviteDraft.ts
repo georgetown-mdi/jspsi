@@ -132,8 +132,9 @@ export function seedAdvancedInvite(
       // The default is the symmetric both-receive exchange, matching the quick
       // path and getDefaultLinkageTerms' output.
       outputDirection: "both",
-      // Carried from the recommended terms (psi / no-dedup); the gated controls
-      // hold these at the safe defaults until APPLIED_SETTINGS flips.
+      // Carried from the recommended terms (psi / no-dedup), so a fresh draft opens
+      // on the identifier-revealing algorithm and one-to-one matching; the gated
+      // deduplicate control holds its default until APPLIED_SETTINGS flips.
       algorithm: terms.algorithm,
       deduplicate: terms.deduplicate,
       // The default strategy (`cascade`). Ungated -- the control writes it straight
@@ -714,7 +715,7 @@ export function draftFromTerms(
     algorithm: terms.algorithm,
     deduplicate: terms.deduplicate,
     // Reflect the imported strategy so the control shows it and an export
-    // round-trips it. Ungated, so unlike a gated psi-c/dedup an imported
+    // round-trips it. Ungated, so unlike a gated deduplicate an imported
     // single-pass is adopted as-is rather than refused (gatedActiveSettingMessage
     // deliberately carries no branch for it).
     linkageStrategy: terms.linkageStrategy,

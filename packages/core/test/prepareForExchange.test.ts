@@ -165,20 +165,36 @@ describe("prepareForExchange: consistent and terms-only configs proceed", () => 
   });
 });
 
-// --- Count-only (psi-c) fails closed before connecting -----------------------
+// --- Count-only (psi-c) at the local prepare step -----------------------------
 
-describe("prepareForExchange: count-only (psi-c) is refused", () => {
+describe("prepareForExchange: count-only (psi-c) is admitted in shape", () => {
   const psiCTerms: LinkageTerms = { ...terms, algorithm: "psi-c" };
 
-  test("a psi-c algorithm is refused before connecting", () => {
-    // No count-only run path exists, so a psi-c run would reveal matched
-    // identifiers under a self-attested record asserting only a count. Refuse it
-    // before any connection, on every mint/accept path -- not only in the web
-    // inviter clamp. It is a UsageError (CLI exit 64) whose message names the
-    // fixed enum literal, so an operator sees which value to change.
+  test("a conforming psi-c spec prepares", () => {
+    const prepared = prepareForExchange(
+      { linkageTerms: psiCTerms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.linkageTerms.algorithm).toBe("psi-c");
+  });
+
+  test("an out-of-shape psi-c spec is refused before connecting", () => {
+    // A count-only run is one round over one key, so a second key is a shape the
+    // specification does not admit. Refuse it before any connection -- never narrow
+    // it to the first key -- with the UsageError (CLI exit 64) that names what to
+    // change.
+    const twoKeys: LinkageTerms = {
+      ...psiCTerms,
+      linkageKeys: [
+        ...psiCTerms.linkageKeys,
+        { name: "FN", elements: [{ field: "first_name" }] },
+      ],
+    };
     expect(() =>
       prepareForExchange(
-        { linkageTerms: psiCTerms, metadata },
+        { linkageTerms: twoKeys, metadata },
         "Tester",
         rawRows,
         columns,
@@ -186,7 +202,7 @@ describe("prepareForExchange: count-only (psi-c) is refused", () => {
     ).toThrow(UsageError);
     expect(() =>
       prepareForExchange(
-        { linkageTerms: psiCTerms, metadata },
+        { linkageTerms: twoKeys, metadata },
         "Tester",
         rawRows,
         columns,
@@ -198,8 +214,8 @@ describe("prepareForExchange: count-only (psi-c) is refused", () => {
 // --- assertAlgorithmImplemented (the shared guard) ---------------------------
 
 describe("assertAlgorithmImplemented", () => {
-  test("refuses psi-c", () => {
-    expect(() => assertAlgorithmImplemented("psi-c")).toThrow(UsageError);
+  test("passes psi-c", () => {
+    expect(() => assertAlgorithmImplemented("psi-c")).not.toThrow();
   });
 
   test("passes psi", () => {
