@@ -1467,9 +1467,9 @@ test("validateInvite: offline config-source refuses a fan-out standardization be
   // The mint-boundary counterpart of the run-side fan-out refusal (these default
   // terms are cascade, which matches one value per record, so a splitting
   // record's candidate set has no round to enter): a config whose hand-authored
-  // standardization declares `split_on` must
-  // be refused BEFORE the token is disclosed, so `invite` never mints an
-  // invitation the config's own `psilink exchange` would then reject (exit 64).
+  // standardization declares `split_on` must be refused BEFORE the token is
+  // disclosed, so `invite` never mints an invitation the config's own `psilink
+  // exchange` would then reject (exit 64).
   // The standardization is otherwise consistent with the terms, so it passes the
   // earlier consistency gate and reaches this one. An OperatorConfigError: a
   // standardization is only ever this party's own authoring.

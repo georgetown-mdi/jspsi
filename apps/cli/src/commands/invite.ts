@@ -628,9 +628,9 @@ export async function validateInvite(params: {
     // record, where a splitting record contributes no key at all. Covers this
     // path's terms and, where the config carries one, its hand-authored
     // standardization -- the two places only this config-as-source path can
-    // declare a fan-out step (the
-    // online and infer paths build terms and standardization from columns, which
-    // declare none). See assertFanOutImplemented.
+    // declare a fan-out step (the online and infer paths build terms and
+    // standardization from columns, which declare none). See
+    // assertFanOutImplemented.
     assertFanOutImplemented(configTerms, configSource.standardization);
 
     // Carry the disclosed-columns subset only when the config declares an
