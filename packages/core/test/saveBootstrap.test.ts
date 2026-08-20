@@ -160,7 +160,8 @@ test("no save field is put on the wire when save intent is omitted", async () =>
 // on: a boolean saveIntent -- including `false` -- yields a DEFINED bootstrap, so
 // a non-saving party still carries partnerSaveIntent back to emit its notice;
 // `undefined` yields no bootstrap. This is the invariant a "clean up false to
-// undefined" change (see RunProtocolResult.bootstrap) would silently break.
+// undefined" change (see the CLI's OutputCompleteContext.bootstrap, which hands
+// the outcome to the handler) would silently break.
 
 const psiLibrary = await PSI();
 

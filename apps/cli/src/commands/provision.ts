@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { UsageError } from "@psilink/core";
+import { causeChainSome, UsageError } from "@psilink/core";
 import type { ExchangeSpec } from "@psilink/core";
 
 import { DEFAULT_CONFIG_PATH, saveConfig } from "../config";
@@ -102,6 +102,27 @@ export interface ProvisionOptions {
 }
 
 /**
+ * The {@link provisionConfigAndKey} failures whose rollback did not remove the
+ * config that call had already written. Membership is keyed on the propagating
+ * error object rather than written onto it as a property: that error comes from
+ * the key writer or the filesystem, so it is not this module's to mutate, and a
+ * non-extensible one would turn the marking into a second failure replacing the
+ * one worth reporting.
+ */
+const failuresLeavingConfigOnDisk = new WeakSet<object>();
+
+/**
+ * Whether `error`, or any link in its `cause` chain, is a
+ * {@link provisionConfigAndKey} failure whose already-written config is still on
+ * disk because the rollback of that write also failed. A caller reporting what
+ * did and did not persist reads this rather than probing the config path, where
+ * a file is equally likely to be one this call never wrote.
+ */
+export function provisionLeftConfigOnDisk(error: unknown): boolean {
+  return causeChainSome(error, (link) => failuresLeavingConfigOnDisk.has(link));
+}
+
+/**
  * Provision a config and key pair, refusing to clobber existing files. Re-runs
  * the conflict gate (so it is safe to call even if the caller skipped the
  * up-front {@link assertNoProvisionConflicts}) and writes nothing if a gated
@@ -120,10 +141,13 @@ export interface ProvisionOptions {
  * written first; only if the key write then fails is there a residue -- the
  * already-written config -- which is removed before the error propagates (but
  * never when reusing an existing config: that file is the user's, not this
- * call's). The key path is never deleted on failure: saveKeyFile guarantees
- * nothing was written there, so removing it could only ever delete a file this
- * call did not write (e.g. one that appeared in the conflict gate's TOCTOU
- * window). Parent directories created for a nested target path are left in place.
+ * call's). A removal that itself fails leaves that config on disk and records it
+ * on the propagating error, so a caller's report can name the file's real state
+ * ({@link provisionLeftConfigOnDisk}). The key path is never deleted on failure:
+ * saveKeyFile guarantees nothing was written there, so removing it could only
+ * ever delete a file this call did not write (e.g. one that appeared in the
+ * conflict gate's TOCTOU window). Parent directories created for a nested target
+ * path are left in place.
  *
  * @returns the resolved paths (the key always written; the config written only
  *   when not reusing an existing one).
@@ -172,7 +196,12 @@ export function provisionConfigAndKey(
       try {
         fs.rmSync(resolved.configPath, { force: true });
       } catch {
-        // Best-effort rollback; surface the original write error below.
+        // Best-effort rollback; the key-write error below stays the one
+        // surfaced. Record the outcome on it, though: which files are on disk
+        // differs by it, and a caller that reported the config as unsaved would
+        // misstate what the operator has to clean up before re-provisioning.
+        if (typeof err === "object" && err !== null)
+          failuresLeavingConfigOnDisk.add(err);
       }
     }
     throw err;
