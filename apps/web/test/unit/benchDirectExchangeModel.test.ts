@@ -9,10 +9,22 @@ import {
 import { disclosedColumnNames } from "@psi/metadataEditing";
 
 import {
+  CONNECTION_TUNING_DEFAULT,
+  connectionTuningProblems,
+} from "@bench/connectionTuningModel";
+import {
   DEFAULT_PREVIEW_IDENTITY,
   DIRECT_STEP_ORDER,
+  directServerBlockedReason,
   previewInferredTerms,
 } from "@bench/directExchangeModel";
+import {
+  EXCHANGE_FILES_DEFAULT,
+  ZERO_SETUP_EXCHANGE_FILES,
+  exchangeFilesProblems,
+} from "@bench/exchangeFilesModel";
+
+import type { DirectServerGates } from "@bench/directExchangeModel";
 
 const LINKABLE_COLUMNS = [
   "ssn",
@@ -91,5 +103,70 @@ describe("previewInferredTerms", () => {
 
   test("the spine walks file -> server -> confirm -> run", () => {
     expect(DIRECT_STEP_ORDER).toEqual(["file", "server", "confirm", "run"]);
+  });
+});
+
+describe("the agreed-server step's continue gate", () => {
+  const gates = (
+    overrides: Partial<DirectServerGates> = {},
+  ): DirectServerGates => ({
+    transport: "sftp",
+    transportReady: true,
+    exchangeFilesBlocked: false,
+    connectionTuningBlocked: false,
+    splitDirectoryBlocked: false,
+    ...overrides,
+  });
+
+  test("a step with nothing outstanding names nothing, which is what enables Continue", () => {
+    expect(directServerBlockedReason(gates())).toBeUndefined();
+  });
+
+  test("an unauthored transport is named first, ahead of the cards below it", () => {
+    expect(
+      directServerBlockedReason(
+        gates({ transportReady: false, exchangeFilesBlocked: true }),
+      ),
+    ).toBe("Set up the SFTP connection above to continue.");
+    expect(
+      directServerBlockedReason(
+        gates({ transport: "filedrop", transportReady: false }),
+      ),
+    ).toContain("shared directory");
+  });
+
+  test("a refused connection-tuning value names that card rather than the file-handling one", () => {
+    // Both cards are collapsed disclosures on this step, so the sentence beside
+    // the button is the only cue naming the one to open. Driven through both
+    // cards' models as the step drives them, rather than by setting the flags.
+    const step = gates({
+      exchangeFilesBlocked:
+        exchangeFilesProblems(EXCHANGE_FILES_DEFAULT, ZERO_SETUP_EXCHANGE_FILES)
+          .length > 0,
+      connectionTuningBlocked:
+        connectionTuningProblems({
+          ...CONNECTION_TUNING_DEFAULT,
+          peerTimeout: { magnitude: "soon", unit: "m" },
+        }).length > 0,
+    });
+    expect(step.exchangeFilesBlocked).toBe(false);
+    expect(step.connectionTuningBlocked).toBe(true);
+    expect(directServerBlockedReason(step)).toBe(
+      "Resolve the connection-tuning settings above to continue.",
+    );
+  });
+
+  test("a refused file-handling combination names its own card", () => {
+    expect(
+      directServerBlockedReason(gates({ exchangeFilesBlocked: true })),
+    ).toBe("Resolve the file-handling settings above to continue.");
+  });
+
+  test("the split-directory precondition is named last, where its own alert stands", () => {
+    // The remedy in full is in that alert; the sentence beside the button points
+    // at it rather than restating a paragraph the operator is already looking at.
+    expect(
+      directServerBlockedReason(gates({ splitDirectoryBlocked: true })),
+    ).toBe("Resolve the retain-mode requirement above to continue.");
   });
 });

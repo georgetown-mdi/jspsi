@@ -5,8 +5,8 @@ import {
   composeConfigDocument,
   composeKeyFileDocument,
   composeSftpConfigDocument,
-  zeroSetupFileSyncArgv,
   zeroSetupFiledropArgv,
+  zeroSetupOptionsArgv,
   zeroSetupSftpArgv,
 } from "./intent";
 import { JobInputNotFoundError, jobInputFilePath } from "./workInputs";
@@ -658,7 +658,7 @@ export class JobManager {
       return spawnZeroSetupJob({
         binaryPath: this.binaryPath,
         connectionArgs: this.zeroSetupConnectionArgs(intent, args.serverEntry),
-        fileSyncArgs: zeroSetupFileSyncArgv(intent.options),
+        optionArgs: zeroSetupOptionsArgv(intent.options),
         inputPath: args.inputPath,
         outputPath: args.outputPath,
         recordPath: args.recordPath,

@@ -1,15 +1,25 @@
+import { useId } from "react";
+
 import { Alert, Button, Group, Radio, Stack, Text } from "@mantine/core";
 import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 
 import {
+  FILEDROP_CONNECTION_TUNING,
+  SFTP_CONNECTION_TUNING,
+  connectionTuningProblems,
+} from "./connectionTuningModel";
+import {
   ZERO_SETUP_EXCHANGE_FILES,
   exchangeFilesProblems,
 } from "./exchangeFilesModel";
+import { ConnectionTuningCard } from "./ConnectionTuningCard";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
+import { directServerBlockedReason } from "./directExchangeModel";
 import { splitDirectoryRetainProblem } from "./sftpConnectionChoice";
 import styles from "./bench.module.css";
 
+import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { DirectTransport } from "./directExchangeModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { JobRendezvousConfig } from "@psi/workInputClient";
@@ -38,6 +48,10 @@ export function DirectServerSection({
   exchangeFilesOpen,
   onExchangeFiles,
   onExchangeFilesOpen,
+  connectionTuning,
+  connectionTuningOpen,
+  onConnectionTuning,
+  onConnectionTuningOpen,
   onAuthorConnection,
   onClearConnection,
   onContinue,
@@ -55,19 +69,26 @@ export function DirectServerSection({
   exchangeFilesOpen: boolean;
   onExchangeFiles: (draft: ExchangeFilesDraft) => void;
   onExchangeFilesOpen: (open: boolean) => void;
+  /** The operator's connection-tuning choices, authored here for the same reason
+   * the file-handling ones are. */
+  connectionTuning: ConnectionTuningDraft;
+  connectionTuningOpen: boolean;
+  onConnectionTuning: (draft: ConnectionTuningDraft) => void;
+  onConnectionTuningOpen: (open: boolean) => void;
   onAuthorConnection: (connection: SftpConnectionProjection) => void;
   onClearConnection: () => void;
   onContinue: () => void;
   onBack: () => void;
 }) {
+  const blockedReasonId = useId();
   const rendezvousConfigured = rendezvous?.configured === true;
   const sftpReady = sftpConnection != null;
   const transportReady =
     transport === "sftp" ? sftpReady : rendezvousConfigured;
-  // A combination core refuses is a form problem here, on the step that authors
-  // it, rather than a run that fails at rendezvous.
-  const exchangeFilesBlocked =
-    exchangeFilesProblems(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES).length > 0;
+  // The SFTP session mode applies only where a session exists, so the tuning card
+  // withholds it on the shared-directory transport.
+  const tuningCapabilities =
+    transport === "sftp" ? SFTP_CONNECTION_TUNING : FILEDROP_CONNECTION_TUNING;
   // The connection and the retain-mode toggle are authored on separate cards
   // here, so the split-directory precondition is re-asked at the step's exit,
   // where both are known, rather than only inside the authoring form the
@@ -76,10 +97,20 @@ export function DirectServerSection({
     transport === "sftp"
       ? splitDirectoryRetainProblem(sftpConnection, exchangeFiles.retainFiles)
       : undefined;
-  const canContinue =
-    transportReady &&
-    !exchangeFilesBlocked &&
-    splitDirectoryProblem === undefined;
+  // A value either card's run would refuse is a form problem here, on the step
+  // that authors it, rather than a run that fails at rendezvous. The two cards
+  // block separately so the sentence below names the one to open.
+  const blockedReason = directServerBlockedReason({
+    transport,
+    transportReady,
+    exchangeFilesBlocked:
+      exchangeFilesProblems(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES).length >
+      0,
+    connectionTuningBlocked:
+      connectionTuningProblems(connectionTuning).length > 0,
+    splitDirectoryBlocked: splitDirectoryProblem !== undefined,
+  });
+  const canContinue = blockedReason === undefined;
 
   return (
     <Stack gap="lg">
@@ -158,6 +189,14 @@ export function DirectServerSection({
         onChange={onExchangeFiles}
       />
 
+      <ConnectionTuningCard
+        draft={connectionTuning}
+        capabilities={tuningCapabilities}
+        open={connectionTuningOpen}
+        onToggleOpen={onConnectionTuningOpen}
+        onChange={onConnectionTuning}
+      />
+
       {splitDirectoryProblem !== undefined && (
         <Alert
           color="red"
@@ -169,13 +208,23 @@ export function DirectServerSection({
       )}
 
       <Group>
-        <Button onClick={onContinue} disabled={!canContinue}>
+        <Button
+          onClick={onContinue}
+          disabled={!canContinue}
+          aria-describedby={canContinue ? undefined : blockedReasonId}
+        >
           Continue to confirm and run
         </Button>
         <Button variant="default" onClick={onBack}>
           Back
         </Button>
       </Group>
+      {/* Mounted whether or not it currently has content, so a reason that
+          appears mid-session is an empty -> non-empty transition assistive tech
+          announces, rather than a region mounting with its text already set. */}
+      <Text id={blockedReasonId} size="sm" c="dimmed" role="status">
+        {blockedReason}
+      </Text>
     </Stack>
   );
 }

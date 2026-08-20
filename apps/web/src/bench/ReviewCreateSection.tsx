@@ -8,6 +8,11 @@ import {
   exchangeFilesProblems,
 } from "./exchangeFilesModel";
 import {
+  FILEDROP_CONNECTION_TUNING,
+  SFTP_CONNECTION_TUNING,
+  connectionTuningProblems,
+} from "./connectionTuningModel";
+import {
   LIFETIME_CHOICES,
   RESULTS_DIRECTION_LABELS,
   answersRows,
@@ -15,6 +20,7 @@ import {
   expiryLabel,
   transportChooserCopy,
 } from "./inviterModel";
+import { ConnectionTuningCard } from "./ConnectionTuningCard";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
 import { splitDirectoryRetainProblem } from "./sftpConnectionChoice";
@@ -27,6 +33,7 @@ import type {
   SpineTarget,
   Transport,
 } from "./inviterModel";
+import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { OutputDirection } from "@psi/advancedInvite";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
@@ -64,6 +71,10 @@ export function ReviewCreateSection({
   exchangeFilesOpen,
   onExchangeFiles,
   onExchangeFilesOpen,
+  connectionTuning,
+  connectionTuningOpen,
+  onConnectionTuning,
+  onConnectionTuningOpen,
   onLifetime,
   onDirection,
   onTransport,
@@ -98,6 +109,14 @@ export function ReviewCreateSection({
   exchangeFilesOpen: boolean;
   onExchangeFiles: (draft: ExchangeFilesDraft) => void;
   onExchangeFilesOpen: (open: boolean) => void;
+  /** The operator's connection-tuning choices for the same run. Carried by the
+   * same transports the file-handling card is offered on. */
+  connectionTuning: ConnectionTuningDraft;
+  /** Whether the connection-tuning disclosure is expanded (held by the host for
+   * the same reason as the file-handling one). */
+  connectionTuningOpen: boolean;
+  onConnectionTuning: (draft: ConnectionTuningDraft) => void;
+  onConnectionTuningOpen: (open: boolean) => void;
   onLifetime: (seconds: number) => void;
   onDirection: (direction: OutputDirection) => void;
   onTransport: (transport: Transport) => void;
@@ -162,6 +181,13 @@ export function ReviewCreateSection({
   const exchangeFilesBlocked =
     exchangeFilesOffered &&
     exchangeFilesProblems(exchangeFiles, CONFIG_EXCHANGE_FILES).length > 0;
+  const connectionTuningBlocked =
+    exchangeFilesOffered &&
+    connectionTuningProblems(connectionTuning).length > 0;
+  // The SFTP session mode applies only where a session exists, so the card
+  // withholds it on the shared-directory transport.
+  const tuningCapabilities =
+    transport === "sftp" ? SFTP_CONNECTION_TUNING : FILEDROP_CONNECTION_TUNING;
   // The authored connection and the retain-mode toggle are separate cards, so a
   // split-directory connection can outlive the retain choice it required: hold
   // the create here, where both are known, rather than minting a partner-facing
@@ -177,7 +203,8 @@ export function ReviewCreateSection({
     !minting &&
     !connectionIncomplete &&
     splitDirectoryProblem === undefined &&
-    !exchangeFilesBlocked;
+    !exchangeFilesBlocked &&
+    !connectionTuningBlocked;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
   const readiness = useDeferredAnnouncement(
@@ -187,9 +214,11 @@ export function ReviewCreateSection({
         ? splitDirectoryProblem
         : exchangeFilesBlocked
           ? "Resolve the file-handling settings above before you can create."
-          : problems.length === 0
-            ? "Ready to create the invitation."
-            : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
+          : connectionTuningBlocked
+            ? "Resolve the connection-tuning settings above before you can create."
+            : problems.length === 0
+              ? "Ready to create the invitation."
+              : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
   );
   return (
     <>
@@ -289,13 +318,22 @@ export function ReviewCreateSection({
         <p className={`${styles.small} ${styles.sub}`}>{capabilityNote}</p>
       </fieldset>
       {exchangeFilesOffered && (
-        <ExchangeFilesCard
-          draft={exchangeFiles}
-          capabilities={CONFIG_EXCHANGE_FILES}
-          open={exchangeFilesOpen}
-          onToggleOpen={onExchangeFilesOpen}
-          onChange={onExchangeFiles}
-        />
+        <>
+          <ExchangeFilesCard
+            draft={exchangeFiles}
+            capabilities={CONFIG_EXCHANGE_FILES}
+            open={exchangeFilesOpen}
+            onToggleOpen={onExchangeFilesOpen}
+            onChange={onExchangeFiles}
+          />
+          <ConnectionTuningCard
+            draft={connectionTuning}
+            capabilities={tuningCapabilities}
+            open={connectionTuningOpen}
+            onToggleOpen={onConnectionTuningOpen}
+            onChange={onConnectionTuning}
+          />
+        </>
       )}
       <h2>Exchange proposal</h2>
       <p className={`${styles.small} ${styles.sub}`}>
@@ -365,9 +403,11 @@ export function ReviewCreateSection({
               ? splitDirectoryProblem
               : exchangeFilesBlocked
                 ? "Resolve the file-handling settings above to continue."
-                : problems.length === 0
-                  ? "Ready to create."
-                  : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
+                : connectionTuningBlocked
+                  ? "Resolve the connection-tuning settings above to continue."
+                  : problems.length === 0
+                    ? "Ready to create."
+                    : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
         </p>
       </div>
     </>

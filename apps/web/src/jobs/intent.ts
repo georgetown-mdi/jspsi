@@ -8,6 +8,7 @@ import {
   ExchangeSpecSchema,
   LinkageTermsSchema,
   MAX_NAME_LENGTH,
+  MAX_TIMEOUT_SECONDS,
   MetadataSchema,
   SHARED_SECRET_REGEX,
   StandardizationSchema,
@@ -50,6 +51,12 @@ import type { JobSftpServerEntry } from "./sftpServer";
  * the `timestampInFilename` dependency and the reserved `temp` value -- are
  * core's, applied through core's own schema so this boundary restates none of
  * them.
+ *
+ * Not every arm admits every field. `connectionPerPoll` is admitted on the sftp
+ * arms alone, mirroring the CLI, which applies the mode only there; and the
+ * zero-setup arms admit only what their argv can carry (see
+ * {@link zeroSetupOptionsArgv}), so a field with no route to that run is refused
+ * rather than accepted and dropped.
  */
 export interface JobExchangeOptions {
   pollIntervalMs?: number;
@@ -61,6 +68,7 @@ export interface JobExchangeOptions {
   peerId?: string;
   retainFiles?: boolean;
   unexpectedFiles?: "error" | "warn" | "ignore";
+  connectionPerPoll?: boolean;
 }
 
 /**
@@ -87,7 +95,14 @@ function checkAgainstCoreFileSyncOptions(
     });
 }
 
+// The poll interval carries no floor beyond core's own positive-integer rule,
+// matching the CLI: a sub-second poll is warned about (the anti-flood advisory
+// at LOW_POLLING_FREQUENCY_WARN_MS) and allowed, because a demo against a
+// controlled server legitimately wants one. The console's authoring surface is
+// the operator's own choice about a server they authored the connection to, so
+// it warns and guides rather than refusing.
 const jobExchangeOptionsFields = {
+  pollIntervalMs: z.number().int().positive().optional(),
   peerTimeoutMs: z.number().int().positive().optional(),
   serverConnectTimeoutMs: z.number().int().positive().optional(),
   maxReconnectAttempts: z.number().int().min(0).max(604800).optional(),
@@ -98,30 +113,84 @@ const jobExchangeOptionsFields = {
     .refine(isAdmissiblePeerId, { message: PEER_ID_SHAPE_MESSAGE })
     .optional(),
   retainFiles: z.boolean().optional(),
-  unexpectedFiles: z.enum(["error", "warn", "ignore"]).optional(),
 };
 
 const jobExchangeOptionsSchema: z.ZodType<JobExchangeOptions> = z
   .object({
-    pollIntervalMs: z.number().int().positive().optional(),
     ...jobExchangeOptionsFields,
+    unexpectedFiles: z.enum(["error", "warn", "ignore"]).optional(),
   })
   .strict()
   .superRefine(checkAgainstCoreFileSyncOptions);
 
-// The sftp variant floors the poll interval at one second: an sftp poll is a
-// directory listing against a REMOTE server the operator authored a connection
-// to, so a client-chosen hot poll would flood a shared third-party host rather
-// than the job's own local rendezvous directory (the filedrop case, which keeps
-// the positive-int floor).
+// The sftp variant adds `connectionPerPoll`, and only it: the ephemeral-session
+// mode dials a real SFTP socket, which filedrop's connectionless client has
+// none of, so the CLI applies it on `sftp` alone. Admitting it on the filedrop
+// arm would take a value the run cannot honour; the strict parse refuses it
+// there instead.
 const jobSftpExchangeOptionsSchema: z.ZodType<JobExchangeOptions> = z
   .object({
-    pollIntervalMs: z
-      .number()
-      .int()
-      .min(1000, "pollIntervalMs must be at least 1000 on the sftp channel")
-      .optional(),
     ...jobExchangeOptionsFields,
+    unexpectedFiles: z.enum(["error", "warn", "ignore"]).optional(),
+    connectionPerPoll: z.boolean().optional(),
+  })
+  .strict()
+  .superRefine(checkAgainstCoreFileSyncOptions);
+
+/**
+ * A millisecond duration a zero-setup run must be able to express as one of the
+ * CLI's coarse duration flags (`--peer-timeout`, `--connection-timeout`), whose
+ * grammar takes a second-or-coarser unit and rejects a millisecond one. A value
+ * that is not a whole number of seconds has no faithful flag form, so it is
+ * refused here rather than rounded into one the operator did not author.
+ *
+ * Both flags are also capped at core's {@link MAX_TIMEOUT_SECONDS} (seven days),
+ * which the CLI enforces as a usage error, so a value past it is refused here
+ * too: accepting one would create a job -- occupying the appliance's single run
+ * slot -- whose spawned child then exits 64 on the very argv the job exists to
+ * run.
+ */
+function wholeSecondFlagMs(field: string) {
+  return z
+    .number()
+    .int()
+    .positive()
+    .max(
+      MAX_TIMEOUT_SECONDS * 1000,
+      `${field} must not exceed ${MAX_TIMEOUT_SECONDS / 86_400} days on a ` +
+        "zero-setup exchange: the duration flag it is carried on refuses a " +
+        "longer value",
+    )
+    .refine((ms) => ms % 1000 === 0, {
+      message:
+        `${field} must be a whole number of seconds on a zero-setup ` +
+        "exchange: it is carried to the run as a duration flag, whose value " +
+        "takes a second-or-coarser unit",
+    })
+    .optional();
+}
+
+// The zero-setup arms admit only what {@link zeroSetupOptionsArgv} can carry to
+// the child. `unexpectedFiles` is absent: it is a configuration-only key with no
+// CLI flag at all, and a zero-setup run composes no configuration document, so
+// the strict parse refuses it rather than accepting a choice the run would drop.
+// The two coarse-duration fields are additionally held to whole seconds, the
+// only values their flags can state.
+const jobZeroSetupOptionsFields = {
+  ...jobExchangeOptionsFields,
+  peerTimeoutMs: wholeSecondFlagMs("peerTimeoutMs"),
+  serverConnectTimeoutMs: wholeSecondFlagMs("serverConnectTimeoutMs"),
+};
+
+const jobZeroSetupOptionsSchema: z.ZodType<JobExchangeOptions> = z
+  .object(jobZeroSetupOptionsFields)
+  .strict()
+  .superRefine(checkAgainstCoreFileSyncOptions);
+
+const jobZeroSetupSftpOptionsSchema: z.ZodType<JobExchangeOptions> = z
+  .object({
+    ...jobZeroSetupOptionsFields,
+    connectionPerPoll: z.boolean().optional(),
   })
   .strict()
   .superRefine(checkAgainstCoreFileSyncOptions);
@@ -529,10 +598,10 @@ function withDefaultExchangeMode(raw: unknown): unknown {
  * `path`, a `host`, a `server` block, an `@path` credential, or a
  * connection-selecting `remote`) past validation, and each arm admits only its own
  * fields. The sftp arm carries no connection field at all (the appliance runs one
- * authored connection), and its options variant floors `pollIntervalMs` at 1000 ms
- * because its poll lists a remote authored server, not a job-local directory.
- * A missing `mode` defaults to `"exchange"`, so a merged exchange client parses
- * unchanged.
+ * authored connection), and its options variant differs from the filedrop arm's
+ * only in admitting `connectionPerPoll`, the dialing mode a connectionless
+ * filedrop client cannot honour. A missing `mode` defaults to `"exchange"`, so a
+ * merged exchange client parses unchanged.
  *
  * A union-level refine enforces exactly one input source -- inline `inputCsv` or
  * the mounted `inputFile` reference -- on both arms: the arm's strict parse runs
@@ -578,7 +647,7 @@ const jobZeroSetupFiledropIntentSchema = z
     mode: z.literal("zeroSetup"),
     channel: z.literal("filedrop"),
     ...jobZeroSetupIntentCommonFields,
-    options: jobExchangeOptionsSchema.optional(),
+    options: jobZeroSetupOptionsSchema.optional(),
   })
   .strict();
 
@@ -587,7 +656,7 @@ const jobZeroSetupSftpIntentSchema = z
     mode: z.literal("zeroSetup"),
     channel: z.literal("sftp"),
     ...jobZeroSetupIntentCommonFields,
-    options: jobSftpExchangeOptionsSchema.optional(),
+    options: jobZeroSetupSftpOptionsSchema.optional(),
   })
   .strict();
 
@@ -747,8 +816,8 @@ export function composeConfigDocument(
  * reach the file exactly as they do on the filedrop path -- as schema-validated
  * YAML values -- the acceptance's `outbound_payload_consent` is derived exactly as
  * it is there (see {@link outboundPayloadConsentFor}), and the tuning `options`
- * are the same numeric/boolean/enum subset (with the sftp poll floor already
- * enforced by the intent schema).
+ * are the same numeric/boolean/enum subset, plus the `connectionPerPoll` dialing
+ * mode this channel is the only one to admit.
  *
  * This path deliberately does NOT use `mintExchangeFile`: its
  * {@link ExchangeFileInput} typing makes credentials unrepresentable, an
@@ -864,7 +933,7 @@ function buildZeroSetupSftpUrl(serverEntry: JobSftpServerEntry): string {
  * A split-directory entry adds `--outbound-path`, the CLI's own name for the same
  * split: the URL carries the inbound half (see {@link buildZeroSetupSftpUrl}) and
  * this flag the outbound one. The CLI's guard on that flag then holds the run to
- * retain mode, which {@link zeroSetupFileSyncArgv} emits from the operator's own
+ * retain mode, which {@link zeroSetupOptionsArgv} emits from the operator's own
  * file-handling choice -- so a split run without it is refused by the CLI rather
  * than running with a directory layout it cannot honour.
  *
@@ -913,24 +982,29 @@ export function zeroSetupFiledropArgv(rendezvousDir: string): Array<string> {
 }
 
 /**
- * Map the intent's file-sync toggles to their CLI flags, the zero-setup argv's
+ * Map the intent's tuning options to their CLI flags, the zero-setup argv's
  * counterpart to the exchange mode's composed `options` block. A zero-setup run
  * composes no config document, so these flags are the only route the operator's
- * retain-mode choice has into the child.
+ * authored choices have into the child, and every field the zero-setup arms
+ * admit has one here -- what has no flag is refused by those arms rather than
+ * accepted and dropped (see {@link jobZeroSetupOptionsSchema}).
  *
- * Only an enabled toggle is emitted. Each of the three is `false` by default in
- * core, and a zero-setup run loads no configuration file for a flag to override,
- * so an explicitly-off toggle and an unset one select the same behaviour; the
- * negated forms would add argv tokens that change nothing. `peerId` rides a
- * single `--peer-id=<value>` token (the `=` form, like every other value-bearing
- * flag here) and reaches this point only through {@link isAdmissiblePeerId}, so
- * it is a bare label -- never a path, a separator, or a flag-shaped value.
+ * Only an enabled toggle is emitted. Each of the three booleans is `false` by
+ * default in core, and a zero-setup run loads no configuration file for a flag to
+ * override, so an explicitly-off toggle and an unset one select the same
+ * behaviour; the negated forms would add argv tokens that change nothing.
+ * `peerId` rides a single `--peer-id=<value>` token (the `=` form, like every
+ * other value-bearing flag here) and reaches this point only through
+ * {@link isAdmissiblePeerId}, so it is a bare label -- never a path, a
+ * separator, or a flag-shaped value.
  *
- * `unexpectedFiles` has no CLI flag (it is a configuration-only key), so it
- * cannot ride a zero-setup argv; the console offers it only on the flow that
- * composes a config document.
+ * The durations are emitted in the units each flag's own grammar takes:
+ * `--polling-frequency` accepts a millisecond suffix and carries the interval
+ * verbatim, while the two coarse-duration flags take a second-or-coarser unit
+ * and so carry whole seconds -- exact, because the zero-setup arms admit only a
+ * whole-second value for them.
  */
-export function zeroSetupFileSyncArgv(
+export function zeroSetupOptionsArgv(
   options: JobExchangeOptions | undefined,
 ): Array<string> {
   if (options === undefined) return [];
@@ -940,6 +1014,15 @@ export function zeroSetupFileSyncArgv(
   if (options.timestampInFilename === true)
     argv.push("--timestamp-in-filename");
   if (options.peerId !== undefined) argv.push(`--peer-id=${options.peerId}`);
+  if (options.pollIntervalMs !== undefined)
+    argv.push(`--polling-frequency=${options.pollIntervalMs}ms`);
+  if (options.peerTimeoutMs !== undefined)
+    argv.push(`--peer-timeout=${options.peerTimeoutMs / 1000}s`);
+  if (options.serverConnectTimeoutMs !== undefined)
+    argv.push(`--connection-timeout=${options.serverConnectTimeoutMs / 1000}s`);
+  if (options.maxReconnectAttempts !== undefined)
+    argv.push(`--max-reconnect-attempts=${options.maxReconnectAttempts}`);
+  if (options.connectionPerPoll === true) argv.push("--connection-per-poll");
   return argv;
 }
 

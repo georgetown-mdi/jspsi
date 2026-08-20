@@ -4,6 +4,7 @@ import { parse as parseYaml } from "yaml";
 
 import {
   MAX_NAME_LENGTH,
+  MAX_TIMEOUT_SECONDS,
   assessOutboundPayloadConsent,
   disclosedColumnNames,
   safeParseExchangeSpec,
@@ -25,8 +26,8 @@ import {
   jobCreateIntentSchema,
   jobExchangeIntentSchema,
   jobZeroSetupIntentSchema,
-  zeroSetupFileSyncArgv,
   zeroSetupFiledropArgv,
+  zeroSetupOptionsArgv,
   zeroSetupSftpArgv,
 } from "@jobs/intent";
 
@@ -693,22 +694,90 @@ describe("the sftp intent arm", () => {
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
 
-  test("pollIntervalMs 999 is rejected on sftp, accepted on filedrop", () => {
+  // No channel floors the poll interval above core's own positive-integer rule:
+  // the console warns about a sub-second interval (the CLI's anti-flood advisory,
+  // raised at authoring time) and runs it, exactly as the command line does for
+  // the operator who authored the connection.
+  test("a sub-second pollIntervalMs is accepted on both channels", () => {
     expect(
       jobExchangeIntentSchema.safeParse(
-        validSftpIntent({ options: { pollIntervalMs: 999 } }),
+        validSftpIntent({ options: { pollIntervalMs: 250 } }),
+      ).success,
+    ).toBe(true);
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ options: { pollIntervalMs: 250 } }),
+      ).success,
+    ).toBe(true);
+  });
+
+  test("a zero or negative pollIntervalMs is still refused on both channels", () => {
+    for (const pollIntervalMs of [0, -1])
+      for (const intent of [
+        validSftpIntent({ options: { pollIntervalMs } }),
+        validIntent({ options: { pollIntervalMs } }),
+      ])
+        expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("connectionPerPoll is admitted on sftp and refused on filedrop", () => {
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validSftpIntent({ options: { connectionPerPoll: true } }),
+      ).success,
+    ).toBe(true);
+    // The mode dials a real SFTP session, which a filedrop client has none of, so
+    // the strict parse refuses it rather than taking a value the run cannot honour.
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ options: { connectionPerPoll: true } }),
       ).success,
     ).toBe(false);
-    expect(
-      jobExchangeIntentSchema.safeParse(
-        validSftpIntent({ options: { pollIntervalMs: 1000 } }),
-      ).success,
-    ).toBe(true);
-    expect(
-      jobExchangeIntentSchema.safeParse(
-        validIntent({ options: { pollIntervalMs: 999 } }),
-      ).success,
-    ).toBe(true);
+  });
+
+  test("connectionPerPoll reaches the composed sftp config", () => {
+    const yaml = composeSftpConfigDocument(
+      validSftpIntent({ options: { connectionPerPoll: true } }),
+      testSftpServerEntry(),
+    );
+    const doc = parseYaml(yaml) as {
+      connection: { options?: Record<string, unknown> };
+    };
+    expect(doc.connection.options?.connection_per_poll).toBe(true);
+  });
+});
+
+// Each tuning knob authored on the console must survive to the config the CLI
+// loads, under the snake_case name core's schema reads.
+describe("the connection-tuning knobs reach the composed config", () => {
+  test("every knob round-trips into a filedrop config", () => {
+    const yaml = composeConfigDocument(
+      validIntent({
+        options: {
+          pollIntervalMs: 250,
+          peerTimeoutMs: 7_200_000,
+          serverConnectTimeoutMs: 45_000,
+          maxReconnectAttempts: 12,
+        },
+      }),
+      "/srv/jobs/abc/exchange",
+    );
+    const doc = parseYaml(yaml) as {
+      connection: { options?: Record<string, unknown> };
+    };
+    expect(doc.connection.options).toMatchObject({
+      poll_interval_ms: 250,
+      peer_timeout_ms: 7_200_000,
+      server_connect_timeout_ms: 45_000,
+      max_reconnect_attempts: 12,
+    });
+  });
+
+  test("an intent with no options composes no options block at all", () => {
+    const doc = parseYaml(
+      composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange"),
+    ) as { connection: { options?: Record<string, unknown> } };
+    expect(doc.connection.options).toBeUndefined();
   });
 });
 
@@ -820,15 +889,15 @@ describe("the options peer_id and its cross-field rules", () => {
   });
 });
 
-describe("zeroSetupFileSyncArgv", () => {
+describe("zeroSetupOptionsArgv", () => {
   test("emits nothing when no option was set", () => {
-    expect(zeroSetupFileSyncArgv(undefined)).toEqual([]);
-    expect(zeroSetupFileSyncArgv({})).toEqual([]);
+    expect(zeroSetupOptionsArgv(undefined)).toEqual([]);
+    expect(zeroSetupOptionsArgv({})).toEqual([]);
   });
 
   test("emits the retain trio and the party name", () => {
     expect(
-      zeroSetupFileSyncArgv({
+      zeroSetupOptionsArgv({
         retainFiles: true,
         locklessRendezvous: true,
         timestampInFilename: true,
@@ -844,7 +913,7 @@ describe("zeroSetupFileSyncArgv", () => {
 
   test("emits nothing for an explicitly-off toggle", () => {
     expect(
-      zeroSetupFileSyncArgv({
+      zeroSetupOptionsArgv({
         retainFiles: false,
         locklessRendezvous: false,
         timestampInFilename: false,
@@ -853,7 +922,7 @@ describe("zeroSetupFileSyncArgv", () => {
   });
 
   test("carries the party name as a single =value token", () => {
-    const argv = zeroSetupFileSyncArgv({
+    const argv = zeroSetupOptionsArgv({
       timestampInFilename: true,
       peerId: "clinic-a",
     });
@@ -862,7 +931,35 @@ describe("zeroSetupFileSyncArgv", () => {
   });
 
   test("emits no flag for unexpected_files, which has none", () => {
-    expect(zeroSetupFileSyncArgv({ unexpectedFiles: "warn" })).toEqual([]);
+    expect(zeroSetupOptionsArgv({ unexpectedFiles: "warn" })).toEqual([]);
+  });
+
+  test("emits each tuning knob in the unit its own flag takes", () => {
+    expect(
+      zeroSetupOptionsArgv({
+        pollIntervalMs: 250,
+        peerTimeoutMs: 7_200_000,
+        serverConnectTimeoutMs: 45_000,
+        maxReconnectAttempts: 12,
+        connectionPerPoll: true,
+      }),
+    ).toEqual([
+      "--polling-frequency=250ms",
+      "--peer-timeout=7200s",
+      "--connection-timeout=45s",
+      "--max-reconnect-attempts=12",
+      "--connection-per-poll",
+    ]);
+  });
+
+  test("emits a zero retry budget, which means connect once and do not retry", () => {
+    expect(zeroSetupOptionsArgv({ maxReconnectAttempts: 0 })).toEqual([
+      "--max-reconnect-attempts=0",
+    ]);
+  });
+
+  test("emits no session-mode flag when the mode is off", () => {
+    expect(zeroSetupOptionsArgv({ connectionPerPoll: false })).toEqual([]);
   });
 });
 
@@ -1053,15 +1150,92 @@ describe("jobZeroSetupIntentSchema accepts the allowed fields", () => {
     expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(true);
   });
 
-  test("accepts the sftp poll floor and the event-stream toggle", () => {
+  test("accepts a sub-second poll interval and the event-stream toggle", () => {
     expect(
       jobZeroSetupIntentSchema.safeParse(
         validZeroSetupSftpIntent({
-          options: { pollIntervalMs: 1000 },
+          options: { pollIntervalMs: 250 },
           eventStream: true,
         }),
       ).success,
     ).toBe(true);
+  });
+});
+
+// Every option a zero-setup arm admits has a flag on the argv this mode builds,
+// so nothing an operator authors is accepted and then dropped. What has no flag
+// -- or no faithful flag form -- is refused here instead.
+describe("the zero-setup arms admit only what their argv can carry", () => {
+  test("refuses unexpectedFiles, which has no CLI flag at all", () => {
+    for (const intent of [
+      validZeroSetupIntent({ options: { unexpectedFiles: "warn" } }),
+      validZeroSetupSftpIntent({ options: { unexpectedFiles: "warn" } }),
+    ])
+      expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("refuses a timeout that is not a whole number of seconds", () => {
+    for (const options of [
+      { peerTimeoutMs: 1500 },
+      { serverConnectTimeoutMs: 45_500 },
+    ])
+      expect(
+        jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ options }))
+          .success,
+      ).toBe(false);
+  });
+
+  test("refuses a timeout past the seven-day ceiling its flag is capped at", () => {
+    // Accepting one would create a job -- occupying the appliance's single run
+    // slot -- whose spawned CLI refuses the argv it was created to run.
+    const overCeilingMs = (MAX_TIMEOUT_SECONDS + 1) * 1000;
+    for (const options of [
+      { peerTimeoutMs: overCeilingMs },
+      { serverConnectTimeoutMs: overCeilingMs },
+    ])
+      expect(
+        jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ options }))
+          .success,
+      ).toBe(false);
+    // The ceiling itself is admissible: the CLI's own cap is inclusive.
+    expect(
+      jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupIntent({
+          options: { peerTimeoutMs: MAX_TIMEOUT_SECONDS * 1000 },
+        }),
+      ).success,
+    ).toBe(true);
+    // The ceiling is the duration FLAG's, so the exchange mode -- which composes
+    // a configuration document and passes no such flag -- keeps admitting it.
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ options: { peerTimeoutMs: overCeilingMs } }),
+      ).success,
+    ).toBe(true);
+  });
+
+  test("accepts a whole-second timeout and every other tuning knob", () => {
+    expect(
+      jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupSftpIntent({
+          options: {
+            pollIntervalMs: 250,
+            peerTimeoutMs: 7_200_000,
+            serverConnectTimeoutMs: 45_000,
+            maxReconnectAttempts: 12,
+            connectionPerPoll: true,
+          },
+        }),
+      ).success,
+    ).toBe(true);
+  });
+
+  test("refuses connectionPerPoll on the filedrop arm, as the exchange mode does", () => {
+    expect(
+      jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupIntent({ options: { connectionPerPoll: true } }),
+      ).success,
+    ).toBe(false);
   });
 });
 
@@ -1150,10 +1324,10 @@ describe("jobZeroSetupIntentSchema is injection-closed and strict", () => {
     expect(jobZeroSetupIntentSchema.safeParse(both).success).toBe(false);
   });
 
-  test("floors the sftp poll interval at 1000ms, as the exchange arm does", () => {
+  test("refuses a non-positive poll interval, as the exchange arm does", () => {
     expect(
       jobZeroSetupIntentSchema.safeParse(
-        validZeroSetupSftpIntent({ options: { pollIntervalMs: 999 } }),
+        validZeroSetupSftpIntent({ options: { pollIntervalMs: 0 } }),
       ).success,
     ).toBe(false);
   });

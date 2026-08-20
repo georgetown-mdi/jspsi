@@ -59,6 +59,13 @@ import {
   exchangeFilesProblems,
 } from "./exchangeFilesModel";
 import {
+  CONNECTION_TUNING_DEFAULT,
+  FILEDROP_CONNECTION_TUNING,
+  SFTP_CONNECTION_TUNING,
+  connectionTuningProblems,
+  withConnectionTuning,
+} from "./connectionTuningModel";
+import {
   acceptorCleaningAttention,
   acceptorColumnsEditorState,
   acceptorInitialColumnsState,
@@ -74,6 +81,7 @@ import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
 import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
 import { AcceptorSftpConnectionCard } from "./AcceptorSftpConnectionCard";
 import { BenchShell } from "./BenchShell";
+import { ConnectionTuningCard } from "./ConnectionTuningCard";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { Ledger } from "./Ledger";
 import { ManageExchangeOffer } from "./ManageExchangeOffer";
@@ -114,6 +122,7 @@ import type { AcceptorStep } from "./acceptorModel";
 import type { AlertContent } from "@components/csvIntake";
 import type { BenchCoverageInput } from "@components/useNonEmptyRates";
 import type { ColumnSamples } from "@psi/columnSamples";
+import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
@@ -224,6 +233,11 @@ export function AcceptorBench() {
     EXCHANGE_FILES_DEFAULT,
   );
   const [exchangeFilesOpen, setExchangeFilesOpen] = useState(false);
+  // The operator's connection-tuning choices for the same accept, authored and
+  // consumed alongside the file-handling draft.
+  const [connectionTuning, setConnectionTuning] =
+    useState<ConnectionTuningDraft>(CONNECTION_TUNING_DEFAULT);
+  const [connectionTuningOpen, setConnectionTuningOpen] = useState(false);
   const [acceptorName, setAcceptorName] = useState("");
   // The name recorded in the exchange record, committed through the consent gate
   // at "Accept and continue" and fixed thereafter -- the run adopts the terms
@@ -650,6 +664,12 @@ export function AcceptorBench() {
     acceptServerJob &&
     unsupported === undefined &&
     decode.invitation.endpoint.channel === "filedrop";
+  // The SFTP session mode applies only where a session exists, so the tuning card
+  // withholds it on a shared-directory accept.
+  const tuningCapabilities =
+    ready && decode.invitation.endpoint.channel === "sftp"
+      ? SFTP_CONNECTION_TUNING
+      : FILEDROP_CONNECTION_TUNING;
   const linkageTerms = token?.linkageTerms;
   // The sanitized legal-agreement values the consent step displays beside the
   // attestation; undefined when the invitation attaches none (no fieldset then).
@@ -701,10 +721,16 @@ export function AcceptorBench() {
           ? { kind: "inline", file: acceptedFile }
           : undefined;
     if (inputSource === undefined) return undefined;
-    // The file-handling choices as they stood at launch, fixed into the launch
-    // alongside the edits so a later edit to the card cannot retune a run already
-    // going.
-    const options = exchangeFilesOptions(exchangeFiles, CONFIG_EXCHANGE_FILES);
+    // The file-handling and connection-tuning choices as they stood at launch,
+    // fixed into the launch alongside the edits so a later edit to either card
+    // cannot retune a run already going.
+    const options = withConnectionTuning(
+      exchangeFilesOptions(exchangeFiles, CONFIG_EXCHANGE_FILES),
+      connectionTuning,
+      decode.invitation.endpoint.channel === "sftp"
+        ? SFTP_CONNECTION_TUNING
+        : FILEDROP_CONNECTION_TUNING,
+    );
     return {
       invitation: decode.invitation,
       acceptorName: committedName,
@@ -1348,19 +1374,32 @@ export function AcceptorBench() {
               connectionBlocked={sftpConnectionMissing}
               exchangeFilesSection={
                 acceptServerJob ? (
-                  <ExchangeFilesCard
-                    draft={exchangeFiles}
-                    capabilities={CONFIG_EXCHANGE_FILES}
-                    open={exchangeFilesOpen}
-                    onToggleOpen={setExchangeFilesOpen}
-                    onChange={setExchangeFiles}
-                  />
+                  <>
+                    <ExchangeFilesCard
+                      draft={exchangeFiles}
+                      capabilities={CONFIG_EXCHANGE_FILES}
+                      open={exchangeFilesOpen}
+                      onToggleOpen={setExchangeFilesOpen}
+                      onChange={setExchangeFiles}
+                    />
+                    <ConnectionTuningCard
+                      draft={connectionTuning}
+                      capabilities={tuningCapabilities}
+                      open={connectionTuningOpen}
+                      onToggleOpen={setConnectionTuningOpen}
+                      onChange={setConnectionTuning}
+                    />
+                  </>
                 ) : undefined
               }
               exchangeFilesBlocked={
                 acceptServerJob &&
                 exchangeFilesProblems(exchangeFiles, CONFIG_EXCHANGE_FILES)
                   .length > 0
+              }
+              connectionTuningBlocked={
+                acceptServerJob &&
+                connectionTuningProblems(connectionTuning).length > 0
               }
               onMetadataChange={changeMetadata}
               onRemap={remapColumn}

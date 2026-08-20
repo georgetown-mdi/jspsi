@@ -159,6 +159,59 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     expect(argv.join(" ")).not.toContain(CONTAINER_CREDENTIAL_PATH);
   });
 
+  // A run tuned for a slow peer or a session-capping server must graduate to a
+  // scheduled run tuned the same way, or the recurring version quietly behaves
+  // differently from the one the operator prototyped.
+  test("an sftp exchange hands off its connection tuning verbatim", () => {
+    const handoff = buildJobHandoff(
+      validSftpIntent({
+        options: {
+          pollIntervalMs: 600_000,
+          peerTimeoutMs: 7_200_000,
+          serverConnectTimeoutMs: 45_000,
+          maxReconnectAttempts: 12,
+          connectionPerPoll: true,
+        },
+      }),
+      testSftpServerEntry(),
+      false,
+    );
+    const yaml =
+      handoff.template.kind === "config" ? handoff.template.yaml : "";
+    const doc = parseYaml(yaml) as {
+      connection: { options?: Record<string, unknown> };
+    };
+    expect(doc.connection.options).toMatchObject({
+      poll_interval_ms: 600_000,
+      peer_timeout_ms: 7_200_000,
+      server_connect_timeout_ms: 45_000,
+      max_reconnect_attempts: 12,
+      connection_per_poll: true,
+    });
+    expect(safeParseExchangeSpec(parseYaml(yaml)).success).toBe(true);
+  });
+
+  test("a zero-setup run hands off its connection tuning as the same flags", () => {
+    const handoff = buildJobHandoff(
+      validZeroSetupSftpIntent({
+        options: {
+          pollIntervalMs: 600_000,
+          peerTimeoutMs: 7_200_000,
+          maxReconnectAttempts: 12,
+          connectionPerPoll: true,
+        },
+      }),
+      testSftpServerEntry(),
+      false,
+    );
+    const argv =
+      handoff.template.kind === "command" ? handoff.template.argv : [];
+    expect(argv).toContain("--polling-frequency=600000ms");
+    expect(argv).toContain("--peer-timeout=7200s");
+    expect(argv).toContain("--max-reconnect-attempts=12");
+    expect(argv).toContain("--connection-per-poll");
+  });
+
   test("a filedrop exchange placeholders the shared directory path", () => {
     const handoff = buildJobHandoff(validIntent(), undefined, false);
     expect(handoff.channel).toBe("filedrop");

@@ -89,6 +89,7 @@ export function AcceptorColumnsStep({
   connectionBlocked = false,
   exchangeFilesSection,
   exchangeFilesBlocked = false,
+  connectionTuningBlocked = false,
   onMetadataChange,
   onRemap,
   onReset,
@@ -123,6 +124,11 @@ export function AcceptorColumnsStep({
    * the launch gate exactly as {@link connectionBlocked} does, so an unusable
    * combination is a form problem here rather than a job that fails later. */
   exchangeFilesBlocked?: boolean;
+  /** Whether the connection-tuning choices carry a value the run would refuse.
+   * Gates launch as {@link exchangeFilesBlocked} does, but separately: the two
+   * are separate cards in {@link exchangeFilesSection}, and the blocked reason
+   * names the one to open. */
+  connectionTuningBlocked?: boolean;
   onMetadataChange: (next: Metadata) => void;
   /** Bind a missing field type to a chosen column, forcing role linkage. */
   onRemap: (type: SemanticType, columnName: string) => void;
@@ -202,7 +208,7 @@ export function AcceptorColumnsStep({
     verdict,
     editorState,
     linkageTerms,
-    { connectionBlocked, exchangeFilesBlocked },
+    { connectionBlocked, exchangeFilesBlocked, connectionTuningBlocked },
   );
   const launchDisabled = launchBlockedReason !== undefined;
 

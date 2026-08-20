@@ -211,7 +211,7 @@ export async function awaitJobTerminalState(
 export async function captureZeroSetupArgv(args: {
   workdir: string;
   connectionArgs: Array<string>;
-  fileSyncArgs?: Array<string>;
+  optionArgs?: Array<string>;
   eventStream: boolean;
   identity?: string;
   linkageStrategy?: "cascade" | "single-pass";
@@ -224,7 +224,7 @@ export async function captureZeroSetupArgv(args: {
       spawnZeroSetupJob({
         binaryPath: STUB_CLI_PATH,
         connectionArgs: args.connectionArgs,
-        fileSyncArgs: args.fileSyncArgs ?? [],
+        optionArgs: args.optionArgs ?? [],
         inputPath: path.join(workdir, "input.csv"),
         outputPath: path.join(workdir, "output.csv"),
         recordPath: path.join(workdir, "record.json"),
