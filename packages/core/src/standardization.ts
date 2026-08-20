@@ -37,11 +37,17 @@ import { isCalendarDateValid } from "./utils/calendarDate.js";
 import { expandFuzzyComparisons } from "./fuzzyComparisons.js";
 import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
+  declaredFanOutFunction,
   FAN_OUT_FUNCTION_NAMES,
   isListedFanOutFunction,
+  MAX_KEY_CANDIDATES_PER_ROW,
 } from "./fanOutFunctions.js";
 
-export { FAN_OUT_FUNCTION_NAMES } from "./fanOutFunctions.js";
+export {
+  declaredEffectiveKeyCount,
+  FAN_OUT_FUNCTION_NAMES,
+  MAX_KEY_CANDIDATES_PER_ROW,
+} from "./fanOutFunctions.js";
 
 const logger = getLogger("cleaning");
 
@@ -57,8 +63,8 @@ const logger = getLogger("cleaning");
  *   as `split_on`. `Set` enforces uniqueness: duplicate values from splitting or
  *   subsequent element-wise steps are automatically deduplicated.
  *   {@link buildKeyStrings} crosses these candidates into the key's candidate
- *   set; what is not implemented is MATCHING on that set, which the linkage
- *   strategies refuse (see {@link fanOutReachedMatchingRefusal}).
+ *   set; matching on that set runs under the single-pass strategy alone, and the
+ *   cascade refuses it (see {@link fanOutReachedMatchingRefusal}).
  */
 export type FieldValue = string | null | Set<string>;
 
@@ -692,17 +698,22 @@ function fanOutDeclaredMessage(functionName: string): string {
 }
 
 /**
- * Refusal for a candidate set that REACHED a linkage strategy -- the point of
- * harm, where the alternative is the silent narrowing itself. Key realization
- * carries every candidate ({@link buildKeyStrings}), so this is the one place
- * left that cannot honor them: `linkViaPSI` and `linkViaSinglePassPSI` run one
- * value per record.
+ * Refusal for a candidate set that REACHED a seam running one value per record --
+ * the point of harm, where the alternative is the silent narrowing itself. Key
+ * realization carries every candidate ({@link buildKeyStrings}); the seams that
+ * cannot honor them are `linkViaPSI` and `linkViaCountOnlyPSI`, fan-out matching
+ * being specified for single-pass alone, plus the single-pass table build of a
+ * party that declared NO fan-out, whose fixed-width column carries one value per
+ * (key, record). A party that DID declare one builds the ragged table instead and
+ * refuses a set its advertisement cannot carry through the single-pass build's own
+ * width checks (`link.ts`), which are a different refusal on the same class of
+ * fault: an expansion the declared factors do not account for.
  *
- * Unreachable while {@link assertFanOutImplemented} gates every run path, and
- * deliberately a check rather than a comment saying so: it also covers a fan-out
- * function that never made it into {@link FAN_OUT_FUNCTION_NAMES}, and the
- * standardization-authored half that gate cannot see on a prepared exchange
- * assembled outside `prepareForExchange`.
+ * Unreachable from a declared fan-out while {@link assertFanOutImplemented} gates
+ * every run path, and deliberately a check rather than a comment saying so: it
+ * also covers a fan-out function that never made it into
+ * {@link FAN_OUT_FUNCTION_NAMES}, and the standardization-authored half that gate
+ * cannot see on a prepared exchange assembled outside `prepareForExchange`.
  */
 export function fanOutReachedMatchingRefusal(): UsageError {
   return new UsageError(
@@ -1320,8 +1331,8 @@ function noRealizedValues(): RealizedFieldValues {
  * An empty array indicates that the record has no valid value for this field and
  * is excluded from any linkage key that references it. More than one value is a
  * fan-out: {@link buildKeyStrings} crosses every value into the key's candidate
- * set, and an exchange declaring one is refused because matching on that set is
- * not implemented (see {@link assertFanOutImplemented}).
+ * set, and an exchange declaring one is refused ahead of the consent copy that
+ * would describe it (see {@link assertFanOutImplemented}).
  */
 export class StandardizedField {
   readonly name: string;
@@ -1670,33 +1681,6 @@ function swapElements(
 }
 
 /**
- * The normative per-(record, key) fan-out width bound: one record contributes at
- * most this many candidate values to one linkage key's round
- * (docs/spec/PROTOCOL.md, The width bound). Not operator-configurable -- it is
- * what a partner-supplied frame's element and byte bounds are derived from, so
- * changing it re-derives those.
- *
- * A record realizing more candidates than this contributes NONE of them to that
- * key's round: {@link buildKeyStrings} drops it exactly as an absent (`NULL`)
- * realization is dropped, warns the operator, and leaves the record eligible for
- * later keys. Deliberately not a run refusal -- the transforms are
- * partner-authored while the values expanded are this party's own rows, so
- * failing the run would let a partner end an exchange by authoring a delimiter
- * that shatters one local value.
- *
- * It binds `split_on`, the fan-out producer, and it is also the count at which a
- * cross-product earns an operator advisory: a wide expansion weakens the
- * guarantee a dual-party-output exchange otherwise gives, because each candidate
- * can independently reveal co-possession. Past the bound that width is not the
- * operator's call to make per row, and the consequence of an authored fan-out
- * within the bound is surfaced where the operator consents to the terms. For the
- * other candidate producer, `generateFuzzyComparisons`, the number is the
- * advisory alone -- its own width factor is that feature's to set when its
- * matching lands.
- */
-export const MAX_KEY_CANDIDATES_PER_ROW = 20;
-
-/**
  * The hard cap on the key strings ONE row may contribute to a single key round.
  *
  * {@link MAX_KEY_CANDIDATES_PER_ROW} bounds the record's candidate set for a key
@@ -1945,8 +1929,8 @@ export function buildKeyStrings(
  * - Singleton `Set<string>` -> the one string, unwrapped.
  * - Multi-value `Set<string>` -> the whole set, every candidate the record
  *   realized. Narrowing it here would match on less than the terms declare;
- *   matching on the set is what is not implemented, and the strategy consuming it
- *   refuses ({@link fanOutReachedMatchingRefusal}) rather than narrowing.
+ *   single-pass matches the whole set, and the cascade refuses it
+ *   ({@link fanOutReachedMatchingRefusal}) rather than narrowing.
  */
 export class StandardizedKeyIterable {
   [index: number]: KeyCandidates;
@@ -2087,34 +2071,30 @@ export function assertStandardizationMatchesTerms(
     );
 }
 
-function declaredFanOutFunction(
-  steps: ReadonlyArray<{ function: string }> | undefined,
-): string | undefined {
-  return steps?.find((step) => FAN_OUT_FUNCTION_NAMES.includes(step.function))
-    ?.function;
-}
-
 /**
- * Refuse transforms that declare a fan-out step the run cannot honor, before any
- * matching begins.
+ * Refuse transforms that declare a fan-out step this build will not run, before
+ * any matching begins.
  *
- * Matching runs on a single value per record: a record whose value expands into
- * several match candidates has no round to enter, so a fan-out term reaches the
- * wire only to abort the run at its first splitting row -- and with no refusal at
- * all it would match FEWER records while the consent surface states each
- * candidate matches independently. That is the disclosure-fidelity gap this
- * refusal closes, the fan-out sibling of `assertAlgorithmImplemented` and
- * `assertDeduplicateImplemented` in `exchange.ts`.
+ * The single-pass strategy matches a candidate set (docs/spec/PROTOCOL.md,
+ * Fan-out matching); the consent and documentation surfaces still describe a
+ * build in which no fan-out runs, and the cascade -- the schema default -- has no
+ * fan-out realization at all. So the refusal stays blanket rather than narrowing
+ * to the cascade: a fan-out term admitted ahead of those surfaces would match
+ * records under copy that does not describe what ran, which is the
+ * disclosure-fidelity gap this refusal closes, the fan-out sibling of
+ * `assertAlgorithmImplemented` and `assertDeduplicateImplemented` in
+ * `exchange.ts`.
  *
  * Both authoring surfaces a fan-out step can reach are checked, because both
- * realize a candidate set no strategy can consume: a standardization
- * transformation feeds {@link StandardizedField}, and a linkage-key element
- * transform feeds {@link buildKeyStrings}; either way the candidates cross into
- * the key's candidate set. `standardization` is omitted where the caller no longer
- * holds one (the run boundary reads a prepared exchange, which retains the built
- * dataset rather than the spec); what covers that half there is
- * {@link fanOutReachedMatchingRefusal}, which fires as a round is built -- at the
- * point of harm, but after this party's terms have gone on the wire.
+ * realize a candidate set: a standardization transformation feeds
+ * {@link StandardizedField}, and a linkage-key element transform feeds
+ * {@link buildKeyStrings}; either way the candidates cross into the key's
+ * candidate set. `standardization` is omitted where the caller no longer holds one
+ * (the run boundary reads a prepared exchange, which retains the built dataset
+ * rather than the spec); what covers that half there is
+ * {@link fanOutReachedMatchingRefusal} on the cascade, and on single-pass the
+ * declared-width check its table build runs -- both at the point of harm, but
+ * after this party's terms have gone on the wire.
  *
  * The two surfaces carry the same message under DIFFERENT error classes, because
  * they differ in whose content the fault is. A `standardization` is only ever this
@@ -2134,9 +2114,9 @@ function declaredFanOutFunction(
  * having already matched one -- so no partner free text is interpolated, and the
  * CLI classifies both as a usage error (exit 64) through the base class.
  *
- * When fan-out matching lands, REPLACE this refusal with it and true up the
- * consent copy in the same change; a splitting record must then contribute one
- * PSI entry per candidate.
+ * Narrowing this to a cascade-only refusal is what lets a single-pass fan-out
+ * run; do it in the same change that trues up the consent copy, which still
+ * describes a build where no fan-out matches.
  */
 export function assertFanOutImplemented(
   terms: LinkageTerms,

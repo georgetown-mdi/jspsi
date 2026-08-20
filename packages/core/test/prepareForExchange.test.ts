@@ -11,6 +11,14 @@ import {
   StandardizationTermsError,
   UsageError,
 } from "../src/errors";
+import {
+  MAX_SINGLE_PASS_CELLS,
+  singlePassDatasetExceedsCap,
+} from "../src/connection/frameSize";
+import {
+  declaredEffectiveKeyCount,
+  MAX_KEY_CANDIDATES_PER_ROW,
+} from "../src/fanOutFunctions";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -459,6 +467,120 @@ describe("prepareForExchange: a fan-out transform is refused", () => {
       psiLibrary: unusablePsiLibrary,
     });
     await expect(run).rejects.toThrow(/the connection was used/);
+  });
+});
+
+// --- The single-pass ceiling pre-flight, and the refusals ahead of it ---------
+
+describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
+  const singlePassTerms: LinkageTerms = {
+    ...terms,
+    linkageStrategy: "single-pass",
+  };
+  const fanOutTerms: LinkageTerms = {
+    ...singlePassTerms,
+    linkageKeys: [
+      {
+        name: "FN_LN",
+        elements: [
+          { field: "first_name" },
+          {
+            field: "last_name",
+            transform: [{ function: "split_on", params: { delimiter: "-" } }],
+          },
+        ],
+      },
+    ],
+  };
+  // Just past the ceiling at a given declared width. The budget is on value slots,
+  // so a fanning-out config crosses it at MAX_KEY_CANDIDATES_PER_ROW times fewer
+  // rows. One row object shared across the array: both refusals here fire on the
+  // counts, before anything reads a row.
+  const rowsOverCeiling = (effectiveKeyCount: number): Array<CSVRow> =>
+    new Array<CSVRow>(
+      Math.floor(MAX_SINGLE_PASS_CELLS / effectiveKeyCount) + 1,
+    ).fill(rawRows[0]);
+
+  test("an over-ceiling dataset declaring no fan-out is refused with the remedies that fit it", () => {
+    const prepare = () =>
+      prepareForExchange(
+        { linkageTerms: singlePassTerms, metadata },
+        "Tester",
+        rowsOverCeiling(1),
+        columns,
+      );
+    // Every remedy the message names is a configuration change, so the class is
+    // the one the CLI maps to EX_USAGE rather than to a transport failure.
+    expect(prepare).toThrow(UsageError);
+    expect(prepare).toThrow(/exceed the single-pass ceiling/);
+    expect(prepare).not.toThrow(/removing a fan-out/);
+  });
+
+  test("an over-ceiling fan-out config is refused for the fan-out, not offered a smaller size", () => {
+    // The interim refusal stops a declared fan-out whatever the row count, so
+    // offering the ceiling's "removing a fan-out is another remedy" here would
+    // promise a run this build refuses at every size. The pre-flight therefore runs
+    // behind that refusal -- an ordering, not a wording: once the refusal narrows to
+    // the cascade, a runnable single-pass fan-out reaches the pre-flight and the
+    // remedy it offers is a real one.
+    const overCeilingRows = rowsOverCeiling(MAX_KEY_CANDIDATES_PER_ROW);
+    // The dataset really is over the ceiling at the width this config declares, so
+    // the pre-flight has something to fire on: what arrives below is the ordering's
+    // doing rather than a fixture that never reached the gate.
+    expect(
+      singlePassDatasetExceedsCap(
+        declaredEffectiveKeyCount(fanOutTerms),
+        overCeilingRows.length,
+      ),
+    ).toBe(true);
+    const prepare = () =>
+      prepareForExchange(
+        { linkageTerms: fanOutTerms, metadata },
+        "Tester",
+        overCeilingRows,
+        columns,
+      );
+    expect(prepare).toThrow(UsageError);
+    expect(prepare).toThrow(/split_on/);
+    expect(prepare).not.toThrow(/single-pass ceiling/);
+  });
+
+  test("a standardization contradicting its terms is refused ahead of the ceiling", () => {
+    // A config with both faults meets the standardization refusal, not the
+    // ceiling. Both are fail-closed prepare-time refusals, so an operator meets
+    // exactly one of them and the precedence is the decision: the standardization
+    // fault is the better-typed of the two (an OperatorConfigError, which the web
+    // renders as an actionable config alert) and it names a contradiction the
+    // operator must fix at any dataset size, while the ceiling's remedies would
+    // send them to shrink a dataset that is not what stops this run.
+    const inconsistentStandardization: Standardization = [
+      { output: "not_a_field", input: "first_name" },
+    ];
+    const effectiveKeyCount = declaredEffectiveKeyCount(
+      singlePassTerms,
+      inconsistentStandardization,
+    );
+    const overCeilingRows = rowsOverCeiling(effectiveKeyCount);
+    // The dataset really is over the ceiling at the width this config declares, so
+    // what arrives below is the ordering's doing rather than a fixture that never
+    // reached the gate.
+    expect(
+      singlePassDatasetExceedsCap(effectiveKeyCount, overCeilingRows.length),
+    ).toBe(true);
+    const prepare = () =>
+      prepareForExchange(
+        {
+          linkageTerms: singlePassTerms,
+          metadata,
+          standardization: inconsistentStandardization,
+        },
+        "Tester",
+        overCeilingRows,
+        columns,
+      );
+    expect(prepare).toThrow(StandardizationTermsError);
+    expect(prepare).toThrow(/not_a_field/);
+    expect(prepare).not.toThrow(/single-pass ceiling/);
   });
 });
 

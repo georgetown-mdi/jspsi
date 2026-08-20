@@ -6,9 +6,12 @@ import {
   type MessageConnection,
 } from "./connection/messageConnection";
 import {
+  partyFansOut,
   singlePassExchangeExceedsCap,
   singlePassReplyByteCap,
+  type SinglePassPartySize,
 } from "./connection/frameSize";
+import { MAX_KEY_CANDIDATES_PER_ROW } from "./fanOutFunctions";
 import {
   fanOutReachedMatchingRefusal,
   type KeyCandidates,
@@ -70,14 +73,14 @@ export interface IndexableIterable<T> extends Iterable<T> {
   [index: number]: T | undefined;
 }
 
-// Both strategies run one value per record, so a record carrying several
-// candidates has no round to enter: it is refused where it would be consumed
-// rather than narrowed to one candidate or dropped from the round, either of
-// which matches on less than the terms declare. Key realization carries the whole
-// candidate set (buildKeyStrings), so this seam is the only one that cannot honor
-// it, and it is the single point both strategies read a record's value through.
-// docs/spec/PROTOCOL.md (Fan-out matching) specifies the value-level rounds that
-// replace the refusal.
+// The cascade and the count-only round run one value per record, so a record
+// carrying several candidates has no round to enter: it is refused where it would
+// be consumed rather than narrowed to one candidate or dropped from the round,
+// either of which matches on less than the terms declare. Key realization carries
+// the whole candidate set (buildKeyStrings), so this is the single point those two
+// strategies read a record's value through. Single-pass, the one strategy fan-out
+// matching is specified for, consumes the set instead (docs/spec/PROTOCOL.md,
+// Fan-out matching).
 function requireSingleCandidate(value: KeyCandidates): string | undefined {
   if (value === undefined || typeof value === "string") return value;
   throw fanOutReachedMatchingRefusal();
@@ -480,20 +483,35 @@ export async function linkViaCountOnlyPSI(
 // recommend cascade: linkage_strategy is a mandatory-consistency agreed term that
 // cannot change unilaterally mid-exchange (re-agreeing on cascade is an
 // out-of-band step), so pointing at it here would be misleading. The cap is on
-// each party's (key, record) cell count keyCount * recordCount; reducing either
-// factor, or splitting the dataset, is the actionable remedy. See
+// each party's value slot count effectiveKeyCount * recordCount; reducing either
+// factor, or splitting the dataset, is the actionable remedy, and removing a
+// fan-out is another when either party declares one. See
 // docs/spec/PROTOCOL.md (the single-pass dataset ceiling).
+//
+// Every remedy it names is a configuration one of the two operators can change,
+// so both of its raise sites are a UsageError (CLI exit 64) rather than a
+// transport or internal fault -- the same class as the width refusals below. It
+// interpolates the agreed key count and the two record counts and nothing else,
+// all of them authenticated session state.
 function singlePassOverCapMessage(
   id: string,
   numLinkageKeys: number,
-  senderRecordCount: number,
-  receiverRecordCount: number,
+  sender: SinglePassPartySize,
+  receiver: SinglePassPartySize,
 ): string {
+  const fansOut =
+    partyFansOut(numLinkageKeys, sender) ||
+    partyFansOut(numLinkageKeys, receiver);
   return (
     `${id}: single-pass cannot carry this dataset: ${numLinkageKeys} linkage ` +
-    `key(s) with ${senderRecordCount} sender and ${receiverRecordCount} ` +
+    `key(s) with ${sender.recordCount} sender and ${receiver.recordCount} ` +
     "receiver record(s) exceed the single-pass ceiling. Reduce the number of " +
-    "linkage keys or the record count, or split the dataset into smaller batches."
+    "linkage keys or the record count, or split the dataset into smaller " +
+    "batches." +
+    (fansOut
+      ? ` A linkage key that fans out counts as ${MAX_KEY_CANDIDATES_PER_ROW} ` +
+        "toward that ceiling, so removing a fan-out is another remedy."
+      : "")
   );
 }
 
@@ -550,6 +568,25 @@ export function withholdsSenderAssociationTable(
 }
 
 /**
+ * The authenticated session state {@link linkViaSinglePassPSI} derives every one
+ * of its bounds from: the partner's raw row count and both parties' declared
+ * effective key counts, all three carried on the terms exchange. Nothing here is
+ * read from an inbound linkage frame, so both parties compute the same numbers and
+ * reach the same verdicts.
+ */
+export interface SinglePassSessionBounds {
+  /**
+   * The partner's raw row count, exchanged over the encrypted channel during role
+   * resolution.
+   */
+  readonly partnerRecordCount: number;
+  /** This party's own declared effective key count, as it advertised it. */
+  readonly localEffectiveKeyCount: number;
+  /** The partner's declared effective key count, as it advertised it. */
+  readonly partnerEffectiveKeyCount: number;
+}
+
+/**
  * The single-pass linkage strategy: an alternative to {@link linkViaPSI} that
  * produces the same matched row pairs but uses one network round-trip instead of
  * one per linkage key. exchange.ts chooses between the two on `linkageStrategy`.
@@ -567,11 +604,17 @@ export function withholdsSenderAssociationTable(
  * docs/spec/PROTOCOL.md; the PSI building blocks it calls are on
  * {@link PSIParticipant}.
  *
- * @param partnerRecordCount - The partner's raw row count, exchanged over the
- *   encrypted channel during role resolution. Together with this party's own row
- *   count and the agreed key count it derives the per-exchange frame cap and the
- *   abort-if-over-ceiling gate -- identically on both parties, so they reach the
- *   same verdict from authenticated session state alone (see frameSize.ts).
+ * This is the one strategy fan-out matching is specified for, so `data` may yield
+ * a record a candidate SET for a key: every candidate enters the round as its own
+ * PSI entry, the within-round uniqueness rule applies per VALUE, and the
+ * record-level pairing is resolved by the deterministic sweep in
+ * {@link replaySinglePassCascade}. A fan-out-free exchange ships and replays
+ * exactly what it did before fan-out existed.
+ *
+ * @param bounds - The authenticated session state every derived bound reads; see
+ *   {@link SinglePassSessionBounds}. Together they fix the per-exchange frame cap,
+ *   the abort-if-over-ceiling gate, and which of the two message-2 index-table
+ *   layouts the sender ships -- identically on both parties.
  * @param withholdSenderTable - When `true`, the receiver suppresses message 3
  *   (the sender's association-table half) ENTIRELY and the sender skips awaiting
  *   it, so a non-receiving, no-payload helper's process never receives -- and so
@@ -590,7 +633,7 @@ export async function linkViaSinglePassPSI(
   participant: PSIParticipant,
   conn: MessageConnection,
   data: Array<IndexableIterable<KeyCandidates>>,
-  partnerRecordCount: number,
+  bounds: SinglePassSessionBounds,
   withholdSenderTable: boolean = false,
   verbosity: number = 0,
   setStage?: (id: string) => void,
@@ -618,39 +661,82 @@ export async function linkViaSinglePassPSI(
       `single-pass PSI`,
   );
 
-  // distinctValueIndexTable[j][i] is record i's index into distinctValues for
-  // key j, or -1 where that record has no value for the key.
-  const { distinctValues, distinctValueIndexTable, numRecords } =
-    getDistinctValuesAndIndices(data);
+  const {
+    partnerRecordCount,
+    localEffectiveKeyCount,
+    partnerEffectiveKeyCount,
+  } = bounds;
 
-  // Map (own count, partner count, role) -> (senderRecordCount,
-  // receiverRecordCount). Both parties derive the SAME pair: the starter is the
-  // PSI sender, the joiner the receiver. This is the authenticated session state
-  // the frame cap and the over-ceiling gate read -- never the inbound frame.
+  // The layout this party's own index table takes: ragged when its declared
+  // effective key count exceeds the agreed key count, fixed-width otherwise. The
+  // discriminant is the declared value rather than the data, so the build refuses
+  // a cell wider than what was declared instead of silently outgrowing the slot
+  // bound derived from it.
+  const localFansOut = partyFansOut(numLinkageKeys, {
+    effectiveKeyCount: localEffectiveKeyCount,
+  });
+
+  const { distinctValues, columns, numRecords, slotCount } =
+    getDistinctValuesAndIndices(data, localFansOut);
+
+  // Map (own count, partner count, role) -> (sender size, receiver size). Both
+  // parties derive the SAME pair: the starter is the PSI sender, the joiner the
+  // receiver. This is the authenticated session state the frame cap, the
+  // over-ceiling gate, and the index-table layout read -- never the inbound frame.
   const isSender = participant.config.role === "starter";
-  const senderRecordCount = isSender ? numRecords : partnerRecordCount;
-  const receiverRecordCount = isSender ? partnerRecordCount : numRecords;
+  const localSize: SinglePassPartySize = {
+    effectiveKeyCount: localEffectiveKeyCount,
+    recordCount: numRecords,
+  };
+  const partnerSize: SinglePassPartySize = {
+    effectiveKeyCount: partnerEffectiveKeyCount,
+    recordCount: partnerRecordCount,
+  };
+  const senderSize = isSender ? localSize : partnerSize;
+  const receiverSize = isSender ? partnerSize : localSize;
+  // The sender's advertised width decides message 2's layout on BOTH sides, so a
+  // sender that declares no fan-out ships the frame it always shipped even when
+  // its partner fans out.
+  const senderFansOut = partyFansOut(numLinkageKeys, senderSize);
+
+  // The value slots this party's own data actually occupies must fit the bound its
+  // advertisement claims: the partner's decode, its element bounds, and its read
+  // gate are all derived from that claim, so exceeding it would have the partner
+  // reject a frame this party built. A candidate producer whose width the declared
+  // factors do not account for lands here rather than on the wire: a row within the
+  // per-record bound still overruns the slots when the key it widens is one the
+  // declared factors count as single-valued, which is the fuzzy case
+  // `declaredEffectiveKeyCount` (fanOutFunctions.ts) defers to this seam. That
+  // producer is a configuration its operator can change, so the refusal is
+  // usage-typed rather than internal.
+  const localSlotBound = localEffectiveKeyCount * numRecords;
+  if (slotCount > localSlotBound) {
+    throw new UsageError(
+      `${participant.id}: single-pass built ${slotCount} candidate value slot(s) ` +
+        `across ${numLinkageKeys} linkage key(s) and ${numRecords} record(s), ` +
+        `more than the ${localSlotBound} this party's declared linkage terms and ` +
+        "standardization account for. Drop the step that expands a record's " +
+        "value for a key the declared factors count as single-valued -- a fuzzy " +
+        "comparison, or a transform that expands one value without being a " +
+        "declared fan-out function -- so this party's rows fit the width it " +
+        "advertised.",
+    );
+  }
 
   // Authoritative, symmetric over-ceiling gate. Both parties compute it
-  // identically from the exchanged counts and the agreed key count, BEFORE
+  // identically from the exchanged counts and effective key counts, BEFORE
   // exchanging any single-pass frame, so an over-cap exchange aborts on both
   // sides in lockstep -- neither sends nor waits, so neither hangs to the
   // inactivity timeout. The guidance is identical across parties and transports
   // and does not recommend cascade. The prepareForExchange pre-flight is the
   // coarse one-party shadow of this; this is the precise two-party check.
-  if (
-    singlePassExchangeExceedsCap(
-      numLinkageKeys,
-      senderRecordCount,
-      receiverRecordCount,
-    )
-  ) {
-    throw new Error(
+  if (singlePassExchangeExceedsCap(senderSize, receiverSize)) {
+    throw new UsageError(
       singlePassOverCapMessage(
         participant.id,
         numLinkageKeys,
-        senderRecordCount,
-        receiverRecordCount,
+        senderSize,
+        receiverSize,
       ),
     );
   }
@@ -672,8 +758,9 @@ export async function linkViaSinglePassPSI(
     // createServerSetup sorted distinctValues; remap the index table into that
     // sorted order so its indices match the sorted setup message.
     const sortedDistinctValueIndices = getSortedDistinctValueIndices(
-      distinctValueIndexTable,
+      columns,
       permutation,
+      numRecords,
     );
 
     const reply = encodeSinglePassReply(
@@ -691,16 +778,16 @@ export async function linkViaSinglePassPSI(
     // cascade.
     const replyCap = singlePassReplyByteCap(
       numLinkageKeys,
-      senderRecordCount,
-      receiverRecordCount,
+      senderSize,
+      receiverSize,
     );
     if (reply.byteLength > replyCap) {
-      throw new Error(
+      throw new UsageError(
         singlePassOverCapMessage(
           participant.id,
           numLinkageKeys,
-          senderRecordCount,
-          receiverRecordCount,
+          senderSize,
+          receiverSize,
         ),
       );
     }
@@ -766,8 +853,8 @@ export async function linkViaSinglePassPSI(
   // plus the coherence checks below.
   const replyCap = singlePassReplyByteCap(
     numLinkageKeys,
-    senderRecordCount,
-    receiverRecordCount,
+    senderSize,
+    receiverSize,
   );
   conn.setInboundFrameCap?.(replyCap);
   let replyFrame: Uint8Array;
@@ -790,49 +877,47 @@ export async function linkViaSinglePassPSI(
   // exchanged over the encrypted channel during role resolution
   // (partnerRecordCount), which the over-ceiling gate above already bounded. This
   // ties the decoded count to authenticated state rather than trusting the frame,
-  // and the index-table consistency check then confirms the frame actually
-  // carries numLinkageKeys * numSenderRecords entries -- both before the
-  // allocations below, preserving the pre-allocation ordering.
+  // and the index-table check then confirms the frame's own shape against the
+  // agreed key count, that record count, and the sender's declared slot bound --
+  // all before the allocations below, preserving the pre-allocation ordering.
   if (numSenderRecords !== partnerRecordCount) {
-    throw new Error(
-      `${participant.id} protocol error: single-pass reply declares ` +
-        `${numSenderRecords} sender record(s), but the sender exchanged ` +
-        `${partnerRecordCount}`,
+    throw partnerProtocolError(
+      participant.id,
+      `the single-pass reply declares ${numSenderRecords} sender record(s), ` +
+        `but the sender exchanged ${partnerRecordCount}`,
     );
   }
-  if (
-    stackedDistinctValueIndices.length !==
-    numLinkageKeys * numSenderRecords
-  ) {
-    throw new Error(
-      `${participant.id} protocol error: single-pass distinct-value index table ` +
-        "length does not match the agreed key count",
-    );
-  }
+  const senderSlotBound = senderSize.effectiveKeyCount * numSenderRecords;
+  const senderCells = senderFansOut
+    ? decodeRaggedIndexTable(
+        participant.id,
+        stackedDistinctValueIndices,
+        numLinkageKeys,
+        numSenderRecords,
+        senderSlotBound,
+      )
+    : decodeFixedWidthIndexTable(
+        participant.id,
+        stackedDistinctValueIndices,
+        numLinkageKeys,
+        numSenderRecords,
+      );
 
   // Collect the request-masking transients before the match masking.
   relieveTransientMemory();
   stage("identifying shared elements");
   const [receiverDistinctValueIds, senderDistinctValueIds] =
     await participant.computeValueMatches(setupBytes, responseBytes);
-  const distinctValueReceiverToSenderMap = new Map<number, number>();
-  for (let k = 0; k < receiverDistinctValueIds.length; ++k) {
-    distinctValueReceiverToSenderMap.set(
-      receiverDistinctValueIds[k],
+  // Keyed by the SENDER's value id, because the resolution sweep walks the
+  // sender's rows in ascending order (see replaySinglePassCascade). The pairing is
+  // a bijection over the matched values -- each party's values are distinct, and
+  // two of them pair only when their plaintexts are equal -- so either direction
+  // carries the same information.
+  const senderToReceiverDistinctValue = new Map<number, number>();
+  for (let k = 0; k < senderDistinctValueIds.length; ++k) {
+    senderToReceiverDistinctValue.set(
       senderDistinctValueIds[k],
-    );
-  }
-
-  // Split the stacked distinct value indices into one row per key (it is laid
-  // out key by key). subarray returns a view over the same memory rather than a
-  // copy.
-  const senderDistinctValueIndexTable: Array<Int32Array> = [];
-  for (let j = 0; j < numLinkageKeys; ++j) {
-    senderDistinctValueIndexTable.push(
-      stackedDistinctValueIndices.subarray(
-        j * numSenderRecords,
-        (j + 1) * numSenderRecords,
-      ),
+      receiverDistinctValueIds[k],
     );
   }
 
@@ -847,40 +932,13 @@ export async function linkViaSinglePassPSI(
   // the operator's real wait was the up-front encryption stages; describeExchange-
   // Stages omits the per-key stages for single-pass to match (cascade keeps them,
   // where each key is a genuine round trip).
-  const matched: IndexIterationMap = new Array(numRecords).fill(undefined);
-  const senderMatched: Array<boolean> = new Array(numSenderRecords).fill(false);
-  for (let j = 0; j < numLinkageKeys; ++j) {
-    const receiverDistinctValueToRowMap = getUnmatchedDistinctValueToRowMap(
-      distinctValueIndexTable[j],
-      (row) => matched[row] !== undefined,
-    );
-    const senderDistinctValueToRowMap = getUnmatchedDistinctValueToRowMap(
-      senderDistinctValueIndexTable[j],
-      (row) => senderMatched[row],
-    );
-    for (const [
-      receiverDistinctValue,
-      receiverRow,
-    ] of receiverDistinctValueToRowMap) {
-      const senderDistinctValue = distinctValueReceiverToSenderMap.get(
-        receiverDistinctValue,
-      );
-      if (senderDistinctValue === undefined) continue;
-      const senderRow = senderDistinctValueToRowMap.get(senderDistinctValue);
-      if (senderRow === undefined) continue;
-      matched[receiverRow] = { theirIndex: senderRow, iteration: j };
-      senderMatched[senderRow] = true;
-    }
-  }
-
-  const result: AssociationTable = [[], []];
-  for (let i = 0; i < numRecords; ++i) {
-    const m = matched[i];
-    if (m) {
-      result[0].push(i);
-      result[1].push(m.theirIndex);
-    }
-  }
+  const result = replaySinglePassCascade(
+    columns.map(localKeyCells),
+    senderCells,
+    senderToReceiverDistinctValue,
+    numRecords,
+    numSenderRecords,
+  );
 
   // Collect the cascade's per-key reconstruction maps before returning.
   relieveTransientMemory();
@@ -916,26 +974,104 @@ export async function linkViaSinglePassPSI(
   return result;
 }
 
+// --- the distinct-value index table ------------------------------------------
+
+// One linkage key's cells for one party: the distinct-value indices each record
+// contributes to that key's round. Read through this interface so the resolution
+// sweep below is ONE implementation over both of message 2's layouts and over the
+// receiver's own locally built table -- the spec fixes one resolution rule, and a
+// per-layout copy of it could drift from that rule silently.
+interface KeyCells {
+  /** How many candidate values record `row` contributes to this key's round. */
+  count(row: number): number;
+  /** Record `row`'s `k`-th value index, `0 <= k < count(row)`. */
+  valueAt(row: number, k: number): number;
+}
+
+// A party that declares no fan-out: one index per record, -1 where the record has
+// no value for the key. Zero-copy over the decoded frame's own Int32Array.
+class FixedWidthKeyCells implements KeyCells {
+  constructor(private readonly indices: ArrayLike<number>) {}
+  count(row: number): number {
+    return this.indices[row] < 0 ? 0 : 1;
+  }
+  valueAt(row: number): number {
+    return this.indices[row];
+  }
+}
+
+// A party that declares a fan-out: `starts[row]..starts[row + 1]` delimits record
+// `row`'s slice of `values`, so a record with no value for the key is an empty
+// slice rather than a marker value.
+class RaggedKeyCells implements KeyCells {
+  constructor(
+    private readonly starts: Int32Array,
+    private readonly values: Int32Array,
+  ) {}
+  count(row: number): number {
+    return this.starts[row + 1] - this.starts[row];
+  }
+  valueAt(row: number, k: number): number {
+    return this.values[this.starts[row] + k];
+  }
+}
+
+// One key's column of this party's own value indices, in whichever layout its
+// declared width calls for. The two carry the same information; they differ only
+// in what they cost to build and to ship (see getSortedDistinctValueIndices).
+type LocalKeyColumn =
+  | { readonly ragged: false; readonly indices: Array<number> }
+  | {
+      readonly ragged: true;
+      readonly starts: Int32Array;
+      readonly values: Int32Array;
+    };
+
+function localKeyCells(column: LocalKeyColumn): KeyCells {
+  return column.ragged
+    ? new RaggedKeyCells(column.starts, column.values)
+    : new FixedWidthKeyCells(column.indices);
+}
+
 // For this party, the distinct values (pooled across all keys) plus, for every
-// record and key, the index of the value in that cell: distinctValueIndexTable[j][i]
-// is the index -- into distinctValues -- of record i's value for key j, or -1 if
-// that record has no value for the key. Equal indices mean equal values, so the
-// receiver can recover which records share a value without seeing the values
-// themselves. "" is a real value with its own index, distinct from -1
-// (docs/spec/PROTOCOL.md, Key input data).
+// record and key, the indices of the values in that cell. Equal indices mean equal
+// values, so the receiver can recover which records share a value without seeing
+// the values themselves. "" is a real value with its own index, distinct from the
+// fixed-width layout's -1 absent marker (docs/spec/PROTOCOL.md, Key input data).
+//
+// `fansOut` is the party's DECLARED width, not an observation of its data: a
+// record's candidate set is refused here when it is wider than the declaration
+// admits, so the slot bound derived from that declaration -- which the partner's
+// element bounds, read gate, and decode all rest on -- cannot be outgrown by the
+// data. Values stay pooled across keys with no per-key tag, exactly as they are
+// without fan-out, and the replay compares them only within one key's round.
 function getDistinctValuesAndIndices(
   data: Array<IndexableIterable<KeyCandidates>>,
+  fansOut: boolean,
 ): {
   distinctValues: Array<string>;
-  distinctValueIndexTable: Array<Array<number>>;
+  columns: Array<LocalKeyColumn>;
   numRecords: number;
+  slotCount: number;
 } {
   const valueId = new Map<string, number>();
   const distinctValues: Array<string> = [];
-  const distinctValueIndexTable: Array<Array<number>> = [];
+  const columns: Array<LocalKeyColumn> = [];
   let numRecords = 0;
+  let slotCount = 0;
+  const idOf = (value: string): number => {
+    let id = valueId.get(value);
+    if (id === undefined) {
+      id = distinctValues.length;
+      valueId.set(value, id);
+      distinctValues.push(value);
+    }
+    return id;
+  };
   for (let j = 0; j < data.length; ++j) {
-    const column = Array.from(data[j], requireSingleCandidate);
+    const column = fansOut
+      ? Array.from(data[j])
+      : Array.from(data[j], requireSingleCandidate);
     if (j === 0) {
       numRecords = column.length;
     } else if (column.length !== numRecords) {
@@ -944,60 +1080,329 @@ function getDistinctValuesAndIndices(
           `expected ${numRecords}; all columns must have the same length`,
       );
     }
-    const row: Array<number> = new Array(column.length);
-    for (let i = 0; i < column.length; ++i) {
-      const value = column[i];
-      if (value === undefined) {
-        row[i] = -1;
-        continue;
+    if (!fansOut) {
+      const indices: Array<number> = new Array(column.length);
+      for (let i = 0; i < column.length; ++i) {
+        const value = column[i] as string | undefined;
+        if (value === undefined) {
+          indices[i] = -1;
+          continue;
+        }
+        indices[i] = idOf(value);
+        slotCount += 1;
       }
-      let id = valueId.get(value);
-      if (id === undefined) {
-        id = distinctValues.length;
-        valueId.set(value, id);
-        distinctValues.push(value);
-      }
-      row[i] = id;
+      columns.push({ ragged: false, indices });
+      continue;
     }
-    distinctValueIndexTable.push(row);
+    const starts = new Int32Array(column.length + 1);
+    const values: Array<number> = [];
+    for (let i = 0; i < column.length; ++i) {
+      const candidates = column[i];
+      if (candidates !== undefined) {
+        // A record's candidate set is a SET, so each distinct value it realizes
+        // enters the round once; a singleton arrives unwrapped from realization
+        // and costs no iteration.
+        if (typeof candidates === "string") values.push(idOf(candidates));
+        else for (const value of candidates) values.push(idOf(value));
+      }
+      const width = values.length - starts[i];
+      // Usage-typed rather than internal: realization drops an over-width row for
+      // the DECLARED fan-out producers alone (docs/spec/PROTOCOL.md, The width
+      // bound), so what reaches this bound at full width is a producer that rule
+      // does not bind -- a fuzzy comparison, or an expansion from a function
+      // outside FAN_OUT_FUNCTION_NAMES -- and each is a configuration its operator
+      // can change.
+      if (width > MAX_KEY_CANDIDATES_PER_ROW)
+        throw new UsageError(
+          `single-pass: record ${i} contributes ${width} candidate value(s) to ` +
+            `linkage key ${j}, more than the ${MAX_KEY_CANDIDATES_PER_ROW} one ` +
+            "record may contribute to one key. Drop the step that expands this " +
+            "record's value for that key -- a fuzzy comparison, or a transform " +
+            "that expands one value without being a declared fan-out function -- " +
+            "so no record realizes more candidates than the bound admits.",
+        );
+      starts[i + 1] = values.length;
+    }
+    slotCount += values.length;
+    columns.push({ ragged: true, starts, values: Int32Array.from(values) });
   }
-  return { distinctValues, distinctValueIndexTable, numRecords };
+  return { distinctValues, columns, numRecords, slotCount };
 }
 
-// Remap the distinct value index table from build order into the setup
-// message's sorted order, so it accurately points to the distinct values for
-// each row. createServerSetup yields permutation[sortedPos] = buildId, so we
-// have to invert the permutation. -1s are preserved so the empty slots stick
-// around. Also flattens the output (stacks column-wise) for sending over the
-// wire. Uses a fresh copy, leaving the caller's `distinctValueIndexTable`
-// untouched.
+// Remap this party's index table from build order into the setup message's sorted
+// order, so it points at the distinct values as the setup message carries them,
+// and flatten it into the wire words of message 2 part (d). createServerSetup
+// yields permutation[sortedPos] = buildId, so the permutation is inverted first.
+// Uses fresh storage, leaving the caller's columns untouched.
+//
+// Two layouts, chosen by the sender's declared width and read the same way on the
+// receiver (docs/spec/PROTOCOL.md, Wire-format deltas):
+//   - fixed-width: one word per (key, record), -1 where the record has no value;
+//   - ragged: per (key, record) a count word then that many value-index words,
+//     strictly ascending within the cell. The remap permutes the indices, so each
+//     cell is re-sorted after it -- the ordering is a property of the SORTED
+//     indices the receiver validates, not of the build order they came from.
 function getSortedDistinctValueIndices(
-  distinctValueIndexTable: Array<Array<number>>,
+  columns: Array<LocalKeyColumn>,
   permutation: Array<number>,
+  numRecords: number,
 ): Array<number> {
   const sortedPosOf = new Array<number>(permutation.length);
   for (let sortedPos = 0; sortedPos < permutation.length; ++sortedPos) {
     sortedPosOf[permutation[sortedPos]] = sortedPos;
   }
-  const result = distinctValueIndexTable.flat();
-  for (let i = 0; i < result.length; ++i) {
-    if (result[i] >= 0) result[i] = sortedPosOf[result[i]];
+  const result: Array<number> = [];
+  const cell: Array<number> = [];
+  for (const column of columns) {
+    if (!column.ragged) {
+      for (const index of column.indices)
+        result.push(index >= 0 ? sortedPosOf[index] : -1);
+      continue;
+    }
+    for (let row = 0; row < numRecords; ++row) {
+      const from = column.starts[row];
+      const to = column.starts[row + 1];
+      result.push(to - from);
+      cell.length = 0;
+      for (let k = from; k < to; ++k) cell.push(sortedPosOf[column.values[k]]);
+      cell.sort((a, b) => a - b);
+      for (const index of cell) result.push(index);
+    }
   }
   return result;
 }
 
-// Adapts reduceToSingletons for the replay: skips already-matched rows and the -1
-// marker for an absent value (0 is a valid value index, so it is kept). ArrayLike
-// so it serves both the receiver's number[] and the sender's decoded Int32Array.
-function getUnmatchedDistinctValueToRowMap(
-  distinctValueIndices: ArrayLike<number>,
-  isMatched: (row: number) => boolean,
+// --- decoding the partner's index table --------------------------------------
+
+// The fixed-width layout a sender that declares no fan-out ships: exactly one word
+// per (key, record). A frame carrying any other number of words is a clean
+// protocol error rather than a wrong reconstruction. subarray returns a view over
+// the decoded frame rather than a copy, so nothing is duplicated here.
+function decodeFixedWidthIndexTable(
+  participantId: string,
+  words: Int32Array,
+  keyCount: number,
+  numRecords: number,
+): Array<KeyCells> {
+  if (words.length !== keyCount * numRecords)
+    throw partnerProtocolError(
+      participantId,
+      "the single-pass distinct-value index table length does not match the " +
+        "agreed key count",
+    );
+  const cells: Array<KeyCells> = [];
+  for (let j = 0; j < keyCount; ++j)
+    cells.push(
+      new FixedWidthKeyCells(
+        words.subarray(j * numRecords, (j + 1) * numRecords),
+      ),
+    );
+  return cells;
+}
+
+/**
+ * Decode the ragged layout a sender that declares a fan-out ships, validating it
+ * against authenticated session state before it drives any allocation
+ * (docs/spec/PROTOCOL.md, Wire-format deltas). In key-major then row order each
+ * (key, record) cell is a count word `c` followed by `c` value-index words; there
+ * is no absent marker, a record with no value for the key being `c = 0`.
+ *
+ * Every bound comes from state the partner cannot choose: the agreed key count,
+ * the record count the sender carried on the terms exchange, the normative width
+ * bound, and `slotBound` -- the sender's declared effective key count times that
+ * record count, which is also what bounds the setup frame's element count, so an
+ * index at or above it can address no value the sender could legitimately have
+ * sent. The checks, in the order the fixed-width layout's own length check ran:
+ * exactly `keyCount * numRecords` cells, each count in `0 .. 20`, the counts
+ * totalling no more than the slot bound, each cell's indices strictly ascending
+ * (which is also what rejects a repeat) and inside the value bound, and the words
+ * ending exactly at the last index word.
+ *
+ * @internal exported for the malformed-frame wire-message tests.
+ */
+export function decodeRaggedIndexTable(
+  participantId: string,
+  words: Int32Array,
+  keyCount: number,
+  numRecords: number,
+  slotBound: number,
+): Array<KeyCells> {
+  const refuse = (detail: string): never => {
+    throw partnerProtocolError(
+      participantId,
+      `the single-pass distinct-value index table ${detail}`,
+    );
+  };
+  const cellCount = keyCount * numRecords;
+  if (words.length < cellCount)
+    refuse("declares fewer cells than the agreed key and record counts");
+  // Every word is either one of the cellCount count words or one of the index
+  // words they account for, so the total is known before a single cell is read --
+  // which is what lets the slot bound be enforced ahead of the allocation.
+  const totalIndexWords = words.length - cellCount;
+  if (totalIndexWords > slotBound)
+    refuse("carries more candidate values than the sender's declared width");
+
+  const values = new Int32Array(totalIndexWords);
+  const starts: Array<Int32Array> = [];
+  let read = 0;
+  let written = 0;
+  for (let j = 0; j < keyCount; ++j) {
+    const keyStarts = new Int32Array(numRecords + 1);
+    keyStarts[0] = written;
+    for (let row = 0; row < numRecords; ++row) {
+      const width = words[read++];
+      if (width < 0 || width > MAX_KEY_CANDIDATES_PER_ROW)
+        refuse("declares a cell wider than one record may contribute to a key");
+      if (read + width > words.length)
+        refuse("is truncated inside a cell it declared");
+      let previous = -1;
+      for (let k = 0; k < width; ++k) {
+        const index = words[read++];
+        if (index <= previous)
+          refuse(
+            "declares a cell whose value indices are not strictly ascending",
+          );
+        if (index >= slotBound)
+          refuse("names a value index outside the sender's declared value set");
+        previous = index;
+        values[written++] = index;
+      }
+      keyStarts[row + 1] = written;
+    }
+    starts.push(keyStarts);
+  }
+  if (read !== words.length)
+    refuse("carries trailing words past its last cell");
+  return starts.map((keyStarts) => new RaggedKeyCells(keyStarts, values));
+}
+
+// --- the record-level resolution ---------------------------------------------
+
+// The values exactly one of this round's candidate records holds, mapped to that
+// record. Uniqueness is per VALUE, not per record: a value two candidate records
+// share is ambiguous and leaves the round, while those records' other candidates
+// stay in it (docs/spec/PROTOCOL.md, Value-level round participation). A record
+// out of candidacy contributes nothing, which is how a value ambiguous in one
+// round becomes usable in a later one.
+function uniqueValueOwners(
+  cells: KeyCells,
+  numRecords: number,
+  outOfCandidacy: Uint8Array,
 ): Map<number, number> {
-  return reduceToSingletons<number>(distinctValueIndices.length, (row) =>
-    isMatched(row) || distinctValueIndices[row] < 0
-      ? undefined
-      : distinctValueIndices[row],
-  );
+  const firstRow = new Map<number, number>();
+  const recurring = new Set<number>();
+  for (let row = 0; row < numRecords; ++row) {
+    if (outOfCandidacy[row]) continue;
+    const width = cells.count(row);
+    for (let k = 0; k < width; ++k) {
+      const value = cells.valueAt(row, k);
+      if (firstRow.has(value)) recurring.add(value);
+      else firstRow.set(value, row);
+    }
+  }
+  for (const value of recurring) firstRow.delete(value);
+  return firstRow;
+}
+
+/**
+ * Replay the cascade locally over both parties' index tables, applying the
+ * record-level resolution rule (docs/spec/PROTOCOL.md, Record-level resolution).
+ * For each linkage key in the agreed order:
+ *
+ * 1. lift the round's value-level matches to record-level candidate pairs, several
+ *    equal value pairs between the same two records collapsing to one;
+ * 2. sweep those pairs in ascending (sender row, receiver row) order, accepting a
+ *    pair when NEITHER of its records has already been accepted in this round;
+ * 3. remove every record appearing in ANY of the round's candidate pairs --
+ *    accepted or not -- from candidacy for every later key.
+ *
+ * The order is fixed normatively because it decides which of two ambiguous matches
+ * wins, and both of its components are role-derived, so both parties and any other
+ * implementation reproduce the same table from the same frames. Nothing here reads
+ * a map's iteration order, a value's bytes, or an encrypted element's position:
+ * the sweep walks sender rows in ascending order and sorts each row's few receiver
+ * candidates, so the pairs are emitted already in the normative order.
+ *
+ * On inputs where every cell holds at most one value this reduces to the
+ * single-valued cascade: each round's candidate pairs are then a partial
+ * one-to-one correspondence, so the sweep accepts every pair and removal on a
+ * potential match coincides with removal on a match.
+ */
+function replaySinglePassCascade(
+  receiverCells: Array<KeyCells>,
+  senderCells: Array<KeyCells>,
+  senderToReceiverDistinctValue: ReadonlyMap<number, number>,
+  numReceiverRecords: number,
+  numSenderRecords: number,
+): AssociationTable {
+  const receiverOut = new Uint8Array(numReceiverRecords);
+  const senderOut = new Uint8Array(numSenderRecords);
+  const pairedWith = new Int32Array(numReceiverRecords).fill(-1);
+  const receiverCandidates: Array<number> = [];
+
+  for (let j = 0; j < receiverCells.length; ++j) {
+    const receiverOwners = uniqueValueOwners(
+      receiverCells[j],
+      numReceiverRecords,
+      receiverOut,
+    );
+    const senderOwners = uniqueValueOwners(
+      senderCells[j],
+      numSenderRecords,
+      senderOut,
+    );
+    const touchedReceiverRows: Array<number> = [];
+    const touchedSenderRows: Array<number> = [];
+    const acceptedReceiverRows = new Set<number>();
+
+    for (let senderRow = 0; senderRow < numSenderRecords; ++senderRow) {
+      if (senderOut[senderRow]) continue;
+      receiverCandidates.length = 0;
+      const width = senderCells[j].count(senderRow);
+      for (let k = 0; k < width; ++k) {
+        const senderValue = senderCells[j].valueAt(senderRow, k);
+        // Absent from the owners map means the value was ambiguous within the
+        // sender's own round and left it.
+        if (senderOwners.get(senderValue) !== senderRow) continue;
+        const receiverValue = senderToReceiverDistinctValue.get(senderValue);
+        if (receiverValue === undefined) continue;
+        const receiverRow = receiverOwners.get(receiverValue);
+        if (receiverRow === undefined) continue;
+        receiverCandidates.push(receiverRow);
+      }
+      if (receiverCandidates.length === 0) continue;
+      // At most MAX_KEY_CANDIDATES_PER_ROW entries, so the sort is a handful of
+      // comparisons; ascending here plus the ascending sender-row loop is exactly
+      // the normative lexicographic order.
+      receiverCandidates.sort((a, b) => a - b);
+      touchedSenderRows.push(senderRow);
+      let previous = -1;
+      let accepted = false;
+      for (const receiverRow of receiverCandidates) {
+        // Several equal value pairs between the same two records are one
+        // candidate pair.
+        if (receiverRow === previous) continue;
+        previous = receiverRow;
+        touchedReceiverRows.push(receiverRow);
+        if (accepted || acceptedReceiverRows.has(receiverRow)) continue;
+        pairedWith[receiverRow] = senderRow;
+        acceptedReceiverRows.add(receiverRow);
+        accepted = true;
+      }
+    }
+
+    for (const row of touchedReceiverRows) receiverOut[row] = 1;
+    for (const row of touchedSenderRows) senderOut[row] = 1;
+  }
+
+  const result: AssociationTable = [[], []];
+  for (let row = 0; row < numReceiverRecords; ++row) {
+    if (pairedWith[row] < 0) continue;
+    result[0].push(row);
+    result[1].push(pairedWith[row]);
+  }
+  return result;
 }
 
 // Pack a flat array of value indices as a little-endian Int32 frame (the
@@ -1038,7 +1443,10 @@ export function decodeInt32LE(bytes: Uint8Array): Int32Array {
 //   uint32 numRecords
 //   the rest: the distinct-value index table, as Int32 (encodeInt32LE)
 // setup and response carry explicit lengths; the index table is the remainder, so
-// its length is implied by the frame size. See docs/spec/PROTOCOL.md.
+// its length is implied by the frame size. The table's words are the fixed-width
+// or the ragged layout, chosen by the sender's declared width and read the same
+// way on both sides with no wire flag (getSortedDistinctValueIndices, and
+// decodeFixedWidthIndexTable / decodeRaggedIndexTable). See docs/spec/PROTOCOL.md.
 /** @internal exported for the wire-message test. */
 export function encodeSinglePassReply(
   setup: Uint8Array,

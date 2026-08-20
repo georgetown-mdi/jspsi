@@ -14,9 +14,12 @@ import {
   decodeSinglePassReply,
 } from "../src/link";
 import { MAX_WEBRTC_FRAME_BYTES } from "../src/connection/binaryPackBounds";
+import { MAX_KEY_CANDIDATES_PER_ROW } from "../src/fanOutFunctions";
+import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTerms";
 import {
   MAX_FRAME_SIZE_BYTES,
   MAX_SINGLE_PASS_CELLS,
+  partyFansOut,
   singlePassDatasetExceedsCap,
   singlePassExchangeExceedsCap,
   singlePassReplyByteCap,
@@ -33,6 +36,7 @@ import type { AssociationTable } from "../src/types";
 import { UsageError } from "../src/errors";
 import { sortAssociationTable } from "../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
+import { fanOutFreeBounds } from "./utils/singlePassBounds";
 
 const psiLibrary = await PSI();
 
@@ -170,7 +174,7 @@ test("single-pass yields the byte-identical association table as the cascade", a
       spServer,
       spServerConn,
       serverData,
-      clientData[0].length,
+      fanOutFreeBounds(serverData.length, clientData[0].length),
       false,
       -1,
     ),
@@ -179,7 +183,7 @@ test("single-pass yields the byte-identical association table as the cascade", a
       spClient,
       spClientConn,
       clientData,
-      serverData[0].length,
+      fanOutFreeBounds(clientData.length, serverData[0].length),
       false,
       -1,
     ),
@@ -259,21 +263,29 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
 
   const [singlePassSender, singlePassReceiver] = await run(
     (protocol, p, c, d) =>
-      linkViaSinglePassPSI(protocol, p, c, d, 2, false, -1),
+      linkViaSinglePassPSI(
+        protocol,
+        p,
+        c,
+        d,
+        fanOutFreeBounds(d.length, 2),
+        false,
+        -1,
+      ),
   );
   expect(singlePassSender).toStrictEqual(cascadeSender);
   expect(singlePassReceiver).toStrictEqual(cascadeReceiver);
 });
 
-// --- both strategies: a record carrying several candidates is refused ---------
-// Key realization carries every candidate a record realizes (buildKeyStrings),
-// and matching on that set is what is not implemented: each strategy refuses the
-// record where it would consume it rather than narrowing to one candidate or
-// dropping the record, either of which matches on less than the terms declare. A
-// declared fan-out is refused before the exchange runs (assertFanOutImplemented);
-// this is the same fail-closed behavior at the point of harm, for a candidate set
-// that reached a round anyway.
-test("a candidate set reaching either strategy is refused, not narrowed", async () => {
+// --- the cascade: a record carrying several candidates is refused ------------
+// Key realization carries every candidate a record realizes (buildKeyStrings).
+// Fan-out matching is specified for single-pass and for it alone, so the cascade
+// refuses the record where it would consume it rather than narrowing to one
+// candidate or dropping the record, either of which matches on less than the terms
+// declare. A declared fan-out is refused before the exchange runs
+// (assertFanOutImplemented); this is the same fail-closed behavior at the point of
+// harm, for a candidate set that reached a round anyway.
+test("a candidate set reaching the cascade is refused, not narrowed", async () => {
   const withCandidateSet: Array<Array<string | Set<string> | undefined>> = [
     ["A", new Set(["B", "C"])],
   ];
@@ -288,31 +300,49 @@ test("a candidate set reaching either strategy is refused, not narrowed", async 
   // Refused before any frame moves: the pipe's other end is never read, so a
   // refusal that leaked past this point would hang rather than pass. The class is
   // asserted too -- the CLI classifies a UsageError as a configuration fault.
-  const runs = [
-    () =>
-      linkViaPSI(
-        { cardinality: "one-to-one" },
-        participant,
-        conn,
-        withCandidateSet,
-        1,
-        -1,
-      ),
-    () =>
-      linkViaSinglePassPSI(
-        { cardinality: "one-to-one" },
-        participant,
-        conn,
-        withCandidateSet,
-        1,
-        false,
-        -1,
-      ),
+  const run = () =>
+    linkViaPSI(
+      { cardinality: "one-to-one" },
+      participant,
+      conn,
+      withCandidateSet,
+      1,
+      -1,
+    );
+  await expect(run()).rejects.toThrow(UsageError);
+  await expect(run()).rejects.toThrow(/fan-out/);
+});
+
+test("single-pass refuses a candidate set wider than its declaration admits", async () => {
+  // The sibling refusal on the strategy that DOES match a candidate set: the slot
+  // bound the partner's element bounds, read gate, and decode all rest on comes
+  // from this party's advertised effective key count, so a row realizing more
+  // candidates than that advertisement accounts for is refused as the table is
+  // built rather than shipped under a bound it exceeds. Here the declaration is
+  // the plain key count -- the fan-out-free advertisement -- and the row carries
+  // two candidates.
+  const withCandidateSet: Array<Array<string | Set<string> | undefined>> = [
+    ["A", new Set(["B", "C"])],
   ];
-  for (const run of runs) {
-    await expect(run()).rejects.toThrow(UsageError);
-    await expect(run()).rejects.toThrow(/fan-out/);
-  }
+  const [conn] = createMessagePipe();
+  const participant = new PSIParticipant(
+    "server",
+    psiLibrary,
+    { role: "starter", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const run = () =>
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      participant,
+      conn,
+      withCandidateSet,
+      fanOutFreeBounds(1, 1),
+      false,
+      -1,
+    );
+  await expect(run()).rejects.toThrow(UsageError);
+  await expect(run()).rejects.toThrow(/fan-out/);
 });
 
 test("a single-candidate row is unaffected by that refusal", async () => {
@@ -435,7 +465,7 @@ async function runSinglePassCapturingFrames(
       sp,
       capturingSenderConn,
       [senderSet],
-      receiverSet.length,
+      fanOutFreeBounds(1, receiverSet.length),
       withhold,
       -1,
     ),
@@ -444,7 +474,7 @@ async function runSinglePassCapturingFrames(
       cp,
       capturingReceiverConn,
       [receiverSet],
-      senderSet.length,
+      fanOutFreeBounds(1, senderSet.length),
       withhold,
       -1,
     ),
@@ -629,61 +659,143 @@ test("encodeSinglePassReply / decodeSinglePassReply round-trip, and a truncated 
 });
 
 // --- single-pass dataset ceiling: derived from exchanged counts ---------------
-// The cap is a per-party budget on keyCount * recordCount (the distinct-value
-// upper bound), with the read-gate/send-time byte cap derived from the same
-// quantity. These pin the deterministic arithmetic both parties compute.
-test("singlePassDatasetExceedsCap fires exactly at keyCount * rows = the budget", () => {
+// The cap is a per-party budget on effectiveKeyCount * recordCount -- the value
+// slot count, the distinct-value upper bound -- with the read-gate/send-time byte
+// cap derived from the same quantity. These pin the deterministic arithmetic both
+// parties compute.
+test("singlePassDatasetExceedsCap fires exactly at slots = the budget", () => {
   const fits = Math.floor(MAX_SINGLE_PASS_CELLS / 1); // one key
   expect(singlePassDatasetExceedsCap(1, fits)).toBe(false);
   expect(singlePassDatasetExceedsCap(1, fits + 1)).toBe(true);
-  // The budget is on keyCount * rows, so more keys fit proportionally fewer rows.
+  // The budget is on slots, so more keys fit proportionally fewer rows.
   const perKey = Math.floor(MAX_SINGLE_PASS_CELLS / 4);
   expect(singlePassDatasetExceedsCap(4, perKey)).toBe(false);
   expect(singlePassDatasetExceedsCap(4, perKey + 1)).toBe(true);
+  // A key that fans out counts MAX_KEY_CANDIDATES_PER_ROW toward the same
+  // unchanged budget, so it buys its width with rows: four keys of which one fans
+  // out is an effective key count of 23.
+  const perSlot = Math.floor(MAX_SINGLE_PASS_CELLS / 23);
+  expect(singlePassDatasetExceedsCap(23, perSlot)).toBe(false);
+  expect(singlePassDatasetExceedsCap(23, perSlot + 1)).toBe(true);
 });
 
 test("singlePassExchangeExceedsCap fires when EITHER party is over the budget", () => {
   const fits = MAX_SINGLE_PASS_CELLS; // one key, exactly at the budget
-  expect(singlePassExchangeExceedsCap(1, fits, fits)).toBe(false);
+  const size = (recordCount: number, effectiveKeyCount = 1) => ({
+    effectiveKeyCount,
+    recordCount,
+  });
+  expect(singlePassExchangeExceedsCap(size(fits), size(fits))).toBe(false);
   // Sender over, receiver under -> over (and vice versa).
-  expect(singlePassExchangeExceedsCap(1, fits + 1, 1)).toBe(true);
-  expect(singlePassExchangeExceedsCap(1, 1, fits + 1)).toBe(true);
+  expect(singlePassExchangeExceedsCap(size(fits + 1), size(1))).toBe(true);
+  expect(singlePassExchangeExceedsCap(size(1), size(fits + 1))).toBe(true);
+  // A fan-out on one side alone takes that side over: the same row count against
+  // an effective key count of 20 is 20x the slots.
+  const perKey = Math.floor(fits / 20);
+  expect(singlePassExchangeExceedsCap(size(perKey, 20), size(perKey, 20))).toBe(
+    false,
+  );
+  expect(
+    singlePassExchangeExceedsCap(size(perKey + 1, 20), size(perKey, 20)),
+  ).toBe(true);
 });
 
-test("singlePassReplyByteCap weights the sender heavier and stays below both transport envelopes at the ceiling", () => {
-  // The sender contributes a masked value + an index cell per (key, record); the
-  // receiver a masked value per (key, record); plus a fixed overhead. Pinning the
+test("singlePassReplyByteCap weights the sender heavier and charges the ragged table on top", () => {
+  // The sender contributes a masked value + an index word per value slot; the
+  // receiver a masked value per value slot; plus a fixed overhead. Pinning the
   // exact formula is what makes the cap reproducible across implementations.
-  expect(singlePassReplyByteCap(2, 10, 5)).toBe(
+  const size = (recordCount: number, effectiveKeyCount: number) => ({
+    effectiveKeyCount,
+    recordCount,
+  });
+  expect(singlePassReplyByteCap(2, size(10, 2), size(5, 2))).toBe(
     (40 + 4) * (2 * 10) + 40 * (2 * 5) + 256,
   );
   // The two arguments are NOT interchangeable: the sender carries the index table
-  // (+4/cell), so swapping the sender and receiver counts changes the value. This
-  // is why both parties must agree on which count is the sender's -- the role
-  // mapping in linkViaSinglePassPSI feeds (senderRows, receiverRows) in the same
-  // order on both sides, so they compute the identical cap from swapped local
-  // inputs (own vs partner count).
-  expect(singlePassReplyByteCap(3, 100, 200)).not.toBe(
-    singlePassReplyByteCap(3, 200, 100),
+  // (+4/slot), so swapping the sender and receiver sizes changes the value. This
+  // is why both parties must agree on which size is the sender's -- the role
+  // mapping in linkViaSinglePassPSI feeds (sender, receiver) in the same order on
+  // both sides, so they compute the identical cap from swapped local inputs (own
+  // vs partner size).
+  expect(singlePassReplyByteCap(3, size(100, 3), size(200, 3))).not.toBe(
+    singlePassReplyByteCap(3, size(200, 3), size(100, 3)),
   );
-  // At the ceiling (both parties' keyCount*rows at the budget) the derived cap must
-  // stay below both transports' fixed frame envelopes, so the per-transport clamp
-  // does not bind and a legitimate single-pass reply the count budget admits is
-  // never rejected mid-exchange. This guards a future raise of MAX_SINGLE_PASS_CELLS
-  // (or of the per-cell byte weights): prose in frameSize.ts asserts the invariant,
-  // but only a check can keep it true.
+  // A sender that fans out ships the ragged table, whose per-cell count prefix is
+  // the only added term; the receiver's fan-out adds nothing beyond its own slots,
+  // since it ships no index table.
+  expect(singlePassReplyByteCap(1, size(10, 20), size(5, 1))).toBe(
+    (40 + 4) * (20 * 10) + 40 * (1 * 5) + 4 * (1 * 10) + 256,
+  );
+  expect(singlePassReplyByteCap(1, size(10, 1), size(5, 20))).toBe(
+    (40 + 4) * (1 * 10) + 40 * (20 * 5) + 256,
+  );
+  // At the same slot budget, a fanning-out sender's cap exceeds a fan-out-free
+  // one's: the ragged table's per-cell count prefixes are the added term, which is
+  // why the envelope invariant below is maximized over a fanning-out sender.
   const atCeiling = singlePassReplyByteCap(
     1,
-    MAX_SINGLE_PASS_CELLS,
-    MAX_SINGLE_PASS_CELLS,
+    { effectiveKeyCount: 1, recordCount: MAX_SINGLE_PASS_CELLS },
+    { effectiveKeyCount: 1, recordCount: MAX_SINGLE_PASS_CELLS },
   );
+  const atFanOutCeiling = singlePassReplyByteCap(
+    1,
+    {
+      effectiveKeyCount: MAX_KEY_CANDIDATES_PER_ROW,
+      recordCount: MAX_SINGLE_PASS_CELLS / MAX_KEY_CANDIDATES_PER_ROW,
+    },
+    { effectiveKeyCount: 1, recordCount: MAX_SINGLE_PASS_CELLS },
+  );
+  expect(atFanOutCeiling).toBeGreaterThan(atCeiling);
+});
+
+test("singlePassReplyByteCap stays below both transport envelopes at its maximum over the admissible space", () => {
+  // The derived cap must stay below both transports' fixed frame envelopes, so the
+  // per-transport clamp does not bind and a legitimate single-pass reply the slot
+  // budget admits is never rejected mid-exchange. This guards a future raise of
+  // MAX_SINGLE_PASS_CELLS, of MAX_LINKAGE_ENTRIES, or of the per-slot byte weights:
+  // prose in frameSize.ts asserts the invariant, but only a check can keep it true.
+  //
+  // The maximum is SEARCHED rather than hand-picked, so a change to any of those
+  // bounds re-maximizes here instead of leaving the invariant evaluated at an
+  // interior point that still passes. The space searched is the one the wire admits
+  // (assertPartnerEffectiveKeyCount, protocolSetup.ts): up to MAX_LINKAGE_ENTRIES
+  // agreed keys, an effective key count of keyCount + fanOutKeys *
+  // (MAX_KEY_CANDIDATES_PER_ROW - 1) for a whole number of fanning-out keys, and --
+  // since the cap rises with rows -- the largest record count the slot budget
+  // leaves that width.
+  const partiesAt = (keyCount: number) =>
+    Array.from({ length: keyCount + 1 }, (_unused, fanOutKeys) => {
+      const effectiveKeyCount =
+        keyCount + fanOutKeys * (MAX_KEY_CANDIDATES_PER_ROW - 1);
+      return {
+        effectiveKeyCount,
+        recordCount: Math.floor(MAX_SINGLE_PASS_CELLS / effectiveKeyCount),
+      };
+    });
+  const empty = { effectiveKeyCount: 0, recordCount: 0 };
+  let worst = { bytes: 0, keyCount: 0, sender: empty, receiver: empty };
+  for (let keyCount = 1; keyCount <= MAX_LINKAGE_ENTRIES; keyCount++) {
+    const parties = partiesAt(keyCount);
+    for (const sender of parties)
+      for (const receiver of parties) {
+        const bytes = singlePassReplyByteCap(keyCount, sender, receiver);
+        if (bytes > worst.bytes) worst = { bytes, keyCount, sender, receiver };
+      }
+  }
+  // The maximizing pair is inside the slot budget, so it is a reply the ceiling
+  // admits rather than one the over-ceiling gate would have refused first.
+  expect(singlePassExchangeExceedsCap(worst.sender, worst.receiver)).toBe(
+    false,
+  );
+  // It fans out, which is what makes the ragged count-prefix term the binding one.
+  expect(partyFansOut(worst.keyCount, worst.sender)).toBe(true);
   // The file-sync backstop, a core constant.
-  expect(atCeiling).toBeLessThan(MAX_FRAME_SIZE_BYTES);
-  // The nearer constraint on the raised cap: the WebRTC data channel's fixed
-  // browser-tab envelope. The coupling is bidirectional -- lowering
-  // MAX_WEBRTC_FRAME_BYTES below this ceiling cap would pass every bound's own
-  // test yet reject legitimate WebRTC replies, so the two must move together.
-  expect(atCeiling).toBeLessThan(MAX_WEBRTC_FRAME_BYTES);
+  expect(worst.bytes).toBeLessThan(MAX_FRAME_SIZE_BYTES);
+  // The nearer constraint: the WebRTC data channel's fixed browser-tab envelope.
+  // The coupling is bidirectional -- lowering MAX_WEBRTC_FRAME_BYTES below this
+  // maximum would pass every bound's own test yet reject legitimate WebRTC replies,
+  // so the two must move together.
+  expect(worst.bytes).toBeLessThan(MAX_WEBRTC_FRAME_BYTES);
 });
 
 test("the single-pass receiver read gate is bounded to the derived reply cap", async () => {
@@ -715,7 +827,7 @@ test("the single-pass receiver read gate is bounded to the derived reply cap", a
     receiver,
     fake,
     [["a", "b", "c"]],
-    partnerRows,
+    fanOutFreeBounds(keyCount, partnerRows),
     false,
     -1,
   );
@@ -724,7 +836,11 @@ test("the single-pass receiver read gate is bounded to the derived reply cap", a
   // fails fast after the gate is exercised.
   await new Promise((r) => setTimeout(r, 0));
   expect(setCalls[0]).toBe(
-    singlePassReplyByteCap(keyCount, partnerRows, localRows),
+    singlePassReplyByteCap(
+      keyCount,
+      { effectiveKeyCount: keyCount, recordCount: partnerRows },
+      { effectiveKeyCount: keyCount, recordCount: localRows },
+    ),
   );
   resolveReceive?.(
     encodeSinglePassReply(new Uint8Array(), new Uint8Array(), partnerRows, [0]),
@@ -756,7 +872,7 @@ test("single-pass receiver rejects a reply whose index table contradicts its rec
     receiver,
     conn,
     [["a", "b"]], // one key
-    5,
+    fanOutFreeBounds(1, 5),
     false,
     -1,
   );
@@ -790,7 +906,7 @@ test("single-pass receiver rejects a reply whose sender count contradicts the ex
     receiver,
     conn,
     [["a", "b"]], // one key, two local rows
-    3, // the sender exchanged 3 records
+    fanOutFreeBounds(1, 3), // the sender exchanged 3 records
     false,
     -1,
   );
@@ -812,7 +928,9 @@ test("single-pass aborts symmetrically when the exchange exceeds the ceiling", a
   // Both parties compute the over-ceiling verdict from the exchanged counts alone,
   // before any single-pass frame moves, and both abort with the same guidance --
   // which does not recommend cascade. Drive a tiny local dataset whose keyCount *
-  // partnerRecordCount exceeds the budget.
+  // partnerRecordCount exceeds the budget. The class is asserted with the
+  // guidance: every remedy the message offers is a configuration change, so the
+  // CLI must exit 64 rather than treat the refusal as a transport fault.
   const [conn, peer] = createMessagePipe();
   const receiver = new PSIParticipant(
     "client",
@@ -825,10 +943,11 @@ test("single-pass aborts symmetrically when the exchange exceeds the ceiling", a
     receiver,
     conn,
     [["a", "b"]],
-    MAX_SINGLE_PASS_CELLS + 1, // partner alone is over the budget
+    fanOutFreeBounds(1, MAX_SINGLE_PASS_CELLS + 1), // partner alone is over
     false,
     -1,
   );
+  await expect(run).rejects.toThrow(UsageError);
   await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
   await expect(run).rejects.not.toThrow(/cascade/);
   // The abort happened before any frame was exchanged: the peer saw nothing.
@@ -854,10 +973,11 @@ test("single-pass aborts symmetrically from the starter side too", async () => {
     sender,
     conn,
     [["a", "b"]],
-    MAX_SINGLE_PASS_CELLS + 1, // partner alone is over the budget
+    fanOutFreeBounds(1, MAX_SINGLE_PASS_CELLS + 1), // partner alone is over
     false,
     -1,
   );
+  await expect(run).rejects.toThrow(UsageError);
   await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
   await expect(run).rejects.not.toThrow(/cascade/);
   // The starter aborted before receiving the request: the peer saw nothing.
