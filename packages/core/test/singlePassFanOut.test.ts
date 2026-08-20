@@ -20,6 +20,7 @@ import {
   createMessagePipe,
   ConnectionError,
 } from "../src/connection/messageConnection";
+import { UsageError } from "../src/errors";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { AssociationTable } from "../src/types";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
@@ -516,12 +517,17 @@ test("a row realizing more candidates than the party declared is refused, not sh
     -1,
   );
   await expect(run).rejects.toThrow(/fan-out/);
+  // The class is the contract, not only the wording: this fault is the operator's
+  // to fix, and the exit code it earns follows from the class alone (the mapping
+  // itself is pinned in apps/cli's cli.test.ts).
+  await expect(run).rejects.toThrow(UsageError);
 });
 
 test("a cell wider than the normative width bound is refused as the table is built", async () => {
-  // The realization layer drops an over-width row before it reaches a round; this
-  // is the strategy's own backstop for a caller that assembled one anyway, and it
-  // is what keeps the sender from building a frame its own decoder would reject.
+  // Realization drops an over-width row for the DECLARED fan-out producers alone,
+  // so what lands here is an expansion that rule does not bind -- a fuzzy
+  // comparison, an unlisted function, or a caller that assembled one anyway -- and
+  // it is what keeps the sender from building a frame its own decoder would reject.
   const tooWide = new Set(
     Array.from({ length: MAX_KEY_CANDIDATES_PER_ROW + 1 }, (_u, i) => `V${i}`),
   );
@@ -543,4 +549,34 @@ test("a cell wider than the normative width bound is refused as the table is bui
   await expect(run).rejects.toThrow(
     /contributes 21 candidate value\(s\) to linkage key 0/,
   );
+  await expect(run).rejects.toThrow(UsageError);
+});
+
+test("rows inside the per-record bound that overrun the declared slots are refused", async () => {
+  // Where the two width checks differ: every row here is inside the per-record
+  // cap, and it is their sum across the keys that exceeds what this party
+  // advertised -- one key declared a fan-out, the other is one the declared
+  // factors count as single-valued while its rows realize a full-width set.
+  const insideBound = new Set(
+    Array.from({ length: MAX_KEY_CANDIDATES_PER_ROW }, (_u, i) => `V${i}`),
+  );
+  const [conn] = createMessagePipe();
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    new PSIParticipant(
+      "server",
+      psiLibrary,
+      { role: "starter", verbose: -1 },
+      UNBOUNDED_PSI_ELEMENTS,
+    ),
+    conn,
+    [[insideBound], [insideBound]],
+    boundsFor(1, MAX_KEY_CANDIDATES_PER_ROW + 1, 2),
+    false,
+    -1,
+  );
+  await expect(run).rejects.toThrow(
+    /built 40 candidate value slot\(s\) across 2 linkage key\(s\) and 1 record\(s\), more than the 21/,
+  );
+  await expect(run).rejects.toThrow(UsageError);
 });

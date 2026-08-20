@@ -694,14 +694,23 @@ export async function linkViaSinglePassPSI(
   // advertisement claims: the partner's decode, its element bounds, and its read
   // gate are all derived from that claim, so exceeding it would have the partner
   // reject a frame this party built. A candidate producer whose width the declared
-  // factors do not account for lands here rather than on the wire.
+  // factors do not account for lands here rather than on the wire: a row within the
+  // per-record bound still overruns the slots when the key it widens is one the
+  // declared factors count as single-valued, which is the fuzzy case
+  // `declaredEffectiveKeyCount` (fanOutFunctions.ts) defers to this seam. That
+  // producer is a configuration its operator can change, so the refusal is
+  // usage-typed rather than internal.
   const localSlotBound = localEffectiveKeyCount * numRecords;
   if (slotCount > localSlotBound) {
-    throw new Error(
+    throw new UsageError(
       `${participant.id}: single-pass built ${slotCount} candidate value slot(s) ` +
         `across ${numLinkageKeys} linkage key(s) and ${numRecords} record(s), ` +
         `more than the ${localSlotBound} this party's declared linkage terms and ` +
-        "standardization account for",
+        "standardization account for. Drop the step that expands a record's " +
+        "value for a key the declared factors count as single-valued -- a fuzzy " +
+        "comparison, or a transform that expands one value without being a " +
+        "declared fan-out function -- so this party's rows fit the width it " +
+        "advertised.",
     );
   }
 
@@ -1088,11 +1097,20 @@ function getDistinctValuesAndIndices(
         else for (const value of candidates) values.push(idOf(value));
       }
       const width = values.length - starts[i];
+      // Usage-typed rather than internal: realization drops an over-width row for
+      // the DECLARED fan-out producers alone (docs/spec/PROTOCOL.md, The width
+      // bound), so what reaches this bound at full width is a producer that rule
+      // does not bind -- a fuzzy comparison, or an expansion from a function
+      // outside FAN_OUT_FUNCTION_NAMES -- and each is a configuration its operator
+      // can change.
       if (width > MAX_KEY_CANDIDATES_PER_ROW)
-        throw new Error(
+        throw new UsageError(
           `single-pass: record ${i} contributes ${width} candidate value(s) to ` +
             `linkage key ${j}, more than the ${MAX_KEY_CANDIDATES_PER_ROW} one ` +
-            "record may contribute to one key",
+            "record may contribute to one key. Drop the step that expands this " +
+            "record's value for that key -- a fuzzy comparison, or a transform " +
+            "that expands one value without being a declared fan-out function -- " +
+            "so no record realizes more candidates than the bound admits.",
         );
       starts[i + 1] = values.length;
     }

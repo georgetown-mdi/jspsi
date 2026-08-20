@@ -702,9 +702,12 @@ function fanOutDeclaredMessage(functionName: string): string {
  * the point of harm, where the alternative is the silent narrowing itself. Key
  * realization carries every candidate ({@link buildKeyStrings}); the seams that
  * cannot honor them are `linkViaPSI` and `linkViaCountOnlyPSI`, fan-out matching
- * being specified for single-pass alone, plus the single-pass table build for a
- * party whose declared width does not admit the set (a row wider than the
- * advertisement would break the slot bound its partner's decode rests on).
+ * being specified for single-pass alone, plus the single-pass table build of a
+ * party that declared NO fan-out, whose fixed-width column carries one value per
+ * (key, record). A party that DID declare one builds the ragged table instead and
+ * refuses a set its advertisement cannot carry through the single-pass build's own
+ * width checks (`link.ts`), which are a different refusal on the same class of
+ * fault: an expansion the declared factors do not account for.
  *
  * Unreachable from a declared fan-out while {@link assertFanOutImplemented} gates
  * every run path, and deliberately a check rather than a comment saying so: it

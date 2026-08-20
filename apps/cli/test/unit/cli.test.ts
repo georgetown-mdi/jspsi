@@ -11,6 +11,7 @@ import {
   assertNoUnknownOptions,
   durationFlagMs,
   durationFlagSeconds,
+  exitCodeForError,
   exitWithError,
   MAX_TIMEOUT_SECONDS,
   nonNegativeIntFlag,
@@ -419,6 +420,16 @@ test("parseOrExit: a non-UsageError propagates unchanged without exiting", () =>
   } finally {
     exitSpy.mockRestore();
   }
+});
+
+// --- exitCodeForError --------------------------------------------------------
+
+test("exitCodeForError: a core UsageError is EX_USAGE, a bare Error is not", () => {
+  // What the error CLASS buys an operator at the command boundary, and why a
+  // refusal a configuration can fix is raised as a UsageError in core rather than
+  // a bare Error: the two land on different exit codes, and a script reads them.
+  expect(exitCodeForError(new UsageError("bad terms"))).toBe(64);
+  expect(exitCodeForError(new Error("bad terms"))).toBe(69);
 });
 
 // --- exitWithError -----------------------------------------------------------
