@@ -2594,21 +2594,21 @@ describe("assertFanOutImplemented", () => {
     expect(() => assertFanOutImplemented(minimalTerms)).not.toThrow();
   });
 
-  // docs/spec/PROTOCOL.md's "Wire-format deltas: existing frames only, and no
-  // version bump" paragraph holds PROTOCOL_VERSION at 1 only because this
-  // refusal keeps every production exchange off the ragged single-pass wire
-  // layout that fan-out introduces. Narrowing this refusal while the version
-  // is still 1 would ship a build that interoperates at version 1 yet
-  // degrades a standardization-only fan-out to a generic frame error against
-  // an unpatched peer, instead of the version reconcile catching it. Once
-  // PROTOCOL_VERSION moves past 1, runIf skips this test with no edit here.
+  // docs/spec/PROTOCOL.md's "Wire-format deltas: existing frames only"
+  // paragraph holds PROTOCOL_VERSION at 1 only while this refusal keeps every
+  // production exchange off the ragged single-pass wire layout that fan-out
+  // introduces. Narrowing this refusal while the version is still 1 would ship
+  // a build that interoperates at version 1 yet degrades a
+  // standardization-only fan-out to a generic frame error against an unpatched
+  // peer, instead of the version reconcile catching it. Once PROTOCOL_VERSION
+  // moves past 1, runIf skips this test with no edit here.
   test.runIf(PROTOCOL_VERSION === 1)(
     "a declared fan-out is still refused before the exchange runs while PROTOCOL_VERSION is 1",
     () => {
       const message =
         "PROTOCOL_VERSION must move past 1 before the standing fan-out " +
         'refusal narrows -- see docs/spec/PROTOCOL.md, "Wire-format deltas: ' +
-        'existing frames only, and no version bump"';
+        'existing frames only"';
 
       const singlePassTerms: LinkageTerms = {
         ...minimalTerms,
