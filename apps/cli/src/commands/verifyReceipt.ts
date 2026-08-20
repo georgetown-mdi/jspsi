@@ -351,8 +351,6 @@ export interface SuppliedVerificationInputs {
   localTerms: boolean;
   /** Whether `--partner-terms` was supplied. */
   partnerTerms: boolean;
-  /** How this party's signing identity was found, when one was. */
-  localIdentity?: LocalIdentitySource;
   /** Whether this section carries the note explaining a config that defines no
    * `linkage_terms`. A run reporting both artifacts prints it once, under the
    * first agreed-terms line it explains. Defaults to carrying it. */
@@ -614,10 +612,9 @@ function guidanceLine(guidance: SignedReceiptVerdictGuidance): string {
       );
     case "no-certificate-anchored":
       return (
-        "  certificate fingerprint trust not established" +
-        (guidance.pinnedValueSupplied ? "" : " (no pinned value supplied)") +
-        ": nothing ties the record's certificates to the partner you know. " +
-        "Pass --partner-fingerprint, or --config-file with " +
+        "  certificate fingerprint trust not established (no pinned value " +
+        "supplied): nothing ties the record's certificates to the partner you " +
+        "know. Pass --partner-fingerprint, or --config-file with " +
         "signing.partner_fingerprint set."
       );
     case "certificate-unanchored":
@@ -643,9 +640,7 @@ export function formatSignedRecordReport(
   report: DualSignedRecordVerificationReport,
   supplied: SuppliedVerificationInputs = NOTHING_SUPPLIED,
 ): { lines: string[]; exitCode: number } {
-  const verdict = decideSignedReceiptVerdict(report, {
-    localIdentitySource: supplied.localIdentity,
-  });
+  const verdict = decideSignedReceiptVerdict(report);
   const headline = verdict.headline;
   const lines: string[] = [];
   if (headline.tone === "failed")
@@ -1051,10 +1046,7 @@ async function verifySignedRecord(
   inputs: Omit<DualSignedRecordVerificationInputs, "localIdentity">,
   chosen: ChosenLocalIdentity,
   log: { warn: (message: string) => void },
-): Promise<{
-  report: DualSignedRecordVerificationReport;
-  localIdentity: LocalIdentityAnchor | undefined;
-}> {
+): Promise<DualSignedRecordVerificationReport> {
   const report = await verifyDualSignedRecord(record, {
     ...inputs,
     localIdentity: chosen.anchor,
@@ -1062,21 +1054,17 @@ async function verifySignedRecord(
   const anchoredEverySlot = parties(report).every(
     (party) => party.certificateAnchor !== "unanchored",
   );
-  if (chosen.file !== undefined || anchoredEverySlot)
-    return { report, localIdentity: chosen.anchor };
+  if (chosen.file !== undefined || anchoredEverySlot) return report;
   const resolved = await foundLocalIdentity(
     defaultSigningIdentityPath(),
     "per-user default",
     log,
   );
-  if (resolved === undefined) return { report, localIdentity: undefined };
-  return {
-    report: await verifyDualSignedRecord(record, {
-      ...inputs,
-      localIdentity: resolved,
-    }),
+  if (resolved === undefined) return report;
+  return await verifyDualSignedRecord(record, {
+    ...inputs,
     localIdentity: resolved,
-  };
+  });
 }
 
 export async function handler(argv: Arguments): Promise<void> {
@@ -1214,7 +1202,7 @@ export async function handler(argv: Arguments): Promise<void> {
         configFile,
         configFile !== undefined,
       );
-      const { report, localIdentity } = await verifySignedRecord(
+      const report = await verifySignedRecord(
         signedRecord,
         {
           pinnedFingerprints: resolvePinnedFingerprints(
@@ -1232,7 +1220,6 @@ export async function handler(argv: Arguments): Promise<void> {
       );
       const rendered = formatSignedRecordReport(report, {
         ...supplied,
-        localIdentity: localIdentity?.source,
         // The note explaining a config that carries no terms belongs beside
         // the first agreed-terms line it explains, and a combined run has
         // already printed that line above.

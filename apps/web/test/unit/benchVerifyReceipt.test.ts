@@ -585,6 +585,10 @@ describe("verifySignedRecord: both certificates anchored", () => {
     expect(view.runBinding.explanation).toContain(
       "Load the exchange record for this run",
     );
+    // Nothing was supplied to pair against, so there is no pairing to advise on.
+    expect(view.runBinding.explanation).not.toContain(
+      "pair them by that stamp",
+    );
   });
 
   test("a record from another run of this partnership fails the pairing", async () => {
@@ -609,6 +613,9 @@ describe("verifySignedRecord: both certificates anchored", () => {
     );
     expect(view.runBinding.tone).toBe("failed");
     expect(view.runBinding.explanation).toContain("from different runs");
+    // A pairing the record contradicts is answered by finding the record written
+    // beside this receipt, so the verdict earns the stamp advice.
+    expect(view.runBinding.explanation).toContain("pair them by that stamp");
     // Distinguishable from the other failure classes: every signature, identity,
     // and anchor row still reads as verified.
     for (const party of view.parties)
@@ -633,6 +640,9 @@ describe("verifySignedRecord: both certificates anchored", () => {
     const view = signedVerdictViewModel(report);
     expect(view.runBinding.status).toBe("The record carries no run binder");
     expect(view.runBinding.explanation).toContain("no signed receipt");
+    // Earned here as much as by a cross-run pairing: both are answered by the
+    // record written beside this receipt.
+    expect(view.runBinding.explanation).toContain("pair them by that stamp");
   });
 });
 
@@ -894,9 +904,9 @@ describe("signedVerdictViewModel: over a report built by hand", () => {
   });
 
   test("a verified verdict with an unanchored slot is refused rather than phrased", () => {
-    // The sentence would claim both certificates were anchored when one was
-    // not. core withholds `verified` in that case, and this refuses to render
-    // the overstatement if it ever does not.
+    // The sentence would claim both certificates were anchored when one was not.
+    // The verdict decides that once for every surface and refuses the report, so
+    // the page renders no overstatement rather than each page guarding its own.
     expect(() =>
       signedVerdictViewModel(
         signedReport({

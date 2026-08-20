@@ -199,6 +199,14 @@ export interface DualSignedRecordVerificationReport {
    * that matches neither is reported and leaves its slot unanchored.
    */
   localIdentity: AnchorMatchStatus;
+  /**
+   * How that identity reached the verification, when one was supplied. The
+   * outcome already turns on it -- what a non-match costs is the whole
+   * difference between a contradiction and a note -- so the report states it
+   * rather than leaving a consumer to carry it alongside. Absent when no local
+   * identity was supplied.
+   */
+  localIdentitySource?: LocalIdentitySource;
   /** Whether the record's agreed-terms hash matches the one the caller supplied. */
   termsHash: TermsHashStatus;
   /**
@@ -582,6 +590,7 @@ export async function verifyDualSignedRecord(
     responder,
     pinnedFingerprints: anchoring.pinnedFingerprints,
     localIdentity: anchoring.localIdentity,
+    localIdentitySource: inputs.localIdentity?.source,
     termsHash,
     runBinding,
     binder: record.content.binder,
@@ -709,8 +718,9 @@ export interface SignedReceiptVerdictRunBinding extends SignedReceiptVerdictChec
  *   neither certificate. It anchors nothing and contradicts nothing -- the
  *   verifier was not a party to this exchange, or has re-keyed since.
  * - `no-certificate-anchored`: nothing ties either certificate to a party the
- *   verifier knows. `pinnedValueSupplied` states whether any pinned value reached
- *   the run at all, so a surface naming one as missing names one that is.
+ *   verifier knows, and no pinned value reached the run -- a pinned value that
+ *   matched anchors the slot it matched, and one that matched nothing is the
+ *   contradiction above rather than a run short of anchors.
  * - `certificate-unanchored`: one slot is anchored and the other is not, which is
  *   what holds the verdict short of verified.
  */
@@ -718,7 +728,7 @@ export type SignedReceiptVerdictGuidance =
   | { kind: "pinned-fingerprint-unmatched" }
   | { kind: "named-local-identity-unmatched" }
   | { kind: "resolved-local-identity-unmatched" }
-  | { kind: "no-certificate-anchored"; pinnedValueSupplied: boolean }
+  | { kind: "no-certificate-anchored" }
   | { kind: "certificate-unanchored"; role: HandshakeRole };
 
 /** The decided verdict over a {@link DualSignedRecordVerificationReport}. */
@@ -735,19 +745,6 @@ export interface SignedReceiptVerdict {
    * recomputed -- deriving it needs the exchange session key. A surface escapes
    * it at its display sink. */
   binder: string;
-}
-
-/** What the report does not carry but the verdict turns on. */
-export interface SignedReceiptVerdictInputs {
-  /**
-   * How the verifier's own signing identity reached the verification, which
-   * fixes what a non-match costs: a `named` identity asserts the record is one
-   * the verifier signed and a non-match contradicts that, while a `resolved` one
-   * that reached neither slot says only that this was not their exchange.
-   * Required whenever the report's `localIdentity` is `unmatched`, which is the
-   * one case the distinction decides.
-   */
-  localIdentitySource?: LocalIdentitySource;
 }
 
 // Every status across the report's rows, each mapping to one tier: a single table
@@ -831,6 +828,19 @@ function anchoredSlot(
         "unanchored: the verdict would claim both certificates were anchored " +
         "when one was not",
     );
+  // The two anchored kinds are the only sources this verification establishes,
+  // so a status outside them anchors nothing at all -- it reaches here only from
+  // a caller that stepped past the type. Naming it would put an anchor that does
+  // not exist under a verified headline on every surface at once.
+  if (
+    party.certificateAnchor !== "partner-pin" &&
+    party.certificateAnchor !== "local-identity"
+  )
+    throw new Error(
+      `a verified dual-signed record reports the ${party.role}'s certificate ` +
+        `anchor as ${party.certificateAnchor}: the verdict would name an ` +
+        "anchor that does not exist",
+    );
   return { role: party.role, anchor: party.certificateAnchor };
 }
 
@@ -850,7 +860,6 @@ function decideHeadline(
 
 function decideGuidance(
   report: DualSignedRecordVerificationReport,
-  localIdentitySource: LocalIdentitySource | undefined,
   parties: readonly SignedReceiptPartyReport[],
   unanchored: readonly SignedReceiptPartyReport[],
 ): SignedReceiptVerdictGuidance[] {
@@ -858,13 +867,13 @@ function decideGuidance(
   if (report.pinnedFingerprints === "unmatched")
     guidance.push({ kind: "pinned-fingerprint-unmatched" });
   const localUnmatched = report.localIdentity === "unmatched";
-  if (localUnmatched && localIdentitySource === "named")
+  if (localUnmatched && report.localIdentitySource === "named")
     guidance.push({ kind: "named-local-identity-unmatched" });
   // An identity that anchors nothing is worth stating only while a slot is still
   // waiting to be anchored; beside a fully anchored record it is noise.
   else if (
     localUnmatched &&
-    localIdentitySource === "resolved" &&
+    report.localIdentitySource === "resolved" &&
     unanchored.length > 0
   )
     guidance.push({ kind: "resolved-local-identity-unmatched" });
@@ -874,18 +883,78 @@ function decideGuidance(
   // above, and telling the verifier to supply more would talk past it.
   const anchorContradicted =
     report.pinnedFingerprints === "unmatched" ||
-    (localUnmatched && localIdentitySource === "named");
+    (localUnmatched && report.localIdentitySource === "named");
   if (anchorContradicted) return guidance;
 
-  if (unanchored.length === parties.length)
-    guidance.push({
-      kind: "no-certificate-anchored",
-      pinnedValueSupplied: report.pinnedFingerprints !== "not-supplied",
-    });
-  else
+  if (unanchored.length === parties.length) {
+    // A pinned value that matched a certificate anchored the slot it matched, and
+    // one that matched none is the contradiction handled above, so a run with
+    // nothing anchored supplied no pinned value. Were that to stop holding, the
+    // line below would tell the verifier to pin a fingerprint they had already
+    // pinned, so the verdict refuses the report instead.
+    if (report.pinnedFingerprints !== "not-supplied")
+      throw new Error(
+        "a dual-signed record anchors neither certificate while a pinned " +
+          `fingerprint is reported as ${report.pinnedFingerprints}: the ` +
+          "guidance would ask for a pinned value that was already supplied",
+      );
+    guidance.push({ kind: "no-certificate-anchored" });
+  } else
     for (const slot of unanchored)
       guidance.push({ kind: "certificate-unanchored", role: slot.role });
   return guidance;
+}
+
+/** What a verdict states beside the headline, the guidance, and the binder
+ * decided over it: the rows themselves. */
+type DecidedVerdictRows = Omit<
+  SignedReceiptVerdict,
+  "headline" | "guidance" | "binder"
+>;
+
+function partyRows(
+  party: SignedReceiptVerdictParty,
+): Array<[string, SignedReceiptVerdictCheck<string>]> {
+  const rows: Record<
+    Exclude<
+      keyof SignedReceiptVerdictParty,
+      "role" | "identity" | "fingerprint"
+    >,
+    [string, SignedReceiptVerdictCheck<string>]
+  > = {
+    certificateAnchor: [
+      `the ${party.role}'s certificate anchor`,
+      party.certificateAnchor,
+    ],
+    certificateBinding: [
+      `the ${party.role}'s certificate binding`,
+      party.certificateBinding,
+    ],
+    signature: [`the ${party.role}'s receipt signature`, party.signature],
+    assertedIdentity: [
+      `the ${party.role}'s asserted identity`,
+      party.assertedIdentity,
+    ],
+  };
+  return Object.values(rows);
+}
+
+/** Every decided row under the headline, named as a reader meets it. */
+function decidedRows(
+  verdict: DecidedVerdictRows,
+): Array<[string, SignedReceiptVerdictCheck<string>]> {
+  // Keyed by the members the rows are drawn from rather than listed loose, so a
+  // row added to the verdict later cannot fall outside the refusals that read
+  // this list: the mapping stops compiling until it names the new member.
+  const rows: Record<
+    keyof DecidedVerdictRows,
+    Array<[string, SignedReceiptVerdictCheck<string>]>
+  > = {
+    termsHash: [["the agreed-terms hash", verdict.termsHash]],
+    runBinding: [["the receipt-record pairing", verdict.runBinding]],
+    parties: verdict.parties.flatMap(partyRows),
+  };
+  return Object.values(rows).flat();
 }
 
 /**
@@ -901,22 +970,20 @@ function decideGuidance(
  * a status carries a tier here and its wording there, and a remediation names the
  * inputs that surface actually takes.
  *
- * Total over a report {@link verifyDualSignedRecord} produces, provided a caller
- * that supplied a local identity to the verification also states its
- * {@link SignedReceiptVerdictInputs.localIdentitySource}: a report whose local
- * identity is `unmatched` is refused without one, because a named identity
- * contradicts the record while one resolved without being asked does not, and
- * guessing either way would misgrade the evidence. The other refusal -- a
- * `verified` outcome over a slot nothing anchors -- is unreachable from a
- * produced report and can only be stated by a hand-built one.
+ * Total over a report {@link verifyDualSignedRecord} produces. Its refusals are a
+ * report contradicting itself, which only a hand-built one can state: a verdict
+ * that speaks for a slot nothing anchors, a verified verdict over a row reported
+ * as failed, a run anchoring neither certificate beside a pinned value that
+ * reached one, and a local identity reported as matching neither certificate
+ * without stating how it reached the verification -- named or resolved being the
+ * whole difference between a contradiction and a note.
  */
 export function decideSignedReceiptVerdict(
   report: DualSignedRecordVerificationReport,
-  inputs: SignedReceiptVerdictInputs = {},
 ): SignedReceiptVerdict {
   if (
     report.localIdentity === "unmatched" &&
-    inputs.localIdentitySource === undefined
+    report.localIdentitySource === undefined
   )
     throw new Error(
       "a signing identity matched neither certificate in this record, and how " +
@@ -927,8 +994,7 @@ export function decideSignedReceiptVerdict(
   const unanchored = parties.filter(
     (party) => party.certificateAnchor === "unanchored",
   );
-  return {
-    headline: decideHeadline(report, parties, unanchored),
+  const decided: DecidedVerdictRows = {
     parties: [
       decideParty(report.initiator, report.responder, report),
       decideParty(report.responder, report.initiator, report),
@@ -939,12 +1005,28 @@ export function decideSignedReceiptVerdict(
       pairByStamp:
         report.runBinding === "mismatch" || report.runBinding === "unpaired",
     },
-    guidance: decideGuidance(
-      report,
-      inputs.localIdentitySource,
-      parties,
-      unanchored,
-    ),
+  };
+  const headline = decideHeadline(report, parties, unanchored);
+  // The verification withholds `verified` while any check it made was
+  // contradicted, so a verified headline always sits over rows that all passed.
+  // Were that to stop holding, every surface would render a verified verdict over
+  // a row reading failed -- evidence overstated -- so the verdict fails loudly
+  // here instead, once for all of them, as the unanchored slot above does.
+  if (headline.tone === "verified") {
+    const failed = decidedRows(decided).find(
+      ([, row]) => row.tone === "failed",
+    );
+    if (failed !== undefined)
+      throw new Error(
+        `a verified dual-signed record reports ${failed[0]} as ` +
+          `${failed[1].status}: the verdict would read verified over a row ` +
+          "that failed",
+      );
+  }
+  return {
+    headline,
+    ...decided,
+    guidance: decideGuidance(report, parties, unanchored),
     binder: report.binder,
   };
 }
