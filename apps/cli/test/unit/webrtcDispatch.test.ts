@@ -116,7 +116,8 @@ const {
   WEBRTC_RENDEZVOUS_SECRET_REQUIRED,
   WEBRTC_ROLE_REQUIRED,
 } = await import("../../src/protocol");
-const { WEBRTC_URL_REFUSED } = await import("../../src/connectionFromUrl");
+const { WEBRTC_URL_REFUSED, WEBRTC_URL_EXTRAS_REFUSED } =
+  await import("../../src/connectionFromUrl");
 const { ID_TAKEN_MESSAGE } =
   await import("../../src/connection/webrtc/brokerClient");
 const { WEBRTC_BROKER_HOST_REFUSED, WEBRTC_BROKER_PATH_REFUSED } =
@@ -476,6 +477,7 @@ test("each refusal survives the display boundary whole", () => {
     WEBRTC_RENDEZVOUS_SECRET_REQUIRED,
     WEBRTC_ROLE_REQUIRED,
     WEBRTC_URL_REFUSED,
+    WEBRTC_URL_EXTRAS_REFUSED,
     ID_TAKEN_MESSAGE,
     WEBRTC_BROKER_HOST_REFUSED,
     WEBRTC_BROKER_PATH_REFUSED,

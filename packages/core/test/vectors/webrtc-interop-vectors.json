@@ -3,7 +3,7 @@
   "construction": {
     "peerId": "HKDF-SHA-256 over the decoded 32-byte shared secret, 32-byte zero salt, info `psilink-webrtc-peerid-v1:<role>`, first 16 bytes, lowercase hex. Roles are 'inviter' and 'acceptor'; the inviter registers with the signaling broker under its own id and the acceptor dials it.",
     "invitation": "base64url(UTF-8 JSON body) with base64url(SHA-256(body)[0:4]) appended. The JSON key order is the invitation schema's parse-result order, which canonicalJson below states literally.",
-    "signaling": "The endpoint carries host/port/path only. It names no scheme: each side resolves ws vs wss locally (the browser from its own page protocol, the CLI from `server.secure`, which defaults to true), so no scheme is pinned here."
+    "signaling": "The endpoint carries host/port/path only. It names no scheme: each side resolves ws vs wss locally (the browser from its own page protocol, the CLI from `server.secure`, which defaults to true), so no scheme is pinned here. `signaling.endpoint` is the locator a browser inviter mints, and `signaling.cliMintedEndpoints` the locators a CLI inviter mints from a ws/wss URL, each with the broker location both sides must resolve it to -- one entry per mint direction, so neither is left resolving an absent field to a default of its own."
   },
   "inputs": {
     "sharedSecretHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
@@ -43,7 +43,50 @@
       "path": "/api/"
     },
     "brokerHost": "psilink.example.org:8443",
-    "brokerPathname": "/api/peerjs"
+    "brokerPathname": "/api/peerjs",
+    "cliMintedEndpoints": [
+      {
+        "inviteUrl": "wss://psilink.example.org",
+        "endpoint": {
+          "channel": "webrtc",
+          "host": "psilink.example.org",
+          "path": "/"
+        },
+        "brokerLocation": {
+          "host": "psilink.example.org",
+          "port": 443,
+          "path": "/"
+        }
+      },
+      {
+        "inviteUrl": "wss://psilink.example.org:8443/",
+        "endpoint": {
+          "channel": "webrtc",
+          "host": "psilink.example.org",
+          "port": 8443,
+          "path": "/"
+        },
+        "brokerLocation": {
+          "host": "psilink.example.org",
+          "port": 8443,
+          "path": "/"
+        }
+      },
+      {
+        "inviteUrl": "wss://psilink.example.org:8443/psi",
+        "endpoint": {
+          "channel": "webrtc",
+          "host": "psilink.example.org",
+          "port": 8443,
+          "path": "/psi"
+        },
+        "brokerLocation": {
+          "host": "psilink.example.org",
+          "port": 8443,
+          "path": "/psi"
+        }
+      }
+    ]
   },
   "invitation": {
     "token": {

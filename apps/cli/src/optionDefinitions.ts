@@ -508,12 +508,19 @@ export function connectionOverridesFrom(
 
 /**
  * Warn that the file-sync-only flags (`--lockless-rendezvous`, `--retain-files`,
- * `--polling-frequency`) have no effect on a channel that is not `sftp` or
- * `filedrop`, naming whichever flags the caller actually set. The channel is
- * taken as input so the one helper serves both call sites: `exchange` derives it
- * from the loaded connection (post-override), `zero-setup` from the server URL
- * (pre-connection). A file-sync channel warns for none of them. Shared so the
- * wording cannot drift between the two commands.
+ * `--polling-frequency`, `--peer-id`, `--timestamp-in-filename`) have no effect
+ * on a channel that is not `sftp` or `filedrop`, naming whichever flags the
+ * caller actually set. The channel is taken as input so the one helper serves
+ * every call site: `exchange` derives it from the loaded connection
+ * (post-override), `zero-setup` from the server URL (pre-connection). A
+ * file-sync channel warns for none of them. Shared so the wording cannot drift
+ * between the commands.
+ *
+ * Each caller passes only the flags it is wired to warn for, not the whole
+ * set: `invite`'s webrtc route (the ws://wss:// URL) passes `peerId` and the
+ * rest through, but `exchange` -- which also registers `--peer-id` and the
+ * `--server-*` set -- is not yet wired to warn for its own webrtc drops, so
+ * those go unreported on that command today.
  *
  * `--connection-per-poll` is the exception to "file-sync": it is SFTP-only (the
  * ephemeral-session mode dials a real SFTP socket, which filedrop's
@@ -522,18 +529,18 @@ export function connectionOverridesFrom(
  * checked before the file-sync early return below. Warn-not-block, per the
  * trusted-operator posture.
  *
- * `--polling-frequency` belongs here because `pollIntervalMs` is a FileSyncOptions
- * field {@link applyConnectionOverrides} applies only on `sftp`/`filedrop`, so on
- * a non-file-sync channel the override is dropped exactly as the two toggles are;
- * this is where its ignored-flag warning lives, and {@link warnLowPollingFrequency}
- * (the aggressively-low advisory) is correspondingly a no-op off those channels so
- * the two never both fire.
+ * `--polling-frequency`, `--peer-id`, and `--timestamp-in-filename` belong here
+ * because `pollIntervalMs`, `peerId`, and `timestampInFilename` are
+ * FileSyncOptions fields {@link applyConnectionOverrides} applies only on
+ * `sftp`/`filedrop`, so on a non-file-sync channel each override is dropped
+ * exactly as the two toggles are; this is where their ignored-flag warnings
+ * live, and {@link warnLowPollingFrequency} (the aggressively-low advisory) is
+ * correspondingly a no-op off those channels so the two never both fire.
  *
  * `--outbound-path` is deliberately NOT one of these flags: unlike the silently-
- * ignored options above, it is a hard error on a non-file-sync channel (the
- * URL-driven commands reject a webrtc URL before overrides apply, and
- * applyConnectionOverrides throws on a webrtc config), so it needs no
- * "ignored" warning -- a warning here would falsely promise it was tolerated.
+ * ignored options above, {@link applyConnectionOverrides} throws on it off the
+ * file-sync channels, so it needs no "ignored" warning -- a warning here would
+ * falsely promise it was tolerated.
  */
 export function warnUnsupportedFileSyncFlags(
   channel: ConnectionConfig["channel"],
@@ -542,6 +549,8 @@ export function warnUnsupportedFileSyncFlags(
     retainFiles?: boolean;
     pollingFrequencyMs?: number;
     connectionPerPoll?: boolean;
+    peerId?: string;
+    timestampInFilename?: boolean;
   },
   log: { warn: (message: string) => void },
 ): void {
@@ -570,6 +579,95 @@ export function warnUnsupportedFileSyncFlags(
       `--polling-frequency has no effect on the ${channel} channel and will be ` +
         "ignored; it is only supported on sftp and filedrop",
     );
+  // Set-or-unset, like pollingFrequencyMs above: --peer-id takes a value and has
+  // no negated form. The value is operator-supplied free text reaching the
+  // terminal and any --log-file, so the message names the flag alone.
+  if (flags.peerId !== undefined)
+    log.warn(
+      `--peer-id has no effect on the ${channel} channel and will be ignored; ` +
+        "it is only supported on sftp and filedrop",
+    );
+  if (flags.timestampInFilename === true)
+    log.warn(
+      `--timestamp-in-filename has no effect on the ${channel} channel and ` +
+        "will be ignored; it is only supported on sftp and filedrop",
+    );
+}
+
+/**
+ * Warn that the `--server-*` overrides a webrtc connection cannot take have no
+ * effect on it, naming whichever the caller actually set.
+ * {@link applyConnectionOverrides} merges the server sub-group on `sftp` alone,
+ * so on webrtc every one of them is parsed and dropped; this is the ignored-flag
+ * warning for that drop, the counterpart to the file-sync one
+ * {@link warnUnsupportedFileSyncFlags} emits. A no-op on every other channel,
+ * where the wording below (which names the coordination server and the ws/wss
+ * URL) would not apply. Warn-not-block, per the trusted-operator posture.
+ *
+ * `--server-port` and `--server-username` carry remedies of their own, so each
+ * warns for itself: the coordination server's port is part of the location the
+ * URL already gives, while its `username` has no webrtc form at all -- the
+ * server is reached by location and its API key alone (the same remedy
+ * {@link WEBRTC_URL_EXTRAS_REFUSED} gives for `server.key`). The rest are SSH
+ * authentication material with no counterpart on a signaling socket at all, so
+ * they share one line -- and they are the ones that most need it: a credential
+ * typed at a channel that discards it looks, from the terminal, exactly like
+ * one that was used.
+ */
+export function warnUnsupportedWebRTCServerFlags(
+  channel: ConnectionConfig["channel"],
+  flags: {
+    serverPort?: number;
+    serverUsername?: string;
+    serverPassword?: string;
+    serverPrivateKey?: string;
+    serverPrivateKeyPassphrase?: string;
+    serverKeyboardInteractive?: boolean;
+    serverHostKeyFingerprint?: string;
+  },
+  log: { warn: (message: string) => void },
+): void {
+  if (channel !== "webrtc") return;
+  // Security invariant, as in warnServerOverridesIgnoredOffline: emit the flag
+  // NAME only. Every value here is operator-supplied, and three of them are
+  // secrets; the messages reach the terminal and any --log-file, so each stays
+  // static apart from the flag name.
+  if (flags.serverPort !== undefined)
+    log.warn(
+      "--server-port has no effect on the webrtc channel and will be ignored; " +
+        "the coordination server's port is part of the ws:// or wss:// URL " +
+        "this invitation is built from.",
+    );
+  if (flags.serverUsername !== undefined)
+    log.warn(
+      "--server-username has no effect on the webrtc channel and will be " +
+        "ignored; a webrtc invitation reaches its coordination server by " +
+        "location and its API key alone. For a coordination server that " +
+        "needs a key, author `channel: webrtc` (with `server.key`) in " +
+        "psilink.yaml and run 'psilink exchange'. A username has no webrtc " +
+        "form and is never sent.",
+    );
+  const sshAuthenticationFlags: ReadonlyArray<readonly [string, boolean]> = [
+    ["--server-password", flags.serverPassword !== undefined],
+    ["--server-private-key", flags.serverPrivateKey !== undefined],
+    [
+      "--server-private-key-passphrase",
+      flags.serverPrivateKeyPassphrase !== undefined,
+    ],
+    ["--server-keyboard-interactive", flags.serverKeyboardInteractive === true],
+    [
+      "--server-host-key-fingerprint",
+      flags.serverHostKeyFingerprint !== undefined,
+    ],
+  ];
+  for (const [flag, set] of sshAuthenticationFlags)
+    if (set)
+      log.warn(
+        `${flag} has no effect on the webrtc channel and will be ignored; it ` +
+          "authenticates an SSH server, and a webrtc invitation reaches its " +
+          "coordination server by location alone -- no credential of any kind " +
+          "is sent, saved, or carried on the invitation.",
+      );
 }
 
 /**

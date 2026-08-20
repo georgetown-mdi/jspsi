@@ -84,6 +84,57 @@ const connectionEndpoint = {
   path: signalingPath,
 };
 
+// The other mint direction: what `psilink invite` emits from a ws/wss URL, and
+// where a BROWSER acceptor seeded from that endpoint opens its signaling socket.
+// Stated literally here, as everything in this file is, rather than computed
+// from either app's builder.
+//
+// The path is the reason this direction is pinned at all. Each client resolves
+// an endpoint that names no mount point to its OWN default -- `/` in the CLI,
+// `/api/` in the browser app -- so a bare-host URL that left the field empty
+// would send the two to different sockets and simply never meet. The CLI's mint
+// therefore emits the resolved mount point even when the URL wrote none, which
+// is what the first vector below fixes.
+const cliMintedEndpoints = [
+  {
+    inviteUrl: `wss://${signalingLocation.hostname}`,
+    endpoint: {
+      channel: "webrtc",
+      host: signalingLocation.hostname,
+      path: "/",
+    },
+    brokerLocation: { host: signalingLocation.hostname, port: 443, path: "/" },
+  },
+  {
+    inviteUrl: `wss://${signalingLocation.hostname}:${signalingLocation.port}/`,
+    endpoint: {
+      channel: "webrtc",
+      host: signalingLocation.hostname,
+      port: Number(signalingLocation.port),
+      path: "/",
+    },
+    brokerLocation: {
+      host: signalingLocation.hostname,
+      port: Number(signalingLocation.port),
+      path: "/",
+    },
+  },
+  {
+    inviteUrl: `wss://${signalingLocation.hostname}:${signalingLocation.port}/psi`,
+    endpoint: {
+      channel: "webrtc",
+      host: signalingLocation.hostname,
+      port: Number(signalingLocation.port),
+      path: "/psi",
+    },
+    brokerLocation: {
+      host: signalingLocation.hostname,
+      port: Number(signalingLocation.port),
+      path: "/psi",
+    },
+  },
+];
+
 // The invitation body in the key order InvitationTokenSchema's parse result
 // serializes: top-level version, linkageTerms, sharedSecret, expires,
 // connectionEndpoint, disclosedPayloadColumns, and inside a linkage field
@@ -159,7 +210,11 @@ const vectors = {
       "The endpoint carries host/port/path only. It names no scheme: each side " +
       "resolves ws vs wss locally (the browser from its own page protocol, the " +
       "CLI from `server.secure`, which defaults to true), so no scheme is pinned " +
-      "here.",
+      "here. `signaling.endpoint` is the locator a browser inviter mints, and " +
+      "`signaling.cliMintedEndpoints` the locators a CLI inviter mints from a " +
+      "ws/wss URL, each with the broker location both sides must resolve it to " +
+      "-- one entry per mint direction, so neither is left resolving an absent " +
+      "field to a default of its own.",
   },
   inputs: {
     sharedSecretHex: SHARED_SECRET_HEX,
@@ -180,6 +235,7 @@ const vectors = {
     // PeerJS signaling socket is opened on.
     brokerHost: `${connectionEndpoint.host}:${connectionEndpoint.port}`,
     brokerPathname: `${signalingPath.replace(/\/$/, "")}/peerjs`,
+    cliMintedEndpoints,
   },
   invitation: {
     token: canonicalToken,

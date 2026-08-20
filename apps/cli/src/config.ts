@@ -345,10 +345,9 @@ export function applyConnectionOverrides(
       delete result.path;
       serverModified = true;
     } else {
-      // webrtc has no directory, so the flag is meaningless there. Only
-      // `exchange` can reach this -- the URL-driven commands reject a webrtc URL
-      // before overrides apply -- and its config is rejected as unsupported
-      // shortly after; surface a precise cause here first.
+      // webrtc has no directory, so the flag is meaningless there: refuse it
+      // with a cause naming the channels that do carry one, rather than
+      // silently dropping it the way the channel-gated overrides above are.
       throw new UsageError(
         "--outbound-path is only supported on the sftp and filedrop channels",
       );

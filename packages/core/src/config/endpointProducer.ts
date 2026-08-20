@@ -7,18 +7,16 @@ import type { ConnectionEndpoint } from "./invitation.js";
 import type { ConnectionConfig } from "./connection.js";
 
 /**
- * A connection over one of the file-sync channels (`sftp`, `filedrop`) -- the
- * ones a file-drop or SFTP exchange runs over and the only ones
- * {@link endpointFromConnection} produces a locator for. Narrowed from
- * {@link ConnectionConfig} so a `webrtc` connection cannot reach the producer:
- * a webrtc locator is authored from the browser location, not from a connection
- * config, so webrtc's producer lives elsewhere. Mirrors the CLI's
- * `RunnableConnectionConfig` (the channels its transport can run) so the two
- * agree by construction.
+ * The connections {@link endpointFromConnection} produces a locator for. The
+ * channels are named one by one rather than aliasing {@link ConnectionConfig}
+ * (the allowlist convention in CONTRIBUTING.md), so a channel added to that
+ * union is rejected here until its locator fields have been decided. Mirrors the
+ * CLI's `ProtocolConnectionConfig` (the channels its transport can run) so the
+ * two agree by construction.
  */
-export type FileSyncConnectionConfig = Extract<
+export type EndpointSourceConnectionConfig = Extract<
   ConnectionConfig,
-  { channel: "sftp" | "filedrop" }
+  { channel: "sftp" | "filedrop" | "webrtc" }
 >;
 
 /**
@@ -62,15 +60,33 @@ export const PLACEHOLDER_SSH_USERNAME = "REPLACE_WITH_SSH_USERNAME";
  * so the pair is always whole (`outboundPath` is statically `string | undefined`
  * but is never undefined once `inboundPath` is set).
  *
- * Scoped to the file-sync channels by the {@link FileSyncConnectionConfig}
- * parameter: a webrtc locator is authored from the browser location, not from a
- * connection config, so webrtc never reaches here.
+ * On `webrtc` the locator is the peer-coordination server's own
+ * host/port/path -- where the acceptor's signaling socket goes, which is the
+ * only thing a party running its own (or a forked deployment's) coordination
+ * server cannot convey any other way. Everything else on that connection is left
+ * behind: the `key` and `username` fields (only `key` is PeerJS's own; `username`
+ * has no consumer on this channel at all), the `stun`/`turn` entries (a relay
+ * entry carries a credential of its own), the `provision` block, and `secure` --
+ * the first three because they are not a public locator, `secure` because the
+ * endpoint schema has no field for it, so an acceptor seeded from one resolves
+ * TLS. A locator for a plaintext broker is therefore out of reach here by
+ * construction; the inviting command names that where the operator can act on it.
  *
  * `port` is carried only when it is a reachable 1-65535 value. Port 0 is the one
  * port the connection schema permits but the endpoint schema rejects (it is an
  * OS-assigned ephemeral port, never a connect target), so it is dropped rather
  * than emitted as a locator the partner could not dial -- and rather than
- * failing the whole invite when the endpoint is encoded.
+ * failing the whole invite when the endpoint is encoded. An empty `path`, which
+ * the webrtc server schema permits and the endpoint schema rejects, is dropped
+ * for the same reason: a blank signaling path is not a locator. That drop is
+ * unreachable from today's only caller -- `psilink invite`'s URL-built webrtc
+ * connection never has an empty pathname (asserted in the CLI's
+ * `inviterConnectionFromURL` suite) -- so it is a dead branch, not active
+ * behavior. A future producer reachable with a genuinely empty path must emit
+ * the resolved mount point itself rather than drop the field and lean on a
+ * consumer default: the CLI and browser resolve an absent path differently
+ * (see docs/spec/WEBRTC_TRANSPORT.md), so there is no shared default to defer
+ * to.
  *
  * A host or path longer than the endpoint schema allows
  * ({@link MAX_ENDPOINT_HOST_LENGTH} / {@link MAX_ENDPOINT_PATH_LENGTH}) is the
@@ -82,7 +98,7 @@ export const PLACEHOLDER_SSH_USERNAME = "REPLACE_WITH_SSH_USERNAME";
  * ZodError at encode.
  */
 export function endpointFromConnection(
-  connection: FileSyncConnectionConfig,
+  connection: EndpointSourceConnectionConfig,
 ): ConnectionEndpoint {
   // Keep a port only when it is a reachable 1-65535 value the endpoint schema
   // accepts; drop port 0 (see the doc comment) so encoding never fails on it.
@@ -130,6 +146,23 @@ export function endpointFromConnection(
       // Shared mode: the inviter's remote working directory (omitted for a
       // bare-host connection, which uses the server's default directory).
       path: server.path,
+    };
+  }
+
+  if (connection.channel === "webrtc") {
+    const { server } = connection;
+    requireFits("connection host", server.host, MAX_ENDPOINT_HOST_LENGTH);
+    requireFits("connection path", server.path, MAX_ENDPOINT_PATH_LENGTH);
+    return {
+      channel: "webrtc",
+      host: server.host,
+      port: reachablePort(server.port),
+      // The signaling mount point, dropped when blank (see the doc comment); a
+      // dead branch for today's only caller, which never mints an empty one.
+      path:
+        server.path !== undefined && server.path !== ""
+          ? server.path
+          : undefined,
     };
   }
 
