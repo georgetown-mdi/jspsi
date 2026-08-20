@@ -514,6 +514,8 @@ const SPLIT_FILEDROP: FileDropEndpoint = {
   inboundPath: "/mnt/in",
   outboundPath: "/mnt/out",
 };
+/** A filedrop endpoint naming no directory in either form. */
+const PATHLESS_FILEDROP: FileDropEndpoint = { channel: "filedrop" };
 const SINGLE_DIR_SFTP: SFTPEndpoint = {
   channel: "sftp",
   host: "sftp.partner.example",
@@ -580,6 +582,18 @@ describe("acceptUnsupported (runnability by endpoint shape)", () => {
     expect(
       acceptUnsupported(SINGLE_DIR_FILEDROP, SHARED_MOUNT),
     ).toBeUndefined();
+  });
+
+  test("a filedrop endpoint naming no directory runs against a single mount", () => {
+    // Decided, not incidental: a console filedrop accept runs over the appliance's
+    // own mounts and never over the locator the endpoint carries, so the locator
+    // decides only which SHAPE the two sides agreed on -- and no named pair is the
+    // single shared folder. It matches a one-mount appliance and mismatches a split
+    // one, exactly as an endpoint that names a shared path does.
+    expect(acceptUnsupported(PATHLESS_FILEDROP, SHARED_MOUNT)).toBeUndefined();
+    expect(
+      acceptUnsupported(PATHLESS_FILEDROP, SPLIT_MOUNT)?.message,
+    ).toContain("no single");
   });
 
   test("a single-directory SFTP endpoint is runnable, needing no rendezvous mount", () => {

@@ -1119,6 +1119,22 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     expect(body).not.toContain(root);
   });
 
+  test("a single-mount console names no outbound leg, whatever the name variable says", async () => {
+    // A split body always carries an outboundLocator, so a body that carried one
+    // without a second mount would announce a split this appliance cannot run. The
+    // mount decides the shape; the name variable only names a leg that exists.
+    const root = enableJobApi();
+    const mount = path.join(root, "agency-drop");
+    fs.mkdirSync(mount, { recursive: true });
+    vi.stubEnv("JOB_RENDEZVOUS_DIR", mount);
+    vi.stubEnv("JOB_RENDEZVOUS_OUTBOUND_NAME", "to-partner");
+    expect(await (await getRendezvous()).json()).toEqual({
+      configured: true,
+      locator: "agency-drop",
+      folderName: "agency-drop",
+    });
+  });
+
   test("an incoherent pair reports unavailable WITH the remedy", async () => {
     const root = enableJobApi();
     const mount = path.join(root, "share");

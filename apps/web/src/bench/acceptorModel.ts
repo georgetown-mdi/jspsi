@@ -454,7 +454,14 @@ export interface AcceptUnsupported {
  * provisioning has to match: unlike SFTP's remote directories, a file-drop accept
  * takes its directories from the appliance's mounts rather than from the partner's
  * endpoint, and those mounts are already oriented from THIS party's side -- so a
- * split accept needs no mirror swap here, only two mounts to run over. */
+ * split accept needs no mirror swap here, only two mounts to run over.
+ *
+ * Keyed on the pair alone, so an endpoint naming no directory at all reads as the
+ * single-shared-folder shape and is admitted against a one-mount appliance. That is
+ * the honest reading here rather than a gap: a console file-drop accept runs over
+ * this appliance's own mounts and never over the locator the endpoint carries, so
+ * the only thing the locator decides is which SHAPE the two sides agreed on, and no
+ * named pair is a shared folder. */
 function isSplitDirectoryFiledrop(endpoint: AcceptEndpoint): boolean {
   return endpoint.channel === "filedrop" && endpoint.inboundPath !== undefined;
 }

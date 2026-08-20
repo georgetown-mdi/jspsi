@@ -89,6 +89,26 @@ describe("setupSftpCredentialScratchDir containment", () => {
     );
   });
 
+  test("refuses to boot when the scratch dir is inside the OUTBOUND leg", () => {
+    // The second leg of a split rendezvous is a partner-synced folder exactly as
+    // the first is, so a scratch dir nested in it would expose every pasted
+    // credential through the sync -- refused at boot, not warned about.
+    const base = sandbox("scratch-in-outbound");
+    const dataRoot = path.join(base, "data-root");
+    const inbound = path.join(base, "from-partner");
+    const outbound = path.join(base, "to-partner");
+    fs.mkdirSync(outbound, { recursive: true });
+    const scratchDir = path.join(outbound, "sftp-credentials");
+    expect(() =>
+      setupSftpCredentialScratchDir(scratchDir, dataRoot, [inbound, outbound]),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "JobApiConfigError",
+        message: expect.stringContaining("rendezvous") as string,
+      }) as Error,
+    );
+  });
+
   test("refuses a scratch dir a symlink resolves back into the data root", () => {
     const base = sandbox("scratch-symlink");
     const dataRoot = path.join(base, "data-root");

@@ -296,6 +296,28 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     expect(credentialWarnings[0]).not.toContain(ref);
   });
 
+  test("a credential ref under the OUTBOUND leg of a split pair warns too", () => {
+    // The outbound mount is as partner-synced as the inbound one -- the party
+    // writes into it and the partner's sync tool reads it -- so a leg that reached
+    // the exclusion list only through the first would leave a credential
+    // referenced out of the second unremarked.
+    const dir = scratchDir();
+    const dataRoot = path.join(dir, "data-root");
+    const inbound = path.join(dir, "from-partner");
+    const outbound = path.join(dir, "to-partner");
+    fs.mkdirSync(path.join(outbound, "planted"), { recursive: true });
+    const ref = path.join(outbound, "planted", "pw");
+    fs.writeFileSync(ref, "x");
+    const { credentialWarnings } = validateAuthoredSftpServer(
+      authoredBody({}, { kind: "ref", ref: `@${ref}`, credType: "password" }),
+      dataRoot,
+      [inbound, outbound],
+    );
+    expect(credentialWarnings).toHaveLength(1);
+    expect(credentialWarnings[0]).toContain("rendezvous");
+    expect(credentialWarnings[0]).not.toContain(ref);
+  });
+
   test("a symlink that resolves back under the data root warns", () => {
     // The ref path is lexically OUTSIDE the data root, but a symlink in the chain
     // resolves back inside it -- the realpath arm must still catch it and warn, so

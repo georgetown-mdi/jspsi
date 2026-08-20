@@ -20,6 +20,7 @@ import {
   workdirDirectoryExists,
   writeJobFile,
 } from "./workdir";
+import { jobRendezvousLegs, rendezvousStartupWarnings } from "./jobRendezvous";
 import {
   resolveCliBinaryPath,
   spawnExchangeJob,
@@ -28,7 +29,6 @@ import {
 import { buildJobHandoff } from "./handoff";
 import { probeSftpHostKey } from "./sftpProbe";
 import { removeSftpCredentialFile } from "./sftpScratch";
-import { rendezvousStartupWarnings } from "./jobRendezvous";
 import { validateAuthoredSftpServer } from "./sftpServer";
 
 import type {
@@ -455,18 +455,16 @@ export class JobManager {
   }
 
   /**
-   * The rendezvous mounts a filedrop job preflights, each paired with the leg it is:
-   * one shared mount on a single-mount console, the inbound and outbound legs on a
-   * split appliance. Empty when no mount resolves.
+   * The rendezvous mounts a filedrop job preflights and a credential `@path` is
+   * excluded from, each paired with the leg it is. Routed through the shared
+   * enumeration so the manager and the boot-time containment surfaces cannot state
+   * different rules about which mounts this appliance has.
    */
   private rendezvousLegs(): Array<[string, RendezvousLeg]> {
-    if (this.jobRendezvousDir === undefined) return [];
-    if (this.jobRendezvousOutboundDir === undefined)
-      return [[this.jobRendezvousDir, "shared"]];
-    return [
-      [this.jobRendezvousDir, "inbound"],
-      [this.jobRendezvousOutboundDir, "outbound"],
-    ];
+    return jobRendezvousLegs(
+      this.jobRendezvousDir,
+      this.jobRendezvousOutboundDir,
+    );
   }
 
   /**

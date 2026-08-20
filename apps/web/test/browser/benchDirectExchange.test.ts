@@ -12,6 +12,7 @@ import "@mantine/core/styles.css";
 import { BenchLobby } from "@bench/BenchLobby";
 import { DirectExchangeBench } from "@bench/DirectExchangeBench";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
+import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -701,6 +702,54 @@ describe("direct exchange transport step", () => {
       )
       .toBeInTheDocument();
     expect(page.getByText("rendezvous", { exact: true }).query()).toBeNull();
+  });
+
+  test("a split rendezvous holds Continue until retain mode is on", async () => {
+    // The mounts and the retain choice are settled on separate cards of this one
+    // step, so the precondition is re-asked at its exit rather than inside a card
+    // the operator has already left.
+    stubJobApi({
+      sftp: { configured: false },
+      rendezvous: {
+        configured: true,
+        split: true,
+        locator: "from-partner",
+        folderName: "from-partner",
+        outboundLocator: "to-partner",
+        outboundFolderName: "to-partner",
+      },
+    });
+    app.render(createElement(DirectExchangeBench));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await page
+      .getByRole("radio", { name: "A shared directory", exact: false })
+      .click();
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue to confirm and run" }),
+      )
+      .toBeDisabled();
+    // Stated in full beside the cards, and the sentence at the button names which
+    // of them to go back to.
+    expect(app.container.textContent).toContain(
+      SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT,
+    );
+    await expect
+      .element(
+        page.getByText(
+          "Resolve the retain-mode requirement above to continue.",
+        ),
+      )
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: /How files are handled/ }).click();
+    await page.getByLabelText("Keep every exchange file").click();
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue to confirm and run" }),
+      )
+      .toBeEnabled();
   });
 });
 

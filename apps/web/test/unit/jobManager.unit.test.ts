@@ -1210,6 +1210,40 @@ describe("a split-provisioned filedrop appliance", () => {
     expect(yaml).not.toContain(inbound);
     expect(yaml).not.toContain(outbound);
   });
+
+  test("an outbound leg with no inbound one still joins the credential exclusions", () => {
+    // Not reachable from the environment -- the inbound leg falls back to the data
+    // root, which an enabled job API always has -- so the state is driven at the
+    // manager. The enumeration's rule is that each leg joins the containment list
+    // independently, so a mount that resolves at all is a partner-synced folder a
+    // credential must not be referenced out of, whether or not an exchange could
+    // run over the pair it belongs to.
+    const outbound = rendezvousRoot();
+    const root = tempDataRoot("outbound-only");
+    roots.push(root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      jobRendezvousOutboundDir: outbound,
+    });
+    managers.push(manager);
+    const secretPath = path.join(outbound, "password");
+    fs.writeFileSync(secretPath, "s3cret\n");
+    const projection = manager.authorSftpServer({
+      host: "sftp.example.org",
+      port: 2222,
+      username: "linkage",
+      path: "/exchange",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: {
+        kind: "ref",
+        ref: `@${secretPath}`,
+        credType: "password",
+      },
+    });
+    expect(projection.credentialWarnings).toHaveLength(1);
+    expect(projection.credentialWarnings?.[0]).toContain("rendezvous");
+  });
 });
 
 describe("zero-setup mode end-to-end via the stub CLI", () => {

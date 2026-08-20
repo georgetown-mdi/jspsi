@@ -188,15 +188,20 @@ export function resolveJobRendezvousFolderName(
  * The outbound leg's own folder name on a split appliance, resolved from
  * {@link JOB_RENDEZVOUS_OUTBOUND_NAME_ENV} exactly as
  * {@link resolveJobRendezvousFolderName} resolves the inbound one, else from the
- * outbound mount's last segment. Undefined when no outbound leg is provisioned.
+ * outbound mount's last segment.
+ *
+ * The mount decides first, so an appliance with no outbound leg has no outbound name
+ * whatever the name variable says: the name belongs to a folder, and a single-mount
+ * console that carries a stale {@link JOB_RENDEZVOUS_OUTBOUND_NAME_ENV} would
+ * otherwise report the outbound half of a split rendezvous it does not have.
  */
 export function resolveJobRendezvousOutboundFolderName(
   env: NodeJS.ProcessEnv,
   outboundDir: string | undefined,
 ): string | undefined {
+  if (outboundDir === undefined) return undefined;
   const configured = env[JOB_RENDEZVOUS_OUTBOUND_NAME_ENV];
   if (configured !== undefined) return usableFolderName(configured);
-  if (outboundDir === undefined) return undefined;
   return usableFolderName(lastPathSegment(outboundDir));
 }
 
@@ -364,21 +369,47 @@ export function useJobRendezvousFolderName(
 }
 
 /**
- * Every rendezvous mount this appliance runs a filedrop exchange over, in a form the
- * containment surfaces (the pasted-credential scratch assertion and the credential
- * `@path` warning) enumerate: one directory on a single-mount console, both legs on
- * a split one, and none when no mount resolves. A leg missing from that list is a
- * partner-synced folder a credential could be referenced out of unnoticed, so both
- * legs join every list the first is on.
+ * Which mount of a filedrop rendezvous a preflight notice is about: the single
+ * shared directory of a one-mount console, or one leg of a split appliance's pair.
+ * A split appliance preflights each leg independently, so every notice has to say
+ * which of the two it means.
+ */
+export type RendezvousLeg = "shared" | "inbound" | "outbound";
+
+/**
+ * Every rendezvous mount this appliance runs a filedrop exchange over, paired with
+ * the leg it is: one shared directory on a single-mount console, both legs on a
+ * split one, and none when no mount resolves.
+ *
+ * The single enumeration of "every rendezvous mount", so the preflight that names
+ * each leg and the containment surfaces that exclude each cannot come to different
+ * answers about which mounts exist. Each leg joins independently: a mount missing
+ * from the list is a partner-synced folder a credential could be referenced out of
+ * unnoticed, so an outbound leg is enumerated even in the half-provisioned state
+ * that no exchange runs in.
+ */
+export function jobRendezvousLegs(
+  dir: string | undefined,
+  outboundDir: string | undefined,
+): Array<[string, RendezvousLeg]> {
+  const legs: Array<[string, RendezvousLeg]> = [];
+  if (dir !== undefined)
+    legs.push([dir, outboundDir === undefined ? "shared" : "inbound"]);
+  if (outboundDir !== undefined) legs.push([outboundDir, "outbound"]);
+  return legs;
+}
+
+/**
+ * The same mounts as {@link jobRendezvousLegs}, in the form the containment surfaces
+ * (the pasted-credential scratch assertion and the credential `@path` warning)
+ * enumerate: the directories alone.
  */
 export function jobRendezvousDirs(
   provisioning: JobRendezvousProvisioning,
 ): Array<string> {
-  const dirs: Array<string> = [];
-  if (provisioning.dir !== undefined) dirs.push(provisioning.dir);
-  if (provisioning.outboundDir !== undefined)
-    dirs.push(provisioning.outboundDir);
-  return dirs;
+  return jobRendezvousLegs(provisioning.dir, provisioning.outboundDir).map(
+    ([dir]) => dir,
+  );
 }
 
 /**
@@ -423,14 +454,6 @@ function fitNotice(withPaths: string, withoutPaths: string): string {
 function andMoreSuffix(count: number): string {
   return ` and ${count} more`;
 }
-
-/**
- * Which mount of a filedrop rendezvous a preflight notice is about: the single
- * shared directory of a one-mount console, or one leg of a split appliance's pair.
- * A split appliance runs this preflight over each leg independently, so every
- * notice has to say which of the two it means.
- */
-export type RendezvousLeg = "shared" | "inbound" | "outbound";
 
 /** How a notice names the mount it is about: "the rendezvous directory" on a
  * single-mount console, "the inbound/outbound rendezvous directory" on a split
