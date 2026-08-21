@@ -66,6 +66,8 @@ Two candidate quantities exist, and neither is one. The agreed terms describe wh
 
 That leaves the question of what overstating buys, and the answer is what makes recording the residual acceptable rather than merely unavoidable. Which of the receiving party's records matched is decided by that party's own round output, through the coverage rule; the returned list can repeat a position but cannot introduce one. So an overstated group adds no matched record, no disclosed column, and no membership fact on the receiving side. It repeats a row that side already pairs, inflates the overstater's own table with pairs naming its own rows, and is capped by the row count that party carried on the terms exchange.
 
+Only one direction is a residual, and reading the two together overstates what is open. The unbound quantity is the many side's declaration of the size of its OWN group. The opposite freedom -- its partner deciding which of the many side's records belong to one group, on the way back -- is closed by a check rather than recorded, because there the many side does hold something to check against: the position each of its own entries named. That is the difference between the two. A self-declared quantity has no local counterpart; a partner's regrouping of a list this party wrote has one, entry for entry.
+
 The reason to write this down rather than close it is that the argument is contingent on where the matched-record set comes from. A change that let the returned list decide membership -- rather than confirming a set the receiving party computed -- would turn a cheap overstatement into a disclosure, and would be recognizable as one against this paragraph.
 
 ## What stays open

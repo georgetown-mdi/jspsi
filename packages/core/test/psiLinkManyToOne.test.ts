@@ -624,6 +624,37 @@ for (const manySide of ["starter", "joiner"] as const) {
     );
   });
 
+  test(`a returned list merging two of the many side's groups is refused${under}`, async () => {
+    // The many side's own list comes back with each entry translated into a
+    // partner row, and which of its records share a row is ITS grouping, not the
+    // returning party's to decide. A "one" partner naming one row for every entry
+    // merges the two groups this side sent -- rows 0 and 1 matched one position,
+    // row 2 another -- which flat distinctness cannot catch on the side where a
+    // repeat is admitted.
+    await expectProtocolRefusal(
+      manySide,
+      onMappedElementList(2, (list) =>
+        list.map((entry) => ({ ...entry, theirIndex: list[0].theirIndex })),
+      ),
+      /names one partner row for two positions this side matched/,
+    );
+  });
+
+  test(`a returned list splitting one of the many side's groups is refused${under}`, async () => {
+    // The mirror deviation: the two entries that named ONE position come back
+    // carrying different partner rows, so the partner splits a group this side's
+    // own data formed. Every entry stays in range and the count is untouched.
+    await expectProtocolRefusal(
+      manySide,
+      onMappedElementList(2, (list) => [
+        list[0],
+        { ...list[1], theirIndex: list[2].theirIndex },
+        ...list.slice(2),
+      ]),
+      /names two partner rows for one position this side matched/,
+    );
+  });
+
   test(`a returned list repeating a partner row is refused on the one side${under}`, async () => {
     // Distinctness is relaxed only where THIS party is the "many" side, several of
     // its records legitimately naming one partner row. The "one" side's own records

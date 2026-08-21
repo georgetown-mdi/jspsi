@@ -25,6 +25,7 @@ import {
   assertPartnerIndices,
   assertPartnerIndexTable,
   partnerProtocolError,
+  type PartnerIndexGrouping,
 } from "./utils/partnerIndices";
 import { COUNT_ONLY_SHAPE_REFUSALS } from "./config/linkageTerms";
 import { UsageError } from "./errors";
@@ -232,6 +233,19 @@ export function groupDuplicatesAndRemoveUndefineds(
   return [data, { rows, groupStarts }];
 }
 
+// The (round, partner position) each entry of this party's own outbound
+// mapped-element list names, copied out of the list BEFORE it is sent. The
+// returned list is checked against this grouping, and it has to be the grouping
+// this party sent: a transport that hands the partner the array itself rather than
+// a serialization of it leaves the partner's own in-place translation
+// (`e.theirIndex = i`, below) writing over these entries.
+function sentGrouping(sent: IterationMap): PartnerIndexGrouping {
+  return {
+    rounds: Float64Array.from(sent, (e) => e.iteration),
+    positions: Float64Array.from(sent, (e) => e.theirIndex),
+  };
+}
+
 /**
  * The matching cardinality ONE party runs, as that party resolves it from the two
  * agreed `deduplicate` settings (`resolveLinkageCardinality`, exchange.ts).
@@ -282,7 +296,9 @@ function multiplicitySides(
  * `many-to-many` multiplicity neither party's terms declared (docs/spec/PROTOCOL.md,
  * Deriving one table from the exchanged association maps). The dropped group's rows
  * are attributed nothing and stay eligible for later keys, exactly as a value this
- * party dropped itself.
+ * party dropped itself: this drop is the one carve-out from the rule that a record
+ * appearing in a round's candidate pairs leaves candidacy after it
+ * (docs/spec/PROTOCOL.md, Multiplicity is within-round).
  *
  * This party's own set carries each value once, so a repeat can only come from the
  * partner's. On the starter role the round's own association-table check refuses
@@ -500,6 +516,13 @@ export async function linkViaPSI(
         "record(s) matched",
     );
 
+    // Held for the returned list's check below, where this party is the "many"
+    // side: the pairing its own list named is what that list has to come back
+    // carrying.
+    const sentGroups = sides.localKeepsDuplicates
+      ? sentGrouping(identifiedIndexIterationMap)
+      : undefined;
+
     log.debug(
       `${participant.id}: sending match map indexed by round, receiving ` +
         "partner's",
@@ -641,6 +664,16 @@ export async function linkViaPSI(
     // "many" side, several of its records legitimately naming one partner row; the
     // count check above it is then what caps the list's length, which distinctness
     // otherwise does.
+    //
+    // What survives the relaxation is injectivity MODULO the grouping this party
+    // sent, and both halves of it are checkable here: two of our entries that named
+    // the same (round, position) must come back carrying the same partner row, and
+    // two that named different positions must come back carrying different rows --
+    // distinct positions in a round are distinct partner values held by distinct
+    // partner rows, and a partner row matched in round j has left candidacy for
+    // every later round. Without it the "one" partner, not this party's own data,
+    // would decide which of our records group together (docs/spec/PROTOCOL.md,
+    // Deriving one table from the exchanged association maps).
     assertPartnerIndexCount(
       participant.id,
       "the returned mapped-element list",
@@ -654,7 +687,7 @@ export async function linkViaPSI(
       "the returned mapped-element list",
       identifiedIndexMap.map((x) => x.theirIndex),
       partnerRecordCount,
-      { allowRepeats: sides.localKeepsDuplicates },
+      sentGroups ? { repeatsGroupedBy: sentGroups } : {},
     );
 
     if (!sides.partnerKeepsDuplicates)
