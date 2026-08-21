@@ -4167,8 +4167,9 @@ test("a throw from the pre-terminal hook does not fail the completed exchange", 
   // unattended run that swallowed it silently would read as a clean success.
   mockExchangeObserving(OBSERVED_PARTNER_COLUMNS);
   const emitter = openEventStreamWithFdWired();
+  let seen: string[] | undefined;
   try {
-    const [resultA] = await Promise.all([
+    await Promise.all([
       runProtocol(
         { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
         null,
@@ -4181,7 +4182,8 @@ test("a throw from the pre-terminal hook does not fail the completed exchange", 
         undefined,
         {
           eventStream: emitter,
-          onOutputComplete: () => {
+          onOutputComplete: ({ observedReceivedPayloadColumns }) => {
+            seen = observedReceivedPayloadColumns;
             throw new Error("the hook let one escape");
           },
         },
@@ -4195,10 +4197,9 @@ test("a throw from the pre-terminal hook does not fail the completed exchange", 
         "test-b",
       ),
     ]);
-    // The run resolved: the exchange completed and its observation is reported.
-    expect(resultA.observedReceivedPayloadColumns).toEqual(
-      OBSERVED_PARTNER_COLUMNS,
-    );
+    // The run resolved: the exchange completed and its observation reached the
+    // hook, which is the only route it takes out of runProtocol.
+    expect(seen).toEqual(OBSERVED_PARTNER_COLUMNS);
     expect(process.exitCode).toBe(73);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();

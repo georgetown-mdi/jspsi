@@ -365,11 +365,26 @@ export interface FileSyncRuntimeOptions {
 export interface OutputCompleteContext {
   /**
    * The received-payload column set this party observed from the partner during
-   * the exchange, the same value {@link RunProtocolResult.observedReceivedPayloadColumns}
-   * carries -- available to the hook because it is known as soon as the exchange
+   * the exchange (`partnerPayload.columns`, in the partner's namespace) --
+   * available to the hook because it is known as soon as the exchange
    * completes, well before this call resolves. Always an array here: the hook
-   * runs only on the completed-exchange path, where the partner's payload exists
-   * (it is empty when the partner transmitted nothing).
+   * runs only on the completed-exchange path, where the partner's payload
+   * exists (it is empty when the partner transmitted nothing).
+   *
+   * A save-capable caller that learns its received set only by observation --
+   * the online inviter, a zero-setup `--save` party -- crystallizes this into
+   * the persisted config's `expectedPayloadColumns` so a later recurring
+   * `psilink exchange` fails closed on a divergent received payload
+   * ({@link reconcileReceivedPayload}). It is empty when the partner
+   * transmitted no payload (no disclosed columns, or no matched rows --
+   * {@link preparePayload} emits a no-data message in both cases); callers
+   * must persist an empty observation as NOTHING (stay lazy), never as `[]`,
+   * because a zero-match first exchange is indistinguishable from "partner
+   * discloses nothing" and a strict empty lock-in would false-abort a later
+   * matching run. See `observedReceivedColumnsForSave` in bootstrap.ts.
+   *
+   * This hook is the only route this observation takes out of
+   * {@link runProtocol} -- {@link RunProtocolResult} carries none of it.
    */
   observedReceivedPayloadColumns: string[];
   /**
@@ -406,25 +421,6 @@ export interface RunProtocolResult {
    * never observed.
    */
   onAuthenticatedError?: unknown;
-  /**
-   * The received-payload column set this party OBSERVED from the partner during
-   * the exchange (`partnerPayload.columns`, in the partner's namespace). Defined
-   * only on a fully-completed exchange; `undefined` on a signal-interrupted run
-   * and on any path that rejects (a failed exchange throws before this returns).
-   *
-   * A save-capable caller that learns its received set only by observation -- the
-   * online inviter, a zero-setup `--save` party -- crystallizes this into the
-   * persisted config's `expectedPayloadColumns` so a later recurring `psilink
-   * exchange` fails closed on a divergent received payload
-   * ({@link reconcileReceivedPayload}). It is empty when the partner transmitted
-   * no payload (no disclosed columns, or no matched rows -- {@link preparePayload}
-   * emits a no-data message in both cases); callers must persist an empty
-   * observation as NOTHING (stay lazy), never as `[]`, because a zero-match first
-   * exchange is indistinguishable from "partner discloses nothing" and a strict
-   * empty lock-in would false-abort a later matching run. See
-   * `observedReceivedColumnsForSave` in bootstrap.ts.
-   */
-  observedReceivedPayloadColumns?: string[];
 }
 
 /**
@@ -1822,9 +1818,6 @@ export async function runProtocol(
     // onAuthenticatedError is set only when a post-handshake hook failed but the
     // exchange above still succeeded (a hook failure followed by an exchange
     // failure rethrows from the catch below instead of reaching here).
-    // observedReceivedPayloadColumns surfaces what this party received so a
-    // save-capable caller can crystallize it into a fail-closed recurring lock-in
-    // (see RunProtocolResult); it is set only here, on the completed-exchange path.
     //
     // The single success terminal event: the exchange completed and the local
     // output stage (result CSV plus the non-fatal record) finished, so exactly one
@@ -1852,10 +1845,7 @@ export async function runProtocol(
             },
       ),
     );
-    return {
-      onAuthenticatedError,
-      observedReceivedPayloadColumns: partnerPayload.columns,
-    };
+    return { onAuthenticatedError };
   } catch (err) {
     // tokenRotated=true means this party's saveKeyFile succeeded; the partner
     // independently derived the same new token from the session key, but
