@@ -216,7 +216,8 @@ export function hardenUpgradeSurface(
   // holds no per-call state, so removing it first keeps a repeated harden at one.
   // No matching hook is wired on `upgrade`: `ws` releases the bound itself on the
   // 101, and an extra `upgrade` listener would flip the signaling server's
-  // sole-listener test for whether an unhandled upgrade is its to close.
+  // sole-listener test for whether it releases an unhandled upgrade at once or
+  // holds it for the window a co-resident listener gets to answer.
   server.removeListener("request", trackPendingRequest);
   server.on("request", trackPendingRequest);
 }

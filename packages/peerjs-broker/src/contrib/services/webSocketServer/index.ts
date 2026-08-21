@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import { OutgoingMessage } from "node:http";
+import { Socket } from "node:net";
 
 import { WebSocketServer as Server } from "ws";
 
@@ -8,6 +10,7 @@ import { Client } from "../../models/client.ts";
 
 import type { Server as HttpServer, IncomingMessage } from "node:http";
 import type { Server as HttpsServer } from "node:https";
+import type { Duplex } from "node:stream";
 
 import type WebSocket from "ws";
 
@@ -67,6 +70,61 @@ export const MAX_SIGNALING_PAYLOAD_BYTES = 256 * 1024;
 // memory surface as the id), while `key` is only compared and never stored.
 // See docs/spec/CHANNEL_SECURITY.md.
 export const MAX_HANDSHAKE_PARAM_LENGTH = 256;
+
+// Bound every exit that leaves this server holding a socket it will not go on to
+// serve: a refusal (a missing or over-length handshake parameter, a wrong key, an
+// id claimed under another token, the concurrent limit) and an upgrade on a path
+// that is not ours. A refusal sends its error frame and closes, which starts the
+// WebSocket close handshake; `ws` releases the socket once the peer answers the
+// close frame, or once its own close timer expires -- 30 seconds of retained
+// socket per refusal on the pinned `ws`, and a refused peer is precisely the one
+// with nothing to negotiate and no reason to answer. One second is far above the
+// round trip an answering peer needs, having already been written its error
+// frame, and 30x below what `ws` would otherwise hold; it is equally the window a
+// co-resident `upgrade` listener gets to answer an upgrade this server left for
+// it, which sits far above the same-tick answer one gives, so a socket it adopted
+// is never taken back from it. See docs/spec/CHANNEL_SECURITY.md.
+export const SOCKET_RELEASE_TIMEOUT_MS = 1_000;
+
+// Arm the release bound as a handle disposed of exactly once: expiring marks it
+// spent before the deadline body runs, so a cancel behind that -- the socket
+// closing after a terminate the deadline itself ordered -- finds nothing left to
+// retire, and a cancelled deadline never expires. Every release path below wants
+// that same bookkeeping, and holding it here makes the double disposal
+// unrepresentable rather than merely absent from each of them.
+function armReleaseDeadline(onExpire: () => void): { cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+    timer = undefined;
+    onExpire();
+  }, SOCKET_RELEASE_TIMEOUT_MS);
+  timer.unref();
+
+  return {
+    cancel: (): void => {
+      if (timer === undefined) return;
+      clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+}
+
+// The response this server is still writing on `socket`, if there is one. Node's
+// HTTP server assigns an outgoing message to the socket it is being written on
+// and clears that reference when the message detaches on `finish`, so asking for
+// it is asking the HTTP server itself whether the socket is still carrying an
+// answer of ours.
+//
+// `_httpMessage` is internal to Node rather than a documented API, so it is read
+// defensively and its behavior is driven rather than assumed: the `instanceof`
+// makes a Node that stops setting it read as "nothing in flight" instead of as
+// some other object's field, and the pipelined-response check in
+// apps/web/test/unit/signalingServer.test.ts drives a real http.Server through
+// the whole sequence -- so a Node that no longer sets it fails that check rather
+// than quietly reopening the misread its caller below exists to avoid.
+function responseStillWriting(socket: Duplex): OutgoingMessage | null {
+  const assigned = (socket as { _httpMessage?: unknown })._httpMessage;
+  return assigned instanceof OutgoingMessage ? assigned : null;
+}
 
 export class WebSocketServer extends EventEmitter implements IWebSocketServer {
   public readonly path: string;
@@ -131,18 +189,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     // dispatch to.
     server.on("upgrade", (req, socket, head) => {
       if (!this.socketServer.shouldHandle(req)) {
-        // Not our path (shouldHandle() applies the `path` option above). Leave it
-        // for a co-resident `upgrade` listener -- e.g. Vite HMR at `/` in dev. But
-        // when we are the ONLY upgrade listener (the production server, where
-        // nothing else will answer) close it rather than leak an open socket:
-        // Node will not auto-destroy an unhandled upgrade once any `upgrade`
-        // listener exists, so close it here rather than leak it (the production
-        // connection idle-timeout is at best a far coarser backstop). This
-        // restores the prompt reject the old `{ server, path }` wiring did,
-        // without clobbering co-resident listeners.
-        if (server.listenerCount("upgrade") === 1 && !socket.destroyed) {
-          socket.destroy();
-        }
+        this._releaseUnhandledUpgrade(server, socket);
         return;
       }
       // Bail if the socket was already torn down between the event and here;
@@ -172,7 +219,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     const { id, token, key } = Object.fromEntries(searchParams.entries());
 
     if (!id || !token || !key) {
-      this._sendErrorAndClose(socket, Errors.INVALID_WS_PARAMETERS);
+      this._sendErrorAndRelease(socket, Errors.INVALID_WS_PARAMETERS);
       return;
     }
 
@@ -181,12 +228,12 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       token.length > MAX_HANDSHAKE_PARAM_LENGTH ||
       key.length > MAX_HANDSHAKE_PARAM_LENGTH
     ) {
-      this._sendErrorAndClose(socket, Errors.WS_PARAMETER_TOO_LONG);
+      this._sendErrorAndRelease(socket, Errors.WS_PARAMETER_TOO_LONG);
       return;
     }
 
     if (key !== this.config.key) {
-      this._sendErrorAndClose(socket, Errors.INVALID_KEY);
+      this._sendErrorAndRelease(socket, Errors.INVALID_KEY);
       return;
     }
 
@@ -195,14 +242,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     if (client) {
       if (token !== client.getToken()) {
         // ID-taken, invalid token
-        socket.send(
-          JSON.stringify({
-            type: MessageType.ID_TAKEN,
-            payload: { msg: "ID is taken" },
-          }),
-        );
-
-        socket.close();
+        this._sendAndRelease(socket, MessageType.ID_TAKEN, "ID is taken");
         return;
       }
 
@@ -218,6 +258,129 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     this.emit("error", error);
   }
 
+  // Release an upgrade on a path that is not ours (shouldHandle() applies the
+  // `path` option above). Node stops auto-destroying an unhandled upgrade the
+  // moment any `upgrade` listener exists, so every socket this branch declines
+  // must be released by someone or it is leaked -- the production connection
+  // idle-timeout is at best a far coarser backstop. When this is the sole
+  // `upgrade` listener, nothing else can answer and the socket is destroyed at
+  // once. Where a co-resident listener exists -- Vite HMR at `/` in dev -- the
+  // socket is left for it, and whether it answered is then TESTED rather than
+  // assumed: a socket that has written nothing since the moment it became
+  // nobody's was answered by nobody when the release bound expires, so it is
+  // destroyed and the broken premise raised as an error rather than leaked on a
+  // premise that no longer holds.
+  private _releaseUnhandledUpgrade(
+    server: HttpServer | HttpsServer,
+    socket: Duplex,
+  ): void {
+    if (socket.destroyed) return;
+
+    if (server.listenerCount("upgrade") === 1) {
+      socket.destroy();
+      return;
+    }
+
+    // `bytesWritten` counts the whole connection's lifetime rather than this
+    // window, and this server writes on that connection itself: an upgrade
+    // arrives on a connection it has already answered a request on (HTTP
+    // keep-alive), or -- pipelined ahead of the upgrade in one write -- on one it
+    // is answering still, since Node emits `upgrade` as soon as its parser sees
+    // one rather than when the response ahead of it finishes. Either response's
+    // bytes read as this upgrade's answer would leave precisely that socket held
+    // past the bound with the watch below taken off it, which is both the leak
+    // this release exists to close and the unwatched error that ends the process.
+    // So an answer is movement against the count the socket carries once no
+    // answer of this server's is being written on it -- a baseline taken at the
+    // decline, and taken again if a response of ours detaches after it.
+    let answerBaseline = socket instanceof Socket ? socket.bytesWritten : 0;
+
+    // The window below is the one stretch in which this socket is nobody's:
+    // declined here, not yet taken by a co-resident listener, and so carrying no
+    // `error` listener of anyone's. A raw socket that emits `error` with none
+    // attached terminates the process, and a peer needs nothing more exotic than
+    // a reset -- being killed, or dropped by its network -- to emit one. So it is
+    // watched from the decline to the bound: an error in that stretch destroys
+    // the socket, which is that socket's release, leaving the bound behind it
+    // nothing to reclaim and no unanswered upgrade to report against a peer that
+    // merely hung up. The watch runs to the bound rather than to an adopter's
+    // answer, so an adopted socket that errors in the stretch between the two is
+    // destroyed and reported here.
+    const releaseOnError = (error: Error): void => {
+      socket.destroy();
+      this._onSocketError(error);
+    };
+    socket.on("error", releaseOnError);
+
+    let deadline: { cancel: () => void } | undefined;
+    let stopAwaitingResponse = (): void => {};
+
+    // Every handle the window installs comes off with the window, whichever way
+    // it ends -- the peer closing, the bound concluding the socket was adopted,
+    // the bound expiring on an unanswered one -- so a socket handed on to a
+    // co-resident listener carries none of this server's bookkeeping into the
+    // life that listener gives it.
+    const dropWindowHandles = (): void => {
+      deadline?.cancel();
+      stopAwaitingResponse();
+      socket.off("error", releaseOnError);
+      socket.off("close", dropWindowHandles);
+    };
+
+    const releaseUnlessAnswered = (): void => {
+      if (socket.destroyed) return;
+      if (socket instanceof Socket && socket.bytesWritten > answerBaseline) {
+        // Answered: the socket is its adopter's now, errors with it.
+        dropWindowHandles();
+        return;
+      }
+
+      // The handles stay on across the destroy -- the `close` it emits is what
+      // drops them -- so the socket is watched right up to its release.
+      socket.destroy();
+      this._onSocketError(
+        new Error(
+          "PeerJS signaling server released an upgrade no co-resident listener answered",
+        ),
+      );
+    };
+
+    // A socket this server is still writing a response on is not nobody's and
+    // cannot be leaked by this decline, so the bound does not start on it: it
+    // starts where that response lets the socket go, against a baseline taken
+    // there, and again behind any response pipelined after it. Discounting the
+    // whole stretch costs nothing an adopter could have used -- an answer written
+    // into a response still writing is interleaved with it on one TCP stream, so
+    // whatever adopted such a socket has a corrupted connection either way --
+    // while counting it is the misread that leaks the socket unwatched.
+    //
+    // The wait is the response's own `finish`, behind the handler Node itself
+    // registered on it: by the time this one runs the message has been detached
+    // and its last byte counted, so the baseline it takes is final. A message
+    // that has already finished is waited on by nobody -- the event cannot come
+    // twice -- so the bound starts instead.
+    const startWindowOnceSocketIsFree = (): void => {
+      const responseInFlight = responseStillWriting(socket);
+      if (!responseInFlight || responseInFlight.writableFinished) {
+        deadline = armReleaseDeadline(releaseUnlessAnswered);
+        return;
+      }
+      // Each wait is a `once` that has fired by the time the next replaces it,
+      // so the one held here is the only one still to retire.
+      const onResponseDetached = (): void => {
+        if (socket instanceof Socket) answerBaseline = socket.bytesWritten;
+        startWindowOnceSocketIsFree();
+      };
+      responseInFlight.once("finish", onResponseDetached);
+      stopAwaitingResponse = (): void => {
+        responseInFlight.off("finish", onResponseDetached);
+      };
+    };
+    startWindowOnceSocketIsFree();
+
+    socket.on("close", dropWindowHandles);
+  }
+
   private _registerClient({
     socket,
     id,
@@ -231,7 +394,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     const clientsCount = this.realm.getClientsIds().length;
 
     if (clientsCount >= this.config.concurrent_limit) {
-      this._sendErrorAndClose(socket, Errors.CONNECTION_LIMIT_EXCEED);
+      this._sendErrorAndRelease(socket, Errors.CONNECTION_LIMIT_EXCEED);
       return;
     }
 
@@ -300,15 +463,31 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     this.emit("connection", client);
   }
 
-  private _sendErrorAndClose(socket: WebSocket, msg: Errors): void {
-    socket.send(
-      JSON.stringify({
-        type: MessageType.ERROR,
-        payload: { msg },
-      }),
-    );
+  private _sendErrorAndRelease(socket: WebSocket, msg: Errors): void {
+    this._sendAndRelease(socket, MessageType.ERROR, msg);
+  }
 
+  // Hand the peer the frame that tells it why it was refused, then release the
+  // socket on the bound above. The frame and the close frame behind it are
+  // written first, so a peer that answers the close handshake is released on it;
+  // the terminate is the deadline on that handshake, which a refused peer has no
+  // reason to complete and every reason -- if it is holding sockets on purpose --
+  // to stall.
+  private _sendAndRelease(
+    socket: WebSocket,
+    type: MessageType,
+    msg: string,
+  ): void {
+    socket.send(JSON.stringify({ type, payload: { msg } }));
     socket.close();
+
+    const deadline = armReleaseDeadline(() => {
+      socket.terminate();
+    });
+
+    socket.once("close", () => {
+      deadline.cancel();
+    });
   }
 }
 
