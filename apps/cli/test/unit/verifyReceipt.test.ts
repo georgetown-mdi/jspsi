@@ -317,7 +317,7 @@ describe("formatVerificationReport: the recorded result size", () => {
     );
     const out = lines.join("\n");
     expect(out).toContain("result size: not checked (no opened matched-pairs");
-    expect(out).toContain("a count-only exchange records none at all");
+    expect(out).toContain("count-only exchange records no such table at all");
     expect(exitCode).toBe(0);
   });
 });

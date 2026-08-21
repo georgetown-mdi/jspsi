@@ -357,8 +357,9 @@ const RESULT_SIZE_WORD: Record<ResultSizeStatus, string> = {
     "not checked (re-supply the result file so its matched pairs can be " +
     "recounted)",
   unopenable:
-    "not checked (no opened matched-pairs table to recount; a count-only " +
-    "exchange records none at all)",
+    "not checked (no opened matched-pairs table to recount; the " +
+    "matched-pairs line names why where the record commits to one -- a " +
+    "count-only exchange records no such table at all)",
 };
 /**
  * What this run supplied, so a "not checked" line names an input that is still

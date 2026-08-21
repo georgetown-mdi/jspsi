@@ -449,8 +449,9 @@ const RESULT_SIZE_ROWS: Record<
     tone: "incomplete",
     explanation:
       "No opened matched-pairs table stands behind the recorded number, so " +
-      "there is nothing to recount it from. A count-only exchange records no " +
-      "such table at all.",
+      "there is nothing to recount it from. Where the record commits to such a " +
+      "table, its own row above names why it did not open; a count-only " +
+      "exchange records no such table at all.",
   },
 };
 
