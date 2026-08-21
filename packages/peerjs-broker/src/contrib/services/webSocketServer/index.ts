@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { OutgoingMessage } from "node:http";
 import { Socket } from "node:net";
 
 import { WebSocketServer as Server } from "ws";
@@ -105,6 +106,24 @@ function armReleaseDeadline(onExpire: () => void): { cancel: () => void } {
       timer = undefined;
     },
   };
+}
+
+// The response this server is still writing on `socket`, if there is one. Node's
+// HTTP server assigns an outgoing message to the socket it is being written on
+// and clears that reference when the message detaches on `finish`, so asking for
+// it is asking the HTTP server itself whether the socket is still carrying an
+// answer of ours.
+//
+// `_httpMessage` is internal to Node rather than a documented API, so it is read
+// defensively and its behavior is driven rather than assumed: the `instanceof`
+// makes a Node that stops setting it read as "nothing in flight" instead of as
+// some other object's field, and the pipelined-response check in
+// apps/web/test/unit/signalingServer.test.ts drives a real http.Server through
+// the whole sequence -- so a Node that no longer sets it fails that check rather
+// than quietly reopening the misread its caller below exists to avoid.
+function responseStillWriting(socket: Duplex): OutgoingMessage | null {
+  const assigned = (socket as { _httpMessage?: unknown })._httpMessage;
+  return assigned instanceof OutgoingMessage ? assigned : null;
 }
 
 export class WebSocketServer extends EventEmitter implements IWebSocketServer {
@@ -247,10 +266,10 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
   // `upgrade` listener, nothing else can answer and the socket is destroyed at
   // once. Where a co-resident listener exists -- Vite HMR at `/` in dev -- the
   // socket is left for it, and whether it answered is then TESTED rather than
-  // assumed: a socket that has written nothing since the moment it was declined
-  // was answered by nobody when the release bound expires, so it is destroyed
-  // and the broken premise raised as an error rather than leaked on a premise
-  // that no longer holds.
+  // assumed: a socket that has written nothing since the moment it became
+  // nobody's was answered by nobody when the release bound expires, so it is
+  // destroyed and the broken premise raised as an error rather than leaked on a
+  // premise that no longer holds.
   private _releaseUnhandledUpgrade(
     server: HttpServer | HttpsServer,
     socket: Duplex,
@@ -263,49 +282,54 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     }
 
     // `bytesWritten` counts the whole connection's lifetime rather than this
-    // window, and an upgrade may arrive on a connection this server has already
-    // answered an ordinary request on -- HTTP keep-alive, which any raw client
-    // can drive. Adoption is therefore movement against the count the socket
-    // carried when it was declined, never the raw count: reading a prior
-    // request's bytes as this upgrade's answer would leave precisely that socket
-    // held past the bound with the watch below taken off it, which is both the
-    // leak this release exists to close and the unwatched error that ends the
-    // process.
-    const bytesWrittenWhenDeclined =
-      socket instanceof Socket ? socket.bytesWritten : 0;
+    // window, and this server writes on that connection itself: an upgrade
+    // arrives on a connection it has already answered a request on (HTTP
+    // keep-alive), or -- pipelined ahead of the upgrade in one write -- on one it
+    // is answering still, since Node emits `upgrade` as soon as its parser sees
+    // one rather than when the response ahead of it finishes. Either response's
+    // bytes read as this upgrade's answer would leave precisely that socket held
+    // past the bound with the watch below taken off it, which is both the leak
+    // this release exists to close and the unwatched error that ends the process.
+    // So an answer is movement against the count the socket carries once no
+    // answer of this server's is being written on it -- a baseline taken at the
+    // decline, and taken again if a response of ours detaches after it.
+    let answerBaseline = socket instanceof Socket ? socket.bytesWritten : 0;
 
     // The window below is the one stretch in which this socket is nobody's:
     // declined here, not yet taken by a co-resident listener, and so carrying no
     // `error` listener of anyone's. A raw socket that emits `error` with none
     // attached terminates the process, and a peer needs nothing more exotic than
     // a reset -- being killed, or dropped by its network -- to emit one. So it is
-    // watched for exactly the window and no longer: an error inside it destroys
+    // watched from the decline to the bound: an error in that stretch destroys
     // the socket, which is that socket's release, leaving the bound behind it
     // nothing to reclaim and no unanswered upgrade to report against a peer that
-    // merely hung up; an error after a co-resident listener has answered belongs
-    // to the listener that adopted it, along with the socket.
+    // merely hung up. The watch runs to the bound rather than to an adopter's
+    // answer, so an adopted socket that errors in the stretch between the two is
+    // destroyed and reported here.
     const releaseOnError = (error: Error): void => {
       socket.destroy();
       this._onSocketError(error);
     };
     socket.on("error", releaseOnError);
 
+    let deadline: { cancel: () => void } | undefined;
+    let stopAwaitingResponse = (): void => {};
+
     // Every handle the window installs comes off with the window, whichever way
-    // it ends -- the peer closing, an adopter answering, the bound expiring --
-    // so a socket handed on to a co-resident listener carries none of this
-    // server's bookkeeping into the life that listener gives it.
+    // it ends -- the peer closing, the bound concluding the socket was adopted,
+    // the bound expiring on an unanswered one -- so a socket handed on to a
+    // co-resident listener carries none of this server's bookkeeping into the
+    // life that listener gives it.
     const dropWindowHandles = (): void => {
-      deadline.cancel();
+      deadline?.cancel();
+      stopAwaitingResponse();
       socket.off("error", releaseOnError);
       socket.off("close", dropWindowHandles);
     };
 
-    const deadline = armReleaseDeadline(() => {
+    const releaseUnlessAnswered = (): void => {
       if (socket.destroyed) return;
-      if (
-        socket instanceof Socket &&
-        socket.bytesWritten > bytesWrittenWhenDeclined
-      ) {
+      if (socket instanceof Socket && socket.bytesWritten > answerBaseline) {
         // Answered: the socket is its adopter's now, errors with it.
         dropWindowHandles();
         return;
@@ -319,7 +343,40 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
           "PeerJS signaling server released an upgrade no co-resident listener answered",
         ),
       );
-    });
+    };
+
+    // A socket this server is still writing a response on is not nobody's and
+    // cannot be leaked by this decline, so the bound does not start on it: it
+    // starts where that response lets the socket go, against a baseline taken
+    // there, and again behind any response pipelined after it. Discounting the
+    // whole stretch costs nothing an adopter could have used -- an answer written
+    // into a response still writing is interleaved with it on one TCP stream, so
+    // whatever adopted such a socket has a corrupted connection either way --
+    // while counting it is the misread that leaks the socket unwatched.
+    //
+    // The wait is the response's own `finish`, behind the handler Node itself
+    // registered on it: by the time this one runs the message has been detached
+    // and its last byte counted, so the baseline it takes is final. A message
+    // that has already finished is waited on by nobody -- the event cannot come
+    // twice -- so the bound starts instead.
+    const startWindowOnceSocketIsFree = (): void => {
+      const responseInFlight = responseStillWriting(socket);
+      if (!responseInFlight || responseInFlight.writableFinished) {
+        deadline = armReleaseDeadline(releaseUnlessAnswered);
+        return;
+      }
+      // Each wait is a `once` that has fired by the time the next replaces it,
+      // so the one held here is the only one still to retire.
+      const onResponseDetached = (): void => {
+        if (socket instanceof Socket) answerBaseline = socket.bytesWritten;
+        startWindowOnceSocketIsFree();
+      };
+      responseInFlight.once("finish", onResponseDetached);
+      stopAwaitingResponse = (): void => {
+        responseInFlight.off("finish", onResponseDetached);
+      };
+    };
+    startWindowOnceSocketIsFree();
 
     socket.on("close", dropWindowHandles);
   }

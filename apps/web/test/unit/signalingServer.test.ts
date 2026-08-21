@@ -23,6 +23,7 @@ import { hardenUpgradeSurface } from "../../server/upgradeHardening";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import type { IRealm } from "@psilink/peerjs-broker/models/realm";
+import type { ServerResponse } from "node:http";
 
 // Socket-level coverage for the signaling guards that need a live `ws`
 // connection: the liveness flag that gates the two-tier reaper, the
@@ -64,6 +65,16 @@ interface CoResidentUpgrade {
   handlesAfterAdopt: HandleCounts;
 }
 
+/** A response the server has begun and the test finishes when it chooses, so a
+ * socket can be held mid-response for as long as a case needs. */
+interface StreamingResponse {
+  /** How many chunks have reached the socket so far. */
+  chunksWritten: () => number;
+  /** Stop writing and finish the response, which is what detaches it from the
+   * socket it was being written on. */
+  finish: () => void;
+}
+
 interface Signaling {
   port: number;
   realm: IRealm;
@@ -80,6 +91,8 @@ interface Signaling {
    * `upgrade` listener is registered first and so has already run, which makes an
    * entry here the observable that its release window is open. */
   coResidentUpgrades: Array<CoResidentUpgrade>;
+  /** Each streaming response the server has begun, in request order. */
+  streamed: Array<StreamingResponse>;
 }
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -99,7 +112,8 @@ async function startSignaling(
     coResidentUpgrade?: "answers" | "ignores";
     /** Answer ordinary (non-upgrade) requests, the other half of a shared
      * server: a connection can then reach the upgrade path with response bytes
-     * already written on it. */
+     * already written on it, or -- on `STREAMING_PATH` -- with a response of the
+     * server's still being written. */
     answerOrdinaryRequests?: boolean;
   } = {},
 ): Promise<Signaling> {
@@ -111,8 +125,13 @@ async function startSignaling(
       preHandshakeIdleMs: opts.preHandshakeIdleMs,
     });
   }
+  const streamed: Array<StreamingResponse> = [];
   if (opts.answerOrdinaryRequests) {
-    server.on("request", (_req, res) => {
+    server.on("request", (req, res) => {
+      if (req.url === STREAMING_PATH) {
+        streamed.push(startStreamingResponse(res));
+        return;
+      }
       res.writeHead(200, {
         "Content-Type": "text/plain",
         "Content-Length": String(ORDINARY_RESPONSE_BODY.length),
@@ -183,7 +202,7 @@ async function startSignaling(
         server.close(() => resolve());
       }),
   );
-  return { port, realm, wss, errors, accepted, coResidentUpgrades };
+  return { port, realm, wss, errors, accepted, coResidentUpgrades, streamed };
 }
 
 function signalingUrl(port: number, id: string, secure = false): string {
@@ -293,6 +312,11 @@ function upgradeRequest(port: number, target: string): string {
 
 const ORDINARY_RESPONSE_BODY = "an ordinary response";
 
+/** The path whose response is written a chunk at a time until the test finishes
+ * it, rather than answered and done. */
+const STREAMING_PATH = "/streaming";
+const STREAMING_CHUNK_MS = 200;
+
 /** An ordinary keep-alive GET: answering it leaves the connection open with
  * response bytes already written on it. */
 function ordinaryRequest(port: number, target: string): string {
@@ -303,6 +327,33 @@ function ordinaryRequest(port: number, target: string): string {
     "",
     "",
   ].join("\r\n");
+}
+
+/** Begin a response that keeps writing until the caller finishes it, so the
+ * socket stays assigned to it -- the state a handler that takes its time, or a
+ * long-lived event stream, leaves a connection in. */
+function startStreamingResponse(res: ServerResponse): StreamingResponse {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  let chunksWritten = 0;
+  const timer = setInterval(() => {
+    chunksWritten += 1;
+    res.write(`chunk ${chunksWritten}\n`);
+  }, STREAMING_CHUNK_MS);
+  const stop = (): void => {
+    clearInterval(timer);
+  };
+  res.on("close", stop);
+  cleanups.push(() => {
+    stop();
+    return Promise.resolve();
+  });
+  return {
+    chunksWritten: () => chunksWritten,
+    finish: () => {
+      stop();
+      res.end();
+    },
+  };
 }
 
 function openRawUpgrade(port: number, target: string): RawConnection {
@@ -663,6 +714,71 @@ describe("signaling socket release", () => {
     await waitForFrame(ws, "OPEN");
     ws.close();
   }, 15_000);
+
+  test("an upgrade pipelined behind a response still writing is released once that response ends", async () => {
+    // Node emits `upgrade` as soon as its parser sees one, so a client that
+    // pipelines an upgrade behind a request in a single write reaches this
+    // server's decline while the response ahead of it is still being written --
+    // on the very socket the release window is now watching. Those bytes are
+    // this server's own; counting them as the upgrade's answer concludes an
+    // adoption that never happened, which leaves the socket held past the bound
+    // with the watch taken off it and a reset from the peer ending the process.
+    const sig = await startSignaling({
+      coResidentUpgrade: "ignores",
+      answerOrdinaryRequests: true,
+    });
+
+    const peer = openRawConnection(sig.port);
+    // One write carrying both, so the upgrade is parsed before the response to
+    // the request ahead of it has written a byte.
+    peer.send(
+      ordinaryRequest(sig.port, STREAMING_PATH) +
+        upgradeRequest(sig.port, "/not-the-signaling-path"),
+    );
+    await waitFor(() => sig.coResidentUpgrades.length > 0);
+    await waitFor(() => sig.streamed.length > 0);
+    await waitFor(() => sig.streamed[0].chunksWritten() > 0);
+
+    // Past the bound with the response still writing: the socket is this
+    // server's own to write on rather than nobody's, so the window has not
+    // concluded anything about it and its watch is still in place -- which is
+    // what keeps the reset below from ending the process.
+    await new Promise((resolve) =>
+      setTimeout(resolve, SOCKET_RELEASE_TIMEOUT_MS * 2),
+    );
+    const heldMidResponse = {
+      destroyed: sig.accepted[0].destroyed,
+      handles: handleCounts(sig.accepted[0]),
+    };
+
+    // The response ends, and with it the stretch the window had to sit out. The
+    // socket is nobody's from here, and nobody answers it.
+    sig.streamed[0].finish();
+    const releasedAfterResponse = await settlesWithin(
+      peer.released,
+      RELEASE_MARGIN_MS,
+    );
+    // Hang up hard whether or not the release happened, so a socket wrongly left
+    // open is left holding the reset that ends the process rather than being
+    // reported as a failed assertion the process never reaches.
+    peer.reset();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(heldMidResponse).toEqual({
+      destroyed: false,
+      handles: sig.coResidentUpgrades[0].handlesAtWindowOpen,
+    });
+    expect(releasedAfterResponse).toBe(true);
+    expect(sig.accepted).toHaveLength(1);
+    expect(sig.accepted[0].destroyed).toBe(true);
+    expect(sig.errors).toHaveLength(1);
+    expect(sig.errors[0].message).toContain("no co-resident listener answered");
+
+    // The process is not merely alive but still brokering.
+    const ws = new WebSocket(signalingUrl(sig.port, "peer-after-pipelined"));
+    await waitForFrame(ws, "OPEN");
+    ws.close();
+  }, 20_000);
 
   test("a peer that resets inside the co-resident window is released, not crashed on", async () => {
     // The window is the one stretch where the socket has no owner: this server
