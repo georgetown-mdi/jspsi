@@ -274,13 +274,14 @@ export function resolveCountOnlyRun(
  * Refuse a linkage-terms `deduplicate: true` the run cannot honor, before any
  * matching begins.
  *
- * The cascade implements the deduplicating match (`linkViaPSI`), but no exchange
- * runs one. `single-pass` implements neither deduplicating cardinality: it refuses
- * `one-to-many` and `many-to-many`, and accepts `many-to-one` only as an alias
- * that runs the unchanged one-to-one matching. The surfaces downstream of the
- * association table -- the output table, the payload alignment, the exchange
- * record -- have not been carried through a table with several links per input
- * either. Running a `deduplicate: true` term would therefore deliver something
+ * The cascade implements the deduplicating match (`linkViaPSI`), and the surfaces
+ * downstream of the association table -- the payload frame, the output table, and
+ * the exchange record with its re-supply path -- carry a table with several links
+ * per record. `single-pass` implements neither deduplicating cardinality: it
+ * refuses `one-to-many` and `many-to-many`, and accepts `many-to-one` only as an
+ * alias that runs the unchanged one-to-one matching, so an exchange on that
+ * strategy would silently match one-to-one against terms that asked for a group.
+ * Running a `deduplicate: true` term would therefore deliver something
  * other than the consented many-cardinality match -- the disclosure-fidelity gap
  * this refusal closes. Refused at prepare time in {@link prepareForExchange} for
  * this party's own terms, and for both parties' agreed terms by
@@ -305,39 +306,78 @@ export function assertDeduplicateImplemented(deduplicate: boolean): void {
 }
 
 /**
- * Requires an association table's local half to be STRICTLY ascending, at the
- * seam {@link runExchange} consumes the table.
+ * Requires an association table to carry well-formed matched PAIRS, at the seam
+ * {@link runExchange} consumes it: halves of equal length, a local half in
+ * ascending order, and no pair repeated.
  *
- * Both consumers there read it as one entry per matched RECORD, in this party's
- * own row order: the payload gathers one transmitted row per entry
- * ({@link preparePayload}), and the attested result size counts the entries as
- * matched records. The `"one"` side of a deduplicating exchange is the one table
- * shape that breaks it -- several of the partner's records link to one of ours, so
- * the local half repeats a row and is merely non-decreasing (see
- * {@link AssociationTable}) -- which would make the payload repeat rows and the
- * attested size a pair count where a record count is meant.
+ * Everything downstream reads the table as a list of pairs. The payload carries
+ * one row per DISTINCT matched local row ({@link preparePayload}), the result file
+ * one row per pair ({@link buildOutputTable}), and the attested result size the
+ * pair count ({@link matchedPairCount}). A repeated row index on one side of a
+ * pair is therefore admitted here: it is what a deduplicating cardinality
+ * produces, on whichever side carries the multiplicity (see
+ * {@link AssociationTable}).
  *
- * {@link assertDeduplicateImplemented} is what keeps such a table away from that
- * seam today. This encodes that as a check rather than resting on it, so lifting
- * the refusal without carrying the two surfaces through the multiplicity fails
- * here instead of quietly emitting the wrong payload and count.
+ * What no specified cardinality produces, and what no consumer could read, is
+ * refused. A local half out of order would put the result rows and the payload
+ * rows in an order the re-supply path does not reproduce, so the record's
+ * commitments would not reopen from the retained files. A repeated pair would
+ * count one link twice in the attested size and write the same result row twice.
+ * Equal local rows are contiguous in an ascending half, so the pair check holds
+ * only the partner indices of the run in hand and allocates nothing at all for a
+ * strictly ascending table.
  *
  * @internal exported for the association-table invariant test.
  */
-export function assertMatchedRowsStrictlyAscend(
+export function assertMatchedPairsWellFormed(
   associationTable: AssociationTable,
 ): void {
-  const matchedRows = associationTable[0];
-  for (let i = 1; i < matchedRows.length; ++i) {
-    if (matchedRows[i] > matchedRows[i - 1]) continue;
+  const [matchedRows, partnerRows] = associationTable;
+  if (matchedRows.length !== partnerRows.length)
     throw new Error(
-      "the association table's local half is not strictly ascending: the " +
-        "payload rows and the attested result size both read it as one entry " +
-        "per matched record. Carry those two surfaces through a table with " +
-        "several links per record before lifting the deduplication refusal " +
-        "that keeps one from reaching here.",
+      "the association table's halves have different lengths: " +
+        `${matchedRows.length} vs ${partnerRows.length}. Each entry is one ` +
+        "matched pair, so the two halves are read together.",
     );
+  let runStart = 0;
+  const runPartnerRows = new Set<number>();
+  for (let i = 1; i < matchedRows.length; ++i) {
+    if (matchedRows[i] > matchedRows[i - 1]) {
+      runStart = i;
+      runPartnerRows.clear();
+      continue;
+    }
+    if (matchedRows[i] < matchedRows[i - 1])
+      throw new Error(
+        "the association table's local half is not in ascending order: the " +
+          "result rows, the payload rows, and the re-supply path that " +
+          "reproduces both from the retained result all read it in this " +
+          "party's own row order.",
+      );
+    if (runStart === i - 1) runPartnerRows.add(partnerRows[runStart]);
+    if (runPartnerRows.has(partnerRows[i]))
+      throw new Error(
+        "the association table repeats a matched pair: the attested result " +
+          "size counts pairs and the result file writes one row per pair, so " +
+          "one link would be counted twice and written twice.",
+      );
+    runPartnerRows.add(partnerRows[i]);
   }
+}
+
+/**
+ * The result size a record attests for a matched table: its PAIR count.
+ *
+ * Under `one-to-one` the pairs, this party's matched records, and the partner's
+ * matched records are one figure. Under a deduplicating cardinality they diverge,
+ * and the pair count is what the record carries: it is the figure both parties
+ * derive identically from the single exchanged table, where a per-party
+ * matched-record count would put two different "result sizes" on the two records
+ * of one exchange. A repeated row index on one side of a pair is still a pair
+ * (docs/spec/EXCHANGE_RECORD.md, Result size under a deduplicating cardinality).
+ */
+export function matchedPairCount(associationTable: AssociationTable): number {
+  return associationTable[0].length;
 }
 
 /**
@@ -1345,11 +1385,12 @@ export async function runExchange(
     else engine.dispose();
   }
 
-  // One entry per matched record, ascending, is what both readers below assume of
-  // the table -- the payload's transmitted rows and the attested result size. See
-  // assertMatchedRowsStrictlyAscend for what a table breaking it would deliver.
+  // One entry per matched PAIR, in this party's own ascending row order, is what
+  // every reader below assumes of the table -- the payload's transmitted rows, the
+  // result file, and the attested result size. See assertMatchedPairsWellFormed
+  // for the shapes that would break those readings.
   if (associationTable !== undefined)
-    assertMatchedRowsStrictlyAscend(associationTable);
+    assertMatchedPairsWellFormed(associationTable);
 
   // Send-gate: transmit payload only to a partner entitled to the result. A party
   // with expectsOutput:false learns no matched records, so it has no use for
@@ -1413,7 +1454,9 @@ export async function runExchange(
   // docs/spec/EXCHANGE_RECORD.md, Count-only records.
   const attestedResultSize = countOnly
     ? intersectionCount
-    : associationTable?.[0].length;
+    : associationTable === undefined
+      ? undefined
+      : matchedPairCount(associationTable);
 
   // What the signed-receipt step needs: a signing identity AND the session key
   // its binder derives from, resolved once here so the record build below and the

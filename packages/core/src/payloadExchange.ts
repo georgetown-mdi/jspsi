@@ -34,14 +34,18 @@ export interface PartnerPayload {
    * receiver's local {@link AssociationTable} (the partner indices stored
    * there are the sender's row indices). Distinct: one entry addresses one of
    * the sender's rows, so a received message repeating an index is refused at
-   * parse. Empty when partner had no data.
+   * parse. Several of the receiver's association entries may address ONE of
+   * these -- that is what a deduplicating cardinality groups -- and the receiver
+   * joins them all back to the single row it was sent. Empty when partner had no
+   * data.
    */
   rowIndices: number[];
   /**
-   * Payload rows, one per matched record. Positional against {@link columns}:
-   * `rows[i][j]` is the value the column named at `columns[j]` contributed, so
-   * every row carries exactly one cell per column and a received message whose
-   * rows do not is refused at parse. Empty when partner had no data.
+   * Payload rows, one per DISTINCT matched record of the sender. Positional
+   * against {@link columns}: `rows[i][j]` is the value the column named at
+   * `columns[j]` contributed, so every row carries exactly one cell per column
+   * and a received message whose rows do not is refused at parse. Empty when
+   * partner had no data.
    */
   rows: Array<Array<string | null>>;
 }
@@ -188,14 +192,45 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
 export type PayloadWireMessage = z.infer<typeof payloadWireSchema>;
 
 /**
+ * The local rows a payload frame carries for a matched table: each distinct
+ * matched row once, in first-occurrence order.
+ *
+ * A payload row is addressed by the SENDER's own row index, so a frame carries
+ * one row per matched RECORD however many pairs that record stands in. Under a
+ * deduplicating cardinality the local half of the association table repeats a row
+ * -- several of the partner's records link to one of this party's (see
+ * {@link AssociationTable}) -- and emitting one payload row per PAIR would repeat
+ * an index, which the receiver's parse refuses as a malformed frame and which
+ * would put one record's values in the committed payload several times.
+ *
+ * The re-supply path reproduces this same selection from the retained result file
+ * (`reconstructCommittedData`, recordVerification.ts), so a sender reopens its own
+ * payload commitment from its own retained files; both sides read this one
+ * definition rather than restating it.
+ */
+export function distinctMatchedRows(
+  matchedRows: ReadonlyArray<number>,
+): number[] {
+  const seen = new Set<number>();
+  const distinct: number[] = [];
+  for (const row of matchedRows) {
+    if (seen.has(row)) continue;
+    seen.add(row);
+    distinct.push(row);
+  }
+  return distinct;
+}
+
+/**
  * Prepares the payload message to send after PSI linkage.
  *
- * Gathers all `isPayload` columns from the matched rows (indexed by
- * `associationTable[0]`) and packages them for transmission. A `role: ignored`
- * column is never transmitted, regardless of its `isPayload` value -- the role
- * is the explicit "use this column for nothing" opt-out, so it wins over any
- * `isPayload: true` left on the column. Returns a no-data message when the
- * dataset has no transmittable payload columns or no matched rows.
+ * Gathers all `isPayload` columns from the matched rows -- each row
+ * `associationTable[0]` names, once ({@link distinctMatchedRows}) -- and packages
+ * them for transmission. A `role: ignored` column is never transmitted,
+ * regardless of its `isPayload` value -- the role is the explicit "use this
+ * column for nothing" opt-out, so it wins over any `isPayload: true` left on the
+ * column. Returns a no-data message when the dataset has no transmittable payload
+ * columns or no matched rows.
  */
 export function preparePayload(
   rawRows: Array<CSVRow>,
@@ -208,7 +243,7 @@ export function preparePayload(
   }
 
   const columns = payloadCols.map((col) => col.name);
-  const rowIndices = [...associationTable[0]];
+  const rowIndices = distinctMatchedRows(associationTable[0]);
   const rows = rowIndices.map((idx) => {
     const row = rawRows[idx];
     return columns.map((col) =>
@@ -880,7 +915,9 @@ export function toCommittedPayload(
  * linkage.
  *
  * Initiator sends first; responder receives first then sends. The returned
- * {@link PartnerPayload} rows are in the same order as the association table.
+ * {@link PartnerPayload} rows are in the SENDER's matched-row order, one per
+ * distinct row it matched, and are joined to this party's association entries by
+ * the row indices that ride with them ({@link buildOutputTable}).
  * Every failure mode (transport error, malformed message, send rejection)
  * surfaces as a rejection of the awaited call, so no listener registration,
  * error buffering, or per-path cleanup is needed.
@@ -937,6 +974,15 @@ function uniqueColumnName(base: string, taken: ReadonlySet<string>): string {
 /**
  * Formats an exchange result into header and row arrays suitable for CSV
  * output.
+ *
+ * One result row per association PAIR. Under a deduplicating cardinality a row
+ * index repeats on one side of the table -- several of our records against one of
+ * the partner's, or the reverse -- and each such pair is its own result row: our
+ * identifier repeats down the column where the multiplicity is ours, and one
+ * partner payload row is written against each of our records where it is the
+ * partner's. The partner's payload carries one row per distinct record IT matched
+ * ({@link distinctMatchedRows}), so the join below addresses that row once per
+ * pair rather than expecting one payload row per pair.
  *
  * The first column identifies our matched records, headed by our identifier
  * column name (or `row_id` when no identifier column exists). The second column
@@ -1007,18 +1053,27 @@ export function buildOutputTable(
     partnerPayload.rowIndices.map((rowIdx, pos) => [rowIdx, pos]),
   );
 
-  // The wire schema refuses a repeated index at parse, so a received message
-  // cannot reach here carrying one -- but this is an exported entry point taking
-  // a plain PartnerPayload, whose argument no type ties to a parsed frame. The
-  // invariant keeps a check of its own rather than resting on that call path.
+  // A repeated index is a MALFORMED payload -- a sender emitting a row it should
+  // have sent once -- and stays refused under every cardinality: the frame names
+  // two payload rows for one of the sender's records without saying which is the
+  // record's. Multiplicity is carried on the association table's side of the
+  // join, never here. The wire schema refuses the repeat at parse, so a received
+  // message cannot reach this point carrying one -- but this is an exported entry
+  // point taking a plain PartnerPayload, whose argument no type ties to a parsed
+  // frame, so the invariant keeps a check of its own rather than resting on that
+  // call path.
   if (theirIdxToPayloadPos.size !== partnerPayload.rowIndices.length) {
     throw new Error("partner payload rowIndices contains duplicate indices");
   }
 
   if (hasPartnerCols) {
-    const missing = associationTable[1].filter(
-      (idx) => !theirIdxToPayloadPos.has(idx),
-    );
+    // Named once each: a partner row our table pairs with several of our records
+    // is one missing payload row, not one per pair.
+    const missing = [
+      ...new Set(
+        associationTable[1].filter((idx) => !theirIdxToPayloadPos.has(idx)),
+      ),
+    ];
     if (missing.length > 0) {
       throw new Error(
         "partner payload is missing rows for association table indices: " +

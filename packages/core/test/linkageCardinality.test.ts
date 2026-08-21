@@ -7,7 +7,8 @@ import {
   runExchange,
   resolveLinkageCardinality,
   assertDeduplicateImplemented,
-  assertMatchedRowsStrictlyAscend,
+  assertMatchedPairsWellFormed,
+  matchedPairCount,
 } from "../src/exchange";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import { UsageError } from "../src/errors";
@@ -78,48 +79,104 @@ test("assertDeduplicateImplemented passes false and refuses true", () => {
   expect(() => assertDeduplicateImplemented(true)).toThrow(UsageError);
 });
 
-// --- the table shape the refusal keeps out of the run -------------------------
-// The refusal above is what keeps a deduplicating table -- several links onto one
-// of this party's rows, so the local half repeats -- away from the payload and the
-// attested result size, both of which read the table as one entry per matched
-// record. runExchange checks that rather than resting on the refusal, so lifting
-// it without carrying those two surfaces through the multiplicity is a failure
-// rather than a wrong payload and a wrong count.
+// --- the table shapes the consuming seam admits and refuses -------------------
+// Everything downstream of the table reads it as matched PAIRS: one payload row
+// per distinct matched record, one result row per pair, and the attested result
+// size the pair count. A repeated row index on one side is admitted -- it is what
+// a deduplicating cardinality produces -- while an out-of-order local half and a
+// repeated pair stay refused, neither being a shape any specified cardinality
+// produces or any consumer could read.
 
 test("a strictly ascending local half is what the consuming seam accepts", () => {
-  expect(() => assertMatchedRowsStrictlyAscend([[], []])).not.toThrow();
-  expect(() => assertMatchedRowsStrictlyAscend([[3], [0]])).not.toThrow();
+  expect(() => assertMatchedPairsWellFormed([[], []])).not.toThrow();
+  expect(() => assertMatchedPairsWellFormed([[3], [0]])).not.toThrow();
   expect(() =>
-    assertMatchedRowsStrictlyAscend([
+    assertMatchedPairsWellFormed([
       [0, 2, 5],
       [4, 1, 0],
     ]),
   ).not.toThrow();
 });
 
-test("a deduplicating table's repeated local row is refused at the consuming seam", () => {
+test("a deduplicating table's repeated local row is admitted at the consuming seam", () => {
   // The "one" side of a deduplicating exchange: the partner's rows 0 and 1 both
   // link to this party's row 0.
-  const oneSideTable: [Array<number>, Array<number>] = [
-    [0, 0, 1],
-    [0, 1, 2],
-  ];
-  expect(() => assertMatchedRowsStrictlyAscend(oneSideTable)).toThrow(
-    /not strictly ascending/,
-  );
-  // The message names what to do about it rather than only what failed.
-  expect(() => assertMatchedRowsStrictlyAscend(oneSideTable)).toThrow(
-    /before lifting the deduplication refusal/,
-  );
+  expect(() =>
+    assertMatchedPairsWellFormed([
+      [0, 0, 1],
+      [0, 1, 2],
+    ]),
+  ).not.toThrow();
+});
+
+test("the mirror table's repeated partner row is admitted at the consuming seam", () => {
+  // The "many" side: this party's rows 0 and 1 both link to the partner's row 4.
+  expect(() =>
+    assertMatchedPairsWellFormed([
+      [0, 1, 2],
+      [4, 4, 7],
+    ]),
+  ).not.toThrow();
 });
 
 test("a descending local half is refused at the consuming seam", () => {
   expect(() =>
-    assertMatchedRowsStrictlyAscend([
+    assertMatchedPairsWellFormed([
       [1, 0],
       [0, 1],
     ]),
-  ).toThrow(/not strictly ascending/);
+  ).toThrow(/not in ascending order/);
+});
+
+test("a repeated pair is refused at the consuming seam", () => {
+  // One link written twice: the result file would carry the row twice and the
+  // attested size would count it twice.
+  expect(() =>
+    assertMatchedPairsWellFormed([
+      [0, 0, 1],
+      [3, 3, 5],
+    ]),
+  ).toThrow(/repeats a matched pair/);
+  // Non-adjacent within the same run of equal local rows.
+  expect(() =>
+    assertMatchedPairsWellFormed([
+      [0, 0, 0],
+      [3, 5, 3],
+    ]),
+  ).toThrow(/repeats a matched pair/);
+  // The same partner row against a DIFFERENT local row is a distinct pair, not a
+  // repeat, so the run-scoped check must not fire on it.
+  expect(() =>
+    assertMatchedPairsWellFormed([
+      [0, 0, 1],
+      [3, 5, 3],
+    ]),
+  ).not.toThrow();
+});
+
+test("halves of different lengths are refused at the consuming seam", () => {
+  expect(() => assertMatchedPairsWellFormed([[0, 1], [0]])).toThrow(
+    /different lengths/,
+  );
+});
+
+test("the attested result size is the pair count, not the matched-record count", () => {
+  // The "one" side of a deduplicating exchange: two of the partner's records link
+  // to this party's row 0, so two pairs stand against one matched record here.
+  const oneSideTable: [Array<number>, Array<number>] = [
+    [0, 0, 1],
+    [0, 1, 2],
+  ];
+  expect(matchedPairCount(oneSideTable)).toBe(3);
+  expect(new Set(oneSideTable[0]).size).toBe(2);
+  // Its mirror carries the same pair count, which is what makes the two parties'
+  // records of one exchange agree on the figure.
+  expect(
+    matchedPairCount([
+      [0, 1, 2],
+      [0, 0, 1],
+    ]),
+  ).toBe(3);
 });
 
 // --- runExchange: both parties refuse a deduplicating term in lockstep --------

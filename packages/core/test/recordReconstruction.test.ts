@@ -5,7 +5,11 @@ import { describe, expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import { buildExchangeRecord } from "../src/exchangeRecord";
-import { prepareForExchange, runExchange } from "../src/exchange";
+import {
+  matchedPairCount,
+  prepareForExchange,
+  runExchange,
+} from "../src/exchange";
 import { loadCSVFile } from "../src/file";
 import {
   buildOutputTable,
@@ -79,7 +83,10 @@ async function roundTrip(opts: {
     localTerms: termsA,
     partnerTerms: termsB,
     recordsExposed: opts.rawRows.length,
-    resultSize: opts.associationTable[0].length,
+    // The seam's own definition of the attested figure, read here rather than
+    // restated, so a change to what a record attests is a failure in these round
+    // trips too.
+    resultSize: matchedPairCount(opts.associationTable),
     associationTable: opts.associationTable,
     localPayloadSent,
     partnerPayloadReceived,
@@ -104,7 +111,7 @@ async function roundTrip(opts: {
     localTerms: termsA,
     partnerTerms: termsB,
   });
-  return { report, warnings, result };
+  return { report, warnings, result, record, data };
 }
 
 const idMeta: Metadata = [
@@ -377,6 +384,126 @@ describe("reconstructCommittedData round-trips through the real build path", () 
     const report = await verifyExchangeRecord(record, keys, { data });
     expect(report.outcome).toBe("failed");
     expect(report.commitments.localPayloadSent).toBe("mismatch");
+  });
+});
+
+// A deduplicating cardinality repeats a row index on one side of the association
+// table, so the result file carries several rows against one record. The record's
+// commitments still bind one payload row per matched RECORD on each side, and the
+// re-supply path has to collapse the repeated result rows back to it -- on the
+// local side for the sent payload, on the partner side for the received one. Both
+// fan directions are driven here, each against the payload frame the mirrored
+// party would actually have sent.
+describe("reconstructCommittedData round-trips a deduplicating cardinality", () => {
+  test("the 'one' side: several partner records against one of ours", async () => {
+    // The partner's rows 1 and 0 both link to our row 0, and its row 3 to our
+    // row 2. Its payload carries one row per record IT matched, ascending.
+    const partnerPayload: PartnerPayload = {
+      columns: ["note"],
+      rowIndices: [0, 1, 3],
+      rows: [["q-0"], ["q-1"], ["q-3"]],
+    };
+    const { report, record, data, result } = await roundTrip({
+      rawRows: idRows,
+      metadata: idMeta,
+      associationTable: [
+        [0, 0, 2],
+        [1, 0, 3],
+      ],
+      partnerPayload,
+      ourIdColumn: "pid",
+    });
+    // One result row per PAIR, our identifier repeating down the column.
+    expect(result.rows).toEqual([
+      ["P0", "1", "q-1"],
+      ["P0", "0", "q-0"],
+      ["P2", "3", "q-3"],
+    ]);
+    // The sent payload is one row per distinct matched record of ours -- two,
+    // against three pairs -- and the re-supply reproduces exactly that.
+    expect(data.localPayloadSent).toEqual({
+      columns: ["dose"],
+      rows: [["10mg"], ["30mg"]],
+    });
+    expect(report.outcome).toBe("verified");
+    expect(report.commitments).toEqual({
+      localPayloadSent: "verified",
+      partnerPayloadReceived: "verified",
+      associationTable: "verified",
+    });
+    // The attested figure is the pair count, which the distinct matched-record
+    // count on this side does not equal.
+    expect(record.resultSize).toBe(3);
+  });
+
+  test("the 'many' side: several of our records against one partner record", async () => {
+    // Our rows 0 and 1 both link to the partner's row 1, and our row 2 to its
+    // row 3. The partner is the "one" side here, so its payload carries one row
+    // per record it matched -- two rows against our three pairs.
+    const partnerPayload: PartnerPayload = {
+      columns: ["note"],
+      rowIndices: [1, 3],
+      rows: [["q-1"], ["q-3"]],
+    };
+    const { report, record, data, result } = await roundTrip({
+      rawRows: idRows,
+      metadata: idMeta,
+      associationTable: [
+        [0, 1, 2],
+        [1, 1, 3],
+      ],
+      partnerPayload,
+      ourIdColumn: "pid",
+    });
+    // The one partner payload row is written against each of our grouped records.
+    expect(result.rows).toEqual([
+      ["P0", "1", "q-1"],
+      ["P1", "1", "q-1"],
+      ["P2", "3", "q-3"],
+    ]);
+    // Collapsing the repeated result rows back to the two rows the partner sent
+    // is what reopens the received-payload commitment: one row per pair would
+    // reproduce three and mismatch.
+    expect(data.partnerPayloadReceived).toEqual({
+      columns: ["note"],
+      rows: [["q-1"], ["q-3"]],
+    });
+    expect(report.outcome).toBe("verified");
+    expect(report.commitments).toEqual({
+      localPayloadSent: "verified",
+      partnerPayloadReceived: "verified",
+      associationTable: "verified",
+    });
+    expect(record.resultSize).toBe(3);
+  });
+
+  test("a fan on each side at once reopens every commitment", async () => {
+    // Not a cardinality any exchange resolves today (many-to-many is refused at
+    // the pairing rules), but the re-supply path is shape-driven: the local half
+    // repeats AND the partner half repeats, and neither collapse may disturb the
+    // other.
+    const partnerPayload: PartnerPayload = {
+      columns: ["note"],
+      rowIndices: [0, 2],
+      rows: [["q-0"], ["q-2"]],
+    };
+    const { report, record } = await roundTrip({
+      rawRows: idRows,
+      metadata: idMeta,
+      associationTable: [
+        [0, 0, 1, 1],
+        [0, 2, 0, 2],
+      ],
+      partnerPayload,
+      ourIdColumn: "pid",
+    });
+    expect(report.outcome).toBe("verified");
+    expect(report.commitments).toEqual({
+      localPayloadSent: "verified",
+      partnerPayloadReceived: "verified",
+      associationTable: "verified",
+    });
+    expect(record.resultSize).toBe(4);
   });
 });
 

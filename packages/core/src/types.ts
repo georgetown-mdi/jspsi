@@ -4,19 +4,21 @@ import { z } from "zod";
  * Paired arrays of matched row indices produced by PSI linkage.
  *
  * `[0]` contains our (local) row indices; `[1]` contains the corresponding
- * partner row indices. The entries in `[0]` are in strictly ascending order --
- * a structural invariant of the cascade in {@link linkViaPSI} relied upon by
- * payload reconstruction. The single-pass sender receives its table from the
- * partner rather than producing it, so there the order is enforced at the seam
- * that consumes it, beside the range, distinctness, and pairing checks
- * (utils/partnerIndices.ts; docs/spec/PROTOCOL.md's index-validation
- * subsection).
+ * partner row indices, so entry `i` is one matched PAIR. The entries in `[0]` are
+ * in strictly ascending order -- a structural invariant of the cascade in
+ * {@link linkViaPSI} relied upon by payload reconstruction. The single-pass sender
+ * receives its table from the partner rather than producing it, so there the order
+ * is enforced at the seam that consumes it, beside the range, distinctness, and
+ * pairing checks (utils/partnerIndices.ts; docs/spec/PROTOCOL.md's
+ * index-validation subsection).
  *
  * The one exception is the "one" side of a deduplicating exchange, where several
  * of the partner's records link to one of ours and `[0]` is non-decreasing rather
  * than strictly ascending -- the distinctness is what that cardinality relaxes,
  * and the ascending order itself still holds (docs/spec/PROTOCOL.md, Deriving one
- * table from the exchanged association maps).
+ * table from the exchanged association maps). The mirror case repeats `[1]`
+ * instead. The seam that consumes the table checks the admitted shapes rather
+ * than resting on this description (`assertMatchedPairsWellFormed`, exchange.ts).
  */
 export type AssociationTable = [Array<number>, Array<number>];
 

@@ -4,7 +4,7 @@ title: "Deduplicate: Which Side Carries the Multiplicity, and How Far It Reaches
 
 # Deduplicating matching semantics: the direction, the axis, and the round boundary
 
-*Status: specified; built in the cascade, behind the standing refusal. The normative rules are in [PROTOCOL.md](../spec/PROTOCOL.md#deduplicating-cardinalities-many-to-x-matching), with the operator-facing term in [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#linkage_termsdeduplicate); a `deduplicate: true` term is still refused before any matching begins, so no exchange runs one. This note records why the rules have that shape, the alternatives weighed, and what stays open. See [docs/notes/README.md](README.md).*
+*Status: specified; built in the cascade and carried through the result file and the exchange record, behind the standing refusal. The normative rules are in [PROTOCOL.md](../spec/PROTOCOL.md#deduplicating-cardinalities-many-to-x-matching), with the record's count and re-supply rows in [EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#result-size-under-a-deduplicating-cardinality) and the operator-facing term in [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#linkage_termsdeduplicate); a `deduplicate: true` term is still refused before any matching begins, so no exchange runs one. This note records why the rules have that shape, the alternatives weighed, and what stays open. See [docs/notes/README.md](README.md).*
 
 This is design rationale. Nothing here binds an implementation; the normative rows live in the spec documents linked above, and this note does not restate them.
 
@@ -70,9 +70,30 @@ Only one direction is a residual, and reading the two together overstates what i
 
 The reason to write this down rather than close it is that the argument is contingent on where the matched-record set comes from. A change that let the returned list decide membership -- rather than confirming a set the receiving party computed -- would turn a cheap overstatement into a disclosure, and would be recognizable as one against this paragraph.
 
+## Why the recorded result size is the pair count
+
+Once the multiplicity reaches the surfaces downstream of the association table, "the result size" stops naming one number. A table with several links per record admits three readings -- its pair count, this party's matched-record count, and the partner's -- and the exchange record has one field. The normative row is in [EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#result-size-under-a-deduplicating-cardinality); the case for it is here.
+
+The deciding property is cross-party agreement. Both parties end a cascade holding the same table, so the pair count is one figure they derive identically -- exactly as the result size is one figure under `one-to-one`. A matched-record count is not: the "many" side would record more than its partner, and two records of one exchange would state two different sizes with nothing in either saying which reading it took. That is a poor property for an artifact whose whole purpose is to stand alone in front of an auditor.
+
+The second reason is what the field is for. A record supports an accounting of disclosures, and what was disclosed is a set of linkages: this record of mine set against that record of yours. Under multiplicity the entity count is smaller than the linkage count on one side and larger on the other, and it is the linkage count that says how much crossed. Reading it as entities would also make the figure depend on a quantity the protocol leaves as the many side's own self-declaration (see the section above), where the pair count is at least a quantity both parties checked each other's contribution to.
+
+Recording both was considered and set aside. The distinct matched-record count is derivable by each holder from its own retained result, so a second field would tell that holder nothing it could not compute -- while adding a figure to the artifact it hands an auditor, and taking a format version bump to do it. A reader who wants the entity-level figure reads the result file.
+
+## Why the result file gains no local row-index column
+
+The result file identifies this party's matched record by its identifier value, or by the local row index when the exchange used no identifier column ([PROTOCOL.md](../spec/PROTOCOL.md#output)). The re-supply path that reopens a record's commitments maps that first column back to an input row, and where the identifier column has duplicate values it maps every duplicate to the first occurrence -- so the reproduction is exact only for an identifier unique per row.
+
+That edge predates any multiplicity, but a deduplicating exchange is where it stops being an edge. The input such an exchange sets out to group holds several rows for one individual, and if its identifier column names the individual rather than the row, those rows share a value by construction. The reconstruction then reproduces the first of them for every later one and the commitments report a mismatch -- a correct verdict on an unmodified pair of files, which is the worst kind.
+
+Carrying this party's own row index in the result, beside the partner's, would close it: the re-supply would read the index directly instead of inferring it. It is deliberately not done here. It is a change to the shape of a file operators hold, script against, and hand to their own downstream systems; it moves the value columns' offset for every reader of every result, including results already written; and it widens what a result discloses in the identifier-free case not at all but in the identified case slightly, by carrying a second locator for each matched record. Those are its own decision with its own doc row, not a line to slide in beside a commitment fix.
+
+What is done here instead is to make the condition legible where it is met: the reconstruction's duplicate-identifier warning states that a deduplicating input carries duplicates by construction when its identifier names the individual, that every later duplicate reproduces the first row's values, and that an identifier unique per row reproduces exactly. An operator reading it is reading it about their own files.
+
 ## What stays open
 
 - **Cross-round accumulation**, above: the rule taken is the conservative one, and the case for the other is a real one.
 - **The closure procedure** for `many-to-many`, and what it discloses.
 - **Fan-out combined with a deduplicating cardinality.** The relaxed acceptance clause is specified and the two axes are defined to compose, but no exchange runs both today, and the combination deserves worked cases before it does.
-- **How the grouping is surfaced.** A deduplicating result is several output rows against one partner row; what a result file and a result view make of that is a front-end question this note does not touch.
+- **How the grouping is surfaced to a person.** The result FILE is settled -- one row per pair, [PROTOCOL.md](../spec/PROTOCOL.md#output) -- because the record's commitments are reproduced from it and it therefore could not stay a front-end question. What a result VIEW makes of a group, and whether an operator is shown the grouping as a grouping rather than as repeated rows, is untouched.
+- **An exact local locator in the result.** Above: a local row-index column would make the re-supply exact under a duplicated identifier, at the cost of a result-file shape change; the condition is warned about instead.
