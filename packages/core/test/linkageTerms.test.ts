@@ -27,7 +27,6 @@ import {
   sanitizeForDisplay,
 } from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
-import { UsageError } from "../src/errors";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
 import {
   MAX_NODE_COUNT,
@@ -2744,25 +2743,31 @@ test.each([
     output: { expectsOutput: true, shareWithPartner: false },
   },
 ])(
-  "deriveAcceptedLinkageTerms refuses a deduplicating invitation ($direction), before the mirror",
+  "deriveAcceptedLinkageTerms derives the acceptor's deduplicate as false ($direction)",
   ({ output }) => {
-    // A deduplicating invitation is refused for the deduplicate term itself, not the
-    // mirror, whatever the inviter's output shape. (A sole-receiver inviter would
-    // also mirror to an incoherent expectsOutput: false, but the deduplicate refusal
-    // fires first, so both shapes meet the same message.) The term is per-party with
-    // no cross-party binding, so adopting it would leave the acceptor disclosing its
-    // grouping on a run a hostile inviter can flip out from under it.
-    const inviterTerms: LinkageTerms = {
-      ...inviterBase,
-      deduplicate: true,
-      output,
-    };
-    expect(() =>
-      deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
-    ).toThrow(UsageError);
-    expect(() =>
-      deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
-    ).toThrow(/deduplicating exchange cannot be accepted from an invitation/);
+    // The acceptor's own side of the cardinality is never the inviter's to set, so
+    // it is derived rather than read off the invitation, for either output shape and
+    // for either value the invitation carries. That is what closes the flip: a
+    // hostile inviter carrying `true` and then presenting `false` at the terms
+    // exchange cannot make this party the "many" side, because this party's value
+    // was never the invitation's.
+    for (const declared of [false, true]) {
+      const inviterTerms: LinkageTerms = {
+        ...inviterBase,
+        deduplicate: declared,
+        output,
+      };
+      const derived = deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org");
+      expect(derived.deduplicate).toBe(false);
+      // Derived, not refused: the rest of the terms come through, and the pair the
+      // two documents make is the runnable one-sided one rather than an abort.
+      expect(derived.identity).toBe("Accepting Org");
+      expect(derived.linkageKeys).toEqual(inviterTerms.linkageKeys);
+      // `deduplicate` carries no cross-party consistency rule, so the differing
+      // pair passes compatibility from both sides.
+      expect(validateCompatibility(inviterTerms, derived).errors).toEqual([]);
+      expect(validateCompatibility(derived, inviterTerms).errors).toEqual([]);
+    }
   },
 );
 

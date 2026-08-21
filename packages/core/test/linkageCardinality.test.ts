@@ -146,30 +146,33 @@ test("resolution is symmetric, so both parties derive the same verdict", () => {
   }
 });
 
-test("a deduplicating invitation is refused at accept, before any exchange (hostile flip closed)", () => {
-  // Acceptance REFUSES a deduplicating invitation rather than adopting the term.
-  // `deduplicate` is per-party with no cross-party binding, so adopting the
-  // inviter's value would let a hostile inviter carry `true`, have the acceptor
-  // disclose its record grouping as the "many" side, then present `false` at the
-  // terms exchange so the run proceeds. The refusal fires at derive time, before
-  // any connection or terms exchange and whatever the inviter would later present,
-  // so the acceptor never reaches resolveLinkageCardinality at all.
-  const inviter = cardinalityTerms(true);
-  let thrown: unknown;
-  try {
-    deriveAcceptedLinkageTerms(inviter, "Acceptor");
-  } catch (err) {
-    thrown = err;
+test("an accept-derived pair resolves the one-sided cardinality (hostile flip closed)", () => {
+  // Acceptance derives the acceptor's own `deduplicate` as false rather than
+  // adopting the inviter's, so the accepted pair is one-sided whatever the
+  // invitation declares: the inviter is the "many" side and the acceptor the "one".
+  // What that closes is the flip -- an inviter carrying `true` and then presenting
+  // `false` at the terms exchange cannot make the acceptor the "many" side,
+  // because the acceptor's value was never the invitation's to set.
+  for (const declared of [false, true]) {
+    const inviter = cardinalityTerms(declared);
+    const acceptor = deriveAcceptedLinkageTerms(inviter, "Acceptor");
+    expect(acceptor.deduplicate).toBe(false);
+    expect(resolveLinkageCardinality(acceptor, inviter)).toBe(
+      declared ? "one-to-many" : "one-to-one",
+    );
+    // The mirror label, from the inviter's own side of the same pair.
+    expect(resolveLinkageCardinality(inviter, acceptor)).toBe(
+      declared ? "many-to-one" : "one-to-one",
+    );
   }
-  expect(thrown).toBeInstanceOf(UsageError);
-  expect((thrown as Error).message).toMatch(
-    /deduplicating exchange cannot be accepted from an invitation/,
+  // Whatever the inviter presents at the terms exchange, the acceptor's own side
+  // stays the "one" one: the both-sided pair no accept-derived exchange can reach.
+  const flipped = cardinalityTerms(false);
+  const acceptor = deriveAcceptedLinkageTerms(
+    cardinalityTerms(true),
+    "Acceptor",
   );
-  // The refusal is specific to the deduplicating term: a non-deduplicating
-  // invitation still derives cleanly.
-  expect(() =>
-    deriveAcceptedLinkageTerms(cardinalityTerms(false), "Acceptor"),
-  ).not.toThrow();
+  expect(resolveLinkageCardinality(acceptor, flipped)).toBe("one-to-one");
 });
 
 test("assertDeduplicateImplemented refuses only the strategy that cannot match", () => {
@@ -525,6 +528,53 @@ test("the mirror orientation runs the same procedure from the other handshake ro
     [1, 2, 3],
     [0, 0, 1],
   ]);
+});
+
+test("an accepted deduplicating invitation runs many-to-one end to end", async () => {
+  // The invite-and-accept path rather than two hand-authored configs: the
+  // acceptor's terms are the ones core derives from the invitation, so what runs
+  // here is the pair an accepted deduplicating invitation actually produces.
+  const inviterTerms = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: true,
+  });
+  const acceptorTerms = deriveAcceptedLinkageTerms(inviterTerms, "B");
+  expect(acceptorTerms.deduplicate).toBe(false);
+
+  const [connInviter, connAcceptor] = createMessagePipe();
+  const [inviter, acceptor] = await Promise.allSettled([
+    runExchange(
+      connInviter,
+      "initiator",
+      prepareForExchange({ linkageTerms: inviterTerms }, "A", rowsA, [
+        "first_name",
+      ]),
+      { psiLibrary },
+    ),
+    runExchange(
+      connAcceptor,
+      "responder",
+      prepareForExchange({ linkageTerms: acceptorTerms }, "B", rowsB, [
+        "first_name",
+      ]),
+      { psiLibrary },
+    ),
+  ]);
+
+  // The inviting party is the "many" side: its duplicate rows group onto the
+  // accepting party's single record, and the accepting party holds the mirror of
+  // that one table.
+  expect(fulfilled(inviter).associationTable).toStrictEqual([
+    [1, 2, 3],
+    [0, 0, 1],
+  ]);
+  expect(fulfilled(acceptor).associationTable).toStrictEqual([
+    [0, 0, 1],
+    [1, 2, 3],
+  ]);
+  expect(fulfilled(inviter).audit?.record.resultSize).toBe(3);
+  expect(fulfilled(acceptor).audit?.record.resultSize).toBe(3);
 });
 
 // The refused pairs abort BOTH parties at the post-terms resolution, before any
