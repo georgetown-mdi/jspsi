@@ -400,6 +400,11 @@ describe("managed exchange detail accounting of disclosures", () => {
     expect(
       page.getByRole("button", { name: /Export this accounting/ }).query(),
     ).toBeNull();
+    expect(
+      page
+        .getByText("Export it if you need to keep it", { exact: false })
+        .query(),
+    ).toBeNull();
   });
 
   test("a filed disclosure opens to the facts of that run, with the partner escaped", async () => {

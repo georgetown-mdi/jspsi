@@ -497,7 +497,7 @@ function DisclosureAccountingView({
       <p className={`${styles.small} ${styles.sub}`}>
         This accounting is kept in this browser and is deleted with the
         exchange.{" "}
-        {!unreadable && (
+        {!unreadable && entries.length > 0 && (
           <>
             Export it if you need to keep it, or hand an auditor a run record
             file you downloaded when that run finished.{" "}
