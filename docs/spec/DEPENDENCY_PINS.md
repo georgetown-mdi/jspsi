@@ -672,3 +672,76 @@ Two limits sit between a green run there and a bump being proved:
   assertion speaks for the `amd64` rootfs at the new digest and not for the
   `arm64` one. Reading the other architecture's release by hand, as above, is
   what covers it.
+
+## Bumping the default base image
+
+This is the second docker-ecosystem pin carrying its own bump section outside
+the machine-read `Upgrading ...` heading form -- consciously, per the
+convention [recorded above](#why-these-are-exact-pinned) alongside
+[the FIPS base image's section](#bumping-the-fips-base-image): a heading in
+that form is read only as a parenthesised list of npm package names, so
+`npm run check:dependabot-pin-coverage` has no way to hold either docker pin's
+bump procedure to a Dependabot config entry -- it is ecosystem-blind by
+construction, not merely unextended to this pin yet. Extending it to a heading
+form tagged by ecosystem is a separate call from this section, which exists to
+make the procedure below readable rather than to close that gap.
+
+`Dockerfile` pins `node:26-alpine`'s multi-arch index digest, in both stages,
+so the base moves only when someone edits that digest -- what the freeze
+covers and why the base is pinned by digest rather than by tag is in
+[The Docker image's dependency freeze](CONTAINER_IMAGES.md#the-docker-images-dependency-freeze).
+
+**The arrival signal.** Dependabot's docker ecosystem
+(`.github/dependabot.yml`, weekly on Monday, targeting `staging`) tracks the
+digest in the `FROM` and opens a pull request of its own when the
+`node:26-alpine` tag is rebuilt onto a newer image, the same cadence and the
+same never-batched treatment as [the FIPS base's](#bumping-the-fips-base-image).
+Dependabot's own commit edits only the `Dockerfile` `FROM` lines; nothing
+updates the mirrored literal below, so the pull request arrives with
+`npm run test:scripts` red by construction -- the freeze test's whole point,
+not a defect in the pull request.
+
+**The same-diff pair.** A digest bump lands with both of these or not at all:
+
+1. The digest in both of `Dockerfile`'s `FROM node:26-alpine@sha256:...`
+   lines. This is what the Dependabot pull request edits, and the only one of
+   the two it moves on its own.
+2. The `DEFAULT_BASE` literal in `scripts/dockerfile-freeze.test.mjs`.
+   `npm run test:scripts` stays red until it matches, so push the
+   reconciling edit onto the same pull request -- a second commit on the
+   Dependabot branch works; Dependabot rebases its own future pushes around a
+   manual commit it did not make -- rather than merging a red check.
+
+**What re-proves the result.** `image_smoke.yaml`'s pull-request path filter
+lists `Dockerfile`, so the pull request runs the full matrix: both the
+default and the FIPS legs rebuild, even though only the default base moved.
+The default leg's OS-layer Trivy scan (`vuln`, HIGH/CRITICAL, fixable findings
+only, against `.github/trivyignore`) is not scoped out the way the FIPS leg's
+currently is (see [Bumping the FIPS base image](#bumping-the-fips-base-image)),
+so it runs on this pull request as it does on every other -- a new snapshot
+carrying a fixable OS-layer finding fails the pull request rather than
+shipping. The same job also drives the assertions the freeze test cannot
+reach because they read a running container rather than the Dockerfile text:
+the account the image runs as and its writable set and symlink containment,
+the headless CLI invocation, a real file-drop exchange between two containers
+of the built image, and `scripts/assert-image-capabilities.mjs`'s walk of
+what the shipped setup scripts ask of the image.
+
+**What beyond the digest deserves a look.** `node:26-alpine` is a floating tag
+underneath its digest, so a rebuild the tag picked up can carry a different
+Node minor or patch release, and a different bundled npm, than the digest it
+replaces -- and nothing in `image_smoke.yaml` prints or asserts either
+version. Read them before merging, the same way the smoke job reads a
+container's shell:
+`docker run --rm --entrypoint sh node:26-alpine@sha256:<new-digest> -c 'node --version && npm --version'`.
+The npm version is the one worth the look: [the npm floor](#the-install-script-policy-allowscripts)
+the `allowScripts` install-script policy needs is a property of exactly this
+digest, which is why that section states a measured bundled-npm value for the
+digest pinned at the time it was written rather than deriving it from
+anything checked automatically -- nothing re-measures it when the digest
+moves, so a bump that changes it leaves that section's stated value stale
+until someone updates it in the same diff. A digest that moves the bundled
+npm below 11.16.0 would carry the policy silently off, and below 11.17.0
+falls under the floor that section states as the builder's intent; either is
+worth a line in the pull request, and updating the stated value either way
+keeps that section honest, even though nothing here turns red over either.
