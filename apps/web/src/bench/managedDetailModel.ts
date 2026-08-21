@@ -130,11 +130,12 @@ export function connectionRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
 }
 
 /**
- * One run-history entry: what a single run did and what it disclosed. Today the
- * record persists only the most-recent run's bookkeeping (`lastRun`), never a per-
- * run disclosure ledger (a separate future item), so exactly one entry is derivable
- * -- the most recent run. This shape is deliberately per-entry so a fuller ledger
- * can slot in later without reshaping the view.
+ * One run-history entry: what a single run did and what it disclosed. The record's
+ * own bookkeeping (`lastRun`) keeps only the most recent run, so exactly one entry
+ * is derivable here. A completed run's disclosure is not read from this bookkeeping
+ * at all -- it is the run's own exchange record, filed in the exchange's accounting
+ * of disclosures (see {@link ./disclosureAccountingModel.ts}); this entry covers
+ * the runs that accounting cannot, the ones that did not complete.
  */
 export interface RunHistoryEntry {
   /** ISO 8601 UTC instant of the run. */
@@ -159,7 +160,7 @@ const OUTCOME_LABELS: Record<ManagedExchangeLastRun["outcome"], string> = {
 
 /** The disclosure line for a succeeded run. */
 const SUCCEEDED_DISCLOSURE =
-  "Disclosed the agreed terms (shown above). The full record file was offered to download when the run completed.";
+  "Disclosed the agreed terms (shown above). The run's own record states exactly what it disclosed; it is filed in the accounting of disclosures below, and was offered to download when the run completed.";
 
 /** The disclosure line for a run that provably stopped before any data left this
  * party (a no-show, or a failure that fired before the data exchange began). */
@@ -236,8 +237,8 @@ function nonSucceededDisclosure(lastRun: ManagedExchangeLastRun): string {
  * terms (which the configuration view above names); a run that stopped before the
  * data exchange disclosed nothing; and a run that failed after the handshake, where
  * the record cannot prove whether data reached the partner, asserts neither way (see
- * {@link nonSucceededDisclosure}). A per-run disclosure ledger is a separate future
- * item; this renders the one run the record knows about.
+ * {@link nonSucceededDisclosure}). This renders the one run the bookkeeping knows
+ * about; every completed run's disclosure is in the accounting of disclosures.
  */
 export function runHistoryEntries(
   record: Pick<ManagedExchangeRecord, "lastRun">,

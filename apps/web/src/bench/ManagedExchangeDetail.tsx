@@ -3,6 +3,15 @@ import { useState } from "react";
 import { Alert, Button, Checkbox, NumberInput, TextInput } from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 
+import { DisclosureSection } from "@components/DisclosureSection";
+import { triggerBlobDownload } from "@components/blobDownload";
+
+import {
+  DISCLOSURE_EXPORT_MIME,
+  disclosureAccountingCsv,
+  disclosureAccountingFileName,
+  disclosureEntries,
+} from "./disclosureAccountingModel";
 import {
   LABEL_GUIDANCE,
   MAX_LABEL_LENGTH,
@@ -25,25 +34,29 @@ import type {
   ManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
 import type { ConfigRow } from "./managedDetailModel";
+import type { DisclosureAccounting } from "@psi/disclosureAccounting";
+import type { DisclosureFact } from "./disclosureAccountingModel";
 
 /**
  * The managed exchange detail sections composed onto the per-partnership home at
  * `/saved/$id` (below the run affordance in {@link ./ManagedRunSurface.tsx}): the
  * read-only configuration a compliance user inspects, the local-fields editor, the
- * run history, and the self-attested record view. Each is its own component so the
+ * run history, and the accounting of disclosures. Each is its own component so the
  * run surface stays the run affordance and these compose beside it; the derivations
- * and copy are the pure {@link ./managedDetailModel.ts}'s.
+ * and copy are the pure {@link ./managedDetailModel.ts}'s and
+ * {@link ./disclosureAccountingModel.ts}'s.
  *
  * The agreed terms are read-only here -- fixed for this partnership; a change to
  * them is a new exchange, not an in-place edit ({@link ConfigurationView} says so
  * and offers the fast re-invite on the same terms) -- while the local fields edit
- * in place without touching the partnership ({@link LocalFieldsEditor}). The record
- * view frames what it shows
- * honestly as self-attested and links to the existing verify page; it never claims
- * a signed receipt.
+ * in place without touching the partnership ({@link LocalFieldsEditor}). The
+ * accounting frames what it shows honestly as self-attested and links to the
+ * existing verify page; it never claims a signed receipt.
  */
 export function ManagedExchangeDetail({
   record,
+  accounting,
+  accountingUnreadable,
   onSaveLocalFields,
   onReinviteToChangeTerms,
   canReinvite,
@@ -51,6 +64,13 @@ export function ManagedExchangeDetail({
   reinviteFailed,
 }: {
   record: ManagedExchangeRecord;
+  /** This exchange's accounting of disclosures, read from its own sibling store;
+   * `undefined` while it loads, when the exchange has never completed a run, or
+   * when the read failed (which `accountingUnreadable` distinguishes). */
+  accounting: DisclosureAccounting | undefined;
+  /** Whether reading the accounting failed. Distinguished from an empty one so a
+   * failed read can never render as "nothing was disclosed". */
+  accountingUnreadable: boolean;
   /** Persist an in-place edit to the local fields (label, max-token-age policy).
    * Rejects on a store failure; the editor surfaces the failure and keeps the
    * form. */
@@ -82,7 +102,10 @@ export function ManagedExchangeDetail({
       />
       <LocalFieldsEditor record={record} onSave={onSaveLocalFields} />
       <RunHistory record={record} />
-      <RecordView record={record} />
+      <DisclosureAccountingView
+        accounting={accounting}
+        unreadable={accountingUnreadable}
+      />
     </>
   );
 }
@@ -331,10 +354,11 @@ function LocalFieldsEditor({
 }
 
 /**
- * The run history: one entry per run with what was disclosed. Today the record
- * persists only the most-recent run's bookkeeping (a per-run disclosure ledger is a
- * separate future item), so this renders around the most recent run honestly -- the
- * section is shaped per-entry so a fuller ledger can slot in later. A
+ * The run history: what the most recent run DID, whether or not it completed. The
+ * record's own bookkeeping keeps only that one run (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), which is why this
+ * section is scoped to it and says so; the disclosures of every completed run are
+ * the accounting below, which a run that failed before disclosing never enters. A
  * saved-but-never-run exchange shows the honest empty state.
  */
 function RunHistory({ record }: { record: ManagedExchangeRecord }) {
@@ -349,7 +373,8 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
       ) : (
         <>
           <p className={`${styles.small} ${styles.sub}`}>
-            Only the most recent run is kept in this browser.
+            Only the most recent run&apos;s outcome is kept. Every completed
+            run&apos;s disclosure is in the accounting below.
           </p>
           {entries.map((entry) => (
             <div key={entry.at} className={styles.dlRow}>
@@ -365,50 +390,104 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
   );
 }
 
+/** One disclosure fact as a configuration row, so a disclosure renders in the same
+ * voice as the agreed terms above it: its values when it carries any, its named
+ * empty state when it does not. */
+function factRow(fact: DisclosureFact): ConfigRow {
+  return fact.values.length > 0
+    ? { label: fact.label, values: fact.values }
+    : { label: fact.label, muted: fact.muted };
+}
+
 /**
- * The record view for the most recent run: what the record honestly shows. The web
- * app does not persist the per-run exchange record file per exchange -- it is
- * offered to download at run completion (see docs/spec/EXCHANGE_RECORD.md) -- so
- * this view surfaces the run's self-attested facts (from `lastRun`) and explains
- * plainly that the full record file is saved at run completion, linking to the
- * existing verify page for checking a stored file. It is framed as self-attested and
- * never claims a signed, non-repudiable receipt.
+ * The accounting of disclosures: one entry per completed run, each read off that
+ * run's own self-attested exchange record (see docs/spec/EXCHANGE_RECORD.md), plus
+ * the CSV a compliance reader is handed. The entries are the records themselves
+ * rather than a summary beside them, so this surface has no facts of its own to
+ * drift from the artifact.
+ *
+ * A failed read renders as its own state, never as an empty accounting: "nothing
+ * was disclosed" is a claim, and this surface must not make it on a read it could
+ * not perform. Each entry starts collapsed behind its date and partner, so a long
+ * history stays scannable and the reader opens the run they came for.
  */
-function RecordView({ record }: { record: ManagedExchangeRecord }) {
-  const { lastRun } = record;
+function DisclosureAccountingView({
+  accounting,
+  unreadable,
+}: {
+  accounting: DisclosureAccounting | undefined;
+  unreadable: boolean;
+}) {
+  const [openedNonce, setOpenedNonce] = useState<string>();
+  const entries = accounting === undefined ? [] : disclosureEntries(accounting);
+  const exportCsv = () => {
+    if (accounting === undefined) return;
+    triggerBlobDownload(
+      disclosureAccountingFileName(new Date()),
+      disclosureAccountingCsv(accounting),
+      DISCLOSURE_EXPORT_MIME,
+    );
+  };
   return (
     <div className={styles.callout}>
-      <h2 className={styles.eyebrow}>Record</h2>
+      <h2 className={styles.eyebrow}>Accounting of disclosures</h2>
       <p className={styles.small}>
-        The record for a run is a self-attested account of what this exchange
-        disclosed -- built from what both sides already hold, and deliberately
-        unsigned. It is an honest local audit note, not a signed or
+        Every completed run files its own record here: who you disclosed to,
+        under which agreement and for what purpose, the categories of data that
+        moved each way, how many records you exposed, and -- when both sides
+        received the result -- its size. Each entry is that run&apos;s
+        self-attested record, built from what both sides already hold and
+        deliberately unsigned: an honest local account, not a signed or
         non-repudiable receipt.
       </p>
-      {lastRun !== undefined && lastRun.outcome === "succeeded" ? (
+      {unreadable ? (
+        <Alert color="red" title="This accounting could not be read">
+          The disclosure records stored for this exchange could not be read, so
+          they are not shown. This does not mean nothing was disclosed. An app
+          upgrade can leave a stored accounting unreadable to this version of
+          the app, and there is no export of it from here. What remains is any
+          record file you downloaded yourself when a run finished; a run that
+          finished unattended left none.
+        </Alert>
+      ) : entries.length === 0 ? (
         <p className={styles.small}>
-          The most recent run succeeded on{" "}
-          <span className={styles.mono}>{dateLabel(new Date(lastRun.at))}</span>
-          . Its full record file was offered to download when the run finished;
-          this browser does not keep a copy per exchange.
-        </p>
-      ) : lastRun !== undefined ? (
-        <p className={styles.small}>
-          The most recent run did not complete (see the run history above), so
-          no completed run is recorded for this exchange yet. A run&apos;s full
-          record file is offered to download when the run finishes; this browser
-          does not keep a copy per exchange.
+          No run of this exchange has completed, so it has disclosed nothing.
+          Each completed run will file its record here.
         </p>
       ) : (
-        <p className={styles.small}>
-          No completed run is recorded for this exchange yet. A run&apos;s full
-          record file is offered to download when the run finishes; this browser
-          does not keep a copy per exchange.
-        </p>
+        <>
+          <p className={`${styles.small} ${styles.sub}`}>
+            {entries.length === 1
+              ? "1 disclosure recorded."
+              : `${entries.length} disclosures recorded.`}
+          </p>
+          {entries.map((entry) => (
+            <DisclosureSection
+              key={entry.bindingNonce}
+              label={entry.when}
+              summary={entry.partner}
+              open={openedNonce === entry.bindingNonce}
+              onToggle={(open) =>
+                setOpenedNonce(open ? entry.bindingNonce : undefined)
+              }
+              headingOrder={3}
+            >
+              {entry.facts.map((fact) => (
+                <ConfigRowItem key={fact.label} row={factRow(fact)} />
+              ))}
+            </DisclosureSection>
+          ))}
+          <Button variant="default" onClick={exportCsv} mt="sm">
+            Export this accounting (CSV)
+          </Button>
+        </>
       )}
-      <p className={styles.small}>
-        To check a record file you saved, open the{" "}
-        <Link to="/verify">verify page</Link> and drop it in.
+      <p className={`${styles.small} ${styles.sub}`}>
+        This accounting is kept in this browser and is deleted with the
+        exchange. Export it if you need to keep it, or hand an auditor a run
+        record file you downloaded when that run finished. To check a record
+        file you saved, open the <Link to="/verify">verify page</Link> and drop
+        it in.
       </p>
     </div>
   );

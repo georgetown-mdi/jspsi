@@ -1,0 +1,128 @@
+import { buildExchangeRecord } from "@psilink/core";
+
+import type {
+  CommittedPayload,
+  ExchangeRecord,
+  LinkageTerms,
+} from "@psilink/core";
+
+/**
+ * Real exchange records for the accounting-of-disclosures suites, built through
+ * core's own {@link buildExchangeRecord} rather than hand-written object literals.
+ * The accounting's contract is that every fact it shows is a field of the record
+ * the run produced, so a fixture that invented the record could not test it: a
+ * field core stops deriving would keep passing against a literal.
+ *
+ * Shared by the Node unit suites and the browser suite, which need the same
+ * records.
+ */
+
+/** The linkage terms both sides of the fixture exchange agree, carrying the
+ * governance fields an accounting reads: the agreement and its purpose, the
+ * linkage fields the keys reference, and the payload data dictionary that
+ * describes a disclosed column. */
+const LOCAL_TERMS: LinkageTerms = {
+  version: "1.0.0",
+  identity: "County Health Dept",
+  date: "2026-01-01",
+  algorithm: "psi",
+  linkageStrategy: "cascade",
+  output: { expectsOutput: true, shareWithPartner: true },
+  deduplicate: false,
+  legalAgreement: {
+    reference: "MOU-2025-0042",
+    purpose: "Evaluate shared program enrollment",
+    expirationDate: "2027-01-01",
+  },
+  linkageFields: [
+    { name: "last_name", type: "last_name" },
+    { name: "date_of_birth", type: "date_of_birth" },
+  ],
+  linkageKeys: [
+    {
+      name: "NAME_DOB",
+      elements: [{ field: "last_name" }, { field: "date_of_birth" }],
+    },
+  ],
+  payload: {
+    send: [{ name: "dose", description: "Administered dose" }],
+    receive: [{ name: "clinic" }],
+  },
+};
+
+/** The payload this party committed as sent, and the one it committed as received:
+ * the columns the accounting reports as the categories disclosed each way. */
+const LOCAL_PAYLOAD_SENT: CommittedPayload = {
+  columns: ["dose"],
+  rows: [["10mg"]],
+};
+const PARTNER_PAYLOAD_RECEIVED: CommittedPayload = {
+  columns: ["clinic"],
+  rows: [["north"]],
+};
+
+/** How a fixture record differs from the standing one. */
+export interface DisclosureRecordOverrides {
+  /** The partner's self-asserted identity, as it reaches the record byte-exactly
+   * -- the hook a suite uses to plant partner-controlled text. */
+  partnerIdentity?: string;
+  /** The agreement reference and purpose, or `null` for terms that name no
+   * agreement at all. */
+  legalAgreement?: LinkageTerms["legalAgreement"] | null;
+  /** This party's contributed row count. */
+  recordsExposed?: number;
+  /** The intersection size, or `null` for the single-output case the record omits
+   * it in. */
+  resultSize?: number | null;
+  /** The run instant, which is the entry's identity. */
+  createdAt?: string;
+  /** The self-facing retention/disposition pointer. */
+  retentionDisposition?: string;
+  /** The matching algorithm, so a suite can build a count-only disclosure. */
+  algorithm?: LinkageTerms["algorithm"];
+  /** The one column name the partner committed as received, as it reaches the
+   * record byte-exactly -- the hook a suite uses to plant partner-controlled text
+   * in a payload column name rather than in an identity. */
+  partnerPayloadColumn?: string;
+}
+
+/** Build one run's self-attested exchange record. */
+export async function disclosureRecord(
+  overrides: DisclosureRecordOverrides = {},
+): Promise<ExchangeRecord> {
+  const agreement =
+    overrides.legalAgreement === null
+      ? undefined
+      : (overrides.legalAgreement ?? LOCAL_TERMS.legalAgreement);
+  // The agreement key is omitted rather than set to undefined: the canonical
+  // encoding the record hashes its terms through rejects an explicit undefined.
+  const { legalAgreement: _declared, ...termsWithoutAgreement } = LOCAL_TERMS;
+  const localTerms: LinkageTerms = {
+    ...termsWithoutAgreement,
+    algorithm: overrides.algorithm ?? LOCAL_TERMS.algorithm,
+    ...(agreement !== undefined ? { legalAgreement: agreement } : {}),
+  };
+  const built = await buildExchangeRecord({
+    localTerms,
+    partnerTerms: {
+      ...localTerms,
+      identity: overrides.partnerIdentity ?? "Riverbend Schools",
+    },
+    recordsExposed: overrides.recordsExposed ?? 2,
+    ...(overrides.resultSize === null
+      ? {}
+      : { resultSize: overrides.resultSize ?? 1 }),
+    ...(overrides.retentionDisposition !== undefined
+      ? { retentionDisposition: overrides.retentionDisposition }
+      : {}),
+    localPayloadSent: LOCAL_PAYLOAD_SENT,
+    partnerPayloadReceived:
+      overrides.partnerPayloadColumn === undefined
+        ? PARTNER_PAYLOAD_RECEIVED
+        : { columns: [overrides.partnerPayloadColumn], rows: [["north"]] },
+    // One matched pair: this party's row 0 to the partner's row 0.
+    associationTable: [[0], [0]],
+    createdAt: overrides.createdAt ?? "2026-07-01T09:00:00.000Z",
+  });
+  return built.record;
+}

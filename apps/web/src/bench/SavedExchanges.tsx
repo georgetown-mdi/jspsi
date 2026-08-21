@@ -347,8 +347,9 @@ export function DeleteExchangeButton({
       >
         <p>
           Delete {named}? This removes everything this browser holds for it --
-          the terms, the stored secret, and its run history -- in one step. It
-          cannot be undone here.
+          the terms, the stored secret, its run history, and its accounting of
+          disclosures -- in one step. It cannot be undone here. Export the
+          accounting first if you need to keep it.
         </p>
         <p className={`${styles.small} ${styles.sub}`}>
           This only removes your copy: your partner is not notified, and their

@@ -14,11 +14,14 @@ import {
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
 import { ManagedExchangeDetail } from "@bench/ManagedExchangeDetail";
+import { appendDisclosureRecord } from "@psi/disclosureAccounting";
+import { disclosureEntries } from "@bench/disclosureAccountingModel";
+
+import { disclosureRecord } from "../utils/disclosureFixtures";
 
 import { createAppMount } from "./renderApp";
 
 import type {
-  ManagedExchangeLastRun,
   ManagedExchangeLocalEdits,
   ManagedExchangeSide,
   NewManagedExchange,
@@ -27,9 +30,9 @@ import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The managed exchange detail sections, rendered: the read-only configuration with
 // its re-invite affordance (never an edit control over the terms), the editable
-// local fields, and the self-attested record view (no signed-receipt claim). The
-// stubbed Link is what lets the record view's /verify link render outside a
-// router.
+// local fields, and the accounting of disclosures (no signed-receipt claim, and a
+// failed read that never reads as "nothing was disclosed"). The stubbed Link is
+// what lets the accounting's /verify link render outside a router.
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -71,6 +74,8 @@ describe("managed exchange detail configuration", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        accounting: undefined,
+        accountingUnreadable: false,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -110,6 +115,8 @@ describe("managed exchange detail configuration", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("acceptor"),
+        accounting: undefined,
+        accountingUnreadable: false,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: false,
@@ -155,6 +162,8 @@ describe("managed exchange detail configuration", () => {
             },
           }),
         }),
+        accounting: undefined,
+        accountingUnreadable: false,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -188,6 +197,8 @@ describe("managed exchange detail configuration", () => {
       app.render(
         createElement(ManagedExchangeDetail, {
           record: record("inviter"),
+          accounting: undefined,
+          accountingUnreadable: false,
           onSaveLocalFields: () => Promise.resolve(),
           onReinviteToChangeTerms: () => {
             reinviting = true;
@@ -242,6 +253,8 @@ describe("managed exchange detail local fields", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        accounting: undefined,
+        accountingUnreadable: false,
         onSaveLocalFields: (edits) => {
           saved.push(edits);
           return Promise.resolve();
@@ -274,6 +287,8 @@ describe("managed exchange detail local fields", () => {
           tokenMaxAgeDays: 90,
           expires: "2026-10-01T00:00:00.000Z",
         }),
+        accounting: undefined,
+        accountingUnreadable: false,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -293,6 +308,8 @@ describe("managed exchange detail local fields", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
+        accounting: undefined,
+        accountingUnreadable: false,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -311,15 +328,13 @@ describe("managed exchange detail local fields", () => {
   });
 });
 
-describe("managed exchange detail record view", () => {
-  test("frames the record as self-attested and unsigned, never a signed receipt", async () => {
-    const lastRun: ManagedExchangeLastRun = {
-      at: "2026-07-01T09:00:00.000Z",
-      outcome: "succeeded",
-    };
+describe("managed exchange detail accounting of disclosures", () => {
+  test("frames the accounting as self-attested and unsigned, never a signed receipt", async () => {
     app.render(
       createElement(ManagedExchangeDetail, {
-        record: record("inviter", { lastRun }),
+        record: record("inviter"),
+        accounting: undefined,
+        accountingUnreadable: false,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -344,18 +359,12 @@ describe("managed exchange detail record view", () => {
     ).toBeNull();
   });
 
-  test("a non-succeeded last run points at run history rather than claiming no run", async () => {
-    // With a failed last run, the record view must not read "no completed run is
-    // recorded" bare while the run history above shows that failed run; it says the
-    // most recent run did not complete and points at the history.
-    const lastRun: ManagedExchangeLastRun = {
-      at: "2026-07-01T09:00:00.000Z",
-      outcome: "failed",
-      failureKind: "transport",
-    };
+  test("an exchange with no completed run says so, and offers no export", async () => {
     app.render(
       createElement(ManagedExchangeDetail, {
-        record: record("inviter", { lastRun }),
+        record: record("inviter"),
+        accounting: undefined,
+        accountingUnreadable: false,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -365,11 +374,177 @@ describe("managed exchange detail record view", () => {
     );
 
     await expect
-      .element(
-        page.getByText("The most recent run did not complete", {
-          exact: false,
+      .element(page.getByText("it has disclosed nothing", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page.getByRole("button", { name: /Export this accounting/ }).query(),
+    ).toBeNull();
+  });
+
+  test("a filed disclosure opens to the facts of that run, with the partner escaped", async () => {
+    // The record keeps the partner's identity byte-exact for the cross-party
+    // validation, so this surface is where the bidi override becomes visible.
+    const accounting = appendDisclosureRecord(
+      undefined,
+      await disclosureRecord({ partnerIdentity: "Riverbend‮Schools" }),
+    );
+    const [entry] = disclosureEntries(accounting);
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting,
+        accountingUnreadable: false,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    // The entry is named by its own instant, and the partner reaches the DOM
+    // escaped -- in the collapsed summary and again in the opened row.
+    const toggle = page.getByRole("button", {
+      name: entry.when,
+      exact: false,
+    });
+    await expect.element(toggle).toBeInTheDocument();
+    expect(
+      page.getByText("Riverbend\\u202eSchools").elements().length,
+    ).toBeGreaterThan(0);
+
+    await toggle.click();
+
+    await expect.element(page.getByText("MOU-2025-0042")).toBeVisible();
+    await expect
+      .element(page.getByText("Evaluate shared program enrollment"))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: /Export this accounting/ }))
+      .toBeInTheDocument();
+  });
+
+  test("two disclosures sharing a createdAt open and close independently", async () => {
+    // createdAt is millisecond-resolution and not guaranteed unique across runs;
+    // only the record's own bindingNonce distinguishes them, so the view must key
+    // and toggle on it rather than on the shared instant.
+    const sharedCreatedAt = "2026-07-01T09:00:00.000Z";
+    const accounting = appendDisclosureRecord(
+      appendDisclosureRecord(
+        undefined,
+        await disclosureRecord({
+          partnerIdentity: "Riverbend Schools",
+          createdAt: sharedCreatedAt,
+          recordsExposed: 11,
         }),
+      ),
+      await disclosureRecord({
+        partnerIdentity: "Falls County Clinic",
+        createdAt: sharedCreatedAt,
+        recordsExposed: 23,
+      }),
+    );
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting,
+        accountingUnreadable: false,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    const firstToggle = page.getByRole("button", {
+      name: "Riverbend Schools",
+      exact: false,
+    });
+    const secondToggle = page.getByRole("button", {
+      name: "Falls County Clinic",
+      exact: false,
+    });
+
+    await secondToggle.click();
+
+    await expect.element(page.getByText("23", { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByText("11", { exact: true }))
+      .not.toBeVisible();
+
+    await firstToggle.click();
+
+    await expect.element(page.getByText("11", { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByText("23", { exact: true }))
+      .not.toBeVisible();
+  });
+
+  test("an accounting that could not be read is never shown as an empty one", async () => {
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting: undefined,
+        accountingUnreadable: true,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    await expect
+      .element(page.getByText("This accounting could not be read"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("does not mean nothing was disclosed", { exact: false }),
       )
       .toBeInTheDocument();
+    // The empty-accounting copy would be a claim this read cannot support.
+    expect(
+      page.getByText("it has disclosed nothing", { exact: false }).query(),
+    ).toBeNull();
+  });
+
+  test("an unreadable accounting names the upgrade case and offers no remedy it cannot deliver", async () => {
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting: undefined,
+        accountingUnreadable: true,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    // The cause an operator can act on, and the two honest limits: nothing to
+    // export from this state, and a record file only where one was downloaded --
+    // which an unattended run never offered.
+    await expect
+      .element(page.getByText("An app upgrade can leave", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("no export of it from here", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("record file you downloaded yourself", { exact: false }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("finished unattended left none", { exact: false }),
+      )
+      .toBeInTheDocument();
+    // The export affordance is absent, so the copy cannot be pointing at one.
+    expect(
+      page.getByRole("button", { name: /Export this accounting/ }).query(),
+    ).toBeNull();
   });
 });

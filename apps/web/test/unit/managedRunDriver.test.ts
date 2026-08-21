@@ -4,14 +4,21 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import log from "loglevel";
 
+import { runExchange } from "@psilink/core";
+
+import {
+  DISCLOSURE_NOT_FILED_WARNING,
+  runManagedExchangeInBrowser,
+} from "../../src/psi/managedRunDriver.js";
 import {
   FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
   FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
 } from "../../src/psi/exchangeLifecycle.js";
+import { appendDisclosureRecordToStore } from "../../src/psi/disclosureAccountingStore.js";
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { beginManagedRendezvous } from "../../src/psi/managedRendezvous.js";
+import { disclosureRecord } from "../utils/disclosureFixtures.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
-import { runManagedExchangeInBrowser } from "../../src/psi/managedRunDriver.js";
 import { waitForIncomingConnection } from "../../src/psi/waitForConnection.js";
 
 import type { ManagedExchangeRecord } from "../../src/psi/managedExchangeRecord.js";
@@ -103,6 +110,9 @@ vi.mock("../../src/psi/managedInputHandle.js", () => ({
     Promise.resolve({ rows: [], columns: [] }),
   ),
 }));
+vi.mock("../../src/psi/disclosureAccountingStore.js", () => ({
+  appendDisclosureRecordToStore: vi.fn(() => Promise.resolve()),
+}));
 vi.mock("../../src/psi/managedPreparedExchange.js", () => ({
   prepareManagedRerunExchange: vi.fn(() => ({})),
 }));
@@ -128,7 +138,9 @@ vi.mock("@psilink/core", async (importOriginal) => {
 });
 
 const mockedAuthenticate = vi.mocked(authenticateExchange);
+const mockedAppendDisclosure = vi.mocked(appendDisclosureRecordToStore);
 const mockedRendezvous = vi.mocked(beginManagedRendezvous);
+const mockedRunExchange = vi.mocked(runExchange);
 const mockedOpen = vi.mocked(openPeerMessageConnection);
 const mockedWaitForIncoming = vi.mocked(waitForIncomingConnection);
 
@@ -506,4 +518,93 @@ describe("runManagedExchangeInBrowser", () => {
       expect(onWarning).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("filing the run's disclosure", () => {
+  /** Make this run's exchange produce a real self-attested record, the way a
+   * completed exchange does. The cast is the shape the assertions need: the rest of
+   * `ExchangeResult` is the mocked outputs builder's business, not this run's. */
+  async function exchangeYieldsRecord() {
+    const record = await disclosureRecord();
+    mockedRunExchange.mockResolvedValueOnce({
+      audit: {
+        record,
+        keys: { version: "psilink-exchange-keys/v1", salts: {} },
+      },
+    } as unknown as Awaited<ReturnType<typeof runExchange>>);
+    return record;
+  }
+
+  test("files this run's record against this exchange, once", async () => {
+    // The gap this closes: a run that completes with nobody present had nowhere to
+    // leave a record of what it disclosed, the completion download being an
+    // attended affordance.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    const record = await exchangeYieldsRecord();
+
+    await runDriver(new AbortController().signal);
+
+    expect(mockedAppendDisclosure.mock.calls).toEqual([[RECORD.id, record]]);
+  });
+
+  test("files the disclosure before the run yields its outputs", async () => {
+    // A tab closed on the completion screen must not be what decides whether the
+    // disclosure was recorded, so the entry lands before the outputs surface.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    await exchangeYieldsRecord();
+    let fileEntry: (() => void) | undefined;
+    mockedAppendDisclosure.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        fileEntry = resolve;
+      }),
+    );
+    let settled = false;
+
+    const running = runDriver(new AbortController().signal).then((result) => {
+      settled = true;
+      return result;
+    });
+    await tick();
+    expect(settled).toBe(false);
+
+    fileEntry?.();
+    await expect(running).resolves.toMatchObject({ exchange: OUTPUTS });
+  });
+
+  test("files nothing when the exchange produced no record", async () => {
+    // Core omits the audit only when building the record threw after the exchange
+    // succeeded; there is nothing to file, and inventing an entry would attest a
+    // record that does not exist.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+
+    await runDriver(new AbortController().signal);
+
+    expect(mockedAppendDisclosure).not.toHaveBeenCalled();
+  });
+
+  test("a failed filing warns the operator and leaves the run's results standing", async () => {
+    // The exchange has already happened, so a failed filing can neither undo it nor
+    // make the run a failure: it points the operator at the completion download,
+    // which is the only remaining route to a record of this disclosure.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    await exchangeYieldsRecord();
+    mockedAppendDisclosure.mockRejectedValueOnce(new Error("quota exceeded"));
+    const logged = vi.spyOn(log, "error").mockImplementation(() => {});
+    const onWarning = vi.fn();
+
+    const result = await runDriver(new AbortController().signal, onWarning);
+
+    expect(result.exchange).toBe(OUTPUTS);
+    expect(onWarning.mock.calls).toEqual([[DISCLOSURE_NOT_FILED_WARNING]]);
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
 });

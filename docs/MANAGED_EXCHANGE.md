@@ -807,11 +807,41 @@ attack](#telling-a-desync-from-an-attack)).
 What each run disclosed is accounted for **run by run**. Every successful run
 produces the same self-attested exchange record a one-shot exchange does -- this
 party's own local, unsigned account of what it disclosed on that run, carrying
-no protected value (see [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md)) -- so a
-recurring partnership's disclosures are evidenced by the set of those records
-the operator retains, one per run. Where an accounting of disclosures applies,
-they are the per-exchange source it draws on (see
-[COMPLIANCE.md](COMPLIANCE.md#hipaa-considerations)).
+no protected value (see [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md)) -- and a
+managed exchange files each of them in its own [accounting of
+disclosures](#the-accounting-of-disclosures).
+
+## The accounting of disclosures
+
+Each managed exchange keeps its own accounting of what it has disclosed: one
+entry per completed run, each entry that run's self-attested exchange record.
+It is the per-exchange source an operator draws a HIPAA accounting of
+disclosures or a FERPA disclosure record from (see
+[COMPLIANCE.md](COMPLIANCE.md#hipaa-considerations)), and it is on the
+exchange's own page, below its run history.
+
+- **It is the records, not a summary of them.** An entry shows what that run's
+  record says -- the partner, the governing agreement and the purpose of the
+  disclosure under it, the categories of data that moved each way, how many
+  records this party exposed, the result size where both parties received the
+  result, and the instant -- and says "not recorded" where the record carries
+  nothing, rather than inferring a value from elsewhere. It is self-attested and
+  unsigned, exactly as the record is: an honest local account, not a signed or
+  non-repudiable receipt.
+- **A run files its own entry, present or not.** The entry is written as part of
+  the run, before it reports its results. This is what an unattended run needs:
+  the record file is otherwise offered only as a download when the run finishes,
+  which requires somebody there to take it.
+- **A run that did not complete is not in it.** Nothing was disclosed, so there
+  is no record to file; the run history above says what happened instead.
+- **It is exportable.** One action writes the whole accounting as a CSV, one row
+  per run, for handing to a compliance reader.
+- **It stays in this browser, and is deleted with the exchange.** Nothing prunes
+  it -- a silently dropped entry would falsify the account -- and it is not
+  carried in the export/import artifact, which migrates the runnable exchange
+  rather than its history. Export the accounting before deleting or handing off
+  the exchange; the record files offered at a run's completion stand in only for
+  the runs somebody was there to download one from.
 
 ## Surviving storage eviction
 
@@ -909,7 +939,9 @@ behind a detected loss.
 
 Removing a managed exchange is a first-class, always-available action, and it
 removes **everything the browser holds for it in one step**: the record, the
-secret, the persisted input-file handle, the schedule, and the run bookkeeping.
+secret, the persisted input-file handle, the schedule, the run bookkeeping, and
+its [accounting of disclosures](#the-accounting-of-disclosures) -- which is why
+the confirm says to export the accounting first if it must be kept.
 Deletion is local and unilateral -- it does not notify the partner, whose own
 copy stands until they delete it or the partnership is re-established by
 re-invite -- and it is not secret expiry: an age bound (when set) caps how long
@@ -926,5 +958,6 @@ until then).
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges) - the browser at-rest threat model, the discard-secret reversal, the rollback and metadata-at-rest analyses, and the egress-hardening limits
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-exchange-authentication) - the shared-secret rotation, `token_max_age_days`, and re-invite recovery the managed lifecycle reuses
 - [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md) - the self-attested per-run record of what this party disclosed, produced by every successful run
+- [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-accounting-of-disclosures) - the accounting of disclosures' stored shape, its append rule, and its retention
 - [COMPLIANCE.md](COMPLIANCE.md#hipaa-considerations) - how those per-run records serve an accounting of disclosures
 - [DEPLOYMENT.md](DEPLOYMENT.md) - the hosted web app deployment posture and the reverse-proxy responsibilities

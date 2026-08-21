@@ -58,11 +58,22 @@ export const MANAGED_EXCHANGE_STORE_NAME = "records";
  */
 export const MANAGED_EXCHANGE_LOCAL_STORE_NAME = "localState";
 
+/**
+ * The object store holding a record's accounting of disclosures -- its runs'
+ * self-attested exchange records -- keyed by the record's `id`. A SEPARATE store
+ * for the reason the local-state store is one: the record schema is
+ * reader-rejects-unknown and its `lastRun` is closed enums by design, and the
+ * export artifact must not carry the accounting (the exporter reads only the
+ * records store), so a sibling makes both structural. Its shape is governed by
+ * {@link ./disclosureAccounting.ts}.
+ */
+export const MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME = "disclosures";
+
 /** The database schema version this build opens. Bump only for an IndexedDB
  * structural migration (a new object store or index), never for a change to the
  * record's own `schemaVersion`, which the record schema governs.
  * @internal */
-export const IDB_VERSION = 2;
+export const IDB_VERSION = 3;
 
 /**
  * Open (creating or upgrading) the managed-exchange database. The records store is
@@ -86,6 +97,8 @@ export function openManagedExchangeDatabase(): Promise<IDBDatabase> {
         db.createObjectStore(MANAGED_EXCHANGE_STORE_NAME, { keyPath: "id" });
       if (!db.objectStoreNames.contains(MANAGED_EXCHANGE_LOCAL_STORE_NAME))
         db.createObjectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
+      if (!db.objectStoreNames.contains(MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME))
+        db.createObjectStore(MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME);
     };
     request.onsuccess = () => {
       const db = request.result;
@@ -848,21 +861,34 @@ export async function reviveSpentManagedExchange(
 /**
  * Delete a managed exchange in one step, removing everything the browser holds
  * for it -- the record, the secret, the input-file handle, the schedule, the run
- * bookkeeping, AND the local sibling state (the backup marker and any spent
- * state) -- so nothing is left behind. The record and its sibling state are removed
- * in one transaction spanning both stores, so a delete cannot leave a stranded
- * sibling entry. Idempotent: a delete of a missing id resolves without error.
+ * bookkeeping, the local sibling state (the backup marker and any spent state),
+ * AND its accounting of disclosures -- so nothing is left behind. All three are
+ * removed in one transaction spanning the three stores, so a delete cannot leave a
+ * stranded sibling entry. Idempotent: a delete of a missing id resolves without
+ * error.
+ *
+ * The accounting goes with the exchange deliberately: it is this exchange's own
+ * disclosure history, and a delete that left it behind would strand cleartext
+ * partner and agreement metadata under an id nothing surfaces. An operator who
+ * must keep the accounting exports it before deleting; the delete confirm says so.
  */
 export async function deleteManagedExchange(id: string): Promise<void> {
   const db = await openManagedExchangeDatabase();
   try {
     await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction(
-        [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
+        [
+          MANAGED_EXCHANGE_STORE_NAME,
+          MANAGED_EXCHANGE_LOCAL_STORE_NAME,
+          MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
+        ],
         "readwrite",
       );
       transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME).delete(id);
       transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME).delete(id);
+      transaction
+        .objectStore(MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME)
+        .delete(id);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
@@ -873,20 +899,25 @@ export async function deleteManagedExchange(id: string): Promise<void> {
 }
 
 /**
- * Delete every managed exchange record and all local sibling state. Used to reset
- * the store; both stores are cleared in one transaction, so no sibling entry
- * outlives the records it belonged to.
+ * Delete every managed exchange record, all local sibling state, and every
+ * accounting of disclosures. Used to reset the store; all three stores are cleared
+ * in one transaction, so no sibling entry outlives the records it belonged to.
  */
 export async function clearManagedExchanges(): Promise<void> {
   const db = await openManagedExchangeDatabase();
   try {
     await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction(
-        [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
+        [
+          MANAGED_EXCHANGE_STORE_NAME,
+          MANAGED_EXCHANGE_LOCAL_STORE_NAME,
+          MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
+        ],
         "readwrite",
       );
       transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME).clear();
       transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME).clear();
+      transaction.objectStore(MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME).clear();
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);

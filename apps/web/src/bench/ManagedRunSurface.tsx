@@ -28,6 +28,7 @@ import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managedExchangeArtifact";
 import { canReinviteFromRecord } from "@psi/managedReinvite";
 import { deriveManagedBackupState } from "@psi/managedBackupState";
 import { fileSystemAccessSupported } from "@psi/managedInputHandle";
+import { getDisclosureAccounting } from "@psi/disclosureAccountingStore";
 import { managedRerunCompletion } from "@psi/managedCompletionSurface";
 import { reinviteManagedExchange } from "@psi/managedReinviteDriver";
 import { runManagedExchangeInBrowser } from "@psi/managedRunDriver";
@@ -59,6 +60,7 @@ import type {
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
+import type { DisclosureAccounting } from "@psi/disclosureAccounting";
 import type { ManagedBackupMarker } from "@psi/managedBackupState";
 import type { ManagedInputSource } from "@psi/managedInputHandle";
 import type { ManagedMigrationDispatch } from "@psi/managedExchangeExport";
@@ -92,6 +94,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
   >();
   const [spentAt, setSpentAt] = useState<string>();
   const [backupMarker, setBackupMarker] = useState<ManagedBackupMarker>();
+  // This exchange's accounting of disclosures, and whether reading it failed. The
+  // two are separate state, never one optional value: an unreadable accounting must
+  // not render as an empty one, which would read as "nothing was disclosed".
+  const [accounting, setAccounting] = useState<DisclosureAccounting>();
+  const [accountingUnreadable, setAccountingUnreadable] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
   // A dispatched migration whose download fired but whose spend awaits the operator
@@ -159,6 +166,29 @@ export function ManagedRunSurface({ id }: { id: string }) {
       abortRef.current = undefined;
     };
   }, [id]);
+
+  // The accounting of disclosures is read on its own, never folded into the record
+  // load above: an unreadable accounting must not present the exchange as
+  // unloadable, and an unloadable record must not hide a readable accounting.
+  // Keyed on the completion instant as well as the id, so the entry a finished run
+  // just filed is read back without a reload.
+  useEffect(() => {
+    let live = true;
+    getDisclosureAccounting(id)
+      .then((loaded) => {
+        if (!live) return;
+        setAccounting(loaded);
+        setAccountingUnreadable(false);
+      })
+      .catch(() => {
+        if (!live) return;
+        setAccounting(undefined);
+        setAccountingUnreadable(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [id, finishedAt]);
 
   // Revoke the run's object URLs when they are replaced or the surface unmounts:
   // the results blob is matched-record PII and the keys blob is private material.
@@ -558,6 +588,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
               Keep the file somewhere only you can read, and never send it over
               an unencrypted channel.
             </p>
+            <p className={styles.small}>
+              This exchange&apos;s accounting of disclosures stays on this
+              device: it does not travel in the backup file. If you need to keep
+              it, keep the exchange here for now, export the accounting as CSV,
+              and then move it.
+            </p>
             <p>
               <Button onClick={confirmMigration} loading={exportBusy}>
                 I saved the file; hand off this exchange
@@ -659,6 +695,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
             />
             <ManagedExchangeDetail
               record={record}
+              accounting={accounting}
+              accountingUnreadable={accountingUnreadable}
               onSaveLocalFields={saveLocalFields}
               onReinviteToChangeTerms={() => reinviteNow("detail")}
               canReinvite={canReinviteFromRecord(record)}
