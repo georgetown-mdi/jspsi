@@ -21,6 +21,7 @@ import {
 import { hardenUpgradeSurface } from "../../server/upgradeHardening";
 
 import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
 import type { IRealm } from "@psilink/peerjs-broker/models/realm";
 
 // Socket-level coverage for the signaling guards that need a live `ws`
@@ -34,6 +35,34 @@ import type { IRealm } from "@psilink/peerjs-broker/models/realm";
 // port, the pattern test/devServer/signalingProbe.ts uses. The per-message size
 // cap is covered in signalingPayloadBound.test.ts; the pre-101 handshake timeout
 // in signalingUpgradeTimeout.test.ts, which imports no `ws` (see the note there).
+
+/** How many `error` and `close` listeners a socket is carrying. The release
+ * window installs one of each, so these counts are where a test sees whether it
+ * took them back off. */
+interface HandleCounts {
+  error: number;
+  close: number;
+}
+
+function handleCounts(socket: Duplex): HandleCounts {
+  return {
+    error: socket.listenerCount("error"),
+    close: socket.listenerCount("close"),
+  };
+}
+
+interface CoResidentUpgrade {
+  url: string;
+  /** Handles on the socket as the upgrade reached the signaling server, before
+   * its release window installed any of its own. */
+  handlesBeforeWindow: HandleCounts;
+  /** Handles once the window is open: the signaling server's `upgrade` listener
+   * runs before the co-resident one, so its watch is on by this point. */
+  handlesAtWindowOpen: HandleCounts;
+  /** Handles once the co-resident listener has adopted it, so the difference
+   * from the line above is the adopter's own. */
+  handlesAfterAdopt: HandleCounts;
+}
 
 interface Signaling {
   port: number;
@@ -50,7 +79,7 @@ interface Signaling {
   /** Each upgrade the co-resident listener was handed. The signaling server's own
    * `upgrade` listener is registered first and so has already run, which makes an
    * entry here the observable that its release window is open. */
-  coResidentUpgrades: Array<string>;
+  coResidentUpgrades: Array<CoResidentUpgrade>;
 }
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -68,6 +97,10 @@ async function startSignaling(
      * (Vite's HMR handler at `/`), that either adopts the upgrades this server
      * leaves it or ignores them. */
     coResidentUpgrade?: "answers" | "ignores";
+    /** Answer ordinary (non-upgrade) requests, the other half of a shared
+     * server: a connection can then reach the upgrade path with response bytes
+     * already written on it. */
+    answerOrdinaryRequests?: boolean;
   } = {},
 ): Promise<Signaling> {
   const server = opts.tls
@@ -78,6 +111,27 @@ async function startSignaling(
       preHandshakeIdleMs: opts.preHandshakeIdleMs,
     });
   }
+  if (opts.answerOrdinaryRequests) {
+    server.on("request", (_req, res) => {
+      res.writeHead(200, {
+        "Content-Type": "text/plain",
+        "Content-Length": String(ORDINARY_RESPONSE_BODY.length),
+      });
+      res.end(ORDINARY_RESPONSE_BODY);
+    });
+  }
+  // Registered ahead of the signaling server's own `upgrade` listener, so it
+  // sees each socket as the server was handed it: the baseline the release
+  // window's handles are added to, and the one they have to come back to. Only
+  // the co-resident shapes get it -- in the sole-listener shape it would be the
+  // second `upgrade` listener and so change the very thing under test.
+  let handlesBeforeWindow: HandleCounts = { error: 0, close: 0 };
+  if (opts.coResidentUpgrade !== undefined) {
+    server.on("upgrade", (_req, socket) => {
+      handlesBeforeWindow = handleCounts(socket);
+    });
+  }
+
   const realm = new Realm();
   const wss = new WebSocketServer({
     server,
@@ -93,7 +147,7 @@ async function startSignaling(
   const errors: Array<Error> = [];
   wss.on("error", (error: Error) => errors.push(error));
 
-  const coResidentUpgrades: Array<string> = [];
+  const coResidentUpgrades: Array<CoResidentUpgrade> = [];
   if (opts.coResidentUpgrade !== undefined) {
     const adopter =
       opts.coResidentUpgrade === "answers"
@@ -103,8 +157,14 @@ async function startSignaling(
       // Only the upgrades the signaling server declined are this listener's; an
       // upgrade on the signaling path has already been adopted by it.
       if (req.url?.startsWith("/api/peerjs")) return;
-      coResidentUpgrades.push(req.url ?? "");
+      const handlesAtWindowOpen = handleCounts(socket);
       adopter?.handleUpgrade(req, socket, head, () => {});
+      coResidentUpgrades.push({
+        url: req.url ?? "",
+        handlesBeforeWindow,
+        handlesAtWindowOpen,
+        handlesAfterAdopt: handleCounts(socket),
+      });
     });
   }
 
@@ -169,10 +229,12 @@ function waitForFrame(
   });
 }
 
-interface RawUpgrade {
+interface RawConnection {
   /** Every byte the server has written to this socket, as text. Server-to-client
    * frames are unmasked, so a signaling frame's JSON reads verbatim here. */
   received: () => string;
+  /** Write a request on this connection, once it is up. */
+  send: (request: string) => void;
   /** Resolves once the server releases the socket. */
   released: Promise<void>;
   /** Hang up with a TCP RST rather than a FIN -- what a peer that is killed, or
@@ -180,11 +242,12 @@ interface RawUpgrade {
   reset: () => void;
 }
 
-/** Open an upgrade by hand and never answer what comes back -- neither the close
- * frame a refusal sends nor anything else. A `ws` client replies to a close frame
- * and so releases the server's socket for it, which is exactly the cooperation a
- * peer holding sockets on purpose withholds; this is the peer that withholds it. */
-function openRawUpgrade(port: number, target: string): RawUpgrade {
+/** Open a connection by hand and never answer what comes back -- neither the
+ * close frame a refusal sends nor anything else. A `ws` client replies to a close
+ * frame and so releases the server's socket for it, which is exactly the
+ * cooperation a peer holding sockets on purpose withholds; this is the peer that
+ * withholds it. */
+function openRawConnection(port: number): RawConnection {
   const socket = net.connect(port, "127.0.0.1");
   const chunks: Array<Buffer> = [];
   socket.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -193,29 +256,59 @@ function openRawUpgrade(port: number, target: string): RawUpgrade {
   const released = new Promise<void>((resolve) => {
     socket.once("close", () => resolve());
   });
-  socket.on("connect", () => {
-    socket.write(
-      [
-        `GET ${target} HTTP/1.1`,
-        `Host: 127.0.0.1:${port}`,
-        "Upgrade: websocket",
-        "Connection: Upgrade",
-        `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}`,
-        "Sec-WebSocket-Version: 13",
-        "",
-        "",
-      ].join("\r\n"),
-    );
-  });
   cleanups.push(() => {
     socket.destroy();
     return Promise.resolve();
   });
   return {
     received: () => Buffer.concat(chunks).toString("utf8"),
+    send: (request: string) => {
+      if (socket.connecting) {
+        socket.once("connect", () => socket.write(request));
+      } else {
+        socket.write(request);
+      }
+    },
     released,
-    reset: () => socket.resetAndDestroy(),
+    reset: () => {
+      // A peer that hangs up after the server released the socket has nothing
+      // left to reset, and says so rather than throwing the test off course.
+      if (!socket.destroyed) socket.resetAndDestroy();
+    },
   };
+}
+
+function upgradeRequest(port: number, target: string): string {
+  return [
+    `GET ${target} HTTP/1.1`,
+    `Host: 127.0.0.1:${port}`,
+    "Upgrade: websocket",
+    "Connection: Upgrade",
+    `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}`,
+    "Sec-WebSocket-Version: 13",
+    "",
+    "",
+  ].join("\r\n");
+}
+
+const ORDINARY_RESPONSE_BODY = "an ordinary response";
+
+/** An ordinary keep-alive GET: answering it leaves the connection open with
+ * response bytes already written on it. */
+function ordinaryRequest(port: number, target: string): string {
+  return [
+    `GET ${target} HTTP/1.1`,
+    `Host: 127.0.0.1:${port}`,
+    "Connection: keep-alive",
+    "",
+    "",
+  ].join("\r\n");
+}
+
+function openRawUpgrade(port: number, target: string): RawConnection {
+  const connection = openRawConnection(port);
+  connection.send(upgradeRequest(port, target));
+  return connection;
 }
 
 /** Whether `promise` settles within `ms` -- a released socket answers `true`, a
@@ -475,6 +568,40 @@ describe("signaling socket release", () => {
     expect(sig.errors).toEqual([]);
   }, 15_000);
 
+  test("an adopted socket is left carrying none of the release window's handles", async () => {
+    // The hand-off has to be clean as well as survivable: a watch or a close
+    // handler of this server's still attached to a socket it no longer owns is
+    // bookkeeping running against an adopter's connection for as long as that
+    // connection lives.
+    const sig = await startSignaling({ coResidentUpgrade: "answers" });
+
+    const peer = openRawUpgrade(sig.port, "/not-the-signaling-path");
+    await waitFor(() => peer.received().includes("101 Switching Protocols"));
+    await waitFor(() => sig.coResidentUpgrades.length > 0);
+    const [upgrade] = sig.coResidentUpgrades;
+
+    // The window really does install a watch and a close handler, so the check
+    // below is not passing on a window that installed nothing.
+    expect(upgrade.handlesAtWindowOpen).toEqual({
+      error: upgrade.handlesBeforeWindow.error + 1,
+      close: upgrade.handlesBeforeWindow.close + 1,
+    });
+
+    // Past the bound, which is where the hand-off concludes: what the socket
+    // carries is the baseline plus the adopter's own handles, and nothing else.
+    await new Promise((resolve) => setTimeout(resolve, RELEASE_MARGIN_MS));
+    expect(sig.accepted[0].destroyed).toBe(false);
+    expect(handleCounts(sig.accepted[0])).toEqual({
+      error:
+        upgrade.handlesBeforeWindow.error +
+        (upgrade.handlesAfterAdopt.error - upgrade.handlesAtWindowOpen.error),
+      close:
+        upgrade.handlesBeforeWindow.close +
+        (upgrade.handlesAfterAdopt.close - upgrade.handlesAtWindowOpen.close),
+    });
+    expect(sig.errors).toEqual([]);
+  }, 15_000);
+
   test("an upgrade left to a co-resident listener that ignores it is released on the bound", async () => {
     // The same premise, broken: a second `upgrade` listener exists, so the
     // sole-listener release does not apply, but nothing answers the socket. It is
@@ -487,6 +614,54 @@ describe("signaling socket release", () => {
     expect(peer.received()).toBe("");
     expect(sig.errors).toHaveLength(1);
     expect(sig.errors[0].message).toContain("no co-resident listener answered");
+    // The release takes the window's handles with it: nothing of this server's
+    // outlives the socket it was watching. Polled rather than read once --
+    // `destroy()` flips `destroyed` immediately, while the `close` the teardown
+    // hangs on waits for the handle to come fully down an event-loop turn or
+    // more later -- and polling the counts themselves keeps the failure legible.
+    await expect
+      .poll(() => handleCounts(sig.accepted[0]), { timeout: RELEASE_MARGIN_MS })
+      .toEqual(sig.coResidentUpgrades[0].handlesBeforeWindow);
+  }, 15_000);
+
+  test("an upgrade declined on a connection an ordinary request was answered on is still released", async () => {
+    // Adoption is movement in the socket's write counter during the window, not
+    // a non-zero counter: HTTP keep-alive lets an upgrade arrive on a connection
+    // this server has already written a response on, and reading those earlier
+    // bytes as this upgrade's answer would leave the socket held past the bound
+    // with its watch taken off -- the leak this release exists to close, and an
+    // unwatched socket for the peer to reset the process out from under.
+    const sig = await startSignaling({
+      coResidentUpgrade: "ignores",
+      answerOrdinaryRequests: true,
+    });
+
+    const peer = openRawConnection(sig.port);
+    peer.send(ordinaryRequest(sig.port, "/ordinary"));
+    await waitFor(() => peer.received().includes(ORDINARY_RESPONSE_BODY));
+    peer.send(upgradeRequest(sig.port, "/not-the-signaling-path"));
+    await waitFor(() => sig.coResidentUpgrades.length > 0);
+
+    const releasedOnBound = await settlesWithin(
+      peer.released,
+      RELEASE_MARGIN_MS,
+    );
+    // Hang up hard whether or not the release happened, so a socket wrongly left
+    // open is left holding the reset that ends the process rather than being
+    // reported as a failed assertion the process never reaches.
+    peer.reset();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(releasedOnBound).toBe(true);
+    expect(sig.accepted).toHaveLength(1);
+    expect(sig.accepted[0].destroyed).toBe(true);
+    expect(sig.errors).toHaveLength(1);
+    expect(sig.errors[0].message).toContain("no co-resident listener answered");
+
+    // The process is not merely alive but still brokering.
+    const ws = new WebSocket(signalingUrl(sig.port, "peer-after-reused"));
+    await waitForFrame(ws, "OPEN");
+    ws.close();
   }, 15_000);
 
   test("a peer that resets inside the co-resident window is released, not crashed on", async () => {
@@ -512,6 +687,10 @@ describe("signaling socket release", () => {
     // Handling the error released the socket: the server holds nothing open.
     expect(sig.accepted).toHaveLength(1);
     expect(sig.accepted[0].destroyed).toBe(true);
+    // And the window's own handles went with it, on this path as on the others.
+    await expect
+      .poll(() => handleCounts(sig.accepted[0]), { timeout: RELEASE_MARGIN_MS })
+      .toEqual(sig.coResidentUpgrades[0].handlesBeforeWindow);
 
     // That release is also the whole of it, so the bound behind it finds nothing
     // left to reclaim and does not go on to accuse a peer that hung up of leaving

@@ -85,6 +85,28 @@ export const MAX_HANDSHAKE_PARAM_LENGTH = 256;
 // is never taken back from it. See docs/spec/CHANNEL_SECURITY.md.
 export const SOCKET_RELEASE_TIMEOUT_MS = 1_000;
 
+// Arm the release bound as a handle disposed of exactly once: expiring marks it
+// spent before the deadline body runs, so a cancel behind that -- the socket
+// closing after a terminate the deadline itself ordered -- finds nothing left to
+// retire, and a cancelled deadline never expires. Every release path below wants
+// that same bookkeeping, and holding it here makes the double disposal
+// unrepresentable rather than merely absent from each of them.
+function armReleaseDeadline(onExpire: () => void): { cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+    timer = undefined;
+    onExpire();
+  }, SOCKET_RELEASE_TIMEOUT_MS);
+  timer.unref();
+
+  return {
+    cancel: (): void => {
+      if (timer === undefined) return;
+      clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+}
+
 export class WebSocketServer extends EventEmitter implements IWebSocketServer {
   public readonly path: string;
   private readonly realm: IRealm;
@@ -225,9 +247,10 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
   // `upgrade` listener, nothing else can answer and the socket is destroyed at
   // once. Where a co-resident listener exists -- Vite HMR at `/` in dev -- the
   // socket is left for it, and whether it answered is then TESTED rather than
-  // assumed: a socket still carrying no response bytes when the release bound
-  // expires was answered by nobody, so it is destroyed and the broken premise
-  // raised as an error rather than leaked on a premise that no longer holds.
+  // assumed: a socket that has written nothing since the moment it was declined
+  // was answered by nobody when the release bound expires, so it is destroyed
+  // and the broken premise raised as an error rather than leaked on a premise
+  // that no longer holds.
   private _releaseUnhandledUpgrade(
     server: HttpServer | HttpsServer,
     socket: Duplex,
@@ -238,6 +261,18 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       socket.destroy();
       return;
     }
+
+    // `bytesWritten` counts the whole connection's lifetime rather than this
+    // window, and an upgrade may arrive on a connection this server has already
+    // answered an ordinary request on -- HTTP keep-alive, which any raw client
+    // can drive. Adoption is therefore movement against the count the socket
+    // carried when it was declined, never the raw count: reading a prior
+    // request's bytes as this upgrade's answer would leave precisely that socket
+    // held past the bound with the watch below taken off it, which is both the
+    // leak this release exists to close and the unwatched error that ends the
+    // process.
+    const bytesWrittenWhenDeclined =
+      socket instanceof Socket ? socket.bytesWritten : 0;
 
     // The window below is the one stretch in which this socket is nobody's:
     // declined here, not yet taken by a co-resident listener, and so carrying no
@@ -255,27 +290,38 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     };
     socket.on("error", releaseOnError);
 
-    const release = setTimeout(() => {
+    // Every handle the window installs comes off with the window, whichever way
+    // it ends -- the peer closing, an adopter answering, the bound expiring --
+    // so a socket handed on to a co-resident listener carries none of this
+    // server's bookkeeping into the life that listener gives it.
+    const dropWindowHandles = (): void => {
+      deadline.cancel();
+      socket.off("error", releaseOnError);
+      socket.off("close", dropWindowHandles);
+    };
+
+    const deadline = armReleaseDeadline(() => {
       if (socket.destroyed) return;
-      if (socket instanceof Socket && socket.bytesWritten > 0) {
+      if (
+        socket instanceof Socket &&
+        socket.bytesWritten > bytesWrittenWhenDeclined
+      ) {
         // Answered: the socket is its adopter's now, errors with it.
-        socket.off("error", releaseOnError);
+        dropWindowHandles();
         return;
       }
 
+      // The handles stay on across the destroy -- the `close` it emits is what
+      // drops them -- so the socket is watched right up to its release.
       socket.destroy();
       this._onSocketError(
         new Error(
           "PeerJS signaling server released an upgrade no co-resident listener answered",
         ),
       );
-    }, SOCKET_RELEASE_TIMEOUT_MS);
-    release.unref();
-
-    socket.once("close", () => {
-      clearTimeout(release);
-      socket.off("error", releaseOnError);
     });
+
+    socket.on("close", dropWindowHandles);
   }
 
   private _registerClient({
@@ -378,13 +424,12 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     socket.send(JSON.stringify({ type, payload: { msg } }));
     socket.close();
 
-    const release = setTimeout(() => {
+    const deadline = armReleaseDeadline(() => {
       socket.terminate();
-    }, SOCKET_RELEASE_TIMEOUT_MS);
-    release.unref();
+    });
 
     socket.once("close", () => {
-      clearTimeout(release);
+      deadline.cancel();
     });
   }
 }
