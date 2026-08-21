@@ -475,8 +475,9 @@ export interface InvitationSummary {
   /** Whether the inviter will share the result with the accepting partner. */
   inviterSharesResult: boolean;
   /**
-   * Whether a record may match more than one of the partner's records (the
-   * inviter's declared deduplicate setting).
+   * Whether several of the inviting party's records may match the same one of
+   * the accepting party's records (the inviter's declared deduplicate
+   * setting).
    */
   deduplicate: boolean;
   /**

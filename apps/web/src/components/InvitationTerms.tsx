@@ -1606,8 +1606,8 @@ export function InvitationTerms({
               <Term label="Duplicate matches">
                 <Text size="sm">
                   {summary.deduplicate
-                    ? "A record may match more than one of the partner's records."
-                    : "Each record matches at most one of the partner's records."}
+                    ? "More than one of the inviting party's records may match a single one of the accepting party's records."
+                    : "Each of the inviting party's records matches at most one of the accepting party's records."}
                 </Text>
                 {/* Deduplicate changes match multiplicity, not what is disclosed, so
                 by the caveat-placement rule on {@link InvitationTerms} its caveat

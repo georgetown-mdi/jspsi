@@ -2054,15 +2054,15 @@ test("displayInvitation: a proposed setting the run does not apply is marked, no
 
   const oneToOne = render({});
   expect(oneToOne).toContain(
-    "duplicate matches (enforced): each record matches at most one of the " +
-      "partner's records",
+    "duplicate matches (enforced): each of the inviting party's records " +
+      "matches at most one of the accepting party's records",
   );
   expect(oneToOne).not.toContain("proposes this");
 
   const deduplicating = render({ deduplicate: true });
   expect(deduplicating).toContain(
-    "duplicate matches (enforced): a record may match more than one of the " +
-      "partner's records",
+    "duplicate matches (enforced): more than one of the inviting party's " +
+      "records may match a single one of the accepting party's records",
   );
   expect(deduplicating).toContain(
     "    Your partner proposes this, but this version of the exchange does " +
