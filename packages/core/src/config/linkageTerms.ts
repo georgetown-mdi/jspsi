@@ -1142,12 +1142,12 @@ export function countOnlyShapeViolation(
  * so a document that reached a caller through a schema already met them and this
  * is the boundary for one built or mutated without a parse.
  *
- * `deduplicate: true` is refused for EVERY algorithm today by
- * `assertDeduplicateImplemented` (at the CLI mint boundary and at core's
- * exchange boundary), because no run honors it. That refusal is to be replaced
- * by the deduplicating run path when one lands; this rule is the count-only
- * algorithm's own constraint, which outlives it and reaches the parse and accept
- * boundaries the implemented-setting gate does not.
+ * This rule is the count-only algorithm's own constraint, distinct from the
+ * combinations `assertDeduplicateImplemented` and `resolveLinkageCardinality`
+ * refuse for want of a matching path: a count-only run reports a size and hands
+ * neither party a record-by-record result, so there is no multiplicity for it to
+ * honor whatever the cascade implements. It reaches the parse and accept
+ * boundaries those two do not.
  *
  * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
  * same reason as `assertAlgorithmImplemented`: on the accept side these values
@@ -1400,12 +1400,18 @@ export function safeParseLinkageTerms(raw: unknown) {
  *   nothing, and `sameColumnSet([], [])` passes both directions. This is the strict
  *   empty case kept distinct from the absent case above, which yields an absent send.
  *
- * `deduplicate` is left as adopted from the inviter's terms. It is per-party in
- * principle, but the web app's AdvancedInvite authoring and the CLI default acceptance
- * never author it one-sided (`deduplicate` stays false), so for the configurations
- * those front ends produce a verbatim adoption is correct and the mirror is always
- * coherent. Metadata and standardization stay per-party and local (they are never
- * embedded in the token); this function shapes only the agreed linkage terms.
+ * `deduplicate` is left as adopted from the inviter's terms, which is a KNOWN
+ * LIMITATION rather than a mirror of the term's meaning. The term is per-party: it
+ * declares that several of the DECLARING party's own records may match one of its
+ * partner's, so an acceptor adopting it declares the same of its own inputs. An
+ * accepted deduplicating invitation therefore reaches the run boundary as the
+ * `(true, true)` pair, which `resolveLinkageCardinality` refuses for want of the
+ * transitive closure -- so a deduplicating exchange is reachable from two
+ * separately authored configurations rather than through invite-and-accept.
+ * Closing it is a change to what the acceptor consents to (its own side of the
+ * cardinality) and takes its own decision. Metadata and standardization stay
+ * per-party and local (they are never embedded in the token); this function shapes
+ * only the agreed linkage terms.
  *
  * It fails closed. A config that is valid for the INVITER can mirror to one that is
  * incoherent for the acceptor: an inviter that is the sole receiver (it shares no

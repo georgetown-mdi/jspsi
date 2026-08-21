@@ -24,7 +24,7 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 import type { MessageConnection } from "../src/connection/messageConnection";
 import type { Algorithm } from "../src/types";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageStrategy, LinkageTerms } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
 import type { SigningConfig, SigningMode } from "../src/config/signing";
 import type { Standardization } from "../src/config/standardization";
@@ -282,31 +282,31 @@ describe("prepareForExchange: an unimplemented algorithm is refused", () => {
 
 // --- Deduplication fails closed before connecting -----------------------------
 
-describe("prepareForExchange: a deduplicating term is refused", () => {
-  // Matching runs strictly one-to-one, so deduplicate: true would be silently
-  // matched one-to-one rather than honored -- refuse it before any connection,
-  // with the actionable UsageError (CLI exit 64), never the generic mid-run
-  // cardinality throw. The output block already satisfies the schema's
-  // deduplicate-requires-output constraint.
-  const deduplicatingTerms: LinkageTerms = { ...terms, deduplicate: true };
+describe("prepareForExchange: a deduplicating term is refused off cascade", () => {
+  // Single-pass matches strictly one-to-one, so a deduplicate: true term there
+  // would be matched one-to-one rather than honored -- refuse it before any
+  // connection, with the actionable UsageError (CLI exit 64), never the generic
+  // mid-run cardinality throw. The base `terms` are cascade, which is the
+  // strategy that matches it, and their output block already satisfies the
+  // schema's deduplicate-requires-output constraint.
+  const prepareDeduplicating = (linkageStrategy: LinkageStrategy) =>
+    prepareForExchange(
+      {
+        linkageTerms: { ...terms, deduplicate: true, linkageStrategy },
+        metadata,
+      },
+      "Tester",
+      rawRows,
+      columns,
+    );
 
-  test("deduplicate: true is refused before connecting", () => {
-    expect(() =>
-      prepareForExchange(
-        { linkageTerms: deduplicatingTerms, metadata },
-        "Tester",
-        rawRows,
-        columns,
-      ),
-    ).toThrow(UsageError);
-    expect(() =>
-      prepareForExchange(
-        { linkageTerms: deduplicatingTerms, metadata },
-        "Tester",
-        rawRows,
-        columns,
-      ),
-    ).toThrow(/deduplicate/);
+  test("deduplicate: true under single-pass is refused before connecting", () => {
+    expect(() => prepareDeduplicating("single-pass")).toThrow(UsageError);
+    expect(() => prepareDeduplicating("single-pass")).toThrow(/single-pass/);
+  });
+
+  test("deduplicate: true under cascade prepares, the strategy that matches it", () => {
+    expect(() => prepareDeduplicating("cascade")).not.toThrow();
   });
 });
 

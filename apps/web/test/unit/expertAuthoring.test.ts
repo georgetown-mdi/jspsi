@@ -59,17 +59,18 @@ function withFuzzyOnFirstElement(terms: LinkageTerms): LinkageTerms {
 }
 
 describe("gated settings cannot reach the built terms", () => {
-  // These pin the gating WHILE the applied-flags are false (their state today).
-  // When an applied-flag flips (the engine wires the feature in), the clamp stops
-  // firing and these fail loudly, forcing the gating copy and tests to be updated
-  // in lockstep -- the "fail if a control is wired ahead of engine support" guard.
-  // The algorithm is outside that set: the exchange honors psi-c.
-  test("buildAdvancedTerms clamps deduplicate and fuzzy, and writes the algorithm through", () => {
+  // These pin the gating WHILE an applied-flag is false. When one flips (the
+  // engine wires the feature in), the clamp stops firing and these fail loudly,
+  // forcing the gating copy and tests to be updated in lockstep -- the "fail if a
+  // control is wired ahead of engine support" guard. Two settings sit outside
+  // that set because the exchange honors them: the algorithm, and deduplicate.
+  test("buildAdvancedTerms clamps fuzzy, and writes the algorithm and deduplicate through", () => {
     const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
-    // Force every gated setting on, bypassing the disabled controls, to prove the
-    // build clamps regardless of how the draft reached this state. The algorithm is
-    // not one of them: the exchange honors both members, so a count-only draft
-    // reaches the built terms and is judged there by the count-only shape rules.
+    // Force the gated setting on, bypassing the disabled control, to prove the
+    // build clamps regardless of how the draft reached this state. The other two
+    // are set alongside it to prove the clamp is per setting rather than a blanket
+    // one: each reaches the built terms and is judged there by the rules that
+    // apply to it.
     const forced: AdvancedInviteDraft = {
       ...draft,
       algorithm: "psi-c",
@@ -92,7 +93,7 @@ describe("gated settings cannot reach the built terms", () => {
     };
     const terms = buildAdvancedTerms(forced);
     expect(terms.algorithm).toBe("psi-c");
-    expect(terms.deduplicate).toBe(false);
+    expect(terms.deduplicate).toBe(true);
     expect(
       terms.linkageKeys.every((key) =>
         key.elements.every((el) => el.generateFuzzyComparisons === undefined),
@@ -103,14 +104,16 @@ describe("gated settings cannot reach the built terms", () => {
   test("gatedActiveSettingMessage refuses an import that turns a gated setting on", () => {
     const base = getDefaultLinkageTerms("Org", inferMetadata(ALL_COLUMNS));
     expect(gatedActiveSettingMessage(base)).toBeUndefined();
-    // The algorithm is not gated here: an imported count-only document is judged by
-    // the count-only shape rules, which validateAdvancedInvite applies.
+    // Neither the algorithm nor deduplicate is gated here: an imported count-only
+    // document is judged by the count-only shape rules, which
+    // validateAdvancedInvite applies, and a deduplicating document is one the
+    // exchange runs.
     expect(
       gatedActiveSettingMessage({ ...base, algorithm: "psi-c" }),
     ).toBeUndefined();
-    expect(gatedActiveSettingMessage({ ...base, deduplicate: true })).toMatch(
-      /duplicate/i,
-    );
+    expect(
+      gatedActiveSettingMessage({ ...base, deduplicate: true }),
+    ).toBeUndefined();
     expect(gatedActiveSettingMessage(withFuzzyOnFirstElement(base))).toMatch(
       /fuzzy/i,
     );

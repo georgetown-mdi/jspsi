@@ -342,8 +342,8 @@ export function attributableRoundMatches(
  * mirror one procedure (docs/spec/PROTOCOL.md, Deduplicating cardinalities).
  * `"many-to-many"` throws: its pairing rules are specified but the entity closure
  * that makes such a table actionable is not. exchange.ts resolves the cardinality
- * from the two agreed `deduplicate` settings and still refuses any deduplicating
- * pair before the rounds begin, so no production caller reaches here with one.
+ * from the two agreed `deduplicate` settings and refuses that pair before the
+ * rounds begin, so a production caller reaches here with one of the other three.
  *
  * @param protocol - Exchange protocol settings; only `cardinality` is used
  *   here, and it is this party's own resolved label (see
@@ -987,6 +987,14 @@ export interface SinglePassSessionBounds {
  * {@link replaySinglePassCascade}. A fan-out-free exchange ships and replays
  * exactly what it did before fan-out existed.
  *
+ * It matches `one-to-one` alone. The receiver's replay resolves the whole pairing
+ * from the fixed-width index table, and no clause of it keeps a party's
+ * within-dataset duplicate values, so every deduplicating cardinality is refused
+ * here rather than aliased onto the one-to-one arm -- an alias would match a
+ * consented many-cardinality term one-to-one and say nothing. exchange.ts refuses
+ * the same pair before the run (`assertDeduplicateImplemented`); this is the
+ * strategy's own fail-closed half, which holds for a direct caller too.
+ *
  * @param bounds - The authenticated session state every derived bound reads; see
  *   {@link SinglePassSessionBounds}. Together they fix the per-exchange frame cap,
  *   the abort-if-over-ceiling gate, and which of the two message-2 index-table
@@ -1016,7 +1024,7 @@ export async function linkViaSinglePassPSI(
 ): Promise<AssociationTable> {
   if (participant.config.role === "either")
     throw new Error("participants role is unresolved");
-  if (!["one-to-one", "many-to-one"].includes(protocol.cardinality)) {
+  if (protocol.cardinality !== "one-to-one") {
     throw new Error(
       `psi for cardinality '${protocol.cardinality}' not yet implemented`,
     );

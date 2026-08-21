@@ -971,11 +971,15 @@ describe("customize tabs", () => {
     expect(after.slice(2)).toEqual(before.slice(2));
   });
 
-  test("a gated setting cannot alter minted terms", () => {
+  test("the deduplicate control reaches the minted terms", () => {
+    // The exchange applies it, so the setting is not clamped away between the
+    // draft and the document the partner consents to. The clamp itself still
+    // holds for the settings that stay gated; expertAuthoring.test.ts is where
+    // that mechanism is pinned.
     const seeded = editorFromCsv("Dana", csv);
-    const forced = editorWithDeduplicate(seeded, true);
-    expect(forced.draft.deduplicate).toBe(true);
-    expect(mintedTerms(forced).deduplicate).toBe(false);
+    const chosen = editorWithDeduplicate(seeded, true);
+    expect(chosen.draft.deduplicate).toBe(true);
+    expect(mintedTerms(chosen).deduplicate).toBe(true);
   });
 
   test("a count-only draft over a seeded multi-key spine blocks generation", () => {

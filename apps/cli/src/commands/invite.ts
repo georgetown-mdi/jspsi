@@ -662,13 +662,12 @@ export async function validateInvite(params: {
     // assertAlgorithmImplemented.
     assertAlgorithmImplemented(configTerms.algorithm);
 
-    // Likewise fail closed pre-mint on a `deduplicate: true` term the run
-    // refuses (matching runs strictly one-to-one): the schema alone admits it
-    // when paired with `expects_output: true`, and only this hand-authored
-    // config-as-source path can carry it (the online and infer paths build
-    // terms via getDefaultLinkageTerms, which is always deduplicate: false).
-    // See assertDeduplicateImplemented.
-    assertDeduplicateImplemented(configTerms.deduplicate);
+    // Likewise fail closed pre-mint on a `deduplicate: true` term the agreed
+    // strategy cannot match: the schema alone admits it beside a `single-pass`
+    // strategy, and only this hand-authored config-as-source path can carry that
+    // pair (the online and infer paths build terms via getDefaultLinkageTerms,
+    // which is always deduplicate: false). See assertDeduplicateImplemented.
+    assertDeduplicateImplemented(configTerms);
 
     // Likewise fail closed pre-mint on a transform that fans one value out into
     // several match candidates under a strategy that matches one value per

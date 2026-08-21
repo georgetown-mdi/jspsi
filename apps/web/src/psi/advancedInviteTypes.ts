@@ -25,11 +25,12 @@ import type {
  * (a field reference chosen from the declared list, a per-element transform
  * pipeline, and a two-of-N swap) and imports/exports the whole terms document.
  *
- * `deduplicate` and per-element fuzzy comparisons are GATED: the terms mapping
- * clamps them to the applied behavior (no-dedup / no-fuzzy) while their
- * `APPLIED_SETTINGS` flag is false, the editor controls are disabled to match, and
- * an import that turns one on is refused -- so the editor can never mint an
- * invitation whose headline behavior silently does not happen. A fan-out transform
+ * Per-element fuzzy comparisons are GATED: the terms mapping clamps them to the
+ * applied behavior (no-fuzzy) while their `APPLIED_SETTINGS` flag is false, the
+ * editor control is disabled to match, and an import that turns one on is refused
+ * -- so the editor can never mint an invitation whose headline behavior silently
+ * does not happen. `deduplicate` reads the same flag through the same clamp, which
+ * passes it: the exchange applies the setting. A fan-out transform
  * step is held back the same way against core's own list rather than an
  * `APPLIED_SETTINGS` flag: the step editor does not offer the family, and a
  * document that carries one -- in a cleaning step or a linkage-key element
@@ -138,16 +139,16 @@ export interface AdvancedInviteDraft {
   /** Whether more than one of the holder's records may match the same partner
    * record -- deduplication of the holder's OWN inputs, which lets multiple of its
    * inputs map to the same matched output (see EXCHANGE_REFERENCE
-   * `linkage_terms.deduplicate`). Gated: {@link buildAdvancedTerms} clamps it to
-   * `false` while `APPLIED_SETTINGS`.deduplicate is false. */
+   * `linkage_terms.deduplicate`). {@link buildAdvancedTerms} clamps it to `false`
+   * only while `APPLIED_SETTINGS`.deduplicate is false, and passes it otherwise. */
   deduplicate: boolean;
   /** How the agreed linkage keys are exchanged (see {@link LinkageStrategy}).
    * `cascade` (the default) matches keys one round at a time; `single-pass`
    * batches them into one exchange for a round-trip count constant in the number
    * of keys, at the cost of disclosing the sender's full per-key value structure
-   * to the receiver. Unlike {@link AdvancedInviteDraft.algorithm} and
-   * `deduplicate` this is NOT gated -- single-pass is honored end-to-end -- so
-   * {@link buildAdvancedTerms} writes it straight through with no clamp; the
+   * to the receiver. Like {@link AdvancedInviteDraft.algorithm} it is NOT gated --
+   * single-pass is honored end-to-end -- so {@link buildAdvancedTerms} writes it
+   * straight through with no clamp; the
    * consent tradeoff is surfaced at the control. Seeded from the default terms
    * (`cascade`) and reflected from an imported document. */
   linkageStrategy: LinkageStrategy;

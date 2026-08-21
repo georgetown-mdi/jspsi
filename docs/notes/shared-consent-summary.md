@@ -294,34 +294,55 @@ acceptance does after it states the conflict.
 
 ## Proposed is not applied
 
-Two settings an inviter may declare are not honored by today's exchange:
-deduplicated matching and the per-element fuzzy-comparison expansion.
-`APPLIED_SETTINGS` is the single source of truth for which, and the summary
-carries the resulting flags alongside each term rather than leaving each renderer
-to consult it. A surface therefore cannot state a matching behavior the run does
-not perform, and cannot forget the caveat for one setting while carrying it for
-another.
+One setting an inviter may declare is not honored by today's exchange: the
+per-element fuzzy-comparison expansion. `APPLIED_SETTINGS` is the single source of
+truth for which, and the summary carries the resulting flags alongside each term
+rather than leaving each renderer to consult it. A surface therefore cannot state
+a matching behavior the run does not perform, and cannot forget the caveat for one
+setting while carrying it for another.
 
-Neither changes what is disclosed -- they change match multiplicity and breadth --
-so their caveats sit one expand down with the headlines they qualify. A setting
-that stated a DISCLOSURE guarantee would take the other placement: with the
-headline itself, where a reader cannot take the guarantee as in force without also
-meeting what qualifies it.
+It does not change what is disclosed -- it changes match breadth -- so its caveat
+sits one expand down with the headline it qualifies. A setting that stated a
+DISCLOSURE guarantee would take the other placement: with the headline itself,
+where a reader cannot take the guarantee as in force without also meeting what
+qualifies it.
 
-What each caveat SAYS follows what not applying the setting actually does, and the
-two are not alike there. Deduplication is refused at the exchange boundary, so an
-invitation carrying it aborts before any identifier is revealed; its caveat names
-that refusal and what to ask the inviter for. A caveat saying the run proceeds and
-reveals more than the headline promised describes a run that does not happen --
-which is what one surface once said about a count-only invitation while the other
-said the opposite. The fuzzy expansion has no such refusal: it is a silent no-op
-that narrows the match, so its marker says only that the expansion is proposed,
-and a refusal claim there would be the same error facing the other way.
+What a caveat SAYS follows what not applying the setting actually does. The fuzzy
+expansion is a silent no-op that narrows the match, so its marker says only that
+the expansion is proposed. A setting whose not-applying is a REFUSAL takes the
+opposite copy -- naming the refusal and what to ask the inviter for -- and the two
+must not be swapped: a caveat saying the run proceeds and reveals more than the
+headline promised describes a run that does not happen, which is what one surface
+once said about a count-only invitation while the other said the opposite.
 
 The caveat copy is carried once, beside the classification, and rendered twice --
 for the same reason the classification is. Two surfaces authoring their own
 account of the same unimplemented setting is how they came to say opposite things
 about a proposed count-only exchange in the first place.
+
+## The deduplicate disclosure statement
+
+Deduplicated matching runs, so what its headline needs is not a caveat but a
+statement of what it costs. The exchange discloses grouping the one-to-one match
+does not, and the acceptor is the party that reads it, so the sentence beside the
+duplicate-matches headline states three things the specification fixes: which
+party learns it and about which of its own records, that what is learned is a
+count and row positions rather than the matched value, and that the count is the
+declaring party's own declaration rather than a figure any check binds.
+
+The last of those is the one a surface would be tempted to drop, and dropping it
+would state a guarantee no check makes. So it is not left to either surface's
+discretion: the sentence is one string in core, and the consent-coverage
+classification carries it as the copy BOTH surfaces must render for a
+deduplicating document. The representation check alone could not catch its loss --
+a surface that renders only "duplicate matches: yes" still moves when the term
+moves -- which is exactly why the pin sits beside the classification rather than
+in either surface's own test.
+
+Its placement is the same rule the caveats follow, applied to the headline it
+qualifies rather than to the setting's implementation status: the duplicate-matches
+headline states match multiplicity, so it sits inside a disclosure, and the
+sentence sits with it.
 
 ## The count-only tier
 

@@ -1,32 +1,17 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import { buildAdvancedTerms } from "@psi/advancedInviteTerms";
 import { seedAdvancedInvite } from "@psi/advancedInviteDraft";
 import { setColumnDisclosure } from "@psi/metadataEditing";
 import { validateAdvancedInvite } from "@psi/advancedInviteValidation";
 
-import type * as PsilinkCore from "@psilink/core";
 import type { AdvancedInviteDraft } from "@psi/advancedInviteTypes";
 
-// The count-only shape gate at the web AUTHORING boundary. One of the five rules
-// -- duplicate matches -- is unreachable through `buildAdvancedTerms` while
-// `APPLIED_SETTINGS.deduplicate` is false, since the build clamps the setting away
-// before any rule sees it, so that flag is forced here to reach the gate that has
-// to hold once it flips (the same reason core's fuzzy-expansion suite forces its
-// own). The rules themselves are untouched by the mock: they read the algorithm and
-// the document. The mock is file-scoped, which is why the authoring gate lives here
-// and the accept and import gates -- which need no forced flag -- stay on the
-// unmocked path in countOnlyAcceptGates.test.ts.
-vi.mock("@psilink/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof PsilinkCore>();
-  return {
-    ...actual,
-    APPLIED_SETTINGS: {
-      deduplicate: true,
-      fuzzyComparisons: false,
-    },
-  };
-});
+// The count-only shape gate at the web AUTHORING boundary. Each of the five rules
+// is reached through `buildAdvancedTerms`, which clamps only the settings whose
+// applied-flag is false; the rules themselves read the algorithm and the document.
+// The accept and import gates are the same rules at the other two boundaries, in
+// countOnlyAcceptGates.test.ts.
 
 const LINKAGE_COLUMNS = ["ssn", "first_name", "last_name", "dob"];
 const NOW = new Date("2026-01-01T00:00:00Z");

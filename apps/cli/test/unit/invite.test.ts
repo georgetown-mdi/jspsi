@@ -1775,14 +1775,19 @@ test("validateInvite: a psi config with the same metadata and shape still mints"
   }
 });
 
-test("validateInvite: offline config-source refuses a deduplicating term before minting", async () => {
-  // The mint-boundary counterpart of the run-side deduplicate refusal (matching
-  // runs strictly one-to-one): a config with `deduplicate: true` -- schema-valid
-  // when paired with `expects_output: true` -- must be refused BEFORE the token
-  // is disclosed, so `invite` never mints an invitation the config's own
-  // `psilink exchange` would then reject (exit 64). The sibling of the psi-c
-  // mint gate above; no input is passed, so it exercises the check in isolation.
-  const terms: LinkageTerms = { ...defaultTerms(), deduplicate: true };
+test("validateInvite: offline config-source refuses a deduplicating term under single-pass before minting", async () => {
+  // The mint-boundary counterpart of the run-side refusal (single-pass matches
+  // strictly one-to-one): a config pairing `deduplicate: true` with
+  // `linkage_strategy: single-pass` -- schema-valid when `expects_output: true`
+  // -- must be refused BEFORE the token is disclosed, so `invite` never mints an
+  // invitation the config's own `psilink exchange` would then reject (exit 64).
+  // The sibling of the psi-c mint gate above; no input is passed, so it exercises
+  // the check in isolation.
+  const terms: LinkageTerms = {
+    ...defaultTerms(),
+    deduplicate: true,
+    linkageStrategy: "single-pass",
+  };
   const { dir, configPath, keyPath } = withConfig(terms);
   try {
     const invite = () =>
@@ -1793,7 +1798,26 @@ test("validateInvite: offline config-source refuses a deduplicating term before 
         log: silentLog,
       });
     await expect(invite()).rejects.toBeInstanceOf(UsageError);
-    await expect(invite()).rejects.toThrow(/deduplicate/);
+    await expect(invite()).rejects.toThrow(/single-pass/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: offline config-source mints a deduplicating cascade term", async () => {
+  // The other half of the narrowed mint gate: the strategy that matches a
+  // deduplicating cardinality mints, so the gate refuses the pair rather than the
+  // setting.
+  const terms: LinkageTerms = { ...defaultTerms(), deduplicate: true };
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

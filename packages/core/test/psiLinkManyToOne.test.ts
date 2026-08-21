@@ -672,12 +672,12 @@ for (const manySide of ["starter", "joiner"] as const) {
 }
 
 // --- the same labels under single-pass ----------------------------------------
-// Single-pass implements no deduplicating match: it refuses one-to-many and
-// many-to-many outright, and accepts many-to-one as an alias that runs the
-// unchanged one-to-one matching. Both halves of that accept-list are pinned here,
-// so lifting the exchange-boundary refusal without teaching single-pass the
-// cardinality trips a test rather than silently matching one-to-one under a
-// consented many-cardinality term.
+// Single-pass implements no deduplicating match, and its accept-list admits
+// one-to-one alone. Pinned here for every deduplicating label, so a future change
+// that admits one without teaching the replay the widening trips a test rather
+// than silently matching one-to-one under a consented many-cardinality term. The
+// exchange boundary refuses the same pair before the run; this is the strategy's
+// own fail-closed half, which a direct caller reaches.
 
 const singlePassStarterData = [["E1", "E1", "E2", "E3"]];
 const singlePassJoinerData = [["E1", "E2", "X"]];
@@ -714,20 +714,20 @@ async function runSinglePass(
   ]);
 }
 
-test("single-pass runs many-to-one as an alias for one-to-one", async () => {
-  const [oneToOneStarter, oneToOneJoiner] = await runSinglePass("one-to-one");
-  const [starter, joiner] = await runSinglePass("many-to-one");
-
-  // Table for table with the one-to-one run on the same inputs: the starter's
-  // duplicated "E1" is dropped as ambiguous rather than kept and expanded onto
-  // both of its rows, which is what the cascade's many-to-one makes of this same
-  // data in the first test of this file.
-  expect(starter).toStrictEqual(oneToOneStarter);
-  expect(joiner).toStrictEqual(oneToOneJoiner);
+test("single-pass runs one-to-one, the one cardinality it admits", async () => {
+  const [starter, joiner] = await runSinglePass("one-to-one");
+  // The starter's duplicated "E1" is dropped as ambiguous rather than kept and
+  // expanded onto both of its rows, which is what the cascade's many-to-one makes
+  // of this same data in the first test of this file.
   expect(starter).toStrictEqual([[2], [1]]);
+  expect(joiner).toStrictEqual([[1], [2]]);
 });
 
-for (const cardinality of ["one-to-many", "many-to-many"] as const) {
+for (const cardinality of [
+  "many-to-one",
+  "one-to-many",
+  "many-to-many",
+] as const) {
   test(`single-pass refuses ${cardinality}`, async () => {
     // Refused before any frame moves, so the unread other end of the pipe is not a
     // partner this ever reaches.

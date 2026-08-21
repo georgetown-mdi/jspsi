@@ -273,21 +273,28 @@ export function resolveCountOnlyRun(
 
 /**
  * Refuse a linkage-terms `deduplicate: true` the run cannot honor, before any
- * matching begins.
+ * matching begins: the term under a linkage strategy that does not match a
+ * deduplicating cardinality.
  *
  * The cascade implements the deduplicating match (`linkViaPSI`), and the surfaces
  * downstream of the association table -- the payload frame, the output table, and
  * the exchange record with its re-supply path -- carry a table with several links
- * per record. `single-pass` implements neither deduplicating cardinality: it
- * refuses `one-to-many` and `many-to-many`, and accepts `many-to-one` only as an
- * alias that runs the unchanged one-to-one matching, so an exchange on that
- * strategy would silently match one-to-one against terms that asked for a group.
- * Running a `deduplicate: true` term would therefore deliver something
- * other than the consented many-cardinality match -- the disclosure-fidelity gap
- * this refusal closes. Refused at prepare time in {@link prepareForExchange} for
- * this party's own terms, and for both parties' agreed terms by
+ * per record. `single-pass` implements neither deduplicating cardinality: its
+ * accept-list admits `one-to-one` alone, so an exchange on that strategy would
+ * abort mid-round against terms that asked for a group. Refusing the pair here
+ * puts the answer where the operator is still configuring, and keeps the
+ * strategy's own guard as the second, fail-closed half rather than the first.
+ * Refused at prepare time in {@link prepareForExchange} for this party's own
+ * terms, and for both parties' agreed terms by
  * {@link resolveLinkageCardinality} after the terms exchange, before the PSI
  * rounds begin.
+ *
+ * Reads the whole terms document rather than the two values, so a caller cannot
+ * pass one party's `deduplicate` against the other's strategy. `linkageStrategy`
+ * is a mandatory-consistency term, so the agreed pair carries one value and both
+ * parties reach the same verdict from their own copy; the resolver asserts over
+ * both documents regardless, which makes the refusal symmetric in the pair even
+ * where the consistency check has not run.
  *
  * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
  * same reason as {@link assertAlgorithmImplemented}: on the accept side the
@@ -295,14 +302,16 @@ export function resolveCountOnlyRun(
  * `deriveAcceptedLinkageTerms`), so it is not unconditionally this operator's
  * own content. The message carries only fixed literals.
  */
-export function assertDeduplicateImplemented(deduplicate: boolean): void {
-  if (!deduplicate) return;
+export function assertDeduplicateImplemented(terms: LinkageTerms): void {
+  if (!terms.deduplicate) return;
+  if (terms.linkageStrategy !== "single-pass") return;
   throw new UsageError(
-    "linkage-terms deduplication is not yet implemented: matching currently " +
-      'runs strictly one-to-one, so a "deduplicate: true" term would be ' +
-      "silently matched one-to-one rather than honored. The exchange is " +
-      "refused before matching begins. Set deduplicate to false until " +
-      "deduplication is implemented.",
+    "deduplicated matching is not yet implemented for the single-pass " +
+      'linkage strategy: single-pass matches strictly one-to-one, so a "' +
+      'deduplicate: true" term would be matched one-to-one rather than ' +
+      "honored. The exchange is refused before matching begins. Set " +
+      "linkage_strategy to cascade to run a deduplicating match, or set " +
+      "deduplicate to false.",
   );
 }
 
@@ -496,24 +505,49 @@ export function assertSigningModeImplemented(
  * Resolve the matching cardinality {@link runExchange} passes to the linkage
  * strategies, from the two parties' agreed `deduplicate` settings.
  *
- * Each party calls it with the same agreed pair -- its own setting first, the
+ * Each party calls it with the same agreed pair -- its own terms first, the
  * partner's second, read off the terms exchange -- so both derive one cardinality
  * from the same authenticated state and the lockstep PSI rounds cannot be
  * desynced by a divergent resolution. The label is read from the CALLING party's
  * own side, a `deduplicate: true` party being the "many" one, so the two parties
  * hold mirror labels for the single procedure they run (docs/spec/PROTOCOL.md,
- * Deduplicating cardinalities). Today only `one-to-one` (both parties
- * `deduplicate: false`) is resolved here, and it is its own mirror; any
- * `deduplicate: true` is refused before the rounds begin, never silently
- * collapsed onto one-to-one (see {@link assertDeduplicateImplemented}), so the
- * mirror labels `linkViaPSI` accepts are reachable only from a direct caller.
+ * Deduplicating cardinalities): `(true, false)` gives the declaring party
+ * `many-to-one` and its partner `one-to-many`, and `(false, false)` gives
+ * `one-to-one`, which is its own mirror.
+ *
+ * `(true, true)` is refused. Its round-level pairing follows from the per-side
+ * rules -- both sides keep their within-dataset duplicates and every candidate
+ * pair is accepted -- but a table carrying multiplicity on both sides links
+ * records transitively, and only the transitive closure that resolves it into
+ * entity clusters makes such a table actionable for either party. That closure,
+ * its interaction with the key cascade, and what it discloses are unspecified and
+ * unbuilt, so the pair is refused before the rounds begin rather than paired and
+ * handed over unresolved (docs/spec/PROTOCOL.md, `many-to-many` stops at the
+ * pairing rules).
+ *
+ * Every refusal here is a symmetric function of the agreed pair -- each party
+ * asserts over BOTH documents and the `(true, true)` test is symmetric in them --
+ * so a refused pair aborts both parties at this same point rather than starting a
+ * round one side would refuse.
  */
 export function resolveLinkageCardinality(
-  localDeduplicate: boolean,
-  partnerDeduplicate: boolean,
-): "one-to-one" {
-  assertDeduplicateImplemented(localDeduplicate);
-  assertDeduplicateImplemented(partnerDeduplicate);
+  localTerms: LinkageTerms,
+  partnerTerms: LinkageTerms,
+): Exclude<LinkageCardinality, "many-to-many"> {
+  assertDeduplicateImplemented(localTerms);
+  assertDeduplicateImplemented(partnerTerms);
+  if (localTerms.deduplicate && partnerTerms.deduplicate)
+    throw new UsageError(
+      "both parties' linkage terms set deduplicate to true, which resolves to " +
+        "a many-to-many match. Its pairing rules are specified, but the " +
+        "transitive closure that resolves a both-sided multiplicity into " +
+        "entity clusters -- what makes such a table mean anything to either " +
+        "party -- is not yet implemented, so the exchange is refused before " +
+        "matching begins. Set deduplicate to false on one of the two parties " +
+        "to run a many-to-one match.",
+    );
+  if (localTerms.deduplicate) return "many-to-one";
+  if (partnerTerms.deduplicate) return "one-to-many";
   return "one-to-one";
 }
 
@@ -597,13 +631,13 @@ export function prepareForExchange(
   assertCountOnlyTermsShape(linkageTerms);
   assertCountOnlyTransmitsNoColumn(linkageTerms.algorithm, metadata);
 
-  // Fail closed on a deduplicating term before any credential, terms, or data are
-  // sent: matching runs strictly one-to-one, so `deduplicate: true` cannot be
-  // honored and would silently under-deliver the consented cardinality. Refused
-  // again from both parties' agreed terms in runExchange
+  // Fail closed on a deduplicating term the agreed strategy cannot match before
+  // any credential, terms, or data are sent: single-pass matches one-to-one, so a
+  // `deduplicate: true` term there would under-deliver the consented cardinality.
+  // Refused again from both parties' agreed terms in runExchange
   // (resolveLinkageCardinality), which holds for a PreparedExchange built without
   // going through this function. See assertDeduplicateImplemented.
-  assertDeduplicateImplemented(linkageTerms.deduplicate);
+  assertDeduplicateImplemented(linkageTerms);
 
   // Fail closed on a signing mode with no run path before any credential, terms,
   // or data are sent: only certificate mode signs a receipt, so a session-derived
@@ -1195,13 +1229,11 @@ export async function runExchange(
 
   // Resolve the matching cardinality from both parties' agreed deduplicate
   // settings as the first step after the terms exchange: the resolution is
-  // symmetric, so a refusal (any deduplicating term) aborts BOTH parties at this
-  // same point -- before the bootstrap frame and the PSI rounds -- rather than
-  // desyncing the lockstep. See resolveLinkageCardinality.
-  const cardinality = resolveLinkageCardinality(
-    linkageTerms.deduplicate,
-    partnerTerms.deduplicate,
-  );
+  // symmetric, so a refusal (many-to-many, or a deduplicating term under
+  // single-pass) aborts BOTH parties at this same point -- before the bootstrap
+  // frame and the PSI rounds -- rather than desyncing the lockstep. See
+  // resolveLinkageCardinality.
+  const cardinality = resolveLinkageCardinality(linkageTerms, partnerTerms);
 
   // Resolve which disclosure this exchange runs from both parties' agreed terms, at
   // the same point and for the same reason as the cardinality above: the resolution

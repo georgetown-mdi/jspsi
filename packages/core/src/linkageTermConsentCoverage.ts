@@ -15,6 +15,7 @@
 // half covers what the other cannot.
 
 import { parseLinkageTerms } from "./config/linkageTerms.js";
+import { DEDUPLICATE_DISCLOSURE_STATEMENT } from "./consentFacts.js";
 
 import type {
   LinkageField,
@@ -57,6 +58,20 @@ export interface ConsentRelevantTerm {
    * rendering rather than the representation.
    */
   vary: (terms: LinkageTerms) => LinkageTerms;
+  /**
+   * Fixed copy every surface MUST render for the variant document and MUST NOT
+   * render for the base -- for a field whose variant turns on a DISCLOSURE the
+   * acceptor is entitled to read in the same words on either surface, not merely
+   * a setting each surface may word for itself.
+   *
+   * The representation check below proves a surface moves when the field does;
+   * it cannot tell a surface stating the disclosure from one stating only that
+   * the setting is on. Pinning the sentence here rather than in each surface's
+   * own test is what keeps a surface from dropping it: the pin is carried on the
+   * probe both surfaces are measured with, so a surface that stops rendering it
+   * fails on the same string the other surface is held to.
+   */
+  requiredVariantCopy?: string;
   /**
    * Surfaces that do not render this field, each with why it is still absent.
    * Recorded rather than closed here: surfacing a field changes what an acceptor
@@ -320,7 +335,10 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     classification: "consent-relevant",
     reason:
       "Whether several of the inviter's records may match the same one of " +
-      "the acceptor's, which changes how many records the intersection holds.",
+      "the acceptor's, which changes how many records the intersection holds " +
+      "-- and discloses to the acceptor, for each of its own matched records, " +
+      "how many of the inviter's records group onto it and which rows they are.",
+    requiredVariantCopy: DEDUPLICATE_DISCLOSURE_STATEMENT,
     vary: (terms) =>
       edited(terms, (draft) => {
         draft.deduplicate = true;
@@ -562,6 +580,8 @@ export interface ConsentRepresentationProbe {
   reason: string;
   base: LinkageTerms;
   variant: LinkageTerms;
+  /** {@link ConsentRelevantTerm.requiredVariantCopy} for the field, if any. */
+  requiredVariantCopy?: string;
   /** {@link ConsentRelevantTerm.unrepresented} for the field, never absent. */
   unrepresented: Partial<Record<ConsentSurfaceName, string>>;
 }
@@ -590,6 +610,9 @@ export function consentRepresentationProbes(): Array<ConsentRepresentationProbe>
       reason: entry.reason,
       base: parseLinkageTerms(prepared),
       variant: parseLinkageTerms(entry.vary(prepared)),
+      ...(entry.requiredVariantCopy !== undefined
+        ? { requiredVariantCopy: entry.requiredVariantCopy }
+        : {}),
       unrepresented: entry.unrepresented ?? {},
     });
   }

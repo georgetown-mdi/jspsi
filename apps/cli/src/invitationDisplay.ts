@@ -4,6 +4,7 @@ import {
   CONSENT_BASIS_MARKERS,
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_DISCLOSURE_STATEMENT,
   PROPOSED_NOT_APPLIED_NOTES,
   redactAndSanitizeForDisplay,
   summarizeInvitation,
@@ -451,9 +452,11 @@ export function logDecisionFacts(
  * companion classification (`CONSENT_FACTS`) supplies both the basis marker each
  * fact's label carries and the caveat sentence beneath it, so neither surface
  * decides for itself whether a fact is enforced or what to say about it. A term
- * today's exchange does not apply (`psi-c`, `deduplicate`, and the per-element fuzzy
- * expansion) is marked as proposed, in the shared wording, so the prompt never
- * states a matching behavior the run does not perform.
+ * today's exchange does not apply (the per-element fuzzy expansion) is marked as
+ * proposed, in the shared wording, so the prompt never states a matching behavior
+ * the run does not perform. A term the run does apply that widens what is
+ * disclosed carries the shared statement of what it costs instead: the count-only
+ * tier for `psi-c`, and the grouping disclosure for `deduplicate`.
  *
  * `ownOutboundSend` is the columns THIS party will disclose to the partner for
  * matched records -- its own outbound disclosure, the hardest-to-undo fact it
@@ -554,8 +557,12 @@ export function displayInvitation(params: {
         ? "more than one of the inviting party's records may match a single one of the accepting party's records"
         : "each of the inviting party's records matches at most one of the accepting party's records"),
   );
-  if (summary.deduplicate && !summary.deduplicateApplied)
-    emit(`    ${PROPOSED_NOT_APPLIED_NOTES.deduplicate}`);
+  // What a deduplicating match reveals that a one-to-one one does not, beneath
+  // the headline it qualifies -- the same shared wording the web consent screen
+  // renders with its own copy of that headline. Printed for exactly a
+  // deduplicating invitation: a one-to-one exchange discloses no grouping at all,
+  // so the sentence would name a disclosure that does not happen.
+  if (summary.deduplicate) emit(`    ${DEDUPLICATE_DISCLOSURE_STATEMENT}`);
 
   // Value-level matching multiplicity, stated beside the record-level line above
   // because the two are easily read as one: a key element that splits its value
