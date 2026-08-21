@@ -309,7 +309,8 @@ export function readVerificationKeysFile(pathValue: string): VerificationKeys {
   }
 }
 
-function firstIssue(err: unknown): string {
+/** @internal exported for testing */
+export function firstIssue(err: unknown): string {
   const issues = (
     err as { issues?: Array<{ path?: unknown[]; message: string }> }
   ).issues;
@@ -317,7 +318,7 @@ function firstIssue(err: unknown): string {
     const issue = issues[0];
     const at =
       Array.isArray(issue.path) && issue.path.length > 0
-        ? `${issue.path.join(".")}: `
+        ? `${issue.path.map((segment) => String(segment)).join(".")}: `
         : "";
     return `${at}${issue.message}`;
   }
