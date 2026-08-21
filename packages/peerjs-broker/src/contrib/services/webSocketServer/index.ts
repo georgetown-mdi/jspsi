@@ -239,9 +239,29 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       return;
     }
 
+    // The window below is the one stretch in which this socket is nobody's:
+    // declined here, not yet taken by a co-resident listener, and so carrying no
+    // `error` listener of anyone's. A raw socket that emits `error` with none
+    // attached terminates the process, and a peer needs nothing more exotic than
+    // a reset -- being killed, or dropped by its network -- to emit one. So it is
+    // watched for exactly the window and no longer: an error inside it destroys
+    // the socket, which is that socket's release, leaving the bound behind it
+    // nothing to reclaim and no unanswered upgrade to report against a peer that
+    // merely hung up; an error after a co-resident listener has answered belongs
+    // to the listener that adopted it, along with the socket.
+    const releaseOnError = (error: Error): void => {
+      socket.destroy();
+      this._onSocketError(error);
+    };
+    socket.on("error", releaseOnError);
+
     const release = setTimeout(() => {
       if (socket.destroyed) return;
-      if (socket instanceof Socket && socket.bytesWritten > 0) return;
+      if (socket instanceof Socket && socket.bytesWritten > 0) {
+        // Answered: the socket is its adopter's now, errors with it.
+        socket.off("error", releaseOnError);
+        return;
+      }
 
       socket.destroy();
       this._onSocketError(
@@ -254,6 +274,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
 
     socket.once("close", () => {
       clearTimeout(release);
+      socket.off("error", releaseOnError);
     });
   }
 

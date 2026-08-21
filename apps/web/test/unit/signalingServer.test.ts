@@ -44,6 +44,13 @@ interface Signaling {
   /** Every `error` the server re-emitted, collected so it does not throw as an
    * unhandled EventEmitter `error`. */
   errors: Array<Error>;
+  /** Every socket the HTTP server accepted. A raw upgrade never becomes a `ws`
+   * client, so this is where a test sees whether the process still holds one. */
+  accepted: Array<net.Socket>;
+  /** Each upgrade the co-resident listener was handed. The signaling server's own
+   * `upgrade` listener is registered first and so has already run, which makes an
+   * entry here the observable that its release window is open. */
+  coResidentUpgrades: Array<string>;
 }
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -86,6 +93,7 @@ async function startSignaling(
   const errors: Array<Error> = [];
   wss.on("error", (error: Error) => errors.push(error));
 
+  const coResidentUpgrades: Array<string> = [];
   if (opts.coResidentUpgrade !== undefined) {
     const adopter =
       opts.coResidentUpgrade === "answers"
@@ -95,9 +103,13 @@ async function startSignaling(
       // Only the upgrades the signaling server declined are this listener's; an
       // upgrade on the signaling path has already been adopted by it.
       if (req.url?.startsWith("/api/peerjs")) return;
+      coResidentUpgrades.push(req.url ?? "");
       adopter?.handleUpgrade(req, socket, head, () => {});
     });
   }
+
+  const accepted: Array<net.Socket> = [];
+  server.on("connection", (socket: net.Socket) => accepted.push(socket));
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
@@ -111,7 +123,7 @@ async function startSignaling(
         server.close(() => resolve());
       }),
   );
-  return { port, realm, wss, errors };
+  return { port, realm, wss, errors, accepted, coResidentUpgrades };
 }
 
 function signalingUrl(port: number, id: string, secure = false): string {
@@ -163,6 +175,9 @@ interface RawUpgrade {
   received: () => string;
   /** Resolves once the server releases the socket. */
   released: Promise<void>;
+  /** Hang up with a TCP RST rather than a FIN -- what a peer that is killed, or
+   * whose network drops it, leaves the server holding. */
+  reset: () => void;
 }
 
 /** Open an upgrade by hand and never answer what comes back -- neither the close
@@ -196,7 +211,11 @@ function openRawUpgrade(port: number, target: string): RawUpgrade {
     socket.destroy();
     return Promise.resolve();
   });
-  return { received: () => Buffer.concat(chunks).toString("utf8"), released };
+  return {
+    received: () => Buffer.concat(chunks).toString("utf8"),
+    released,
+    reset: () => socket.resetAndDestroy(),
+  };
 }
 
 /** Whether `promise` settles within `ms` -- a released socket answers `true`, a
@@ -468,5 +487,43 @@ describe("signaling socket release", () => {
     expect(peer.received()).toBe("");
     expect(sig.errors).toHaveLength(1);
     expect(sig.errors[0].message).toContain("no co-resident listener answered");
+  }, 15_000);
+
+  test("a peer that resets inside the co-resident window is released, not crashed on", async () => {
+    // The window is the one stretch where the socket has no owner: this server
+    // has declined it and the co-resident listener has not taken it. A raw socket
+    // held there with no `error` listener turns an ordinary hang-up -- a peer
+    // killed, or a network that drops it -- into an unhandled `error` that ends
+    // the process, taking rendezvous down for every peer over an upgrade this
+    // server was never going to serve.
+    const sig = await startSignaling({ coResidentUpgrade: "ignores" });
+
+    const peer = openRawUpgrade(sig.port, "/not-the-signaling-path");
+    // Reset only once the co-resident listener has been handed the upgrade. The
+    // signaling server's listener runs before it, so that hand-off is the window
+    // opening; an RST any earlier can reach the server with the request itself
+    // still unread, which never opens the window at all.
+    await waitFor(() => sig.coResidentUpgrades.length > 0);
+    peer.reset();
+
+    await waitFor(() => sig.errors.length > 0);
+    expect(sig.errors).toHaveLength(1);
+    expect(sig.errors[0].message).toContain("ECONNRESET");
+    // Handling the error released the socket: the server holds nothing open.
+    expect(sig.accepted).toHaveLength(1);
+    expect(sig.accepted[0].destroyed).toBe(true);
+
+    // That release is also the whole of it, so the bound behind it finds nothing
+    // left to reclaim and does not go on to accuse a peer that hung up of leaving
+    // an upgrade unanswered.
+    await new Promise((resolve) =>
+      setTimeout(resolve, SOCKET_RELEASE_TIMEOUT_MS * 2),
+    );
+    expect(sig.errors).toHaveLength(1);
+
+    // The process is not merely alive but still brokering.
+    const ws = new WebSocket(signalingUrl(sig.port, "peer-after-reset"));
+    await waitForFrame(ws, "OPEN");
+    ws.close();
   }, 15_000);
 });
