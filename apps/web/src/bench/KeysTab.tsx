@@ -17,7 +17,11 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
-import { buildAdvancedTerms } from "@psi/advancedInvite";
+import {
+  DEDUPLICATE_NOT_ON_INVITATION_MESSAGE,
+  INVITATION_CARRIES_DEDUPLICATE,
+  buildAdvancedTerms,
+} from "@psi/advancedInvite";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { TermsImportExport } from "@components/TermsImportExport";
@@ -62,8 +66,8 @@ const KEY_VERDICT_BADGES: Record<
  * The Matching keys tab: the guided ordered key list (enable + reorder, with
  * satisfiability badges), the expert switch that opens element-by-element
  * authoring and terms import/export, and the matching settings -- the live
- * linkage strategy plus the gated method and deduplication controls, held
- * visible but inert until the run honors them.
+ * linkage strategy and matching method, plus the deduplication control, held
+ * visible but inert while an invitation cannot carry it.
  */
 export function KeysTab({
   editor,
@@ -247,14 +251,21 @@ export function KeysTab({
         }
         mt="md"
       />
+      {/* Held back on the invitation path rather than gated on
+      APPLIED_SETTINGS.deduplicate, which the exchange applies: what an invitation
+      cannot do is deliver the setting to a runnable exchange, since accepting
+      adopts it for both parties. The description states that ground and
+      the way through, so a disabled control explains itself rather than reading as
+      an unbuilt feature; both are the one wording the Generate gate and the import
+      refusal use. See INVITATION_CARRIES_DEDUPLICATE. */}
       <Checkbox
         label="Allow several of your records to match one partner record"
         description={
-          APPLIED_SETTINGS.deduplicate
+          INVITATION_CARRIES_DEDUPLICATE
             ? undefined
-            : "Deduplication of your own inputs is not available yet; each record matches at most once."
+            : DEDUPLICATE_NOT_ON_INVITATION_MESSAGE
         }
-        disabled={!APPLIED_SETTINGS.deduplicate}
+        disabled={!INVITATION_CARRIES_DEDUPLICATE}
         checked={editor.draft.deduplicate}
         onChange={(event) => onDeduplicate(event.currentTarget.checked)}
         mt="md"

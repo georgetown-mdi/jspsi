@@ -8,6 +8,8 @@ import { createElement } from "react";
 
 import {
   CONSENT_FACTS,
+  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
+  DEDUPLICATE_DISCLOSURE_STATEMENT,
   UNRECOGNIZED_TRANSFORM_NOTE,
   sanitizeForDisplay,
 } from "@psilink/core";
@@ -20,6 +22,7 @@ import {
   ESC,
   PRINTABLE_ASCII,
   RLO,
+  consentRepresentationProbes,
   hostileSource,
   hostileTerms,
   hostileVariants,
@@ -2219,17 +2222,15 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
   // The consent-integrity invariant this locks in: a sentence that qualifies a
   // headline renders at the SAME visibility level as that headline, never one expand
   // down, so a reader can never see a headline as in force while what qualifies it
-  // is hidden. Which level that is follows the setting's disclosure weight -- psi-c
-  // states a disclosure GUARANTEE (count only, no identifiers), so its headline and
-  // the tier bounding it are always-visible in the core; deduplicate and fuzzy
-  // change match behavior/breadth, not what is disclosed, so their headlines and
-  // caveats sit one expand down together. These assert placement against the
+  // is hidden. Which level that is follows the HEADLINE's disclosure weight --
+  // psi-c's headline states a disclosure GUARANTEE (count only, no identifiers), so
+  // it and the tier bounding it are always-visible in the core; the deduplicate and
+  // fuzzy headlines state match behavior/breadth, so they and their qualifying
+  // sentences sit one expand down together. These assert placement against the
   // accessibility tree (which panel the text lives in), not styling.
   function renderCaveatTerms(overrides?: Partial<LinkageTerms>) {
     renderTerms({ ...terms, ...overrides });
   }
-
-  const deduplicateCaveat = "for an invitation without deduplication";
 
   test("the count-only tier states the disclosure, in the words the CLI accept prompt shows", async () => {
     // A count-only run reveals no identifier, so the psi consequence must not reach
@@ -2289,23 +2290,74 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     );
   });
 
-  test("the deduplicate caveat sits with its headline inside 'Other details', co-hidden", async () => {
-    // deduplicate proposed, not applied (module terms). By the rule it sits one
-    // expand down WITH its headline: both are inside the collapsed "Other details"
-    // panel, so a reader who does not expand it sees neither -- the headline is never
-    // visible as in force while its caveat is hidden.
+  test("the deduplicate disclosure statement sits with its headline inside 'Other details', co-hidden", async () => {
+    // deduplicate on (module terms). By the rule the statement sits one expand down
+    // WITH the headline it qualifies: both are inside the collapsed "Other details"
+    // panel, so a reader who does not expand it sees neither -- the headline is
+    // never visible as in force while what it costs is hidden. It is the same
+    // sentence the CLI accept prompt prints, read from core.
     renderCaveatTerms();
     await expect.element(toggle("Other details")).toBeInTheDocument();
 
     // The collapse hides its content from assistive tech while closed ...
     const collapse = await readyCollapse("Other details");
     expect(collapse.getAttribute("aria-hidden")).toBe("true");
-    // ... and BOTH the headline and its contradicting caveat live inside it, so
+    // ... and BOTH the headline and the sentence qualifying it live inside it, so
     // neither leaks into the always-visible core ahead of the other.
     expect(collapse.textContent).toContain(
       "More than one of the inviting party's records",
     );
-    expect(collapse.textContent).toContain(deduplicateCaveat);
+    expect(collapse.textContent).toContain(DEDUPLICATE_DISCLOSURE_STATEMENT);
+    // The refusal note keeps that level too: the disclosure this headline would
+    // make and the fact that accepting cannot produce the run making it are one
+    // reading, so neither may sit an expand away from the other.
+    expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPT_REFUSAL_NOTE);
+  });
+
+  // The other half of the cross-surface pin: core's consent classification names
+  // the sentence a surface MUST render for a term whose variant turns on a
+  // disclosure, and the CLI accept prompt's coverage test is held to the same
+  // strings. Driving this screen from the same list is what stops either surface
+  // dropping one while still moving its output enough to pass the representation
+  // check.
+  const pinnedDisclosureProbes = consentRepresentationProbes().filter(
+    (probe) =>
+      probe.requiredVariantCopy !== undefined &&
+      probe.unrepresented.web === undefined,
+  );
+
+  test("the consent-coverage check pins at least one disclosure sentence", () => {
+    // Without this a filter that matched nothing would leave the per-probe test
+    // below green by vacuity.
+    expect(pinnedDisclosureProbes.length).toBeGreaterThan(0);
+  });
+
+  test.each(pinnedDisclosureProbes)(
+    "renders every pinned disclosure sentence for $path",
+    async (probe) => {
+      renderTerms(probe.variant);
+      await expect.element(toggle("Other details")).toBeInTheDocument();
+      // Per probe, not only over the set: an entry carrying an empty list would
+      // otherwise pass by rendering nothing at all.
+      const copies = probe.requiredVariantCopy ?? [];
+      expect(copies.length).toBeGreaterThan(0);
+      for (const copy of copies)
+        expect(app.container.textContent).toContain(copy);
+    },
+  );
+
+  test("a one-to-one invitation states no grouping disclosure at all", async () => {
+    // Non-vacuous the other way: the sentences are the setting's doing rather than
+    // a fixture of the screen, and a one-to-one exchange discloses no grouping to
+    // state and proposes no exchange that would be refused for one.
+    renderCaveatTerms({ deduplicate: false });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_DISCLOSURE_STATEMENT,
+    );
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
+    );
   });
 
   test("the fuzzy caveat sits with its annotation inside the key's own detail, behind the matching disclosure", async () => {
@@ -2343,10 +2395,10 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
   });
 
   test("a setting that matches the run carries no not-yet-applied caveat", async () => {
-    // psi (identifiers revealed -- the run's actual behavior), deduplicate off (the
-    // run is one-to-one), and no fuzzy: every displayed setting equals what the run
-    // does, so none is flagged. The flag gating itself is asserted in the
-    // summarizeInvitation unit tests.
+    // psi (identifiers revealed -- the run's actual behavior), deduplicate off, and
+    // no fuzzy: every displayed setting equals what the run does, so none is
+    // flagged. The flag gating itself is asserted in the summarizeInvitation unit
+    // tests.
     renderCaveatTerms({
       algorithm: "psi",
       deduplicate: false,
@@ -2354,10 +2406,9 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
       linkageKeys: [{ name: "DOB", elements: [{ field: "dob" }] }],
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    // Neither caveat renders anywhere on the screen. container includes the
-    // collapsed panels' mounted content, so this also covers the detail levels, not
-    // just the core.
-    expect(app.container.textContent).not.toContain("does not yet apply it");
+    // The caveat renders nowhere on the screen. container includes the collapsed
+    // panels' mounted content, so this also covers the detail levels, not just the
+    // core.
     expect(app.container.textContent).not.toContain(
       "(proposed; not yet applied)",
     );

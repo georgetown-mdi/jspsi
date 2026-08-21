@@ -9,6 +9,8 @@ import logLibrary from "loglevel";
 import YAML from "yaml";
 import {
   CONSENT_FACTS,
+  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
+  DEDUPLICATE_DISCLOSURE_STATEMENT,
   encodeInvitation,
   getDefaultLinkageTerms,
   getLogger,
@@ -252,6 +254,29 @@ test("validateAccept: an invalid invitation is rejected before the prompt", asyn
       log: silentLog,
     }),
   ).rejects.toBeInstanceOf(UsageError);
+});
+
+test("validateAccept: a deduplicating invitation is refused before the prompt or any connection", async () => {
+  // The hostile-flip guard at the CLI accept entry point. A deduplicating
+  // invitation is schema-valid, so it decodes cleanly -- but validateAccept derives
+  // the acceptor's own terms (deriveAcceptedLinkageTerms) ahead of reading the
+  // input, opening any connection, or prompting, so it refuses here whatever the
+  // inviter would go on to present at the terms exchange. Offline, which connects to
+  // nothing, so the rejection is provably before any connection.
+  const base = sampleToken(new Date(Date.now() + 3_600_000).toISOString());
+  const encoded = await encodeInvitation({
+    ...base,
+    linkageTerms: { ...base.linkageTerms, deduplicate: true },
+  });
+  const rejected = validateAccept({
+    resolved: { mode: "offline", invitation: encoded },
+    options: testOptions(),
+    log: silentLog,
+  });
+  await expect(rejected).rejects.toBeInstanceOf(UsageError);
+  await expect(rejected).rejects.toThrow(
+    /deduplicating exchange cannot be accepted from an invitation/,
+  );
 });
 
 test("validateAccept: online rejects a missing input file before the prompt, preserving its exit code", async () => {
@@ -1980,6 +2005,28 @@ test("displayInvitation: represents every consent-relevant linkage term, bar the
       .map((probe) => probe.path)
       .sort(),
   );
+
+  // A term whose variant turns on a disclosure carries the sentence stating it in
+  // the classification, and both surfaces are held to that one string: moving the
+  // output is not enough where an acceptor is entitled to read what the setting
+  // costs. Asserted absent from the base too, so the pin measures the setting
+  // rather than a sentence the prompt always prints.
+  const pinned = probes.filter(
+    (probe) =>
+      probe.requiredVariantCopy !== undefined &&
+      probe.unrepresented.cli === undefined,
+  );
+  expect(pinned.length).toBeGreaterThan(0);
+  for (const probe of pinned) {
+    // Per probe, not only over the set: an entry carrying an empty list would
+    // otherwise satisfy the loop below by rendering nothing at all.
+    const copies = probe.requiredVariantCopy ?? [];
+    expect(copies.length, probe.path).toBeGreaterThan(0);
+    for (const copy of copies) {
+      expect(render(probe.variant), probe.path).toContain(copy);
+      expect(render(probe.base), probe.path).not.toContain(copy);
+    }
+  }
 });
 
 test("displayInvitation: shows each matching rule the acceptor is consenting to", () => {
@@ -2039,11 +2086,14 @@ test("displayInvitation: shows each matching rule the acceptor is consenting to"
   expect(out).toContain("    agreement valid through: 2027-12-31");
 });
 
-test("displayInvitation: a proposed setting the run does not apply is marked, not stated as in force", () => {
-  // deduplicate is declarable but unimplemented, and core refuses it on every
-  // run path. Printing it as a plain fact would have the operator consent to a
-  // behavior the run does not perform.
-  const log = getLogger("accept-display-proposed-test");
+test("displayInvitation: a deduplicating term states what it discloses and that accepting will not run it", () => {
+  // The run honors deduplicate, so the line is a plain fact -- and a deduplicating
+  // match discloses grouping a one-to-one match does not, which the acceptor is
+  // consenting to. The statement is shared wording, printed under the headline it
+  // qualifies rather than one block away. The refusal note sits with it at the
+  // same level: accepting adopts the term for both parties, so the run whose cost
+  // the statement states is one this acceptance cannot produce.
+  const log = getLogger("accept-display-deduplicate-test");
   log.setLevel("silent");
   const base = sampleToken(FUTURE());
   const render = (overrides: Partial<LinkageTerms>): string =>
@@ -2057,18 +2107,22 @@ test("displayInvitation: a proposed setting the run does not apply is marked, no
     "duplicate matches (enforced): each of the inviting party's records " +
       "matches at most one of the accepting party's records",
   );
-  expect(oneToOne).not.toContain("proposes this");
+  // A one-to-one exchange discloses no grouping at all, so neither sentence must
+  // reach it: their presence below is the setting's doing rather than the
+  // fixture's.
+  expect(oneToOne).not.toContain(DEDUPLICATE_DISCLOSURE_STATEMENT);
+  expect(oneToOne).not.toContain(DEDUPLICATE_ACCEPT_REFUSAL_NOTE);
 
   const deduplicating = render({ deduplicate: true });
   expect(deduplicating).toContain(
     "duplicate matches (enforced): more than one of the inviting party's " +
       "records may match a single one of the accepting party's records",
   );
-  expect(deduplicating).toContain(
-    "    Your partner proposes this, but this version of the exchange does " +
-      "not yet apply it and will refuse to run; ask your partner for an " +
-      "invitation without deduplication.",
-  );
+  expect(deduplicating).toContain(`    ${DEDUPLICATE_DISCLOSURE_STATEMENT}`);
+  // Same indent as the statement it follows, so the acceptor reads what the
+  // setting would disclose and that this exchange will not perform it in one
+  // place rather than a screen apart.
+  expect(deduplicating).toContain(`    ${DEDUPLICATE_ACCEPT_REFUSAL_NOTE}`);
 });
 
 test("displayInvitation: the retain line is printed at both decision blocks, and only where retention is disclosed", () => {

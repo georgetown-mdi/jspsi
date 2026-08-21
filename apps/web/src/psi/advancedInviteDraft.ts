@@ -133,8 +133,8 @@ export function seedAdvancedInvite(
       // path and getDefaultLinkageTerms' output.
       outputDirection: "both",
       // Carried from the recommended terms (psi / no-dedup), so a fresh draft opens
-      // on the identifier-revealing algorithm and one-to-one matching; the gated
-      // deduplicate control holds its default until APPLIED_SETTINGS flips.
+      // on the identifier-revealing algorithm and one-to-one matching; a
+      // deduplicating exchange is chosen at the control rather than defaulted to.
       algorithm: terms.algorithm,
       deduplicate: terms.deduplicate,
       // The default strategy (`cascade`). Ungated -- the control writes it straight

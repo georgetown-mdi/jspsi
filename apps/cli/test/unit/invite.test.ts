@@ -1775,13 +1775,45 @@ test("validateInvite: a psi config with the same metadata and shape still mints"
   }
 });
 
-test("validateInvite: offline config-source refuses a deduplicating term before minting", async () => {
-  // The mint-boundary counterpart of the run-side deduplicate refusal (matching
-  // runs strictly one-to-one): a config with `deduplicate: true` -- schema-valid
-  // when paired with `expects_output: true` -- must be refused BEFORE the token
-  // is disclosed, so `invite` never mints an invitation the config's own
-  // `psilink exchange` would then reject (exit 64). The sibling of the psi-c
-  // mint gate above; no input is passed, so it exercises the check in isolation.
+test("validateInvite: offline config-source refuses a deduplicating term under single-pass before minting", async () => {
+  // The mint-boundary counterpart of the run-side refusal (single-pass matches
+  // strictly one-to-one): a config pairing `deduplicate: true` with
+  // `linkage_strategy: single-pass` -- schema-valid when `expects_output: true`
+  // -- must be refused BEFORE the token is disclosed, so `invite` never mints an
+  // invitation the config's own `psilink exchange` would then reject (exit 64).
+  // The sibling of the psi-c mint gate above; no input is passed, so it exercises
+  // the check in isolation.
+  const terms: LinkageTerms = {
+    ...defaultTerms(),
+    deduplicate: true,
+    linkageStrategy: "single-pass",
+  };
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    const invite = () =>
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      });
+    await expect(invite()).rejects.toBeInstanceOf(UsageError);
+    await expect(invite()).rejects.toThrow(/single-pass/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: offline config-source refuses a deduplicating cascade term before minting", async () => {
+  // The strategy that DOES match a deduplicating cardinality is refused here
+  // too, so the mint gate is the invitation path's rather than the strategy's:
+  // acceptance adopts the inviting party's deduplicate rather than mirroring it,
+  // so any deduplicating invitation reaches the run as the both-sided pair and is
+  // refused there. Refusing at the mint puts that answer before the token is
+  // disclosed. The remedy the message names -- a deduplicating term in a party's
+  // OWN configuration, run through `psilink exchange` -- is pinned on the core
+  // side (prepareForExchange.test.ts prepares it under cascade, and
+  // linkageCardinality.test.ts runs the agreed pair end to end).
   const terms: LinkageTerms = { ...defaultTerms(), deduplicate: true };
   const { dir, configPath, keyPath } = withConfig(terms);
   try {
@@ -1793,7 +1825,12 @@ test("validateInvite: offline config-source refuses a deduplicating term before 
         log: silentLog,
       });
     await expect(invite()).rejects.toBeInstanceOf(UsageError);
-    await expect(invite()).rejects.toThrow(/deduplicate/);
+    await expect(invite()).rejects.toThrow(/an invitation cannot carry/);
+    // The remedy is the per-party configuration path, not "wait for support".
+    await expect(invite()).rejects.toThrow(/per-party configurations/);
+    // Nothing was written and no token exists to withdraw: the refusal lands
+    // before the mint's own side effects.
+    expect(fs.existsSync(keyPath)).toBe(false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

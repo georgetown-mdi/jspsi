@@ -1189,7 +1189,7 @@ describe("summarizeInvitation", () => {
     ]);
   });
 
-  test("marks deduplicate and fuzzy comparisons as proposed but not yet applied", () => {
+  test("marks the fuzzy expansion as proposed but not yet applied, and deduplicate as applied", () => {
     const summary = summarizeInvitation(
       makeToken({
         deduplicate: true,
@@ -1204,10 +1204,11 @@ describe("summarizeInvitation", () => {
         ],
       }),
     );
-    // Both are surfaced (terms as proposed) but flagged as not run by today's
-    // exchange, so the renderer marks them rather than state a behavior that
-    // does not occur.
-    expect(summary.deduplicateApplied).toBe(false);
+    // The fuzzy expansion is surfaced (the term as proposed) but flagged as not
+    // run by today's exchange, so the renderer marks it rather than state a
+    // behavior that does not occur. Deduplication IS run, so it carries no such
+    // flag and the renderer states what it discloses instead.
+    expect(summary.deduplicateApplied).toBe(true);
     expect(summary.linkageKeys[0].elements[0].fuzzyComparisonApplied).toBe(
       false,
     );

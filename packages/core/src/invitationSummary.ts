@@ -482,9 +482,14 @@ export interface InvitationSummary {
   deduplicate: boolean;
   /**
    * Whether today's exchange actually applies the deduplicate setting above
-   * (see {@link APPLIED_SETTINGS}). False while matching is hard-wired
-   * one-to-one; the renderer flags the duplicate-matches row as proposed-but-
-   * not-applied when a looser setting is proposed but this is false.
+   * (see {@link APPLIED_SETTINGS}). True: the cascade matches the resolved
+   * cardinality and every surface downstream of the association table carries
+   * the multiplicity. What stays refused -- the both-sided pair, and a
+   * deduplicating term under `single-pass` -- is a property of the agreed PAIR
+   * rather than of the inviter's setting, so it is not readable from an
+   * invitation alone and this flag does not carry it. What it carries is this
+   * build's applied setting for the term, kept as the summary's applied-settings
+   * surface for it beside the per-element `fuzzyComparisonApplied`.
    */
   deduplicateApplied: boolean;
   /**
@@ -1230,11 +1235,10 @@ export function summarizeInvitation(
   }
 
   // The consent screen reflects the inviter's terms as proposed, not only what
-  // today's exchange executes: deduplicate and the per-element
-  // generateFuzzyComparisons are surfaced even though the run does not yet apply
-  // them (matching is currently hard-wired to one-to-one, and fuzzy expansion is
-  // unimplemented). The *Applied flags below carry that gap to the renderer; the
-  // displayed terms are what the acceptor agrees to.
+  // today's exchange executes: the per-element generateFuzzyComparisons is
+  // surfaced even though the run does not yet apply the expansion. The *Applied
+  // flags below carry that gap to the renderer; the displayed terms are what the
+  // acceptor agrees to.
   // Which of the two fan-out registers this invitation is in: the strategy that
   // matches a candidate set, or one that refuses the terms outright. Read once
   // here so the element markers, the key summaries and the consent fact a surface

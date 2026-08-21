@@ -4,6 +4,8 @@ import {
   FAN_OUT_FUNCTION_NAMES,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
+  UsageError,
+  assertDeduplicateImplemented,
   assessLinkageSatisfiability,
   canonicalString,
   countOnlyShapeViolation,
@@ -133,6 +135,57 @@ const COUNT_ONLY_MESSAGES: Record<CountOnlyShapeViolation, string> = {
     `those columns so they are not sent, or ${REVEAL_IDENTIFIERS_INSTEAD}`,
 };
 
+/** Shown when the draft asks for a deduplicating match under a linkage strategy
+ * that matches one value per record. Core refuses that pair on both parties
+ * before matching begins ({@link assertDeduplicateImplemented}), so an invitation
+ * minted on it is one both sides abort on rather than one the partner can accept.
+ * Names the two ways out in the words the controls carrying them are labelled,
+ * keeping the same split the count-only messages do: the rule is core's, the
+ * wording this editor's. */
+const DEDUPLICATE_STRATEGY_MESSAGE =
+  "Single-pass matches each of your records to at most one partner record, so " +
+  "it cannot run a deduplicating match. Set Linkage strategy to Cascade, or " +
+  'clear "Allow several of your records to match one partner record".';
+
+/**
+ * Whether an INVITATION can carry a deduplicating term, and so whether this
+ * editor -- which authors nothing else -- offers the setting at all.
+ *
+ * Not {@link APPLIED_SETTINGS}.deduplicate, which answers a different question
+ * and answers it `true`: the exchange does apply the setting, and a
+ * configuration that carries it runs a deduplicating match. What an invitation
+ * cannot do is deliver it to a runnable exchange. Acceptance REFUSES a
+ * deduplicating invitation (`deriveAcceptedLinkageTerms` in core throws), at
+ * accept time before any connection, because the term is per-party and adopting it
+ * would leave the acceptor disclosing its record grouping on a run a hostile
+ * inviter can flip. So an invitation is the wrong carrier for the term whether the
+ * partner accepts it or not.
+ *
+ * So the setting is held back at this editor's three doors while this is false:
+ * the control is disabled, an import carrying it is refused, and the Generate
+ * gate below refuses a draft that reached the state by another route. Flip it
+ * when accept-side authoring lands -- the acceptor choosing its own side of the
+ * cardinality -- and all three open together; the paired tests fail loudly so
+ * none is left stale. Typed `boolean` rather than the literal for the same reason
+ * `APPLIED_SETTINGS` is: each gate reads as a runtime branch rather than as
+ * provably dead code the moment the flag is meant to flip -- which is what the
+ * inferrable-type exemption below is for.
+ */
+// eslint-disable-next-line @typescript-eslint/no-inferrable-types -- see above: the widening is the point.
+export const INVITATION_CARRIES_DEDUPLICATE: boolean = false;
+
+/** Why the deduplicate control is off, and what blocks a draft that carries the
+ * setting anyway -- one wording for the disabled control's description, the
+ * Generate gate, and the import refusal, so the three cannot state different
+ * grounds. Names the way through (both parties' own configurations) rather than
+ * calling the capability unbuilt, which would be untrue: the exchange runs it.
+ * See {@link INVITATION_CARRIES_DEDUPLICATE}. */
+export const DEDUPLICATE_NOT_ON_INVITATION_MESSAGE =
+  "An invitation cannot carry a deduplicating match: accepting one sets it for " +
+  "both parties, and an exchange in which both parties deduplicate is refused " +
+  "before matching begins. A deduplicating exchange is set up in each party's " +
+  "own configuration file instead, with the setting on for one party only.";
+
 /**
  * Validate a draft for the Generate gate. The core schema
  * ({@link safeParseLinkageTerms}) is the single source for everything it covers
@@ -143,8 +196,11 @@ const COUNT_ONLY_MESSAGES: Record<CountOnlyShapeViolation, string> = {
  * rejects an already-passed date later, so refuse it up front), at least one
  * column-satisfiable linkage key, a
  * canonical-encode dry run (the byte form both parties hash; refuse a value that
- * cannot encode rather than fail cross-party), and a declared fan-out step, which
- * the schema admits and the run refuses.
+ * cannot encode rather than fail cross-party), the two pairings the schema admits
+ * and the run refuses (a declared fan-out step, and a deduplicating term under a
+ * linkage strategy that matches one value per record), and the deduplicating term
+ * an invitation cannot carry to a runnable exchange at all
+ * ({@link INVITATION_CARRIES_DEDUPLICATE}).
  *
  * Schema errors are mapped back to the offending control by their issue path --
  * the editor re-derives the control because the referential-integrity refines
@@ -350,6 +406,38 @@ export function validateAdvancedInvite(
   )
     errors.keys = `A linkage key's transform ${FAN_OUT_MESSAGE_BODY}`;
 
+  // The two refusals a deduplicating draft can meet, composed onto the key list
+  // rather than one overwriting the other: each names an obstacle the other's
+  // remedy leaves standing, so showing only one would send the operator to move a
+  // setting that does not unblock generation. Joined with a newline, the way the
+  // payload control carries its two problems. Written over whatever else the key
+  // list reports, since generation stays blocked until a deduplicate setting
+  // moves. The count-only gate below writes over both in turn for a `psi-c`
+  // draft, whose own shape rules own these settings and whose remedies stay valid
+  // for that algorithm.
+  const deduplicateProblems: Array<string> = [];
+  // The invitation-path gate: this editor mints invitations only, and an
+  // invitation cannot deliver this setting to a runnable exchange. Read off the
+  // BUILT terms, like the gates around it, so what is judged is what the
+  // invitation would carry.
+  if (terms.deduplicate && !INVITATION_CARRIES_DEDUPLICATE)
+    deduplicateProblems.push(DEDUPLICATE_NOT_ON_INVITATION_MESSAGE);
+  // The deduplicating-pair gate, run as core's own refusal rather than a second
+  // web-side copy of the pair it names -- the same reading-from-core the fan-out
+  // gate above does with core's list, so a pair added there is refused here with
+  // no second edit. Core refuses it symmetrically from the agreed terms, so an
+  // exchange configured on it aborts both parties at the run boundary; refusing
+  // it at Generate puts the answer where the operator still holds both controls,
+  // and keeps this editor honest about the pair once the gate above opens.
+  try {
+    assertDeduplicateImplemented(terms);
+  } catch (err) {
+    if (!(err instanceof UsageError)) throw err;
+    deduplicateProblems.push(DEDUPLICATE_STRATEGY_MESSAGE);
+  }
+  if (deduplicateProblems.length > 0)
+    errors.keys = deduplicateProblems.join("\n");
+
   // The count-only shape gate, at the same altitude as the fan-out one above and
   // read from core's own rules rather than a second web-side list, so this editor
   // refuses exactly the documents core refuses at parse and at accept. Written
@@ -395,6 +483,11 @@ function fieldForIssuePath(path: ReadonlyArray<PropertyKey>): AdvancedField {
   // A payload-column schema failure (e.g. a sent column whose name exceeds the
   // length bound) surfaces against the payload control, not the key list.
   if (head === "payload") return "payload";
+  // The schema's deduplicate-requires-output refine reports here, against the
+  // output pair rather than the setting that makes it incoherent. It belongs to
+  // the result-direction control, not the key list, which is where the fallback
+  // below would put it -- under a message about enabling a linkage key.
+  if (head === "output") return "output";
   // linkageKeys, linkageFields, and anything else the editor can influence
   // surface against the key list (the only structural control it offers).
   return "keys";
@@ -415,6 +508,20 @@ function messageForField(field: AdvancedField): string {
       return "Enter a valid date (YYYY-MM-DD).";
     case "lifetime":
       return "Choose an invitation duration between 1 second and one year.";
+    case "output":
+      // The one rule that reports against the output pair: a party that receives
+      // no matched results has nothing to deduplicate its own records onto. Name
+      // that obstacle and the actionable result-direction control that settles it,
+      // rather than the pair the issue path points at, which is not the half the
+      // operator chose. The deduplicate checkbox the other half once named is
+      // disabled while an invitation cannot carry the term
+      // ({@link INVITATION_CARRIES_DEDUPLICATE}), so pointing at it is not an
+      // actionable remedy here.
+      return (
+        "Deduplicating your own records needs you to receive the matched " +
+        'results. Under "Who receives the matched results", choose an option ' +
+        "that includes you."
+      );
     case "payload":
       // The common payload error (sending while only you receive) is set with its
       // own message in validateAdvancedInvite; this covers a schema failure on a
@@ -429,15 +536,26 @@ function messageForField(field: AdvancedField): string {
   }
 }
 
-/** A message naming any setting an imported terms set turns on that the run does
- * not yet honor (gated by {@link APPLIED_SETTINGS}), or `undefined` when none. The
- * editor refuses such an import rather than load a draft whose headline behavior
- * silently does not happen -- the same gate the disabled GUI controls and the
- * {@link buildAdvancedTerms} clamp enforce, applied at the one door (import) that
- * could otherwise carry a gated setting in from outside. */
+/** A message naming any setting an imported terms set turns on that this editor
+ * holds back, or `undefined` when none. The editor refuses such an import rather
+ * than load a draft carrying a setting its own controls are closed against --
+ * the same gate the disabled GUI controls and the {@link buildAdvancedTerms}
+ * clamp enforce, applied at the one door (import) that could otherwise carry one
+ * in from outside. Without it the disabled control would be the operator's only
+ * way to clear a setting an import turned on.
+ *
+ * Two grounds, and the message states the one that applies rather than a shared
+ * form of words: a setting the run does not yet honor (gated by
+ * {@link APPLIED_SETTINGS}), and the deduplicating term the run DOES honor but an
+ * invitation cannot carry to a runnable exchange
+ * ({@link INVITATION_CARRIES_DEDUPLICATE}). */
 export function gatedActiveSettingMessage(
   terms: LinkageTerms,
 ): string | undefined {
+  // First, and returning on its own, because its ground is not the applied-flag
+  // one the shared sentence below states.
+  if (terms.deduplicate && !INVITATION_CARRIES_DEDUPLICATE)
+    return `${DEDUPLICATE_NOT_ON_INVITATION_MESSAGE} Remove that setting and import again.`;
   const blocked: Array<string> = [];
   if (terms.deduplicate && !APPLIED_SETTINGS.deduplicate)
     blocked.push("duplicate matches");

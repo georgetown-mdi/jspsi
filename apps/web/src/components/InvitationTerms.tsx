@@ -17,6 +17,8 @@ import { useReducedMotion } from "@mantine/hooks";
 import {
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
+  DEDUPLICATE_DISCLOSURE_STATEMENT,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
   UNRECOGNIZED_TRANSFORM_NOTE,
@@ -411,22 +413,26 @@ function CondensableDetails({
  * level, and accessible name a tier is announced with are authored once rather than
  * per tier.
  *
- * Every "proposed but not yet applied" caveat (deduplicate and per-element fuzzy
- * comparison) follows ONE placement rule, so the flagging is uniform rather than
- * decided per setting: a setting's caveat renders at the SAME visibility level as
- * the headline it contradicts, never one expand down, so a reader can never see a
- * headline setting as in force while its caveat is hidden. Which level that is
- * follows the setting's disclosure weight. Both change match multiplicity/breadth
- * rather than what is disclosed, so their headlines sit in a disclosure rather than
- * the core (deduplicate in "Other details", fuzzy in each key's detail, itself
- * behind the matching disclosure) and their caveats sit with those headlines,
- * co-hidden with them: a looser match multiplicity or breadth is not something a
- * reader takes as a disclosure guarantee, where a statement about what is disclosed
- * would have to sit always-visible in the core. What each caveat SAYS is fixed copy
- * read from `PROPOSED_NOT_APPLIED_NOTES` in `@psilink/core`, which the CLI accept
- * prompt renders too, so no partner text enters a caveat and neither surface can
- * restate one. Render tests pin each caveat at its headline's level against the
- * accessibility tree.
+ * Every sentence qualifying a setting's headline follows ONE placement rule, so the
+ * flagging is uniform rather than decided per setting: it renders at the SAME
+ * visibility level as the headline it qualifies, never one expand down, so a reader
+ * can never see a headline setting as in force while what qualifies it is hidden.
+ * Which level that is follows the HEADLINE's disclosure weight. The per-element
+ * fuzzy comparison is proposed but not applied, and deduplicate is applied at a
+ * disclosure cost; both are settings whose headline changes match
+ * multiplicity/breadth rather than stating a disclosure guarantee, so those
+ * headlines sit in a disclosure rather than the core (deduplicate in "Other
+ * details", fuzzy in each key's detail, itself behind the matching disclosure) and
+ * their qualifying sentences sit with them, co-hidden. A HEADLINE stating what is
+ * disclosed would have to sit always-visible in the core instead, which is where
+ * the count-only tier below sits. What each sentence SAYS is fixed copy read from
+ * `PROPOSED_NOT_APPLIED_NOTES`, `DEDUPLICATE_DISCLOSURE_STATEMENT`, and
+ * `DEDUPLICATE_ACCEPT_REFUSAL_NOTE` in `@psilink/core`, which the CLI accept
+ * prompt renders too, so no partner text enters one and neither surface can
+ * restate it. Deduplicate takes two of them: what the setting discloses, and
+ * that accepting cannot produce the run that would disclose it (acceptance
+ * adopts the term, and the both-sided pair is refused before matching). Render
+ * tests pin each at its headline's level against the accessibility tree.
  *
  * The same placement rule governs the count-only facts: what the run itself holds,
  * what its rounds disclose beside the count, and the bound a partner's choice of
@@ -1609,17 +1615,30 @@ export function InvitationTerms({
                     ? "More than one of the inviting party's records may match a single one of the accepting party's records."
                     : "Each of the inviting party's records matches at most one of the accepting party's records."}
                 </Text>
-                {/* Deduplicate changes match multiplicity, not what is disclosed, so
-                by the caveat-placement rule on {@link InvitationTerms} its caveat
-                sits here with its headline one expand down -- co-hidden with it, so
-                the line above never reads as in force while the caveat is hidden.
-                Not-applied is safe in the disclosure direction: core refuses a
-                deduplicating term before matching begins, so nothing runs and
-                nothing is disclosed. */}
-                {summary.deduplicate && !summary.deduplicateApplied && (
-                  <Text size="xs" c="dimmed">
-                    {PROPOSED_NOT_APPLIED_NOTES.deduplicate}
-                  </Text>
+                {/* What a deduplicating match reveals that a one-to-one one does
+                not, and then that accepting cannot produce such a match at all --
+                core refuses a deduplicating invitation at accept
+                (deriveAcceptedLinkageTerms), before deriving terms or connecting,
+                so this consent screen's note is the pre-consent warning that
+                refusal enforces. Both are the shared wording the CLI accept
+                prompt uses beneath its own copy of this headline. By the
+                placement rule on {@link InvitationTerms} they sit at the
+                visibility level of the headline they qualify, which is here -- so
+                a reader who expands "Other details" to find that several of the
+                inviting party's records may match one of theirs meets what that
+                costs, and that this exchange will not pay it, in the same place.
+                Rendered for exactly a deduplicating invitation: a one-to-one
+                exchange discloses no grouping and proposes no refused pair, so
+                either sentence would name something that does not happen. */}
+                {summary.deduplicate && (
+                  <>
+                    <Text size="xs" c="dimmed">
+                      {DEDUPLICATE_DISCLOSURE_STATEMENT}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {DEDUPLICATE_ACCEPT_REFUSAL_NOTE}
+                    </Text>
+                  </>
                 )}
               </Term>
             </Stack>

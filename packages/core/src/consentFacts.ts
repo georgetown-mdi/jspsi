@@ -241,8 +241,10 @@ export const CONSENT_FACTS = {
   duplicateMatches: {
     basis: "enforced",
     reason:
-      "Matching multiplicity is fixed by the run, and a deduplicating term this " +
-      "version does not apply aborts the exchange rather than matching looser.",
+      "Matching multiplicity is fixed by the run: the cardinality both parties " +
+      "resolve from the agreed pair decides which side's within-dataset " +
+      "duplicates take part, and a pair no strategy matches aborts the " +
+      "exchange rather than matching looser.",
   },
   matchedFields: {
     basis: "enforced",
@@ -475,27 +477,86 @@ export const COUNT_ONLY_DISCLOSURE_STATEMENT =
   "records match.";
 
 /**
+ * The disclosure statement a surface renders beside the duplicate-matches
+ * headline of a deduplicating invitation: what a deduplicating match reveals that
+ * a one-to-one match does not.
+ *
+ * Drafted from the disclosure rows of docs/spec/PROTOCOL.md (The disclosure delta
+ * a deduplicating match pays) rather than composed here, and it states three
+ * things those rows fix. The party learning it is the "one" side -- the ACCEPTING
+ * party, since the declaring inviter is the "many" one -- and what it learns is
+ * per matched record of its OWN. What it learns is a count and a set of the
+ * inviting party's row indices, the same opaque row-index layer a one-to-one
+ * association table already carries, never the linkage-key value behind them. And
+ * the disclosure is bounded to MATCHED groups: a group whose value the partner
+ * does not hold matches nothing and is never counted.
+ *
+ * The last clause is the integrity limit, and it must not be dropped or softened.
+ * The spec binds the aggregate and the positions but not the size of the group
+ * standing behind any one of them (The many side's per-value multiplicity is not
+ * independently bound), so a surface stating the count as a fact about the
+ * inviting party's file would state a guarantee no check makes.
+ *
+ * Written in party names rather than "you", like the headline it sits with, so
+ * the one sentence reads correctly from either party's side and no surface needs
+ * a viewer-relative variant of it. Fixed first-party copy naming no value, so a
+ * surface may render it verbatim.
+ */
+export const DEDUPLICATE_DISCLOSURE_STATEMENT =
+  "Grouping is what a deduplicating match discloses: for each of the accepting " +
+  "party's matched records, that party learns how many of the inviting party's " +
+  "records share the matched linkage-key value and which of the inviting " +
+  "party's rows they are -- a count and row positions, never the value behind " +
+  "them, and only for groups that matched. That count is the inviting party's " +
+  "own declaration, which psilink does not check against its data.";
+
+/**
+ * The refusal note a surface renders beside
+ * {@link DEDUPLICATE_DISCLOSURE_STATEMENT}, for the same deduplicating
+ * invitation: accepting one cannot produce a runnable exchange, so the grouping
+ * disclosure the statement describes belongs to a run that does not happen.
+ *
+ * The ground is a hard refusal, not the setting. Acceptance REFUSES a
+ * deduplicating invitation (`deriveAcceptedLinkageTerms` throws), before any
+ * derived terms are built or any connection is opened, because the term is
+ * per-party and adopting it would leave the acceptor disclosing its record
+ * grouping on a run a hostile inviter can flip out from under it. That is why the
+ * note is not a proposed-but-not-applied marker: the setting is not applied to a
+ * run at all -- accepting it is refused. A deduplicating exchange runs from two
+ * separately authored configurations, where each party's own `deduplicate` is its
+ * own, so the note names that as the way through rather than calling the
+ * capability unbuilt. This note is the operator-facing pre-consent warning a
+ * surface renders from the DECODED invitation's own terms, ahead of the accept
+ * refusal that enforces it.
+ *
+ * Rendered at the same visibility level as the statement it follows, by the
+ * placement rule both surfaces hold: a reader who meets what a deduplicating
+ * match would disclose meets, in the same place, that this exchange will not
+ * perform it.
+ *
+ * Fixed first-party copy naming no value, so a surface may render it verbatim.
+ */
+export const DEDUPLICATE_ACCEPT_REFUSAL_NOTE =
+  "Accepting adopts this setting for both parties, and an exchange in which " +
+  "both parties deduplicate is refused before any matching, so this exchange " +
+  "does not run as proposed. Ask the inviting party for an invitation without " +
+  "deduplication, or agree to run the exchange from each party's own " +
+  "configuration file, where only one of you deduplicates.";
+
+/**
  * The caveat copy for a term an inviter may declare that today's exchange does
  * not apply, keyed by the {@link APPLIED_SETTINGS} flag that gates it.
  *
- * The two are not alike in what not-applying them does, and the copy follows
- * that rather than a house style. `deduplicate` is refused at the exchange
- * boundary (`assertDeduplicateImplemented` in `exchange.ts`), so an invitation
- * carrying it aborts before any identifier is revealed: its copy names the
- * refusal and what to ask the inviter for. A caveat claiming the run proceeds and
- * discloses more than the headline would be describing a run that does not
- * happen.
- * `fuzzyComparisons` has no such refusal; it is a silent no-op that narrows the
- * match, so its marker says only that the expansion is proposed, and claiming a
- * refusal there would be the same error in the other direction.
+ * `fuzzyComparisons` is the one such term. It has no refusal: it is a silent
+ * no-op that narrows the match, so its marker says only that the expansion is
+ * proposed, where claiming a refusal would describe a run that does not happen.
+ * A term whose not-applying IS a refusal takes the opposite copy -- naming the
+ * refusal and what to ask the inviter for -- which is what makes this a table
+ * rather than a house style.
  *
  * Shared for the same reason the classification is.
  */
 export const PROPOSED_NOT_APPLIED_NOTES = {
-  deduplicate:
-    "Your partner proposes this, but this version of the exchange does not " +
-    "yet apply it and will refuse to run; ask your partner for an invitation " +
-    "without deduplication.",
   fuzzyComparisons: "(proposed; not yet applied)",
 } as const;
 

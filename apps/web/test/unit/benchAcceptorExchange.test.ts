@@ -71,6 +71,23 @@ describe("prepareAcceptorExchange", () => {
     expect(prepared.rowCount).toBe(2);
   });
 
+  test("refuses a deduplicating invitation before preparing the run", () => {
+    // The web accept entry point derives the acceptor's own terms
+    // (deriveAcceptedLinkageTerms) as it prepares the exchange, ahead of any
+    // connection, so a deduplicating invitation is refused here whatever the inviter
+    // would go on to present at the terms exchange.
+    expect(() =>
+      prepareAcceptorExchange({
+        linkageTerms: { ...inviterTerms, deduplicate: true },
+        acceptorName: "Sam Alvarez",
+        edits: baseEdits,
+        rawRows,
+        columns,
+        disclosedPayloadColumns: ["program_code"],
+      }),
+    ).toThrow(/deduplicating exchange cannot be accepted from an invitation/);
+  });
+
   test("locks in the received-payload columns to the disclosed set exactly", () => {
     const prepared = prepareAcceptorExchange({
       linkageTerms: inviterTerms,
