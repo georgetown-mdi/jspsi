@@ -261,6 +261,13 @@ const RESULT_OUR_ID_COLUMN = 0;
 const RESULT_PARTNER_INDEX_COLUMN = 1;
 const RESULT_VALUE_COLUMN_START = 2;
 
+function sameCells(
+  a: ReadonlyArray<string | null>,
+  b: ReadonlyArray<string | null>,
+): boolean {
+  return a.length === b.length && a.every((cell, i) => cell === b[i]);
+}
+
 /**
  * Reconstruct the committed data sets from a holder's retained input, result, and
  * the record's own governance -- the re-supply path that lets a party verify its
@@ -284,18 +291,23 @@ const RESULT_VALUE_COLUMN_START = 2;
  * and taking each distinct partner row once -- which this function does. Where a
  * deduplicating cardinality pairs several of this party's records with one of the
  * partner's, those result rows repeat the one payload row the partner sent, and
- * the reconstruction collapses them back to it. If either ordering invariant ever
- * failed, the reconstructed bytes would simply not open the commitment (a reported
- * mismatch), never a false verification.
+ * the reconstruction collapses them back to it -- but only where the copies agree
+ * cell for cell. A copy that differs is reproduced beside the first rather than
+ * collapsed onto it, so an edited cell in any copy of a repeated row is covered by
+ * the commitment exactly as the first copy's cells are. If either ordering
+ * invariant ever failed, the reconstructed bytes would simply not open the
+ * commitment (a reported mismatch), never a false verification.
  *
- * Reconstruction is byte-exact only from UNMODIFIED retained files. Two residual
+ * Reconstruction is byte-exact only from UNMODIFIED retained files. Three residual
  * edges are surfaced as warnings rather than silently mis-reconstructed: a
  * duplicate value in the identifier column makes a matched row's index ambiguous
  * (the first occurrence is used -- the expected case, not an unusual one, for an
  * input whose identifier names the individual rather than the row, which is the
- * input a deduplicating exchange groups), and a result referencing an identifier
- * the supplied input does not carry means the input does not match this exchange. A
- * third cannot be seen from here: a result value cell cannot distinguish a
+ * input a deduplicating exchange groups), a result referencing an identifier
+ * the supplied input does not carry means the input does not match this exchange,
+ * and disagreeing copies of one partner record's received values mean the result
+ * no longer carries the single row that record's values were committed as. A
+ * fourth cannot be seen from here: a result value cell cannot distinguish a
  * committed empty string from a committed null (the result wrote both as an
  * empty cell), so a genuinely-null received cell reproduces as an empty string
  * and its commitment mismatches. Nothing in the re-supplied files tells those two
@@ -392,7 +404,10 @@ export function reconstructCommittedData(
   // into the partner's ascending send order so they reproduce the committed bytes,
   // and taken once per distinct partner row -- the sender committed one row per
   // record IT matched, so result rows repeating a partner row repeat that row's
-  // values.
+  // values. The collapse is conditional on the copies agreeing: keeping only the
+  // first copy of a repeated row unconditionally would leave every later copy's
+  // value cells reproduced by nothing, and so outside the commitment that is
+  // supposed to bind them.
   const receivedColumns = record.governance.payloadReceived.map((c) => c.name);
   let partnerPayloadReceived: CommittedPayload;
   if (receivedColumns.length === 0) {
@@ -405,12 +420,25 @@ export function reconstructCommittedData(
       ])
       .sort((a, b) => a[0] - b[0]);
     const rows: Array<Array<string | null>> = [];
-    let previousIndex: number | undefined;
+    let previous: { index: number; values: Array<string | null> } | undefined;
+    let anyDivergentCopy = false;
     for (const [index, values] of bySendOrder) {
-      if (index === previousIndex) continue;
-      previousIndex = index;
+      if (previous !== undefined && previous.index === index) {
+        if (sameCells(previous.values, values)) continue;
+        anyDivergentCopy = true;
+      }
+      previous = { index, values };
       rows.push(values);
     }
+    if (anyDivergentCopy)
+      warnings.push(
+        "the result carries several rows for one partner record whose " +
+          "received values differ. The partner sent one row for that record " +
+          "and the received-payload commitment binds it once, so the copies a " +
+          "grouped result writes against this party's records have to agree; " +
+          "they are reproduced as they stand, so that commitment reports a " +
+          "mismatch",
+      );
     partnerPayloadReceived = { columns: receivedColumns, rows };
   }
   data.partnerPayloadReceived = partnerPayloadReceived as CanonicalValue;

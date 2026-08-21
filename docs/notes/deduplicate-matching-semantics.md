@@ -80,6 +80,14 @@ The second reason is what the field is for. A record supports an accounting of d
 
 Recording both was considered and set aside. The distinct matched-record count is derivable by each holder from its own retained result, so a second field would tell that holder nothing it could not compute -- while adding a figure to the artifact it hands an auditor, and taking a format version bump to do it. A reader who wants the entity-level figure reads the result file.
 
+## Why the repeated copies must agree rather than be committed per pair
+
+A record that stands in several pairs has its values written down the result file once per pair and committed once, because the payload commitments bind one row per matched record while the file is one row per pair. Reproducing the committed rows from the file therefore means collapsing the copies -- and a collapse that simply kept the first copy would leave every later copy's value cells reproduced by nothing. Neither commitment would reach them: the association-table commitment binds the pairing, not the values, and the payload commitment binds a row those copies were never compared against. The rule taken is in [EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#no-data-snapshot-in-the-keys-data-minimization).
+
+There were two ways to close that, and the difference between them is what the artifact costs. Committing the received payload per PAIR would match the file exactly and remove the collapse, but it changes the committed bytes: a format version bump, a commitment carrying the same information at the file's redundancy, and the loss of the property that a sender's payload-sent commitment and its receiver's payload-received commitment cover byte-identical data. Requiring the copies to agree costs nothing in the artifact and nothing on the wire, and it is not an approximation: the copies ARE the sender's one row, so any disagreement is an alteration of the retained file and is reported as one.
+
+What that buys is worth stating plainly, because it is the property a reader of a verified record is entitled to assume: every value cell the result carries is reproduced by something the record binds. The first copy reproduces the committed row; every later copy has to equal it.
+
 ## Why the result file gains no local row-index column
 
 The result file identifies this party's matched record by its identifier value, or by the local row index when the exchange used no identifier column ([PROTOCOL.md](../spec/PROTOCOL.md#output)). The re-supply path that reopens a record's commitments maps that first column back to an input row, and where the identifier column has duplicate values it maps every duplicate to the first occurrence -- so the reproduction is exact only for an identifier unique per row.

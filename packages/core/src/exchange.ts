@@ -36,6 +36,7 @@ import {
   linkViaSinglePassPSI,
   withholdsSenderAssociationTable,
 } from "./link.js";
+import type { LinkageCardinality } from "./link.js";
 import { InProcessPsiEngine } from "./psiEngine.js";
 import {
   partyFansOut,
@@ -308,29 +309,40 @@ export function assertDeduplicateImplemented(deduplicate: boolean): void {
 /**
  * Requires an association table to carry well-formed matched PAIRS, at the seam
  * {@link runExchange} consumes it: halves of equal length, a local half in
- * ascending order, and no pair repeated.
+ * ascending order, no pair repeated, and a local row repeated only where the
+ * cardinality this exchange resolved produces one.
  *
  * Everything downstream reads the table as a list of pairs. The payload carries
  * one row per DISTINCT matched local row ({@link preparePayload}), the result file
  * one row per pair ({@link buildOutputTable}), and the attested result size the
- * pair count ({@link matchedPairCount}). A repeated row index on one side of a
- * pair is therefore admitted here: it is what a deduplicating cardinality
- * produces, on whichever side carries the multiplicity (see
- * {@link AssociationTable}).
+ * pair count ({@link matchedPairCount}).
  *
- * What no specified cardinality produces, and what no consumer could read, is
- * refused. A local half out of order would put the result rows and the payload
- * rows in an order the re-supply path does not reproduce, so the record's
- * commitments would not reopen from the retained files. A repeated pair would
- * count one link twice in the attested size and write the same result row twice.
- * Equal local rows are contiguous in an ascending half, so the pair check holds
- * only the partner indices of the run in hand and allocates nothing at all for a
- * strictly ascending table.
+ * Which table shapes those readings admit follows from the resolved cardinality,
+ * so it is passed in rather than inferred from the table. Under `one-to-one` a
+ * matched record of ours stands in exactly one pair and the local half is strictly
+ * ascending. A repeat there is admitted only where this party is the "one" side of
+ * a deduplicating exchange, several of the partner's records linking to one of
+ * ours (`one-to-many`, and `many-to-many`, which fans both ways -- see
+ * {@link AssociationTable}). Where this party is the "many" side the multiplicity
+ * lands on the PARTNER half, whose repeats the pair check below admits within a
+ * run: detecting a repeat across the whole half costs an allocation over every
+ * matched pair on the `one-to-one` path too, where the local half's strict ascent
+ * costs nothing.
+ *
+ * What no cardinality produces, and what no consumer could read, is refused. A
+ * local half out of order would put the result rows and the payload rows in an
+ * order the re-supply path does not reproduce, so the record's commitments would
+ * not reopen from the retained files. A repeated pair would count one link twice
+ * in the attested size and write the same result row twice. Equal local rows are
+ * contiguous in an ascending half, so the pair check holds only the partner
+ * indices of the run in hand and allocates nothing at all for a strictly ascending
+ * table.
  *
  * @internal exported for the association-table invariant test.
  */
 export function assertMatchedPairsWellFormed(
   associationTable: AssociationTable,
+  cardinality: LinkageCardinality,
 ): void {
   const [matchedRows, partnerRows] = associationTable;
   if (matchedRows.length !== partnerRows.length)
@@ -339,6 +351,8 @@ export function assertMatchedPairsWellFormed(
         `${matchedRows.length} vs ${partnerRows.length}. Each entry is one ` +
         "matched pair, so the two halves are read together.",
     );
+  const localRowMayRepeat =
+    cardinality === "one-to-many" || cardinality === "many-to-many";
   let runStart = 0;
   const runPartnerRows = new Set<number>();
   for (let i = 1; i < matchedRows.length; ++i) {
@@ -353,6 +367,16 @@ export function assertMatchedPairsWellFormed(
           "result rows, the payload rows, and the re-supply path that " +
           "reproduces both from the retained result all read it in this " +
           "party's own row order.",
+      );
+    if (!localRowMayRepeat)
+      throw new Error(
+        "the association table repeats a local row index, which the " +
+          `"${cardinality}" cardinality this exchange resolved does not ` +
+          "produce: one of this party's records stands in exactly one pair " +
+          "there, and the payload rows, the result rows, and the attested " +
+          "result size are all read against that. Several of the partner's " +
+          "records grouping onto one of ours is the deduplicating shape, " +
+          "admitted only under the cardinality that asks for it.",
       );
     if (runStart === i - 1) runPartnerRows.add(partnerRows[runStart]);
     if (runPartnerRows.has(partnerRows[i]))
@@ -1387,10 +1411,11 @@ export async function runExchange(
 
   // One entry per matched PAIR, in this party's own ascending row order, is what
   // every reader below assumes of the table -- the payload's transmitted rows, the
-  // result file, and the attested result size. See assertMatchedPairsWellFormed
-  // for the shapes that would break those readings.
+  // result file, and the attested result size. The cardinality resolved above
+  // settles which multiplicities those readings admit; see
+  // assertMatchedPairsWellFormed for the shapes that would break them.
   if (associationTable !== undefined)
-    assertMatchedPairsWellFormed(associationTable);
+    assertMatchedPairsWellFormed(associationTable, cardinality);
 
   // Send-gate: transmit payload only to a partner entitled to the result. A party
   // with expectsOutput:false learns no matched records, so it has no use for
