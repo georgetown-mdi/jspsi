@@ -202,9 +202,10 @@ describe("hardenUpgradeSurface", () => {
   });
 
   test("adds no upgrade listener, leaving the signaling server the sole one", () => {
-    // The signaling server decides whether an unhandled upgrade is its to close
-    // by testing that it is the only `upgrade` listener; a listener added here
-    // would silently flip that test on the production server.
+    // The signaling server decides whether to release an unhandled upgrade at
+    // once by testing that it is the only `upgrade` listener; a listener added
+    // here would silently flip that test on the production server, holding every
+    // unhandled upgrade for the window it gives a co-resident listener instead.
     const server = http.createServer();
     hardenUpgradeSurface(server);
     expect(server.listenerCount("upgrade")).toBe(0);

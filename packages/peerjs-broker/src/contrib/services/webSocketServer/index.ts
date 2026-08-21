@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { Socket } from "node:net";
 
 import { WebSocketServer as Server } from "ws";
 
@@ -8,6 +9,7 @@ import { Client } from "../../models/client.ts";
 
 import type { Server as HttpServer, IncomingMessage } from "node:http";
 import type { Server as HttpsServer } from "node:https";
+import type { Duplex } from "node:stream";
 
 import type WebSocket from "ws";
 
@@ -67,6 +69,21 @@ export const MAX_SIGNALING_PAYLOAD_BYTES = 256 * 1024;
 // memory surface as the id), while `key` is only compared and never stored.
 // See docs/spec/CHANNEL_SECURITY.md.
 export const MAX_HANDSHAKE_PARAM_LENGTH = 256;
+
+// Bound every exit that leaves this server holding a socket it will not go on to
+// serve: a refusal (a missing or over-length handshake parameter, a wrong key, an
+// id claimed under another token, the concurrent limit) and an upgrade on a path
+// that is not ours. A refusal sends its error frame and closes, which starts the
+// WebSocket close handshake; `ws` releases the socket once the peer answers the
+// close frame, or once its own close timer expires -- 30 seconds of retained
+// socket per refusal on the pinned `ws`, and a refused peer is precisely the one
+// with nothing to negotiate and no reason to answer. One second is far above the
+// round trip an answering peer needs, having already been written its error
+// frame, and 30x below what `ws` would otherwise hold; it is equally the window a
+// co-resident `upgrade` listener gets to answer an upgrade this server left for
+// it, which sits far above the same-tick answer one gives, so a socket it adopted
+// is never taken back from it. See docs/spec/CHANNEL_SECURITY.md.
+export const SOCKET_RELEASE_TIMEOUT_MS = 1_000;
 
 export class WebSocketServer extends EventEmitter implements IWebSocketServer {
   public readonly path: string;
@@ -131,18 +148,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     // dispatch to.
     server.on("upgrade", (req, socket, head) => {
       if (!this.socketServer.shouldHandle(req)) {
-        // Not our path (shouldHandle() applies the `path` option above). Leave it
-        // for a co-resident `upgrade` listener -- e.g. Vite HMR at `/` in dev. But
-        // when we are the ONLY upgrade listener (the production server, where
-        // nothing else will answer) close it rather than leak an open socket:
-        // Node will not auto-destroy an unhandled upgrade once any `upgrade`
-        // listener exists, so close it here rather than leak it (the production
-        // connection idle-timeout is at best a far coarser backstop). This
-        // restores the prompt reject the old `{ server, path }` wiring did,
-        // without clobbering co-resident listeners.
-        if (server.listenerCount("upgrade") === 1 && !socket.destroyed) {
-          socket.destroy();
-        }
+        this._releaseUnhandledUpgrade(server, socket);
         return;
       }
       // Bail if the socket was already torn down between the event and here;
@@ -172,7 +178,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     const { id, token, key } = Object.fromEntries(searchParams.entries());
 
     if (!id || !token || !key) {
-      this._sendErrorAndClose(socket, Errors.INVALID_WS_PARAMETERS);
+      this._sendErrorAndRelease(socket, Errors.INVALID_WS_PARAMETERS);
       return;
     }
 
@@ -181,12 +187,12 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       token.length > MAX_HANDSHAKE_PARAM_LENGTH ||
       key.length > MAX_HANDSHAKE_PARAM_LENGTH
     ) {
-      this._sendErrorAndClose(socket, Errors.WS_PARAMETER_TOO_LONG);
+      this._sendErrorAndRelease(socket, Errors.WS_PARAMETER_TOO_LONG);
       return;
     }
 
     if (key !== this.config.key) {
-      this._sendErrorAndClose(socket, Errors.INVALID_KEY);
+      this._sendErrorAndRelease(socket, Errors.INVALID_KEY);
       return;
     }
 
@@ -195,14 +201,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     if (client) {
       if (token !== client.getToken()) {
         // ID-taken, invalid token
-        socket.send(
-          JSON.stringify({
-            type: MessageType.ID_TAKEN,
-            payload: { msg: "ID is taken" },
-          }),
-        );
-
-        socket.close();
+        this._sendAndRelease(socket, MessageType.ID_TAKEN, "ID is taken");
         return;
       }
 
@@ -218,6 +217,46 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     this.emit("error", error);
   }
 
+  // Release an upgrade on a path that is not ours (shouldHandle() applies the
+  // `path` option above). Node stops auto-destroying an unhandled upgrade the
+  // moment any `upgrade` listener exists, so every socket this branch declines
+  // must be released by someone or it is leaked -- the production connection
+  // idle-timeout is at best a far coarser backstop. When this is the sole
+  // `upgrade` listener, nothing else can answer and the socket is destroyed at
+  // once. Where a co-resident listener exists -- Vite HMR at `/` in dev -- the
+  // socket is left for it, and whether it answered is then TESTED rather than
+  // assumed: a socket still carrying no response bytes when the release bound
+  // expires was answered by nobody, so it is destroyed and the broken premise
+  // raised as an error rather than leaked on a premise that no longer holds.
+  private _releaseUnhandledUpgrade(
+    server: HttpServer | HttpsServer,
+    socket: Duplex,
+  ): void {
+    if (socket.destroyed) return;
+
+    if (server.listenerCount("upgrade") === 1) {
+      socket.destroy();
+      return;
+    }
+
+    const release = setTimeout(() => {
+      if (socket.destroyed) return;
+      if (socket instanceof Socket && socket.bytesWritten > 0) return;
+
+      socket.destroy();
+      this._onSocketError(
+        new Error(
+          "PeerJS signaling server released an upgrade no co-resident listener answered",
+        ),
+      );
+    }, SOCKET_RELEASE_TIMEOUT_MS);
+    release.unref();
+
+    socket.once("close", () => {
+      clearTimeout(release);
+    });
+  }
+
   private _registerClient({
     socket,
     id,
@@ -231,7 +270,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     const clientsCount = this.realm.getClientsIds().length;
 
     if (clientsCount >= this.config.concurrent_limit) {
-      this._sendErrorAndClose(socket, Errors.CONNECTION_LIMIT_EXCEED);
+      this._sendErrorAndRelease(socket, Errors.CONNECTION_LIMIT_EXCEED);
       return;
     }
 
@@ -300,15 +339,32 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     this.emit("connection", client);
   }
 
-  private _sendErrorAndClose(socket: WebSocket, msg: Errors): void {
-    socket.send(
-      JSON.stringify({
-        type: MessageType.ERROR,
-        payload: { msg },
-      }),
-    );
+  private _sendErrorAndRelease(socket: WebSocket, msg: Errors): void {
+    this._sendAndRelease(socket, MessageType.ERROR, msg);
+  }
 
+  // Hand the peer the frame that tells it why it was refused, then release the
+  // socket on the bound above. The frame and the close frame behind it are
+  // written first, so a peer that answers the close handshake is released on it;
+  // the terminate is the deadline on that handshake, which a refused peer has no
+  // reason to complete and every reason -- if it is holding sockets on purpose --
+  // to stall.
+  private _sendAndRelease(
+    socket: WebSocket,
+    type: MessageType,
+    msg: string,
+  ): void {
+    socket.send(JSON.stringify({ type, payload: { msg } }));
     socket.close();
+
+    const release = setTimeout(() => {
+      socket.terminate();
+    }, SOCKET_RELEASE_TIMEOUT_MS);
+    release.unref();
+
+    socket.once("close", () => {
+      clearTimeout(release);
+    });
   }
 }
 

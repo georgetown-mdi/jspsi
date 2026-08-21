@@ -1,11 +1,18 @@
 import http from "node:http";
 import https from "node:https";
+import net from "node:net";
+import { randomBytes } from "node:crypto";
 
+import WebSocket, { WebSocketServer as WsServer } from "ws";
 import { afterEach, describe, expect, test } from "vitest";
-import WebSocket from "ws";
 
+import {
+  MAX_HANDSHAKE_PARAM_LENGTH,
+  SOCKET_RELEASE_TIMEOUT_MS,
+  WebSocketServer,
+} from "@psilink/peerjs-broker/services/webSocketServer/index";
+import { Errors } from "@psilink/peerjs-broker/enums";
 import { Realm } from "@psilink/peerjs-broker/models/realm";
-import { WebSocketServer } from "@psilink/peerjs-broker/services/webSocketServer/index";
 
 import {
   loopbackTlsCert,
@@ -18,14 +25,15 @@ import type { IRealm } from "@psilink/peerjs-broker/models/realm";
 
 // Socket-level coverage for the signaling guards that need a live `ws`
 // connection: the liveness flag that gates the two-tier reaper, the
-// pre-handshake idle timeout's exemption of an established socket, and the
-// one-socket-per-registered-client invariant a re-attach holds, alongside a
-// regression check that a normal registration still answers OPEN. These drive a
-// real http.Server -- or, where the guard turns on which socket object the HTTP
-// layer hands out, an https.Server -- plus `ws` on a loopback port, the pattern
-// test/devServer/signalingProbe.ts uses. The per-message size cap is covered in
-// signalingPayloadBound.test.ts; the pre-101 handshake timeout in
-// signalingUpgradeTimeout.test.ts, which imports no `ws` (see the note there).
+// pre-handshake idle timeout's exemption of an established socket, the
+// one-socket-per-registered-client invariant a re-attach holds, and the bounded
+// release of every socket a refusal or an unhandled upgrade leaves behind,
+// alongside a regression check that a normal registration still answers OPEN.
+// These drive a real http.Server -- or, where the guard turns on which socket
+// object the HTTP layer hands out, an https.Server -- plus `ws` on a loopback
+// port, the pattern test/devServer/signalingProbe.ts uses. The per-message size
+// cap is covered in signalingPayloadBound.test.ts; the pre-101 handshake timeout
+// in signalingUpgradeTimeout.test.ts, which imports no `ws` (see the note there).
 
 interface Signaling {
   port: number;
@@ -33,6 +41,9 @@ interface Signaling {
   /** The live `ws` server, whose `clients` set is the authoritative count of
    * sockets the process is still holding open. */
   wss: WebSocketServer;
+  /** Every `error` the server re-emitted, collected so it does not throw as an
+   * unhandled EventEmitter `error`. */
+  errors: Array<Error>;
 }
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -42,7 +53,15 @@ afterEach(async () => {
 });
 
 async function startSignaling(
-  opts: { preHandshakeIdleMs?: number; tls?: boolean } = {},
+  opts: {
+    preHandshakeIdleMs?: number;
+    tls?: boolean;
+    concurrentLimit?: number;
+    /** Attach a second `upgrade` listener, the shape a shared dev server has
+     * (Vite's HMR handler at `/`), that either adopts the upgrades this server
+     * leaves it or ignores them. */
+    coResidentUpgrade?: "answers" | "ignores";
+  } = {},
 ): Promise<Signaling> {
   const server = opts.tls
     ? https.createServer(requireLoopbackTlsCert())
@@ -56,11 +75,29 @@ async function startSignaling(
   const wss = new WebSocketServer({
     server,
     realm,
-    config: { path: "/api", key: "peerjs", concurrent_limit: 5000 },
+    config: {
+      path: "/api",
+      key: "peerjs",
+      concurrent_limit: opts.concurrentLimit ?? 5000,
+    },
   });
   // The real wiring (instance.ts) attaches an error listener; without one the
   // server's `emit("error")` on a socket error would throw as unhandled.
-  wss.on("error", () => {});
+  const errors: Array<Error> = [];
+  wss.on("error", (error: Error) => errors.push(error));
+
+  if (opts.coResidentUpgrade !== undefined) {
+    const adopter =
+      opts.coResidentUpgrade === "answers"
+        ? new WsServer({ noServer: true })
+        : null;
+    server.on("upgrade", (req, socket, head) => {
+      // Only the upgrades the signaling server declined are this listener's; an
+      // upgrade on the signaling path has already been adopted by it.
+      if (req.url?.startsWith("/api/peerjs")) return;
+      adopter?.handleUpgrade(req, socket, head, () => {});
+    });
+  }
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
@@ -74,7 +111,7 @@ async function startSignaling(
         server.close(() => resolve());
       }),
   );
-  return { port, realm, wss };
+  return { port, realm, wss, errors };
 }
 
 function signalingUrl(port: number, id: string, secure = false): string {
@@ -118,6 +155,63 @@ function waitForFrame(
     ws.on("message", onMessage);
     ws.on("error", onError);
   });
+}
+
+interface RawUpgrade {
+  /** Every byte the server has written to this socket, as text. Server-to-client
+   * frames are unmasked, so a signaling frame's JSON reads verbatim here. */
+  received: () => string;
+  /** Resolves once the server releases the socket. */
+  released: Promise<void>;
+}
+
+/** Open an upgrade by hand and never answer what comes back -- neither the close
+ * frame a refusal sends nor anything else. A `ws` client replies to a close frame
+ * and so releases the server's socket for it, which is exactly the cooperation a
+ * peer holding sockets on purpose withholds; this is the peer that withholds it. */
+function openRawUpgrade(port: number, target: string): RawUpgrade {
+  const socket = net.connect(port, "127.0.0.1");
+  const chunks: Array<Buffer> = [];
+  socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+  // A released socket may land as a reset; `close` carries the verdict.
+  socket.on("error", () => {});
+  const released = new Promise<void>((resolve) => {
+    socket.once("close", () => resolve());
+  });
+  socket.on("connect", () => {
+    socket.write(
+      [
+        `GET ${target} HTTP/1.1`,
+        `Host: 127.0.0.1:${port}`,
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}`,
+        "Sec-WebSocket-Version: 13",
+        "",
+        "",
+      ].join("\r\n"),
+    );
+  });
+  cleanups.push(() => {
+    socket.destroy();
+    return Promise.resolve();
+  });
+  return { received: () => Buffer.concat(chunks).toString("utf8"), released };
+}
+
+/** Whether `promise` settles within `ms` -- a released socket answers `true`, a
+ * retained one `false`, either way without blocking to the vitest timeout. */
+function settlesWithin(
+  promise: Promise<unknown>,
+  ms: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    promise.then(() => true),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 async function waitFor(
@@ -258,4 +352,121 @@ describe("signaling socket guards", () => {
 
     second.close();
   });
+});
+
+// A release the peer declines to cooperate with must still happen on the bound,
+// so every case below drives a raw socket that answers nothing. Waiting a
+// multiple of the bound keeps the check honest on a slow runner while staying far
+// under the `ws` close timer (30 seconds) a missing release would fall back to,
+// which is the failure these pin.
+const RELEASE_MARGIN_MS = SOCKET_RELEASE_TIMEOUT_MS * 3;
+
+const refusalCases: Array<{
+  name: string;
+  concurrentLimit?: number;
+  prepare?: (sig: Signaling) => Promise<void>;
+  query: string;
+  refusal: string;
+}> = [
+  {
+    name: "a handshake missing its token",
+    query: "?key=peerjs&id=peer-refused",
+    refusal: Errors.INVALID_WS_PARAMETERS,
+  },
+  {
+    name: "an over-length handshake parameter",
+    query: `?key=peerjs&id=${"a".repeat(MAX_HANDSHAKE_PARAM_LENGTH + 1)}&token=tok`,
+    refusal: Errors.WS_PARAMETER_TOO_LONG,
+  },
+  {
+    name: "a wrong realm key",
+    query: "?key=not-the-key&id=peer-refused&token=tok",
+    refusal: Errors.INVALID_KEY,
+  },
+  {
+    name: "an id already claimed under another token",
+    prepare: async (sig) => {
+      const holder = new WebSocket(signalingUrl(sig.port, "peer-claimed"));
+      cleanups.push(() => {
+        holder.terminate();
+        return Promise.resolve();
+      });
+      await waitForFrame(holder, "OPEN");
+    },
+    query: "?key=peerjs&id=peer-claimed&token=a-different-token",
+    refusal: "ID is taken",
+  },
+  {
+    name: "a registration past the concurrent limit",
+    concurrentLimit: 0,
+    query: "?key=peerjs&id=peer-refused&token=tok",
+    refusal: Errors.CONNECTION_LIMIT_EXCEED,
+  },
+];
+
+describe("signaling socket release", () => {
+  test.each(refusalCases)(
+    "$name is told why it was refused and its socket released",
+    async ({ concurrentLimit, prepare, query, refusal }) => {
+      const sig = await startSignaling({ concurrentLimit });
+      await prepare?.(sig);
+      // Whatever the case's setup legitimately holds -- the registered client an
+      // id-claim refusal needs -- is what the count must fall back to.
+      const heldBefore = sig.wss.socketServer.clients.size;
+
+      const peer = openRawUpgrade(sig.port, `/api/peerjs${query}`);
+
+      expect(await settlesWithin(peer.released, RELEASE_MARGIN_MS)).toBe(true);
+      // The buffer holds only what arrived before the release, so finding the
+      // refusal in it is the ordering assertion as well: a peer that is cut
+      // before its frame is written never learns why it was refused.
+      expect(peer.received()).toContain(refusal);
+      await waitFor(() => sig.wss.socketServer.clients.size === heldBefore);
+      expect(sig.errors).toEqual([]);
+    },
+    15_000,
+  );
+
+  test("an upgrade on another path is released at once when nothing else can answer", async () => {
+    // The sole-listener shape, which is the production one: no co-resident
+    // listener exists, so nothing else will ever answer this socket.
+    const sig = await startSignaling();
+
+    const peer = openRawUpgrade(sig.port, "/not-the-signaling-path");
+
+    expect(await settlesWithin(peer.released, RELEASE_MARGIN_MS)).toBe(true);
+    // Releasing what nobody else could have answered is the expected shape, not
+    // a premise that broke.
+    expect(sig.errors).toEqual([]);
+  }, 15_000);
+
+  test("an upgrade left to a co-resident listener that answers it is not taken back", async () => {
+    // The premise the branch rests on, holding: the co-resident listener adopts
+    // the upgrade, and the socket it now owns must survive the release bound --
+    // cutting it is the dev-server HMR teardown the `noServer` wiring exists to
+    // avoid.
+    const sig = await startSignaling({ coResidentUpgrade: "answers" });
+
+    const peer = openRawUpgrade(sig.port, "/not-the-signaling-path");
+    await waitFor(() => peer.received().includes("101 Switching Protocols"));
+
+    expect(
+      await settlesWithin(peer.released, SOCKET_RELEASE_TIMEOUT_MS * 2),
+    ).toBe(false);
+    expect(sig.errors).toEqual([]);
+  }, 15_000);
+
+  test("an upgrade left to a co-resident listener that ignores it is released on the bound", async () => {
+    // The same premise, broken: a second `upgrade` listener exists, so the
+    // sole-listener release does not apply, but nothing answers the socket. It is
+    // reclaimed on the bound rather than held on a premise that no longer holds.
+    const sig = await startSignaling({ coResidentUpgrade: "ignores" });
+
+    const peer = openRawUpgrade(sig.port, "/not-the-signaling-path");
+
+    expect(await settlesWithin(peer.released, RELEASE_MARGIN_MS)).toBe(true);
+    expect(peer.received()).toBe("");
+    expect(sig.errors).toHaveLength(1);
+    expect(sig.errors[0].message).toContain("no co-resident listener answered");
+  }, 15_000);
 });
