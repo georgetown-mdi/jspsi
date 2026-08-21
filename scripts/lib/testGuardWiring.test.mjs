@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 
 // The two guards are only as loud as their registration: both are run-level
 // options, so a config that drops its line goes quiet with nothing failing. This
@@ -44,6 +44,8 @@ async function loadTestConfig(configPath) {
   };
 }
 
+const WEB_CONFIG = "apps/web/vite.config.ts";
+
 // Every config that owns a run. The apps import the built @psilink/core, so
 // they carry the dist guard; packages/core builds its own dist in `pretest` and
 // tests its sources, and the root config runs no suite of its own.
@@ -51,24 +53,51 @@ const CONFIGS = [
   { path: "vitest.config.ts", distGuard: false },
   { path: "packages/core/vitest.config.ts", distGuard: false },
   { path: "apps/cli/vitest.config.ts", distGuard: true },
-  { path: "apps/web/vite.config.ts", distGuard: true },
+  { path: WEB_CONFIG, distGuard: true },
 ];
 
+// The budget for loading all four configs, vitest's 5s default being the wrong
+// scale for it: importing the web config pulls the app's server modules through
+// vite's loader and is essentially the whole cost of this file -- 1.3s of the
+// 1.4s an idle container spends, and 56s at worst with twenty-four competing
+// workers on ten cores, where under the default the case that happened to import
+// first reds with a bare timeout rather than a wiring verdict. Not a timing
+// assertion: nothing waits for it to elapse on a healthy run.
+const CONFIG_LOAD_TIMEOUT_MS = 120_000;
+
+/** Each config's loaded value, keyed by its repo-relative path. */
+const loadedConfigs = new Map();
+
+// Loaded once, here, rather than per case: the import cost is the same whichever
+// case pays it, and charging it to a hook with a bound of its own leaves each
+// case asserting wiring at no cost, under the default the assertions deserve.
+beforeAll(async () => {
+  for (const { path } of CONFIGS)
+    loadedConfigs.set(path, await loadTestConfig(path));
+}, CONFIG_LOAD_TIMEOUT_MS);
+
+function loadedConfig(path) {
+  const config = loadedConfigs.get(path);
+  if (config === undefined)
+    throw new Error(`config was not preloaded: ${path}`);
+  return config;
+}
+
 describe.each(CONFIGS)("$path", ({ path, distGuard }) => {
-  test("registers the skipped-leg reporter alongside the default one", async () => {
-    const { reporters } = await loadTestConfig(path);
+  test("registers the skipped-leg reporter alongside the default one", () => {
+    const { reporters } = loadedConfig(path);
     expect(reporters).toContain("default");
     expect(reporters).toContain(SKIPPED_LEG_REPORTER);
   });
 
-  test(`${distGuard ? "guards" : "does not need a guard for"} the core dist`, async () => {
-    const { globalSetup } = await loadTestConfig(path);
+  test(`${distGuard ? "guards" : "does not need a guard for"} the core dist`, () => {
+    const { globalSetup } = loadedConfig(path);
     expect(globalSetup.includes(DIST_GUARD)).toBe(distGuard);
   });
 });
 
-test("the web config declares the environment prerequisites its suites skip on", async () => {
-  const { globalSetup } = await loadTestConfig("apps/web/vite.config.ts");
+test("the web config declares the environment prerequisites its suites skip on", () => {
+  const { globalSetup } = loadedConfig(WEB_CONFIG);
   expect(globalSetup).toContain(
     resolve(REPO_ROOT, "apps/web/test/requireTestPrerequisites.ts"),
   );

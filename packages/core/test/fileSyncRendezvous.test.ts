@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { v4 as uuidv4 } from "uuid";
 
 import {
@@ -2727,31 +2727,57 @@ describe("FileSyncRendezvous entry-present peer hello window", () => {
   // naming a hello a live-but-slow partner may own. Driving two real
   // connections over a latency-asymmetric transport, the unfloored window
   // aborted such a partner in ~650 ms and prescribed removing its hello.
+  //
+  // Driven on a virtual clock, where only a poll's own wait moves time. On a
+  // real one the cap ties the window's deadline to the peer budget's, and the
+  // two land apart by whatever the machine spends between the two Date.now()
+  // calls that derive them, so a poll falling in that sliver decides which
+  // budget reports the run rather than the floor this case is about. Here the
+  // deadline is the budget exactly, no poll can fall past it while the wait loop
+  // still runs, and the only thing that can fire the window is the floor's
+  // removal -- which drops it to an eighth of the budget, 187 ms in.
   test("does not fire on a budget too small to hold a round trip", async () => {
-    const files = new Map<string, Buffer>();
-    placePeerHello(files, "zzz", flags);
-    const p = makeParty(
-      "aaa",
-      {
-        ...flags,
-        timeToLive: new Date(Date.now() + 1500),
-        pollingFrequency: 20,
-      },
-      files,
-    );
+    vi.useFakeTimers();
+    try {
+      const files = new Map<string, Buffer>();
+      placePeerHello(files, "zzz", flags);
+      const p = makeParty(
+        "aaa",
+        {
+          ...flags,
+          timeToLive: new Date(Date.now() + 1500),
+          pollingFrequency: 20,
+        },
+        files,
+      );
 
-    const started = Date.now();
-    const err = await p.rdv.run(p.scope).then(
-      () => undefined,
-      (e: unknown) => e,
-    );
-    const elapsed = Date.now() - started;
+      const started = Date.now();
+      let ended = started;
+      const settled = p.rdv.run(p.scope).then(
+        () => {
+          ended = Date.now();
+          return undefined;
+        },
+        (e: unknown) => {
+          ended = Date.now();
+          return e;
+        },
+      );
+      // Twice the budget, so a window that never fires and a run that overran
+      // its budget are told apart by the elapsed assertion below rather than by
+      // the run still being in flight when this returns.
+      await vi.advanceTimersByTimeAsync(3000);
+      const err = await settled;
+      const elapsed = ended - started;
 
-    expect(isPeerWaitTimeout(err)).toBe(true);
-    expect((err as Error).message).not.toContain("residue");
-    // Capped at the operator's budget: the floor never extends a wait past it.
-    expect(elapsed).toBeLessThan(3000);
-    expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
+      expect(isPeerWaitTimeout(err)).toBe(true);
+      expect((err as Error).message).not.toContain("residue");
+      // Capped at the operator's budget: the floor never extends a wait past it.
+      expect(elapsed).toBeLessThan(3000);
+      expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // The pair a lockless run killed just after it acked leaves behind: the peer's
