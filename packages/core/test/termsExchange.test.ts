@@ -566,7 +566,7 @@ test("a throwing protocolVersion getter degrades to no readable version", () => 
   // The hardened edge of the probe's "no readable version" contract, fed to the
   // probe directly because it is the one frame shape a real transport's
   // deserialized wire data can never carry: a frame whose `protocolVersion` read
-  // THROWS (a throwing getter) must degrade to `undefined` -- the same legacy-peer
+  // THROWS (a throwing getter) must degrade to `undefined` -- the same refused-shape
   // outcome as a garbled, absent, or non-object version -- rather than escaping the
   // schema's `.catch`. Without the hardening the read throws instead of returning
   // undefined, so this check fails loudly if a future change removes it.
@@ -578,6 +578,56 @@ test("a throwing protocolVersion getter degrades to no readable version", () => 
     },
   };
   expect(probeProtocolVersion(frame)).toBeUndefined();
+});
+
+test("initiator fails fast (and sends an abort) on every unreadable-version message 2", async () => {
+  // The initiator-side legs of the refusal symmetry the spec states across both
+  // message paths and both directions (docs/spec/PROTOCOL.md): the three frame
+  // shapes that carry no readable version -- a non-object frame, an explicit null,
+  // and a `protocolVersion` read that throws -- are refused on message 2 exactly as
+  // message 1 refuses them, and the initiator still SENDS its abort (message 3)
+  // rather than stranding the responder on its receive timeout. The throwing getter
+  // survives only because the in-process pipe passes the frame by reference; a real
+  // transport's deserialized wire data cannot carry that shape.
+  const unreadableVersionFrames: Array<[string, unknown]> = [
+    ["non-object frame", "not an object"],
+    [
+      "explicit null version",
+      {
+        linkageTerms: termsB,
+        decision: "proceed",
+        recordCount: 200,
+        effectiveKeyCount: 1,
+        protocolVersion: null,
+      },
+    ],
+    [
+      "throwing version getter",
+      {
+        linkageTerms: termsB,
+        decision: "proceed",
+        recordCount: 200,
+        effectiveKeyCount: 1,
+        get protocolVersion(): unknown {
+          throw new Error("boom");
+        },
+      },
+    ],
+  ];
+  for (const [shape, frame] of unreadableVersionFrames) {
+    const [connA, connB] = makeConnections();
+    const initiator = exchangeTerms(connA, "initiator", termsA, 100);
+    await connB.receive(); // msg 1: initiator's terms
+    await connB.send(frame);
+    const abort = await connB.receive(); // msg 3: initiator's abort -- must arrive
+    expect(abort, shape).toMatchObject({
+      decision: "abort",
+      abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+    });
+    await expect(initiator, shape).rejects.toThrow(
+      PROTOCOL_VERSION_MISMATCH_MESSAGE,
+    );
+  }
 });
 
 test("a version mismatch is diagnosed ahead of a simultaneous terms mismatch", async () => {
@@ -605,12 +655,13 @@ test("a version mismatch is diagnosed ahead of a simultaneous terms mismatch", a
 test("initiator: a version skew on an abort frame wins over the peer's abort reason", async () => {
   // Precedence pin for the reconcile-before-abort-check ordering (the initiator
   // branch runs reconcileProtocolVersion before the decision === "abort" check): a
-  // message 2 that BOTH aborts AND carries a skewed protocolVersion is diagnosed as
+  // message 2 that BOTH aborts AND carries a SKEWED protocolVersion is diagnosed as
   // the version skew -- the root cause -- rather than relaying the peer's stated abort
-  // reason. That frame shape is reachable only from a non-conforming or malicious
-  // peer: a conforming responder's sendAbort never spreads protocolVersion onto an
-  // abort frame, so a genuine abort probes to undefined, the reconcile no-ops, and the
-  // peer's reason surfaces (pinned by the abort-relay tests above). This guards the
+  // reason. A conforming responder's abort carries this build's own version (see
+  // sendAbort), so the reconcile no-ops on it and the peer's stated reason surfaces
+  // (pinned by the abort-relay test above); the foreign version this fixture carries
+  // is reachable only from a non-conforming or malicious peer, and the reconcile --
+  // which runs before the decision is read -- reports the skew instead. This guards the
   // ordering against a refactor that put the abort check first and re-buried the skew.
   const [connA, connB] = makeConnections();
   const initiator = exchangeTerms(connA, "initiator", termsA, 100);
