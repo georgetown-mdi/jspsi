@@ -4,6 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import {
   ConnectionError,
+  InternalConsistencyError,
   OperatorConfigError,
   StandardizationTermsError,
   UsageError,
@@ -280,6 +281,21 @@ test("classifies every other failure as exchange", () => {
   expect(
     classifyTerminalError(new ConnectionError("bad frame", "usage"), "run"),
   ).toBe("exchange");
+});
+
+test("classifies a run-phase InternalConsistencyError as exchange", () => {
+  // The class the single-pass send-time reply-cap backstop raises (pinned as what
+  // a triggered backstop throws in core's psiLink.test.ts). The four categories
+  // have no internal-fault member, so it lands in the default bucket beside the
+  // retryable transport faults; the exit code (70, pinned in cli.test.ts) is where
+  // a supervisor sees the difference -- the mirror of a `security` failure, which
+  // only the category shows.
+  const backstop = new InternalConsistencyError(
+    "single-pass built a reply of 10 byte(s), above the 8 byte(s) both parties " +
+      "derive from their declared sizes",
+  );
+  expect(classifyTerminalError(backstop, "run")).toBe("exchange");
+  expect(buildErrorEvent(backstop, "run").category).toBe("exchange");
 });
 
 // --- Hostile-value sanitization (ESC / RLO injection) ------------------------

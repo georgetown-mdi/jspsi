@@ -5,7 +5,12 @@ import { Writable } from "node:stream";
 
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
-import { loadCSVFile, MAX_RECONNECT_ATTEMPTS, UsageError } from "@psilink/core";
+import {
+  InternalConsistencyError,
+  loadCSVFile,
+  MAX_RECONNECT_ATTEMPTS,
+  UsageError,
+} from "@psilink/core";
 
 import {
   assertNoUnknownOptions,
@@ -13,6 +18,7 @@ import {
   durationFlagSeconds,
   exitCodeForError,
   exitWithError,
+  INTERNAL_FAULT_EXIT_CODE,
   MAX_TIMEOUT_SECONDS,
   nonNegativeIntFlag,
   openInputSource,
@@ -430,6 +436,21 @@ test("exitCodeForError: a core UsageError is EX_USAGE, a bare Error is not", () 
   // a bare Error: the two land on different exit codes, and a script reads them.
   expect(exitCodeForError(new UsageError("bad terms"))).toBe(64);
   expect(exitCodeForError(new Error("bad terms"))).toBe(69);
+});
+
+test("exitCodeForError: a core InternalConsistencyError is EX_SOFTWARE", () => {
+  // The class the single-pass send-time reply-cap backstop raises (that it is the
+  // class a triggered backstop actually throws is pinned in core's
+  // psiLink.test.ts). Its exit code is neither of its neighbours: 64 would name an
+  // operator input the run has already found within budget, and 69 would invite a
+  // supervisor to retry a deterministic internal fault -- another whole exchange,
+  // ending at the same refusal.
+  const backstop = new InternalConsistencyError(
+    "single-pass built a reply of 10 byte(s), above the 8 byte(s) both parties " +
+      "derive from their declared sizes",
+  );
+  expect(exitCodeForError(backstop)).toBe(INTERNAL_FAULT_EXIT_CODE);
+  expect(INTERNAL_FAULT_EXIT_CODE).toBe(70);
 });
 
 // --- exitWithError -----------------------------------------------------------

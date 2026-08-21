@@ -28,7 +28,7 @@ import {
   type PartnerIndexGrouping,
 } from "./utils/partnerIndices";
 import { COUNT_ONLY_SHAPE_REFUSALS } from "./config/linkageTerms";
-import { UsageError } from "./errors";
+import { InternalConsistencyError, UsageError } from "./errors";
 import { receiveCountReport, sendCountReport } from "./protocolSetup";
 
 import { getLoggerForVerbosity } from "./utils/logger";
@@ -875,7 +875,9 @@ function singlePassOverCapMessage(
 // controls is what stopped the send. Reaching it means the built reply outgrew the
 // cap both parties derive from those same declared sizes -- an inconsistency
 // between this party's reply builder and that derivation -- so it names the two
-// byte counts and withholds the dataset remedies, which cannot move it.
+// byte counts and withholds the dataset remedies, which cannot move it. It is
+// raised as an InternalConsistencyError, the class whose classification carries
+// that remedy: report it, rather than fix an input or retry a transport.
 function singlePassReplyOverCapMessage(
   id: string,
   replyBytes: number,
@@ -1164,7 +1166,7 @@ export async function linkViaSinglePassPSI(
       receiverSize,
     );
     if (reply.byteLength > replyCap) {
-      throw new UsageError(
+      throw new InternalConsistencyError(
         singlePassReplyOverCapMessage(
           participant.id,
           reply.byteLength,
