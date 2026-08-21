@@ -7,6 +7,7 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 import {
   IDB_VERSION,
   MANAGED_EXCHANGE_DB_NAME,
+  MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
   MANAGED_EXCHANGE_LOCAL_STORE_NAME,
   MANAGED_EXCHANGE_STORE_NAME,
   clearManagedExchanges,
@@ -27,11 +28,17 @@ import {
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
 import {
+  appendDisclosureRecordToStore,
+  getDisclosureAccounting,
+} from "@psi/disclosureAccountingStore";
+import {
   getManagedLocalState,
   markManagedExchangeBackedUp,
   markManagedExchangeSpent,
 } from "@psi/managedLocalState";
 import { buildManagedDeposit } from "@bench/manageOfferModel";
+
+import { disclosureRecord } from "../utils/disclosureFixtures";
 
 import type {
   ManagedExchangeSchedule,
@@ -107,6 +114,25 @@ async function rawLocalStored(id: string): Promise<unknown> {
       const request = db
         .transaction(MANAGED_EXCHANGE_LOCAL_STORE_NAME, "readonly")
         .objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME)
+        .get(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** The raw accounting-of-disclosures value under a key, read straight from its
+ * sibling store, so the delete test can assert the accounting is gone too rather
+ * than merely absent through a validating read. */
+async function rawDisclosureStored(id: string): Promise<unknown> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    return await new Promise<unknown>((resolve, reject) => {
+      const request = db
+        .transaction(MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME, "readonly")
+        .objectStore(MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME)
         .get(id);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
@@ -539,10 +565,15 @@ describe("one-step delete leaves nothing behind", () => {
     // in.
     await markManagedExchangeBackedUp(created.id, "2026-02-01T14:05:00.000Z");
     await markManagedExchangeSpent(created.id, "2026-02-02T09:00:00.000Z");
+    // And file a run's disclosure, so the delete must clear the accounting too --
+    // otherwise the delete strands cleartext partner and agreement metadata under
+    // an id nothing surfaces.
+    await appendDisclosureRecordToStore(created.id, await disclosureRecord());
     // Everything the browser holds for the exchange -- the record under its key,
-    // and the sibling local-state entry -- exists before the delete.
+    // the sibling local-state entry, and the accounting -- exists before the delete.
     expect(await rawStored(created.id)).toBeDefined();
     expect(await rawLocalStored(created.id)).toBeDefined();
+    expect(await rawDisclosureStored(created.id)).toBeDefined();
 
     await deleteManagedExchange(created.id);
 
@@ -554,11 +585,51 @@ describe("one-step delete leaves nothing behind", () => {
     expect(await listManagedExchanges()).toEqual([]);
     expect(await rawLocalStored(created.id)).toBeUndefined();
     expect(await getManagedLocalState(created.id)).toBeUndefined();
+    expect(await rawDisclosureStored(created.id)).toBeUndefined();
+    expect(await getDisclosureAccounting(created.id)).toBeUndefined();
     await root.removeEntry("managed-input.csv");
   });
 
   test("delete of a missing id is idempotent", async () => {
     await expect(deleteManagedExchange("no-such-id")).resolves.toBeUndefined();
+  });
+});
+
+describe("the accounting of disclosures accumulates each run's record", () => {
+  test("a filed record round-trips verbatim, and a second run is a second entry", async () => {
+    const created = await createManagedExchange(newExchange());
+    const first = await disclosureRecord({
+      createdAt: "2026-02-01T14:00:00.000Z",
+    });
+    const second = await disclosureRecord({
+      createdAt: "2026-03-01T14:00:00.000Z",
+    });
+
+    await appendDisclosureRecordToStore(created.id, first);
+    await appendDisclosureRecordToStore(created.id, second);
+
+    const accounting = await getDisclosureAccounting(created.id);
+    // Verbatim through the structured clone and the validating read: the entry is
+    // the record the run produced, not a summary of it.
+    expect(accounting?.entries).toEqual([first, second]);
+  });
+
+  test("re-filing one run's record does not double its entry", async () => {
+    const created = await createManagedExchange(newExchange());
+    const record = await disclosureRecord();
+
+    await appendDisclosureRecordToStore(created.id, record);
+    await appendDisclosureRecordToStore(created.id, record);
+
+    expect((await getDisclosureAccounting(created.id))?.entries).toHaveLength(
+      1,
+    );
+  });
+
+  test("an exchange that has never completed a run has no accounting", async () => {
+    const created = await createManagedExchange(newExchange());
+
+    expect(await getDisclosureAccounting(created.id)).toBeUndefined();
   });
 });
 

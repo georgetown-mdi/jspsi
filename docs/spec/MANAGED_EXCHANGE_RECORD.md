@@ -11,7 +11,9 @@ re-authoring the exchange or re-establishing a shared secret. It covers the
 record's field-by-field shape -- what persists across runs versus what is
 supplied at each run -- the field types, the key-derivation implications of the
 persisted secret, the schedule and run bookkeeping the unattended path relies
-on, and the export artifact's custody model and rollback caveats. It is the
+on, the local sibling stores beside the record (the backup, spent, and import
+markers, and the accounting of disclosures each run files its record into), and
+the export artifact's custody model and rollback caveats. It is the
 implementation-level complement to the **Managed exchange lifecycle** overview in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md), which says what the feature is for,
 its automation goal and platform envelope, its durability and single-owner
@@ -569,11 +571,71 @@ only the record. Deleting a managed exchange removes the record and its sibling
 state together (see [Deleting a managed
 exchange](../MANAGED_EXCHANGE.md#deleting-a-managed-exchange)).
 
+## The accounting of disclosures
+
+A managed exchange's **accounting of disclosures** is a second local sibling, in
+its own origin-local store keyed by the record `id`: the
+[self-attested exchange records](EXCHANGE_RECORD.md) this exchange's runs have
+produced, accumulated in run order. It is what an operator populates a HIPAA
+accounting of disclosures or a FERPA disclosure record from (see
+[COMPLIANCE.md](../COMPLIANCE.md#hipaa-considerations)).
+
+**An entry is a run's exchange record, verbatim.** Not a summary of one, and not
+a second format beside it: every fact the accounting states -- the partner, the
+governing agreement and the purpose of the disclosure under it, the categories
+disclosed each way, the records this party exposed, the result size where the
+record format's entitlement gate recorded one, and the instant -- is a field of
+that record. What a surface renders is therefore a reading of the artifact, and a
+fact the record does not carry is reported as not recorded rather than inferred
+from elsewhere.
+
+**Why it cannot be a record field.** The managed record's `lastRun` is a
+timestamp and closed enums by design and keeps only the most recent run, so it
+can hold no disclosure and no history; and an exchange record carries free text a
+partner authored, which that field set deliberately excludes. The accounting is
+therefore its own store, which also keeps it out of the export artifact
+structurally, exactly as the three markers above are kept out.
+
+**Shape.** One object per exchange: a `version`
+(`psilink-disclosure-accounting/v1`, its own reader-rejects-unknown literal) and
+`entries`, the exchange records oldest first. A stored value that fails
+validation -- an unrecognized version, an unknown key, or an entry that is not a
+valid exchange record -- rejects the whole read rather than loading the entries
+that parsed: a partially-loaded accounting would still render, as a shorter and
+quietly false account of what was disclosed, so the failure is surfaced as a
+failure.
+
+**When an entry is written.** Each run appends its record inside a single
+strict-durability transaction, before the run reports its outputs. This is where
+an **unattended** run's disclosure record lands: the per-run record is otherwise
+offered only as a download at run completion, which requires an operator present,
+so a scheduled run would otherwise leave no record of a disclosure it made. The
+append is idempotent on the record's own binding nonce (per-exchange,
+CSPRNG-generated, locally generated, so it identifies a run within this holder's
+own log; see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#record-fields)), so a
+retried write cannot inflate the count of disclosures the accounting reports. A
+failed append does not fail the run -- the disclosure has already happened and
+the exchange's results stand -- and is surfaced as a notice instead.
+
+**What it holds at rest, and retention.** The entries are the records' own
+cleartext content: names, categories, references, and aggregate counts, never a
+payload value, a linkage-field value, or a matched identifier. The `resultSize`
+an entry carries is the intersection **cardinality** under the record format's
+entitlement gate, not the intersection, so the managed record's no-match-result
+rule is untouched -- but the accounting does add a growing, per-run set of
+partner and agreement metadata to what a reader of the store learns (see
+[Metadata at
+rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). It is bounded
+only by the exchange's own run history: nothing prunes it, since a silently
+dropped entry would falsify the account. Deleting the managed exchange deletes
+its accounting in the same one-step delete, so an operator who must keep it
+exports it first.
+
 ## See also
 
 - [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md) - the managed exchange lifecycle: who it serves, the automation goal and platform envelope, durability contract, single-owner invariant, desync story, eviction survival, and the moment-anchored backup surfaces
 - [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges) - the browser at-rest threat model for the persisted secret: the primary controls, the rollback and metadata-at-rest analyses, and the egress-hardening limits
 - [EXCHANGE_FILE.md](EXCHANGE_FILE.md) - the exchange-file artifact and the credential-free endpoint locator the record composes from
 - [PROTOCOL.md](PROTOCOL.md#shared-secret-rotation) - the shared-secret rotation and rendezvous-peer-id derivation constructions
-- [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md) - the self-attested per-run disclosure record (a distinct artifact; the managed record is not a disclosure log)
+- [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md) - the self-attested per-run disclosure record (a distinct artifact; the managed record is not a disclosure log, and the accounting of disclosures above accumulates these records rather than defining a log of its own)
 </content>

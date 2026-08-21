@@ -34,6 +34,7 @@ import { buildRunOutputs } from "@bench/runOutputs";
 import { CLOSE_OUTCOME_WARNINGS } from "./exchangeLifecycle";
 import { HANDSHAKE_ROLE_FOR_SIDE } from "./handshakeRole";
 import { acquireValidatedManagedInput } from "./managedInputHandle";
+import { appendDisclosureRecordToStore } from "./disclosureAccountingStore";
 import { authenticateExchange } from "./authenticateExchange";
 import { beginManagedRendezvous } from "./managedRendezvous";
 import { createBrowserPsiEngineFactory } from "./psiCryptoController";
@@ -43,8 +44,8 @@ import { prepareManagedRerunExchange } from "./managedPreparedExchange";
 import { runManagedRerun } from "./managedRun";
 import { waitForIncomingConnection } from "./waitForConnection";
 
+import type { BuiltExchangeRecord, MessageConnection } from "@psilink/core";
 import type { DataConnection } from "peerjs";
-import type { MessageConnection } from "@psilink/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type Peer from "peerjs";
 
@@ -269,6 +270,13 @@ export function runManagedExchangeInBrowser(
           );
           const outputs = buildRunOutputs(result, carried.prepared, urls);
           builtOutputs = true;
+          // The disclosure has happened, so its record is appended to this
+          // exchange's accounting BEFORE the run reports its outputs: an
+          // unattended run has nobody to take the completion download, and an
+          // attended one can have its tab closed on the completion screen.
+          // Awaited, unlike the teardown below, because it is a local write of
+          // bounded duration rather than a wait the partner's peer controls.
+          await appendDisclosure(record.id, result.audit, onWarning);
           return outputs;
         } finally {
           // Started, not awaited: the clean close inside it waits for the peer to
@@ -289,6 +297,39 @@ export function runManagedExchangeInBrowser(
       aborted: () => signal.aborted,
     },
   );
+}
+
+/** The notice a run raises when its disclosure could not be filed: the exchange
+ * itself completed and its results stand, but this browser holds no record of what
+ * it disclosed, and the remedy -- downloading the record offered beside the results
+ * -- is available only while the completion surface is open. */
+export const DISCLOSURE_NOT_FILED_WARNING =
+  "This run's disclosure record could not be saved to this exchange's accounting of disclosures. Your results are complete. Download the record file below if you need to keep an account of this disclosure.";
+
+/**
+ * Append this run's self-attested exchange record to the exchange's accounting of
+ * disclosures. Best-effort by design: the exchange has already happened, so a
+ * failed append can neither undo it nor make the run a failure -- it raises the
+ * notice instead, which is the operator's cue to take the completion download
+ * while it is still offered.
+ *
+ * A result with no audit appends nothing: core omits the audit only when building
+ * the record threw after the exchange already succeeded (see `ExchangeResult`), and
+ * there is nothing to file. That case reaches the operator through the completion
+ * surface, which offers no record download either.
+ */
+async function appendDisclosure(
+  id: string,
+  audit: BuiltExchangeRecord | undefined,
+  onWarning: ((message: string) => void) | undefined,
+): Promise<void> {
+  if (audit === undefined) return;
+  try {
+    await appendDisclosureRecordToStore(id, audit.record);
+  } catch (error) {
+    log.error("managed re-run: filing the disclosure record failed:", error);
+    onWarning?.(DISCLOSURE_NOT_FILED_WARNING);
+  }
 }
 
 /**
