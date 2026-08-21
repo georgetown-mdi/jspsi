@@ -162,11 +162,14 @@ const MAX_EFFECTIVE_KEY_COUNT =
 // envelope and never inside `linkageTerms`, so it does not enter the
 // canonical/agreed-terms hash.
 //
-// `.optional()` because a build that predates the field advertises none, and the
-// protocol-version reconcile lets such a legacy peer proceed; that peer also
-// predates the fan-out capability, so an absent advertisement resolves to the plain
-// key count -- exactly what a fan-out-free party would have sent. See
-// assertPartnerEffectiveKeyCount for the checks a PRESENT value must pass.
+// `.optional()` in the SCHEMA because message 2 doubles as the responder's abort
+// frame, which carries no role metadata at all (the same reason `recordCount` is
+// optional there). It is not optional on a frame that proceeds: the protocol-version
+// reconcile admits only a partner advertising this build's exact version, and this
+// build always declares a count beside it, so an omission there is a non-conforming
+// peer. assertPartnerEffectiveKeyCount refuses it with the classified protocol error
+// -- naming the count rather than blaming the linkage terms with a decode failure --
+// exactly as it refuses an inadmissible value.
 const effectiveKeyCountField = z
   .number()
   .int()
@@ -190,17 +193,17 @@ const effectiveKeyCountField = z
 // values, see docs/spec/PROTOCOL.md) and from the file-sync MESSAGE_ENVELOPE_VERSION
 // byte (the transport frame format, see fileSyncConnection.ts). The reconcile is
 // fail-closed (matching the mode-flag fast-fail precedent), NOT
-// fail-soft like the host-key advisory: any PRESENT value that is not our exact
-// version aborts -- a different integer, or a garbled/wrong-typed value from a
-// non-conforming or corrupted peer, which is why the field is read as `unknown`
-// rather than a typed number (a typed schema would bury such a value in a generic
-// parse error instead of naming the version skew). A partner that advertises NO
-// version (undefined) is a build that predates this field: adding the field is
-// itself wire-compatible (an older peer strips the unknown key and this build
-// treats an absent advertisement as legacy), so such a partner is allowed to
-// proceed. The durable, forward-looking guarantee is that any two builds that
-// both carry the field fail cleanly the moment their versions differ. That
-// guarantee no longer rests on a future bump keeping the envelope's other fields
+// fail-soft like the host-key advisory: anything that is not our exact version
+// aborts. That covers a PRESENT value -- a different integer, or a garbled/
+// wrong-typed value from a non-conforming or corrupted peer, which is why the field
+// is read as `unknown` rather than a typed number (a typed schema would bury such a
+// value in a generic parse error instead of naming the version skew) -- and equally
+// a partner advertising NO readable version at all. Pre-publication no build
+// predating this field is deployed, so an unversioned advertisement identifies a
+// non-conforming peer rather than an older psilink, and admitting one would leave a
+// leg of this reconcile open. The durable, forward-looking guarantee is that a
+// partner not running this exact build fails cleanly before the linkage rounds
+// begin. That guarantee does not rest on a future bump keeping the envelope's fields
 // backward-parseable: the version is read from a lenient probe BEFORE the strict
 // parse (see protocolVersionProbe), so a reshaped sibling field cannot throw the
 // parse before the version is read and bury the skew diagnosis. The version is
@@ -215,9 +218,11 @@ export const PROTOCOL_VERSION = 1;
 
 /**
  * The operator-facing diagnosis surfaced -- and sent to the partner as the abort
- * reason -- when the two parties advertise different {@link PROTOCOL_VERSION}s.
- * It reads correctly from either side: each party names the other as the one on
- * the incompatible version, and both conclude they must run the same build.
+ * reason -- when a partner advertises anything but this build's exact
+ * {@link PROTOCOL_VERSION}, an unreadable or absent advertisement included. It
+ * reads correctly from either side: each party names the other as the one on
+ * the incompatible version, and both conclude they must run the same build. It is
+ * a fixed literal, carrying nothing the partner authored.
  *
  * @internal exported for the protocol-version reconcile tests.
  */
@@ -269,8 +274,9 @@ const termsMessage = z.object({
   // Read as `unknown`, not a typed number, so a PRESENT-but-non-matching value
   // (a foreign integer, or a garbled/wrong-typed value from a non-conforming or
   // corrupted peer) reconciles to the actionable version mismatch rather than
-  // throwing a generic parse error that buries the real cause; absent stays
-  // legacy. See PROTOCOL_VERSION and reconcileProtocolVersion.
+  // throwing a generic parse error that buries the real cause. `.optional()` for
+  // the same reason: the reconcile refuses an absent advertisement itself, ahead
+  // of this parse. See PROTOCOL_VERSION and reconcileProtocolVersion.
   protocolVersion: z.unknown().optional(),
   save: z.boolean().optional(),
   disclosesPayload: z.boolean().optional(),
@@ -343,9 +349,9 @@ export interface TermsExchangeResult {
    * {@link assertPartnerEffectiveKeyCount}). With the partner's record count it is
    * the partner's value slot count, the authenticated input every derived
    * single-pass bound reads (see `psiElementBounds` and `singlePassReplyByteCap`
-   * in connection/frameSize.ts). A partner that advertised none -- a build
-   * predating the field, and so predating the fan-out capability -- resolves to
-   * the agreed key count, the value a fan-out-free party advertises.
+   * in connection/frameSize.ts). Always the partner's own advertised value: a
+   * partner that omits it on a frame that proceeds fails the exchange as a
+   * non-conforming peer, so nothing is ever defaulted here.
    */
   partnerEffectiveKeyCount: number;
   /**
@@ -424,16 +430,24 @@ export interface TermsExchangeResult {
  * best-effort sends the partner the abort so neither side waits on a frame the
  * other will not send.
  *
- * An ABSENT advertisement resolves to `keyCount`: it can only come from a build
- * that predates this field, which predates the fan-out capability too, so the
- * plain key count is exactly what such a peer's data obeys.
+ * An ABSENT advertisement draws the same refusal. Every partner reaching this
+ * check advertised this build's exact protocol version (see
+ * {@link reconcileProtocolVersion}), and this build always declares a count beside
+ * that version, so an omission is a non-conforming peer rather than an older
+ * build -- and there is no width its data can be assumed to obey.
  */
 function assertPartnerEffectiveKeyCount(
   advertised: number | undefined,
   agreedTerms: LinkageTerms,
 ): number {
   const keyCount = agreedTerms.linkageKeys.length;
-  if (advertised === undefined) return keyCount;
+  if (advertised === undefined)
+    throw new ConnectionError(
+      "partner advertised no effective key count against " +
+        `${keyCount} agreed linkage key(s): a partner on this protocol version ` +
+        "always declares one",
+      "protocol",
+    );
   const refuse = (detail: string): never => {
     throw new ConnectionError(
       `partner advertised an unusable effective key count (${advertised} ` +
@@ -516,6 +530,14 @@ function partnerWidthAboveAgreedNotice(
  * never reads intent carried here (it throws on the abort first), and advertising
  * a desire to save while refusing the terms would be self-contradictory. Omitting
  * it is the correct signal, not an oversight.
+ *
+ * The protocol version is the one field that does ride the responder's abort,
+ * because the initiator reconciles that frame's version BEFORE it reads the
+ * decision and refuses a frame carrying no readable version (see
+ * {@link reconcileProtocolVersion}): an abort omitting it would reach a
+ * same-version partner as a version skew rather than as the reason it states. The
+ * initiator's decision-only frame closes an exchange whose versions both parties
+ * have already reconciled, and no reconcile reads it, so it carries none.
  */
 async function sendAbort(
   conn: MessageConnection,
@@ -525,7 +547,12 @@ async function sendAbort(
   try {
     await conn.send(
       localTerms !== undefined
-        ? { linkageTerms: localTerms, decision: "abort", abortReasons }
+        ? {
+            linkageTerms: localTerms,
+            decision: "abort",
+            abortReasons,
+            protocolVersion: PROTOCOL_VERSION,
+          }
         : { decision: "abort", abortReasons },
     );
   } catch {
@@ -544,9 +571,9 @@ async function sendAbort(
 // stay backward-parseable across a bump. Like
 // `termsMessage`, `protocolVersion` is read as `unknown`, so a garbled value still
 // reconciles to the named skew rather than a parse error; a non-object frame, or one
-// carrying no version, probes to `undefined` (treated as a legacy peer). `.catch`
-// degrades a non-object frame to that "no readable version" rather than a parse
-// error on this path.
+// carrying no version, probes to `undefined`, which the reconcile refuses on the
+// same terms as a foreign value. `.catch` degrades a non-object frame to that "no
+// readable version" rather than a parse error on this path.
 const protocolVersionProbe = z
   .object({ protocolVersion: z.unknown().optional() })
   .catch({ protocolVersion: undefined });
@@ -556,9 +583,9 @@ const protocolVersionProbe = z
  * requiring the whole envelope to parse (see {@link protocolVersionProbe}), so
  * {@link reconcileProtocolVersion} can diagnose a version skew even when a sibling
  * field would fail the strict parse. Returns `undefined` for a frame that carries
- * no version (a legacy peer), that is not an object, or whose `protocolVersion`
- * read throws -- a throwing getter degrades to the same "no readable version"
- * outcome (pinned by the "throwing protocolVersion getter" test).
+ * no version, that is not an object, or whose `protocolVersion` read throws -- a
+ * throwing getter degrades to the same "no readable version" outcome (pinned by
+ * the "throwing protocolVersion getter" test), which the reconcile refuses.
  *
  * @internal exported for the throwing-getter probe test.
  */
@@ -574,26 +601,28 @@ export function probeProtocolVersion(rawData: unknown): unknown {
 }
 
 /**
- * Fail-closed reconcile of the partner's advertised {@link PROTOCOL_VERSION}. A
- * partner that advertised anything OTHER than our exact version -- a different
- * integer, or a present-but-garbled/wrong-typed value (the field is read as
- * `unknown` precisely so such a value reaches here rather than throwing a generic
- * parse error) -- is on an incompatible build: best-effort send it the abort (so
- * it too fails with the named cause, not a receive timeout) and throw
- * {@link PROTOCOL_VERSION_MISMATCH_MESSAGE}. A partner that advertised NONE
- * (`undefined`) predates this field and is wire-compatible with this build, so it
- * is treated as legacy and allowed to proceed (a no-op return). Pass `localTerms`
- * when reconciling from the responder's message-2 slot, whose abort frame carries
- * `linkageTerms`; omit it for the initiator's decision-only abort. See
- * {@link PROTOCOL_VERSION}.
+ * Fail-closed reconcile of the partner's advertised {@link PROTOCOL_VERSION}. Only
+ * our exact version proceeds; anything else is an incompatible build, so this
+ * best-effort sends the partner the abort (so it too fails with the named cause,
+ * not a receive timeout) and throws
+ * {@link PROTOCOL_VERSION_MISMATCH_MESSAGE}. That covers a different integer, a
+ * present-but-garbled/wrong-typed value (the field is read as `unknown` precisely
+ * so such a value reaches here rather than throwing a generic parse error), and a
+ * partner that advertised NO readable version at all (`undefined`): no deployed
+ * build predates the field, so nothing conforming lands on that leg and admitting
+ * it would be the one way past this reconcile. The refusal is the same on both
+ * message paths and in both directions.
+ *
+ * Pass `localTerms` when reconciling from the responder's message-2 slot, whose
+ * abort frame carries `linkageTerms`; omit it for the initiator's decision-only
+ * abort. See {@link PROTOCOL_VERSION}.
  */
 async function reconcileProtocolVersion(
   conn: MessageConnection,
   partnerVersion: unknown,
   localTerms?: LinkageTerms,
 ): Promise<void> {
-  if (partnerVersion === undefined || partnerVersion === PROTOCOL_VERSION)
-    return;
+  if (partnerVersion === PROTOCOL_VERSION) return;
   await sendAbort(conn, [PROTOCOL_VERSION_MISMATCH_MESSAGE], localTerms);
   throw new Error(PROTOCOL_VERSION_MISMATCH_MESSAGE);
 }
@@ -616,12 +645,12 @@ async function reconcileProtocolVersion(
  * further messages.
  *
  * Both parties advertise this build's {@link PROTOCOL_VERSION} on their terms
- * message (message 1 for the initiator, message 2 for the responder) and check
- * the partner's before weighing the terms. Any advertised version other than
- * this build's -- a different integer, or a present-but-garbled value -- fail-
- * closes with {@link PROTOCOL_VERSION_MISMATCH_MESSAGE} (both sides learn the
- * real cause instead of a later cryptic frame-parse error); an ABSENT
- * one is a legacy build wire-compatible with this one and proceeds. See
+ * message (message 1 for the initiator, message 2 for the responder, an abort in
+ * that slot included) and check the partner's before weighing the terms. Anything
+ * but this build's exact version -- a different integer, a present-but-garbled
+ * value, or no readable version at all -- fail-closes with
+ * {@link PROTOCOL_VERSION_MISMATCH_MESSAGE}, so both sides learn the real cause
+ * instead of a later cryptic frame-parse error. See
  * {@link reconcileProtocolVersion}.
  *
  * `localRecordCount` (this party's raw dataset row count) rides both terms
@@ -732,8 +761,9 @@ export async function exchangeTerms(
     // any terms are weighed. A version skew is the root cause, so its actionable
     // diagnosis (and the abort it best-effort sends the responder) wins over a
     // record-count, terms, or sibling-field parse difference the mismatch might also
-    // produce. A legacy or abort frame carries no version, so this is a
-    // no-op there and the abort still surfaces at the decision check below.
+    // produce. A conforming responder advertises its version on this frame whether it
+    // proceeds or aborts (see sendAbort), so a genuine abort passes the reconcile and
+    // surfaces its own reasons at the decision check below.
     await reconcileProtocolVersion(conn, probeProtocolVersion(rawMsg));
 
     const msg = parseOrProtocolError(termsWithDecisionMessage, rawMsg);
