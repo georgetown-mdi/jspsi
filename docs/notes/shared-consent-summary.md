@@ -344,6 +344,16 @@ qualifies rather than to the setting's implementation status: the duplicate-matc
 headline states match multiplicity, so it sits inside a disclosure, and the
 sentence sits with it.
 
+A second sentence sits beside it, and the pin carries both, because what the
+setting discloses and whose records are grouped to disclose it are separate facts
+a reader needs together. Acceptance derives the accepting party's own
+`deduplicate` as false rather than adopting the invitation's, so the pair an
+accepted deduplicating invitation resolves to is one-sided by construction. A
+reader met only by the disclosure statement would have no way to tell whether
+their own file is the one being grouped -- and the invitation offers no control
+for the other direction, so the sentence names the per-party configuration path
+that does.
+
 ## The count-only tier
 
 The exchange conducts a count-only run, so what both surfaces render for a `psi-c`
@@ -422,8 +432,9 @@ spec's remaining `psi-c` shape refusals are held on the same footing: more than
 one linkage key and `linkage_strategy: single-pass` would falsify the tier's own
 copy -- the round-disclosure note speaks of one key's exactly-once values, and
 the result note denies any record-by-record pairing -- and `deduplicate` is
-refused twice over, by the count-only rule and by `assertDeduplicateImplemented`,
-which refuses it under every algorithm while no run honors it. None of those
+refused by the count-only rule, with `assertDeduplicateImplemented` refusing it a
+second time under `single-pass`, the strategy no deduplicating match runs on.
+None of those
 three -- more than one linkage key, single-pass, and deduplicate -- has a render
 backstop, by decision rather than omission: the refusals reach them where the
 terms are authored, at parse, and at accept, which is where a document that
