@@ -27,7 +27,11 @@
  *   module only supplies the phases it gates.
  */
 
-import { ConnectionError, OutboundDisclosureRefusalError } from "@psilink/core";
+import {
+  ConnectionError,
+  InternalConsistencyError,
+  OutboundDisclosureRefusalError,
+} from "@psilink/core";
 
 import {
   ManagedExchangeExpiredError,
@@ -238,12 +242,21 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
  * exact, not a heuristic. (A stored record's secret is regex-validated on every
  * read, so the malformed-tag case cannot arise here regardless; the lapse check
  * covers it anyway.)
+ *
+ * The rest of core's tagged family are the file-sync transport refusals, which a
+ * WebRTC-only browser run never raises. {@link InternalConsistencyError} is the
+ * one that does reach here: the single-pass reply-cap backstop runs in the
+ * browser too and raises it mid-data-exchange, so a bound lapsing during a long
+ * run coincides with it as readily as with a real expiry. It is excluded by
+ * type, because re-mapping it would report a defect in psilink as a benign
+ * expiry and send the operator to a fresh invitation that cannot fix it.
  */
 export function remapLapsedRunFailure(
   error: unknown,
   record: Pick<ManagedExchangeRecord, "expires">,
   now: number,
 ): ManagedExchangeExpiredError | undefined {
+  if (error instanceof InternalConsistencyError) return undefined;
   if (!hasRecoveryHint(error)) return undefined;
   if (!managedExchangeLapsed(record, now)) return undefined;
   // expires is defined here: managedExchangeLapsed returns true only when it is

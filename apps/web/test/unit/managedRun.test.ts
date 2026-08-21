@@ -1,5 +1,6 @@
 import {
   ConnectionError,
+  InternalConsistencyError,
   OutboundDisclosureRefusalError,
   generateSharedSecret,
   getDefaultLinkageTerms,
@@ -311,6 +312,25 @@ describe("remapLapsedRunFailure: a bound that lapses mid-run", () => {
     expect(
       remapLapsedRunFailure(
         new ConnectionError("key exchange authentication failed", "security"),
+        { expires: "2026-07-14T11:59:00.000Z" },
+        NOW,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("an internal fault on a lapsed record is not re-mapped to the expiry", () => {
+    // Core tags InternalConsistencyError on the class, and raises it from the
+    // single-pass reply-cap backstop mid-data-exchange -- so a bound that lapses
+    // during a long run satisfies the tag and the lapse alike, unlike the
+    // handshake-time expiry the re-map exists for. Re-mapping it would report a
+    // defect in psilink as a benign expiry and offer a fresh invitation, which
+    // cannot fix it.
+    expect(
+      remapLapsedRunFailure(
+        new InternalConsistencyError(
+          "server: single-pass built a reply above the byte cap both parties " +
+            "derive from their declared sizes; report it with this message.",
+        ),
         { expires: "2026-07-14T11:59:00.000Z" },
         NOW,
       ),

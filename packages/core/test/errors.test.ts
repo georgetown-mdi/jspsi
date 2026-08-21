@@ -7,6 +7,7 @@ import {
   DirectoryListingBoundsError,
   TransportOperationStalledError,
   ConnectionClosedError,
+  InternalConsistencyError,
   PeerAbortError,
   TransportPublishIndeterminateError,
   causeChainSome,
@@ -117,6 +118,28 @@ describe("errors deliberately left without a recovery hint", () => {
       (err as { psilinkRecoveryHintEmitted?: unknown })
         .psilinkRecoveryHintEmitted,
     ).toBeUndefined();
+  });
+});
+
+describe("the internal fault's recovery hint", () => {
+  test("InternalConsistencyError tags the hint on the class and stays a plain Error", () => {
+    // The tag is what suppresses the CLI's generic "retry the exchange without
+    // re-inviting" advisory, which the raise site -- mid-data-exchange, after the
+    // handshake rotated the secret -- otherwise reaches, printing a retry beneath
+    // a message whose remedy is to report the fault. It sits on the CLASS because
+    // every internal fault takes that same step, and the one raise site's message
+    // states it (pinned in psiLink.test.ts). Not a UsageError: the boundary maps
+    // this class to exit 70, not the 64 that would send the operator to an input
+    // the single-pass ceiling gate has already cleared.
+    const err = new InternalConsistencyError(
+      "server: single-pass built a reply of 4096 byte(s), above the 2048 " +
+        "byte(s) both parties derive from their declared sizes. The exchange " +
+        "cannot proceed; report it with this message.",
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(UsageError);
+    expect(err.name).toBe("InternalConsistencyError");
+    expect(err.psilinkRecoveryHintEmitted).toBe(true);
   });
 });
 

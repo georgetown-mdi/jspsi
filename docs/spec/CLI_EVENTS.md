@@ -177,6 +177,8 @@ Why 70 rather than a code already in the vocabulary:
 - **Not 69 (`EX_UNAVAILABLE`).** 69 is the transport-availability code a supervisor is expected to retry once the transport recovers. This fault is deterministic in the run's own inputs, so every retry rebuilds the same reply and reaches the same refusal -- while conducting another full exchange, re-sending this party's records, which is exactly the loop the retry cap exists to bound (see [Exit codes](../CLI.md#exit-codes)).
 - **70 (`EX_SOFTWARE`)** is the `sysexits` code for an internal software error, and matches the remedy the message states: report it, with the two byte counts it names.
 
+The human line agrees with the code. The class carries `psilinkRecoveryHintEmitted`, so the CLI's generic post-handshake "retry the exchange without re-inviting" advisory is suppressed and the fault's own report-it remedy stands alone on stderr. The suppression is load-bearing rather than cosmetic here: the backstop fires mid-data-exchange, after the handshake rotated the secret, which is exactly the window that advisory prints in, and it would prescribe the retry the exit code exists to stop.
+
 ## Terminal-event guarantees
 
 Exactly one terminal event -- a `result` when the exchange and the local output stage completed, or one classified `error` on an organic failure -- is emitted per run. It is the last event on the stream. The `stages`, `stage`, `stageEnd`, `warning`, and `metrics` events that precede it are progress and summary, not outcome. The one `metrics` event is emitted immediately before the terminal event, so a supervisor reads the run's operational counters on the line just above the outcome.
