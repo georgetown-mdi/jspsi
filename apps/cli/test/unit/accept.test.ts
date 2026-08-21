@@ -9,6 +9,7 @@ import logLibrary from "loglevel";
 import YAML from "yaml";
 import {
   CONSENT_FACTS,
+  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
   DEDUPLICATE_DISCLOSURE_STATEMENT,
   encodeInvitation,
   getDefaultLinkageTerms,
@@ -1994,12 +1995,14 @@ test("displayInvitation: represents every consent-relevant linkage term, bar the
   );
   expect(pinned.length).toBeGreaterThan(0);
   for (const probe of pinned) {
-    expect(render(probe.variant), probe.path).toContain(
-      probe.requiredVariantCopy,
-    );
-    expect(render(probe.base), probe.path).not.toContain(
-      probe.requiredVariantCopy,
-    );
+    // Per probe, not only over the set: an entry carrying an empty list would
+    // otherwise satisfy the loop below by rendering nothing at all.
+    const copies = probe.requiredVariantCopy ?? [];
+    expect(copies.length, probe.path).toBeGreaterThan(0);
+    for (const copy of copies) {
+      expect(render(probe.variant), probe.path).toContain(copy);
+      expect(render(probe.base), probe.path).not.toContain(copy);
+    }
   }
 });
 
@@ -2060,11 +2063,13 @@ test("displayInvitation: shows each matching rule the acceptor is consenting to"
   expect(out).toContain("    agreement valid through: 2027-12-31");
 });
 
-test("displayInvitation: a deduplicating term states what it discloses, beneath its own headline", () => {
+test("displayInvitation: a deduplicating term states what it discloses and that accepting will not run it", () => {
   // The run honors deduplicate, so the line is a plain fact -- and a deduplicating
   // match discloses grouping a one-to-one match does not, which the acceptor is
   // consenting to. The statement is shared wording, printed under the headline it
-  // qualifies rather than one block away.
+  // qualifies rather than one block away. The refusal note sits with it at the
+  // same level: accepting adopts the term for both parties, so the run whose cost
+  // the statement states is one this acceptance cannot produce.
   const log = getLogger("accept-display-deduplicate-test");
   log.setLevel("silent");
   const base = sampleToken(FUTURE());
@@ -2079,9 +2084,11 @@ test("displayInvitation: a deduplicating term states what it discloses, beneath 
     "duplicate matches (enforced): each of the inviting party's records " +
       "matches at most one of the accepting party's records",
   );
-  // A one-to-one exchange discloses no grouping at all, so the sentence must not
-  // reach it: its presence below is the setting's doing rather than the fixture's.
+  // A one-to-one exchange discloses no grouping at all, so neither sentence must
+  // reach it: their presence below is the setting's doing rather than the
+  // fixture's.
   expect(oneToOne).not.toContain(DEDUPLICATE_DISCLOSURE_STATEMENT);
+  expect(oneToOne).not.toContain(DEDUPLICATE_ACCEPT_REFUSAL_NOTE);
 
   const deduplicating = render({ deduplicate: true });
   expect(deduplicating).toContain(
@@ -2089,6 +2096,10 @@ test("displayInvitation: a deduplicating term states what it discloses, beneath 
       "records may match a single one of the accepting party's records",
   );
   expect(deduplicating).toContain(`    ${DEDUPLICATE_DISCLOSURE_STATEMENT}`);
+  // Same indent as the statement it follows, so the acceptor reads what the
+  // setting would disclose and that this exchange will not perform it in one
+  // place rather than a screen apart.
+  expect(deduplicating).toContain(`    ${DEDUPLICATE_ACCEPT_REFUSAL_NOTE}`);
 });
 
 test("displayInvitation: the retain line is printed at both decision blocks, and only where retention is disclosed", () => {

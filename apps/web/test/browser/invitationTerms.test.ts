@@ -8,6 +8,7 @@ import { createElement } from "react";
 
 import {
   CONSENT_FACTS,
+  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
   DEDUPLICATE_DISCLOSURE_STATEMENT,
   UNRECOGNIZED_TRANSFORM_NOTE,
   sanitizeForDisplay,
@@ -2307,6 +2308,10 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
       "More than one of the inviting party's records",
     );
     expect(collapse.textContent).toContain(DEDUPLICATE_DISCLOSURE_STATEMENT);
+    // The refusal note keeps that level too: the disclosure this headline would
+    // make and the fact that accepting cannot produce the run making it are one
+    // reading, so neither may sit an expand away from the other.
+    expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPT_REFUSAL_NOTE);
   });
 
   // The other half of the cross-surface pin: core's consent classification names
@@ -2328,22 +2333,30 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
   });
 
   test.each(pinnedDisclosureProbes)(
-    "renders the pinned disclosure sentence for $path",
+    "renders every pinned disclosure sentence for $path",
     async (probe) => {
       renderTerms(probe.variant);
       await expect.element(toggle("Other details")).toBeInTheDocument();
-      expect(app.container.textContent).toContain(probe.requiredVariantCopy);
+      // Per probe, not only over the set: an entry carrying an empty list would
+      // otherwise pass by rendering nothing at all.
+      const copies = probe.requiredVariantCopy ?? [];
+      expect(copies.length).toBeGreaterThan(0);
+      for (const copy of copies)
+        expect(app.container.textContent).toContain(copy);
     },
   );
 
   test("a one-to-one invitation states no grouping disclosure at all", async () => {
-    // Non-vacuous the other way: the sentence is the setting's doing rather than a
-    // fixture of the screen, and a one-to-one exchange discloses no grouping to
-    // state.
+    // Non-vacuous the other way: the sentences are the setting's doing rather than
+    // a fixture of the screen, and a one-to-one exchange discloses no grouping to
+    // state and proposes no exchange that would be refused for one.
     renderCaveatTerms({ deduplicate: false });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).not.toContain(
       DEDUPLICATE_DISCLOSURE_STATEMENT,
+    );
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
     );
   });
 

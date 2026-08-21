@@ -17,6 +17,7 @@ import { useReducedMotion } from "@mantine/hooks";
 import {
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
   DEDUPLICATE_DISCLOSURE_STATEMENT,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
@@ -425,10 +426,13 @@ function CondensableDetails({
  * their qualifying sentences sit with them, co-hidden. A HEADLINE stating what is
  * disclosed would have to sit always-visible in the core instead, which is where
  * the count-only tier below sits. What each sentence SAYS is fixed copy read from
- * `PROPOSED_NOT_APPLIED_NOTES` and `DEDUPLICATE_DISCLOSURE_STATEMENT` in
- * `@psilink/core`, which the CLI accept prompt renders too, so no partner text
- * enters one and neither surface can restate it. Render tests pin each at its
- * headline's level against the accessibility tree.
+ * `PROPOSED_NOT_APPLIED_NOTES`, `DEDUPLICATE_DISCLOSURE_STATEMENT`, and
+ * `DEDUPLICATE_ACCEPT_REFUSAL_NOTE` in `@psilink/core`, which the CLI accept
+ * prompt renders too, so no partner text enters one and neither surface can
+ * restate it. Deduplicate takes two of them: what the setting discloses, and
+ * that accepting cannot produce the run that would disclose it (acceptance
+ * adopts the term, and the both-sided pair is refused before matching). Render
+ * tests pin each at its headline's level against the accessibility tree.
  *
  * The same placement rule governs the count-only facts: what the run itself holds,
  * what its rounds disclose beside the count, and the bound a partner's choice of
@@ -1612,19 +1616,28 @@ export function InvitationTerms({
                     : "Each of the inviting party's records matches at most one of the accepting party's records."}
                 </Text>
                 {/* What a deduplicating match reveals that a one-to-one one does
-                not, in the shared wording the CLI accept prompt prints beneath its
-                own copy of this headline. By the placement rule on {@link
-                InvitationTerms} it sits at the visibility level of the headline it
-                qualifies, which is here -- so a reader who expands "Other details"
-                to find that several of the inviting party's records may match one
-                of theirs meets what that costs in the same place. Rendered for
-                exactly a deduplicating invitation: a one-to-one exchange discloses
-                no grouping at all, so the sentence would name a disclosure that
-                does not happen. */}
+                not, and then that accepting cannot produce such a match at all --
+                acceptance adopts the inviting party's setting rather than
+                mirroring it, so the accepted pair is both-sided and is refused
+                before any matching. Both are the shared wording the CLI accept
+                prompt prints beneath its own copy of this headline. By the
+                placement rule on {@link InvitationTerms} they sit at the
+                visibility level of the headline they qualify, which is here -- so
+                a reader who expands "Other details" to find that several of the
+                inviting party's records may match one of theirs meets what that
+                costs, and that this exchange will not pay it, in the same place.
+                Rendered for exactly a deduplicating invitation: a one-to-one
+                exchange discloses no grouping and proposes no refused pair, so
+                either sentence would name something that does not happen. */}
                 {summary.deduplicate && (
-                  <Text size="xs" c="dimmed">
-                    {DEDUPLICATE_DISCLOSURE_STATEMENT}
-                  </Text>
+                  <>
+                    <Text size="xs" c="dimmed">
+                      {DEDUPLICATE_DISCLOSURE_STATEMENT}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {DEDUPLICATE_ACCEPT_REFUSAL_NOTE}
+                    </Text>
+                  </>
                 )}
               </Term>
             </Stack>

@@ -1804,20 +1804,33 @@ test("validateInvite: offline config-source refuses a deduplicating term under s
   }
 });
 
-test("validateInvite: offline config-source mints a deduplicating cascade term", async () => {
-  // The other half of the narrowed mint gate: the strategy that matches a
-  // deduplicating cardinality mints, so the gate refuses the pair rather than the
-  // setting.
+test("validateInvite: offline config-source refuses a deduplicating cascade term before minting", async () => {
+  // The strategy that DOES match a deduplicating cardinality is refused here
+  // too, so the mint gate is the invitation path's rather than the strategy's:
+  // acceptance adopts the inviting party's deduplicate rather than mirroring it,
+  // so any deduplicating invitation reaches the run as the both-sided pair and is
+  // refused there. Refusing at the mint puts that answer before the token is
+  // disclosed. The remedy the message names -- a deduplicating term in a party's
+  // OWN configuration, run through `psilink exchange` -- is pinned on the core
+  // side (prepareForExchange.test.ts prepares it under cascade, and
+  // linkageCardinality.test.ts runs the agreed pair end to end).
   const terms: LinkageTerms = { ...defaultTerms(), deduplicate: true };
   const { dir, configPath, keyPath } = withConfig(terms);
   try {
-    const ready = await validateInvite({
-      resolved: { mode: "offline" },
-      options: testOptions({ configFile: configPath, keyFile: keyPath }),
-      acceptTimeout: 900,
-      log: silentLog,
-    });
-    expect(ready.mode).toBe("offlineFromConfig");
+    const invite = () =>
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      });
+    await expect(invite()).rejects.toBeInstanceOf(UsageError);
+    await expect(invite()).rejects.toThrow(/an invitation cannot carry/);
+    // The remedy is the per-party configuration path, not "wait for support".
+    await expect(invite()).rejects.toThrow(/per-party configurations/);
+    // Nothing was written and no token exists to withdraw: the refusal lands
+    // before the mint's own side effects.
+    expect(fs.existsSync(keyPath)).toBe(false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

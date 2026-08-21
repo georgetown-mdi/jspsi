@@ -352,11 +352,16 @@ const termsBase = {
 };
 
 // A holds "Carol" twice, so a many-to-one run groups both of its rows onto B's
-// single "Carol" where a one-to-one run drops the value as ambiguous.
+// single "Carol" where a one-to-one run drops the value as ambiguous. "Henry" is
+// the unambiguous shared value beside it: it matches under every cardinality, so
+// the one-to-one leg asserts a real match rather than an empty table, and the
+// difference the grouping makes is read against a run that also matched
+// something.
 const rowsA: Array<CSVRow> = [
   { first_name: "Alice" },
   { first_name: "Carol" },
   { first_name: "Carol" },
+  { first_name: "Henry" },
 ];
 const rowsB: Array<CSVRow> = [{ first_name: "Carol" }, { first_name: "Henry" }];
 
@@ -445,15 +450,16 @@ test("an agreed many-to-one pair runs end to end and groups the many side's rows
   const one = fulfilled(responder);
 
   // A is the "many" side: its rows 1 and 2 both link to B's row 0, and its own
-  // half stays ascending while the multiplicity lands on the partner half.
+  // half stays ascending while the multiplicity lands on the partner half. Its
+  // unambiguous row 3 pairs once, the way it does one-to-one.
   expect(many.associationTable).toStrictEqual([
-    [1, 2],
-    [0, 0],
+    [1, 2, 3],
+    [0, 0, 1],
   ]);
   // B holds the mirror of that one table: its row 0 stands in two pairs.
   expect(one.associationTable).toStrictEqual([
-    [0, 0],
-    [1, 2],
+    [0, 0, 1],
+    [1, 2, 3],
   ]);
 
   // The result file is one row per PAIR on both sides, so the "many" side's
@@ -468,6 +474,7 @@ test("an agreed many-to-one pair runs end to end and groups the many side's rows
   ).toStrictEqual([
     ["1", "0"],
     ["2", "0"],
+    ["3", "1"],
   ]);
   expect(
     buildOutputTable(
@@ -479,14 +486,15 @@ test("an agreed many-to-one pair runs end to end and groups the many side's rows
   ).toStrictEqual([
     ["0", "1"],
     ["0", "2"],
+    ["1", "3"],
   ]);
 
   // Both records attest the same figure, which is the pair count rather than
-  // either party's matched-record count (2 pairs over 2 of A's records and 1 of
+  // either party's matched-record count (3 pairs over 3 of A's records and 2 of
   // B's).
-  expect(many.audit?.record.resultSize).toBe(2);
-  expect(one.audit?.record.resultSize).toBe(2);
-  expect(matchedPairCount(many.associationTable!)).toBe(2);
+  expect(many.audit?.record.resultSize).toBe(3);
+  expect(one.audit?.record.resultSize).toBe(3);
+  expect(matchedPairCount(many.associationTable!)).toBe(3);
 });
 
 test("the mirror orientation runs the same procedure from the other handshake role", async () => {
@@ -500,12 +508,12 @@ test("the mirror orientation runs the same procedure from the other handshake ro
     { initiator: rowsB, responder: rowsA },
   );
   expect(fulfilled(initiator).associationTable).toStrictEqual([
-    [0, 0],
-    [1, 2],
+    [0, 0, 1],
+    [1, 2, 3],
   ]);
   expect(fulfilled(responder).associationTable).toStrictEqual([
-    [1, 2],
-    [0, 0],
+    [1, 2, 3],
+    [0, 0, 1],
   ]);
 });
 
@@ -550,7 +558,8 @@ test("prepareForExchange refuses a deduplicating term under single-pass", () => 
 test("deduplicate: false on both parties runs the exchange to completion", async () => {
   const [initiator, responder] = await runBothWithDeduplicate(false, false);
   // The one-to-one path is untouched: A's duplicated "Carol" is ambiguous and
-  // dropped from the round, so nothing matches at all.
-  expect(fulfilled(initiator).associationTable).toStrictEqual([[], []]);
-  expect(fulfilled(responder).associationTable).toStrictEqual([[], []]);
+  // dropped from the round, while the unambiguous "Henry" matches -- so the
+  // grouping is what the deduplicating runs above add, not matching at all.
+  expect(fulfilled(initiator).associationTable).toStrictEqual([[3], [1]]);
+  expect(fulfilled(responder).associationTable).toStrictEqual([[1], [3]]);
 });

@@ -511,6 +511,36 @@ export const DEDUPLICATE_DISCLOSURE_STATEMENT =
   "own declaration, which psilink does not check against its data.";
 
 /**
+ * The refusal note a surface renders beside
+ * {@link DEDUPLICATE_DISCLOSURE_STATEMENT}, for the same deduplicating
+ * invitation: accepting one cannot produce a runnable exchange, so the grouping
+ * disclosure the statement describes belongs to a run that does not happen.
+ *
+ * The ground is the adoption rule, not the setting. Acceptance takes the
+ * inviting party's `deduplicate` verbatim rather than mirroring it
+ * (`deriveAcceptedLinkageTerms`), so a deduplicating invitation resolves to the
+ * both-sided pair, which is refused before any matching (`resolveLinkageCardinality`).
+ * That is why the note is not a proposed-but-not-applied marker: the setting IS
+ * applied, and what fails is the pair the accept path builds from it. A
+ * deduplicating exchange runs from two separately authored configurations, where
+ * each party's own `deduplicate` is its own, so the note names that as the way
+ * through rather than calling the capability unbuilt.
+ *
+ * Rendered at the same visibility level as the statement it follows, by the
+ * placement rule both surfaces hold: a reader who meets what a deduplicating
+ * match would disclose meets, in the same place, that this exchange will not
+ * perform it.
+ *
+ * Fixed first-party copy naming no value, so a surface may render it verbatim.
+ */
+export const DEDUPLICATE_ACCEPT_REFUSAL_NOTE =
+  "Accepting adopts this setting for both parties, and an exchange in which " +
+  "both parties deduplicate is refused before any matching, so this exchange " +
+  "does not run as proposed. Ask the inviting party for an invitation without " +
+  "deduplication, or agree to run the exchange from each party's own " +
+  "configuration file, where only one of you deduplicates.";
+
+/**
  * The caveat copy for a term an inviter may declare that today's exchange does
  * not apply, keyed by the {@link APPLIED_SETTINGS} flag that gates it.
  *

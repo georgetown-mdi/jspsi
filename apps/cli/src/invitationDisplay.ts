@@ -4,6 +4,7 @@ import {
   CONSENT_BASIS_MARKERS,
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
   DEDUPLICATE_DISCLOSURE_STATEMENT,
   PROPOSED_NOT_APPLIED_NOTES,
   redactAndSanitizeForDisplay,
@@ -456,7 +457,9 @@ export function logDecisionFacts(
  * proposed, in the shared wording, so the prompt never states a matching behavior
  * the run does not perform. A term the run does apply that widens what is
  * disclosed carries the shared statement of what it costs instead: the count-only
- * tier for `psi-c`, and the grouping disclosure for `deduplicate`.
+ * tier for `psi-c`, and the grouping disclosure for `deduplicate`, which carries
+ * with it the note that accepting cannot produce the run that would pay that
+ * cost -- acceptance adopts the term, and the both-sided pair is refused.
  *
  * `ownOutboundSend` is the columns THIS party will disclose to the partner for
  * matched records -- its own outbound disclosure, the hardest-to-undo fact it
@@ -561,8 +564,14 @@ export function displayInvitation(params: {
   // the headline it qualifies -- the same shared wording the web consent screen
   // renders with its own copy of that headline. Printed for exactly a
   // deduplicating invitation: a one-to-one exchange discloses no grouping at all,
-  // so the sentence would name a disclosure that does not happen.
-  if (summary.deduplicate) emit(`    ${DEDUPLICATE_DISCLOSURE_STATEMENT}`);
+  // so the sentence would name a disclosure that does not happen. The refusal
+  // note follows it at the same level and for the same invitation, because the
+  // run whose cost the statement describes is one accepting cannot produce: the
+  // adopted setting resolves to the both-sided pair, refused before matching.
+  if (summary.deduplicate) {
+    emit(`    ${DEDUPLICATE_DISCLOSURE_STATEMENT}`);
+    emit(`    ${DEDUPLICATE_ACCEPT_REFUSAL_NOTE}`);
+  }
 
   // Value-level matching multiplicity, stated beside the record-level line above
   // because the two are easily read as one: a key element that splits its value

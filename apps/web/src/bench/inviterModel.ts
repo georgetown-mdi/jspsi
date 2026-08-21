@@ -1280,6 +1280,7 @@ export type SpineTarget =
  * to where the fix lives. */
 const FIELD_TARGETS: Record<AdvancedField, SpineTarget> = {
   identity: "file",
+  output: "review",
   payload: "columns",
   keys: "keys",
   standardization: "cleaning",

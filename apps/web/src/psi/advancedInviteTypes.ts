@@ -206,6 +206,7 @@ export type AdvancedField =
   | "legalReference"
   | "legalPurpose"
   | "legalExpiration"
+  | "output"
   | "payload"
   | "keys"
   | "standardization";

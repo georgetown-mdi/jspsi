@@ -101,19 +101,21 @@ describe("gated settings cannot reach the built terms", () => {
     ).toBe(true);
   });
 
-  test("gatedActiveSettingMessage refuses an import that turns a gated setting on", () => {
+  test("gatedActiveSettingMessage refuses an import that turns a held-back setting on", () => {
     const base = getDefaultLinkageTerms("Org", inferMetadata(ALL_COLUMNS));
     expect(gatedActiveSettingMessage(base)).toBeUndefined();
-    // Neither the algorithm nor deduplicate is gated here: an imported count-only
-    // document is judged by the count-only shape rules, which
-    // validateAdvancedInvite applies, and a deduplicating document is one the
-    // exchange runs.
+    // The algorithm is not held back at all: an imported count-only document is
+    // judged by the count-only shape rules, which validateAdvancedInvite applies.
     expect(
       gatedActiveSettingMessage({ ...base, algorithm: "psi-c" }),
     ).toBeUndefined();
-    expect(
-      gatedActiveSettingMessage({ ...base, deduplicate: true }),
-    ).toBeUndefined();
+    // The two that are, each on its own ground: the exchange does not apply a
+    // fuzzy expansion, and an invitation cannot carry a deduplicating term to a
+    // runnable exchange whether or not the exchange applies it. The
+    // invitation-path wording is pinned in advancedInviteValidation.test.ts.
+    expect(gatedActiveSettingMessage({ ...base, deduplicate: true })).toMatch(
+      /An invitation cannot carry/,
+    );
     expect(gatedActiveSettingMessage(withFuzzyOnFirstElement(base))).toMatch(
       /fuzzy/i,
     );

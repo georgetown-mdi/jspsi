@@ -15,6 +15,7 @@ import { decodeInvitation } from "@psilink/core";
 
 import { BENCH_STEP_STATE_KEY } from "@bench/stepHistory";
 import { BenchLobby } from "@bench/BenchLobby";
+import { DEDUPLICATE_NOT_ON_INVITATION_MESSAGE } from "@psi/advancedInvite";
 import { InvitationFileError } from "@psi/invitation";
 import { InviterBench } from "@bench/InviterBench";
 import { stagesFor } from "@bench/exchangeRun";
@@ -1177,7 +1178,8 @@ describe("inviter bench", () => {
       .toBeInTheDocument();
 
     // The matching-method control is live -- the exchange conducts both
-    // algorithms -- while the gated deduplication control is visible and inert.
+    // algorithms -- while the deduplication control is visible and inert, since
+    // an invitation cannot carry that term to a runnable exchange.
     await expect
       .element(page.getByLabelText("Matching method"))
       .not.toBeDisabled();
@@ -1188,6 +1190,11 @@ describe("inviter bench", () => {
         ),
       )
       .toBeDisabled();
+    // And it says why where it stands, rather than leaving a disabled control
+    // unexplained: the same wording the Generate gate and the import refusal use.
+    await expect
+      .element(page.getByText(DEDUPLICATE_NOT_ON_INVITATION_MESSAGE))
+      .toBeInTheDocument();
 
     // The agreement authored in its tab reaches the ledger and the review
     // table.

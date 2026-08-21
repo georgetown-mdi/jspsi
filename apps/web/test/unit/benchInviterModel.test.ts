@@ -971,15 +971,21 @@ describe("customize tabs", () => {
     expect(after.slice(2)).toEqual(before.slice(2));
   });
 
-  test("the deduplicate control reaches the minted terms", () => {
-    // The exchange applies it, so the setting is not clamped away between the
-    // draft and the document the partner consents to. The clamp itself still
-    // holds for the settings that stay gated; expertAuthoring.test.ts is where
-    // that mechanism is pinned.
+  test("the deduplicate control reaches the built terms, which the invitation gate then refuses", () => {
+    // The exchange applies the setting, so the build does not clamp it away
+    // between the draft and the document -- what holds it back is the invitation
+    // path, which refuses to carry it rather than letting the terms lose it
+    // silently. The two halves are separable here: the built document says true,
+    // and generation is blocked with the reason.
     const seeded = editorFromCsv("Dana", csv);
     const chosen = editorWithDeduplicate(seeded, true);
     expect(chosen.draft.deduplicate).toBe(true);
-    expect(mintedTerms(chosen).deduplicate).toBe(true);
+    expect(buildAdvancedTerms(chosen.draft).deduplicate).toBe(true);
+
+    const validation = reviewValidation(chosen);
+    expect(validation.canGenerate).toBe(false);
+    expect(validation.terms).toBeUndefined();
+    expect(validation.errors.keys).toMatch(/An invitation cannot carry/);
   });
 
   test("a count-only draft over a seeded multi-key spine blocks generation", () => {
