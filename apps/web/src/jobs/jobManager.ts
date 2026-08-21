@@ -235,8 +235,8 @@ export interface JobManagerOptions {
    */
   jobInputDir?: string;
   /**
-   * The resolved rendezvous directory (from {@link useJobRendezvousDir}) a filedrop
-   * exchange reads and writes, which falls back to the data root when
+   * The resolved rendezvous directory (from {@link JobRendezvousProvisioning.dir})
+   * a filedrop exchange reads and writes, which falls back to the data root when
    * `JOB_RENDEZVOUS_DIR` is unset. Absent only when neither resolves; a filedrop intent
    * then fails with {@link JobRendezvousUnavailableError}. On a split-provisioned
    * appliance it is the INBOUND (peer-written) leg. Never derived from a request.
@@ -244,7 +244,7 @@ export interface JobManagerOptions {
   jobRendezvousDir?: string;
   /**
    * The resolved outbound (self-written) rendezvous leg (from
-   * {@link useJobRendezvousOutboundDir}), present only when
+   * {@link JobRendezvousProvisioning.outboundDir}), present only when
    * `JOB_RENDEZVOUS_OUTBOUND_DIR` names one. Its presence is what makes every
    * filedrop exchange this appliance runs a split one: the composed config carries
    * `inbound_path`/`outbound_path` instead of a single `path`, and the zero-setup
@@ -610,15 +610,10 @@ export class JobManager {
     const recordPath = path.join(workdir, JOB_FILE_NAMES.record);
     const keysPath = path.join(workdir, JOB_FILE_NAMES.recordKeys);
 
-    // The credential is a pasted (materialized) value only for an sftp run that
-    // authored one; buildJobHandoff forces this false on the credential-free
-    // filedrop channel.
-    const handoff = buildJobHandoff(
-      intent,
-      serverEntry,
-      this.authoredMaterializedCredentialPath !== undefined,
-      this.jobRendezvousOutboundDir !== undefined,
-    );
+    const handoff = buildJobHandoff(intent, serverEntry, {
+      credentialPasted: this.authoredMaterializedCredentialPath !== undefined,
+      filedropSplit: this.jobRendezvousOutboundDir !== undefined,
+    });
 
     const record: JobRecord = {
       id,

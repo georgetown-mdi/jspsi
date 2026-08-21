@@ -4,8 +4,8 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { JOB_SECRETS_DIR_ENV, useJobSecretsDir } from "@jobs/jobSecrets";
 
-// The secrets mount resolver mirrors useJobInputDir/useJobRendezvousDir EXCEPT it
-// has no JOB_DATA_ROOT fallback: an unset variable leaves the mount unavailable
+// The secrets mount resolver mirrors useJobInputDir and the rendezvous mount's own
+// EXCEPT it has no JOB_DATA_ROOT fallback: an unset variable leaves it unavailable
 // rather than defaulting the secrets surface into the client-writable data root.
 
 afterEach(() => {

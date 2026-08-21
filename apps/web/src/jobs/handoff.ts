@@ -239,22 +239,36 @@ function buildZeroSetupHandoffTemplate(
 }
 
 /**
+ * What the MANAGER knows about the run that the intent does not: whether the
+ * credential was pasted, and whether this appliance rendezvouses over a split pair.
+ * A record rather than two positional flags, because the two are same-typed and a
+ * transposed pair would otherwise typecheck.
+ */
+export interface JobHandoffRunFacts {
+  /**
+   * Whether the sftp credential the run used was a PASTED, server-materialized
+   * value rather than a file the operator owns. Forced false on the filedrop
+   * channel, which carries no credential.
+   */
+  credentialPasted: boolean;
+  /**
+   * Whether this appliance provisions the inbound/outbound rendezvous pair. Read
+   * only on the filedrop channel, whose template it decides between the single
+   * shared directory and the two-directory form.
+   */
+  filedropSplit: boolean;
+}
+
+/**
  * Build the recurring-run hand-off from a job's create intent and the resources it
  * ran against, captured at job creation so it reflects exactly what ran (rather
  * than re-reading authored state that a later action could change). The exchange
- * arm recomposes the config template; the zero-setup arm the command template. The
- * `credentialPasted` flag is supplied by the manager (true only for an sftp run
- * whose credential was a pasted, materialized value); it is forced false on the
- * filedrop channel, which carries no credential. `filedropSplit` is likewise the
- * manager's -- whether this appliance provisions the inbound/outbound pair -- and is
- * read only on the filedrop channel, whose template it decides between the single
- * shared directory and the two-directory form.
+ * arm recomposes the config template; the zero-setup arm the command template.
  */
 export function buildJobHandoff(
   intent: JobCreateIntent,
   serverEntry: JobSftpServerEntry | undefined,
-  credentialPasted: boolean,
-  filedropSplit: boolean,
+  { credentialPasted, filedropSplit }: JobHandoffRunFacts,
 ): JobHandoff {
   const zeroSetup = intent.mode === "zeroSetup";
   const split = intent.channel === "filedrop" && filedropSplit;
