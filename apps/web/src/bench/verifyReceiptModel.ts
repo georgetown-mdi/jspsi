@@ -327,9 +327,9 @@ export function pinnedFingerprintProblem(value: string): string | undefined {
  * icon in the view. */
 export type VerdictTone = "verified" | "failed" | "incomplete";
 
-/** The headline for each overall outcome, honest about the ambiguity of a
- * mismatch (a failed verdict never asserts tamper alone) and never reporting a
- * not-checked artifact as verified. */
+/** The headline for the verdict, honest about what a failure can and cannot
+ * distinguish (a commitment mismatch never asserts tamper alone) and never
+ * reporting a not-checked artifact as verified. */
 export interface VerdictHeadline {
   tone: VerdictTone;
   title: string;
@@ -363,9 +363,11 @@ export interface VerdictViewModel {
 }
 
 // The verbatim headline copy per outcome. The failed headline states the honest
-// ambiguity core's own type docs require (recordVerification.ts): a mismatch means
-// the record was altered OR the keys/input/result do not belong to this exchange
-// -- cryptographically indistinguishable -- so it never asserts "tampered" alone.
+// ambiguity core's own type docs require (recordVerification.ts): a commitment
+// mismatch means the record was altered OR the keys/input/result do not belong to
+// this exchange -- cryptographically indistinguishable -- so it never asserts
+// "tampered" alone. A failure carrying no commitment mismatch at all takes
+// RESULT_SIZE_ONLY_HEADLINE below, where there is nothing to be ambiguous about.
 const HEADLINES: Record<RecordVerificationReport["outcome"], VerdictHeadline> =
   {
     verified: {
@@ -373,7 +375,9 @@ const HEADLINES: Record<RecordVerificationReport["outcome"], VerdictHeadline> =
       title: "Verified",
       detail:
         "The record is internally consistent: every commitment opened against " +
-        "the files you supplied, and the agreed-terms hash re-derives.",
+        "the files you supplied, the recorded result size recounts from the " +
+        "opened pairing where the record carries one, and the agreed-terms " +
+        "hash re-derives.",
     },
     incomplete: {
       tone: "incomplete",
@@ -391,6 +395,30 @@ const HEADLINES: Record<RecordVerificationReport["outcome"], VerdictHeadline> =
         "input, a result, or the linkage terms) does not belong to this exchange.",
     },
   };
+
+// The failure where the recorded result size is the only element at fault:
+// every commitment opened and the terms hash re-derived, so the two-causes
+// ambiguity the generic failed headline states cannot apply -- a file that did
+// not belong to this exchange fails the matched-pairs commitment first, and the
+// number then reports not checked rather than at fault.
+const RESULT_SIZE_ONLY_HEADLINE: VerdictHeadline = {
+  tone: "failed",
+  title: "Verification failed",
+  detail:
+    "The recorded result size disagrees with the matched pairs the record " +
+    "itself commits to. The record was altered; the files you supplied check " +
+    "out -- every commitment opened and the agreed-terms hash re-derives.",
+};
+
+function headlineFor(report: RecordVerificationReport): VerdictHeadline {
+  const resultSizeIsTheOnlyFault =
+    report.resultSize === "mismatch" &&
+    report.termsHash === "verified" &&
+    Object.values(report.commitments).every((status) => status === "verified");
+  return report.outcome === "failed" && resultSizeIsTheOnlyFault
+    ? RESULT_SIZE_ONLY_HEADLINE
+    : HEADLINES[report.outcome];
+}
 
 // The per-commitment status label and tone. `unopenable` here is the missing-salt
 // signal -- a wrong or drifted keys file -- stated distinctly from a mismatch and
@@ -448,10 +476,11 @@ const RESULT_SIZE_ROWS: Record<
     status: "Not checked",
     tone: "incomplete",
     explanation:
-      "No opened matched-pairs table stands behind the recorded number, so " +
-      "there is nothing to recount it from. Where the record commits to such a " +
-      "table, its own row above names why it did not open; a count-only " +
-      "exchange records no such table at all.",
+      "No matched pairs stand behind the recorded number, so there is nothing " +
+      "to recount it from. Where the record commits to a table that did not " +
+      "open, its own row above names the cause; a table that opened but is not " +
+      "shaped as a pairing carries no count to recount; a count-only exchange " +
+      "records no such table at all.",
   },
 };
 
@@ -535,7 +564,7 @@ export function verdictViewModel(
       ? undefined
       : RESULT_SIZE_ROWS[report.resultSize];
   return {
-    headline: HEADLINES[report.outcome],
+    headline: headlineFor(report),
     commitments,
     ...(sizeRow !== undefined
       ? {

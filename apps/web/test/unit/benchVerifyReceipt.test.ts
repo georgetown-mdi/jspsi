@@ -30,6 +30,7 @@ import {
 
 import type {
   AssociationTable,
+  CanonicalValue,
   CommittedPayload,
   DualSignedRecord,
   DualSignedRecordVerificationReport,
@@ -364,6 +365,11 @@ describe("verdictViewModel: the recorded result size", () => {
     expect(view.resultSize?.status).toBe("Matches the matched pairs");
     expect(view.resultSize?.tone).toBe("verified");
     expect(view.headline.title).toBe("Verified");
+    // The verified headline enumerates what was checked, so it names the
+    // recount beside the openings and the terms hash.
+    expect(view.headline.detail).toContain(
+      "the recorded result size recounts from the opened pairing",
+    );
   });
 
   test("an altered size fails on its own row, not on the pairing's", async () => {
@@ -386,6 +392,70 @@ describe("verdictViewModel: the recorded result size", () => {
     // supplied might be the wrong ones -- the pairing's own row passed.
     expect(view.resultSize?.explanation).toContain(
       "not the files you supplied",
+    );
+    const table = view.commitments.find(
+      (row) => row.label === "The matched-pairs table",
+    );
+    expect(table?.status).toBe("Opened and matches");
+    // Nothing else is at fault, so the headline states what happened rather
+    // than offering the reader two causes it cannot choose between.
+    expect(view.headline.detail).toContain("The record was altered");
+    expect(view.headline.detail).toContain("the files you supplied check out");
+    expect(view.headline.detail).not.toContain("cannot be told apart");
+  });
+
+  test("a commitment failing alongside the size keeps the two-cause headline", async () => {
+    const { record, keys } = await buildExchangeRecord(SIZED_INPUTS);
+    const reconstructed = reconstructForFixture(record);
+    const report = await verifyExchangeRecord(
+      { ...record, resultSize: 9 },
+      keys,
+      {
+        data: {
+          ...reconstructed.data,
+          partnerPayloadReceived: {
+            columns: ["clinic"],
+            rows: [["north"], ["east"]],
+          },
+        },
+        localTerms: LOCAL_TERMS,
+        partnerTerms: PARTNER_TERMS,
+      },
+    );
+    const view = verdictViewModel(report, reconstructed.warnings);
+    expect(view.headline.title).toBe("Verification failed");
+    expect(view.headline.detail).toContain("the record was altered, or a file");
+    expect(view.headline.detail).toContain("cannot be told apart");
+  });
+
+  test("a pairing that opened but is not a pairing carries no count to recount", async () => {
+    // The fifth state behind a not-checked figure: the committed value opened,
+    // so no row above it names a cause, and it is not shaped as a pairing, so
+    // there is no pair count to compare. Reaching it takes a hand-built record.
+    const notAPairing = [
+      [0, 1],
+      [1, 0],
+      [9, 9],
+    ] as unknown as AssociationTable;
+    const { record, keys } = await buildExchangeRecord({
+      ...SIZED_INPUTS,
+      associationTable: notAPairing,
+    });
+    const data: Record<string, CanonicalValue> = {
+      localPayloadSent,
+      partnerPayloadReceived,
+      associationTable: notAPairing,
+    };
+    const report = await verifyExchangeRecord(record, keys, {
+      data,
+      localTerms: LOCAL_TERMS,
+      partnerTerms: PARTNER_TERMS,
+    });
+    const view = verdictViewModel(report, []);
+    expect(view.headline.title).toBe("Incomplete");
+    expect(view.resultSize?.status).toBe("Not checked");
+    expect(view.resultSize?.explanation).toContain(
+      "is not shaped as a pairing carries no count to recount",
     );
     const table = view.commitments.find(
       (row) => row.label === "The matched-pairs table",

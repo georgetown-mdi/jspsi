@@ -78,11 +78,12 @@ export type TermsHashStatus = "verified" | "mismatch" | "not-checked";
  *   have failed the table's own commitment first, leaving `unopenable` below.
  * - `not-supplied`: the association table's data was not re-supplied, so there
  *   was nothing to recount (the third-party-auditor case).
- * - `unopenable`: no opened association table stands behind the figure -- the
- *   record carries no association-table commitment at all (a count-only run's
- *   record never does; see docs/spec/EXCHANGE_RECORD.md, "Count-only (`psi-c`)
- *   records"), the keys carry no salt for it, or the re-supplied table did not
- *   reproduce its commitment.
+ * - `unopenable`: no opened pairing stands behind the figure -- the record
+ *   carries no association-table commitment at all (a count-only run's record
+ *   never does; see docs/spec/EXCHANGE_RECORD.md, "Count-only (`psi-c`)
+ *   records"), the keys carry no salt for it, the re-supplied table did not
+ *   reproduce its commitment, or it opened but is not shaped as a pairing, so
+ *   it carries no pair count to recount.
  */
 export type ResultSizeStatus =
   "verified" | "mismatch" | "not-supplied" | "unopenable";
@@ -150,19 +151,34 @@ const MANDATORY: ReadonlySet<CommitmentName> = new Set([
   "partnerPayloadReceived",
 ]);
 
+// Whether a re-supplied half is a list of row indices. The linkage produces
+// non-negative integers on both sides of a pair, and the chokepoint that admits
+// a partner-supplied half holds it to exactly that (utils/partnerIndices.ts), so
+// anything else is not a half of the table this figure counts.
+function isRowIndexHalf(half: readonly unknown[]): boolean {
+  return half.every(
+    (entry) =>
+      typeof entry === "number" && Number.isInteger(entry) && entry >= 0,
+  );
+}
+
 // The pair count a re-supplied association table states: the entries in its two
 // halves, read together. The value arrives as a CanonicalValue -- the domain the
-// commitment opened over, not a parsed AssociationTable -- so it is read
-// structurally: a caller may hand this anything it handed verifyExchangeRecord.
-// Halves of unequal length carry no pair count to compare (each entry is one
-// pair), so they yield none rather than a guessed figure.
+// commitment opened over, not a parsed AssociationTable -- so the shape is
+// enforced here rather than assumed: a caller may hand this anything it handed
+// verifyExchangeRecord. Only a value shaped as the committed table is (exactly
+// two halves, both arrays of row indices, of equal length, since each entry is
+// one pair) carries a pair count. Every other value yields none, so a figure is
+// never recounted from something that is not a pairing.
 function suppliedPairCount(
   value: CanonicalValue | undefined,
 ): number | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length !== 2) return undefined;
   const [ourRows, partnerRows] = value;
   if (!Array.isArray(ourRows) || !Array.isArray(partnerRows)) return undefined;
   if (ourRows.length !== partnerRows.length) return undefined;
+  if (!isRowIndexHalf(ourRows) || !isRowIndexHalf(partnerRows))
+    return undefined;
   return ourRows.length;
 }
 

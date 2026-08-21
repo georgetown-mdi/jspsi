@@ -413,6 +413,81 @@ describe("verifyExchangeRecord checks the recorded result size", () => {
     expect(report.resultSize).toBe("unopenable");
     expect(report.outcome).toBe("incomplete");
   });
+
+  // A pair count is read only off a value shaped as the pairing the record
+  // commits to. Each shape below is committed AND re-supplied, so its commitment
+  // opens and the recount is the only thing left to withhold the figure: a
+  // counted figure here would put "verified" on a record whose committed value
+  // is not a pairing at all. Reaching any of them takes a hand-built record --
+  // the exchange commits an AssociationTable -- and the fail-safe contract still
+  // owes a verdict rather than a throw.
+  const unreadableShapes: Array<{ label: string; table: CanonicalValue }> = [
+    { label: "not an array at all", table: "two pairs" },
+    {
+      label: "an object rather than two halves",
+      table: { our: [0, 1], partner: [1, 0] },
+    },
+    {
+      label: "three halves",
+      table: [
+        [0, 1],
+        [1, 0],
+        [9, 9],
+      ],
+    },
+    { label: "a single half", table: [[0, 1]] },
+    {
+      label: "two halves of objects",
+      table: [
+        [{ row: 0 }, { row: 1 }],
+        [{ row: 1 }, { row: 0 }],
+      ],
+    },
+    {
+      label: "two halves of nested arrays",
+      table: [
+        [[0], [1]],
+        [[1], [0]],
+      ],
+    },
+    {
+      label: "two halves of strings",
+      table: [
+        ["0", "1"],
+        ["1", "0"],
+      ],
+    },
+    {
+      label: "carrying a negative row index",
+      table: [
+        [0, -1],
+        [1, 0],
+      ],
+    },
+    {
+      label: "carrying a fractional row index",
+      table: [
+        [0, 1.5],
+        [1, 0],
+      ],
+    },
+  ];
+
+  test.each(unreadableShapes)(
+    "a committed value $label is not recounted, and never verifies",
+    async ({ table }) => {
+      const { record, keys } = await buildExchangeRecord({
+        ...baseInputs,
+        associationTable: table as unknown as AssociationTable,
+      });
+      const report = await verifyExchangeRecord(record, keys, {
+        data: { ...fullData, associationTable: table },
+      });
+      expect(report.commitments.associationTable).toBe("verified");
+      expect(report.resultSize).toBe("unopenable");
+      expect(report.outcome).toBe("incomplete");
+    },
+  );
 });
 
 // --- The null-versus-empty reproduction edge ---------------------------------

@@ -4,7 +4,11 @@ import { describe, expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { buildExchangeRecord } from "../src/exchangeRecord";
+import {
+  buildExchangeRecord,
+  parseExchangeRecord,
+  serializeExchangeRecord,
+} from "../src/exchangeRecord";
 import {
   matchedPairCount,
   prepareForExchange,
@@ -658,16 +662,24 @@ describe("an edited copy of a repeated result row fails its commitment", () => {
 // matched-record counts, and either of those read into the field is exactly the
 // misstatement the recorded figure is defined against.
 describe("a tampered result size fails against the re-supplied pairing", () => {
+  // What an auditor verifies is a record FILE, so `viaRecordFile` writes the
+  // altered record through the record's own serializer and reads it back through
+  // its parser before verification. An in-memory edit alone would leave the
+  // recount claim resting on an object that never crossed either.
   async function withRecordedSize(
     opts: Parameters<typeof roundTrip>[0],
     resultSize: number,
+    viaRecordFile = false,
   ) {
     const { record, keys, data } = await roundTrip(opts);
-    return verifyExchangeRecord({ ...record, resultSize }, keys, {
-      data,
-      localTerms: termsA,
-      partnerTerms: termsB,
-    });
+    const tampered = { ...record, resultSize };
+    return verifyExchangeRecord(
+      viaRecordFile
+        ? parseExchangeRecord(JSON.parse(serializeExchangeRecord(tampered)))
+        : tampered,
+      keys,
+      { data, localTerms: termsA, partnerTerms: termsB },
+    );
   }
 
   const oneToOne = {
@@ -702,12 +714,12 @@ describe("a tampered result size fails against the re-supplied pairing", () => {
     ourIdColumn: "pid",
   };
 
-  test("one-to-one: an inflated figure fails, and the honest one verifies", async () => {
-    const honest = await withRecordedSize(oneToOne, 2);
+  test("one-to-one: an inflated figure fails across the record file, and the honest one verifies", async () => {
+    const honest = await withRecordedSize(oneToOne, 2, true);
     expect(honest.resultSize).toBe("verified");
     expect(honest.outcome).toBe("verified");
 
-    const tampered = await withRecordedSize(oneToOne, 3);
+    const tampered = await withRecordedSize(oneToOne, 3, true);
     expect(tampered.resultSize).toBe("mismatch");
     expect(tampered.outcome).toBe("failed");
     // The pairing itself reproduced, so the record's own figure is what the

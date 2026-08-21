@@ -357,10 +357,25 @@ const RESULT_SIZE_WORD: Record<ResultSizeStatus, string> = {
     "not checked (re-supply the result file so its matched pairs can be " +
     "recounted)",
   unopenable:
-    "not checked (no opened matched-pairs table to recount; the " +
-    "matched-pairs line names why where the record commits to one -- a " +
-    "count-only exchange records no such table at all)",
+    "not checked (no matched pairs to recount: where the record commits to a " +
+    "table that did not open, the matched-pairs line above names the cause; a " +
+    "table that opened but is not shaped as a pairing carries no count to " +
+    "recount; a count-only exchange records no such table at all)",
 };
+
+// The failure where the recorded figure is the only element at fault: every
+// commitment opened and the terms hash re-derived, so the altered-or-wrong-file
+// hedge the generic headline carries cannot apply here -- a file that did not
+// belong to this exchange fails the matched-pairs commitment first, and the
+// figure then reports unchecked rather than at fault.
+function resultSizeIsTheOnlyFault(report: RecordVerificationReport): boolean {
+  return (
+    report.resultSize === "mismatch" &&
+    report.termsHash === "verified" &&
+    Object.values(report.commitments).every((status) => status === "verified")
+  );
+}
+
 /**
  * What this run supplied, so a "not checked" line names an input that is still
  * missing rather than one already on the command line, and the note explaining a
@@ -448,8 +463,12 @@ export function formatVerificationReport(
   const lines: string[] = [];
   if (report.outcome === "failed")
     lines.push(
-      "VERIFICATION FAILED: a check did not match -- the record may have been " +
-        "altered, or a re-supplied input/result/terms does not match this exchange.",
+      resultSizeIsTheOnlyFault(report)
+        ? "VERIFICATION FAILED: the recorded result size disagrees with the " +
+            "matched pairs the record itself commits to -- the record was " +
+            "altered; the files you re-supplied check out."
+        : "VERIFICATION FAILED: a check did not match -- the record may have been " +
+            "altered, or a re-supplied input/result/terms does not match this exchange.",
     );
   else if (report.outcome === "incomplete")
     lines.push(
