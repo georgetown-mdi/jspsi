@@ -18,6 +18,8 @@
  * delete transaction (see {@link ./managedExchangeStore.ts}).
  */
 
+import { parseExchangeRecord } from "@psilink/core";
+
 import {
   MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
   openManagedExchangeDatabase,
@@ -77,8 +79,15 @@ export async function getDisclosureAccounting(
  * matches on the record's own binding nonce), so a retried write cannot inflate
  * the count of disclosures the accounting reports.
  *
- * @throws {ZodError} if the stored accounting is invalid; the transaction aborts
- *   and nothing is written.
+ * The record is validated on the way in, through the same
+ * {@link parseExchangeRecord} the read path holds a stored entry to, and the
+ * PARSED result is what is written: what is at rest is then structurally what the
+ * reader admits, so a caller's extra field cannot sit in the store invisibly
+ * (the parser strips unknown keys) and a record the reader would reject cannot be
+ * written at all.
+ *
+ * @throws {ZodError} if the record or the stored accounting is invalid; the
+ *   transaction aborts and nothing is written.
  */
 export async function appendDisclosureRecordToStore(
   id: string,
@@ -103,7 +112,10 @@ export async function appendDisclosureRecordToStore(
             read.result === undefined
               ? undefined
               : parseDisclosureAccounting(read.result);
-          store.put(appendDisclosureRecord(current, record), id);
+          store.put(
+            appendDisclosureRecord(current, parseExchangeRecord(record)),
+            id,
+          );
         } catch (error) {
           failure = error;
           transaction.abort();

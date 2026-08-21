@@ -274,16 +274,20 @@ describe("the exported accounting", () => {
     expect(splitCsvRow(row)).toHaveLength(DISCLOSURE_FACT_LABELS.length + 1);
   });
 
-  test("neutralizes a cell a spreadsheet would read as a formula", async () => {
-    // The purpose and the column names are values the partner chose, and this file
-    // is opened in a spreadsheet by a compliance reader.
+  test("neutralizes every formula lead, in each cell the partner chose the value of", async () => {
+    // The partner identity, the agreement reference and purpose, and the payload
+    // column names are all values the partner chose, and this file is opened in a
+    // spreadsheet by a compliance reader. Each of the four leads the guard names is
+    // driven, one per partner-chosen cell, so no lead is covered only by argument.
     const accounting = accountingOf(
       await disclosureRecord({
+        partnerIdentity: '=HYPERLINK("http://elsewhere.example","click")',
         legalAgreement: {
-          reference: "MOU-2025-0042",
-          purpose: '=HYPERLINK("http://elsewhere.example","click")',
+          reference: "+MOU-2025-0042",
+          purpose: "-1+1",
           expirationDate: "2027-01-01",
         },
+        partnerPayloadColumn: "@SUM(A1:A9)",
       }),
     );
 
@@ -292,6 +296,34 @@ describe("the exported accounting", () => {
     expect(row).toContain(
       '"\'=HYPERLINK(""http://elsewhere.example"",""click"")"',
     );
+    expect(row).toContain('"\'+MOU-2025-0042"');
+    expect(row).toContain('"\'-1+1"');
+    expect(row).toContain('"\'@SUM(A1:A9)"');
+  });
+
+  test("leaves a tab- or return-led value unprefixed, the display boundary having escaped the lead", async () => {
+    // Tab and carriage return are formula leads a spreadsheet honors, and the
+    // guard deliberately does not list them: a value reaches a cell only through
+    // the display boundary, which escapes every non-printable-ASCII code point, so
+    // what leads the cell is a backslash rather than the control character. Pinned
+    // here so the narrowing is checked rather than argued.
+    const accounting = accountingOf(
+      await disclosureRecord({
+        partnerIdentity: "\tRiverbend Schools",
+        legalAgreement: {
+          reference: "\rMOU-2025-0042",
+          purpose: "Evaluate shared program enrollment",
+          expirationDate: "2027-01-01",
+        },
+      }),
+    );
+
+    const [, row] = csvRows(disclosureAccountingCsv(accounting));
+
+    expect(row).toContain('"\\x09Riverbend Schools"');
+    expect(row).toContain('"\\x0dMOU-2025-0042"');
+    expect(row).not.toContain("\t");
+    expect(row).not.toContain("\r");
   });
 
   test("exports its header even with no entries, so an empty accounting is still an answer", () => {

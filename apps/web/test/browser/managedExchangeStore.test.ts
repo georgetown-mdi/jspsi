@@ -40,11 +40,11 @@ import { buildManagedDeposit } from "@bench/manageOfferModel";
 
 import { disclosureRecord } from "../utils/disclosureFixtures";
 
+import type { ExchangeRecord, WebRTCExchangeLocator } from "@psilink/core";
 import type {
   ManagedExchangeSchedule,
   NewManagedExchange,
 } from "@psi/managedExchangeRecord";
-import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The IndexedDB half of the managed-exchange store, exercised against real
 // Chromium (real IndexedDB, structured clone, and the File System Access handle
@@ -124,8 +124,9 @@ async function rawLocalStored(id: string): Promise<unknown> {
 }
 
 /** The raw accounting-of-disclosures value under a key, read straight from its
- * sibling store, so the delete test can assert the accounting is gone too rather
- * than merely absent through a validating read. */
+ * sibling store, so the delete and clear tests can assert the accounting is gone
+ * too -- and gone from the store, rather than merely absent through a validating
+ * read -- and the write path's validation can be checked against what is at rest. */
 async function rawDisclosureStored(id: string): Promise<unknown> {
   const db = await openManagedExchangeDatabase();
   try {
@@ -630,6 +631,42 @@ describe("the accounting of disclosures accumulates each run's record", () => {
     const created = await createManagedExchange(newExchange());
 
     expect(await getDisclosureAccounting(created.id)).toBeUndefined();
+  });
+
+  test("an entry is stored as the reader admits it, without a caller's extra key", async () => {
+    const created = await createManagedExchange(newExchange());
+    const record = await disclosureRecord();
+
+    // A caller handing the store more than the record format carries: the append
+    // validates through the same parser the read path uses, so the extra field
+    // never reaches the disk to sit there invisibly.
+    await appendDisclosureRecordToStore(created.id, {
+      ...record,
+      operatorNote: "not part of the record format",
+    } as ExchangeRecord);
+
+    const stored = (await rawDisclosureStored(created.id)) as {
+      entries: Array<Record<string, unknown>>;
+    };
+    expect(stored.entries[0]).not.toHaveProperty("operatorNote");
+    expect(stored.entries[0]).toEqual(record);
+  });
+});
+
+describe("clearing the store leaves no accounting behind", () => {
+  test("a cleared store takes every accounting of disclosures with it", async () => {
+    const created = await createManagedExchange(newExchange());
+    await appendDisclosureRecordToStore(created.id, await disclosureRecord());
+    expect(await rawDisclosureStored(created.id)).toBeDefined();
+
+    await clearManagedExchanges();
+
+    // The raw sibling value is gone, not merely absent through a validating read:
+    // a clear that spared the accounting would leave cleartext partner and
+    // agreement metadata under an id no record surfaces any more.
+    expect(await rawDisclosureStored(created.id)).toBeUndefined();
+    expect(await getDisclosureAccounting(created.id)).toBeUndefined();
+    expect(await listManagedExchanges()).toEqual([]);
   });
 });
 

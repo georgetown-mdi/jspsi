@@ -613,9 +613,13 @@ so a scheduled run would otherwise leave no record of a disclosure it made. The
 append is idempotent on the record's own binding nonce (per-exchange,
 CSPRNG-generated, locally generated, so it identifies a run within this holder's
 own log; see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#record-fields)), so a
-retried write cannot inflate the count of disclosures the accounting reports. A
-failed append does not fail the run -- the disclosure has already happened and
-the exchange's results stand -- and is surfaced as a notice instead.
+retried write cannot inflate the count of disclosures the accounting reports. The
+record is held to the exchange-record format on the way in, by the same validation
+the read applies, and what is written is the parsed result: what is at rest is
+structurally what the reader admits, so no field beyond the format can sit in the
+store unseen, and a record the reader would reject is never written. A failed
+append does not fail the run -- the disclosure has already happened and the
+exchange's results stand -- and is surfaced as a notice instead.
 
 **What it holds at rest, and retention.** The entries are the records' own
 cleartext content: names, categories, references, and aggregate counts, never a

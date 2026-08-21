@@ -331,15 +331,20 @@ export interface ExchangeRecordGovernance {
  * control are the holder's responsibility. This is a local audit artifact, not a
  * signed or non-repudiable receipt.
  *
- * Rendering note (forward-looking): this record stores partner-supplied free text
- * -- `partnerIdentity`, `governance.legalAgreement.reference`/`purpose`, and the
+ * Rendering note: this record stores partner-supplied free text --
+ * `partnerIdentity`, `governance.legalAgreement.reference`/`purpose`, and the
  * payload column names/descriptions -- byte-for-byte, as required for the
  * byte-exact cross-party validation and the canonical encoding a record is hashed
  * over. A party can place terminal control/ANSI sequences or deceptive Unicode
- * (bidi-override, zero-width, homoglyph) in these fields. No viewer or exporter
- * renders a record to a person today; when one is built, it MUST escape each such
- * field at its display sink -- `sanitizeForDisplay` where the value is shown --
- * never mutating the stored value, which must stay byte-exact.
+ * (bidi-override, zero-width, homoglyph) in these fields. Every sink that renders
+ * a record to a person MUST therefore escape each such field where it is shown --
+ * `sanitizeForDisplay` at that sink -- never mutating the stored value, which must
+ * stay byte-exact. The obligation binds each sink on its own: a new viewer,
+ * exporter, or log line takes it in full rather than inheriting another's
+ * escaping. The web app's accounting-of-disclosures view and its CSV export are
+ * such sinks, and carry the obligation through the `Displayable` brand
+ * `sanitizeForDisplay` returns, so a raw field does not typecheck into what they
+ * render.
  */
 export interface ExchangeRecord {
   /** Single recognized format version for v1; readers reject anything else. */

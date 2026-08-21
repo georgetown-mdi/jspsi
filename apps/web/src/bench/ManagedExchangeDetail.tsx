@@ -443,9 +443,11 @@ function DisclosureAccountingView({
       {unreadable ? (
         <Alert color="red" title="This accounting could not be read">
           The disclosure records stored for this exchange could not be read, so
-          they are not shown. This does not mean nothing was disclosed. The
-          record files offered when each run finished are the account of what
-          this exchange disclosed.
+          they are not shown. This does not mean nothing was disclosed. An app
+          upgrade can leave a stored accounting unreadable to this version of
+          the app, and there is no export of it from here. What remains is any
+          record file you downloaded yourself when a run finished; a run that
+          finished unattended left none.
         </Alert>
       ) : entries.length === 0 ? (
         <p className={styles.small}>

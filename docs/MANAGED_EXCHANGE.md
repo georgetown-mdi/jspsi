@@ -839,8 +839,9 @@ exchange's own page, below its run history.
 - **It stays in this browser, and is deleted with the exchange.** Nothing prunes
   it -- a silently dropped entry would falsify the account -- and it is not
   carried in the export/import artifact, which migrates the runnable exchange
-  rather than its history. Export the accounting before deleting the exchange,
-  or keep the record files offered at each run's completion.
+  rather than its history. Export the accounting before deleting or handing off
+  the exchange; the record files offered at a run's completion stand in only for
+  the runs somebody was there to download one from.
 
 ## Surviving storage eviction
 

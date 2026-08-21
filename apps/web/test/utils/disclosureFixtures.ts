@@ -80,6 +80,10 @@ export interface DisclosureRecordOverrides {
   retentionDisposition?: string;
   /** The matching algorithm, so a suite can build a count-only disclosure. */
   algorithm?: LinkageTerms["algorithm"];
+  /** The one column name the partner committed as received, as it reaches the
+   * record byte-exactly -- the hook a suite uses to plant partner-controlled text
+   * in a payload column name rather than in an identity. */
+  partnerPayloadColumn?: string;
 }
 
 /** Build one run's self-attested exchange record. */
@@ -112,7 +116,10 @@ export async function disclosureRecord(
       ? { retentionDisposition: overrides.retentionDisposition }
       : {}),
     localPayloadSent: LOCAL_PAYLOAD_SENT,
-    partnerPayloadReceived: PARTNER_PAYLOAD_RECEIVED,
+    partnerPayloadReceived:
+      overrides.partnerPayloadColumn === undefined
+        ? PARTNER_PAYLOAD_RECEIVED
+        : { columns: [overrides.partnerPayloadColumn], rows: [["north"]] },
     // One matched pair: this party's row 0 to the partner's row 0.
     associationTable: [[0], [0]],
     createdAt: overrides.createdAt ?? "2026-07-01T09:00:00.000Z",

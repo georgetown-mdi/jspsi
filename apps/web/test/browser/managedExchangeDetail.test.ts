@@ -508,4 +508,43 @@ describe("managed exchange detail accounting of disclosures", () => {
       page.getByText("it has disclosed nothing", { exact: false }).query(),
     ).toBeNull();
   });
+
+  test("an unreadable accounting names the upgrade case and offers no remedy it cannot deliver", async () => {
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting: undefined,
+        accountingUnreadable: true,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    // The cause an operator can act on, and the two honest limits: nothing to
+    // export from this state, and a record file only where one was downloaded --
+    // which an unattended run never offered.
+    await expect
+      .element(page.getByText("An app upgrade can leave", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("no export of it from here", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("record file you downloaded yourself", { exact: false }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("finished unattended left none", { exact: false }),
+      )
+      .toBeInTheDocument();
+    // The export affordance is absent, so the copy cannot be pointing at one.
+    expect(
+      page.getByRole("button", { name: /Export this accounting/ }).query(),
+    ).toBeNull();
+  });
 });

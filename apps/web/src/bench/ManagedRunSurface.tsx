@@ -588,6 +588,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
               Keep the file somewhere only you can read, and never send it over
               an unencrypted channel.
             </p>
+            <p className={styles.small}>
+              This exchange&apos;s accounting of disclosures stays on this
+              device: it does not travel in the backup file. If you need to keep
+              it, keep the exchange here for now, export the accounting as CSV,
+              and then move it.
+            </p>
             <p>
               <Button onClick={confirmMigration} loading={exportBusy}>
                 I saved the file; hand off this exchange
