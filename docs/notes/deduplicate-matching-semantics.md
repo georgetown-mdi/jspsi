@@ -4,7 +4,7 @@ title: "Deduplicate: Which Side Carries the Multiplicity, and How Far It Reaches
 
 # Deduplicating matching semantics: the direction, the axis, and the round boundary
 
-*Status: specified, not built. The normative rules are in [PROTOCOL.md](../spec/PROTOCOL.md#deduplicating-cardinalities-many-to-x-matching), with the operator-facing term in [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#linkage_termsdeduplicate); a `deduplicate: true` term is still refused before any matching begins. This note records why the rules have that shape, the alternatives weighed, and what stays open. See [docs/notes/README.md](README.md).*
+*Status: specified; built in the cascade, behind the standing refusal. The normative rules are in [PROTOCOL.md](../spec/PROTOCOL.md#deduplicating-cardinalities-many-to-x-matching), with the operator-facing term in [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#linkage_termsdeduplicate); a `deduplicate: true` term is still refused before any matching begins, so no exchange runs one. This note records why the rules have that shape, the alternatives weighed, and what stays open. See [docs/notes/README.md](README.md).*
 
 This is design rationale. Nothing here binds an implementation; the normative rows live in the spec documents linked above, and this note does not restate them.
 
@@ -58,10 +58,21 @@ The `(true, true)` pair is not hard to pair: both sides keep their duplicates an
 
 That closure is a separate piece of work with its own disclosure question, so this specification stops where the pairing stops and `many-to-many` is refused with the rest. Fixing the pairing rules ahead of that work is still worth doing: it means the closure work inherits a defined table rather than defining one on its way past.
 
+## Why the many side's per-value multiplicity stays a self-declaration
+
+This is the question the specification left to the work that implements the cardinality, and the answer is that there is nothing to bind it against. The normative statement of the limit and the residual is in [Deriving one table from the exchanged association maps](../spec/PROTOCOL.md#deriving-one-table-from-the-exchanged-association-maps); the reasoning is here.
+
+Two candidate quantities exist, and neither is one. The agreed terms describe what a linkage key is, never how a party's own rows duplicate under it. The only per-party figure that would is the duplication structure itself, which the protocol deliberately keeps off the wire -- it is the same fact [work minimization](../spec/PROTOCOL.md#role-resolution-and-work-minimization) declines to exchange -- so a bound derived from it would be advertised by exactly the party it binds, which is the self-declaration again with an extra frame.
+
+That leaves the question of what overstating buys, and the answer is what makes recording the residual acceptable rather than merely unavoidable. Which of the receiving party's records matched is decided by that party's own round output, through the coverage rule; the returned list can repeat a position but cannot introduce one. So an overstated group adds no matched record, no disclosed column, and no membership fact on the receiving side. It repeats a row that side already pairs, inflates the overstater's own table with pairs naming its own rows, and is capped by the row count that party carried on the terms exchange.
+
+Only one direction is a residual, and reading the two together overstates what is open. The unbound quantity is the many side's declaration of the size of its OWN group. The opposite freedom -- its partner deciding which of the many side's records belong to one group, on the way back -- is closed by a check rather than recorded, because there the many side does hold something to check against: the position each of its own entries named. That is the difference between the two. A self-declared quantity has no local counterpart; a partner's regrouping of a list this party wrote has one, entry for entry.
+
+The reason to write this down rather than close it is that the argument is contingent on where the matched-record set comes from. A change that let the returned list decide membership -- rather than confirming a set the receiving party computed -- would turn a cheap overstatement into a disclosure, and would be recognizable as one against this paragraph.
+
 ## What stays open
 
 - **Cross-round accumulation**, above: the rule taken is the conservative one, and the case for the other is a real one.
-- **Binding the many side's per-value multiplicity.** The spec states the limit ([Deriving one table from the exchanged association maps](../spec/PROTOCOL.md#deriving-one-table-from-the-exchanged-association-maps)): the group size behind a position is that side's self-declaration, where the values-per-record axis binds its comparable quantity against authenticated session state. What authenticated quantity a check could bind the group size against, and what a party overstating a group would gain by it, are for the work that implements the cardinality to settle.
 - **The closure procedure** for `many-to-many`, and what it discloses.
 - **Fan-out combined with a deduplicating cardinality.** The relaxed acceptance clause is specified and the two axes are defined to compose, but no exchange runs both today, and the combination deserves worked cases before it does.
 - **How the grouping is surfaced.** A deduplicating result is several output rows against one partner row; what a result file and a result view make of that is a front-end question this note does not touch.

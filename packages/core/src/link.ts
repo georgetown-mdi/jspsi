@@ -25,6 +25,7 @@ import {
   assertPartnerIndices,
   assertPartnerIndexTable,
   partnerProtocolError,
+  type PartnerIndexGrouping,
 } from "./utils/partnerIndices";
 import { COUNT_ONLY_SHAPE_REFUSALS } from "./config/linkageTerms";
 import { UsageError } from "./errors";
@@ -151,6 +152,178 @@ export function removeDuplicatesAndUndefineds(
 }
 
 /**
+ * One round's `(record, value)` incidence for this party, as the round's PSI set
+ * addresses it: position `k` of the set stands for the local rows listed at
+ * `rows[groupStarts[k] .. groupStarts[k + 1])`, ascending.
+ *
+ * `groupStarts` is absent where every position stands for exactly one row -- the
+ * within-round uniqueness rule a non-deduplicating party applies, which drops a
+ * value two or more of its rows hold -- so that party keeps the flat
+ * row-per-position array and allocates nothing extra. A deduplicating ("many")
+ * party keeps such a value, contributing it once and standing it for the group of
+ * rows holding it (docs/spec/PROTOCOL.md, Matching multiplicity: the (record,
+ * value) incidence).
+ *
+ * @internal exported for the round-construction tests.
+ */
+export interface RoundCandidates {
+  readonly rows: Array<number>;
+  readonly groupStarts?: Array<number>;
+}
+
+/** @internal how many positions this round's PSI set carries. */
+export function candidatePositionCount(candidates: RoundCandidates): number {
+  return candidates.groupStarts
+    ? candidates.groupStarts.length - 1
+    : candidates.rows.length;
+}
+
+// The half-open slice of `rows` that position `position` stands for. Without
+// groups a position IS its row, so the slice is the one-element `[k, k + 1)` and
+// the two layouts read through one loop.
+function positionRowRange(
+  candidates: RoundCandidates,
+  position: number,
+): [number, number] {
+  return candidates.groupStarts
+    ? [candidates.groupStarts[position], candidates.groupStarts[position + 1]]
+    : [position, position + 1];
+}
+
+/**
+ * The deduplicating counterpart of {@link removeDuplicatesAndUndefineds}: a value
+ * several of this party's records hold stays in the round and stands for the GROUP
+ * of those records, rather than being dropped as ambiguous.
+ *
+ * The set carries each DISTINCT value once, so it is bounded by this party's row
+ * count exactly as a non-deduplicating party's is and no derived frame or dataset
+ * bound moves; the multiplicity is re-expanded locally when a match comes back
+ * (docs/spec/PROTOCOL.md, The per-side rules). Values appear in first-occurrence
+ * order and each group's rows ascend, which is what makes the expansion ordering
+ * both parties reconstruct from reproducible.
+ *
+ * @internal exported for the round-construction tests.
+ */
+export function groupDuplicatesAndRemoveUndefineds(
+  dataWithDuplicatesAndUndefineds: Array<string | undefined>,
+  permutation?: Array<number>,
+): [Array<string>, RoundCandidates] {
+  const positionOf = new Map<string, number>();
+  const data: Array<string> = [];
+  const rowsByPosition: Array<Array<number>> = [];
+  for (let i = 0; i < dataWithDuplicatesAndUndefineds.length; ++i) {
+    const value = dataWithDuplicatesAndUndefineds[i];
+    if (value === undefined) continue;
+    let position = positionOf.get(value);
+    if (position === undefined) {
+      position = data.length;
+      positionOf.set(value, position);
+      data.push(value);
+      rowsByPosition.push([]);
+    }
+    rowsByPosition[position].push(permutation ? permutation[i] : i);
+  }
+  const rows: Array<number> = [];
+  const groupStarts: Array<number> = new Array(rowsByPosition.length + 1);
+  groupStarts[0] = 0;
+  for (let position = 0; position < rowsByPosition.length; ++position) {
+    for (const row of rowsByPosition[position]) rows.push(row);
+    groupStarts[position + 1] = rows.length;
+  }
+  return [data, { rows, groupStarts }];
+}
+
+// The (round, partner position) each entry of this party's own outbound
+// mapped-element list names, copied out of the list BEFORE it is sent. The
+// returned list is checked against this grouping, and it has to be the grouping
+// this party sent: a transport that hands the partner the array itself rather than
+// a serialization of it leaves the partner's own in-place translation
+// (`e.theirIndex = i`, below) writing over these entries.
+function sentGrouping(sent: IterationMap): PartnerIndexGrouping {
+  return {
+    rounds: Float64Array.from(sent, (e) => e.iteration),
+    positions: Float64Array.from(sent, (e) => e.theirIndex),
+  };
+}
+
+/**
+ * The matching cardinality ONE party runs, as that party resolves it from the two
+ * agreed `deduplicate` settings (`resolveLinkageCardinality`, exchange.ts).
+ *
+ * The label is read from the resolving party's own side, so the two parties of one
+ * deduplicating exchange hold mirror labels for the single mirrored procedure they
+ * run: the declaring "many" party resolves `many-to-one` and its partner
+ * `one-to-many` (docs/spec/PROTOCOL.md, Deduplicating cardinalities).
+ */
+export type LinkageCardinality =
+  "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+
+// Which side of a round's (record, value) incidence keeps its within-dataset
+// duplicate values, read off this party's own resolved label. Both sides' rules
+// are derived from that one label, so each party knows what its partner's frames
+// carry without a second exchanged term and the lockstep rounds cannot diverge.
+// `undefined` is the cardinality this cascade does not implement.
+interface MultiplicitySides {
+  readonly localKeepsDuplicates: boolean;
+  readonly partnerKeepsDuplicates: boolean;
+}
+
+function multiplicitySides(
+  cardinality: LinkageCardinality,
+): MultiplicitySides | undefined {
+  switch (cardinality) {
+    case "one-to-one":
+      return { localKeepsDuplicates: false, partnerKeepsDuplicates: false };
+    case "many-to-one":
+      return { localKeepsDuplicates: true, partnerKeepsDuplicates: false };
+    case "one-to-many":
+      return { localKeepsDuplicates: false, partnerKeepsDuplicates: true };
+    case "many-to-many":
+      return undefined;
+  }
+}
+
+/**
+ * The round matches a "many" party attributes to its rows: its own matched
+ * position mapped to the partner position it paired with.
+ *
+ * A position the intersection names MORE THAN ONCE is a value two or more of the
+ * PARTNER's records hold. The "one" side's own within-round uniqueness rule would
+ * have dropped that value before the round; where the "one" side does not apply it
+ * -- the variant in which one party contributes its whole dataset each round and
+ * the other resolves -- the "many" party applies it on the partner's behalf and
+ * drops the value from the round, so the exchange cannot silently deliver the
+ * `many-to-many` multiplicity neither party's terms declared (docs/spec/PROTOCOL.md,
+ * Deriving one table from the exchanged association maps). The dropped group's rows
+ * are attributed nothing and stay eligible for later keys, exactly as a value this
+ * party dropped itself: this drop is the one carve-out from the rule that a record
+ * appearing in a round's candidate pairs leaves candidacy after it
+ * (docs/spec/PROTOCOL.md, Multiplicity is within-round).
+ *
+ * This party's own set carries each value once, so a repeat can only come from the
+ * partner's. On the starter role the round's own association-table check refuses
+ * such a table upstream (a repeated index in either half, `identifyIntersection`);
+ * on the joiner role the local half is this party's own computation and reaches
+ * here instead, which is the path a partner that does not deduplicate takes.
+ *
+ * @internal exported for the single-resolver-obligation test.
+ */
+export function attributableRoundMatches(
+  myIndices: ReadonlyArray<number>,
+  theirIndices: ReadonlyArray<number>,
+): Map<number, number> {
+  const partnerPositionOf = new Map<number, number>();
+  const ambiguous = new Set<number>();
+  for (let ii = 0; ii < myIndices.length; ++ii) {
+    const position = myIndices[ii];
+    if (partnerPositionOf.has(position)) ambiguous.add(position);
+    else partnerPositionOf.set(position, theirIndices[ii]);
+  }
+  for (const position of ambiguous) partnerPositionOf.delete(position);
+  return partnerPositionOf;
+}
+
+/**
  * Runs the PSI linkage protocol over one or more linkage keys and returns the
  * matched row indices.
  *
@@ -160,16 +333,21 @@ export function removeDuplicatesAndUndefineds(
  * local dataset are excluded from that round entirely (ambiguous matches cannot
  * be attributed to a single record). They may still match on a later key.
  *
- * Only the `"one-to-one"` cardinality is implemented: both parties'
- * locally-duplicated key values are excluded from each round, so no record
- * matches more than one of the partner's. `"many-to-one"` is accepted but runs
- * this identical one-to-one matching (exchange.ts resolves the cardinality from
- * the agreed `deduplicate` settings and refuses any that would need a genuine
- * many-cardinality match, so no production caller reaches here with it); other
- * values throw.
+ * Under `"one-to-one"` both parties' locally-duplicated key values are excluded
+ * from each round, so no record matches more than one of the partner's. Under a
+ * deduplicating cardinality the "many" side instead KEEPS such a value,
+ * contributing it once and attributing a match on it to every one of its records
+ * holding it, while the "one" side's rule is unchanged; the label is this party's
+ * own, so a `"many-to-one"` party's partner runs `"one-to-many"` and the two
+ * mirror one procedure (docs/spec/PROTOCOL.md, Deduplicating cardinalities).
+ * `"many-to-many"` throws: its pairing rules are specified but the entity closure
+ * that makes such a table actionable is not. exchange.ts resolves the cardinality
+ * from the two agreed `deduplicate` settings and still refuses any deduplicating
+ * pair before the rounds begin, so no production caller reaches here with one.
  *
  * @param protocol - Exchange protocol settings; only `cardinality` is used
- *   here.
+ *   here, and it is this party's own resolved label (see
+ *   {@link LinkageCardinality}).
  * @param participant - Must have a resolved role (`"starter"` or `"joiner"`);
  *   throws if `role` is still `"either"`.
  * @param conn - Open connection to the exchange partner.
@@ -187,13 +365,16 @@ export function removeDuplicatesAndUndefineds(
  * @param setStage - Optional callback invoked with a progress label at each
  *   key round.
  * @returns An {@link AssociationTable} whose first element (`[0]`) contains
- *   the local matched row indices in strictly ascending order, and whose second
- *   element (`[1]`) contains the corresponding partner row indices in the same
- *   pairing order.
+ *   the local matched row indices in ascending order, and whose second element
+ *   (`[1]`) contains the corresponding partner row indices in the same pairing
+ *   order. The local half is STRICTLY ascending except on the "one" side of a
+ *   deduplicating exchange, where several of the partner's rows link to one of
+ *   this party's and it is non-decreasing instead (docs/spec/PROTOCOL.md,
+ *   Deriving one table from the exchanged association maps).
  */
 export async function linkViaPSI(
   protocol: {
-    cardinality: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+    cardinality: LinkageCardinality;
   },
   participant: PSIParticipant,
   conn: MessageConnection,
@@ -211,9 +392,15 @@ export async function linkViaPSI(
 
   log.debug(`${participant.id}: linking using ${data.length} key(s) via PSI`);
 
-  if (["one-to-one", "many-to-one"].includes(protocol.cardinality)) {
+  const sides = multiplicitySides(protocol.cardinality);
+  if (sides !== undefined) {
     let indexIterationMap: IndexIterationMap = [];
-    const unmappedIndicesByIter: Array<Array<number>> = [];
+    const candidatesByIter: Array<RoundCandidates> = [];
+    // The count of POSITIONS this party matched, which the count of matched
+    // RECORDS below exceeds only on the "many" side, where one position stands for
+    // a group. It is what a list arriving from the "one" side is held to, that side
+    // naming each matched position exactly once.
+    let numMatchedPositions = 0;
 
     for (let j = 0; j < data.length; ++j) {
       setStage(`stage ${j + 1} / ${data.length}`);
@@ -236,11 +423,26 @@ export async function linkViaPSI(
           return requireSingleCandidate(data[j][i]);
         });
       }
-      const [data_j, unmappedIndices] = removeDuplicatesAndUndefineds(
-        dataWithDuplicatesAndUndefineds,
-        unidentifiedIndices,
-      );
-      unmappedIndicesByIter.push(unmappedIndices);
+      // The within-round rule this party applies to its own values, which is the
+      // whole of the per-side difference a deduplicating cardinality makes to the
+      // round: the "many" side keeps a value several of its records hold and
+      // stands the round position for that group, every other party drops it.
+      let data_j: Array<string>;
+      let candidates: RoundCandidates;
+      if (sides.localKeepsDuplicates) {
+        [data_j, candidates] = groupDuplicatesAndRemoveUndefineds(
+          dataWithDuplicatesAndUndefineds,
+          unidentifiedIndices,
+        );
+      } else {
+        const [values, rows] = removeDuplicatesAndUndefineds(
+          dataWithDuplicatesAndUndefineds,
+          unidentifiedIndices,
+        );
+        data_j = values;
+        candidates = { rows };
+      }
+      candidatesByIter.push(candidates);
 
       log.debug(
         `${participant.id}: key ${j + 1}/${data.length}: ${data_j.length} ` +
@@ -267,13 +469,32 @@ export async function linkViaPSI(
           "match(es) found",
       );
 
-      for (let ii = 0; ii < myIndices.length; ++ii) {
-        const i = unmappedIndices[myIndices[ii]];
+      if (sides.localKeepsDuplicates) {
+        // A match on a position is attributed to EVERY record in the group behind
+        // it, which is the whole of the widening; the group leaves candidacy with
+        // it, so multiplicity stays within-round and a later, weaker key cannot add
+        // a link onto a group an earlier key formed.
+        const attributable = attributableRoundMatches(myIndices, theirIndices);
+        numMatchedPositions += attributable.size;
+        for (const [position, partnerPosition] of attributable) {
+          const [from, to] = positionRowRange(candidates, position);
+          for (let r = from; r < to; ++r) {
+            indexIterationMap[candidates.rows[r]] = {
+              theirIndex: partnerPosition,
+              iteration: j,
+            };
+          }
+        }
+      } else {
+        numMatchedPositions += myIndices.length;
+        for (let ii = 0; ii < myIndices.length; ++ii) {
+          const i = candidates.rows[myIndices[ii]];
 
-        indexIterationMap[i] = {
-          theirIndex: theirIndices[ii],
-          iteration: j,
-        };
+          indexIterationMap[i] = {
+            theirIndex: theirIndices[ii],
+            iteration: j,
+          };
+        }
       }
     }
 
@@ -295,6 +516,13 @@ export async function linkViaPSI(
         "record(s) matched",
     );
 
+    // Held for the returned list's check below, where this party is the "many"
+    // side: the pairing its own list named is what that list has to come back
+    // carrying.
+    const sentGroups = sides.localKeepsDuplicates
+      ? sentGrouping(identifiedIndexIterationMap)
+      : undefined;
+
     log.debug(
       `${participant.id}: sending match map indexed by round, receiving ` +
         "partner's",
@@ -309,56 +537,110 @@ export async function linkViaPSI(
 
     // Translate the partner's list of our records through the per-round candidate
     // sets, checking each entry against what THIS side matched before it reads a
-    // candidate set. The exchange is symmetric: a round pairs the same number of
-    // records on both parties, and it pairs our record i only if the partner's
-    // corresponding record names i in that same round. So the honest list is a
-    // permutation of our own matched records, one entry each, carrying the round
-    // we matched them on -- which is what makes every entry checkable against
-    // local state rather than merely bounded.
-    assertPartnerIndexCount(
-      participant.id,
-      "the partner's mapped-element list",
-      theirIdentifiedIndexIterationMap.length,
-      numMappedElements,
-    );
-    const translated = new Uint8Array(indexIterationMap.length);
+    // candidate set. A round pairs the same VALUES on both parties, and it pairs
+    // our position p only if the partner's corresponding record names p in that
+    // same round, which is what makes every entry checkable against local state
+    // rather than merely bounded. What the pairing is NOT, once a side
+    // deduplicates, is one entry per record on both sides: a list from the "many"
+    // side names each of our matched positions once per record in the group behind
+    // it, so the count equality is replaced by a coverage rule and a bound taken
+    // from the partner's authenticated row count (docs/spec/PROTOCOL.md, Deriving
+    // one table from the exchanged association maps).
+    if (sides.partnerKeepsDuplicates) {
+      if (theirIdentifiedIndexIterationMap.length > partnerRecordCount)
+        throw partnerProtocolError(
+          participant.id,
+          "the partner's mapped-element list carries " +
+            `${theirIdentifiedIndexIterationMap.length} entries, more than the ` +
+            `${partnerRecordCount} record(s) the partner counted`,
+        );
+    } else {
+      assertPartnerIndexCount(
+        participant.id,
+        "the partner's mapped-element list",
+        theirIdentifiedIndexIterationMap.length,
+        numMatchedPositions,
+      );
+    }
+    // Where a position of ours stands for a group, translating an entry EXPANDS it
+    // into one entry per record in that group, in ascending record order, with the
+    // groups left in the order of the list being translated -- the ordering the
+    // originating party reconstructs its own table from. Where it stands for one
+    // record the entry is translated in place.
+    const expands = sides.localKeepsDuplicates;
+    const expanded: IterationMap = [];
+    // How many entries of our own returned list belong to each of our matched
+    // records: the count of the partner's entries naming it, which is the group
+    // size behind the position that record matched. Only a "many" partner returns
+    // more than one, and only then is the tally read.
+    const returnedEntriesPerRecord = sides.partnerKeepsDuplicates
+      ? new Int32Array(indexIterationMap.length)
+      : undefined;
+    const named = new Uint8Array(indexIterationMap.length);
+    let namedRecords = 0;
     for (const e of theirIdentifiedIndexIterationMap) {
       if (
         !Number.isInteger(e.iteration) ||
         e.iteration < 0 ||
-        e.iteration >= unmappedIndicesByIter.length
+        e.iteration >= candidatesByIter.length
       )
         throw partnerProtocolError(
           participant.id,
           "the partner's mapped-element list names a key round this exchange " +
             "did not run",
         );
-      const candidates = unmappedIndicesByIter[e.iteration];
+      const candidates = candidatesByIter[e.iteration];
       if (
         !Number.isInteger(e.theirIndex) ||
         e.theirIndex < 0 ||
-        e.theirIndex >= candidates.length
+        e.theirIndex >= candidatePositionCount(candidates)
       )
         throw partnerProtocolError(
           participant.id,
           "the partner's mapped-element list names a position outside that " +
             "round's candidate set",
         );
-      const i = candidates[e.theirIndex];
+      const [from, to] = positionRowRange(candidates, e.theirIndex);
+      const i = candidates.rows[from];
       if (indexIterationMap[i]?.iteration !== e.iteration)
         throw partnerProtocolError(
           participant.id,
           "the partner's mapped-element list names a record this side did not " +
             "match on that round",
         );
-      if (translated[i] === 1)
-        throw partnerProtocolError(
-          participant.id,
-          "the partner's mapped-element list names one record twice",
-        );
-      translated[i] = 1;
-      e.theirIndex = i;
+      if (named[i] === 1) {
+        if (!sides.partnerKeepsDuplicates)
+          throw partnerProtocolError(
+            participant.id,
+            "the partner's mapped-element list names one record twice",
+          );
+      } else {
+        for (let r = from; r < to; ++r) {
+          named[candidates.rows[r]] = 1;
+          ++namedRecords;
+        }
+      }
+      if (returnedEntriesPerRecord) ++returnedEntriesPerRecord[i];
+      if (expands) {
+        for (let r = from; r < to; ++r)
+          expanded.push({
+            theirIndex: candidates.rows[r],
+            iteration: e.iteration,
+          });
+      } else {
+        e.theirIndex = i;
+      }
     }
+    // Coverage: the list must name every record this side matched. With the
+    // per-entry rules above that also pins its length -- to this side's matched
+    // position count from a "one" partner, and to the partner's own matched record
+    // count from a "many" one.
+    if (namedRecords !== numMappedElements)
+      throw partnerProtocolError(
+        participant.id,
+        "the partner's mapped-element list does not name every record this " +
+          "side matched",
+      );
 
     log.debug(
       `${participant.id}: returning partner's map with original indices, ` +
@@ -369,35 +651,68 @@ export async function linkViaPSI(
       conn,
       log,
       sendFirst,
-      theirIdentifiedIndexIterationMap,
+      expands ? expanded : theirIdentifiedIndexIterationMap,
     );
 
     // Our own list, come back with each entry's index translated into the
-    // partner's row space. Its length is ours to know, and every row index it
-    // carries lands in the returned table -- the partner half of the result, the
-    // payload alignment, and the attested record -- so it is bounded by the row
-    // count the partner carried on the terms exchange.
+    // partner's row space. Its length is ours to know -- one entry per record we
+    // matched, or, where the partner expanded it, the entry count its own list
+    // above already implied -- and every row index it carries lands in the returned
+    // table (the partner half of the result, the payload alignment, and the
+    // attested record), so it is bounded by the row count the partner carried on
+    // the terms exchange. A repeated row is admitted only where THIS party is the
+    // "many" side, several of its records legitimately naming one partner row; the
+    // count check above it is then what caps the list's length, which distinctness
+    // otherwise does.
+    //
+    // What survives the relaxation is injectivity MODULO the grouping this party
+    // sent, and both halves of it are checkable here: two of our entries that named
+    // the same (round, position) must come back carrying the same partner row, and
+    // two that named different positions must come back carrying different rows --
+    // distinct positions in a round are distinct partner values held by distinct
+    // partner rows, and a partner row matched in round j has left candidacy for
+    // every later round. Without it the "one" partner, not this party's own data,
+    // would decide which of our records group together (docs/spec/PROTOCOL.md,
+    // Deriving one table from the exchanged association maps).
     assertPartnerIndexCount(
       participant.id,
       "the returned mapped-element list",
       identifiedIndexMap.length,
-      numMappedElements,
+      sides.partnerKeepsDuplicates
+        ? theirIdentifiedIndexIterationMap.length
+        : numMappedElements,
     );
     assertPartnerIndices(
       participant.id,
       "the returned mapped-element list",
       identifiedIndexMap.map((x) => x.theirIndex),
       partnerRecordCount,
+      sentGroups ? { repeatsGroupedBy: sentGroups } : {},
     );
 
-    return identifiedIndexMap.reduce(
-      (acc, x, i) => {
-        acc[0].push(originalIndices[i]);
-        acc[1].push(x.theirIndex);
-        return acc;
-      },
-      [[], []] as [Array<number>, Array<number>],
-    );
+    if (!sides.partnerKeepsDuplicates)
+      return identifiedIndexMap.reduce(
+        (acc, x, i) => {
+          acc[0].push(originalIndices[i]);
+          acc[1].push(x.theirIndex);
+          return acc;
+        },
+        [[], []] as [Array<number>, Array<number>],
+      );
+
+    // Our own list came back EXPANDED: our matched records in the order we sent
+    // them, each followed by the partner rows of the group it matched. Walking our
+    // records in that same order with the per-record tally is what reconstructs the
+    // pairing, and it is why the expansion order is normative.
+    const table: [Array<number>, Array<number>] = [[], []];
+    let cursor = 0;
+    for (const row of originalIndices) {
+      for (let t = returnedEntriesPerRecord![row]; t > 0; --t) {
+        table[0].push(row);
+        table[1].push(identifiedIndexMap[cursor++].theirIndex);
+      }
+    }
+    return table;
   } else {
     throw new Error(
       `psi for cardinality '${protocol.cardinality}' not yet implemented`,
@@ -689,7 +1004,7 @@ export interface SinglePassSessionBounds {
  */
 export async function linkViaSinglePassPSI(
   protocol: {
-    cardinality: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+    cardinality: LinkageCardinality;
   },
   participant: PSIParticipant,
   conn: MessageConnection,

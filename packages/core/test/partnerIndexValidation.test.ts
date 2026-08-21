@@ -604,6 +604,74 @@ test("a repeat under the ascending rule is reported as the repeat", () => {
   ).toThrow(/the list repeats an index/);
 });
 
+// --- The grouping a repeat is admitted within ---------------------------------
+// Where a repeat is the protocol's own widening -- the "many" side's returned
+// mapped-element list -- distinctness is replaced rather than lifted: the list
+// stays injective MODULO the grouping this party sent, so a repeat is admitted
+// between two entries that named ONE (round, position) and refused between two
+// that named different ones. The rule is driven end to end over a live exchange in
+// psiLinkManyToOne.test.ts; these are its two halves at the check itself.
+
+const refusalFrom = (run: () => void): unknown => {
+  try {
+    run();
+  } catch (err) {
+    return err;
+  }
+  return undefined;
+};
+
+test("a repeat is admitted within one group and refused across two", () => {
+  // Entries 0 and 1 named one position, entry 2 another.
+  const rules = {
+    repeatsGroupedBy: { rounds: [0, 0, 0], positions: [0, 0, 1] },
+  };
+  expect(() =>
+    assertPartnerIndices("me", "the list", [2, 2, 1], ROWS, rules),
+  ).not.toThrow();
+  expectProtocolRefusal(
+    refusalFrom(() =>
+      assertPartnerIndices("me", "the list", [2, 2, 2], ROWS, rules),
+    ),
+    /the list names one partner row for two positions this side matched/,
+  );
+  expectProtocolRefusal(
+    refusalFrom(() =>
+      assertPartnerIndices("me", "the list", [2, 1, 0], ROWS, rules),
+    ),
+    /the list names two partner rows for one position this side matched/,
+  );
+});
+
+test("one position of each round is a group of its own", () => {
+  // A position number means nothing across rounds: each round has its own
+  // candidate set, so the same number in two rounds is two groups.
+  const rules = { repeatsGroupedBy: { rounds: [0, 1], positions: [0, 0] } };
+  expectProtocolRefusal(
+    refusalFrom(() =>
+      assertPartnerIndices("me", "the list", [1, 1], ROWS, rules),
+    ),
+    /names one partner row for two positions this side matched/,
+  );
+  expect(() =>
+    assertPartnerIndices("me", "the list", [1, 2], ROWS, rules),
+  ).not.toThrow();
+});
+
+test("a grouping that does not run parallel to the list is a caller fault", () => {
+  // The grouping is this party's own record of what it sent, never a partner
+  // quantity, so a mismatched one is a local misuse -- and must not be reported as
+  // the partner's protocol violation.
+  const err = refusalFrom(() =>
+    assertPartnerIndices("me", "the list", [0, 1], ROWS, {
+      repeatsGroupedBy: { rounds: [0], positions: [0] },
+    }),
+  );
+  expect(err).toBeInstanceOf(Error);
+  expect(err).not.toBeInstanceOf(ConnectionError);
+  expect((err as Error).message).toMatch(/one group per entry/);
+});
+
 // --- The untouched run --------------------------------------------------------
 
 test("an untouched exchange is unaffected by the checks", async () => {

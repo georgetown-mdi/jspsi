@@ -274,15 +274,18 @@ export function resolveCountOnlyRun(
  * Refuse a linkage-terms `deduplicate: true` the run cannot honor, before any
  * matching begins.
  *
- * Only one-to-one matching is implemented: both parties' locally-duplicated key
- * values are excluded from every round (see `linkViaPSI`), and a deduplicating
- * party's widening is precisely that it keeps them, so several of its records
- * can never link to the same partner record. Running a `deduplicate: true` term
- * would silently deliver one-to-one matching under a consented many-cardinality
- * term -- the disclosure-fidelity gap this refusal closes. Refused at prepare
- * time in {@link prepareForExchange} for this party's own terms, and for both
- * parties' agreed terms by {@link resolveLinkageCardinality} after the terms
- * exchange, before the PSI rounds begin.
+ * The cascade implements the deduplicating match (`linkViaPSI`), but no exchange
+ * runs one. `single-pass` implements neither deduplicating cardinality: it refuses
+ * `one-to-many` and `many-to-many`, and accepts `many-to-one` only as an alias
+ * that runs the unchanged one-to-one matching. The surfaces downstream of the
+ * association table -- the output table, the payload alignment, the exchange
+ * record -- have not been carried through a table with several links per input
+ * either. Running a `deduplicate: true` term would therefore deliver something
+ * other than the consented many-cardinality match -- the disclosure-fidelity gap
+ * this refusal closes. Refused at prepare time in {@link prepareForExchange} for
+ * this party's own terms, and for both parties' agreed terms by
+ * {@link resolveLinkageCardinality} after the terms exchange, before the PSI
+ * rounds begin.
  *
  * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
  * same reason as {@link assertAlgorithmImplemented}: on the accept side the
@@ -299,6 +302,42 @@ export function assertDeduplicateImplemented(deduplicate: boolean): void {
       "refused before matching begins. Set deduplicate to false until " +
       "deduplication is implemented.",
   );
+}
+
+/**
+ * Requires an association table's local half to be STRICTLY ascending, at the
+ * seam {@link runExchange} consumes the table.
+ *
+ * Both consumers there read it as one entry per matched RECORD, in this party's
+ * own row order: the payload gathers one transmitted row per entry
+ * ({@link preparePayload}), and the attested result size counts the entries as
+ * matched records. The `"one"` side of a deduplicating exchange is the one table
+ * shape that breaks it -- several of the partner's records link to one of ours, so
+ * the local half repeats a row and is merely non-decreasing (see
+ * {@link AssociationTable}) -- which would make the payload repeat rows and the
+ * attested size a pair count where a record count is meant.
+ *
+ * {@link assertDeduplicateImplemented} is what keeps such a table away from that
+ * seam today. This encodes that as a check rather than resting on it, so lifting
+ * the refusal without carrying the two surfaces through the multiplicity fails
+ * here instead of quietly emitting the wrong payload and count.
+ *
+ * @internal exported for the association-table invariant test.
+ */
+export function assertMatchedRowsStrictlyAscend(
+  associationTable: AssociationTable,
+): void {
+  const matchedRows = associationTable[0];
+  for (let i = 1; i < matchedRows.length; ++i) {
+    if (matchedRows[i] > matchedRows[i - 1]) continue;
+    throw new Error(
+      "the association table's local half is not strictly ascending: the " +
+        "payload rows and the attested result size both read it as one entry " +
+        "per matched record. Carry those two surfaces through a table with " +
+        "several links per record before lifting the deduplication refusal " +
+        "that keeps one from reaching here.",
+    );
+  }
 }
 
 /**
@@ -398,9 +437,10 @@ export function assertSigningModeImplemented(
  * own side, a `deduplicate: true` party being the "many" one, so the two parties
  * hold mirror labels for the single procedure they run (docs/spec/PROTOCOL.md,
  * Deduplicating cardinalities). Today only `one-to-one` (both parties
- * `deduplicate: false`) is implemented, and it is its own mirror; any
+ * `deduplicate: false`) is resolved here, and it is its own mirror; any
  * `deduplicate: true` is refused before the rounds begin, never silently
- * collapsed onto one-to-one (see {@link assertDeduplicateImplemented}).
+ * collapsed onto one-to-one (see {@link assertDeduplicateImplemented}), so the
+ * mirror labels `linkViaPSI` accepts are reachable only from a direct caller.
  */
 export function resolveLinkageCardinality(
   localDeduplicate: boolean,
@@ -1304,6 +1344,12 @@ export async function runExchange(
     if (participant !== undefined) participant.dispose();
     else engine.dispose();
   }
+
+  // One entry per matched record, ascending, is what both readers below assume of
+  // the table -- the payload's transmitted rows and the attested result size. See
+  // assertMatchedRowsStrictlyAscend for what a table breaking it would deliver.
+  if (associationTable !== undefined)
+    assertMatchedRowsStrictlyAscend(associationTable);
 
   // Send-gate: transmit payload only to a partner entitled to the result. A party
   // with expectsOutput:false learns no matched records, so it has no use for

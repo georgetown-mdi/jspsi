@@ -100,12 +100,13 @@ test("results are correct", () => {
   expect(serverResult[1]).toStrictEqual([2, 0, 1]);
 });
 
-// "many-to-one" stays on linkViaPSI's accepted-value surface as an alias that
-// runs the identical one-to-one matching; no production caller passes it
-// (exchange.ts resolves the cardinality from the agreed deduplicate settings and
-// refuses any that would need a genuine many-cardinality match). Pinned so the
-// accepted surface neither narrows silently nor grows behavior without a test.
-test("many-to-one is accepted and runs the identical one-to-one matching", async () => {
+// A deduplicating cardinality keeps the "many" side's within-dataset duplicate
+// values in the round, so it changes the table only where such a value MATCHES.
+// This dataset has one (the server's repeated "1" under the second key) and the
+// client holds no "1", so the deduplicating run reproduces the one-to-one table
+// exactly -- the property that keeps the widening confined to matched groups.
+// The many-to-one matching itself is exercised in psiLinkManyToOne.test.ts.
+test("a deduplicating cardinality leaves an unmatched duplicate group's table unchanged", async () => {
   const [mServerConn, mClientConn] = createMessagePipe();
   const mServer = new PSIParticipant(
     "server",
@@ -129,8 +130,9 @@ test("many-to-one is accepted and runs the identical one-to-one matching", async
       clientData[0].length,
       -1,
     ),
+    // The partner's view of the same exchange is the mirror label.
     linkViaPSI(
-      { cardinality: "many-to-one" },
+      { cardinality: "one-to-many" },
       mClient,
       mClientConn,
       clientData,
@@ -144,6 +146,30 @@ test("many-to-one is accepted and runs the identical one-to-one matching", async
 
   expect(mServerResult).toStrictEqual(serverResult);
   expect(mClientResult).toStrictEqual(clientResult);
+});
+
+// many-to-many's round-level pairing rules are specified, but the transitive
+// closure that turns a both-sides-multiple table into entity clusters either party
+// can act on is not, so the cascade refuses it rather than returning a table whose
+// meaning is undecided.
+test("many-to-many is refused as not yet implemented", async () => {
+  const [conn] = createMessagePipe();
+  const participant = new PSIParticipant(
+    "server",
+    psiLibrary,
+    { role: "starter", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  await expect(
+    linkViaPSI(
+      { cardinality: "many-to-many" },
+      participant,
+      conn,
+      [["A"]],
+      1,
+      -1,
+    ),
+  ).rejects.toThrow(/cardinality 'many-to-many' not yet implemented/);
 });
 
 // --- linkViaSinglePassPSI: parity with the cascade ----------------------------
