@@ -319,8 +319,8 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
   deduplicate: {
     classification: "consent-relevant",
     reason:
-      "Whether one of the inviter's records may match several of the " +
-      "acceptor's, which changes how many records the intersection holds.",
+      "Whether several of the inviter's records may match the same one of " +
+      "the acceptor's, which changes how many records the intersection holds.",
     vary: (terms) =>
       edited(terms, (draft) => {
         draft.deduplicate = true;

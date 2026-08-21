@@ -506,7 +506,9 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     const panel = await readyPanel("Other details");
     expect(panel.textContent).toContain("Personal data used");
     expect(panel.textContent).toContain("risk_score");
-    expect(panel.textContent).toContain("may match more than one");
+    expect(panel.textContent).toContain(
+      "More than one of the inviting party's records",
+    );
     // ... the partner-authored allowed-character class is NOT among them: it is
     // promoted whole into the always-visible core (its own constraints group) ...
     expect(panel.textContent).not.toContain("A-Z");
@@ -2300,7 +2302,9 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     expect(collapse.getAttribute("aria-hidden")).toBe("true");
     // ... and BOTH the headline and its contradicting caveat live inside it, so
     // neither leaks into the always-visible core ahead of the other.
-    expect(collapse.textContent).toContain("may match more than one");
+    expect(collapse.textContent).toContain(
+      "More than one of the inviting party's records",
+    );
     expect(collapse.textContent).toContain(deduplicateCaveat);
   });
 

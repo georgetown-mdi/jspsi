@@ -551,8 +551,8 @@ export function displayInvitation(params: {
   emit(
     `  ${marked("duplicate matches", "duplicateMatches")}: ` +
       (summary.deduplicate
-        ? "a record may match more than one of the partner's records"
-        : "each record matches at most one of the partner's records"),
+        ? "more than one of the inviting party's records may match a single one of the accepting party's records"
+        : "each of the inviting party's records matches at most one of the accepting party's records"),
   );
   if (summary.deduplicate && !summary.deduplicateApplied)
     emit(`    ${PROPOSED_NOT_APPLIED_NOTES.deduplicate}`);
