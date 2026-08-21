@@ -230,6 +230,7 @@ import {
   PeerAbortError,
   ConnectionError,
   FrameSizeExceededError,
+  InternalConsistencyError,
   FileSyncConnection,
   fromEventConnection,
   authenticateConnection,
@@ -2401,6 +2402,60 @@ test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceed
   expect(resultB.status).toBe("rejected");
 
   // The terminal error's class tag suppresses both generic advisory lines.
+  expectNoGenericRecoveryAdvisory(mockState.errors);
+}, 20_000);
+
+test("runProtocol suppresses the generic advisory for the reply-cap internal fault", async () => {
+  // The single-pass reply-cap backstop fires mid-data-exchange, so it reaches the
+  // catch with tokenRotated=true -- the one window where the generic "retry
+  // without re-inviting" advisory does fire -- and its own message prescribes the
+  // opposite: report the fault, because a retry rebuilds the same reply and
+  // refuses it again. InternalConsistencyError carries the class-level
+  // psilinkRecoveryHintEmitted tag, so the hint-walker suppresses the generic
+  // advisory and the operator is left the fault's own remedy alone.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  async function waitForRotationThenThrowInternalFault(): Promise<never> {
+    await waitForBothKeysRotated(keyFileA, keyFileB);
+    throw new InternalConsistencyError(
+      "server: single-pass built a reply of 4096 byte(s), above the 2048 " +
+        "byte(s) both parties derive from their declared sizes. The exchange " +
+        "cannot proceed; report it with this message.",
+    );
+  }
+  vi.mocked(runExchange)
+    .mockImplementationOnce(waitForRotationThenThrowInternalFault)
+    .mockImplementationOnce(waitForRotationThenThrowInternalFault);
+
+  const pA = runProtocol(
+    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+    { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-a",
+  );
+  const pB = runProtocol(
+    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+    { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-b",
+  );
+
+  const [resultA, resultB] = await Promise.allSettled([pA, pB]);
+  expect(resultA.status).toBe("rejected");
+  expect(resultB.status).toBe("rejected");
+  // The fault itself still propagates to the command boundary, which renders its
+  // report-it remedy and maps the class to exit 70: the suppression removes the
+  // contradicting line, not the guidance.
+  expect((resultA as PromiseRejectedResult).reason).toBeInstanceOf(
+    InternalConsistencyError,
+  );
   expectNoGenericRecoveryAdvisory(mockState.errors);
 }, 20_000);
 

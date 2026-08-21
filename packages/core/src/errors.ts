@@ -450,8 +450,25 @@ export class TransportOperationStalledError extends UsageError {
  * neither of which this class joins. The exit code, not the category, is where an
  * internal fault is observable -- the mirror of the `security` category, which is
  * observable only in the category (see docs/spec/CLI_EVENTS.md).
+ *
+ * `psilinkRecoveryHintEmitted` is a class field, the
+ * {@link FrameSizeExceededError} shape rather than
+ * {@link TransportPublishIndeterminateError}'s per-instance one: every internal
+ * fault takes the same next step -- report it, never retry -- so no raise site
+ * has a different one to choose, and each states that step in its own message
+ * (the reply-cap backstop's ends "report it with this message", pinned in
+ * psiLink.test.ts). The tag makes the CLI's hint-walker suppress its generic
+ * "retry the exchange without re-inviting" advisory, which would otherwise print
+ * beneath that message: the backstop fires mid-data-exchange, after the
+ * handshake rotated the secret, which is the window that advisory fires in, and
+ * it prescribes exactly what the EX_SOFTWARE mapping above exists to stop -- a
+ * whole further exchange, this party's records re-sent, rebuilding the same
+ * reply and refusing it again. The convention stays two-state, so a raise site
+ * added here carries its own next step in its message.
  */
 export class InternalConsistencyError extends Error {
+  readonly psilinkRecoveryHintEmitted = true;
+
   constructor(message: string) {
     super(message);
     this.name = "InternalConsistencyError";

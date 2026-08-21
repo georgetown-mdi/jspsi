@@ -1860,18 +1860,19 @@ export async function runProtocol(
     // completed on the partner side even though our own save did not run.
     // Surfaced at error level (rather than warn) because the user's exchange
     // is failing and they need the recovery hint surfaced prominently.
-    // The `psilinkRecoveryHintEmitted` tag is set in two places:
-    //   - The saveKeyFile-failure path below, because its wrapped error
-    //     already explains "definite local rotation, partner unknown".
-    //   - authenticateConnection's own validation errors (token format,
-    //     pre- and post-handshake expiry -- see auth.ts), because their
-    //     messages already include specific recovery hints ("must
-    //     re-invite" / "obtain a new invitation").
-    // Skip the generic advisory in both cases so the user does not see two
-    // messages that contradict each other. Key-exchange protocol failures from
-    // runKex (generic "key exchange authentication failed" / "key exchange
-    // handshake timed out") are NOT tagged and DO get the generic advisory,
-    // which adds useful "retry first; if it fails, re-invite" context.
+    // The `psilinkRecoveryHintEmitted` tag marks an error whose own message
+    // already carries the next step for its fault, so the generic advisory is
+    // skipped rather than printed beneath a step it contradicts. It is set
+    // wherever that holds -- the saveKeyFile-failure path below ("definite local
+    // rotation, partner unknown"), authenticateConnection's own validation
+    // errors (token format, pre- and post-handshake expiry -- see auth.ts:
+    // "must re-invite" / "obtain a new invitation"), core's terminal transport
+    // refusals, and the single-pass reply-cap internal fault, whose step is to
+    // report it rather than retry an exchange that rebuilds the same reply.
+    // Key-exchange protocol failures from runKex (generic "key exchange
+    // authentication failed" / "key exchange handshake timed out") are NOT
+    // tagged and DO get the generic advisory, which adds useful "retry first;
+    // if it fails, re-invite" context.
     //
     // The walk follows `cause` so a future wrap (e.g. `new Error('outer: '
     // + inner.message, { cause: inner })`) still suppresses the generic
