@@ -135,6 +135,39 @@ export interface RecordVerificationInputs {
   partnerTerms?: LinkageTerms;
 }
 
+/**
+ * Whether an alteration of the record is the only explanation a failed
+ * {@link RecordVerificationReport} leaves: the recorded result size disagrees
+ * with the pairing the record itself commits to, while every other element of
+ * the report checked out -- the agreed-terms hash re-derived, the
+ * association-table commitment opened, and no commitment reports anything but
+ * `verified`.
+ *
+ * The single source for the unhedged headline a verification consumer states on
+ * that verdict ("the record was altered; the files you re-supplied check out").
+ * Every other failure keeps the hedge the statuses above require: a commitment
+ * mismatch cannot tell an altered record from a re-supplied file that does not
+ * belong to this exchange. Only a result size at fault is unambiguous, because a
+ * file that did not belong to this exchange fails the table's own commitment
+ * first and leaves the figure unchecked rather than at fault.
+ *
+ * The association table is required in its own right rather than left to the
+ * sweep over the commitment map, so a report carrying an empty map -- or none
+ * for the table the figure counts -- fails this guard instead of passing it on a
+ * vacuous sweep: the accusation claims nothing while any element of the record
+ * is merely unverified.
+ */
+export function recordAlterationIsTheOnlyExplanation(
+  report: RecordVerificationReport,
+): boolean {
+  return (
+    report.resultSize === "mismatch" &&
+    report.termsHash === "verified" &&
+    report.commitments.associationTable === "verified" &&
+    Object.values(report.commitments).every((status) => status === "verified")
+  );
+}
+
 const ALL_COMMITMENTS: readonly CommitmentName[] = [
   "localPayloadSent",
   "partnerPayloadReceived",

@@ -14,6 +14,7 @@ import {
   parseExchangeRecord,
   parseVerificationKeys,
   reconstructCommittedData,
+  recordAlterationIsTheOnlyExplanation,
   recordedVersionMatches,
   reproductionMismatchCauses,
   sanitizeErrorForDisplay,
@@ -363,19 +364,6 @@ const RESULT_SIZE_WORD: Record<ResultSizeStatus, string> = {
     "recount; a count-only exchange records no such table at all)",
 };
 
-// The failure where the recorded figure is the only element at fault: every
-// commitment opened and the terms hash re-derived, so the altered-or-wrong-file
-// hedge the generic headline carries cannot apply here -- a file that did not
-// belong to this exchange fails the matched-pairs commitment first, and the
-// figure then reports unchecked rather than at fault.
-function resultSizeIsTheOnlyFault(report: RecordVerificationReport): boolean {
-  return (
-    report.resultSize === "mismatch" &&
-    report.termsHash === "verified" &&
-    Object.values(report.commitments).every((status) => status === "verified")
-  );
-}
-
 /**
  * What this run supplied, so a "not checked" line names an input that is still
  * missing rather than one already on the command line, and the note explaining a
@@ -463,7 +451,7 @@ export function formatVerificationReport(
   const lines: string[] = [];
   if (report.outcome === "failed")
     lines.push(
-      resultSizeIsTheOnlyFault(report)
+      recordAlterationIsTheOnlyExplanation(report)
         ? "VERIFICATION FAILED: the recorded result size disagrees with the " +
             "matched pairs the record itself commits to -- the record was " +
             "altered; the files you re-supplied check out."

@@ -428,6 +428,25 @@ describe("verdictViewModel: the recorded result size", () => {
     expect(view.headline.detail).toContain("cannot be told apart");
   });
 
+  test("an unchecked terms hash keeps the two-cause headline", async () => {
+    // The unhedged headline asserts the rest of the record checked out, so it
+    // is not reached while an element is merely unchecked rather than verified:
+    // supplying no terms leaves the agreed-terms hash open beside the figure.
+    const { record, keys } = await buildExchangeRecord(SIZED_INPUTS);
+    const reconstructed = reconstructForFixture(record);
+    const report = await verifyExchangeRecord(
+      { ...record, resultSize: 9 },
+      keys,
+      { data: reconstructed.data },
+    );
+    expect(report.termsHash).toBe("not-checked");
+    expect(report.resultSize).toBe("mismatch");
+    const view = verdictViewModel(report, reconstructed.warnings);
+    expect(view.headline.title).toBe("Verification failed");
+    expect(view.headline.detail).toContain("the record was altered, or a file");
+    expect(view.headline.detail).toContain("cannot be told apart");
+  });
+
   test("a pairing that opened but is not a pairing carries no count to recount", async () => {
     // The fifth state behind a not-checked figure: the committed value opened,
     // so no row above it names a cause, and it is not shaped as a pairing, so

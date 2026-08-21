@@ -13,6 +13,7 @@ import {
   parseExchangeRecord,
   parseSensitiveJson,
   parseVerificationKeys,
+  recordAlterationIsTheOnlyExplanation,
   recordedVersionMatches,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
@@ -411,11 +412,8 @@ const RESULT_SIZE_ONLY_HEADLINE: VerdictHeadline = {
 };
 
 function headlineFor(report: RecordVerificationReport): VerdictHeadline {
-  const resultSizeIsTheOnlyFault =
-    report.resultSize === "mismatch" &&
-    report.termsHash === "verified" &&
-    Object.values(report.commitments).every((status) => status === "verified");
-  return report.outcome === "failed" && resultSizeIsTheOnlyFault
+  return report.outcome === "failed" &&
+    recordAlterationIsTheOnlyExplanation(report)
     ? RESULT_SIZE_ONLY_HEADLINE
     : HEADLINES[report.outcome];
 }

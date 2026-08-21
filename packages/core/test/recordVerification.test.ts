@@ -7,19 +7,25 @@ import { buildOutputTable } from "../src/payloadExchange";
 import { loadCSVFile } from "../src/file";
 import {
   reconstructCommittedData,
+  recordAlterationIsTheOnlyExplanation,
   reproductionMismatchCauses,
   toRetainedResult,
   verifyExchangeRecord,
 } from "../src/recordVerification";
 
 import type {
+  CommitmentName,
   CommittedPayload,
   ExchangeRecordInputs,
 } from "../src/exchangeRecord";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
 import type { PartnerPayload } from "../src/payloadExchange";
-import type { RetainedResult } from "../src/recordVerification";
+import type {
+  CommitmentStatus,
+  RecordVerificationReport,
+  RetainedResult,
+} from "../src/recordVerification";
 import type { CanonicalValue } from "../src/utils/canonical";
 import type { AssociationTable } from "../src/types";
 import type { CSVRow } from "../src/file";
@@ -486,6 +492,136 @@ describe("verifyExchangeRecord checks the recorded result size", () => {
       expect(report.commitments.associationTable).toBe("verified");
       expect(report.resultSize).toBe("unopenable");
       expect(report.outcome).toBe("incomplete");
+    },
+  );
+});
+
+// --- The record-alteration verdict guard -------------------------------------
+
+// The guard both verification consumers ask before dropping the
+// altered-or-wrong-file hedge and stating flatly that the record was altered.
+// The shapes below are hand-built rather than verified out of a record: the
+// guard is exported and takes a plain report, so what it answers for a shape no
+// core-built report reaches -- an empty commitment map, a map carrying no
+// association table -- is part of its contract, and an accusation may not rest
+// on a sweep that passes because there was nothing to sweep.
+describe("recordAlterationIsTheOnlyExplanation", () => {
+  const onlyTheFigureAtFault: RecordVerificationReport = {
+    outcome: "failed",
+    termsHash: "verified",
+    commitments: {
+      localPayloadSent: "verified",
+      partnerPayloadReceived: "verified",
+      associationTable: "verified",
+    },
+    resultSize: "mismatch",
+  };
+
+  function withCommitment(
+    name: CommitmentName,
+    status: CommitmentStatus,
+  ): RecordVerificationReport {
+    const commitments: Partial<Record<CommitmentName, CommitmentStatus>> = {
+      ...onlyTheFigureAtFault.commitments,
+    };
+    commitments[name] = status;
+    return { ...onlyTheFigureAtFault, commitments };
+  }
+
+  test("the recorded figure alone at fault is the record's own alteration", () => {
+    expect(recordAlterationIsTheOnlyExplanation(onlyTheFigureAtFault)).toBe(
+      true,
+    );
+  });
+
+  test("the report a real tampered figure produces reaches the guard", async () => {
+    // The hand-built shape above, held against the verdict verification
+    // actually emits: the matrix cannot drift onto a report core never writes.
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const report = await verifyExchangeRecord(
+      { ...record, resultSize: 7 },
+      keys,
+      { data: fullData, localTerms: termsA, partnerTerms: termsB },
+    );
+    expect(recordAlterationIsTheOnlyExplanation(report)).toBe(true);
+  });
+
+  const unverifiedElement: Array<{
+    label: string;
+    report: RecordVerificationReport;
+  }> = [
+    {
+      label: "a result size that recounted",
+      report: {
+        ...onlyTheFigureAtFault,
+        outcome: "verified",
+        resultSize: "verified",
+      },
+    },
+    {
+      label: "a result size with no re-supplied pairing to recount",
+      report: {
+        ...onlyTheFigureAtFault,
+        outcome: "incomplete",
+        resultSize: "not-supplied",
+      },
+    },
+    {
+      label: "a result size with no opened pairing behind it",
+      report: {
+        ...onlyTheFigureAtFault,
+        outcome: "incomplete",
+        resultSize: "unopenable",
+      },
+    },
+    {
+      label: "a record stating no result size at all",
+      report: {
+        outcome: "verified",
+        termsHash: "verified",
+        commitments: onlyTheFigureAtFault.commitments,
+      },
+    },
+    {
+      label: "an unchecked agreed-terms hash",
+      report: { ...onlyTheFigureAtFault, termsHash: "not-checked" },
+    },
+    {
+      label: "an agreed-terms hash that did not re-derive",
+      report: { ...onlyTheFigureAtFault, termsHash: "mismatch" },
+    },
+    ...(
+      [
+        "localPayloadSent",
+        "partnerPayloadReceived",
+        "associationTable",
+      ] as const
+    ).flatMap((name) =>
+      (["mismatch", "not-supplied", "unopenable"] as const).map((status) => ({
+        label: `commitment ${name} reported ${status}`,
+        report: withCommitment(name, status),
+      })),
+    ),
+    {
+      label: "an empty commitment map",
+      report: { ...onlyTheFigureAtFault, commitments: {} },
+    },
+    {
+      label: "a commitment map carrying no association table",
+      report: {
+        ...onlyTheFigureAtFault,
+        commitments: {
+          localPayloadSent: "verified",
+          partnerPayloadReceived: "verified",
+        },
+      },
+    },
+  ];
+
+  test.each(unverifiedElement)(
+    "$label leaves the alteration unclaimed",
+    ({ report }) => {
+      expect(recordAlterationIsTheOnlyExplanation(report)).toBe(false);
     },
   );
 });
