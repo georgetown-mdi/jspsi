@@ -58,6 +58,18 @@ OpenSSL Toolkit (https://www.openssl.org/).
 
 ---
 
+PeerJS Server
+Copyright (c) 2013 Michelle Bu and Eric Zhang, http://peerjs.com
+Licensed under the MIT License
+Source: https://github.com/peers/peerjs-server
+
+The PeerJS-compatible WebSocket signaling broker is vendored in this
+repository at packages/peerjs-broker/src/contrib/, kept as upstream wrote it
+apart from this project's own hardening. The upstream license text ships
+alongside it at packages/peerjs-broker/src/contrib/LICENSE.
+
+---
+
 All other npm dependencies were audited for NOTICE files. The three packages
 that ship a NOTICE file (bare-path, playwright, playwright-core) are
 development or build-time only dependencies and are not redistributed to end
