@@ -17,11 +17,7 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
-import {
-  DEDUPLICATE_NOT_ON_INVITATION_MESSAGE,
-  INVITATION_CARRIES_DEDUPLICATE,
-  buildAdvancedTerms,
-} from "@psi/advancedInvite";
+import { buildAdvancedTerms } from "@psi/advancedInvite";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { TermsImportExport } from "@components/TermsImportExport";
@@ -65,9 +61,9 @@ const KEY_VERDICT_BADGES: Record<
 /**
  * The Matching keys tab: the guided ordered key list (enable + reorder, with
  * satisfiability badges), the expert switch that opens element-by-element
- * authoring and terms import/export, and the matching settings -- the live
- * linkage strategy and matching method, plus the deduplication control, held
- * visible but inert while an invitation cannot carry it.
+ * authoring and terms import/export, and the matching settings -- the linkage
+ * strategy, matching method, and deduplication controls, each live while the
+ * exchange applies what it writes.
  */
 export function KeysTab({
   editor,
@@ -251,21 +247,18 @@ export function KeysTab({
         }
         mt="md"
       />
-      {/* Held back on the invitation path rather than gated on
-      APPLIED_SETTINGS.deduplicate, which the exchange applies: what an invitation
-      cannot do is deliver the setting to a runnable exchange, since accepting
-      adopts it for both parties. The description states that ground and
-      the way through, so a disabled control explains itself rather than reading as
-      an unbuilt feature; both are the one wording the Generate gate and the import
-      refusal use. See INVITATION_CARRIES_DEDUPLICATE. */}
+      {/* Gated on the same applied flag as the terms clamp and the import refusal,
+      so a control an operator can turn on is one the run honors. The accepting
+      party's own side of the cardinality is not this control's to set: acceptance
+      derives it as false, so what this authors is one-sided by construction. */}
       <Checkbox
         label="Allow several of your records to match one partner record"
         description={
-          INVITATION_CARRIES_DEDUPLICATE
+          APPLIED_SETTINGS.deduplicate
             ? undefined
-            : DEDUPLICATE_NOT_ON_INVITATION_MESSAGE
+            : "Deduplication of your own inputs is not available yet; each record matches at most once."
         }
-        disabled={!INVITATION_CARRIES_DEDUPLICATE}
+        disabled={!APPLIED_SETTINGS.deduplicate}
         checked={editor.draft.deduplicate}
         onChange={(event) => onDeduplicate(event.currentTarget.checked)}
         mt="md"

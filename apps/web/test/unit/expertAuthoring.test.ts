@@ -109,13 +109,13 @@ describe("gated settings cannot reach the built terms", () => {
     expect(
       gatedActiveSettingMessage({ ...base, algorithm: "psi-c" }),
     ).toBeUndefined();
-    // The two that are, each on its own ground: the exchange does not apply a
-    // fuzzy expansion, and an invitation cannot carry a deduplicating term to a
-    // runnable exchange whether or not the exchange applies it. The
-    // invitation-path wording is pinned in advancedInviteValidation.test.ts.
-    expect(gatedActiveSettingMessage({ ...base, deduplicate: true })).toMatch(
-      /An invitation cannot carry/,
-    );
+    // Nor is a deduplicating term, which the exchange does apply -- this door is
+    // closed against a setting the run would silently drop, not against every
+    // setting an editor control gates.
+    expect(
+      gatedActiveSettingMessage({ ...base, deduplicate: true }),
+    ).toBeUndefined();
+    // The one that is held back: the exchange applies no fuzzy expansion.
     expect(gatedActiveSettingMessage(withFuzzyOnFirstElement(base))).toMatch(
       /fuzzy/i,
     );

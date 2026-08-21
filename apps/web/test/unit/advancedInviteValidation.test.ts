@@ -7,8 +7,6 @@ import {
 } from "@psilink/core";
 
 import {
-  DEDUPLICATE_NOT_ON_INVITATION_MESSAGE,
-  INVITATION_CARRIES_DEDUPLICATE,
   gatedActiveSettingMessage,
   validateAdvancedInvite,
 } from "../../src/psi/advancedInviteValidation.js";
@@ -144,61 +142,49 @@ describe("the deduplicating-pair gate (the run refuses what the schema admits)",
   });
 });
 
-describe("the invitation gate on a deduplicating term", () => {
-  // This editor mints invitations, and acceptance adopts the inviting party's
-  // deduplicate rather than mirroring it, so a deduplicating invitation reaches
-  // the run as the both-sided pair and is refused there -- after the partner has
-  // consented and connected. The control is disabled to match; these pin the
-  // gate behind it, which holds for a draft that reached the state by another
-  // route.
+describe("the strategy gate on a deduplicating term", () => {
+  // Acceptance derives the accepting party's own deduplicate as false rather than
+  // adopting the inviting party's, so a deduplicating invitation reaches the run
+  // as the one-sided pair the cascade matches. What stays refused is the pair no
+  // strategy matches, and this editor refuses it where the operator still holds
+  // both controls.
   const now = new Date("2026-01-01T00:00:00Z");
 
-  test("the setting is held back from the invitation path", () => {
-    // The gate is the invitation's, not the engine's: what the exchange applies
-    // is a separate question, answered `true`, and reading this off
-    // APPLIED_SETTINGS would state the wrong ground.
-    expect(INVITATION_CARRIES_DEDUPLICATE).toBe(false);
-    expect(APPLIED_SETTINGS.deduplicate).toBe(true);
-  });
-
-  test("blocks Generate on a deduplicating draft under cascade, the strategy that matches it", () => {
+  test("a deduplicating draft under cascade generates, the strategy that matches it", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const result = validateAdvancedInvite(
       { ...draft, deduplicate: true, linkageStrategy: "cascade" },
       seed,
       now,
     );
-    expect(result.canGenerate).toBe(false);
-    expect(result.terms).toBeUndefined();
-    expect(result.errors.keys).toBe(DEDUPLICATE_NOT_ON_INVITATION_MESSAGE);
+    expect(result.errors).toEqual({});
+    expect(result.canGenerate).toBe(true);
+    // The setting reaches the built terms rather than being clamped away: the
+    // exchange applies it, which is the one question this control is gated on.
+    expect(APPLIED_SETTINGS.deduplicate).toBe(true);
+    expect(result.terms?.deduplicate).toBe(true);
   });
 
-  test("both obstacles are reported for a deduplicating single-pass draft", () => {
-    // Neither remedy alone unblocks generation, so showing one would send the
-    // operator to move a setting that leaves the other standing.
+  test("blocks Generate on a deduplicating single-pass draft, naming both controls", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const result = validateAdvancedInvite(
       { ...draft, deduplicate: true, linkageStrategy: "single-pass" },
       seed,
       now,
     );
-    expect(result.errors.keys).toContain(DEDUPLICATE_NOT_ON_INVITATION_MESSAGE);
+    expect(result.canGenerate).toBe(false);
+    expect(result.terms).toBeUndefined();
     expect(result.errors.keys).toMatch(/Set Linkage strategy to Cascade/);
+    expect(result.errors.keys).toMatch(/Allow several of your records/);
   });
 
-  test("refuses an import that turns the setting on, with the same ground", () => {
-    // The one door the disabled control cannot close: without this an imported
-    // document could leave the draft holding a setting the operator has no
-    // control to clear.
+  test("an import that turns the setting on is not refused", () => {
+    // The import door is closed against a setting the RUN does not apply, and
+    // this one it does, so the document loads rather than being turned away.
     const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const terms = buildAdvancedTerms({ ...draft, deduplicate: true });
-    expect(gatedActiveSettingMessage(terms)).toMatch(
-      /An invitation cannot carry/,
-    );
-    expect(gatedActiveSettingMessage(terms)).toMatch(/import again/);
-    expect(
-      gatedActiveSettingMessage({ ...terms, deduplicate: false }),
-    ).toBeUndefined();
+    expect(terms.deduplicate).toBe(true);
+    expect(gatedActiveSettingMessage(terms)).toBeUndefined();
   });
 
   test("a draft that deduplicates without receiving results names that obstacle on the output control", () => {
@@ -214,11 +200,10 @@ describe("the invitation gate on a deduplicating term", () => {
     expect(result.canGenerate).toBe(false);
     expect(result.errors.output).toMatch(/needs you to receive the matched/);
     expect(result.errors.output).toMatch(/Who receives the matched results/);
-    // The remedy names only the actionable result-direction control, not the
-    // deduplicate checkbox, which is disabled while an invitation cannot carry the
-    // term.
-    expect(result.errors.output).not.toMatch(/Allow several of your records/);
-    expect(result.errors.keys).not.toMatch(/Enable at least one linkage key/);
+    // Both halves settle it, and both are live controls, so both are named.
+    expect(result.errors.output).toMatch(/Allow several of your records/);
+    // Against the output pair alone: the key list is not where this reports.
+    expect(result.errors.keys).toBeUndefined();
   });
 });
 

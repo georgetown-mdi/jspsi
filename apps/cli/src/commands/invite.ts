@@ -669,28 +669,6 @@ export async function validateInvite(params: {
     // which is always deduplicate: false). See assertDeduplicateImplemented.
     assertDeduplicateImplemented(configTerms);
 
-    // An invitation carries no deduplicating term at all, whatever the strategy,
-    // and that is a property of the ACCEPT path rather than of the setting:
-    // acceptance adopts the inviting party's `deduplicate` verbatim rather than
-    // mirroring it (deriveAcceptedLinkageTerms), so the accepted pair is
-    // both-sided and resolveLinkageCardinality refuses it before any matching.
-    // Refused here so the answer lands while the operator is still configuring,
-    // rather than after the token has been shared, the partner has accepted, and
-    // both ends have connected. The per-party path is untouched: two
-    // configurations each carrying their own value run a deduplicating exchange
-    // through `psilink exchange`, which prepareForExchange admits under cascade.
-    if (configTerms.deduplicate)
-      throw new UsageError(
-        "an invitation cannot carry a deduplicating term: accepting one " +
-          "adopts deduplicate: true for BOTH parties, and an exchange in which " +
-          "both parties deduplicate is refused before matching begins, so the " +
-          "invitation could not be run as offered. Run a deduplicating " +
-          "exchange from per-party configurations instead -- each party sets " +
-          "its own deduplicate in its own configuration file, one true and one " +
-          "false, and both run 'psilink exchange' -- or set deduplicate to " +
-          "false in this configuration to invite.",
-      );
-
     // Likewise fail closed pre-mint on a transform that fans one value out into
     // several match candidates under a strategy that matches one value per
     // record, where a splitting record contributes no key at all. Covers this

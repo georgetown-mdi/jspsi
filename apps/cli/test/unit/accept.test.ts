@@ -256,27 +256,26 @@ test("validateAccept: an invalid invitation is rejected before the prompt", asyn
   ).rejects.toBeInstanceOf(UsageError);
 });
 
-test("validateAccept: a deduplicating invitation is refused before the prompt or any connection", async () => {
-  // The hostile-flip guard at the CLI accept entry point. A deduplicating
-  // invitation is schema-valid, so it decodes cleanly -- but validateAccept derives
+test("validateAccept: a deduplicating invitation leaves this party one-to-one", async () => {
+  // The hostile-flip guard at the CLI accept entry point. validateAccept derives
   // the acceptor's own terms (deriveAcceptedLinkageTerms) ahead of reading the
-  // input, opening any connection, or prompting, so it refuses here whatever the
-  // inviter would go on to present at the terms exchange. Offline, which connects to
-  // nothing, so the rejection is provably before any connection.
+  // input, opening any connection, or prompting, and that derivation sets this
+  // party's own deduplicate rather than adopting the invitation's -- so what the
+  // inviter declares, or goes on to present at the terms exchange, cannot make
+  // this party the "many" side. What it does agree to is the invitation's own
+  // side, which the consent surface states.
   const base = sampleToken(new Date(Date.now() + 3_600_000).toISOString());
   const encoded = await encodeInvitation({
     ...base,
     linkageTerms: { ...base.linkageTerms, deduplicate: true },
   });
-  const rejected = validateAccept({
+  const ready = await validateAccept({
     resolved: { mode: "offline", invitation: encoded },
     options: testOptions(),
     log: silentLog,
   });
-  await expect(rejected).rejects.toBeInstanceOf(UsageError);
-  await expect(rejected).rejects.toThrow(
-    /deduplicating exchange cannot be accepted from an invitation/,
-  );
+  expect(ready.dataSpec.linkageTerms?.deduplicate).toBe(false);
+  expect(ready.token.linkageTerms.deduplicate).toBe(true);
 });
 
 test("validateAccept: online rejects a missing input file before the prompt, preserving its exit code", async () => {
