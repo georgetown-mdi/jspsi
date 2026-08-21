@@ -359,7 +359,10 @@ describe("managed exchange detail accounting of disclosures", () => {
     ).toBeNull();
   });
 
-  test("an exchange with no completed run says so, and offers no export", async () => {
+  test("an exchange with no completed run scopes the empty state to this browser's copy, and offers no export", async () => {
+    // A device that imported the exchange from a backup file holds no accounting
+    // -- the artifact does not carry one -- so an unqualified "it has disclosed
+    // nothing" would read there as the partnership's whole disclosure history.
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
@@ -374,8 +377,26 @@ describe("managed exchange detail accounting of disclosures", () => {
     );
 
     await expect
-      .element(page.getByText("it has disclosed nothing", { exact: false }))
+      .element(
+        page.getByText(
+          "No run of this exchange has completed in this browser, so this browser's copy of the accounting is empty.",
+          { exact: false },
+        ),
+      )
       .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          "an exchange imported from a backup file arrives without the accounting kept on the device it came from",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+    // The claim the copy must never make on its own: that the exchange itself
+    // disclosed nothing.
+    expect(
+      page.getByText("it has disclosed nothing", { exact: false }).query(),
+    ).toBeNull();
     expect(
       page.getByRole("button", { name: /Export this accounting/ }).query(),
     ).toBeNull();
@@ -422,6 +443,16 @@ describe("managed exchange detail accounting of disclosures", () => {
     await expect
       .element(page.getByRole("button", { name: /Export this accounting/ }))
       .toBeInTheDocument();
+    // The count states whose account it is, and the footer's export offer stands
+    // where the export button that honors it does.
+    await expect
+      .element(page.getByText("1 disclosure recorded in this browser."))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("Export it if you need to keep it", { exact: false }),
+      )
+      .toBeInTheDocument();
   });
 
   test("two disclosures sharing a createdAt open and close independently", async () => {
@@ -456,6 +487,10 @@ describe("managed exchange detail accounting of disclosures", () => {
         reinviteFailed: false,
       }),
     );
+
+    await expect
+      .element(page.getByText("2 disclosures recorded in this browser."))
+      .toBeInTheDocument();
 
     const firstToggle = page.getByRole("button", {
       name: "Riverbend Schools",
@@ -505,7 +540,9 @@ describe("managed exchange detail accounting of disclosures", () => {
       .toBeInTheDocument();
     // The empty-accounting copy would be a claim this read cannot support.
     expect(
-      page.getByText("it has disclosed nothing", { exact: false }).query(),
+      page
+        .getByText("copy of the accounting is empty", { exact: false })
+        .query(),
     ).toBeNull();
   });
 
@@ -542,9 +579,27 @@ describe("managed exchange detail accounting of disclosures", () => {
         page.getByText("finished unattended left none", { exact: false }),
       )
       .toBeInTheDocument();
-    // The export affordance is absent, so the copy cannot be pointing at one.
+    // The export affordance is absent, so no copy may point at one -- including
+    // the standing footer's offer, which would contradict the alert above it.
     expect(
       page.getByRole("button", { name: /Export this accounting/ }).query(),
     ).toBeNull();
+    expect(
+      page
+        .getByText("Export it if you need to keep it", { exact: false })
+        .query(),
+    ).toBeNull();
+    // The rest of the footer stands: a record file downloaded at a run's
+    // completion is still checkable, which is the only remedy this state has.
+    await expect
+      .element(
+        page.getByText("This accounting is kept in this browser", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("link", { name: "verify page" }))
+      .toBeInTheDocument();
   });
 });

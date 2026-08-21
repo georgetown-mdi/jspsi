@@ -408,8 +408,16 @@ function factRow(fact: DisclosureFact): ConfigRow {
  *
  * A failed read renders as its own state, never as an empty accounting: "nothing
  * was disclosed" is a claim, and this surface must not make it on a read it could
- * not perform. Each entry starts collapsed behind its date and partner, so a long
- * history stays scannable and the reader opens the run they came for.
+ * not perform. The footer drops its export offer in that state for the same
+ * reason it renders no export button there -- there is nothing to export from a
+ * read that failed. Each entry starts collapsed behind its date and partner, so a
+ * long history stays scannable and the reader opens the run they came for.
+ *
+ * Every count and empty state here speaks for THIS browser's copy and says so: the
+ * export/import artifact migrates the runnable exchange without its accounting
+ * (see {@link ../psi/managedExchangeStore.ts}), so a device that imported one
+ * starts an accounting of its own. An unqualified "this exchange has disclosed
+ * nothing" would read there as the partnership's whole disclosure history.
  */
 function DisclosureAccountingView({
   accounting,
@@ -451,15 +459,19 @@ function DisclosureAccountingView({
         </Alert>
       ) : entries.length === 0 ? (
         <p className={styles.small}>
-          No run of this exchange has completed, so it has disclosed nothing.
-          Each completed run will file its record here.
+          No run of this exchange has completed in this browser, so this
+          browser&apos;s copy of the accounting is empty. That is not
+          necessarily the exchange&apos;s whole history: an exchange imported
+          from a backup file arrives without the accounting kept on the device
+          it came from. Each run this browser completes will file its record
+          here.
         </p>
       ) : (
         <>
           <p className={`${styles.small} ${styles.sub}`}>
             {entries.length === 1
-              ? "1 disclosure recorded."
-              : `${entries.length} disclosures recorded.`}
+              ? "1 disclosure recorded in this browser."
+              : `${entries.length} disclosures recorded in this browser.`}
           </p>
           {entries.map((entry) => (
             <DisclosureSection
@@ -484,10 +496,15 @@ function DisclosureAccountingView({
       )}
       <p className={`${styles.small} ${styles.sub}`}>
         This accounting is kept in this browser and is deleted with the
-        exchange. Export it if you need to keep it, or hand an auditor a run
-        record file you downloaded when that run finished. To check a record
-        file you saved, open the <Link to="/verify">verify page</Link> and drop
-        it in.
+        exchange.{" "}
+        {!unreadable && (
+          <>
+            Export it if you need to keep it, or hand an auditor a run record
+            file you downloaded when that run finished.{" "}
+          </>
+        )}
+        To check a record file you saved, open the{" "}
+        <Link to="/verify">verify page</Link> and drop it in.
       </p>
     </div>
   );
