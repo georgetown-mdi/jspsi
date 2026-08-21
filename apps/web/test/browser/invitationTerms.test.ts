@@ -8,7 +8,7 @@ import { createElement } from "react";
 
 import {
   CONSENT_FACTS,
-  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
+  DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_DISCLOSURE_STATEMENT,
   UNRECOGNIZED_TRANSFORM_NOTE,
   sanitizeForDisplay,
@@ -2308,10 +2308,10 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
       "More than one of the inviting party's records",
     );
     expect(collapse.textContent).toContain(DEDUPLICATE_DISCLOSURE_STATEMENT);
-    // The refusal note keeps that level too: the disclosure this headline would
-    // make and the fact that accepting cannot produce the run making it are one
-    // reading, so neither may sit an expand away from the other.
-    expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPT_REFUSAL_NOTE);
+    // The direction note keeps that level too: the disclosure this headline makes
+    // and whose records are grouped to make it are one reading, so neither may sit
+    // an expand away from the other.
+    expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
   });
 
   // The other half of the cross-surface pin: core's consent classification names
@@ -2349,14 +2349,14 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
   test("a one-to-one invitation states no grouping disclosure at all", async () => {
     // Non-vacuous the other way: the sentences are the setting's doing rather than
     // a fixture of the screen, and a one-to-one exchange discloses no grouping to
-    // state and proposes no exchange that would be refused for one.
+    // state and groups neither party's records.
     renderCaveatTerms({ deduplicate: false });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).not.toContain(
       DEDUPLICATE_DISCLOSURE_STATEMENT,
     );
     expect(app.container.textContent).not.toContain(
-      DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
+      DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
     );
   });
 

@@ -9,7 +9,7 @@ import logLibrary from "loglevel";
 import YAML from "yaml";
 import {
   CONSENT_FACTS,
-  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
+  DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_DISCLOSURE_STATEMENT,
   encodeInvitation,
   getDefaultLinkageTerms,
@@ -2085,13 +2085,13 @@ test("displayInvitation: shows each matching rule the acceptor is consenting to"
   expect(out).toContain("    agreement valid through: 2027-12-31");
 });
 
-test("displayInvitation: a deduplicating term states what it discloses and that accepting will not run it", () => {
+test("displayInvitation: a deduplicating term states what it discloses and whose records pay it", () => {
   // The run honors deduplicate, so the line is a plain fact -- and a deduplicating
   // match discloses grouping a one-to-one match does not, which the acceptor is
   // consenting to. The statement is shared wording, printed under the headline it
-  // qualifies rather than one block away. The refusal note sits with it at the
-  // same level: accepting adopts the term for both parties, so the run whose cost
-  // the statement states is one this acceptance cannot produce.
+  // qualifies rather than one block away. The direction note sits with it at the
+  // same level: the setting is the inviting party's own, this party's own side
+  // being derived as false at accept.
   const log = getLogger("accept-display-deduplicate-test");
   log.setLevel("silent");
   const base = sampleToken(FUTURE());
@@ -2110,7 +2110,7 @@ test("displayInvitation: a deduplicating term states what it discloses and that 
   // reach it: their presence below is the setting's doing rather than the
   // fixture's.
   expect(oneToOne).not.toContain(DEDUPLICATE_DISCLOSURE_STATEMENT);
-  expect(oneToOne).not.toContain(DEDUPLICATE_ACCEPT_REFUSAL_NOTE);
+  expect(oneToOne).not.toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
 
   const deduplicating = render({ deduplicate: true });
   expect(deduplicating).toContain(
@@ -2119,9 +2119,9 @@ test("displayInvitation: a deduplicating term states what it discloses and that 
   );
   expect(deduplicating).toContain(`    ${DEDUPLICATE_DISCLOSURE_STATEMENT}`);
   // Same indent as the statement it follows, so the acceptor reads what the
-  // setting would disclose and that this exchange will not perform it in one
-  // place rather than a screen apart.
-  expect(deduplicating).toContain(`    ${DEDUPLICATE_ACCEPT_REFUSAL_NOTE}`);
+  // setting discloses and whose file is grouped to disclose it in one place
+  // rather than a screen apart.
+  expect(deduplicating).toContain(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
 });
 
 test("displayInvitation: the retain line is printed at both decision blocks, and only where retention is disclosed", () => {

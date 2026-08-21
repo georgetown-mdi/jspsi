@@ -16,7 +16,7 @@
 
 import { parseLinkageTerms } from "./config/linkageTerms.js";
 import {
-  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
+  DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_DISCLOSURE_STATEMENT,
 } from "./consentFacts.js";
 
@@ -76,9 +76,9 @@ export interface ConsentRelevantTerm {
    *
    * A list rather than one string, because what an acceptor is entitled to read
    * about one setting can be more than one sentence: the disclosure a setting
-   * makes and whether the exchange it proposes will run at all are separate
-   * facts, and a surface holding only the first would state a cost for a run
-   * that does not happen. Every entry is held to the same present-for-variant,
+   * makes and which party's records pay it are separate facts, and a surface
+   * holding only the first leaves a reader unable to tell whose file the cost
+   * lands on. Every entry is held to the same present-for-variant,
    * absent-for-base rule.
    */
   requiredVariantCopy?: ReadonlyArray<string>;
@@ -350,7 +350,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       "how many of the inviter's records group onto it and which rows they are.",
     requiredVariantCopy: [
       DEDUPLICATE_DISCLOSURE_STATEMENT,
-      DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
+      DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
     ],
     vary: (terms) =>
       edited(terms, (draft) => {

@@ -511,37 +511,37 @@ export const DEDUPLICATE_DISCLOSURE_STATEMENT =
   "own declaration, which psilink does not check against its data.";
 
 /**
- * The refusal note a surface renders beside
+ * The direction note a surface renders beside
  * {@link DEDUPLICATE_DISCLOSURE_STATEMENT}, for the same deduplicating
- * invitation: accepting one cannot produce a runnable exchange, so the grouping
- * disclosure the statement describes belongs to a run that does not happen.
+ * invitation: which party the setting the statement describes belongs to, and
+ * which it does not.
  *
- * The ground is a hard refusal, not the setting. Acceptance REFUSES a
- * deduplicating invitation (`deriveAcceptedLinkageTerms` throws), before any
- * derived terms are built or any connection is opened, because the term is
- * per-party and adopting it would leave the acceptor disclosing its record
- * grouping on a run a hostile inviter can flip out from under it. That is why the
- * note is not a proposed-but-not-applied marker: the setting is not applied to a
- * run at all -- accepting it is refused. A deduplicating exchange runs from two
- * separately authored configurations, where each party's own `deduplicate` is its
- * own, so the note names that as the way through rather than calling the
- * capability unbuilt. This note is the operator-facing pre-consent warning a
- * surface renders from the DECODED invitation's own terms, ahead of the accept
- * refusal that enforces it.
+ * The two are separate facts and a reader is entitled to both. The statement says
+ * what a deduplicating match discloses; this says whose records are grouped to
+ * disclose it. Accepting does NOT turn the setting on for the accepting party:
+ * `deriveAcceptedLinkageTerms` derives that party's own `deduplicate` as false
+ * rather than adopting the invitation's, so the agreed pair is one-sided by
+ * construction and no invitation can widen what the accepting party's own records
+ * disclose. Without this note a reader meeting a headline about grouping, and a
+ * statement about what grouping discloses, would have no way to tell whether
+ * their own file is the one being grouped.
+ *
+ * It names the way to the other direction rather than leaving it unsaid, because
+ * the invitation path offers no control for it: each party's own `deduplicate`
+ * comes from its own configuration file, and the two run `psilink exchange`.
  *
  * Rendered at the same visibility level as the statement it follows, by the
  * placement rule both surfaces hold: a reader who meets what a deduplicating
- * match would disclose meets, in the same place, that this exchange will not
- * perform it.
+ * match discloses meets, in the same place, which side pays it.
  *
  * Fixed first-party copy naming no value, so a surface may render it verbatim.
  */
-export const DEDUPLICATE_ACCEPT_REFUSAL_NOTE =
-  "Accepting adopts this setting for both parties, and an exchange in which " +
-  "both parties deduplicate is refused before any matching, so this exchange " +
-  "does not run as proposed. Ask the inviting party for an invitation without " +
-  "deduplication, or agree to run the exchange from each party's own " +
-  "configuration file, where only one of you deduplicates.";
+export const DEDUPLICATE_ACCEPTOR_SIDE_NOTE =
+  "Accepting turns this on for the inviting party alone: the accepting party's " +
+  "own records are not grouped, so several of its own rows naming one " +
+  "individual stay separate here. Grouping the accepting party's records " +
+  "instead is set up from each party's own configuration file, where each " +
+  "party declares its own side.";
 
 /**
  * The caveat copy for a term an inviter may declare that today's exchange does

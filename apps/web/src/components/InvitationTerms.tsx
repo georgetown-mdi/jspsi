@@ -17,7 +17,7 @@ import { useReducedMotion } from "@mantine/hooks";
 import {
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
-  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
+  DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_DISCLOSURE_STATEMENT,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
@@ -427,12 +427,12 @@ function CondensableDetails({
  * disclosed would have to sit always-visible in the core instead, which is where
  * the count-only tier below sits. What each sentence SAYS is fixed copy read from
  * `PROPOSED_NOT_APPLIED_NOTES`, `DEDUPLICATE_DISCLOSURE_STATEMENT`, and
- * `DEDUPLICATE_ACCEPT_REFUSAL_NOTE` in `@psilink/core`, which the CLI accept
+ * `DEDUPLICATE_ACCEPTOR_SIDE_NOTE` in `@psilink/core`, which the CLI accept
  * prompt renders too, so no partner text enters one and neither surface can
  * restate it. Deduplicate takes two of them: what the setting discloses, and
- * that accepting cannot produce the run that would disclose it (acceptance
- * adopts the term, and the both-sided pair is refused before matching). Render
- * tests pin each at its headline's level against the accessibility tree.
+ * whose records are grouped to disclose it -- the inviting party's alone, since
+ * acceptance derives the accepting party's own side as false. Render tests pin
+ * each at its headline's level against the accessibility tree.
  *
  * The same placement rule governs the count-only facts: what the run itself holds,
  * what its rounds disclose beside the count, and the bound a partner's choice of
@@ -1616,19 +1616,18 @@ export function InvitationTerms({
                     : "Each of the inviting party's records matches at most one of the accepting party's records."}
                 </Text>
                 {/* What a deduplicating match reveals that a one-to-one one does
-                not, and then that accepting cannot produce such a match at all --
-                core refuses a deduplicating invitation at accept
-                (deriveAcceptedLinkageTerms), before deriving terms or connecting,
-                so this consent screen's note is the pre-consent warning that
-                refusal enforces. Both are the shared wording the CLI accept
-                prompt uses beneath its own copy of this headline. By the
-                placement rule on {@link InvitationTerms} they sit at the
+                not, and then whose records are grouped to reveal it -- the
+                inviting party's alone, since acceptance derives the accepting
+                party's own side as false (deriveAcceptedLinkageTerms) rather
+                than adopting the invitation's. Both are the shared wording the
+                CLI accept prompt uses beneath its own copy of this headline. By
+                the placement rule on {@link InvitationTerms} they sit at the
                 visibility level of the headline they qualify, which is here -- so
                 a reader who expands "Other details" to find that several of the
                 inviting party's records may match one of theirs meets what that
-                costs, and that this exchange will not pay it, in the same place.
-                Rendered for exactly a deduplicating invitation: a one-to-one
-                exchange discloses no grouping and proposes no refused pair, so
+                costs, and whose file pays it, in the same place. Rendered for
+                exactly a deduplicating invitation: a one-to-one exchange
+                discloses no grouping and groups neither party's records, so
                 either sentence would name something that does not happen. */}
                 {summary.deduplicate && (
                   <>
@@ -1636,7 +1635,7 @@ export function InvitationTerms({
                       {DEDUPLICATE_DISCLOSURE_STATEMENT}
                     </Text>
                     <Text size="xs" c="dimmed">
-                      {DEDUPLICATE_ACCEPT_REFUSAL_NOTE}
+                      {DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
                     </Text>
                   </>
                 )}

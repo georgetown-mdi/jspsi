@@ -4,7 +4,7 @@ import {
   CONSENT_BASIS_MARKERS,
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
-  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
+  DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_DISCLOSURE_STATEMENT,
   PROPOSED_NOT_APPLIED_NOTES,
   redactAndSanitizeForDisplay,
@@ -458,8 +458,8 @@ export function logDecisionFacts(
  * the run does not perform. A term the run does apply that widens what is
  * disclosed carries the shared statement of what it costs instead: the count-only
  * tier for `psi-c`, and the grouping disclosure for `deduplicate`, which carries
- * with it the note that accepting cannot produce the run that would pay that
- * cost -- acceptance adopts the term, and the both-sided pair is refused.
+ * with it the note of whose records are grouped to pay it -- the inviting party's
+ * alone, acceptance deriving this party's own side as false.
  *
  * `ownOutboundSend` is the columns THIS party will disclose to the partner for
  * matched records -- its own outbound disclosure, the hardest-to-undo fact it
@@ -564,13 +564,13 @@ export function displayInvitation(params: {
   // the headline it qualifies -- the same shared wording the web consent screen
   // renders with its own copy of that headline. Printed for exactly a
   // deduplicating invitation: a one-to-one exchange discloses no grouping at all,
-  // so the sentence would name a disclosure that does not happen. The refusal
-  // note follows it at the same level and for the same invitation: accepting a
-  // deduplicating invitation cannot produce a runnable exchange -- core refuses it
-  // at accept (deriveAcceptedLinkageTerms), before deriving terms or connecting.
+  // so the sentence would name a disclosure that does not happen. The direction
+  // note follows it at the same level and for the same invitation: the setting is
+  // the inviting party's own, since acceptance derives this party's side as false
+  // (deriveAcceptedLinkageTerms) rather than adopting the invitation's.
   if (summary.deduplicate) {
     emit(`    ${DEDUPLICATE_DISCLOSURE_STATEMENT}`);
-    emit(`    ${DEDUPLICATE_ACCEPT_REFUSAL_NOTE}`);
+    emit(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
   }
 
   // Value-level matching multiplicity, stated beside the record-level line above
