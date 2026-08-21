@@ -44,9 +44,10 @@ export interface DisclosureFact {
 
 /** One completed run's disclosure, as the accounting presents it. */
 export interface DisclosureEntryView {
-  /** The run's own instant, from the record's `createdAt`: the value the export's
-   * first column carries. Not the entry's identity -- {@link bindingNonce} is,
-   * since two runs can share a millisecond instant. */
+  /** The run's own instant, verbatim from the record's `createdAt`: the ISO-8601
+   * value, not the minute-resolution {@link when} the screen shows and the export's
+   * first column carries. Not the entry's identity either -- {@link bindingNonce}
+   * is, since two runs can share a millisecond instant. */
   at: string;
   /** The record's own per-run identity (see `appendDisclosureRecord` in
    * disclosureAccounting.ts): CSPRNG-generated and unique within this holder's
@@ -65,8 +66,8 @@ export interface DisclosureEntryView {
 /** The MIME type of the exported accounting. */
 export const DISCLOSURE_EXPORT_MIME = "text/csv";
 
-/** The export's first column: the run instant, which is the entry's identity
- * rather than one of its facts. */
+/** The export's first column: the run instant, which names the row rather than
+ * being one of its facts. */
 export const DISCLOSED_AT_LABEL = "Disclosed at";
 
 /**
@@ -266,8 +267,8 @@ function factCell(entry: DisclosureFact): string {
  * reads), each row the run instant followed by that run's facts. The values are
  * the display forms, so what the file carries is what the screen showed.
  *
- * An accounting with no entries still exports its header row: "this exchange
- * disclosed nothing" is a meaningful answer, and a zero-byte file is not.
+ * An accounting with no entries still exports its header row: "this copy of the
+ * accounting holds nothing" is a meaningful answer, and a zero-byte file is not.
  */
 export function disclosureAccountingCsv(
   accounting: DisclosureAccounting,
