@@ -113,14 +113,6 @@ describe("deriveReceiptBinder", () => {
 // --- Sign / verify -----------------------------------------------------------
 
 describe("signReceiptContent / verifyReceiptSignature", () => {
-  test("a signature verifies against the same content, certificate, and role", async () => {
-    const c = content();
-    const sig = await signReceiptContent(identityA, c, "initiator");
-    expect(
-      await verifyReceiptSignature(identityA.certificate, c, sig, "initiator"),
-    ).toBe(true);
-  });
-
   test("ECDSA signatures are randomized: two signings differ and both verify", async () => {
     // The receipt format therefore cannot pin a signature as a known answer;
     // what reproduces across implementations is the signed bytes, so a fixed
