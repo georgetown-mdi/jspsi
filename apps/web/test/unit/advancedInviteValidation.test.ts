@@ -213,9 +213,11 @@ describe("the invitation gate on a deduplicating term", () => {
     );
     expect(result.canGenerate).toBe(false);
     expect(result.errors.output).toMatch(/needs you to receive the matched/);
-    expect(result.errors.output).toMatch(
-      /Who receives the matched results|Allow several of your records/,
-    );
+    expect(result.errors.output).toMatch(/Who receives the matched results/);
+    // The remedy names only the actionable result-direction control, not the
+    // deduplicate checkbox, which is disabled while an invitation cannot carry the
+    // term.
+    expect(result.errors.output).not.toMatch(/Allow several of your records/);
     expect(result.errors.keys).not.toMatch(/Enable at least one linkage key/);
   });
 });

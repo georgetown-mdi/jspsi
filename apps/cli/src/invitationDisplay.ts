@@ -565,9 +565,9 @@ export function displayInvitation(params: {
   // renders with its own copy of that headline. Printed for exactly a
   // deduplicating invitation: a one-to-one exchange discloses no grouping at all,
   // so the sentence would name a disclosure that does not happen. The refusal
-  // note follows it at the same level and for the same invitation, because the
-  // run whose cost the statement describes is one accepting cannot produce: the
-  // adopted setting resolves to the both-sided pair, refused before matching.
+  // note follows it at the same level and for the same invitation: accepting a
+  // deduplicating invitation cannot produce a runnable exchange -- core refuses it
+  // at accept (deriveAcceptedLinkageTerms), before deriving terms or connecting.
   if (summary.deduplicate) {
     emit(`    ${DEDUPLICATE_DISCLOSURE_STATEMENT}`);
     emit(`    ${DEDUPLICATE_ACCEPT_REFUSAL_NOTE}`);

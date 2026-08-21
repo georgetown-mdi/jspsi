@@ -516,15 +516,18 @@ export const DEDUPLICATE_DISCLOSURE_STATEMENT =
  * invitation: accepting one cannot produce a runnable exchange, so the grouping
  * disclosure the statement describes belongs to a run that does not happen.
  *
- * The ground is the adoption rule, not the setting. Acceptance takes the
- * inviting party's `deduplicate` verbatim rather than mirroring it
- * (`deriveAcceptedLinkageTerms`), so a deduplicating invitation resolves to the
- * both-sided pair, which is refused before any matching (`resolveLinkageCardinality`).
- * That is why the note is not a proposed-but-not-applied marker: the setting IS
- * applied, and what fails is the pair the accept path builds from it. A
- * deduplicating exchange runs from two separately authored configurations, where
- * each party's own `deduplicate` is its own, so the note names that as the way
- * through rather than calling the capability unbuilt.
+ * The ground is a hard refusal, not the setting. Acceptance REFUSES a
+ * deduplicating invitation (`deriveAcceptedLinkageTerms` throws), before any
+ * derived terms are built or any connection is opened, because the term is
+ * per-party and adopting it would leave the acceptor disclosing its record
+ * grouping on a run a hostile inviter can flip out from under it. That is why the
+ * note is not a proposed-but-not-applied marker: the setting is not applied to a
+ * run at all -- accepting it is refused. A deduplicating exchange runs from two
+ * separately authored configurations, where each party's own `deduplicate` is its
+ * own, so the note names that as the way through rather than calling the
+ * capability unbuilt. This note is the operator-facing pre-consent warning a
+ * surface renders from the DECODED invitation's own terms, ahead of the accept
+ * refusal that enforces it.
  *
  * Rendered at the same visibility level as the statement it follows, by the
  * placement rule both surfaces hold: a reader who meets what a deduplicating

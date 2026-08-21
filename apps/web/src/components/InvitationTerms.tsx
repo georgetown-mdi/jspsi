@@ -1617,10 +1617,11 @@ export function InvitationTerms({
                 </Text>
                 {/* What a deduplicating match reveals that a one-to-one one does
                 not, and then that accepting cannot produce such a match at all --
-                acceptance adopts the inviting party's setting rather than
-                mirroring it, so the accepted pair is both-sided and is refused
-                before any matching. Both are the shared wording the CLI accept
-                prompt prints beneath its own copy of this headline. By the
+                core refuses a deduplicating invitation at accept
+                (deriveAcceptedLinkageTerms), before deriving terms or connecting,
+                so this consent screen's note is the pre-consent warning that
+                refusal enforces. Both are the shared wording the CLI accept
+                prompt uses beneath its own copy of this headline. By the
                 placement rule on {@link InvitationTerms} they sit at the
                 visibility level of the headline they qualify, which is here -- so
                 a reader who expands "Other details" to find that several of the

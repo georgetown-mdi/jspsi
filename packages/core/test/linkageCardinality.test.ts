@@ -146,20 +146,30 @@ test("resolution is symmetric, so both parties derive the same verdict", () => {
   }
 });
 
-test("an accepted deduplicating invitation adopts the term, so its pair is refused", () => {
-  // A known limitation, encoded rather than left to prose: acceptance MIRRORS the
-  // output direction but adopts `deduplicate` verbatim, and the term is per-party
-  // -- so an acceptor of a deduplicating invitation declares the same of its OWN
-  // inputs and the agreed pair resolves to many-to-many. A deduplicating exchange
-  // is reachable from two separately authored configurations rather than through
-  // invite-and-accept. Closing that changes what the acceptor consents to, and
-  // this fails when it is closed.
+test("a deduplicating invitation is refused at accept, before any exchange (hostile flip closed)", () => {
+  // Acceptance REFUSES a deduplicating invitation rather than adopting the term.
+  // `deduplicate` is per-party with no cross-party binding, so adopting the
+  // inviter's value would let a hostile inviter carry `true`, have the acceptor
+  // disclose its record grouping as the "many" side, then present `false` at the
+  // terms exchange so the run proceeds. The refusal fires at derive time, before
+  // any connection or terms exchange and whatever the inviter would later present,
+  // so the acceptor never reaches resolveLinkageCardinality at all.
   const inviter = cardinalityTerms(true);
-  const acceptor = deriveAcceptedLinkageTerms(inviter, "Acceptor");
-  expect(acceptor.deduplicate).toBe(true);
-  expect(() => resolveLinkageCardinality(inviter, acceptor)).toThrow(
-    /many-to-many/,
+  let thrown: unknown;
+  try {
+    deriveAcceptedLinkageTerms(inviter, "Acceptor");
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  expect((thrown as Error).message).toMatch(
+    /deduplicating exchange cannot be accepted from an invitation/,
   );
+  // The refusal is specific to the deduplicating term: a non-deduplicating
+  // invitation still derives cleanly.
+  expect(() =>
+    deriveAcceptedLinkageTerms(cardinalityTerms(false), "Acceptor"),
+  ).not.toThrow();
 });
 
 test("assertDeduplicateImplemented refuses only the strategy that cannot match", () => {

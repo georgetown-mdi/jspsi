@@ -154,12 +154,12 @@ const DEDUPLICATE_STRATEGY_MESSAGE =
  * Not {@link APPLIED_SETTINGS}.deduplicate, which answers a different question
  * and answers it `true`: the exchange does apply the setting, and a
  * configuration that carries it runs a deduplicating match. What an invitation
- * cannot do is deliver it to a runnable exchange. Acceptance adopts the inviting
- * party's `deduplicate` verbatim rather than mirroring it
- * (`deriveAcceptedLinkageTerms` in core), so every deduplicating invitation
- * resolves to the both-sided pair, which is refused before any matching -- the
- * partner would meet the refusal after accepting and connecting, having consented
- * to a run that cannot happen.
+ * cannot do is deliver it to a runnable exchange. Acceptance REFUSES a
+ * deduplicating invitation (`deriveAcceptedLinkageTerms` in core throws), at
+ * accept time before any connection, because the term is per-party and adopting it
+ * would leave the acceptor disclosing its record grouping on a run a hostile
+ * inviter can flip. So an invitation is the wrong carrier for the term whether the
+ * partner accepts it or not.
  *
  * So the setting is held back at this editor's three doors while this is false:
  * the control is disabled, an import carrying it is refused, and the Generate
@@ -511,13 +511,16 @@ function messageForField(field: AdvancedField): string {
     case "output":
       // The one rule that reports against the output pair: a party that receives
       // no matched results has nothing to deduplicate its own records onto. Name
-      // that obstacle and both controls that settle it, rather than the pair the
-      // issue path points at, which is not the half the operator chose.
+      // that obstacle and the actionable result-direction control that settles it,
+      // rather than the pair the issue path points at, which is not the half the
+      // operator chose. The deduplicate checkbox the other half once named is
+      // disabled while an invitation cannot carry the term
+      // ({@link INVITATION_CARRIES_DEDUPLICATE}), so pointing at it is not an
+      // actionable remedy here.
       return (
         "Deduplicating your own records needs you to receive the matched " +
         'results. Under "Who receives the matched results", choose an option ' +
-        'that includes you, or clear "Allow several of your records to match ' +
-        'one partner record".'
+        "that includes you."
       );
     case "payload":
       // The common payload error (sending while only you receive) is set with its

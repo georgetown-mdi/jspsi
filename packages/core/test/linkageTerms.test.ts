@@ -27,6 +27,7 @@ import {
   sanitizeForDisplay,
 } from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
+import { UsageError } from "../src/errors";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
 import {
   MAX_NODE_COUNT,
@@ -2733,20 +2734,37 @@ test("a verbatim copy of one-sided inviter output would FAIL the mirror (why mir
   ).toBeGreaterThan(0);
 });
 
-test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (deduplicate)", () => {
-  // An inviter that is the sole receiver may validly carry deduplicate: true
-  // (deduplicate requires expectsOutput, which the inviter has). The acceptor
-  // mirrors to expectsOutput: false, where deduplicate: true is forbidden -- so the
-  // derivation must throw rather than produce an invalid, never-re-validated config.
-  const inviterTerms: LinkageTerms = {
-    ...inviterBase,
-    deduplicate: true,
+test.each([
+  {
+    direction: "both-receive",
+    output: { expectsOutput: true, shareWithPartner: true },
+  },
+  {
+    direction: "sole-receiver",
     output: { expectsOutput: true, shareWithPartner: false },
-  };
-  expect(() =>
-    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
-  ).toThrow(/cannot be accepted unchanged/);
-});
+  },
+])(
+  "deriveAcceptedLinkageTerms refuses a deduplicating invitation ($direction), before the mirror",
+  ({ output }) => {
+    // A deduplicating invitation is refused for the deduplicate term itself, not the
+    // mirror, whatever the inviter's output shape. (A sole-receiver inviter would
+    // also mirror to an incoherent expectsOutput: false, but the deduplicate refusal
+    // fires first, so both shapes meet the same message.) The term is per-party with
+    // no cross-party binding, so adopting it would leave the acceptor disclosing its
+    // grouping on a run a hostile inviter can flip out from under it.
+    const inviterTerms: LinkageTerms = {
+      ...inviterBase,
+      deduplicate: true,
+      output,
+    };
+    expect(() =>
+      deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
+    ).toThrow(UsageError);
+    expect(() =>
+      deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
+    ).toThrow(/deduplicating exchange cannot be accepted from an invitation/);
+  },
+);
 
 test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (payload.send to a non-receiving partner)", () => {
   // Same shape via payload, but through the MIRROR: an inviter that is the sole
@@ -2843,19 +2861,6 @@ test("deriveAcceptedLinkageTerms accepts a sole-receiver inviter that REQUESTS p
   expect(derived.payload?.receive).toBeUndefined();
   expect(validateCompatibility(inviterTerms, derived).errors).toEqual([]);
   expect(validateCompatibility(derived, inviterTerms).errors).toEqual([]);
-});
-
-test("deriveAcceptedLinkageTerms accepts a coherent deduplicate config (no false positive)", () => {
-  // deduplicate: true with both-receive mirrors to an acceptor that also receives,
-  // so deduplicate stays valid -- the fail-closed gate must NOT reject it.
-  const inviterTerms: LinkageTerms = {
-    ...inviterBase,
-    deduplicate: true,
-    output: { expectsOutput: true, shareWithPartner: true },
-  };
-  expect(() =>
-    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
-  ).not.toThrow();
 });
 
 describe("referencedLinkageFieldNames", () => {
