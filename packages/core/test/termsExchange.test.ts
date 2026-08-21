@@ -580,16 +580,18 @@ test("a throwing protocolVersion getter degrades to no readable version", () => 
   expect(probeProtocolVersion(frame)).toBeUndefined();
 });
 
-test("initiator fails fast (and sends an abort) on every unreadable-version message 2", async () => {
+test("initiator fails fast (and sends an abort) on message 2 versions it cannot read or reconcile", async () => {
   // The initiator-side legs of the refusal symmetry the spec states across both
-  // message paths and both directions (docs/spec/PROTOCOL.md): the three frame
-  // shapes that carry no readable version -- a non-object frame, an explicit null,
-  // and a `protocolVersion` read that throws -- are refused on message 2 exactly as
-  // message 1 refuses them, and the initiator still SENDS its abort (message 3)
-  // rather than stranding the responder on its receive timeout. The throwing getter
-  // survives only because the in-process pipe passes the frame by reference; a real
-  // transport's deserialized wire data cannot carry that shape.
-  const unreadableVersionFrames: Array<[string, unknown]> = [
+  // message paths and both directions (docs/spec/PROTOCOL.md): two of these frame
+  // shapes -- a non-object frame and a `protocolVersion` read that throws -- carry no
+  // readable version and probe to `undefined`; the third, an explicit null, probes to
+  // `null`, a PRESENT-but-garbled value (see the responder-side case above). All
+  // three are refused on message 2 by the same reconcile with the same fixed
+  // reason, exactly as message 1 refuses them, and the initiator still SENDS its
+  // abort (message 3) rather than stranding the responder on its receive timeout.
+  // The throwing getter survives only because the in-process pipe passes the frame
+  // by reference; a real transport's deserialized wire data cannot carry that shape.
+  const refusedVersionFrames: Array<[string, unknown]> = [
     ["non-object frame", "not an object"],
     [
       "explicit null version",
@@ -614,7 +616,7 @@ test("initiator fails fast (and sends an abort) on every unreadable-version mess
       },
     ],
   ];
-  for (const [shape, frame] of unreadableVersionFrames) {
+  for (const [shape, frame] of refusedVersionFrames) {
     const [connA, connB] = makeConnections();
     const initiator = exchangeTerms(connA, "initiator", termsA, 100);
     await connB.receive(); // msg 1: initiator's terms
