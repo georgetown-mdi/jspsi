@@ -6,9 +6,12 @@ import {
   type MessageConnection,
 } from "./connection/messageConnection";
 import {
+  MAX_SINGLE_PASS_CELLS,
   partyFansOut,
-  singlePassExchangeExceedsCap,
+  singlePassCeilingBreach,
   singlePassReplyByteCap,
+  valueSlots,
+  type SinglePassCeilingBreach,
   type SinglePassPartySize,
 } from "./connection/frameSize";
 import { MAX_KEY_CANDIDATES_PER_ROW } from "./fanOutFunctions";
@@ -478,40 +481,98 @@ export async function linkViaCountOnlyPSI(
   return receiveCountReport(conn, maxCount);
 }
 
-// Actionable guidance for a dataset that exceeds the single-pass ceiling,
-// identical on both parties and across transports. Deliberately does NOT
-// recommend cascade: linkage_strategy is a mandatory-consistency agreed term that
-// cannot change unilaterally mid-exchange (re-agreeing on cascade is an
-// out-of-band step), so pointing at it here would be misleading. The cap is on
-// each party's value slot count effectiveKeyCount * recordCount; reducing either
-// factor, or splitting the dataset, is the actionable remedy, and removing a
-// fan-out is another when either party declares one. See
-// docs/spec/PROTOCOL.md (the single-pass dataset ceiling).
+// Actionable guidance for an exchange that exceeds the single-pass ceiling.
+// Deliberately does NOT recommend cascade: linkage_strategy is a
+// mandatory-consistency agreed term that cannot change unilaterally mid-exchange
+// (re-agreeing on cascade is an out-of-band step), so pointing at it here would be
+// misleading. See docs/spec/PROTOCOL.md (the single-pass dataset ceiling).
 //
-// Every remedy it names is a configuration one of the two operators can change,
-// so both of its raise sites are a UsageError (CLI exit 64) rather than a
-// transport or internal fault -- the same class as the width refusals below. It
-// interpolates the agreed key count and the two record counts and nothing else,
-// all of them authenticated session state.
+// The ceiling is a PER-PARTY budget on the value slot count effectiveKeyCount *
+// recordCount, so the guidance is oriented to the party it is shown to: it states
+// the products the gate actually weighed, names which side's declared size reached
+// the budget, and offers each side's remedies to the side that can apply them --
+// the two parties reach mirrored verdicts (singlePassCeilingBreach), so the abort
+// stays symmetric while neither operator is sent to a configuration that cannot
+// move it. Reducing either factor, or splitting the dataset, is the actionable
+// remedy on a breaching side, and removing a fan-out is another when that side
+// declares one.
+//
+// Every remedy it names is a configuration one of the two operators can change, so
+// its raise site is a UsageError (CLI exit 64) rather than a transport or internal
+// fault -- the same class as the width refusals below. It interpolates the two
+// parties' declared effective key counts, their record counts, and the value slot
+// products of those, all of them authenticated session state, and no
+// partner-authored text.
 function singlePassOverCapMessage(
   id: string,
   numLinkageKeys: number,
-  sender: SinglePassPartySize,
-  receiver: SinglePassPartySize,
+  breach: SinglePassCeilingBreach,
+  local: SinglePassPartySize,
+  partner: SinglePassPartySize,
 ): string {
-  const fansOut =
-    partyFansOut(numLinkageKeys, sender) ||
-    partyFansOut(numLinkageKeys, receiver);
+  const declared = (who: string, party: SinglePassPartySize): string =>
+    `${who} declared ${party.effectiveKeyCount} effective linkage key(s) ` +
+    `across ${party.recordCount} record(s), which is ${valueSlots(party)} ` +
+    "value slot(s)";
+  const fanOutRemedy = (whose: string): string =>
+    ` A linkage key that fans out counts as ${MAX_KEY_CANDIDATES_PER_ROW} ` +
+    `toward that ceiling, so removing ${whose} fan-out is another remedy.`;
+
+  const cause =
+    breach === "local"
+      ? declared("this party", local)
+      : breach === "partner"
+        ? declared("the partner", partner)
+        : `${declared("this party", local)}, and ${declared("the partner", partner)}`;
+
+  const remedies: string[] = [];
+  if (breach !== "partner")
+    remedies.push(
+      "Reduce the number of linkage keys or the record count, or split the " +
+        "dataset into smaller batches." +
+        (partyFansOut(numLinkageKeys, local) ? fanOutRemedy("a") : ""),
+    );
+  if (breach !== "local")
+    remedies.push(
+      (breach === "both"
+        ? "The partner reduces its record count or splits its dataset on its " +
+          "side too."
+        : `This party's own ${valueSlots(local)} value slot(s) are within the ` +
+          "ceiling, so within the agreed terms neither its linkage keys nor " +
+          "its record count can lift this: the partner reduces its record " +
+          "count or splits its dataset.") +
+        (partyFansOut(numLinkageKeys, partner)
+          ? fanOutRemedy("the partner's")
+          : ""),
+    );
+
   return (
-    `${id}: single-pass cannot carry this dataset: ${numLinkageKeys} linkage ` +
-    `key(s) with ${sender.recordCount} sender and ${receiver.recordCount} ` +
-    "receiver record(s) exceed the single-pass ceiling. Reduce the number of " +
-    "linkage keys or the record count, or split the dataset into smaller " +
-    "batches." +
-    (fansOut
-      ? ` A linkage key that fans out counts as ${MAX_KEY_CANDIDATES_PER_ROW} ` +
-        "toward that ceiling, so removing a fan-out is another remedy."
-      : "")
+    `${id}: single-pass cannot carry this ` +
+    `${breach === "local" ? "dataset" : "exchange"}: ${cause}, above the ` +
+    `single-pass ceiling of ${MAX_SINGLE_PASS_CELLS} value slot(s) per party. ` +
+    remedies.join(" ")
+  );
+}
+
+// The diagnosis for the send-time reply-cap backstop below, which is NOT an
+// over-ceiling condition: the ceiling gate has already passed there, so both
+// parties' declared sizes are within the budget and no dataset either operator
+// controls is what stopped the send. Reaching it means the built reply outgrew the
+// cap both parties derive from those same declared sizes -- an inconsistency
+// between this party's reply builder and that derivation -- so it names the two
+// byte counts and withholds the dataset remedies, which cannot move it.
+function singlePassReplyOverCapMessage(
+  id: string,
+  replyBytes: number,
+  replyCap: number,
+): string {
+  return (
+    `${id}: single-pass built a reply of ${replyBytes} byte(s), above the ` +
+    `${replyCap} byte(s) both parties derive from their declared sizes. Both ` +
+    "parties' declared widths and record counts are within the single-pass " +
+    "ceiling, so this is an inconsistency between this party's reply builder " +
+    "and the shared cap derivation rather than a dataset that is too large. " +
+    "The exchange cannot proceed; report it with this message."
   );
 }
 
@@ -727,16 +788,21 @@ export async function linkViaSinglePassPSI(
   // identically from the exchanged counts and effective key counts, BEFORE
   // exchanging any single-pass frame, so an over-cap exchange aborts on both
   // sides in lockstep -- neither sends nor waits, so neither hangs to the
-  // inactivity timeout. The guidance is identical across parties and transports
-  // and does not recommend cascade. The prepareForExchange pre-flight is the
-  // coarse one-party shadow of this; this is the precise two-party check.
-  if (singlePassExchangeExceedsCap(senderSize, receiverSize)) {
+  // inactivity timeout. The verdict is on the per-party budget, so the two
+  // parties' breach labels mirror each other (a "partner" breach here is a
+  // "local" one over there) while the abort decision itself is the same on both;
+  // the guidance that carries it is oriented to this party and does not recommend
+  // cascade. The prepareForExchange pre-flight is the coarse one-party shadow of
+  // this; this is the precise two-party check.
+  const ceilingBreach = singlePassCeilingBreach(localSize, partnerSize);
+  if (ceilingBreach !== undefined) {
     throw new UsageError(
       singlePassOverCapMessage(
         participant.id,
         numLinkageKeys,
-        senderSize,
-        receiverSize,
+        ceilingBreach,
+        localSize,
+        partnerSize,
       ),
     );
   }
@@ -774,8 +840,9 @@ export async function linkViaSinglePassPSI(
     // over-ceiling gate above already aborted the common case from the counts
     // alone; this is the defensive backstop, since the derived cap upper-bounds
     // any legitimate reply, it fires only on a pathological build (an
-    // unexpectedly large serialized element). Same actionable guidance, no
-    // cascade.
+    // unexpectedly large serialized element). Its diagnosis is the
+    // builder-versus-derivation one rather than the over-ceiling guidance, which
+    // the gate above has already ruled out.
     const replyCap = singlePassReplyByteCap(
       numLinkageKeys,
       senderSize,
@@ -783,11 +850,10 @@ export async function linkViaSinglePassPSI(
     );
     if (reply.byteLength > replyCap) {
       throw new UsageError(
-        singlePassOverCapMessage(
+        singlePassReplyOverCapMessage(
           participant.id,
-          numLinkageKeys,
-          senderSize,
-          receiverSize,
+          reply.byteLength,
+          replyCap,
         ),
       );
     }

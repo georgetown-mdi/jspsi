@@ -505,8 +505,20 @@ test("an over-ceiling fan-out exchange aborts on both sides before any frame mov
       -1,
     );
     await expect(run).rejects.toThrow(UsageError);
-    await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
-    await expect(run).rejects.toThrow(/fans out counts as 20/);
+    await expect(run).rejects.toThrow(/single-pass cannot carry this exchange/);
+    // The fan-out that overflows the budget is the PARTNER's declaration in this
+    // fixture, so both the cause and the fan-out remedy are attributed there, and
+    // the value slot product the gate weighed is the one stated.
+    await expect(run).rejects.toThrow(
+      new RegExp(
+        `the partner declared ${MAX_KEY_CANDIDATES_PER_ROW} effective linkage ` +
+          `key\\(s\\) across ${overWithFanOut} record\\(s\\), which is ` +
+          `${MAX_KEY_CANDIDATES_PER_ROW * overWithFanOut} value slot\\(s\\)`,
+      ),
+    );
+    await expect(run).rejects.toThrow(
+      /fans out counts as 20 toward that ceiling, so removing the partner's fan-out/,
+    );
     await expect(run).rejects.not.toThrow(/cascade/);
   }
   expect(overWithFanOut).toBeLessThan(rowsWithinPlainBudget);
@@ -731,4 +743,81 @@ test("a record that matched on a candidate leaves candidacy for the later key", 
   expect(initiatorRows[0].first_name).toBe(responderRows[1].first_name);
   // And the later round did run: row 2 is matched there, on first name alone.
   expect(localRows).toContain(2);
+});
+
+// --- a width the agreed terms do not show reaches the run boundary -----------
+// The fan-out above rides the AGREED terms, so both parties saw it before either
+// ran. A fan-out authored in a party's own standardization rides nothing the
+// partner can see: the terms a consent surface displayed imply one width, and the
+// partner may legitimately run at up to MAX_KEY_CANDIDATES_PER_ROW times it. That
+// advertisement is admissible, so the run proceeds -- what must not happen is it
+// proceeding silently.
+
+// The same two keys with no transform of their own: the width these imply is 2,
+// and any advertisement above it comes from a standardization the partner holds.
+const plainExchangeTerms: LinkageTerms = {
+  ...fanOutExchangeTerms,
+  linkageKeys: [
+    { name: "last name", elements: [{ field: "last_name" }] },
+    { name: "first name", elements: [{ field: "first_name" }] },
+  ],
+};
+
+test("a partner running wider than the agreed terms warns the other party's run", async () => {
+  // The notice rides runExchange's onWarning -- the slot the CLI puts on stderr
+  // AND on the machine-readable warning event (apps/cli/src/protocol.ts), and the
+  // web app folds into a run's accumulated warnings -- so an unattended run's
+  // supervisor sees it rather than only an interactive terminal.
+  const [initiatorConn, responderConn] = createMessagePipe();
+  const initiatorWarnings: string[] = [];
+  const responderWarnings: string[] = [];
+  const isWidthNotice = (warning: string): boolean =>
+    warning.includes("effective key count above the agreed terms");
+
+  await Promise.all([
+    runExchange(
+      initiatorConn,
+      "initiator",
+      prepareForExchange(
+        {
+          linkageTerms: { ...plainExchangeTerms, identity: "Splitting Co" },
+          // The fan-out the agreed terms do not show: this party's own
+          // standardization splits the surname, so it declares 21 where the terms
+          // imply 2.
+          standardization: [
+            {
+              output: "last_name",
+              input: "last_name",
+              steps: [{ function: "split_on", params: { delimiter: " " } }],
+            },
+          ],
+        },
+        "Splitting Co",
+        initiatorRows,
+        ["last_name", "first_name"],
+      ),
+      { psiLibrary, onWarning: (w) => initiatorWarnings.push(w) },
+    ),
+    runExchange(
+      responderConn,
+      "responder",
+      prepareForExchange(
+        { linkageTerms: { ...plainExchangeTerms, identity: "Plain Co" } },
+        "Plain Co",
+        responderRows,
+        ["last_name", "first_name"],
+      ),
+      { psiLibrary, onWarning: (w) => responderWarnings.push(w) },
+    ),
+  ]);
+
+  const notice = responderWarnings.find(isWidthNotice);
+  expect(notice).toBeDefined();
+  expect(notice).toContain(
+    `partner advertised ${MAX_KEY_CANDIDATES_PER_ROW + 1} value slot(s) per record`,
+  );
+  expect(notice).toContain("against the 2 the agreed linkage keys imply");
+  // The party that fanned out is not warned about its own configuration: it
+  // authored the standardization and can see it.
+  expect(initiatorWarnings.filter(isWidthNotice)).toEqual([]);
 });

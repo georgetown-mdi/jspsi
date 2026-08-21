@@ -214,7 +214,14 @@ export interface SinglePassPartySize {
   readonly recordCount: number;
 }
 
-function valueSlots(party: SinglePassPartySize): number {
+/**
+ * One party's **value slot** count: its declared effective key count times its
+ * record count. This is the exact product every gate below weighs, exported so an
+ * operator-facing diagnosis states the quantity the gate multiplied rather than a
+ * neighbouring pair (the agreed key count and the record counts) whose product can
+ * sit under a ceiling the same exchange exceeds.
+ */
+export function valueSlots(party: SinglePassPartySize): number {
   return party.effectiveKeyCount * party.recordCount;
 }
 
@@ -245,8 +252,9 @@ export function partyFansOut(
  * coarse one-party gate the {@link prepareForExchange} pre-flight uses, when only
  * this party's row count is known: if a party's own contribution already exceeds
  * the budget, single-pass cannot succeed whatever the partner's size. The
- * authoritative two-party check is {@link singlePassExchangeExceedsCap}, run
- * post-handshake once both counts are exchanged.
+ * two-party check production runs post-handshake, once both counts are exchanged,
+ * is {@link singlePassCeilingBreach}; {@link singlePassExchangeExceedsCap} is the
+ * boolean convenience over it.
  *
  * A party declaring no fan-out passes its plain key count, for which this is the
  * cell-count gate unchanged.
@@ -256,6 +264,45 @@ export function singlePassDatasetExceedsCap(
   recordCount: number,
 ): boolean {
   return effectiveKeyCount * recordCount > MAX_SINGLE_PASS_CELLS;
+}
+
+/**
+ * Which side of an exchange breached the single-pass ceiling, named from the point
+ * of view of the party asking. See {@link singlePassCeilingBreach}.
+ */
+export type SinglePassCeilingBreach = "local" | "partner" | "both";
+
+/**
+ * Which side of an exchange breached the single-pass ceiling, as the two parties
+ * named from the point of view of the party asking: `"local"` when only the asking
+ * party's own value slot count is over the budget, `"partner"` when only the other
+ * party's is, `"both"` when each is, and `undefined` when the exchange is within
+ * it.
+ *
+ * The two parties reach MIRRORED verdicts, never conflicting ones: the per-party
+ * predicate is {@link singlePassDatasetExceedsCap} over authenticated session state
+ * both hold, so a `"partner"` breach on one side is a `"local"` breach on the
+ * other and `"both"`/`undefined` are the same on each. That is what lets an
+ * over-ceiling diagnosis name the side whose declaration reached the ceiling while
+ * the abort itself stays symmetric -- {@link singlePassExchangeExceedsCap} is this
+ * verdict with the orientation dropped.
+ */
+export function singlePassCeilingBreach(
+  local: SinglePassPartySize,
+  partner: SinglePassPartySize,
+): SinglePassCeilingBreach | undefined {
+  const localOver = singlePassDatasetExceedsCap(
+    local.effectiveKeyCount,
+    local.recordCount,
+  );
+  const partnerOver = singlePassDatasetExceedsCap(
+    partner.effectiveKeyCount,
+    partner.recordCount,
+  );
+  if (localOver && partnerOver) return "both";
+  if (localOver) return "local";
+  if (partnerOver) return "partner";
+  return undefined;
 }
 
 /**
@@ -271,13 +318,7 @@ export function singlePassExchangeExceedsCap(
   sender: SinglePassPartySize,
   receiver: SinglePassPartySize,
 ): boolean {
-  return (
-    singlePassDatasetExceedsCap(sender.effectiveKeyCount, sender.recordCount) ||
-    singlePassDatasetExceedsCap(
-      receiver.effectiveKeyCount,
-      receiver.recordCount,
-    )
-  );
+  return singlePassCeilingBreach(sender, receiver) !== undefined;
 }
 
 /**
@@ -304,8 +345,9 @@ export function singlePassExchangeExceedsCap(
  * authenticated advertisement, so a fan-out-free exchange derives exactly the cap
  * it derived before fan-out existed.
  *
- * Call only for an in-cap exchange (guard with {@link singlePassExchangeExceedsCap}
- * first): at the slot ceiling the cap is about 240 MiB fan-out-free and about 251
+ * Call only for an in-cap exchange (guard with {@link singlePassCeilingBreach}
+ * first, or its boolean convenience {@link singlePassExchangeExceedsCap}): at the
+ * slot ceiling the cap is about 240 MiB fan-out-free and about 251
  * MiB with the ragged table's count prefixes, below both transports' fixed
  * envelopes (the 256 MiB WebRTC envelope is the nearer one), so the per-transport
  * clamp -- min with {@link MAX_FRAME_SIZE_BYTES} for file-sync, with

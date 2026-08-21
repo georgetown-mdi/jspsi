@@ -851,6 +851,81 @@ test("the single-pass receiver read gate is bounded to the derived reply cap", a
   expect(setCalls[setCalls.length - 1]).toBeUndefined();
 });
 
+test("the single-pass sender refuses a built reply above the derived cap", async () => {
+  // The sender-side half of the same cap: before sending, it measures the reply it
+  // built against singlePassReplyByteCap -- the same bound the receiver tightens
+  // its read gate to -- so an over-cap frame never reaches a partner that would
+  // reject it. The diagnosis is the builder-versus-derivation one, not the
+  // over-ceiling guidance: the ceiling gate has already passed, so no dataset
+  // either operator controls is what stopped the send and the dataset remedies are
+  // withheld.
+  //
+  // Driven by a client request over far more values than the partner's declared
+  // size accounts for: the response the sender doubly-encrypts grows with the
+  // request, so the built reply outgrows a cap derived from the declared sizes.
+  // Production reaches this backstop only on such an inconsistency between the
+  // reply builder and the shared derivation -- a real PsiElementBounds refuses an
+  // over-wide request at the deserialize seam first (pinned in
+  // psiParticipant.test.ts), and the inert test bounds are what leave the backstop
+  // reachable here.
+  const keyCount = 1;
+  const localRows = 1;
+  const partnerRows = 1;
+  const [conn, peer] = createMessagePipe();
+  const sender = new PSIParticipant(
+    "server",
+    psiLibrary,
+    { role: "starter", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const partner = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    sender,
+    conn,
+    [["a"]],
+    fanOutFreeBounds(keyCount, partnerRows),
+    false,
+    -1,
+  );
+  await peer.send(
+    await partner.createClientRequest(
+      Array.from({ length: 500 }, (_unused, i) => `value-${i}`),
+    ),
+  );
+  const error = await run.catch((e: unknown) => e);
+  expect(error).toBeInstanceOf(UsageError);
+  const message = (error as UsageError).message;
+  const replyCap = singlePassReplyByteCap(
+    keyCount,
+    { effectiveKeyCount: keyCount, recordCount: localRows },
+    { effectiveKeyCount: keyCount, recordCount: partnerRows },
+  );
+  // The size it names is the frame it actually built, and it is over the cap the
+  // two parties derive -- the pair of numbers the message exists to report.
+  const replyBytes = Number(
+    /built a reply of (\d+) byte\(s\)/.exec(message)?.[1],
+  );
+  expect(replyBytes).toBeGreaterThan(replyCap);
+  expect(message).toBe(
+    `server: single-pass built a reply of ${replyBytes} byte(s), above the ` +
+      `${replyCap} byte(s) both parties derive from their declared sizes. Both ` +
+      "parties' declared widths and record counts are within the single-pass " +
+      "ceiling, so this is an inconsistency between this party's reply builder " +
+      "and the shared cap derivation rather than a dataset that is too large. " +
+      "The exchange cannot proceed; report it with this message.",
+  );
+  // The over-ceiling diagnosis and its dataset remedies stay out: neither operator
+  // can move this by shrinking a dataset.
+  expect(message).not.toMatch(/Reduce the number of linkage keys/);
+  expect(message).not.toMatch(/single-pass ceiling of/);
+});
+
 test("single-pass receiver rejects a reply whose index table contradicts its record count", async () => {
   // The receiver ties the distinct-value index table to the reply's declared
   // record count: its length must equal numLinkageKeys * numSenderRecords. A reply
@@ -926,11 +1001,18 @@ test("single-pass receiver rejects a reply whose sender count contradicts the ex
 
 test("single-pass aborts symmetrically when the exchange exceeds the ceiling", async () => {
   // Both parties compute the over-ceiling verdict from the exchanged counts alone,
-  // before any single-pass frame moves, and both abort with the same guidance --
-  // which does not recommend cascade. Drive a tiny local dataset whose keyCount *
-  // partnerRecordCount exceeds the budget. The class is asserted with the
-  // guidance: every remedy the message offers is a configuration change, so the
-  // CLI must exit 64 rather than treat the refusal as a transport fault.
+  // before any single-pass frame moves, and both abort -- with guidance that does
+  // not recommend cascade. Drive a tiny local dataset against a partner whose own
+  // declared width times record count exceeds the budget. The class is asserted
+  // with the guidance: every remedy the message offers is a configuration change,
+  // so the CLI must exit 64 rather than treat the refusal as a transport fault.
+  //
+  // The cause here is the PARTNER's declaration, so the diagnosis attributes it
+  // there and states the product the gate weighed on that side. Both halves matter
+  // to an unattended run's operator: pointed at their own configuration they would
+  // find nothing to change, and the neighbouring arithmetic -- the agreed key
+  // count against the two record counts -- is not what the gate multiplies, so its
+  // product can sit under the ceiling an exchange exceeds.
   const [conn, peer] = createMessagePipe();
   const receiver = new PSIParticipant(
     "client",
@@ -948,7 +1030,24 @@ test("single-pass aborts symmetrically when the exchange exceeds the ceiling", a
     -1,
   );
   await expect(run).rejects.toThrow(UsageError);
-  await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
+  await expect(run).rejects.toThrow(/single-pass cannot carry this exchange/);
+  await expect(run).rejects.toThrow(
+    new RegExp(
+      `the partner declared 1 effective linkage key\\(s\\) across ` +
+        `${MAX_SINGLE_PASS_CELLS + 1} record\\(s\\), which is ` +
+        `${MAX_SINGLE_PASS_CELLS + 1} value slot\\(s\\), above the ` +
+        `single-pass ceiling of ${MAX_SINGLE_PASS_CELLS}`,
+    ),
+  );
+  // This party's own size is named as being within the ceiling, and it is not
+  // offered the local dataset remedies: nothing it can change under these terms
+  // moves the limit the partner's declaration reached. The scope is stated too --
+  // the linkage keys are an agreed term, so a re-agreed narrower set is a change
+  // this message does not speak to.
+  await expect(run).rejects.toThrow(
+    /This party's own 2 value slot\(s\) are within the ceiling, so within the agreed terms neither its linkage keys nor its record count can lift this: the partner reduces its record count or splits its dataset\./,
+  );
+  await expect(run).rejects.not.toThrow(/Reduce the number of linkage keys/);
   await expect(run).rejects.not.toThrow(/cascade/);
   // The abort happened before any frame was exchanged: the peer saw nothing.
   void peer;
@@ -960,7 +1059,9 @@ test("single-pass aborts symmetrically from the starter side too", async () => {
   // reaches it from the same exchanged counts. The same large partnerRecordCount
   // lands in receiverRecordCount for a starter (vs senderRecordCount for a
   // joiner), yet both compute the identical over-cap verdict and abort before any
-  // frame moves -- the starter throws before it ever reads the request.
+  // frame moves -- the starter throws before it ever reads the request. The
+  // attribution is a function of which party declared the over-ceiling size, not
+  // of which PSI role it drew, so this side names the partner too.
   const [conn, peer] = createMessagePipe();
   const sender = new PSIParticipant(
     "server",
@@ -978,8 +1079,117 @@ test("single-pass aborts symmetrically from the starter side too", async () => {
     -1,
   );
   await expect(run).rejects.toThrow(UsageError);
-  await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
+  await expect(run).rejects.toThrow(/single-pass cannot carry this exchange/);
+  await expect(run).rejects.toThrow(
+    new RegExp(
+      `the partner declared 1 effective linkage key\\(s\\) across ` +
+        `${MAX_SINGLE_PASS_CELLS + 1} record\\(s\\)`,
+    ),
+  );
+  await expect(run).rejects.not.toThrow(/Reduce the number of linkage keys/);
   await expect(run).rejects.not.toThrow(/cascade/);
   // The starter aborted before receiving the request: the peer saw nothing.
+  void peer;
+});
+
+test("a run whose own declared size is over the ceiling keeps the local diagnosis", async () => {
+  // The other orientation: this party's own width times its own row count is what
+  // reaches the budget, and the partner is comfortably inside it. The guidance is
+  // the local one -- the operator's own keys, records, batching, and the fan-out
+  // it declared -- with no attribution to the partner, so an operator whose own
+  // dataset stops the run is sent to the configuration that can lift it.
+  const localRecords =
+    Math.floor(MAX_SINGLE_PASS_CELLS / MAX_KEY_CANDIDATES_PER_ROW) + 1;
+  const [conn, peer] = createMessagePipe();
+  const receiver = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    receiver,
+    conn,
+    [Array.from({ length: localRecords }, (_, i) => `value-${i}`)],
+    {
+      partnerRecordCount: 1,
+      // One key fanning out over this party's own standardization: the width its
+      // advertisement claims, and what multiplies its rows into the budget.
+      localEffectiveKeyCount: MAX_KEY_CANDIDATES_PER_ROW,
+      partnerEffectiveKeyCount: 1,
+    },
+    false,
+    -1,
+  );
+  await expect(run).rejects.toThrow(UsageError);
+  await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
+  await expect(run).rejects.toThrow(
+    new RegExp(
+      `this party declared ${MAX_KEY_CANDIDATES_PER_ROW} effective linkage ` +
+        `key\\(s\\) across ${localRecords} record\\(s\\), which is ` +
+        `${MAX_KEY_CANDIDATES_PER_ROW * localRecords} value slot\\(s\\)`,
+    ),
+  );
+  await expect(run).rejects.toThrow(
+    /Reduce the number of linkage keys or the record count, or split the dataset into smaller batches\./,
+  );
+  await expect(run).rejects.toThrow(
+    new RegExp(
+      `fans out counts as ${MAX_KEY_CANDIDATES_PER_ROW} toward that ceiling, ` +
+        "so removing a fan-out is another remedy",
+    ),
+  );
+  await expect(run).rejects.not.toThrow(/the partner declared/);
+  await expect(run).rejects.not.toThrow(/cascade/);
+  void peer;
+});
+
+test("an exchange over the ceiling on both sides names both declarations", async () => {
+  // Neither party can lift this one alone, so the diagnosis states both products
+  // and gives each side its own remedy -- rather than attributing the whole
+  // breach to whichever side it happened to check first.
+  const localRecords = MAX_SINGLE_PASS_CELLS + 1;
+  const [conn, peer] = createMessagePipe();
+  const receiver = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    receiver,
+    conn,
+    // Two records, and a declared width that carries them over the budget on
+    // their own: the fixture stays small while the arithmetic the gate reads is
+    // the one being asserted.
+    [["a", "b"]],
+    {
+      partnerRecordCount: localRecords,
+      localEffectiveKeyCount: MAX_SINGLE_PASS_CELLS,
+      partnerEffectiveKeyCount: 1,
+    },
+    false,
+    -1,
+  );
+  await expect(run).rejects.toThrow(UsageError);
+  await expect(run).rejects.toThrow(/single-pass cannot carry this exchange/);
+  await expect(run).rejects.toThrow(
+    new RegExp(
+      `this party declared ${MAX_SINGLE_PASS_CELLS} effective linkage ` +
+        `key\\(s\\) across 2 record\\(s\\), which is ` +
+        `${MAX_SINGLE_PASS_CELLS * 2} value slot\\(s\\), and the partner ` +
+        `declared 1 effective linkage key\\(s\\) across ${localRecords} ` +
+        `record\\(s\\), which is ${localRecords} value slot\\(s\\)`,
+    ),
+  );
+  await expect(run).rejects.toThrow(
+    /Reduce the number of linkage keys or the record count, or split the dataset into smaller batches\./,
+  );
+  await expect(run).rejects.toThrow(
+    /The partner reduces its record count or splits its dataset on its side too\./,
+  );
+  await expect(run).rejects.not.toThrow(/cascade/);
   void peer;
 });
