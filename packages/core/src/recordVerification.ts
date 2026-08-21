@@ -15,8 +15,9 @@ import type { AssociationTable } from "./types.js";
 
 // The verification consumer for the self-attested exchange record: it reads a
 // stored record and its verification keys, re-derives the record's canonical
-// bytes, and opens each commitment against re-supplied data. It is read-only --
-// it never mutates or re-signs the artifact.
+// bytes, opens each commitment against re-supplied data, and recounts the one
+// disclosure figure no commitment covers (the result size) from the pairing they
+// do. It is read-only -- it never mutates or re-signs the artifact.
 //
 // This is the UNSIGNED-record path: "verify" here is internal consistency (the
 // agreed-terms hash re-derives, and the commitments open against the holder's
@@ -59,16 +60,46 @@ export type CommitmentStatus =
 export type TermsHashStatus = "verified" | "mismatch" | "not-checked";
 
 /**
+ * The outcome of the recorded result size's check.
+ *
+ * No commitment covers the figure -- it sits in the record in cleartext (see
+ * docs/spec/EXCHANGE_RECORD.md, "What verification binds about the result size").
+ * What stands behind it is the ASSOCIATION-TABLE commitment, because the field is
+ * a count of that table: its entries are the pairs the size counts, so a table
+ * re-supplied and opened against its commitment carries the figure's correct
+ * value, and the check is a recount rather than an opening.
+ *
+ * - `verified`: the association table opened, and its pair count is the recorded
+ *   figure.
+ * - `mismatch`: the association table opened and carries a DIFFERENT number of
+ *   pairs, so the record's cleartext figure does not state the size of the
+ *   pairing the record itself commits to. Unlike a commitment mismatch this is
+ *   unambiguous: a re-supplied file that did not belong to this exchange would
+ *   have failed the table's own commitment first, leaving `unopenable` below.
+ * - `not-supplied`: the association table's data was not re-supplied, so there
+ *   was nothing to recount (the third-party-auditor case).
+ * - `unopenable`: no opened association table stands behind the figure -- the
+ *   record carries no association-table commitment at all (a count-only run's
+ *   record never does; see docs/spec/EXCHANGE_RECORD.md, "Count-only (`psi-c`)
+ *   records"), the keys carry no salt for it, or the re-supplied table did not
+ *   reproduce its commitment.
+ */
+export type ResultSizeStatus =
+  "verified" | "mismatch" | "not-supplied" | "unopenable";
+
+/**
  * The overall verdict.
  *
  * - `failed`: a definite inconsistency -- a commitment mismatch, a terms-hash
- *   mismatch, or a structurally invalid record. The artifact does not verify.
- * - `verified`: every present commitment opened and the terms hash re-derived --
- *   nothing was left unchecked and nothing failed.
+ *   mismatch, a recorded result size the committed pairing does not carry, or a
+ *   structurally invalid record. The artifact does not verify.
+ * - `verified`: every present commitment opened, the terms hash re-derived, and
+ *   any recorded result size recounted -- nothing was left unchecked and nothing
+ *   failed.
  * - `incomplete`: nothing was contradicted, but something could not be checked (a
- *   commitment whose data was not re-supplied, a missing salt, or terms not
- *   supplied). Distinct from `verified` so "we did not check" is never reported as
- *   "it checked out".
+ *   commitment whose data was not re-supplied, a missing salt, terms not
+ *   supplied, or a result size with no opened pairing to recount). Distinct from
+ *   `verified` so "we did not check" is never reported as "it checked out".
  */
 export type RecordVerificationOutcome = "verified" | "incomplete" | "failed";
 
@@ -79,6 +110,12 @@ export interface RecordVerificationReport {
   /** Per-commitment status, one entry per commitment present in the record (plus a
    * mandatory commitment that was expected but absent). */
   commitments: Partial<Record<CommitmentName, CommitmentStatus>>;
+  /** The recorded result size's status, reported separately from the commitments
+   * so a figure at fault is never read as one of them failing. Omitted entirely
+   * when the record carries no result size -- the entitlement gate leaves the
+   * field out whenever only one party receives output, and that absence is not a
+   * fault. */
+  resultSize?: ResultSizeStatus;
 }
 
 /** The data a caller re-supplies to open a record's commitments and re-derive its
@@ -113,18 +150,57 @@ const MANDATORY: ReadonlySet<CommitmentName> = new Set([
   "partnerPayloadReceived",
 ]);
 
+// The pair count a re-supplied association table states: the entries in its two
+// halves, read together. The value arrives as a CanonicalValue -- the domain the
+// commitment opened over, not a parsed AssociationTable -- so it is read
+// structurally: a caller may hand this anything it handed verifyExchangeRecord.
+// Halves of unequal length carry no pair count to compare (each entry is one
+// pair), so they yield none rather than a guessed figure.
+function suppliedPairCount(
+  value: CanonicalValue | undefined,
+): number | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const [ourRows, partnerRows] = value;
+  if (!Array.isArray(ourRows) || !Array.isArray(partnerRows)) return undefined;
+  if (ourRows.length !== partnerRows.length) return undefined;
+  return ourRows.length;
+}
+
+// The recorded result size against the pairing the record commits to. Nothing
+// commits to the figure itself, so the association-table commitment is what
+// carries it: only a table that OPENED is the committed one, and only then does
+// its pair count attest what the field should say. Every other state of that
+// commitment leaves the figure unchecked rather than at fault -- a re-supplied
+// result that does not belong to this exchange fails the table's own commitment,
+// so it can never be mistaken here for an altered figure.
+function checkResultSize(
+  recordedSize: number | undefined,
+  tableStatus: CommitmentStatus | undefined,
+  suppliedTable: CanonicalValue | undefined,
+): ResultSizeStatus | undefined {
+  if (recordedSize === undefined) return undefined;
+  if (tableStatus === "not-supplied") return "not-supplied";
+  if (tableStatus !== "verified") return "unopenable";
+  const pairs = suppliedPairCount(suppliedTable);
+  if (pairs === undefined) return "unopenable";
+  return pairs === recordedSize ? "verified" : "mismatch";
+}
+
 /**
  * Verify a stored {@link ExchangeRecord} against its {@link VerificationKeys} and
  * re-supplied data: re-derive the agreed-terms hash (when both parties' terms are
- * supplied) and open every present commitment against its salt and re-supplied
- * data. Read-only; it never mutates or re-signs the record.
+ * supplied), open every present commitment against its salt and re-supplied data,
+ * and recount the recorded result size from the association table those
+ * commitments cover. Read-only; it never mutates or re-signs the record.
  *
  * Returns a tri-state {@link RecordVerificationReport} that distinguishes a
  * commitment that opened, one whose data was not re-supplied (so could not be
  * opened), and one that failed to open -- so "not checked" is never conflated with
- * "verified". This is the unsigned-record internal-consistency check; the
- * signature and certificate checks that make a dual-signed record evidence against
- * the partner belong to `verifyDualSignedRecord`.
+ * "verified". The result size takes that same reading on its own field
+ * ({@link ResultSizeStatus}), never on a commitment's, so an altered figure is not
+ * read as a commitment failing. This is the unsigned-record internal-consistency
+ * check; the signature and certificate checks that make a dual-signed record
+ * evidence against the partner belong to `verifyDualSignedRecord`.
  *
  * Fail-safe: every check yields a status, never an exception. A malformed salt or
  * commitment, re-supplied data outside the canonical domain, or terms that do not
@@ -213,12 +289,26 @@ export async function verifyExchangeRecord(
     if (termsHash === "mismatch") anyMismatch = true;
   }
 
+  const resultSize = checkResultSize(
+    record.resultSize,
+    commitments.associationTable,
+    inputs.data?.associationTable,
+  );
+  if (resultSize === "mismatch") anyMismatch = true;
+  else if (resultSize !== undefined && resultSize !== "verified")
+    anyUnverified = true;
+
   const outcome: RecordVerificationOutcome = anyMismatch
     ? "failed"
     : anyUnverified
       ? "incomplete"
       : "verified";
-  return { outcome, termsHash, commitments };
+  return {
+    outcome,
+    termsHash,
+    commitments,
+    ...(resultSize !== undefined ? { resultSize } : {}),
+  };
 }
 
 // --- Re-supply reconstruction ------------------------------------------------
@@ -294,7 +384,7 @@ function sameCells(
  * the reconstruction collapses them back to it -- but only where the copies agree
  * cell for cell. A copy that differs is reproduced beside the first rather than
  * collapsed onto it, so an edited cell in any copy of a repeated row is covered by
- * the commitment exactly as the first copy's cells are. If either ordering
+ * the record's commitments exactly as the first copy's cells are. If either ordering
  * invariant ever failed, the reconstructed bytes would simply not open the
  * commitment (a reported mismatch), never a false verification.
  *
@@ -436,8 +526,10 @@ export function reconstructCommittedData(
           "received values differ. The partner sent one row for that record " +
           "and the received-payload commitment binds it once, so the copies a " +
           "grouped result writes against this party's records have to agree; " +
-          "they are reproduced as they stand, so that commitment reports a " +
-          "mismatch",
+          "they are reproduced as they stand, so a commitment reports a " +
+          "mismatch -- the received payload's where a value cell is what " +
+          "differs, and the association table's where a partner row index " +
+          "moved instead",
       );
     partnerPayloadReceived = { columns: receivedColumns, rows };
   }

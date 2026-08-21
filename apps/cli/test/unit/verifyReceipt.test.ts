@@ -260,6 +260,68 @@ describe("formatVerificationReport", () => {
   });
 });
 
+describe("formatVerificationReport: the recorded result size", () => {
+  const sized = (
+    resultSize: RecordVerificationReport["resultSize"],
+  ): RecordVerificationReport => ({
+    outcome: resultSize === "mismatch" ? "failed" : "incomplete",
+    termsHash: "not-checked",
+    commitments: {
+      localPayloadSent: "verified",
+      partnerPayloadReceived: "verified",
+      associationTable: resultSize === "verified" ? "verified" : "not-supplied",
+    },
+    ...(resultSize !== undefined ? { resultSize } : {}),
+  });
+
+  test("a record stating no size gets no line at all", () => {
+    const { lines } = formatVerificationReport(sized(undefined), []);
+    expect(lines.join("\n")).not.toContain("result size:");
+  });
+
+  test("a matching size is reported against the table it counts", () => {
+    const { lines } = formatVerificationReport(sized("verified"), []);
+    expect(lines.join("\n")).toContain(
+      "result size: matches the matched-pairs table it counts",
+    );
+  });
+
+  test("a mismatching size names the recorded figure as the fault", () => {
+    const { lines, exitCode } = formatVerificationReport(sized("mismatch"), []);
+    const out = lines.join("\n");
+    // Its own line, distinct from every commitment line: the figure is what
+    // disagrees, and the operator is not sent looking at their own files.
+    expect(out).toContain("result size: DOES NOT MATCH");
+    expect(out).toContain(
+      "the recorded figure is what disagrees, not the data",
+    );
+    expect(out).not.toContain("commitment associationTable: DOES NOT MATCH");
+    expect(exitCode).toBe(1);
+  });
+
+  test("an unchecked size names what would let it be recounted", () => {
+    const { lines, exitCode } = formatVerificationReport(
+      sized("not-supplied"),
+      [],
+    );
+    expect(lines.join("\n")).toContain(
+      "result size: not checked (re-supply the result file",
+    );
+    expect(exitCode).toBe(0);
+  });
+
+  test("a size with no pairing behind it is not checked, never verified", () => {
+    const { lines, exitCode } = formatVerificationReport(
+      sized("unopenable"),
+      [],
+    );
+    const out = lines.join("\n");
+    expect(out).toContain("result size: not checked (no opened matched-pairs");
+    expect(out).toContain("a count-only exchange records none at all");
+    expect(exitCode).toBe(0);
+  });
+});
+
 describe("formatSignedRecordReport", () => {
   const party = (
     role: SignedReceiptPartyReport["role"],

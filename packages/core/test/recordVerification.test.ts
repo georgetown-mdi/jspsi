@@ -198,8 +198,14 @@ describe("verifyExchangeRecord", () => {
 
   test("a held-no-table record does not report the absent association table", async () => {
     // A party that received no output holds no association table, so neither the
-    // record nor the keys carries it -- a legitimate absence, not reported.
-    const { associationTable: _omit, ...withoutTable } = baseInputs;
+    // record nor the keys carries it -- a legitimate absence, not reported. The
+    // same party is not entitled to the result size either (the gate is both
+    // parties receiving output), so the record states none.
+    const {
+      associationTable: _omitTable,
+      resultSize: _omitSize,
+      ...withoutTable
+    } = baseInputs;
     const { record, keys } = await buildExchangeRecord(withoutTable);
     const report = await verifyExchangeRecord(record, keys, {
       data: { localPayloadSent, partnerPayloadReceived },
@@ -245,6 +251,167 @@ describe("verifyExchangeRecord", () => {
     });
     expect(report.commitments.localPayloadSent).toBe("mismatch");
     expect(report.outcome).toBe("failed");
+  });
+});
+
+// --- The recorded result size ------------------------------------------------
+
+// No commitment covers the result size, so verification recounts it from the
+// association table the record does commit to. `baseInputs` records 2 against a
+// two-pair table, so a tampered figure is the same record with a different
+// integer in that one cleartext field -- the alteration an auditor holding the
+// record and the holder's files could not otherwise see.
+describe("verifyExchangeRecord checks the recorded result size", () => {
+  test("the untampered figure verifies against the re-supplied pairing", async () => {
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const report = await verifyExchangeRecord(record, keys, {
+      data: fullData,
+      localTerms: termsA,
+      partnerTerms: termsB,
+    });
+    expect(report.resultSize).toBe("verified");
+    expect(report.outcome).toBe("verified");
+  });
+
+  test("a tampered figure fails and is named apart from the commitments", async () => {
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const report = await verifyExchangeRecord(
+      { ...record, resultSize: 7 },
+      keys,
+      { data: fullData, localTerms: termsA, partnerTerms: termsB },
+    );
+    expect(report.resultSize).toBe("mismatch");
+    expect(report.outcome).toBe("failed");
+    // The field at fault is the result size alone: every commitment opened and
+    // the terms hash re-derived, so nothing else in the report is implicated.
+    expect(report.commitments).toEqual({
+      localPayloadSent: "verified",
+      partnerPayloadReceived: "verified",
+      associationTable: "verified",
+    });
+    expect(report.termsHash).toBe("verified");
+  });
+
+  test("a figure one off the pair count still fails", async () => {
+    // The plausible tamper is a small edit, not a wild one: the check is an
+    // equality against the count, not a range or a plausibility test.
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const report = await verifyExchangeRecord(
+      { ...record, resultSize: 1 },
+      keys,
+      { data: fullData },
+    );
+    expect(report.resultSize).toBe("mismatch");
+    expect(report.outcome).toBe("failed");
+  });
+
+  test("a record stating no result size reports none, and that is not a fault", async () => {
+    const { resultSize: _omit, ...withoutSize } = baseInputs;
+    const { record, keys } = await buildExchangeRecord(withoutSize);
+    const report = await verifyExchangeRecord(record, keys, {
+      data: fullData,
+      localTerms: termsA,
+      partnerTerms: termsB,
+    });
+    expect("resultSize" in report).toBe(false);
+    expect(report.outcome).toBe("verified");
+  });
+
+  test("a result that was not re-supplied leaves the figure unchecked", async () => {
+    // The auditor case for this field: no pairing was re-supplied, so nothing
+    // was recounted -- reported as unchecked, never as verified.
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const report = await verifyExchangeRecord(record, keys, {
+      data: { localPayloadSent, partnerPayloadReceived },
+      localTerms: termsA,
+      partnerTerms: termsB,
+    });
+    expect(report.resultSize).toBe("not-supplied");
+    expect(report.outcome).toBe("incomplete");
+  });
+
+  test("a tampered figure with no result re-supplied is unchecked, not verified", async () => {
+    // The fail-safe half of the contract stated against a record that IS
+    // altered: with nothing to recount from, the verdict withholds rather than
+    // passing the altered figure.
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const report = await verifyExchangeRecord(
+      { ...record, resultSize: 7 },
+      keys,
+      { data: { localPayloadSent, partnerPayloadReceived } },
+    );
+    expect(report.resultSize).toBe("not-supplied");
+    expect(report.outcome).toBe("incomplete");
+  });
+
+  test("a keys file with no association-table salt leaves the figure unchecked", async () => {
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const { associationTable: _omit, ...saltsWithoutTable } = keys.salts;
+    const report = await verifyExchangeRecord(
+      record,
+      { ...keys, salts: saltsWithoutTable },
+      { data: fullData, localTerms: termsA, partnerTerms: termsB },
+    );
+    expect(report.commitments.associationTable).toBe("unopenable");
+    expect(report.resultSize).toBe("unopenable");
+    expect(report.outcome).toBe("incomplete");
+  });
+
+  test("a pairing that did not open leaves the figure unchecked, never at fault", async () => {
+    // A re-supplied table that does not reproduce its commitment says nothing
+    // about the recorded figure: the fault is reported on the commitment, and
+    // the result size withholds rather than joining the accusation.
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    const report = await verifyExchangeRecord(record, keys, {
+      data: {
+        ...fullData,
+        associationTable: [
+          [0, 1, 2],
+          [2, 0, 1],
+        ] as unknown as CanonicalValue,
+      },
+    });
+    expect(report.commitments.associationTable).toBe("mismatch");
+    expect(report.resultSize).toBe("unopenable");
+    expect(report.outcome).toBe("failed");
+  });
+
+  test("a record with a size but no pairing at all leaves it unchecked", async () => {
+    // The count-only shape: the run produced no pairing, so the record commits
+    // to none while still recording the count. Nothing reproduces the figure,
+    // so it reports unchecked -- the verdict cannot reach "verified".
+    const { associationTable: _omit, ...withoutTable } = baseInputs;
+    const { record, keys } = await buildExchangeRecord(withoutTable);
+    const report = await verifyExchangeRecord(
+      { ...record, resultSize: 2 },
+      keys,
+      {
+        data: { localPayloadSent, partnerPayloadReceived },
+        localTerms: termsA,
+        partnerTerms: termsB,
+      },
+    );
+    expect("associationTable" in report.commitments).toBe(false);
+    expect(report.resultSize).toBe("unopenable");
+    expect(report.outcome).toBe("incomplete");
+  });
+
+  test("a re-supplied pairing with no readable pair count is unchecked", async () => {
+    // Halves of different lengths carry no pair count -- each entry is one pair
+    // read across both -- so the figure is withheld rather than compared against
+    // a guessed one. The record commits to the shape, so reaching this needs a
+    // hand-built pair; the fail-safe contract still owes a verdict, not a throw.
+    const lopsided = [[0, 1], [0]] as unknown as CanonicalValue;
+    const { record, keys } = await buildExchangeRecord({
+      ...baseInputs,
+      associationTable: lopsided as unknown as AssociationTable,
+    });
+    const report = await verifyExchangeRecord(record, keys, {
+      data: { ...fullData, associationTable: lopsided },
+    });
+    expect(report.commitments.associationTable).toBe("verified");
+    expect(report.resultSize).toBe("unopenable");
+    expect(report.outcome).toBe("incomplete");
   });
 });
 

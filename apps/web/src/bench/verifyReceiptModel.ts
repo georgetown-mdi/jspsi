@@ -33,6 +33,7 @@ import type {
   LinkageTerms,
   ReceiptSignatureStatus,
   RecordVerificationReport,
+  ResultSizeStatus,
   RunBindingStatus,
   SignedReceiptVerdictAnchor,
   SignedReceiptVerdictCheck,
@@ -335,9 +336,9 @@ export interface VerdictHeadline {
   detail: string;
 }
 
-/** One plain-language row: a commitment or the terms hash, with a status label
- * and the tone that colors it. `explanation` carries the "supply your files"
- * framing for a not-opened commitment. */
+/** One plain-language row: a commitment, the result size, or the terms hash, with
+ * a status label and the tone that colors it. `explanation` carries the "supply
+ * your files" framing for a not-opened commitment. */
 export interface VerdictRow {
   label: string;
   status: string;
@@ -349,6 +350,10 @@ export interface VerdictRow {
 export interface VerdictViewModel {
   headline: VerdictHeadline;
   commitments: Array<VerdictRow>;
+  /** The recorded result size's row, absent when the record carries no result
+   * size (only a both-output exchange records one, and that absence is not a
+   * gap to show the reader). */
+  resultSize?: VerdictRow;
   termsHash: VerdictRow;
   /** Reconstruction caveats, each already sanitized for display. */
   warnings: Array<string>;
@@ -413,6 +418,42 @@ const COMMITMENT_ROWS: Record<
   },
 };
 
+// The recorded result size counts the matched-pairs table, and no commitment
+// covers it, so the row reports a recount of the table that did open. Its
+// mismatch copy carries no altered-or-wrong-file hedge: a file that did not
+// belong to this exchange fails the table's own row instead, leaving this one
+// not checked.
+const RESULT_SIZE_ROWS: Record<
+  ResultSizeStatus,
+  { status: string; tone: VerdictTone; explanation?: string }
+> = {
+  verified: { status: "Matches the matched pairs", tone: "verified" },
+  mismatch: {
+    status: "Does not match",
+    tone: "failed",
+    explanation:
+      "The matched-pairs table opened and holds a different number of pairs " +
+      "than the record states. The recorded number is what disagrees, not the " +
+      "files you supplied.",
+  },
+  "not-supplied": {
+    status: "Not checked",
+    tone: "incomplete",
+    explanation:
+      "Supply your retained result so its matched pairs can be recounted. " +
+      "Without it the recorded number cannot be checked -- this is not a " +
+      "failure.",
+  },
+  unopenable: {
+    status: "Not checked",
+    tone: "incomplete",
+    explanation:
+      "No opened matched-pairs table stands behind the recorded number, so " +
+      "there is nothing to recount it from. A count-only exchange records no " +
+      "such table at all.",
+  },
+};
+
 const TERMS_ROWS: Record<
   TermsHashStatus,
   { status: string; tone: VerdictTone; explanation?: string }
@@ -463,7 +504,8 @@ const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
  * supplied column name), so the caller passes the raw warnings straight from
  * {@link reconstructCommittedData}. Only the commitments the report carries are
  * shown; the mandatory pair is always present in a parsed record, and the
- * association table appears only when the record holds it.
+ * association table appears only when the record holds it. The result-size row
+ * follows the same rule -- shown only where the record records a size.
  *
  * Pass `signedRecordVerified` when the same run also verified a dual-signed
  * record, so the standing caveat points at that verdict rather than telling the
@@ -487,9 +529,23 @@ export function verdictViewModel(
     });
   }
   const termsRow = TERMS_ROWS[report.termsHash];
+  const sizeRow =
+    report.resultSize === undefined
+      ? undefined
+      : RESULT_SIZE_ROWS[report.resultSize];
   return {
     headline: HEADLINES[report.outcome],
     commitments,
+    ...(sizeRow !== undefined
+      ? {
+          resultSize: {
+            label: "The recorded result size",
+            status: sizeRow.status,
+            tone: sizeRow.tone,
+            explanation: sizeRow.explanation,
+          },
+        }
+      : {}),
     termsHash: {
       label: "The agreed-terms hash",
       status: termsRow.status,

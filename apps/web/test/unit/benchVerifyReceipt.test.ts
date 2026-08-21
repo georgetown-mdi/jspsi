@@ -330,6 +330,82 @@ describe("verdictViewModel: warnings are sanitized", () => {
   });
 });
 
+// The result size is the one disclosure figure no commitment covers, so the page
+// has to show what verification recounted about it -- and show nothing where the
+// record states no figure at all.
+describe("verdictViewModel: the recorded result size", () => {
+  // The fixture exchange's two pairs, recorded: a both-output exchange states
+  // the figure, and this one's pairing reconstructs from the re-supply files.
+  const SIZED_INPUTS: ExchangeRecordInputs = { ...baseInputs, resultSize: 2 };
+
+  test("a record stating no size shows no row for it", async () => {
+    const { record, keys } = await fixtures();
+    const reconstructed = reconstructForFixture(record);
+    const report = await verifyExchangeRecord(record, keys, {
+      data: reconstructed.data,
+      localTerms: LOCAL_TERMS,
+      partnerTerms: PARTNER_TERMS,
+    });
+    const view = verdictViewModel(report, reconstructed.warnings);
+    expect(view.resultSize).toBeUndefined();
+    expect(view.headline.title).toBe("Verified");
+  });
+
+  test("a matching size is its own verified row", async () => {
+    const { record, keys } = await buildExchangeRecord(SIZED_INPUTS);
+    const reconstructed = reconstructForFixture(record);
+    const report = await verifyExchangeRecord(record, keys, {
+      data: reconstructed.data,
+      localTerms: LOCAL_TERMS,
+      partnerTerms: PARTNER_TERMS,
+    });
+    const view = verdictViewModel(report, reconstructed.warnings);
+    expect(view.resultSize?.label).toBe("The recorded result size");
+    expect(view.resultSize?.status).toBe("Matches the matched pairs");
+    expect(view.resultSize?.tone).toBe("verified");
+    expect(view.headline.title).toBe("Verified");
+  });
+
+  test("an altered size fails on its own row, not on the pairing's", async () => {
+    const { record, keys } = await buildExchangeRecord(SIZED_INPUTS);
+    const reconstructed = reconstructForFixture(record);
+    const report = await verifyExchangeRecord(
+      { ...record, resultSize: 9 },
+      keys,
+      {
+        data: reconstructed.data,
+        localTerms: LOCAL_TERMS,
+        partnerTerms: PARTNER_TERMS,
+      },
+    );
+    const view = verdictViewModel(report, reconstructed.warnings);
+    expect(view.headline.title).toBe("Verification failed");
+    expect(view.resultSize?.status).toBe("Does not match");
+    expect(view.resultSize?.tone).toBe("failed");
+    // The reader is told the record's figure disagrees, not that the files they
+    // supplied might be the wrong ones -- the pairing's own row passed.
+    expect(view.resultSize?.explanation).toContain(
+      "not the files you supplied",
+    );
+    const table = view.commitments.find(
+      (row) => row.label === "The matched-pairs table",
+    );
+    expect(table?.status).toBe("Opened and matches");
+  });
+
+  test("with no files re-supplied the size row is not checked, never verified", async () => {
+    const { record, keys } = await buildExchangeRecord(SIZED_INPUTS);
+    const report = await verifyExchangeRecord(record, keys, {});
+    const view = verdictViewModel(report, []);
+    expect(view.headline.title).toBe("Incomplete");
+    expect(view.resultSize?.status).toBe("Not checked");
+    expect(view.resultSize?.tone).toBe("incomplete");
+    expect(view.resultSize?.explanation).toContain(
+      "Supply your retained result",
+    );
+  });
+});
+
 // --- The signed leg ----------------------------------------------------------
 
 // A dual-signed record over the same exchange the fixtures above describe: the

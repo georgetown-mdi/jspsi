@@ -116,7 +116,7 @@ async function roundTrip(opts: {
     localTerms: termsA,
     partnerTerms: termsB,
   });
-  return { report, warnings, result, record, data };
+  return { report, warnings, result, record, keys, data };
 }
 
 const idMeta: Metadata = [
@@ -523,6 +523,7 @@ describe("reconstructCommittedData round-trips a deduplicating cardinality", () 
 describe("an edited copy of a repeated result row fails its commitment", () => {
   // The result's value columns start after our record id and the partner row
   // index, so with one disclosed partner column the received value is cell 2.
+  const PARTNER_INDEX_CELL = 1;
   const RECEIVED_CELL = 2;
 
   // Our rows 0 and 1 both link to the partner's row 1, so the partner's single
@@ -617,6 +618,146 @@ describe("an edited copy of a repeated result row fails its commitment", () => {
     });
     expect(report.outcome).toBe("failed");
     expect(report.commitments.partnerPayloadReceived).toBe("mismatch");
+  });
+
+  test("a moved pairing column surfaces the divergence on the table instead", async () => {
+    // The case the warning's attribution has to stay conditional for. Pointing
+    // the third result row at the partner row the first two already carry makes
+    // its value cell a disagreeing copy -- but the collapse then reproduces the
+    // two rows the partner sent EXACTLY, so the received-payload commitment
+    // opens and the association table is the one that mismatches. A warning
+    // naming only the received payload would send the reader to the one line of
+    // the verdict that passed.
+    const { report, warnings } = await roundTrip({
+      ...manySideFan,
+      editRetainedResult: (rows) => {
+        expect(rows[2]).toEqual(["P2", "3", "q-3"]);
+        rows[2][PARTNER_INDEX_CELL] = "1";
+      },
+    });
+    const divergence = warnings.find((w) =>
+      w.includes("received values differ"),
+    );
+    expect(divergence).toBeDefined();
+    expect(divergence).toContain("the received payload's where a value cell");
+    expect(divergence).toContain(
+      "the association table's where a partner row index moved",
+    );
+    expect(report.commitments.partnerPayloadReceived).toBe("verified");
+    expect(report.commitments.associationTable).toBe("mismatch");
+    expect(report.outcome).toBe("failed");
+  });
+});
+
+// No commitment covers the recorded result size, so verification recounts it from
+// the pairing the record does commit to. Each case below alters that one cleartext
+// field of an otherwise honest artifact set -- the commitments are untouched, so a
+// verdict that still read "verified" would be telling an auditor the pair count is
+// whatever the holder typed. The wrong figures are the plausible ones: under a
+// deduplicating cardinality the pair count diverges from both parties'
+// matched-record counts, and either of those read into the field is exactly the
+// misstatement the recorded figure is defined against.
+describe("a tampered result size fails against the re-supplied pairing", () => {
+  async function withRecordedSize(
+    opts: Parameters<typeof roundTrip>[0],
+    resultSize: number,
+  ) {
+    const { record, keys, data } = await roundTrip(opts);
+    return verifyExchangeRecord({ ...record, resultSize }, keys, {
+      data,
+      localTerms: termsA,
+      partnerTerms: termsB,
+    });
+  }
+
+  const oneToOne = {
+    rawRows: idRows,
+    metadata: idMeta,
+    associationTable: [
+      [0, 2],
+      [1, 0],
+    ] as AssociationTable,
+    partnerPayload: {
+      columns: ["note"],
+      rowIndices: [0, 1],
+      rows: [["q-0"], ["q-1"]],
+    } as PartnerPayload,
+    ourIdColumn: "pid",
+  };
+
+  // Our rows 0 and 1 both link to the partner's row 1: three pairs, three
+  // matched records of ours, two of the partner's.
+  const manySideFan = {
+    rawRows: idRows,
+    metadata: idMeta,
+    associationTable: [
+      [0, 1, 2],
+      [1, 1, 3],
+    ] as AssociationTable,
+    partnerPayload: {
+      columns: ["note"],
+      rowIndices: [1, 3],
+      rows: [["q-1"], ["q-3"]],
+    } as PartnerPayload,
+    ourIdColumn: "pid",
+  };
+
+  test("one-to-one: an inflated figure fails, and the honest one verifies", async () => {
+    const honest = await withRecordedSize(oneToOne, 2);
+    expect(honest.resultSize).toBe("verified");
+    expect(honest.outcome).toBe("verified");
+
+    const tampered = await withRecordedSize(oneToOne, 3);
+    expect(tampered.resultSize).toBe("mismatch");
+    expect(tampered.outcome).toBe("failed");
+    // The pairing itself reproduced, so the record's own figure is what the
+    // verdict indicts -- not the files the holder re-supplied.
+    expect(tampered.commitments).toEqual({
+      localPayloadSent: "verified",
+      partnerPayloadReceived: "verified",
+      associationTable: "verified",
+    });
+  });
+
+  test("many-to-one: the partner's matched-record count is not the pair count", async () => {
+    const honest = await withRecordedSize(manySideFan, 3);
+    expect(honest.resultSize).toBe("verified");
+    expect(honest.outcome).toBe("verified");
+
+    // Two is the number of the PARTNER's records that matched -- the figure a
+    // per-party reading would record, and the one a deduplicating exchange makes
+    // it possible to state instead of the pair count.
+    const tampered = await withRecordedSize(manySideFan, 2);
+    expect(tampered.resultSize).toBe("mismatch");
+    expect(tampered.outcome).toBe("failed");
+    expect(tampered.commitments.associationTable).toBe("verified");
+  });
+
+  test("one-to-many: our own matched-record count is not the pair count either", async () => {
+    // The mirrored fan: the partner's rows 1 and 0 both link to our row 0, so
+    // three pairs stand over two matched records of ours.
+    const oneSideFan = {
+      rawRows: idRows,
+      metadata: idMeta,
+      associationTable: [
+        [0, 0, 2],
+        [1, 0, 3],
+      ] as AssociationTable,
+      partnerPayload: {
+        columns: ["note"],
+        rowIndices: [0, 1, 3],
+        rows: [["q-0"], ["q-1"], ["q-3"]],
+      } as PartnerPayload,
+      ourIdColumn: "pid",
+    };
+    const honest = await withRecordedSize(oneSideFan, 3);
+    expect(honest.resultSize).toBe("verified");
+    expect(honest.outcome).toBe("verified");
+
+    const tampered = await withRecordedSize(oneSideFan, 2);
+    expect(tampered.resultSize).toBe("mismatch");
+    expect(tampered.outcome).toBe("failed");
+    expect(tampered.commitments.associationTable).toBe("verified");
   });
 });
 
