@@ -54,6 +54,8 @@ interface LinkVector {
   name: string;
   description: string;
   method: "linkViaPSI";
+  // The STARTER's resolved label; the joiner runs its mirror (see
+  // mirrorCardinality below).
   cardinality: Cardinality;
   // undefined inputs (the no-key sentinel) serialize as JSON null.
   starterKeys: Array<Array<string | null>>;
@@ -112,6 +114,18 @@ const withUndefined = (
 ): Array<Array<string | undefined>> =>
   rounds.map((round) => round.map((value) => value ?? undefined));
 
+// The partner's view of the same exchange. A cardinality label is read from the
+// party that resolves it, so the two parties of one exchange hold mirror labels
+// (docs/spec/PROTOCOL.md, Deduplicating cardinalities) and a vector pins the
+// starter's; mirrors the generator's own helper.
+function mirrorCardinality(cardinality: Cardinality): Cardinality {
+  return cardinality === "many-to-one"
+    ? "one-to-many"
+    : cardinality === "one-to-many"
+      ? "many-to-one"
+      : cardinality;
+}
+
 async function runLink(
   v: LinkVector,
 ): Promise<[AssociationTable, AssociationTable]> {
@@ -126,7 +140,7 @@ async function runLink(
       -1,
     ),
     linkViaPSI(
-      { cardinality: v.cardinality },
+      { cardinality: mirrorCardinality(v.cardinality) },
       makeParticipant("joiner"),
       joinerConn,
       withUndefined(v.joinerKeys),
@@ -158,6 +172,7 @@ test("the fixture covers every scenario", () => {
     "empty-key-carried-forward-later-round",
     "empty-key-duplicate-dropped-unique-still-matches",
     "many-to-one-duplicate-entity-cascade",
+    "many-to-one-group-expansion-ordering",
   ]);
 });
 

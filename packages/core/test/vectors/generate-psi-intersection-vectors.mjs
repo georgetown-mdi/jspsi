@@ -104,6 +104,17 @@ async function runIdentify(starterInputs, joinerInputs) {
   ];
 }
 
+// The partner's view of the same exchange. A cardinality label is read from the
+// party that resolves it, so the two parties of one exchange hold mirror labels
+// and a scenario pins the STARTER's; mirrors test/psiIntersectionVectors.ts.
+function mirrorCardinality(cardinality) {
+  return cardinality === "many-to-one"
+    ? "one-to-many"
+    : cardinality === "one-to-many"
+      ? "many-to-one"
+      : cardinality;
+}
+
 // linkViaPSI driver: a cascade of key rounds (each round an array of per-row
 // string | undefined). Accepts either plain arrays or StandardizedKeyIterables,
 // both of which satisfy the IndexableIterable interface linkViaPSI reads.
@@ -119,7 +130,7 @@ async function runLink(cardinality, starterKeys, joinerKeys) {
       -1,
     ),
     linkViaPSI(
-      { cardinality },
+      { cardinality: mirrorCardinality(cardinality) },
       makeParticipant("joiner"),
       joinerConn,
       joinerKeys,
@@ -446,24 +457,19 @@ const scenarios = [
   {
     name: "many-to-one-duplicate-entity-cascade",
     description:
-      "linkViaPSI many-to-one: the joiner (the 'many' party) holds two intake " +
-      "rows for the same entity 'E1' (a re-registered record) alongside two " +
-      "singleton entities 'E2' and 'E3', against the starter's (the 'one' " +
-      "party) one row per entity. Round 0 drops both 'E1' joiner rows as a " +
-      "within-round duplicate on the joiner's own side and matches only the " +
-      "unique 'E2' and 'E3' rows; round 1's secondary key then resolves ONE of " +
-      "the two surviving 'E1' duplicates by tie-breaking against the starter's " +
-      "carried-forward value, leaving the other permanently unmatched despite " +
-      "genuinely sharing the entity. This pins today's behavior of the branch " +
-      "linkViaPSI shares between 'one-to-one' and 'many-to-one' " +
-      "(protocol.cardinality is read only to select this branch, never again " +
-      "inside it): given this dataset, 'many-to-one' and 'one-to-one' produce " +
-      "the byte-identical projection asserted here, because neither cardinality " +
-      "yet implements the fan-out consolidation ('deduplicate', " +
-      "EXCHANGE_REFERENCE.md) that would let both 'E1' rows validly link to the " +
-      "same starter row. The vector exists to fail the day that split lands.",
+      "linkViaPSI with the joiner deduplicating: it holds two intake rows for " +
+      "the same entity 'E1' (a re-registered record) alongside two singleton " +
+      "entities 'E2' and 'E3', against the starter's one row per entity. The " +
+      "joiner is the 'many' side, so it contributes 'E1' once and round 0 " +
+      "attributes the match to BOTH of its rows, where one-to-one would have " +
+      "dropped the value as a within-round duplicate and left round 1's " +
+      "secondary key to resolve at most one of them. The group's rows and the " +
+      "starter row they link to all leave candidacy together, so round 1's " +
+      "secondary key adds nothing. The starter, being the 'one' side, holds the " +
+      "mirror label and its half of the table repeats row 0 against the two " +
+      "joiner rows; the projections are the two views of one pairing.",
     method: "linkViaPSI",
-    cardinality: "many-to-one",
+    cardinality: "one-to-many",
     starterKeys: [
       ["E1", "E2", "E3"],
       ["C2", "x", "y"],
@@ -472,6 +478,25 @@ const scenarios = [
       ["E1", "E1", "E2", "E3"],
       ["C1", "C2", "x", "y"],
     ],
+  },
+  {
+    name: "many-to-one-group-expansion-ordering",
+    description:
+      "linkViaPSI with the joiner deduplicating, over a dataset whose ORDER " +
+      "decides the reconstructed table: the joiner's two groups interleave " +
+      "across its rows ('Y' at rows 0, 2, 4 and 'X' at rows 1, 3), and its " +
+      "first-occurrence set order ('Y' then 'X') is the reverse of the " +
+      "starter's ('X' at row 0, 'Y' at row 1). Translating an entry whose " +
+      "position stands for a group expands it into one entry per record in " +
+      "ascending record order, with the groups left in the order of the list " +
+      "being translated, so the starter's returned list arrives grouped by its " +
+      "OWN matched records rather than by joiner row order. An implementation " +
+      "that expanded in any other order reconstructs a different pairing here " +
+      "and fails this vector.",
+    method: "linkViaPSI",
+    cardinality: "one-to-many",
+    starterKeys: [["X", "Y"]],
+    joinerKeys: [["Y", "X", "Y", "X", "Y"]],
   },
 ];
 

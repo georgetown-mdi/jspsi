@@ -117,6 +117,18 @@ export interface PartnerIndexRules {
    * those readers reproduce.
    */
   ascending?: boolean;
+  /**
+   * Admit a repeated entry. Set only where a repeat is the protocol's own
+   * widening rather than a fault: the cascade's returned mapped-element list on
+   * the "many" side of a deduplicating exchange, where several of this party's
+   * records legitimately name one partner row (docs/spec/PROTOCOL.md, Deriving
+   * one table from the exchanged association maps). Distinctness is what
+   * otherwise caps a list's LENGTH at `exclusiveBound`, so a caller setting this
+   * must pin the length against a locally computed count first
+   * ({@link assertPartnerIndexCount}); this function then bounds the entries
+   * alone.
+   */
+  allowRepeats?: boolean;
 }
 
 /**
@@ -126,7 +138,9 @@ export interface PartnerIndexRules {
  * Distinctness is the protocol invariant on all three matching paths -- one-to-one
  * matching pairs each row at most once -- and it is what caps the list's LENGTH at
  * `exclusiveBound`, since a longer list cannot hold distinct in-range entries. The
- * length is therefore not a separate argument.
+ * length is therefore not a separate argument, except under
+ * `rules.allowRepeats`, which lifts both and leaves the length to the caller's own
+ * count check.
  *
  * @param participantId - This party's participant id.
  * @param what - Names the list, for the error message.
@@ -145,13 +159,16 @@ export function assertPartnerIndices(
   exclusiveBound: number,
   rules: PartnerIndexRules = {},
 ): void {
-  if (indices.length > exclusiveBound)
+  const allowRepeats = rules.allowRepeats === true;
+  if (!allowRepeats && indices.length > exclusiveBound)
     throw partnerProtocolError(
       participantId,
       `${what} carries ${entryCount(indices.length)}, more than the ` +
         `${exclusiveBound} this side can address`,
     );
-  const repeats = createRepeatDetector(indices.length, exclusiveBound);
+  const repeats = allowRepeats
+    ? undefined
+    : createRepeatDetector(indices.length, exclusiveBound);
   let previous = -1;
   // Each entry is checked in one pass, the repeat before the order, so a list that
   // both repeats and descends is reported as the repeat -- the narrower of the two
@@ -167,7 +184,7 @@ export function assertPartnerIndices(
         participantId,
         `${what} carries an index outside [0, ${exclusiveBound})`,
       );
-    if (repeats(index))
+    if (repeats?.(index) === true)
       throw partnerProtocolError(participantId, `${what} repeats an index`);
     if (rules.ascending === true && index < previous)
       throw partnerProtocolError(
@@ -178,8 +195,16 @@ export function assertPartnerIndices(
   }
 }
 
+// `allowRepeats` is deliberately not offered here: the two-half form holds the
+// partner half to the LENGTH of the range-checked local half, and that length is a
+// local quantity only while distinctness caps it at the local half's own bound. A
+// seam whose table admits a repeat therefore checks its halves itself, against a
+// count it computed, rather than through this form.
 /** One half of a partner-supplied association table, with what bounds it. */
-export interface PartnerIndexTableHalf extends PartnerIndexRules {
+export interface PartnerIndexTableHalf extends Omit<
+  PartnerIndexRules,
+  "allowRepeats"
+> {
   /** Names the half, for the error message. */
   what: string;
   /** The partner-supplied entries, in received order. */

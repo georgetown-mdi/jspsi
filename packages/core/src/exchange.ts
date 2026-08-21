@@ -274,15 +274,17 @@ export function resolveCountOnlyRun(
  * Refuse a linkage-terms `deduplicate: true` the run cannot honor, before any
  * matching begins.
  *
- * Only one-to-one matching is implemented: both parties' locally-duplicated key
- * values are excluded from every round (see `linkViaPSI`), and a deduplicating
- * party's widening is precisely that it keeps them, so several of its records
- * can never link to the same partner record. Running a `deduplicate: true` term
- * would silently deliver one-to-one matching under a consented many-cardinality
- * term -- the disclosure-fidelity gap this refusal closes. Refused at prepare
- * time in {@link prepareForExchange} for this party's own terms, and for both
- * parties' agreed terms by {@link resolveLinkageCardinality} after the terms
- * exchange, before the PSI rounds begin.
+ * The cascade implements the deduplicating match (`linkViaPSI`), but no exchange
+ * runs one: `single-pass` still matches a single value per record whatever
+ * cardinality it is handed, and the surfaces downstream of the association table
+ * -- the output table, the payload alignment, the exchange record -- have not been
+ * carried through a table with several links per input. Running a
+ * `deduplicate: true` term would therefore deliver something other than the
+ * consented many-cardinality match -- the disclosure-fidelity gap this refusal
+ * closes. Refused at prepare time in {@link prepareForExchange} for this party's
+ * own terms, and for both parties' agreed terms by
+ * {@link resolveLinkageCardinality} after the terms exchange, before the PSI
+ * rounds begin.
  *
  * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
  * same reason as {@link assertAlgorithmImplemented}: on the accept side the
@@ -398,9 +400,10 @@ export function assertSigningModeImplemented(
  * own side, a `deduplicate: true` party being the "many" one, so the two parties
  * hold mirror labels for the single procedure they run (docs/spec/PROTOCOL.md,
  * Deduplicating cardinalities). Today only `one-to-one` (both parties
- * `deduplicate: false`) is implemented, and it is its own mirror; any
+ * `deduplicate: false`) is resolved here, and it is its own mirror; any
  * `deduplicate: true` is refused before the rounds begin, never silently
- * collapsed onto one-to-one (see {@link assertDeduplicateImplemented}).
+ * collapsed onto one-to-one (see {@link assertDeduplicateImplemented}), so the
+ * mirror labels `linkViaPSI` accepts are reachable only from a direct caller.
  */
 export function resolveLinkageCardinality(
   localDeduplicate: boolean,

@@ -11,6 +11,12 @@ import { z } from "zod";
  * that consumes it, beside the range, distinctness, and pairing checks
  * (utils/partnerIndices.ts; docs/spec/PROTOCOL.md's index-validation
  * subsection).
+ *
+ * The one exception is the "one" side of a deduplicating exchange, where several
+ * of the partner's records link to one of ours and `[0]` is non-decreasing rather
+ * than strictly ascending -- the distinctness is what that cardinality relaxes,
+ * and the ascending order itself still holds (docs/spec/PROTOCOL.md, Deriving one
+ * table from the exchanged association maps).
  */
 export type AssociationTable = [Array<number>, Array<number>];
 
