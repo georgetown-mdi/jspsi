@@ -677,7 +677,7 @@ Two limits sit between a green run there and a bump being proved:
 
 This is the second docker-ecosystem pin carrying its own bump section outside
 the machine-read `Upgrading ...` heading form -- consciously, per the
-convention [recorded above](#why-these-are-exact-pinned) alongside
+convention [recorded in this document's lead](#pinned-dependency-internals) alongside
 [the FIPS base image's section](#bumping-the-fips-base-image): a heading in
 that form is read only as a parenthesised list of npm package names, so
 `npm run check:dependabot-pin-coverage` has no way to hold either docker pin's
@@ -708,9 +708,12 @@ not a defect in the pull request.
    the two it moves on its own.
 2. The `DEFAULT_BASE` literal in `scripts/dockerfile-freeze.test.mjs`.
    `npm run test:scripts` stays red until it matches, so push the
-   reconciling edit onto the same pull request -- a second commit on the
-   Dependabot branch works; Dependabot rebases its own future pushes around a
-   manual commit it did not make -- rather than merging a red check.
+   reconciling edit onto the same pull request as a second commit on the
+   Dependabot branch -- how the one prior default-base bump landed (the
+   node:26-alpine bump merged as PR #865) -- rather than merging a red
+   check. How Dependabot's own next push treats a manually edited branch
+   has not been driven here; if the branch is recreated, re-push the
+   reconciling commit with it.
 
 **What re-proves the result.** `image_smoke.yaml`'s pull-request path filter
 lists `Dockerfile`, so the pull request runs the full matrix: both the
@@ -725,7 +728,11 @@ reach because they read a running container rather than the Dockerfile text:
 the account the image runs as and its writable set and symlink containment,
 the headless CLI invocation, a real file-drop exchange between two containers
 of the built image, and `scripts/assert-image-capabilities.mjs`'s walk of
-what the shipped setup scripts ask of the image.
+what the shipped setup scripts ask of the image. The FIPS section's
+single-arch limit applies unchanged here: the smoke build is amd64-only with
+no QEMU across the whole job matrix, and the release path's Trivy scan reads
+an amd64-only build before the separate multi-arch push, so neither workflow
+exercises the arm64 image a bumped digest also carries.
 
 **What beyond the digest deserves a look.** `node:26-alpine` is a floating tag
 underneath its digest, so a rebuild the tag picked up can carry a different
