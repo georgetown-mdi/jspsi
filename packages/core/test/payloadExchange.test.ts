@@ -1706,3 +1706,109 @@ test("buildOutputTable: throws when a partner payload row is wider than the decl
     buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
   ).toThrow("one cell per declared column");
 });
+
+// --- match multiplicity: payload rows per record, result rows per pair --------
+//
+// Under a deduplicating cardinality one side of the association table repeats a
+// row index. The payload frame stays one row per matched RECORD -- a repeat there
+// is a malformed frame the receiver's parse refuses -- while the result table is
+// one row per PAIR. The cases below run a fan in each direction against each
+// other: the partner's rows 0 and 1 grouped onto this party's row 1 (so this
+// party is the "one" side and its local half repeats), mirrored by the partner
+// holding the "many" side's table.
+
+const ONE_SIDE_TABLE: [Array<number>, Array<number>] = [
+  [1, 1, 3],
+  [0, 1, 2],
+];
+const MANY_SIDE_TABLE: [Array<number>, Array<number>] = [
+  [0, 1, 2],
+  [1, 1, 3],
+];
+
+test("preparePayload: a repeated local row is transmitted exactly once", () => {
+  const result = preparePayload(rawRows, metaWithId, ONE_SIDE_TABLE);
+  if (!result.hasData) throw new Error("expected hasData:true");
+  expect(result.rowIndices).toEqual([1, 3]);
+  expect(result.rows).toEqual([
+    ["P1", "B"],
+    ["P3", "D"],
+  ]);
+});
+
+test("exchangePayloads: a deduplicated frame survives the wire schema's distinctness rule", async () => {
+  // One payload row per PAIR would repeat row index 1 and the receiver's parse
+  // would refuse the whole frame; the round trip is what pins that it does not.
+  const [receivedByOneSide, receivedByManySide] = await runExchangePayloads(
+    preparePayload(rawRows, metaWithId, ONE_SIDE_TABLE),
+    preparePayload(rawRows, metaNoId, MANY_SIDE_TABLE),
+  );
+
+  expect(receivedByManySide.rowIndices).toEqual([1, 3]);
+  expect(receivedByManySide.rows).toEqual([
+    ["P1", "B"],
+    ["P3", "D"],
+  ]);
+  expect(receivedByOneSide.rowIndices).toEqual([0, 1, 2]);
+  expect(receivedByOneSide.rows).toEqual([["A"], ["B"], ["C"]]);
+});
+
+test("buildOutputTable: the 'one' side writes one row per pair, its identifier repeating", async () => {
+  const [receivedByOneSide] = await runExchangePayloads(
+    preparePayload(rawRows, metaWithId, ONE_SIDE_TABLE),
+    preparePayload(rawRows, metaNoId, MANY_SIDE_TABLE),
+  );
+
+  const { headers, rows } = buildOutputTable(
+    ONE_SIDE_TABLE,
+    rawRows,
+    metaWithId,
+    receivedByOneSide,
+  );
+
+  expect(headers).toEqual(["patient_id", "row_id", "diagnosis"]);
+  expect(rows).toEqual([
+    ["P1", "0", "A"],
+    ["P1", "1", "B"],
+    ["P3", "2", "C"],
+  ]);
+});
+
+test("buildOutputTable: the 'many' side writes the one partner payload row against each grouped record", async () => {
+  const [, receivedByManySide] = await runExchangePayloads(
+    preparePayload(rawRows, metaWithId, ONE_SIDE_TABLE),
+    preparePayload(rawRows, metaNoId, MANY_SIDE_TABLE),
+  );
+
+  const { headers, rows } = buildOutputTable(
+    MANY_SIDE_TABLE,
+    rawRows,
+    metaNoId,
+    receivedByManySide,
+  );
+
+  expect(headers).toEqual([
+    "row_id",
+    "their_row_id",
+    "patient_id",
+    "diagnosis",
+  ]);
+  expect(rows).toEqual([
+    ["0", "1", "P1", "B"],
+    ["1", "1", "P1", "B"],
+    ["2", "3", "P3", "D"],
+  ]);
+});
+
+test("buildOutputTable: a partner payload missing a row grouped onto several of ours names it once", () => {
+  // The malformed-partner diagnostic stays legible under multiplicity: partner
+  // row 1 stands against two of this party's records but is one missing row.
+  const partnerPayload: PartnerPayload = {
+    columns: ["diagnosis"],
+    rowIndices: [3],
+    rows: [["D"]],
+  };
+  expect(() =>
+    buildOutputTable(MANY_SIDE_TABLE, rawRows, metaNoId, partnerPayload),
+  ).toThrow("association table indices: 1");
+});

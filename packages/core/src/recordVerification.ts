@@ -1,5 +1,6 @@
 import { computeTermsHash, verifyCommitmentOpening } from "./exchangeRecord.js";
 import { readRowColumn } from "./file.js";
+import { distinctMatchedRows } from "./payloadExchange.js";
 
 import type {
   CommitmentName,
@@ -260,6 +261,13 @@ const RESULT_OUR_ID_COLUMN = 0;
 const RESULT_PARTNER_INDEX_COLUMN = 1;
 const RESULT_VALUE_COLUMN_START = 2;
 
+function sameCells(
+  a: ReadonlyArray<string | null>,
+  b: ReadonlyArray<string | null>,
+): boolean {
+  return a.length === b.length && a.every((cell, i) => cell === b[i]);
+}
+
 /**
  * Reconstruct the committed data sets from a holder's retained input, result, and
  * the record's own governance -- the re-supply path that lets a party verify its
@@ -267,26 +275,39 @@ const RESULT_VALUE_COLUMN_START = 2;
  * docs/spec/EXCHANGE_RECORD.md, "No data snapshot in the keys"). The returned
  * `data` feeds {@link verifyExchangeRecord}.
  *
- * The result file lists matched records in this party's association order (its own
- * ascending row index), so `associationTable` and `localPayloadSent` -- both
- * committed in that same order -- reconstruct directly from the result rows:
- * `associationTable` is the two index columns, and `localPayloadSent` is the
- * disclosed columns' values read from the retained input at each matched row.
+ * The result file lists matched PAIRS in this party's association order (its own
+ * ascending row index), so `associationTable` reconstructs directly from the two
+ * index columns of the result rows, one entry per row.
  *
- * `partnerPayloadReceived`, however, is committed in the PARTNER's send order (its
- * ascending row index), which the result scrambles into this party's order. Both
- * parties' association tables are sorted ascending by their own index (guaranteed
- * by the linkage; see link.ts), so the partner's send order is recovered by
- * sorting the result rows by the partner-index column -- which this function does.
- * If that invariant ever failed, the reconstructed bytes would simply not open the
+ * The two payloads are committed with one row per matched RECORD, not per pair
+ * ({@link distinctMatchedRows}), so each reconstructs from the result's distinct
+ * rows on its own side of the pairing. `localPayloadSent` is the disclosed
+ * columns' values read from the retained input at each distinct matched row of
+ * ours, in the result's own order. `partnerPayloadReceived` is committed in the
+ * PARTNER's send order (its own ascending row index), which the result scrambles
+ * into this party's order; both parties' association tables are sorted ascending
+ * by their own index (guaranteed by the linkage; see link.ts), so the partner's
+ * send order is recovered by sorting the result rows by the partner-index column
+ * and taking each distinct partner row once -- which this function does. Where a
+ * deduplicating cardinality pairs several of this party's records with one of the
+ * partner's, those result rows repeat the one payload row the partner sent, and
+ * the reconstruction collapses them back to it -- but only where the copies agree
+ * cell for cell. A copy that differs is reproduced beside the first rather than
+ * collapsed onto it, so an edited cell in any copy of a repeated row is covered by
+ * the commitment exactly as the first copy's cells are. If either ordering
+ * invariant ever failed, the reconstructed bytes would simply not open the
  * commitment (a reported mismatch), never a false verification.
  *
- * Reconstruction is byte-exact only from UNMODIFIED retained files. Two residual
+ * Reconstruction is byte-exact only from UNMODIFIED retained files. Three residual
  * edges are surfaced as warnings rather than silently mis-reconstructed: a
  * duplicate value in the identifier column makes a matched row's index ambiguous
- * (the first occurrence is used), and a result referencing an identifier the
- * supplied input does not carry means the input does not match this exchange. A
- * third cannot be seen from here: a result value cell cannot distinguish a
+ * (the first occurrence is used -- the expected case, not an unusual one, for an
+ * input whose identifier names the individual rather than the row, which is the
+ * input a deduplicating exchange groups), a result referencing an identifier
+ * the supplied input does not carry means the input does not match this exchange,
+ * and disagreeing copies of one partner record's received values mean the result
+ * no longer carries the single row that record's values were committed as. A
+ * fourth cannot be seen from here: a result value cell cannot distinguish a
  * committed empty string from a committed null (the result wrote both as an
  * empty cell), so a genuinely-null received cell reproduces as an empty string
  * and its commitment mismatches. Nothing in the re-supplied files tells those two
@@ -315,7 +336,13 @@ export function reconstructCommittedData(
       warnings.push(
         `the identifier column "${ourIdColumn}" has duplicate values in the ` +
           "input, so a matched row's index is ambiguous; the first occurrence " +
-          "is used",
+          "is used. An input holding several rows for one individual -- what a " +
+          "deduplicating exchange sets out to group -- carries duplicates here " +
+          "whenever its identifier names the individual rather than the row, so " +
+          "this is the expected case for such an input rather than an unusual " +
+          "one. Every later duplicate then reproduces the first row's values " +
+          "and the commitments report a mismatch; an identifier column unique " +
+          "per row reproduces exactly",
       );
   }
 
@@ -347,23 +374,24 @@ export function reconstructCommittedData(
         "so the input may not match this exchange",
     );
 
-  // associationTable: this party's [our indices, partner indices], already in
-  // committed (this party's ascending) order.
+  // associationTable: this party's [our indices, partner indices], one entry per
+  // result row, already in committed (this party's ascending) order.
   if (record.commitments.associationTable !== undefined) {
     const table: AssociationTable = [ourIndices, partnerIndices];
     data.associationTable = table as unknown as CanonicalValue;
   }
 
   // localPayloadSent: the disclosed columns' values (from the record's governance)
-  // read from the retained input at each matched row, in result order. The empty
-  // committed payload is {columns:[], rows:[]}, not one empty row per match.
+  // read from the retained input at each DISTINCT matched row, in result order --
+  // the selection preparePayload transmitted and committed. The empty committed
+  // payload is {columns:[], rows:[]}, not one empty row per match.
   const sentColumns = record.governance.payloadSent.map((c) => c.name);
   const localPayloadSent: CommittedPayload =
     sentColumns.length === 0
       ? { columns: [], rows: [] }
       : {
           columns: sentColumns,
-          rows: ourIndices.map((index) => {
+          rows: distinctMatchedRows(ourIndices).map((index) => {
             const row = inputRows[index];
             return sentColumns.map((column) =>
               row ? (readRowColumn(row, column) ?? null) : null,
@@ -373,7 +401,13 @@ export function reconstructCommittedData(
   data.localPayloadSent = localPayloadSent as CanonicalValue;
 
   // partnerPayloadReceived: the received values (result value columns), re-sorted
-  // into the partner's ascending send order so they reproduce the committed bytes.
+  // into the partner's ascending send order so they reproduce the committed bytes,
+  // and taken once per distinct partner row -- the sender committed one row per
+  // record IT matched, so result rows repeating a partner row repeat that row's
+  // values. The collapse is conditional on the copies agreeing: keeping only the
+  // first copy of a repeated row unconditionally would leave every later copy's
+  // value cells reproduced by nothing, and so outside the commitment that is
+  // supposed to bind them.
   const receivedColumns = record.governance.payloadReceived.map((c) => c.name);
   let partnerPayloadReceived: CommittedPayload;
   if (receivedColumns.length === 0) {
@@ -385,10 +419,27 @@ export function reconstructCommittedData(
         row.slice(RESULT_VALUE_COLUMN_START),
       ])
       .sort((a, b) => a[0] - b[0]);
-    partnerPayloadReceived = {
-      columns: receivedColumns,
-      rows: bySendOrder.map(([, values]) => values),
-    };
+    const rows: Array<Array<string | null>> = [];
+    let previous: { index: number; values: Array<string | null> } | undefined;
+    let anyDivergentCopy = false;
+    for (const [index, values] of bySendOrder) {
+      if (previous !== undefined && previous.index === index) {
+        if (sameCells(previous.values, values)) continue;
+        anyDivergentCopy = true;
+      }
+      previous = { index, values };
+      rows.push(values);
+    }
+    if (anyDivergentCopy)
+      warnings.push(
+        "the result carries several rows for one partner record whose " +
+          "received values differ. The partner sent one row for that record " +
+          "and the received-payload commitment binds it once, so the copies a " +
+          "grouped result writes against this party's records have to agree; " +
+          "they are reproduced as they stand, so that commitment reports a " +
+          "mismatch",
+      );
+    partnerPayloadReceived = { columns: receivedColumns, rows };
   }
   data.partnerPayloadReceived = partnerPayloadReceived as CanonicalValue;
 
