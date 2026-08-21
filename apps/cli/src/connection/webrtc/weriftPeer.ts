@@ -210,18 +210,34 @@ export function assertSctpDrainSupported(peer: RTCPeerConnection): void {
   );
 }
 
-/** Has the peer acknowledged everything handed to the channel? */
-function sctpOutboundAcknowledged(peer: RTCPeerConnection): boolean {
+/**
+ * Has the peer acknowledged everything handed to the channel?
+ *
+ * `assertSctpDrainSupported` guarantees the queues are readable at channel
+ * open, not for the rest of the session, so `queues === undefined` here is
+ * reachable -- chiefly once the association behind them has been torn down.
+ * At that point there is no further acknowledgement this side could wait on
+ * anyway, so `true` is the deliberate answer: the close's own liveness checks
+ * (`channel.readyState`, `session.isConnected()` in `drainOutbound`) are what
+ * decide when a torn-down peer stops being worth waiting for, not this
+ * fallback.
+ *
+ * @internal exported for testing
+ */
+export function sctpOutboundAcknowledged(peer: RTCPeerConnection): boolean {
   const queues = sctpQueues(peer);
-  // Unreachable while the session is alive -- assertSctpDrainSupported ran at
-  // open -- except once the association is torn down, where "nothing left to
-  // acknowledge" is the right answer anyway.
   if (queues === undefined) return true;
   return queues.outbound === 0 && queues.sent === 0;
 }
 
-/** Has everything handed to the channel at least been put on the wire? */
-function sctpOutboundTransmitted(peer: RTCPeerConnection): boolean {
+/**
+ * Has everything handed to the channel at least been put on the wire? Same
+ * `queues === undefined` fallback as {@link sctpOutboundAcknowledged}, for
+ * the same reason.
+ *
+ * @internal exported for testing
+ */
+export function sctpOutboundTransmitted(peer: RTCPeerConnection): boolean {
   const queues = sctpQueues(peer);
   if (queues === undefined) return true;
   return queues.outbound === 0;
