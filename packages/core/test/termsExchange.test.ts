@@ -171,6 +171,8 @@ test("responder flags a present-but-malformed partner hostKey without aborting",
   await connA.send({
     linkageTerms: termsA,
     recordCount: 100,
+    effectiveKeyCount: 1,
+    protocolVersion: PROTOCOL_VERSION,
     hostKey: { fingerprint: "x".repeat(200), keyType: "ssh-ed25519" },
   });
   await connA.receive(); // drain the responder's terms + proceed (msg 2)
@@ -187,7 +189,13 @@ test("a null partner hostKey is treated as absent, not malformed", async () => {
   // malformed flag stays false so no spurious diagnostic fires.
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB, 200);
-  await connA.send({ linkageTerms: termsA, recordCount: 100, hostKey: null });
+  await connA.send({
+    linkageTerms: termsA,
+    recordCount: 100,
+    effectiveKeyCount: 1,
+    protocolVersion: PROTOCOL_VERSION,
+    hostKey: null,
+  });
   await connA.receive(); // drain the responder's terms + proceed (msg 2)
   await connA.send({ decision: "proceed" }); // msg 3
   const result = await responder;
@@ -206,6 +214,8 @@ test("initiator flags a present-but-malformed partner hostKey without aborting",
     linkageTerms: termsB,
     decision: "proceed",
     recordCount: 200,
+    effectiveKeyCount: 1,
+    protocolVersion: PROTOCOL_VERSION,
     hostKey: { fingerprint: "x".repeat(200), keyType: "ssh-ed25519" },
   });
   await connB.receive(); // msg 3: initiator's proceed
@@ -331,18 +341,74 @@ test("initiator fails fast when message 2 advertises a different protocol versio
   await expect(initiator).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
 });
 
-test("a partner that omits the protocol version (legacy build) still proceeds", async () => {
-  // Adding the field is itself wire-compatible: a build predating it strips the
-  // unknown key and advertises none, so an absent version is treated as legacy
-  // and allowed to proceed rather than aborted. The fail-closed guarantee is for
-  // two builds that BOTH carry the field. Drive the initiator by hand to omit it.
+test("responder fails fast when message 1 advertises no protocol version", async () => {
+  // No deployed build predates the field, so a partner advertising none is a
+  // non-conforming peer and draws the same refusal a foreign value does --
+  // relayed as the abort reason so it fails with the named cause too. Drive the
+  // initiator by hand to omit it.
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB, 200);
   await connA.send({ linkageTerms: termsA, recordCount: 100 }); // no version
-  await connA.receive(); // drain the responder's terms + proceed (msg 2)
-  await connA.send({ decision: "proceed" }); // msg 3
-  const result = await responder;
-  expect(result.partnerTerms.identity).toBe("Party A");
+  const abort = await connA.receive();
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+  });
+  await expect(responder).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+});
+
+test("initiator fails fast when message 2 advertises no protocol version", async () => {
+  // The mirror, so the refusal is symmetric across the two message paths: a
+  // proceed frame carrying no version is refused by the initiator, which still
+  // SENDS its abort (message 3) rather than stranding the responder on its
+  // receive timeout. Drive the responder by hand to omit the version.
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
+  await connB.receive(); // msg 1: initiator's terms
+  await connB.send({
+    linkageTerms: termsB,
+    decision: "proceed",
+    recordCount: 200,
+    effectiveKeyCount: 1,
+  }); // no version
+  const abort = await connB.receive(); // msg 3: initiator's abort
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+  });
+  // The decision-only frame closes an exchange already reconciled from both
+  // sides, and no reconcile reads it, so it advertises nothing.
+  expect("protocolVersion" in (abort as Record<string, unknown>)).toBe(false);
+  await expect(initiator).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+});
+
+test("the responder's abort frame carries the protocol version", async () => {
+  // The abort frame in the responder's message-2 slot advertises the version like
+  // its proceed frame does. Without it the initiator -- which reconciles that
+  // frame's version before it reads the decision -- would meet a same-version
+  // partner's abort as a version skew and bury the reason the partner stated.
+  // Driven through an incompatible-terms abort, the ordinary way that frame is
+  // produced.
+  const [connA, connB] = makeConnections();
+  const { conn: recordingB, sent: responderSent } = recordingConnection(connB);
+  const [a, b] = await Promise.allSettled([
+    exchangeTerms(connA, "initiator", termsA, 100),
+    exchangeTerms(
+      recordingB,
+      "responder",
+      { ...termsB, algorithm: "psi-c" },
+      200,
+    ),
+  ]);
+  expect(responderSent[0]).toMatchObject({
+    decision: "abort",
+    protocolVersion: PROTOCOL_VERSION,
+  });
+  if (a.status !== "rejected" || b.status !== "rejected") throw new Error();
+  // The initiator hears the terms cause the responder stated, not a version skew.
+  const initiatorMessage = (a.reason as Error).message;
+  expect(initiatorMessage).toContain("algorithm mismatch");
+  expect(initiatorMessage).not.toContain(PROTOCOL_VERSION_MISMATCH_MESSAGE);
 });
 
 test("responder fails fast when message 1 advertises a malformed protocol version", async () => {
@@ -479,25 +545,28 @@ test("initiator: a same-version malformed message 2 still rejects as a protocol 
   expect((err as Error).message).not.toBe(PROTOCOL_VERSION_MISMATCH_MESSAGE);
 });
 
-test("a non-object terms frame degrades cleanly (probe returns no version, strict parse rejects)", async () => {
+test("a non-object terms frame degrades cleanly (probe returns no version, reconcile refuses)", async () => {
   // The probe's `.catch` branch, exercised on a wire-reachable input: a bare
   // non-object frame (a hostile or corrupt peer). The probe returns `undefined`
-  // (legacy, reconcile no-op) rather than throwing, and the strict parse then
-  // rejects the frame -- a clean parse-error abort, never an uncaught exception or a
-  // hang. Encodes the probe's "no readable version, no throw" contract as a check.
+  // rather than throwing, which the reconcile refuses as no readable version -- a
+  // clean abort with the named diagnosis, never an uncaught exception or a hang.
+  // Encodes the probe's "no readable version, no throw" contract as a check.
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB, 200);
   await connA.send("not an object");
   const abort = await connA.receive();
-  expect(abort).toMatchObject({ decision: "abort" });
-  await expect(responder).rejects.toThrow(/failed to parse/);
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+  });
+  await expect(responder).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
 });
 
 test("a throwing protocolVersion getter degrades to no readable version", () => {
   // The hardened edge of the probe's "no readable version" contract, fed to the
   // probe directly because it is the one frame shape a real transport's
   // deserialized wire data can never carry: a frame whose `protocolVersion` read
-  // THROWS (a throwing getter) must degrade to `undefined` -- the same legacy-peer
+  // THROWS (a throwing getter) must degrade to `undefined` -- the same refused-shape
   // outcome as a garbled, absent, or non-object version -- rather than escaping the
   // schema's `.catch`. Without the hardening the read throws instead of returning
   // undefined, so this check fails loudly if a future change removes it.
@@ -509,6 +578,58 @@ test("a throwing protocolVersion getter degrades to no readable version", () => 
     },
   };
   expect(probeProtocolVersion(frame)).toBeUndefined();
+});
+
+test("initiator fails fast (and sends an abort) on message 2 versions it cannot read or reconcile", async () => {
+  // The initiator-side legs of the refusal symmetry the spec states across both
+  // message paths and both directions (docs/spec/PROTOCOL.md): two of these frame
+  // shapes -- a non-object frame and a `protocolVersion` read that throws -- carry no
+  // readable version and probe to `undefined`; the third, an explicit null, probes to
+  // `null`, a PRESENT-but-garbled value (see the responder-side case above). All
+  // three are refused on message 2 by the same reconcile with the same fixed
+  // reason, exactly as message 1 refuses them, and the initiator still SENDS its
+  // abort (message 3) rather than stranding the responder on its receive timeout.
+  // The throwing getter survives only because the in-process pipe passes the frame
+  // by reference; a real transport's deserialized wire data cannot carry that shape.
+  const refusedVersionFrames: Array<[string, unknown]> = [
+    ["non-object frame", "not an object"],
+    [
+      "explicit null version",
+      {
+        linkageTerms: termsB,
+        decision: "proceed",
+        recordCount: 200,
+        effectiveKeyCount: 1,
+        protocolVersion: null,
+      },
+    ],
+    [
+      "throwing version getter",
+      {
+        linkageTerms: termsB,
+        decision: "proceed",
+        recordCount: 200,
+        effectiveKeyCount: 1,
+        get protocolVersion(): unknown {
+          throw new Error("boom");
+        },
+      },
+    ],
+  ];
+  for (const [shape, frame] of refusedVersionFrames) {
+    const [connA, connB] = makeConnections();
+    const initiator = exchangeTerms(connA, "initiator", termsA, 100);
+    await connB.receive(); // msg 1: initiator's terms
+    await connB.send(frame);
+    const abort = await connB.receive(); // msg 3: initiator's abort -- must arrive
+    expect(abort, shape).toMatchObject({
+      decision: "abort",
+      abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+    });
+    await expect(initiator, shape).rejects.toThrow(
+      PROTOCOL_VERSION_MISMATCH_MESSAGE,
+    );
+  }
 });
 
 test("a version mismatch is diagnosed ahead of a simultaneous terms mismatch", async () => {
@@ -536,12 +657,13 @@ test("a version mismatch is diagnosed ahead of a simultaneous terms mismatch", a
 test("initiator: a version skew on an abort frame wins over the peer's abort reason", async () => {
   // Precedence pin for the reconcile-before-abort-check ordering (the initiator
   // branch runs reconcileProtocolVersion before the decision === "abort" check): a
-  // message 2 that BOTH aborts AND carries a skewed protocolVersion is diagnosed as
+  // message 2 that BOTH aborts AND carries a SKEWED protocolVersion is diagnosed as
   // the version skew -- the root cause -- rather than relaying the peer's stated abort
-  // reason. That frame shape is reachable only from a non-conforming or malicious
-  // peer: a conforming responder's sendAbort never spreads protocolVersion onto an
-  // abort frame, so a genuine abort probes to undefined, the reconcile no-ops, and the
-  // peer's reason surfaces (pinned by the abort-relay tests above). This guards the
+  // reason. A conforming responder's abort carries this build's own version (see
+  // sendAbort), so the reconcile no-ops on it and the peer's stated reason surfaces
+  // (pinned by the abort-relay test above); the foreign version this fixture carries
+  // is reachable only from a non-conforming or malicious peer, and the reconcile --
+  // which runs before the decision is read -- reports the skew instead. This guards the
   // ordering against a refactor that put the abort check first and re-buried the skew.
   const [connA, connB] = makeConnections();
   const initiator = exchangeTerms(connA, "initiator", termsA, 100);
@@ -1018,19 +1140,51 @@ test("the initiator refuses a fan-out advertisement on a cascade exchange too", 
   expect((err as ConnectionError).message).toContain(STRATEGY_REFUSAL);
 });
 
-test("a partner that omits the effective key count resolves to the agreed key count", async () => {
-  // Only a build predating the field can omit it, and such a build predates the
-  // fan-out capability, so the plain key count is exactly what its data obeys.
-  // The protocol-version reconcile is what lets such a peer proceed at all, so
-  // the frame omits the version too.
+const ABSENT_COUNT_REFUSAL =
+  "partner advertised no effective key count against 1 agreed linkage key(s)";
+
+test("the responder refuses a partner that omits the effective key count", async () => {
+  // The advertisement is not defaultable: the version reconcile admits only a
+  // partner advertising this build's version, and a party on that version always
+  // declares a count beside it, so an omission is a non-conforming peer and draws
+  // the classified refusal rather than resolving to the plain key count.
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB, 200);
-  await connA.send({ linkageTerms: termsA, recordCount: 100 });
-  await connA.receive(); // msg 2
-  await connA.send({ decision: "proceed" });
-  expect((await responder).partnerEffectiveKeyCount).toBe(
-    termsA.linkageKeys.length,
-  );
+  await connA.send({
+    linkageTerms: termsA,
+    recordCount: 100,
+    protocolVersion: PROTOCOL_VERSION,
+  });
+  const abort = await connA.receive();
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: ["partner advertised an unusable effective key count"],
+  });
+  const err = await responder.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).message).toContain(ABSENT_COUNT_REFUSAL);
+});
+
+test("the initiator refuses an omitted effective key count on message 2 too", async () => {
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
+  await connB.receive(); // msg 1
+  await connB.send({
+    linkageTerms: termsB,
+    decision: "proceed",
+    recordCount: 200,
+    protocolVersion: PROTOCOL_VERSION,
+  });
+  const abort = await connB.receive();
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: ["partner advertised an unusable effective key count"],
+  });
+  const err = await initiator.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).message).toContain(ABSENT_COUNT_REFUSAL);
 });
 
 // --- Missing record count ----------------------------------------------------
@@ -1045,7 +1199,12 @@ test("initiator aborts when a proceed frame omits the record count", async () =>
   const [connA, connB] = makeConnections();
   const initiator = exchangeTerms(connA, "initiator", termsA, 100);
   await connB.receive(); // msg 1: initiator's terms
-  await connB.send({ linkageTerms: termsB, decision: "proceed" }); // no recordCount
+  await connB.send({
+    linkageTerms: termsB,
+    decision: "proceed",
+    effectiveKeyCount: 1,
+    protocolVersion: PROTOCOL_VERSION,
+  }); // no recordCount
   // The initiator sends an abort (msg 3) and then throws; drain the abort so
   // connB does not dangle, and confirm it carries the reason.
   const abort = await connB.receive();
@@ -1064,7 +1223,11 @@ test("responder rejects a message 1 that omits the record count", async () => {
   // as a failed-to-parse abort rather than proceeding without a count.
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB, 200);
-  await connA.send({ linkageTerms: termsA }); // msg 1 without recordCount
+  await connA.send({
+    linkageTerms: termsA,
+    effectiveKeyCount: 1,
+    protocolVersion: PROTOCOL_VERSION,
+  }); // msg 1 without recordCount
   // The responder aborts (msg 2) with a parse-failure reason; drain it.
   const abort = await connA.receive();
   expect(abort).toMatchObject({ decision: "abort" });
@@ -1102,6 +1265,8 @@ test("responder neutralizes partner bytes in a linkage-terms parse error", async
   const responder = exchangeTerms(connB, "responder", termsB, 200);
   await connA.send({
     recordCount: 100,
+    effectiveKeyCount: 1,
+    protocolVersion: PROTOCOL_VERSION,
     linkageTerms: {
       ...termsA,
       linkageKeys: [
@@ -1139,10 +1304,13 @@ test("initiator: a pathological-count abortReasons fails cleanly, not with a Ran
   const initiator = exchangeTerms(connA, "initiator", termsA, 100);
   await connB.receive(); // consume the initiator's terms (message 1)
   // An abort frame carries no recordCount (like save, role metadata is not spread
-  // onto an abort); the initiator throws on the abort before it would read one.
+  // onto an abort) but does carry the protocol version, as a conforming
+  // responder's does; the initiator throws on the abort before it would read a
+  // count.
   await connB.send({
     linkageTerms: termsB,
     decision: "abort",
+    protocolVersion: PROTOCOL_VERSION,
     abortReasons: Array.from({ length: 4_000_000 }, () => 123),
   });
   const err = await initiator.catch((e: unknown) => e);
@@ -1176,6 +1344,11 @@ test("exchangeTerms responder: rejects (does not hang) when abort send fails on 
   // failed abort send) never reaches connA, and the initiator would hang. The
   // recordCount keeps msg1 well-formed so the responder reaches the algorithm
   // incompatibility (not a parse error) before its abort send fails.
-  await connA.send({ linkageTerms: termsA, recordCount: 100 });
+  await connA.send({
+    linkageTerms: termsA,
+    recordCount: 100,
+    effectiveKeyCount: 1,
+    protocolVersion: PROTOCOL_VERSION,
+  });
   await expect(responder).rejects.toThrow("linkage terms are incompatible");
 });
