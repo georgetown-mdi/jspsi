@@ -487,9 +487,9 @@ export interface InvitationSummary {
    * the multiplicity. What stays refused -- the both-sided pair, and a
    * deduplicating term under `single-pass` -- is a property of the agreed PAIR
    * rather than of the inviter's setting, so it is not readable from an
-   * invitation alone and this flag does not carry it. The renderer flags the
-   * duplicate-matches row as proposed-but-not-applied when a looser setting is
-   * proposed but this is false.
+   * invitation alone and this flag does not carry it. What it carries is this
+   * build's applied setting for the term, kept as the summary's applied-settings
+   * surface for it beside the per-element `fuzzyComparisonApplied`.
    */
   deduplicateApplied: boolean;
   /**

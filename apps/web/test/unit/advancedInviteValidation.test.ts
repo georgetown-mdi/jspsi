@@ -101,6 +101,51 @@ describe("the fan-out gate (the run refuses what the schema admits)", () => {
   });
 });
 
+describe("the deduplicating-pair gate (the run refuses what the schema admits)", () => {
+  // Core refuses a `deduplicate: true` term under `single-pass` on both parties
+  // before matching begins, so an invitation minted on that pair is one both
+  // sides abort on. These pin the refusal at the moment of authoring, and pin
+  // that it is the PAIR that is refused: either setting alone still generates.
+  const now = new Date("2026-01-01T00:00:00Z");
+
+  test("blocks Generate on a deduplicating draft under single-pass", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const result = validateAdvancedInvite(
+      { ...draft, deduplicate: true, linkageStrategy: "single-pass" },
+      seed,
+      now,
+    );
+    expect(result.canGenerate).toBe(false);
+    expect(result.terms).toBeUndefined();
+    // Both ways out, each named as the control that carries it, rather than the
+    // config-file wording core's own refusal uses.
+    expect(result.errors.keys).toMatch(/Set Linkage strategy to Cascade/);
+    expect(result.errors.keys).toMatch(/Allow several of your records/);
+  });
+
+  test("the same deduplicating draft under cascade generates", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const result = validateAdvancedInvite(
+      { ...draft, deduplicate: true, linkageStrategy: "cascade" },
+      seed,
+      now,
+    );
+    expect(result.errors).toEqual({});
+    expect(result.canGenerate).toBe(true);
+  });
+
+  test("a single-pass draft that does not deduplicate generates", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const result = validateAdvancedInvite(
+      { ...draft, deduplicate: false, linkageStrategy: "single-pass" },
+      seed,
+      now,
+    );
+    expect(result.errors).toEqual({});
+    expect(result.canGenerate).toBe(true);
+  });
+});
+
 describe("the invitation-lifetime gate (validation-only, not a schema rule)", () => {
   test("accepts a lifetime at the boundary and lets a valid draft generate", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);

@@ -4,6 +4,8 @@ import {
   FAN_OUT_FUNCTION_NAMES,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
+  UsageError,
+  assertDeduplicateImplemented,
   assessLinkageSatisfiability,
   canonicalString,
   countOnlyShapeViolation,
@@ -133,6 +135,18 @@ const COUNT_ONLY_MESSAGES: Record<CountOnlyShapeViolation, string> = {
     `those columns so they are not sent, or ${REVEAL_IDENTIFIERS_INSTEAD}`,
 };
 
+/** Shown when the draft asks for a deduplicating match under a linkage strategy
+ * that matches one value per record. Core refuses that pair on both parties
+ * before matching begins ({@link assertDeduplicateImplemented}), so an invitation
+ * minted on it is one both sides abort on rather than one the partner can accept.
+ * Names the two ways out in the words the controls carrying them are labelled,
+ * keeping the same split the count-only messages do: the rule is core's, the
+ * wording this editor's. */
+const DEDUPLICATE_STRATEGY_MESSAGE =
+  "Single-pass matches each of your records to at most one partner record, so " +
+  "it cannot run a deduplicating match. Set Linkage strategy to Cascade, or " +
+  'clear "Allow several of your records to match one partner record".';
+
 /**
  * Validate a draft for the Generate gate. The core schema
  * ({@link safeParseLinkageTerms}) is the single source for everything it covers
@@ -143,8 +157,9 @@ const COUNT_ONLY_MESSAGES: Record<CountOnlyShapeViolation, string> = {
  * rejects an already-passed date later, so refuse it up front), at least one
  * column-satisfiable linkage key, a
  * canonical-encode dry run (the byte form both parties hash; refuse a value that
- * cannot encode rather than fail cross-party), and a declared fan-out step, which
- * the schema admits and the run refuses.
+ * cannot encode rather than fail cross-party), and the two pairings the schema
+ * admits and the run refuses: a declared fan-out step, and a deduplicating term
+ * under a linkage strategy that matches one value per record.
  *
  * Schema errors are mapped back to the offending control by their issue path --
  * the editor re-derives the control because the referential-integrity refines
@@ -349,6 +364,23 @@ export function validateAdvancedInvite(
     )
   )
     errors.keys = `A linkage key's transform ${FAN_OUT_MESSAGE_BODY}`;
+
+  // The deduplicating-pair gate, run as core's own refusal rather than a second
+  // web-side copy of the pair it names -- the same reading-from-core the fan-out
+  // gate above does with core's list, so a pair added there is refused here with
+  // no second edit. Core refuses it symmetrically from the agreed terms, so an
+  // invitation minted on it aborts both parties at the run boundary; refusing it
+  // at Generate puts the answer where the operator still holds both controls.
+  // Written over whatever else the key list reports, since generation stays
+  // blocked until one of the two settings moves. The count-only gate below writes
+  // over this one in turn for a `psi-c` draft, whose own shape rules own both
+  // settings and whose remedies stay valid for that algorithm.
+  try {
+    assertDeduplicateImplemented(terms);
+  } catch (err) {
+    if (!(err instanceof UsageError)) throw err;
+    errors.keys = DEDUPLICATE_STRATEGY_MESSAGE;
+  }
 
   // The count-only shape gate, at the same altitude as the fan-out one above and
   // read from core's own rules rather than a second web-side list, so this editor

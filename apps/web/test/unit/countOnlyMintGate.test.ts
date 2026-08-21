@@ -110,7 +110,12 @@ describe("the count-only shape gate at the Generate boundary", () => {
     expect(result.errors.payload).toMatch(/so they are not sent/);
   });
 
-  test("the identical draft under psi generates, so every gate is the algorithm's", () => {
+  test("under psi the identical draft is refused only for its deduplicating pair, which cascade settles", () => {
+    // Every rule above is the count-only algorithm's: under psi the same draft
+    // keeps its several keys, its marked column, and its deduplicate setting. The
+    // one refusal left is the pair no algorithm admits -- deduplicate beside
+    // single-pass, gated in advancedInviteValidation.test.ts -- so moving that
+    // draft to cascade generates and nothing here was the count-only rules'.
     const { draft, seed } = countOnlyDraft([...LINKAGE_COLUMNS, "notes"]);
     const asPsi: AdvancedInviteDraft = {
       ...draft,
@@ -122,7 +127,16 @@ describe("the count-only shape gate at the Generate boundary", () => {
         .metadata,
     };
     const result = validateAdvancedInvite(asPsi, seed, NOW);
-    expect(result.errors).toEqual({});
-    expect(result.canGenerate).toBe(true);
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.payload).toBeUndefined();
+    expect(result.errors.keys).toMatch(/cannot run a deduplicating match/);
+
+    const cascading = validateAdvancedInvite(
+      { ...asPsi, linkageStrategy: "cascade" },
+      seed,
+      NOW,
+    );
+    expect(cascading.errors).toEqual({});
+    expect(cascading.canGenerate).toBe(true);
   });
 });

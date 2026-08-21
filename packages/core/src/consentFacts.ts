@@ -498,9 +498,9 @@ export const COUNT_ONLY_DISCLOSURE_STATEMENT =
  * inviting party's file would state a guarantee no check makes.
  *
  * Written in party names rather than "you", like the headline it sits with, so
- * one sentence serves the acceptor's consent screen and the inviter's own
- * preview. Fixed first-party copy naming no value, so a surface may render it
- * verbatim.
+ * the one sentence reads correctly from either party's side and no surface needs
+ * a viewer-relative variant of it. Fixed first-party copy naming no value, so a
+ * surface may render it verbatim.
  */
 export const DEDUPLICATE_DISCLOSURE_STATEMENT =
   "Grouping is what a deduplicating match discloses: for each of the accepting " +
