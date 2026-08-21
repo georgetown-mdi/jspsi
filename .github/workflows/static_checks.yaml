@@ -169,6 +169,16 @@ jobs:
       # line survives, and restores the working-tree copy either way.
       - name: Route tree freshness
         run: npm run check:routetree
+      # The known-answer vectors under packages/core/test/vectors/ are asserted
+      # by the suites in one direction only -- that the code reproduces the
+      # checked-in JSON -- so a failing conformance assertion could be silenced
+      # by editing the JSON. This regenerates each file with its generator and
+      # compares, naming the file and the generator on a difference. It restores
+      # every file it touches, classifies each entry in that directory
+      # (generator, verifier, or no generator) so an unclassified addition
+      # fails, and masks only the randomized ECDSA signature values, by name.
+      - name: Vectors against their generators
+        run: npm run check:vectors
       # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
       # .mjs with no server or Docker dependency, so a stock runner suffices. This
       # is the repo-wide non-path-filtered gate that guarantees the suite is always
