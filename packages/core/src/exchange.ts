@@ -275,14 +275,15 @@ export function resolveCountOnlyRun(
  * matching begins.
  *
  * The cascade implements the deduplicating match (`linkViaPSI`), but no exchange
- * runs one: `single-pass` still matches a single value per record whatever
- * cardinality it is handed, and the surfaces downstream of the association table
- * -- the output table, the payload alignment, the exchange record -- have not been
- * carried through a table with several links per input. Running a
- * `deduplicate: true` term would therefore deliver something other than the
- * consented many-cardinality match -- the disclosure-fidelity gap this refusal
- * closes. Refused at prepare time in {@link prepareForExchange} for this party's
- * own terms, and for both parties' agreed terms by
+ * runs one. `single-pass` implements neither deduplicating cardinality: it refuses
+ * `one-to-many` and `many-to-many`, and accepts `many-to-one` only as an alias
+ * that runs the unchanged one-to-one matching. The surfaces downstream of the
+ * association table -- the output table, the payload alignment, the exchange
+ * record -- have not been carried through a table with several links per input
+ * either. Running a `deduplicate: true` term would therefore deliver something
+ * other than the consented many-cardinality match -- the disclosure-fidelity gap
+ * this refusal closes. Refused at prepare time in {@link prepareForExchange} for
+ * this party's own terms, and for both parties' agreed terms by
  * {@link resolveLinkageCardinality} after the terms exchange, before the PSI
  * rounds begin.
  *
@@ -301,6 +302,42 @@ export function assertDeduplicateImplemented(deduplicate: boolean): void {
       "refused before matching begins. Set deduplicate to false until " +
       "deduplication is implemented.",
   );
+}
+
+/**
+ * Requires an association table's local half to be STRICTLY ascending, at the
+ * seam {@link runExchange} consumes the table.
+ *
+ * Both consumers there read it as one entry per matched RECORD, in this party's
+ * own row order: the payload gathers one transmitted row per entry
+ * ({@link preparePayload}), and the attested result size counts the entries as
+ * matched records. The `"one"` side of a deduplicating exchange is the one table
+ * shape that breaks it -- several of the partner's records link to one of ours, so
+ * the local half repeats a row and is merely non-decreasing (see
+ * {@link AssociationTable}) -- which would make the payload repeat rows and the
+ * attested size a pair count where a record count is meant.
+ *
+ * {@link assertDeduplicateImplemented} is what keeps such a table away from that
+ * seam today. This encodes that as a check rather than resting on it, so lifting
+ * the refusal without carrying the two surfaces through the multiplicity fails
+ * here instead of quietly emitting the wrong payload and count.
+ *
+ * @internal exported for the association-table invariant test.
+ */
+export function assertMatchedRowsStrictlyAscend(
+  associationTable: AssociationTable,
+): void {
+  const matchedRows = associationTable[0];
+  for (let i = 1; i < matchedRows.length; ++i) {
+    if (matchedRows[i] > matchedRows[i - 1]) continue;
+    throw new Error(
+      "the association table's local half is not strictly ascending: the " +
+        "payload rows and the attested result size both read it as one entry " +
+        "per matched record. Carry those two surfaces through a table with " +
+        "several links per record before lifting the deduplication refusal " +
+        "that keeps one from reaching here.",
+    );
+  }
 }
 
 /**
@@ -1307,6 +1344,12 @@ export async function runExchange(
     if (participant !== undefined) participant.dispose();
     else engine.dispose();
   }
+
+  // One entry per matched record, ascending, is what both readers below assume of
+  // the table -- the payload's transmitted rows and the attested result size. See
+  // assertMatchedRowsStrictlyAscend for what a table breaking it would deliver.
+  if (associationTable !== undefined)
+    assertMatchedRowsStrictlyAscend(associationTable);
 
   // Send-gate: transmit payload only to a partner entitled to the result. A party
   // with expectsOutput:false learns no matched records, so it has no use for

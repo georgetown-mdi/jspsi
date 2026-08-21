@@ -8,6 +8,7 @@ import {
   candidatePositionCount,
   groupDuplicatesAndRemoveUndefineds,
   linkViaPSI,
+  linkViaSinglePassPSI,
   removeDuplicatesAndUndefineds,
   type LinkageCardinality,
 } from "../src/link";
@@ -18,6 +19,7 @@ import {
 } from "../src/connection/messageConnection";
 import type { AssociationTable } from "../src/types";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
+import { fanOutFreeBounds } from "./utils/singlePassBounds";
 
 // The cascade's deduplicating half: a "many" party keeps a value several of its
 // own records hold, contributes it to the round once, and re-expands a match on it
@@ -29,7 +31,8 @@ import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 //
 // This path is dark in production: exchange.ts still refuses any deduplicate: true
 // at the exchange boundary, so only these tests and a direct linkViaPSI caller
-// reach it.
+// reach it. The other strategy reads the same labels differently -- single-pass
+// implements no deduplicating match at all -- which the last section pins.
 
 const psiLibrary = await PSI();
 
@@ -359,111 +362,360 @@ test("a partner contributing one value twice is refused by the round's own table
   const starterRound = makeParticipant("starter")
     .identifyIntersection(starterConn, ["V", "V", "W"])
     .then(
-      () => undefined,
+      (table) => table,
       (err: unknown) => err,
     );
   const joinerRound = makeParticipant("joiner")
     .identifyIntersection(joinerConn, ["V", "W"])
     .then(
-      () => undefined,
+      (table) => table,
       (err: unknown) => err,
     );
 
   const outcome = await starterRound;
   await starterConn.close();
-  await joinerRound;
+  const joinerOutcome = await joinerRound;
 
   expect(outcome).toBeInstanceOf(ConnectionError);
   expect((outcome as ConnectionError).kind).toBe("protocol");
   expect((outcome as Error).message).toMatch(/repeats an index/);
+  // The refusal ends the round for BOTH parties: the joiner, which computed the
+  // ambiguous table and would otherwise be the one to resolve it, takes no
+  // matches from it either.
+  expect(joinerOutcome).toBeInstanceOf(Error);
 });
 
-// --- the generalized index checks ---------------------------------------------
-// Every one aborts as a classified protocol error with no result. The starter is
-// the "many" side throughout, so a list reaching the starter comes from the "one"
-// side (each matched position exactly once) and a list reaching the joiner comes
-// from the "many" side (each matched position at least once, and no other).
+// --- the resolver, end to end -------------------------------------------------
 
-const manyKeys: Keys = [["E1", "E1", "E2", "E3"]];
-const oneKeys: Keys = [["E1", "E2", "X"]];
+// Builds the mapped-element list the starter sends, from the joiner position each
+// of the starter's matched records paired with, in its own record order.
+type StarterRoundReport = (
+  joinerPositions: Array<number>,
+) => Array<MappedElement>;
 
-async function expectProtocolRefusal(
-  party: "starter" | "joiner",
-  deviation: Deviation,
-  detail: RegExp,
+// The joiner's resolver drops a position two or more of the starter's records
+// matched, so a starter naming one at all names a record the joiner did not match.
+// This is the list a non-conforming starter that had resolved the round the same
+// way would send.
+const attributableMatches: StarterRoundReport = (joinerPositions) => {
+  const timesMatched = new Map<number, number>();
+  for (const position of joinerPositions)
+    timesMatched.set(position, (timesMatched.get(position) ?? 0) + 1);
+  return joinerPositions
+    .filter((position) => timesMatched.get(position) === 1)
+    .map((position) => ({ theirIndex: position, iteration: 0 }));
+};
+
+// A starter that does NOT apply its own within-round uniqueness rule: it
+// contributes its whole dataset to the round, duplicates and all, which is the
+// variant the joiner's resolver exists for. No cardinality produces such a party,
+// so it is played by hand from the PSI primitives -- identifyIntersection's
+// starter branch without the association-table check that refuses the ambiguity
+// upstream, then the two mapped-element legs a starter sends first.
+async function runNonConformingStarter(
+  conn: MessageConnection,
+  values: Array<string>,
+  report: StarterRoundReport = attributableMatches,
 ): Promise<void> {
-  const run = await runCascade("starter", manyKeys, oneKeys, {
-    party,
-    deviation,
-  });
-  const outcome = run[party];
-  expect(outcome).toBeInstanceOf(ConnectionError);
-  expect((outcome as ConnectionError).kind).toBe("protocol");
-  expect((outcome as Error).message).toMatch(detail);
+  const participant = makeParticipant("starter");
+  const { setup, permutation } = await participant.createServerSetup(values);
+  await conn.send(setup);
+  const request = (await conn.receive()) as Uint8Array;
+  await conn.send(await participant.processClientRequest(request));
+
+  // The joiner computes the round's table and sends it as [its own positions,
+  // ours in the library's sorted order]; the starter's half of the round is to put
+  // ours back in input order and return them.
+  const [joinerPositions, sortedRows] = (await conn.receive()) as [
+    Array<number>,
+    Array<number>,
+  ];
+  await conn.send(sortedRows.map((slot) => permutation[slot]));
+  await conn.receive();
+
+  // A party contributing its dataset verbatim has one round position per record,
+  // so its translation of the joiner's list is the identity and its own entries
+  // carry the joiner's positions as the round reported them.
+  await conn.send(report(joinerPositions));
+  const joinerList = (await conn.receive()) as Array<MappedElement>;
+  await conn.send(joinerList);
+  await conn.receive();
 }
 
-test("a list from the many side naming a position this party did not match is refused", async () => {
-  await expectProtocolRefusal(
-    "joiner",
-    onMappedElementList(1, (list) => [
-      ...list.slice(0, -1),
-      { ...list[list.length - 1], theirIndex: 2 },
-    ]),
+async function runAgainstNonConformingStarter(
+  starterValues: Array<string>,
+  joinerKeys: Keys,
+  report?: StarterRoundReport,
+): Promise<AssociationTable | Error> {
+  const [starterConn, joinerConn] = createMessagePipe();
+  const starterRun = runNonConformingStarter(
+    starterConn,
+    starterValues,
+    report,
+  ).catch(() => undefined);
+  const outcome = await linkViaPSI(
+    { cardinality: "many-to-one" },
+    makeParticipant("joiner"),
+    joinerConn,
+    joinerKeys,
+    starterValues.length,
+    -1,
+  ).then(
+    (table) => table,
+    (err: unknown) => err as Error,
+  );
+  await starterConn.close();
+  await starterRun;
+  return outcome;
+}
+
+test("the joiner drops a value two or more of a non-conforming starter's records hold", async () => {
+  // The starter holds "A" twice and keeps both in the round, so the joiner's own
+  // "A" position pairs with two of the starter's records. The joiner applies the
+  // starter's uniqueness rule on its behalf: the whole "A" group leaves the round
+  // -- neither of the joiner's own "A" rows is attributed to either of the
+  // starter's -- rather than the exchange delivering the many-to-many table
+  // neither party's terms declared. "B" is unambiguous on both sides and matches.
+  const outcome = await runAgainstNonConformingStarter(
+    ["A", "A", "B"],
+    [["A", "A", "B"]],
+  );
+
+  expect(outcome).toStrictEqual([[2], [2]]);
+});
+
+test("a non-conforming starter naming the dropped group is refused by the joiner", async () => {
+  // The consequence of the drop on the wire: a dropped position names no record
+  // the joiner matched, so a starter that names it -- one entry, exactly the count
+  // the joiner's own attribution leaves it holding -- is refused where the list is
+  // translated rather than reinstating the group.
+  const outcome = await runAgainstNonConformingStarter(
+    ["A", "A", "B"],
+    [["A", "A", "B"]],
+    (joinerPositions) => {
+      const ambiguous = joinerPositions.filter(
+        (position, _, all) =>
+          all.filter((other) => other === position).length > 1,
+      );
+      return [{ theirIndex: ambiguous[0], iteration: 0 }];
+    },
+  );
+
+  expect(outcome).toBeInstanceOf(ConnectionError);
+  expect((outcome as ConnectionError).kind).toBe("protocol");
+  expect((outcome as Error).message).toMatch(
     /names a record this side did not match on that round/,
   );
 });
 
-test("a list from the many side that leaves a matched position unnamed is refused", async () => {
-  await expectProtocolRefusal(
-    "joiner",
-    onMappedElementList(1, (list) => list.slice(0, -1)),
-    /does not name every record this side matched/,
+test("a non-conforming starter reinstating the dropped group is refused on the count", async () => {
+  // The same drop seen by the count check: the joiner holds the partner's list to
+  // the positions IT attributed, so a starter naming every pair the round produced
+  // -- the three its own records matched -- cannot restore the group by volume
+  // either.
+  const outcome = await runAgainstNonConformingStarter(
+    ["A", "A", "B"],
+    [["A", "A", "B"]],
+    (joinerPositions) =>
+      joinerPositions.map((position) => ({
+        theirIndex: position,
+        iteration: 0,
+      })),
+  );
+
+  expect(outcome).toBeInstanceOf(ConnectionError);
+  expect((outcome as ConnectionError).kind).toBe("protocol");
+  expect((outcome as Error).message).toMatch(
+    /the partner's mapped-element list carries 3 entries, expected 1/,
   );
 });
 
-test("a list from the many side longer than the partner's counted rows is refused", async () => {
-  await expectProtocolRefusal(
-    "joiner",
-    onMappedElementList(1, (list) => [...list, list[0], list[0]]),
-    /more than the 4 record\(s\) the partner counted/,
+// --- the generalized index checks ---------------------------------------------
+// Every one aborts as a classified protocol error with no result. A list reaching
+// the "one" side comes from the "many" side (each matched position at least once,
+// and no other) and a list reaching the "many" side comes from the "one" side
+// (each matched position exactly once). Nothing in the checks is role-derived, so
+// the whole block runs under both assignments of the "many" side.
+
+const manyKeys: Keys = [["E1", "E1", "E2", "E3"]];
+const oneKeys: Keys = [["E1", "E2", "X"]];
+
+for (const manySide of ["starter", "joiner"] as const) {
+  const oneSide = manySide === "starter" ? "joiner" : "starter";
+  const [starterKeys, joinerKeys] =
+    manySide === "starter" ? [manyKeys, oneKeys] : [oneKeys, manyKeys];
+  const under = ` (many side: ${manySide})`;
+
+  const expectProtocolRefusal = async (
+    party: "starter" | "joiner",
+    deviation: Deviation,
+    detail: RegExp,
+  ): Promise<void> => {
+    const run = await runCascade(manySide, starterKeys, joinerKeys, {
+      party,
+      deviation,
+    });
+    const outcome = run[party];
+    expect(outcome).toBeInstanceOf(ConnectionError);
+    expect((outcome as ConnectionError).kind).toBe("protocol");
+    expect((outcome as Error).message).toMatch(detail);
+  };
+
+  test(
+    "a list from the many side naming a position this party did not match is " +
+      `refused${under}`,
+    async () => {
+      await expectProtocolRefusal(
+        oneSide,
+        onMappedElementList(1, (list) => [
+          ...list.slice(0, -1),
+          { ...list[list.length - 1], theirIndex: 2 },
+        ]),
+        /names a record this side did not match on that round/,
+      );
+    },
   );
+
+  test(
+    "a list from the many side that leaves a matched position unnamed is " +
+      `refused${under}`,
+    async () => {
+      await expectProtocolRefusal(
+        oneSide,
+        onMappedElementList(1, (list) => list.slice(0, -1)),
+        /does not name every record this side matched/,
+      );
+    },
+  );
+
+  test(
+    "a list from the many side longer than the partner's counted rows is " +
+      `refused${under}`,
+    async () => {
+      await expectProtocolRefusal(
+        oneSide,
+        onMappedElementList(1, (list) => [...list, list[0], list[0]]),
+        /more than the 4 record\(s\) the partner counted/,
+      );
+    },
+  );
+
+  test(`a list from the one side naming a position twice is refused${under}`, async () => {
+    await expectProtocolRefusal(
+      manySide,
+      onMappedElementList(1, (list) => [list[0], list[0]]),
+      /names one record twice/,
+    );
+  });
+
+  test(`a returned list carrying other than the computed entry count is refused${under}`, async () => {
+    // The many side's own list comes back one entry per record it matched...
+    await expectProtocolRefusal(
+      manySide,
+      onMappedElementList(2, (list) => list.slice(0, -1)),
+      /the returned mapped-element list carries 2 entries, expected 3/,
+    );
+    // ...and the one side's comes back EXPANDED, to the count its partner's
+    // inbound list already implied.
+    await expectProtocolRefusal(
+      oneSide,
+      onMappedElementList(2, (list) => list.slice(0, -1)),
+      /the returned mapped-element list carries 2 entries, expected 3/,
+    );
+  });
+
+  test(`a returned list repeating a partner row is refused on the one side${under}`, async () => {
+    // Distinctness is relaxed only where THIS party is the "many" side, several of
+    // its records legitimately naming one partner row. The "one" side's own records
+    // each take a distinct partner row, so a repeat there is still a fault.
+    await expectProtocolRefusal(
+      oneSide,
+      onMappedElementList(2, (list) => [
+        list[0],
+        { ...list[1], theirIndex: list[0].theirIndex },
+        ...list.slice(2),
+      ]),
+      /repeats an index/,
+    );
+  });
+}
+
+// --- the same labels under single-pass ----------------------------------------
+// Single-pass implements no deduplicating match: it refuses one-to-many and
+// many-to-many outright, and accepts many-to-one as an alias that runs the
+// unchanged one-to-one matching. Both halves of that accept-list are pinned here,
+// so lifting the exchange-boundary refusal without teaching single-pass the
+// cardinality trips a test rather than silently matching one-to-one under a
+// consented many-cardinality term.
+
+const singlePassStarterData = [["E1", "E1", "E2", "E3"]];
+const singlePassJoinerData = [["E1", "E2", "X"]];
+
+async function runSinglePass(
+  cardinality: LinkageCardinality,
+): Promise<[AssociationTable, AssociationTable]> {
+  const [starterConn, joinerConn] = createMessagePipe();
+  return await Promise.all([
+    linkViaSinglePassPSI(
+      { cardinality },
+      makeParticipant("starter"),
+      starterConn,
+      singlePassStarterData,
+      fanOutFreeBounds(
+        singlePassStarterData.length,
+        singlePassJoinerData[0].length,
+      ),
+      false,
+      -1,
+    ),
+    linkViaSinglePassPSI(
+      { cardinality },
+      makeParticipant("joiner"),
+      joinerConn,
+      singlePassJoinerData,
+      fanOutFreeBounds(
+        singlePassJoinerData.length,
+        singlePassStarterData[0].length,
+      ),
+      false,
+      -1,
+    ),
+  ]);
+}
+
+test("single-pass runs many-to-one as an alias for one-to-one", async () => {
+  const [oneToOneStarter, oneToOneJoiner] = await runSinglePass("one-to-one");
+  const [starter, joiner] = await runSinglePass("many-to-one");
+
+  // Table for table with the one-to-one run on the same inputs: the starter's
+  // duplicated "E1" is dropped as ambiguous rather than kept and expanded onto
+  // both of its rows, which is what the cascade's many-to-one makes of this same
+  // data in the first test of this file.
+  expect(starter).toStrictEqual(oneToOneStarter);
+  expect(joiner).toStrictEqual(oneToOneJoiner);
+  expect(starter).toStrictEqual([[2], [1]]);
 });
 
-test("a list from the one side naming a position twice is refused", async () => {
-  await expectProtocolRefusal(
-    "starter",
-    onMappedElementList(1, (list) => [list[0], list[0]]),
-    /names one record twice/,
-  );
-});
-
-test("a returned list carrying other than the computed entry count is refused", async () => {
-  // The many side's own list comes back one entry per record it matched...
-  await expectProtocolRefusal(
-    "starter",
-    onMappedElementList(2, (list) => list.slice(0, -1)),
-    /the returned mapped-element list carries 2 entries, expected 3/,
-  );
-  // ...and the one side's comes back EXPANDED, to the count its partner's inbound
-  // list already implied.
-  await expectProtocolRefusal(
-    "joiner",
-    onMappedElementList(2, (list) => list.slice(0, -1)),
-    /the returned mapped-element list carries 2 entries, expected 3/,
-  );
-});
-
-test("a returned list repeating a partner row is refused on the one side", async () => {
-  // Distinctness is relaxed only where THIS party is the "many" side, several of
-  // its records legitimately naming one partner row. The "one" side's own records
-  // each take a distinct partner row, so a repeat there is still a fault.
-  await expectProtocolRefusal(
-    "joiner",
-    onMappedElementList(2, (list) => [
-      list[0],
-      { ...list[1], theirIndex: list[0].theirIndex },
-      ...list.slice(2),
-    ]),
-    /repeats an index/,
-  );
-});
+for (const cardinality of ["one-to-many", "many-to-many"] as const) {
+  test(`single-pass refuses ${cardinality}`, async () => {
+    // Refused before any frame moves, so the unread other end of the pipe is not a
+    // partner this ever reaches.
+    const [conn] = createMessagePipe();
+    await expect(
+      linkViaSinglePassPSI(
+        { cardinality },
+        makeParticipant("starter"),
+        conn,
+        singlePassStarterData,
+        fanOutFreeBounds(
+          singlePassStarterData.length,
+          singlePassJoinerData[0].length,
+        ),
+        false,
+        -1,
+      ),
+    ).rejects.toThrow(
+      `psi for cardinality '${cardinality}' not yet implemented`,
+    );
+  });
+}
