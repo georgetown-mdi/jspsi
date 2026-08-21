@@ -4,7 +4,7 @@ title: "CLI Machine-Interface Event Stream"
 
 # CLI machine-interface event stream
 
-This document specifies the opt-in machine-readable event stream the `psilink` CLI emits under `--event-stream`: the file descriptor it is written to, the NDJSON framing and per-line schema version, every event type and its fields, the four terminal-error categories and the rules that classify them, the security marker, the single-terminal-event guarantees, and the sanitization applied to every field. It is the spec-tier complement to the operator-facing `--event-stream` description in [CLI.md](../CLI.md#machine-readable-event-stream), which says what the stream is for and how to consume it; this document says how each line is constructed. It does not cover the exit codes (see the exit-code table in [CLI.md](../CLI.md#exit-codes)), the exchange protocol that produces the stages (see [PROTOCOL.md](PROTOCOL.md)), or the display-sanitization escape format the fields reuse (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#display-sanitization-escape-format) and `packages/core/src/utils/sanitizeForDisplay.ts`). Intended readers are implementors writing a supervising process and security auditors.
+This document specifies the opt-in machine-readable event stream the `psilink` CLI emits under `--event-stream`: the file descriptor it is written to, the NDJSON framing and per-line schema version, every event type and its fields, the four terminal-error categories and the rules that classify them, the security marker and the internal-fault code that sits opposite it, the single-terminal-event guarantees, and the sanitization applied to every field. It is the spec-tier complement to the operator-facing `--event-stream` description in [CLI.md](../CLI.md#machine-readable-event-stream), which says what the stream is for and how to consume it; this document says how each line is constructed. It does not carry the exit-code table (see [CLI.md](../CLI.md#exit-codes)) -- only the two codes a supervisor must read against the category beside them -- nor the exchange protocol that produces the stages (see [PROTOCOL.md](PROTOCOL.md)), nor the display-sanitization escape format the fields reuse (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#display-sanitization-escape-format) and `packages/core/src/utils/sanitizeForDisplay.ts`). Intended readers are implementors writing a supervising process and security auditors.
 
 The stream is a machine interface for a supervising process (an orchestrator, a job runner, a test harness) that spawns `psilink` and reads structured progress and outcome events without parsing the human log. It is off by default; passing `--event-stream` turns it on for every exchange-running command (the zero-setup exchange, `psilink exchange`, and the online `psilink invite`/`accept`). It has no effect on an offline `invite`/`accept`, which runs no exchange.
 
@@ -146,7 +146,7 @@ The failure **terminal event**. Emitted exactly once, for an organic (non-signal
 
 ## Error categories
 
-The four categories are lifted verbatim from the web front end's `ExchangeErrorCategory` (`apps/web/src/psi/exchangeLifecycle.ts`), so a consumer classifies a CLI failure exactly as it would a web one. The CLI's error taxonomy -- the core `UsageError`/`OperatorConfigError` hierarchy, the `ConnectionError` kinds, and the command boundaries' 64/69/73 exit split -- maps onto them as follows:
+The four categories are lifted verbatim from the web front end's `ExchangeErrorCategory` (`apps/web/src/psi/exchangeLifecycle.ts`), so a consumer classifies a CLI failure exactly as it would a web one. The CLI's error taxonomy -- the core `UsageError`/`OperatorConfigError` hierarchy, the `InternalConsistencyError` class beside it, the `ConnectionError` kinds, and the command boundaries' 64/69/70/73 exit split -- maps onto them as follows:
 
 | Category | Meaning | Classification rule |
 | -------- | ------- | ------------------- |
@@ -162,6 +162,20 @@ The `output` category covers the whole stage, so it is broader than the exit cod
 ### The security marker
 
 The process exit code cannot distinguish a `security` failure from an ordinary one: a `security`-kind `ConnectionError` is not a `UsageError`, so it exits 69 (EX_UNAVAILABLE) -- the same code a plain transport drop yields. A supervisor that must treat a trust failure differently (a wrong secret is not a retryable transport blip, and a host presenting an unexpected key must not be silently reconnected to) therefore cannot rely on the exit code; the `error` event's `category: "security"` is the only place the distinction is observable. This covers the handshake cases (a failed key-exchange authentication: wrong secret, tampered or malformed handshake frames) and the host-identity cases (an SFTP host-key mismatch against the pinned fingerprint, or the unpinned fail-closed refusal) alike. Reading the terminal event, not the exit code, is the supported way to detect a trust-boundary failure.
+
+### The internal-fault code
+
+The mirror of the security marker: here the exit code carries the distinction and the category cannot. An internal fault is a disagreement between two derivations of the same quantity inside one party -- a defect in psilink itself, not in anything the operator, the partner, or the transport supplied. Core raises it as an `InternalConsistencyError`, and the CLI's error-to-exit boundary maps that class to `EX_SOFTWARE` (70).
+
+One check raises it: the single-pass sender's send-time reply-cap backstop, where the reply this party built exceeds the byte cap both parties derive from their declared sizes, on an exchange whose declared sizes the single-pass ceiling gate has already cleared.
+
+The terminal `error` event carries `category: "exchange"`. The four categories are the web's vocabulary and have no internal-fault member, and the classification rules key on the phase and on `OperatorConfigError` / `ConnectionError` membership, neither of which this class joins -- so it falls to the default bucket, alongside the retryable transport faults it is not one of. A supervisor separates it by the exit code.
+
+Why 70 rather than a code already in the vocabulary:
+
+- **Not 64 (`EX_USAGE`).** 64 tells the operator that their own input or configuration is what to change. This condition is reached only after the ceiling gate has found both parties' declared widths and record counts within budget, so there is no dataset either operator controls that moves it, and the error's own message says so.
+- **Not 69 (`EX_UNAVAILABLE`).** 69 is the transport-availability code a supervisor is expected to retry once the transport recovers. This fault is deterministic in the run's own inputs, so every retry rebuilds the same reply and reaches the same refusal -- while conducting another full exchange, re-sending this party's records, which is exactly the loop the retry cap exists to bound (see [Exit codes](../CLI.md#exit-codes)).
+- **70 (`EX_SOFTWARE`)** is the `sysexits` code for an internal software error, and matches the remedy the message states: report it, with the two byte counts it names.
 
 ## Terminal-event guarantees
 

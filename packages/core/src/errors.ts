@@ -426,6 +426,39 @@ export class TransportOperationStalledError extends UsageError {
 }
 
 /**
+ * Thrown when two derivations of the same quantity inside ONE party disagree --
+ * a fault in this implementation rather than in anything an operator, a partner,
+ * or a transport supplied. Its raise site is the single-pass send-time reply-cap
+ * backstop: the reply this party built outgrew the byte cap both parties derive
+ * from their declared sizes, on an exchange whose declared sizes the over-ceiling
+ * gate has already cleared, so no dataset either operator controls and no
+ * transport condition is what stopped the send.
+ *
+ * A plain `Error` rather than a {@link UsageError}: exit 64 (EX_USAGE) tells the
+ * operator that their input or configuration is what to fix, and here their
+ * declared sizes are the very thing already found within budget. The CLI's
+ * error->exit boundary maps this class to EX_SOFTWARE (70) instead of the 69
+ * (EX_UNAVAILABLE) any other plain `Error` takes there, because 69 reads as a
+ * transport blip an unattended supervisor retries, and a retry re-runs the whole
+ * exchange -- re-sending this party's records -- only to rebuild the same reply
+ * and refuse it again. The message's remedy is to report it, and 70 is the code
+ * that carries that to a supervisor reading nothing else.
+ *
+ * On the CLI's machine-readable event stream the terminal `error` event's
+ * category is `exchange`, the default bucket, since that classification keys on
+ * the run phase and on `OperatorConfigError` / `ConnectionError` membership,
+ * neither of which this class joins. The exit code, not the category, is where an
+ * internal fault is observable -- the mirror of the `security` category, which is
+ * observable only in the category (see docs/spec/CLI_EVENTS.md).
+ */
+export class InternalConsistencyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InternalConsistencyError";
+  }
+}
+
+/**
  * Thrown by a transport whose publish of a file was torn by a session drop and
  * whose outcome the transport cannot settle: the operation is rejected, and
  * whether the peer received what was published is undetermined. It is the

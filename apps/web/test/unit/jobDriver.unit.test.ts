@@ -47,8 +47,8 @@ describe("classifyExit maps CLI exit codes to terminal states", () => {
     });
   });
 
-  test("64 / 69 / 1 -> failed with the code recorded", () => {
-    for (const code of [64, 69, 1]) {
+  test("64 / 69 / 70 / 1 -> failed with the code recorded", () => {
+    for (const code of [64, 69, 70, 1]) {
       expect(classifyExit(code, null)).toEqual({
         outcome: "failed",
         exitCode: code,

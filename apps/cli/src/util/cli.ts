@@ -7,6 +7,7 @@ import type { Arguments } from "yargs";
 import {
   getDiagnosticSink,
   getLogger,
+  InternalConsistencyError,
   MAX_TIMEOUT_SECONDS,
   sanitizeErrorForDisplay,
   setDiagnosticSink,
@@ -233,12 +234,33 @@ export function parseOrExit<T>(parse: () => T): T {
 }
 
 /**
+ * The process exit code for a failure in this implementation rather than in
+ * anything the operator, the partner, or the transport supplied: `EX_SOFTWARE`
+ * (70), the sysexits code for an internal software error. Carried by core's
+ * {@link InternalConsistencyError}, whose only raise site is the single-pass
+ * send-time reply-cap backstop, and set nowhere else.
+ *
+ * Distinct from both neighbours for an unattended supervisor's sake. 64 would
+ * name the operator's input as what to fix when the run has already found their
+ * declared sizes within budget, and 69 would present a deterministic internal
+ * fault as a transport blip worth retrying -- and each retry is another full
+ * exchange, re-sending this party's records, ending at the same refusal. The
+ * documented response to a 70 is to report it (see docs/CLI.md, Exit codes).
+ */
+export const INTERNAL_FAULT_EXIT_CODE = 70;
+
+/**
  * The process exit code a caught command error reports: EX_USAGE (64) for a
- * {@link UsageError}, otherwise the error's OWN numeric `exitCode` when it
- * carries one, else EX_UNAVAILABLE (69). The single classification every
+ * {@link UsageError}, {@link INTERNAL_FAULT_EXIT_CODE} (70) for an
+ * {@link InternalConsistencyError}, otherwise the error's OWN numeric `exitCode`
+ * when it carries one, else EX_UNAVAILABLE (69). The single classification every
  * error->exit boundary of an exchange-running command reads, so an error that
  * classified itself more precisely than "the transport failed" is delivered
  * identically whichever command caught it.
+ *
+ * The two typed rungs read core's error taxonomy rather than a property, so the
+ * class an error was raised as is what its exit code follows, and core carries no
+ * CLI exit code of its own.
  *
  * The own-`exitCode` rung is load-bearing in both directions. `openInputSource`
  * and `buildDataSpec` throw plain `Error`s carrying `exitCode`, so a missing
@@ -251,6 +273,7 @@ export function parseOrExit<T>(parse: () => T): T {
  */
 export function exitCodeForError(err: unknown): number {
   if (err instanceof UsageError) return 64;
+  if (err instanceof InternalConsistencyError) return INTERNAL_FAULT_EXIT_CODE;
   const own = (err as { exitCode?: unknown } | null | undefined)?.exitCode;
   return typeof own === "number" ? own : 69;
 }

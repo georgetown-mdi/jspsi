@@ -46,7 +46,7 @@ export const PERSISTENCE_LOSS_EXIT_CODE = 73;
  * How a driven CLI run terminated, reconciled with the CLI's terminal-event
  * contract (docs/spec/CLI_EVENTS.md, Terminal-event guarantees):
  * - `succeeded`: exit 0.
- * - `failed`: an organic failure (exit 64/69/1), with the code recorded.
+ * - `failed`: an organic failure (exit 64/69/70/1), with the code recorded.
  * - `cancelled`: an interrupt (exit 130 for SIGINT, 143 for SIGTERM), the
  *   legitimate "no terminal event + signal exit" case.
  * - `completedWithPersistenceLoss`: {@link PERSISTENCE_LOSS_EXIT_CODE}. The

@@ -33,7 +33,7 @@ import {
   type MessageConnection,
 } from "../src/connection/messageConnection";
 import type { AssociationTable } from "../src/types";
-import { UsageError } from "../src/errors";
+import { InternalConsistencyError, UsageError } from "../src/errors";
 import { sortAssociationTable } from "../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 import { fanOutFreeBounds } from "./utils/singlePassBounds";
@@ -925,8 +925,13 @@ test("the single-pass sender refuses a built reply above the derived cap", async
     ),
   );
   const error = await run.catch((e: unknown) => e);
-  expect(error).toBeInstanceOf(UsageError);
-  const message = (error as UsageError).message;
+  // The class the message's remedy implies: an internal fault to report, which
+  // the CLI boundary maps to exit 70 (pinned in apps/cli/test/unit/cli.test.ts).
+  // Not a UsageError, whose exit 64 would send the operator to an input the
+  // ceiling gate has already cleared.
+  expect(error).toBeInstanceOf(InternalConsistencyError);
+  expect(error).not.toBeInstanceOf(UsageError);
+  const message = (error as InternalConsistencyError).message;
   const replyCap = singlePassReplyByteCap(
     keyCount,
     { effectiveKeyCount: keyCount, recordCount: localRows },
