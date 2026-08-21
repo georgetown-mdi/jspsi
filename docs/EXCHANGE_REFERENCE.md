@@ -128,7 +128,7 @@ PSI roles (sender / receiver) are derived from `output` after the terms exchange
 *Required:* yes  
 *Consistency:* none
 
-Whether or not to deduplicate the inputs of the party holding these terms. Deduplication results in multiple inputs potentially being matched to the same output. Each party independently decides whether to deduplicate its own records; the two values need not agree.
+Whether or not to deduplicate the inputs of the party holding these terms. Setting it `true` says that several of THIS party's records may be matched to the same partner record -- the declaring party is the "many" side of the resulting match, and it deduplicates its own inputs by using the partner's data to group them. Each party independently decides whether to deduplicate its own records; the two values need not agree, and the pair decides the exchange's cardinality (`false`/`false` matches one-to-one, `true`/`false` many-to-one, `true`/`true` many-to-many). The matching procedure each cardinality runs, and the additional disclosure a deduplicating match makes, are in [`docs/spec/PROTOCOL.md`](spec/PROTOCOL.md#deduplicating-cardinalities-many-to-x-matching).
 
 > **Not yet implemented:** deduplication is not honored at run time yet. Every exchange matches with one-to-one cardinality, and a `deduplicate: true` term on either party is refused before the exchange begins -- never silently matched one-to-one under a deduplicating term. Set `deduplicate: false` until the deduplicating cardinality is implemented.
 
@@ -137,9 +137,9 @@ linkage_terms:
   deduplicate: false
 ```
 
-Any party indicating `true` must have `expects_output: true`. The requirement to receive output is already captured by the cross-party `output` consistency check, so no separate consistency check is applied to this field.
+Any party indicating `true` must have `expects_output: true`: the grouping a deduplicating match produces is delivered only in the output, so a "many" party that received none would have widened its own match for nothing. The requirement to receive output is already captured by the cross-party `output` consistency check, so no separate consistency check is applied to this field.
 
-Design intent for the unimplemented deduplicating cardinality: in a many-to-one exchange where the "one" party has `expects_output: false`, the "many" party (with `deduplicate: true`) would additionally be responsible for enforcing uniqueness on the "one" party's side, ensuring that each partner record is matched to at most one of its own records.
+The partner may still be the one with `expects_output: false`. Where it is, the deduplicating party is the only one resolving the match and takes on the uniqueness rule the partner would otherwise have applied to its own values, so that each of its own records is still matched to at most one partner record. That obligation and the rest of the procedure are specified in [`docs/spec/PROTOCOL.md`](spec/PROTOCOL.md#deduplicating-cardinalities-many-to-x-matching).
 
 ### `linkage_terms.linkage_fields`
 

@@ -971,7 +971,12 @@ export interface LinkageTerms {
   linkageStrategy: LinkageStrategy;
   output: Output;
   /**
-   * Whether this party's records may match more than one of the partners'.
+   * Whether SEVERAL of this party's records may match the SAME partner record --
+   * this party is the "many" side of the resolved cardinality, deduplicating its
+   * own inputs by using the partner's data to group them (docs/spec/PROTOCOL.md,
+   * Deduplicating cardinalities).
+   * Consistency: none -- each party declares its own side, and the pair resolves
+   * the cardinality.
    */
   deduplicate: boolean;
   /**
