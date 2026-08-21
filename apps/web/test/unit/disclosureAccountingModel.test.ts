@@ -165,6 +165,26 @@ describe("the accounting's entries", () => {
       "Riverbend\\u202eSchools",
     );
   });
+
+  test("carry the record's own bindingNonce as the entry's identity, distinct even when two runs share a createdAt", async () => {
+    // createdAt is millisecond-resolution and not guaranteed unique (rapid
+    // re-runs, a browser that coarsens Date resolution); bindingNonce is the
+    // record's own CSPRNG-generated per-run identity (see appendDisclosureRecord
+    // in disclosureAccounting.ts), so it is what the view keys and toggles on.
+    const sharedCreatedAt = "2026-07-01T09:00:00.000Z";
+    const accounting = accountingOf(
+      await disclosureRecord({ createdAt: sharedCreatedAt }),
+      await disclosureRecord({ createdAt: sharedCreatedAt }),
+    );
+
+    const [first, second] = disclosureEntries(accounting);
+
+    expect(first.at).toBe(sharedCreatedAt);
+    expect(second.at).toBe(sharedCreatedAt);
+    expect(first.bindingNonce).not.toBe(second.bindingNonce);
+    expect(first.bindingNonce).toBe(accounting.entries[1].bindingNonce);
+    expect(second.bindingNonce).toBe(accounting.entries[0].bindingNonce);
+  });
 });
 
 describe("the exported accounting", () => {

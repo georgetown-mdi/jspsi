@@ -424,6 +424,63 @@ describe("managed exchange detail accounting of disclosures", () => {
       .toBeInTheDocument();
   });
 
+  test("two disclosures sharing a createdAt open and close independently", async () => {
+    // createdAt is millisecond-resolution and not guaranteed unique across runs;
+    // only the record's own bindingNonce distinguishes them, so the view must key
+    // and toggle on it rather than on the shared instant.
+    const sharedCreatedAt = "2026-07-01T09:00:00.000Z";
+    const accounting = appendDisclosureRecord(
+      appendDisclosureRecord(
+        undefined,
+        await disclosureRecord({
+          partnerIdentity: "Riverbend Schools",
+          createdAt: sharedCreatedAt,
+          recordsExposed: 11,
+        }),
+      ),
+      await disclosureRecord({
+        partnerIdentity: "Falls County Clinic",
+        createdAt: sharedCreatedAt,
+        recordsExposed: 23,
+      }),
+    );
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting,
+        accountingUnreadable: false,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    const firstToggle = page.getByRole("button", {
+      name: "Riverbend Schools",
+      exact: false,
+    });
+    const secondToggle = page.getByRole("button", {
+      name: "Falls County Clinic",
+      exact: false,
+    });
+
+    await secondToggle.click();
+
+    await expect.element(page.getByText("23", { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByText("11", { exact: true }))
+      .not.toBeVisible();
+
+    await firstToggle.click();
+
+    await expect.element(page.getByText("11", { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByText("23", { exact: true }))
+      .not.toBeVisible();
+  });
+
   test("an accounting that could not be read is never shown as an empty one", async () => {
     app.render(
       createElement(ManagedExchangeDetail, {

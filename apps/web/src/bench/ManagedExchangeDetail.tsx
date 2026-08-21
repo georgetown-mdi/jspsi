@@ -418,7 +418,7 @@ function DisclosureAccountingView({
   accounting: DisclosureAccounting | undefined;
   unreadable: boolean;
 }) {
-  const [openedAt, setOpenedAt] = useState<string>();
+  const [openedNonce, setOpenedNonce] = useState<string>();
   const entries = accounting === undefined ? [] : disclosureEntries(accounting);
   const exportCsv = () => {
     if (accounting === undefined) return;
@@ -461,11 +461,13 @@ function DisclosureAccountingView({
           </p>
           {entries.map((entry) => (
             <DisclosureSection
-              key={entry.at}
+              key={entry.bindingNonce}
               label={entry.when}
               summary={entry.partner}
-              open={openedAt === entry.at}
-              onToggle={(open) => setOpenedAt(open ? entry.at : undefined)}
+              open={openedNonce === entry.bindingNonce}
+              onToggle={(open) =>
+                setOpenedNonce(open ? entry.bindingNonce : undefined)
+              }
               headingOrder={3}
             >
               {entry.facts.map((fact) => (

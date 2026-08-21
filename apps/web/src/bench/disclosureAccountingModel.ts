@@ -44,9 +44,15 @@ export interface DisclosureFact {
 
 /** One completed run's disclosure, as the accounting presents it. */
 export interface DisclosureEntryView {
-  /** The run's own instant, from the record's `createdAt`: the stable key for the
-   * entry, and the value the export's first column carries. */
+  /** The run's own instant, from the record's `createdAt`: the value the export's
+   * first column carries. Not the entry's identity -- {@link bindingNonce} is,
+   * since two runs can share a millisecond instant. */
   at: string;
+  /** The record's own per-run identity (see `appendDisclosureRecord` in
+   * disclosureAccounting.ts): CSPRNG-generated and unique within this holder's
+   * log, unlike `at`. The stable key for the entry and its open/close toggle
+   * identity. */
+  bindingNonce: string;
   /** The run instant phrased for display. This app's own formatting of the
    * record's timestamp, so it is first-party text rather than a partner value. */
   when: string;
@@ -216,6 +222,7 @@ export function disclosureEntries(
   return accounting.entries
     .map((record) => ({
       at: record.createdAt,
+      bindingNonce: record.bindingNonce,
       when: dateTimeLabel(new Date(record.createdAt)),
       partner: sanitizeForDisplay(record.partnerIdentity),
       facts: disclosureFacts(record),
