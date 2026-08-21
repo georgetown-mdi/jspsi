@@ -140,23 +140,12 @@ function resolveInboundRendezvousMount(env: NodeJS.ProcessEnv): {
   };
 }
 
-/** Resolve the rendezvous directory to an absolute path from
- * {@link JOB_RENDEZVOUS_DIR_ENV}, falling back to {@link JOB_DATA_ROOT_ENV} when it is
- * unset so one mount runs a full console, or undefined when both are unset. A plain
- * resolve -- the rendezvous mount is the operator's own directory; the preflight
- * below warns rather than fails on anything wrong. Exported so the SFTP credential
- * validator can exclude this resolved directory (as it excludes the data root) from
- * a credential `@path` reference. */
-export function resolveJobRendezvousDir(
-  env: NodeJS.ProcessEnv,
-): string | undefined {
-  return resolveInboundRendezvousMount(env).dir;
-}
-
 /** Resolve the outbound rendezvous leg from
  * {@link JOB_RENDEZVOUS_OUTBOUND_DIR_ENV}, or undefined when it is unset or empty --
  * the appliance is then provisioned for a single shared mount. No data-root
- * fallback: see the variable's own documentation. */
+ * fallback: see the variable's own documentation.
+ *
+ * @internal exported for testing */
 export function resolveJobRendezvousOutboundDir(
   env: NodeJS.ProcessEnv,
 ): string | undefined {
@@ -191,6 +180,8 @@ function usableFolderName(value: string): string | undefined {
  * A set-but-unusable name resolves to undefined rather than falling back to the
  * mount point (see {@link JOB_RENDEZVOUS_NAME_ENV}), and so does a mount with no
  * last segment at all.
+ *
+ * @internal exported for testing
  */
 export function resolveJobRendezvousFolderName(
   env: NodeJS.ProcessEnv,
@@ -213,7 +204,7 @@ export function resolveJobRendezvousFolderName(
  * console that carries a stale {@link JOB_RENDEZVOUS_OUTBOUND_NAME_ENV} would
  * otherwise report the outbound half of a split rendezvous it does not have.
  */
-export function resolveJobRendezvousOutboundFolderName(
+function resolveJobRendezvousOutboundFolderName(
   env: NodeJS.ProcessEnv,
   outboundDir: string | undefined,
 ): string | undefined {
@@ -236,7 +227,7 @@ export function resolveJobRendezvousOutboundFolderName(
  * folder name and say nothing where there is none, while the token always needs
  * a locator (core's endpoint schema requires a filedrop directory).
  */
-export function resolveJobRendezvousLocator(
+function resolveJobRendezvousLocator(
   rendezvousDir: string | undefined,
   folderName: string | undefined,
 ): string | undefined {
@@ -280,6 +271,8 @@ function containsOrEqual(parent: string, child: string): boolean {
  * The containment test is lexical over the resolved paths, exactly as the preflight
  * overlap warnings are: a symlink that makes two distinct paths the same directory
  * is not caught here, and the exchange's own entry guard remains the backstop.
+ *
+ * @internal exported for testing
  */
 export function rendezvousSplitProblem(
   provisioning: JobRendezvousProvisioning,
@@ -363,37 +356,6 @@ export function useJobRendezvousProvisioning(
   globalThis.jobRendezvousProvisioning ??=
     resolveJobRendezvousProvisioning(env);
   return globalThis.jobRendezvousProvisioning;
-}
-
-/**
- * The memoized inbound (or single shared) rendezvous directory, or undefined when
- * the variable is unset. Delegates to {@link useJobRendezvousProvisioning}; retained
- * for its unit-test consumers, since the containment surfaces read
- * {@link jobRendezvousDirs} instead.
- */
-export function useJobRendezvousDir(
-  env: NodeJS.ProcessEnv = process.env,
-): string | undefined {
-  return useJobRendezvousProvisioning(env).dir;
-}
-
-/** The memoized outbound rendezvous leg, or undefined on a single-mount appliance.
- * A thin wrapper over {@link useJobRendezvousProvisioning}, retained for the same
- * unit-test consumers {@link useJobRendezvousDir} is. */
-export function useJobRendezvousOutboundDir(
-  env: NodeJS.ProcessEnv = process.env,
-): string | undefined {
-  return useJobRendezvousProvisioning(env).outboundDir;
-}
-
-/** The shared folder's name for the memoized rendezvous mount, or undefined when
- * the console cannot name it (see {@link resolveJobRendezvousFolderName} for how it
- * resolves). Delegates to {@link useJobRendezvousProvisioning}; retained for its
- * unit-test consumers, not read by production code. */
-export function useJobRendezvousFolderName(
-  env: NodeJS.ProcessEnv = process.env,
-): string | undefined {
-  return useJobRendezvousProvisioning(env).folderName;
 }
 
 /**

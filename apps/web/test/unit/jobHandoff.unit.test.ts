@@ -71,8 +71,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     const handoff = buildJobHandoff(
       validSftpIntent({ sharedSecret: DISTINCT_SECRET }),
       testSftpServerEntry(),
-      false,
-      false,
+      { credentialPasted: false, filedropSplit: false },
     );
     expect(handoff.mode).toBe("exchange");
     expect(handoff.channel).toBe("sftp");
@@ -103,8 +102,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
         privateKey: "@/etc/psilink/id_ed25519",
         privateKeyPassphrase: "@/etc/psilink/passphrase",
       },
-      false,
-      false,
+      { credentialPasted: false, filedropSplit: false },
     );
     const yaml =
       handoff.template.kind === "config" ? handoff.template.yaml : "";
@@ -128,8 +126,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
         },
       }),
       testSplitSftpServerEntry(),
-      false,
-      false,
+      { credentialPasted: false, filedropSplit: false },
     );
     const yaml =
       handoff.template.kind === "config" ? handoff.template.yaml : "";
@@ -154,8 +151,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
         },
       }),
       testSplitSftpServerEntry(),
-      false,
-      false,
+      { credentialPasted: false, filedropSplit: false },
     );
     const argv =
       handoff.template.kind === "command" ? handoff.template.argv : [];
@@ -180,8 +176,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
         },
       }),
       testSftpServerEntry(),
-      false,
-      false,
+      { credentialPasted: false, filedropSplit: false },
     );
     const yaml =
       handoff.template.kind === "config" ? handoff.template.yaml : "";
@@ -209,8 +204,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
         },
       }),
       testSftpServerEntry(),
-      false,
-      false,
+      { credentialPasted: false, filedropSplit: false },
     );
     const argv =
       handoff.template.kind === "command" ? handoff.template.argv : [];
@@ -221,7 +215,10 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
   });
 
   test("a filedrop exchange placeholders the shared directory path", () => {
-    const handoff = buildJobHandoff(validIntent(), undefined, false, false);
+    const handoff = buildJobHandoff(validIntent(), undefined, {
+      credentialPasted: false,
+      filedropSplit: false,
+    });
     expect(handoff.channel).toBe("filedrop");
     expect(handoff.usedKeyFile).toBe(true);
     const yaml =
@@ -240,8 +237,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
         },
       }),
       undefined,
-      false,
-      true,
+      { credentialPasted: false, filedropSplit: true },
     );
     const yaml =
       handoff.template.kind === "config" ? handoff.template.yaml : "";
@@ -266,8 +262,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
         },
       }),
       undefined,
-      false,
-      true,
+      { credentialPasted: false, filedropSplit: true },
     );
     const argv =
       handoff.template.kind === "command" ? handoff.template.argv : [];
@@ -281,12 +276,10 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
   test("the split flag is read on the filedrop channel alone", () => {
     // An sftp run's directories are the partner's server's, identical on any
     // machine, so the appliance's own provisioning contributes nothing there.
-    const handoff = buildJobHandoff(
-      validSftpIntent(),
-      testSftpServerEntry(),
-      false,
-      true,
-    );
+    const handoff = buildJobHandoff(validSftpIntent(), testSftpServerEntry(), {
+      credentialPasted: false,
+      filedropSplit: true,
+    });
     const yaml =
       handoff.template.kind === "config" ? handoff.template.yaml : "";
     expect(yaml).not.toContain("/path/to/your/inbound-directory");
@@ -303,8 +296,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     const handoff = buildJobHandoff(
       validIntent({ side: "acceptor", metadata }),
       undefined,
-      false,
-      false,
+      { credentialPasted: false, filedropSplit: false },
     );
     const yaml =
       handoff.template.kind === "config" ? handoff.template.yaml : "";
@@ -321,8 +313,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     const handoff = buildJobHandoff(
       validZeroSetupSftpIntent(),
       testSftpServerEntry(),
-      false,
-      false,
+      { credentialPasted: false, filedropSplit: false },
     );
     expect(handoff.mode).toBe("zeroSetup");
     expect(handoff.usedKeyFile).toBe(false);
@@ -343,12 +334,10 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
   });
 
   test("a filedrop zero-setup run composes a placeholder file:// locator command", () => {
-    const handoff = buildJobHandoff(
-      validZeroSetupIntent(),
-      undefined,
-      false,
-      false,
-    );
+    const handoff = buildJobHandoff(validZeroSetupIntent(), undefined, {
+      credentialPasted: false,
+      filedropSplit: false,
+    });
     expect(handoff.mode).toBe("zeroSetup");
     const argv =
       handoff.template.kind === "command" ? handoff.template.argv : [];
@@ -372,8 +361,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
         },
       }),
       undefined,
-      false,
-      false,
+      { credentialPasted: false, filedropSplit: false },
     );
     const yaml =
       handoff.template.kind === "config" ? handoff.template.yaml : "";
@@ -401,8 +389,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
         },
       }),
       undefined,
-      false,
-      false,
+      { credentialPasted: false, filedropSplit: false },
     );
     const argv =
       handoff.template.kind === "command" ? handoff.template.argv : [];
@@ -419,12 +406,17 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
 
   test("credentialPasted is carried for an sftp run but forced false for filedrop", () => {
     expect(
-      buildJobHandoff(validSftpIntent(), testSftpServerEntry(), true, false)
-        .credentialPasted,
+      buildJobHandoff(validSftpIntent(), testSftpServerEntry(), {
+        credentialPasted: true,
+        filedropSplit: false,
+      }).credentialPasted,
     ).toBe(true);
     // A filedrop run carries no credential, so a stray pasted flag never surfaces.
     expect(
-      buildJobHandoff(validIntent(), undefined, true, false).credentialPasted,
+      buildJobHandoff(validIntent(), undefined, {
+        credentialPasted: true,
+        filedropSplit: false,
+      }).credentialPasted,
     ).toBe(false);
   });
 });

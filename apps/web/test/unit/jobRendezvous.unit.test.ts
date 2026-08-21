@@ -23,13 +23,10 @@ import {
   notEmptyLead,
   rendezvousSplitProblem,
   rendezvousStartupWarnings,
-  resolveJobRendezvousDir,
   resolveJobRendezvousFolderName,
-  resolveJobRendezvousLocator,
   resolveJobRendezvousOutboundDir,
   resolveJobRendezvousProvisioning,
-  useJobRendezvousDir,
-  useJobRendezvousFolderName,
+  useJobRendezvousProvisioning,
 } from "@jobs/jobRendezvous";
 
 import type { RendezvousLeg } from "@jobs/jobRendezvous";
@@ -66,20 +63,20 @@ afterEach(() => {
   ).jobRendezvousProvisioning = undefined;
 });
 
-describe("useJobRendezvousDir", () => {
+describe("the memoized rendezvous provisioning", () => {
   test("resolves a set directory to an absolute path and memoizes it", () => {
     const dir = tempDir("rendezvous");
-    const first = useJobRendezvousDir({ JOB_RENDEZVOUS_DIR: dir });
+    const first = useJobRendezvousProvisioning({ JOB_RENDEZVOUS_DIR: dir }).dir;
     expect(first).toBe(path.resolve(dir));
     // The second call ignores a changed env: the value is memoized on globalThis.
-    expect(useJobRendezvousDir({ JOB_RENDEZVOUS_DIR: "/elsewhere" })).toBe(
-      first,
-    );
+    expect(
+      useJobRendezvousProvisioning({ JOB_RENDEZVOUS_DIR: "/elsewhere" }).dir,
+    ).toBe(first);
   });
 
   test("defaults to JOB_DATA_ROOT when JOB_RENDEZVOUS_DIR is unset", () => {
     const dataRoot = tempDir("data");
-    expect(useJobRendezvousDir({ JOB_DATA_ROOT: dataRoot })).toBe(
+    expect(useJobRendezvousProvisioning({ JOB_DATA_ROOT: dataRoot }).dir).toBe(
       path.resolve(dataRoot),
     );
   });
@@ -88,15 +85,15 @@ describe("useJobRendezvousDir", () => {
     const rendezvous = tempDir("rendezvous");
     const dataRoot = tempDir("data");
     expect(
-      useJobRendezvousDir({
+      useJobRendezvousProvisioning({
         JOB_RENDEZVOUS_DIR: rendezvous,
         JOB_DATA_ROOT: dataRoot,
-      }),
+      }).dir,
     ).toBe(path.resolve(rendezvous));
   });
 
   test("is undefined when both JOB_RENDEZVOUS_DIR and JOB_DATA_ROOT are unset", () => {
-    expect(useJobRendezvousDir({})).toBeUndefined();
+    expect(useJobRendezvousProvisioning({}).dir).toBeUndefined();
   });
 });
 
@@ -107,9 +104,8 @@ function locatorFor(env: NodeJS.ProcessEnv): {
   folderName: string | undefined;
   locator: string | undefined;
 } {
-  const dir = resolveJobRendezvousDir(env);
-  const folderName = resolveJobRendezvousFolderName(env, dir);
-  return { folderName, locator: resolveJobRendezvousLocator(dir, folderName) };
+  const { folderName, locator } = resolveJobRendezvousProvisioning(env);
+  return { folderName, locator };
 }
 
 describe("the shared folder's name the invitation is minted from", () => {
@@ -226,15 +222,16 @@ describe("the shared folder's name the invitation is minted from", () => {
   test("the resolved name is memoized alongside the directory", () => {
     const dir = tempDir("rendezvous");
     expect(
-      useJobRendezvousFolderName({
+      useJobRendezvousProvisioning({
         JOB_RENDEZVOUS_DIR: dir,
         JOB_RENDEZVOUS_NAME: "study-a",
-      }),
+      }).folderName,
     ).toBe("study-a");
-    expect(
-      useJobRendezvousFolderName({ JOB_RENDEZVOUS_NAME: "something-else" }),
-    ).toBe("study-a");
-    expect(useJobRendezvousDir({})).toBe(path.resolve(dir));
+    const memoized = useJobRendezvousProvisioning({
+      JOB_RENDEZVOUS_NAME: "something-else",
+    });
+    expect(memoized.folderName).toBe("study-a");
+    expect(memoized.dir).toBe(path.resolve(dir));
   });
 });
 
@@ -898,35 +895,69 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
   });
 });
 
-// Every notice the preflight can raise, driven through the branch that raises it
-// and then through the seat's real display boundary. The mount path is the one
-// unbounded fragment in all of them -- it is the operator's own server-side
-// configuration, and nothing caps its length -- so each shape is driven twice: once
-// at an ordinary path, where the notice must NAME the mount, and once at a path far
-// past the budget, where the notice must still deliver the clause the operator acts
-// on. Truncation cutting a warning's final clause is the failure this table exists
-// to catch, and it is invisible to a check that reads only the composed string:
-// composing is where the fit is decided, but the seat is where the cut would land.
+// Every notice the preflight can raise, on every leg it can be raised for, driven
+// through the branch that raises it and then through the seat's real display
+// boundary. The mount path is the one unbounded fragment in all of them -- it is the
+// operator's own server-side configuration, and nothing caps its length -- so each
+// shape is driven at an ordinary path, where the notice must NAME the mount, and at
+// paths far past the budget, where it must still deliver the clause the operator
+// acts on. Truncation cutting a warning's final clause is the failure this table
+// exists to catch, and it is invisible to a check that reads only the composed
+// string: composing is where the fit is decided, but the seat is where the cut would
+// land. What bounds the copy is the module's own exported budget, so growing a
+// notice past it reddens here rather than being caught by hand.
 
 /** One preflight notice shape: the branch that raises it, and the clause its copy
- * ends on -- the part a cap eats first. */
+ * ends on -- the part a cap eats first. Every shape is driven over every leg label,
+ * because a split appliance preflights each of its two mounts separately: the leg
+ * lengthens the notice's own first-party wording, and for the unwritable mount it
+ * changes the recovery outright. */
 interface NoticeShape {
   label: string;
   /** Set the mount up so this branch is the one that fires, and hand back the
    * preflight's five arguments plus any mode to restore. */
-  arrange: (mount: string) => {
+  arrange: (
+    mount: string,
+    leg: RendezvousLeg,
+  ) => {
     args: PreflightArgs;
     restore?: () => void;
   };
   /** Selects this shape's notice out of the warnings the call raised. */
   match: RegExp;
-  /** The clause the notice must still end on at the seat. */
-  tail: string;
+  /** The clause the notice must still end on at the seat, for the leg it is about. */
+  tail: (leg: RendezvousLeg) => string;
   /** Whether the notice interpolates the mount path at all. The listing names the
    * mount's ENTRIES instead, and gives way by name rather than by path. */
   namesMount: boolean;
   /** Skipped as root, whose access checks ignore the mode bits. */
   unprivilegedOnly?: boolean;
+}
+
+/** Every leg a notice is composed for: the single shared mount of a one-mount
+ * console, and each half of a split appliance's pair. */
+const NOTICE_LEGS: ReadonlyArray<RendezvousLeg> = [
+  "shared",
+  "inbound",
+  "outbound",
+];
+
+/** How a notice names the mount it is about, which is all an operator with two
+ * folders has to tell them apart by. Distinct per leg: the shared wording is not a
+ * substring of either qualified one. */
+function legPhrase(leg: RendezvousLeg): string {
+  return leg === "shared" ? "the rendezvous " : `the ${leg} rendezvous `;
+}
+
+/** The bound the module holds itself to, asserted against the constant it exports
+ * rather than a measured number: every notice a branch raises is fitted where it is
+ * composed, so first-party copy that outgrows the budget fails here instead of
+ * reaching the operator with its closing clause cut off at the seat. */
+function expectWithinNoticeBudget(warnings: Array<string>): void {
+  for (const warning of warnings)
+    expect(renderedDisplayCost(warning)).toBeLessThanOrEqual(
+      RENDEZVOUS_NOTICE_BUDGET,
+    );
 }
 
 /** The preflight's own argument list: the mount, which leg it is, the work-input
@@ -947,10 +978,7 @@ function overlongMount(segment: string): string {
 
 /** Fixtures that keep every branch except this shape's own quiet: a data root and a
  * work-input directory that are siblings of the mount, never its ancestors. */
-function isolatedArgs(
-  mount: string,
-  leg: RendezvousLeg = "shared",
-): PreflightArgs {
+function isolatedArgs(mount: string, leg: RendezvousLeg): PreflightArgs {
   const dataRoot = tempDir("data");
   return [
     mount,
@@ -964,77 +992,84 @@ function isolatedArgs(
 const NOTICE_SHAPES: Array<NoticeShape> = [
   {
     label: "a mount that does not exist yet",
-    arrange: (mount) => ({ args: isolatedArgs(mount) }),
+    arrange: (mount, leg) => ({ args: isolatedArgs(mount, leg) }),
     match: /does not exist yet/,
-    tail: "the exchange cannot rendezvous until both parties can reach it",
+    tail: () =>
+      "the exchange cannot rendezvous until both parties can reach it",
     namesMount: true,
   },
   {
     label: "a mount that is not a directory",
-    arrange: (mount) => {
+    arrange: (mount, leg) => {
       fs.mkdirSync(path.dirname(mount), { recursive: true });
       fs.writeFileSync(mount, "");
-      return { args: isolatedArgs(mount) };
+      return { args: isolatedArgs(mount, leg) };
     },
     match: /is not a directory/,
-    tail: "is not a directory",
+    tail: () => "is not a directory",
     namesMount: true,
   },
   {
     label: "a mount this process cannot write",
     unprivilegedOnly: true,
-    arrange: (mount) => {
+    arrange: (mount, leg) => {
       fs.mkdirSync(mount, { recursive: true });
       fs.chmodSync(mount, 0o500);
       return {
-        args: isolatedArgs(mount),
+        args: isolatedArgs(mount, leg),
         restore: () => fs.chmodSync(mount, 0o700),
       };
     },
     match: /is not writable/,
-    tail: "the exchange writes its half of the rendezvous there",
+    // The one notice whose recovery is the leg's own: this party writes nothing
+    // into the inbound folder, so the reason a read-only one stops the run is the
+    // exchange's own connect probe rather than its half of the rendezvous.
+    tail: (leg) =>
+      leg === "inbound"
+        ? "the exchange checks write access on both rendezvous folders before it starts"
+        : "the exchange writes its half of the rendezvous there",
     namesMount: true,
   },
   {
     label: "a mount this process cannot list",
     unprivilegedOnly: true,
-    arrange: (mount) => {
+    arrange: (mount, leg) => {
       fs.mkdirSync(mount, { recursive: true });
       fs.chmodSync(mount, 0o300);
       return {
-        args: isolatedArgs(mount),
+        args: isolatedArgs(mount, leg),
         restore: () => fs.chmodSync(mount, 0o700),
       };
     },
     match: /cannot be listed/,
-    tail: "is unknown until the exchange runs",
+    tail: () => "is unknown until the exchange runs",
     namesMount: true,
   },
   {
     label: "the lead of a mount that is not empty",
-    arrange: (mount) => {
+    arrange: (mount, leg) => {
       fs.mkdirSync(mount, { recursive: true });
       fs.writeFileSync(path.join(mount, "console-hello.json"), "");
-      return { args: isolatedArgs(mount) };
+      return { args: isolatedArgs(mount, leg) };
     },
     match: /is not empty/,
-    tail: "Your own input and results are not what it refuses over.",
+    tail: () => "Your own input and results are not what it refuses over.",
     namesMount: true,
   },
   {
     label: "the listing of what a mount holds",
-    arrange: (mount) => {
+    arrange: (mount, leg) => {
       fs.mkdirSync(mount, { recursive: true });
       fs.writeFileSync(path.join(mount, "console-hello.json"), "");
-      return { args: isolatedArgs(mount) };
+      return { args: isolatedArgs(mount, leg) };
     },
     match: /holds/,
-    tail: "console-hello.json",
+    tail: () => "console-hello.json",
     namesMount: false,
   },
   {
     label: "a mount overlapping the job data root",
-    arrange: (mount) => {
+    arrange: (mount, leg) => {
       fs.mkdirSync(mount, { recursive: true });
       // The mount's own parent is the data root, so BOTH unbounded fragments the
       // overlap notice interpolates grow together, as an operator's nested layout
@@ -1043,7 +1078,7 @@ const NOTICE_SHAPES: Array<NoticeShape> = [
       return {
         args: [
           mount,
-          "shared",
+          leg,
           undefined,
           dataRoot,
           path.join(dataRoot, "current-job"),
@@ -1051,18 +1086,24 @@ const NOTICE_SHAPES: Array<NoticeShape> = [
       };
     },
     match: /overlaps/,
-    tail: "a partner's sync writes would reach it",
+    tail: () => "a partner's sync writes would reach it",
     namesMount: true,
   },
 ];
 
-/** The one notice `shape` raises for `mount`, raw and as the seat renders it,
- * alongside every warning the same call raised. */
+/** The one notice `shape` raises for `mount` on `leg`, raw and as the seat renders
+ * it, alongside every warning the same call raised. */
 function noticeFor(
   shape: NoticeShape,
   mount: string,
-): { raw: string; rendered: string; allRendered: Array<string> } {
-  const { args, restore } = shape.arrange(mount);
+  leg: RendezvousLeg,
+): {
+  raw: string;
+  rendered: string;
+  allRaw: Array<string>;
+  allRendered: Array<string>;
+} {
+  const { args, restore } = shape.arrange(mount, leg);
   try {
     const warnings = rendezvousStartupWarnings(...args);
     const raw = warnings.find((warning) => shape.match.test(warning));
@@ -1073,6 +1114,7 @@ function noticeFor(
     return {
       raw: raw!,
       rendered: renderedAtSeat([raw!])[0],
+      allRaw: warnings,
       allRendered: renderedAtSeat(warnings),
     };
   } finally {
@@ -1090,70 +1132,83 @@ describe("every preflight notice fits its budget once rendered", () => {
     );
   });
 
-  for (const shape of NOTICE_SHAPES) {
-    const run =
-      shape.unprivilegedOnly && process.getuid?.() === 0 ? test.skip : test;
+  for (const shape of NOTICE_SHAPES)
+    for (const leg of NOTICE_LEGS) {
+      const run =
+        shape.unprivilegedOnly && process.getuid?.() === 0 ? test.skip : test;
 
-    run(`${shape.label} gives nothing up at an ordinary mount`, () => {
-      const mount = path.join(tempDir("rendezvous"), "drops");
-      const { raw, rendered } = noticeFor(shape, mount);
-      // The residual: at an ordinary path nothing is given up, so a fit that
-      // started dropping its fragment unconditionally would redden here rather
-      // than pass quietly.
-      const kept = shape.namesMount ? mount : shape.tail;
-      expect(raw).toContain(kept);
-      expect(rendered).toContain(kept);
-      expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
-    });
+      run(`${shape.label} gives nothing up at an ordinary ${leg} mount`, () => {
+        const mount = path.join(tempDir("rendezvous"), "drops");
+        const { raw, rendered, allRaw } = noticeFor(shape, mount, leg);
+        // The residual: at an ordinary path nothing is given up, so a fit that
+        // started dropping its fragment unconditionally would redden here rather
+        // than pass quietly. The listing names no mount at all, giving way by
+        // entry name instead.
+        if (shape.namesMount) {
+          expect(raw).toContain(mount);
+          expect(rendered).toContain(mount);
+        }
+        expect(rendered).toContain(shape.tail(leg));
+        // Which of the appliance's mounts the operator is being sent to.
+        expect(rendered).toContain(legPhrase(leg));
+        expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+        expectWithinNoticeBudget(allRaw);
+      });
 
-    // The two ways a mount runs a notice past the budget. The second is a segment
-    // of confusables at a length whose RAW form still fits: what carries it over is
-    // the escape expansion alone, so a fit measuring raw lengths would keep the
-    // path there. Which arithmetic the fit does is the whole of the difference
-    // between the two classes, and the raw-length premise below is what says so.
-    for (const [pathLabel, segment, rawLengthFitsBudget] of [
-      ["past the budget on its own length", "d".repeat(200), false],
-      [
-        "past the budget only once escaped",
-        WIDE_ESCAPING_CHAR.repeat(20),
-        true,
-      ],
-    ] as const) {
-      run(
-        `${shape.label} keeps its closing clause at a mount ${pathLabel}`,
-        () => {
-          const mount = overlongMount(segment);
-          const { raw, rendered, allRendered } = noticeFor(shape, mount);
+      // The two ways a mount runs a notice past the budget. The second is a segment
+      // of confusables at a length whose RAW form still fits: what carries it over is
+      // the escape expansion alone, so a fit measuring raw lengths would keep the
+      // path there. Which arithmetic the fit does is the whole of the difference
+      // between the two classes, and the raw-length premise below is what says so.
+      for (const [pathLabel, segment, rawLengthFitsBudget] of [
+        ["past the budget on its own length", "d".repeat(200), false],
+        [
+          "past the budget only once escaped",
+          WIDE_ESCAPING_CHAR.repeat(20),
+          true,
+        ],
+      ] as const) {
+        run(
+          `${shape.label} keeps its closing clause at a ${leg} mount ${pathLabel}`,
+          () => {
+            const mount = overlongMount(segment);
+            const { raw, rendered, allRaw, allRendered } = noticeFor(
+              shape,
+              mount,
+              leg,
+            );
 
-          // The case is only worth driving if the mount really is past the budget:
-          // a path that fits proves nothing about the fit.
-          expect(renderedDisplayCost(mount)).toBeGreaterThan(
-            RENDEZVOUS_NOTICE_BUDGET,
-          );
-          expect(
-            mount.length <= RENDEZVOUS_NOTICE_BUDGET,
-            `${pathLabel}: the mount's raw length is what separates the two classes`,
-          ).toBe(rawLengthFitsBudget);
+            // The case is only worth driving if the mount really is past the budget:
+            // a path that fits proves nothing about the fit.
+            expect(renderedDisplayCost(mount)).toBeGreaterThan(
+              RENDEZVOUS_NOTICE_BUDGET,
+            );
+            expect(
+              mount.length <= RENDEZVOUS_NOTICE_BUDGET,
+              `${pathLabel}: the mount's raw length is what separates the two classes`,
+            ).toBe(rawLengthFitsBudget);
 
-          expect(renderedDisplayCost(raw)).toBeLessThanOrEqual(
-            RENDEZVOUS_NOTICE_BUDGET,
-          );
-          // The mount is what gives way, and it gives way WHOLE: a clipped path
-          // reads like a path the operator could go and look at.
-          if (shape.namesMount) expect(raw).not.toContain(mount);
-          expect(rendered).toContain(shape.tail);
-          expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
-          expect(rendered.length).toBeLessThanOrEqual(
-            WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
-          );
-          // Not just this shape's own notice: a branch that raises several must
-          // deliver all of them whole.
-          for (const other of allRendered)
-            expect(other).not.toContain(DISPLAY_TRUNCATION_MARKER);
-        },
-      );
+            // Every notice the branch raised, not just this shape's own: what is
+            // left once the path gives way is first-party copy, and the leg is part
+            // of it, so a leg's wording that outgrows the budget fails here.
+            expectWithinNoticeBudget(allRaw);
+            // The mount is what gives way, and it gives way WHOLE: a clipped path
+            // reads like a path the operator could go and look at.
+            if (shape.namesMount) expect(raw).not.toContain(mount);
+            expect(rendered).toContain(shape.tail(leg));
+            expect(rendered).toContain(legPhrase(leg));
+            expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+            expect(rendered.length).toBeLessThanOrEqual(
+              WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+            );
+            // Not just this shape's own notice: a branch that raises several must
+            // deliver all of them whole.
+            for (const other of allRendered)
+              expect(other).not.toContain(DISPLAY_TRUNCATION_MARKER);
+          },
+        );
+      }
     }
-  }
 
   test("the overlap notice gives way to a long directory on either side", () => {
     // The only notice naming TWO operator-configured paths, and containment is
