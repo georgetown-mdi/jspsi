@@ -1,0 +1,11 @@
+This package carries two licenses.
+
+This package's own source, everything outside `src/contrib/`, is licensed
+under the Apache License, Version 2.0; see the repository root LICENSE.md.
+
+`src/contrib/` is vendored from peerjs-server
+(https://github.com/peers/peerjs-server) under the MIT License; see
+src/contrib/LICENSE for its exact text.
+
+Full attribution for the vendored code is recorded in the repository root
+NOTICE.
