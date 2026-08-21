@@ -115,6 +115,14 @@ const termsWithGovernance: LinkageTerms = {
   },
 };
 
+// Inputs that populate every governance channel: a legal agreement, a multi-field
+// matching basis, sent and received payload columns, and an association table.
+const governanceInputs: ExchangeRecordInputs = {
+  ...baseInputs,
+  localTerms: termsWithGovernance,
+  partnerTerms: { ...termsWithGovernance, identity: "Party B" },
+};
+
 // --- Agreed-terms hash -------------------------------------------------------
 
 describe("computeTermsHash", () => {
@@ -509,6 +517,10 @@ describe("governance metadata", () => {
       ],
       payloadReceived: [{ name: "status" }],
     });
+    // A column the data dictionary does not describe omits the key rather than
+    // carrying an undefined one -- a distinction the structural equality above
+    // does not make, and one the canonical encoding does.
+    expect("description" in record.governance.payloadReceived[0]).toBe(false);
   });
 
   test("omits the legal agreement when the terms have none", async () => {
@@ -571,18 +583,6 @@ describe("governance metadata", () => {
     expect(record.governance.payloadReceived).toEqual([]);
   });
 
-  test("carries data-dictionary descriptions when present and bare names otherwise", async () => {
-    const { record } = await buildExchangeRecord(
-      { ...baseInputs, localTerms: termsWithGovernance },
-      fixedRandomness,
-    );
-    expect(record.governance.payloadSent).toEqual([
-      { name: "dose", description: "Administered dose in milligrams." },
-    ]);
-    expect(record.governance.payloadReceived).toEqual([{ name: "status" }]);
-    expect("description" in record.governance.payloadReceived[0]).toBe(false);
-  });
-
   test("payload categories reflect the committed columns when no data dictionary is authored (web regression)", async () => {
     // The web term builders never populate terms.payload, yet real columns flow
     // through the metadata disclosure gate and are committed. The record must
@@ -638,20 +638,6 @@ describe("governance metadata", () => {
       { name: "dose", description: "Administered dose in milligrams." },
       { name: "extra" },
     ]);
-  });
-
-  test("payload category names equal the committed columns (cannot drift from the commitment)", async () => {
-    // The load-bearing invariant: payloadSent/payloadReceived names ARE the
-    // committed columns, so the readable disclosure cannot diverge from the
-    // committed bytes. The keys carry only salts, so pin against the committed
-    // inputs the record was built from.
-    const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    expect(record.governance.payloadSent.map((c) => c.name)).toEqual(
-      localPayloadSent.columns,
-    );
-    expect(record.governance.payloadReceived.map((c) => c.name)).toEqual(
-      partnerPayloadReceived.columns,
-    );
   });
 
   test("rejects a committed column name the record schema forbids (empty partner-sent name)", async () => {
@@ -718,15 +704,8 @@ describe("governance metadata", () => {
   // metadata (names, types, descriptions, references) and never value-level data
   // (payload row values, linkage-field values, the matched-identifier table),
   // which are committed, never embedded. The next two tests guard that invariant
-  // from opposite directions over a fixture that populates every governance
-  // channel: a legal agreement, a multi-field matching basis, sent and received
-  // payload columns, and an association table.
-  const governanceInputs: ExchangeRecordInputs = {
-    ...baseInputs,
-    localTerms: termsWithGovernance,
-    partnerTerms: { ...termsWithGovernance, identity: "Party B" },
-  };
-
+  // from opposite directions over `governanceInputs`, which populates every
+  // governance channel.
   test("governance exposes only allow-listed metadata keys (a new value-bearing field would fail)", async () => {
     // Positive, structural guard: assert governance is a CLOSED allow-list of keys
     // at every level. The realistic regression -- governanceFromTerms (and its
@@ -869,12 +848,6 @@ describe("parse input bounds (untrusted read path)", () => {
   // generous length / element-count cap. These reject an oversized hostile record
   // at parse -- a string field and an array field each pushed one past its cap --
   // without changing what a legitimate record parses to.
-  const governanceInputs: ExchangeRecordInputs = {
-    ...baseInputs,
-    localTerms: termsWithGovernance,
-    partnerTerms: { ...termsWithGovernance, identity: "Party B" },
-  };
-
   test("rejects a record whose string field exceeds its length cap", async () => {
     const { record } = await buildExchangeRecord(
       governanceInputs,

@@ -19,6 +19,32 @@ import {
 const recoveryStepOf = (err: Error): string =>
   (err.cause as Error | undefined)?.message ?? "";
 
+// A two-error `cause` cycle whose links are counting accessors rather than plain
+// properties: without a seen-set a walk never returns, which would hang the run
+// instead of failing it, so the chain refuses to be read past its own length.
+const countingCauseCycle = (): {
+  outer: Error;
+  readCount: () => number;
+} => {
+  let reads = 0;
+  const outer = new Error("outer");
+  const inner = new Error("inner");
+  const link = (from: Error, to: Error): void => {
+    Object.defineProperty(from, "cause", {
+      configurable: true,
+      get() {
+        reads += 1;
+        if (reads > 8)
+          throw new Error("the cause chain was walked past its own length");
+        return to;
+      },
+    });
+  };
+  link(outer, inner);
+  link(inner, outer);
+  return { outer, readCount: () => reads };
+};
+
 // These assertions guard the operator-facing-error audit: the terminal
 // transport/directory UsageError family carries a recovery-hint tag and a
 // concrete operator next step so the CLI's hint-walker suppresses its generic
@@ -150,27 +176,10 @@ describe("causeChainSome", () => {
   });
 
   test("stops on a cause cycle rather than walking it forever", () => {
-    // Counting accessors rather than plain properties: without the seen-set the
-    // walk never returns, which would hang the run instead of failing it.
-    let reads = 0;
-    const outer = new Error("outer");
-    const inner = new Error("inner");
-    const link = (from: Error, to: Error): void => {
-      Object.defineProperty(from, "cause", {
-        configurable: true,
-        get() {
-          reads += 1;
-          if (reads > 8)
-            throw new Error("the cause chain was walked past its own length");
-          return to;
-        },
-      });
-    };
-    link(outer, inner);
-    link(inner, outer);
+    const { outer, readCount } = countingCauseCycle();
 
     expect(causeChainSome(outer, () => false)).toBe(false);
-    expect(reads).toBe(2);
+    expect(readCount()).toBe(2);
   });
 
   test("propagates a throwing cause accessor to the caller", () => {
@@ -209,28 +218,13 @@ describe("isPeerWaitTimeout cause-chain walk", () => {
   });
 
   test("returns false on a cause cycle rather than walking it forever", () => {
-    // The cycle is built out of counting accessors rather than plain properties:
-    // without the seen-set the walk never returns, which would hang the run
-    // instead of failing it, so the chain refuses to be read past its own length.
-    let reads = 0;
-    const outer = new Error("outer");
-    const inner = new Error("inner");
-    const link = (from: Error, to: Error): void => {
-      Object.defineProperty(from, "cause", {
-        configurable: true,
-        get() {
-          reads += 1;
-          if (reads > 8)
-            throw new Error("the cause chain was walked past its own length");
-          return to;
-        },
-      });
-    };
-    link(outer, inner);
-    link(inner, outer);
+    // The composed predicate, not just the helper underneath it: an inlined walk
+    // that dropped the seen-set would still pass every other test here and hang
+    // only on a tagless cycle.
+    const { outer, readCount } = countingCauseCycle();
 
     expect(isPeerWaitTimeout(outer)).toBe(false);
-    expect(reads).toBe(2);
+    expect(readCount()).toBe(2);
   });
 
   test("finds a tag that sits inside a cause cycle", () => {

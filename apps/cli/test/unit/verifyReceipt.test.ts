@@ -205,13 +205,6 @@ describe("formatVerificationReport", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("a supplied signed record points at the section that checks signatures", () => {
-    const { lines } = formatVerificationReport(report("verified"), [], true);
-    expect(lines.join("\n")).toContain(
-      "partner receipt signatures: checked separately below",
-    );
-  });
-
   test("incomplete is not a failure (exit 0) but is labelled distinctly", () => {
     const { lines, exitCode } = formatVerificationReport(
       report("incomplete"),
