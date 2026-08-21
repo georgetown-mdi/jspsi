@@ -4,6 +4,7 @@ import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../src/participant";
 import {
+  associationAndIterationArray,
   attributableRoundMatches,
   candidatePositionCount,
   groupDuplicatesAndRemoveUndefineds,
@@ -14,6 +15,7 @@ import {
 } from "../src/link";
 import {
   createMessagePipe,
+  receiveParsed,
   ConnectionError,
   type MessageConnection,
 } from "../src/connection/messageConnection";
@@ -750,3 +752,165 @@ for (const cardinality of [
     );
   });
 }
+
+// --- the grouping is snapshotted before the send ------------------------------
+// The grouping the returned list is held to is copied out of the "many" side's own
+// outbound list BEFORE that list is sent. What makes the ordering load-bearing
+// rather than incidental is a transport that hands the partner the array itself
+// rather than a serialization of it: the partner's translation writes each entry's
+// index IN PLACE, over the sender's own entries, so a grouping read after the send
+// is the returned list compared against itself and the merge the check exists to
+// refuse passes. The merge deviations in the block above build fresh entries and
+// leave the sent list intact, which is the other half of the same wire fault.
+
+test("the pipe hands the partner the sent mapped elements themselves", async () => {
+  // The premise the deviation below rests on, as a check rather than a claim: the
+  // in-memory pipe passes the array by reference and the wire schema validates it
+  // where it lies rather than rebuilding it, so a partner writing over a received
+  // entry writes over the sender's.
+  const [sender, receiver] = createMessagePipe();
+  const sent = [{ theirIndex: 3, iteration: 0 }];
+  await sender.send(sent);
+  const received = await receiveParsed(receiver, associationAndIterationArray);
+  expect(received[0]).toBe(sent[0]);
+});
+
+for (const manySide of ["starter", "joiner"] as const) {
+  const [starterKeys, joinerKeys] =
+    manySide === "starter" ? [manyKeys, oneKeys] : [oneKeys, manyKeys];
+
+  test(
+    "a returned list merging the many side's groups IN PLACE is refused " +
+      `(many side: ${manySide})`,
+    async () => {
+      const run = await runCascade(manySide, starterKeys, joinerKeys, {
+        party: manySide,
+        deviation: onMappedElementList(2, (list) => {
+          const merged = list[0].theirIndex;
+          for (const entry of list) entry.theirIndex = merged;
+          return list;
+        }),
+      });
+      const outcome = run[manySide];
+      expect(outcome).toBeInstanceOf(ConnectionError);
+      expect((outcome as ConnectionError).kind).toBe("protocol");
+      expect((outcome as Error).message).toMatch(
+        /names one partner row for two positions this side matched/,
+      );
+    },
+  );
+}
+
+// --- the dropped group's later-key eligibility --------------------------------
+// A group the single-resolver rule drops is attributed nothing, so its rows are
+// still candidates on the next key -- the one carve-out from a record leaving
+// candidacy once it appears in a round's candidate pairs. Only a partner that does
+// not deduplicate produces the drop, so the harness plays the same one the single
+// round above does, over two keys: it contributes each column verbatim, one round
+// position per record, so its translation of the joiner's list stays the identity.
+
+// One PSI round of that starter, returning the joiner positions the round paired
+// it with -- the round's own view of the ambiguity, before the joiner resolves it.
+async function runNonConformingStarterRound(
+  participant: PSIParticipant,
+  conn: MessageConnection,
+  values: Array<string>,
+): Promise<Array<number>> {
+  const { setup, permutation } = await participant.createServerSetup(values);
+  await conn.send(setup);
+  const request = (await conn.receive()) as Uint8Array;
+  await conn.send(await participant.processClientRequest(request));
+  const [joinerPositions, sortedRows] = (await conn.receive()) as [
+    Array<number>,
+    Array<number>,
+  ];
+  await conn.send(sortedRows.map((slot) => permutation[slot]));
+  await conn.receive();
+  return joinerPositions;
+}
+
+interface MultiKeyRun {
+  outcome: AssociationTable | Error;
+  // Each round's joiner positions, as that round paired them.
+  positionsByRound: Array<Array<number>>;
+  // The key round each of the joiner's own matched records was attributed on, in
+  // the order the joiner sent them -- its row order.
+  roundsSent: Array<number>;
+}
+
+async function runManyKeysAgainstNonConformingStarter(
+  starterColumns: Array<Array<string>>,
+  joinerKeys: Keys,
+): Promise<MultiKeyRun> {
+  const [starterConn, joinerConn] = createMessagePipe();
+  const positionsByRound: Array<Array<number>> = [];
+  const roundsSent: Array<number> = [];
+
+  const starterRun = (async () => {
+    const participant = makeParticipant("starter");
+    for (const values of starterColumns)
+      positionsByRound.push(
+        await runNonConformingStarterRound(participant, starterConn, values),
+      );
+    // Its own matched records: one entry per (round, joiner position) the round
+    // paired it with exactly once, which is what the joiner's resolver keeps.
+    await starterConn.send(
+      positionsByRound.flatMap((positions, iteration) =>
+        attributableMatches(positions).map((entry) => ({
+          ...entry,
+          iteration,
+        })),
+      ),
+    );
+    const joinerList = (await starterConn.receive()) as Array<MappedElement>;
+    for (const entry of joinerList) roundsSent.push(entry.iteration);
+    await starterConn.send(joinerList);
+    await starterConn.receive();
+  })().catch(() => undefined);
+
+  const outcome = await linkViaPSI(
+    { cardinality: "many-to-one" },
+    makeParticipant("joiner"),
+    joinerConn,
+    joinerKeys,
+    starterColumns[0].length,
+    -1,
+  ).then(
+    (table) => table,
+    (err: unknown) => err as Error,
+  );
+  await starterConn.close();
+  await starterRun;
+  return { outcome, positionsByRound, roundsSent };
+}
+
+test("rows of a group the resolver dropped stay eligible for a later key", async () => {
+  const run = await runManyKeysAgainstNonConformingStarter(
+    [
+      ["A", "A", "B"],
+      ["Q", "P", "S"],
+    ],
+    [
+      ["A", "A", "B"],
+      ["P", "Q", "Z"],
+    ],
+  );
+
+  // Key 0 paired the joiner's one "A" position with two of the starter's records,
+  // which is the drop: the joiner's rows 0 and 1 are attributed nothing there. A
+  // single-key run of this same data leaves them unmatched altogether ("the joiner
+  // drops a value two or more of a non-conforming starter's records hold").
+  expect([...run.positionsByRound[0]].sort((a, b) => a - b)).toStrictEqual([
+    0, 0, 1,
+  ]);
+  // Both take a key-1 match instead, while row 2 -- matched on key 0 -- left
+  // candidacy with that match and is not re-matched.
+  expect(run.roundsSent).toStrictEqual([1, 1, 0]);
+  // The partner half is the pairing only key 1 produces: the starter holds "P" at
+  // its row 1 and "Q" at its row 0, crossing the row order key 0's "A" group would
+  // have given them.
+  expect(run.outcome).toStrictEqual([
+    [0, 1, 2],
+    [1, 0, 2],
+  ]);
+});
