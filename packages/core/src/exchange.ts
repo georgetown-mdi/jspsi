@@ -324,10 +324,12 @@ export function assertDeduplicateImplemented(deduplicate: boolean): void {
  * a deduplicating exchange, several of the partner's records linking to one of
  * ours (`one-to-many`, and `many-to-many`, which fans both ways -- see
  * {@link AssociationTable}). Where this party is the "many" side the multiplicity
- * lands on the PARTNER half, whose repeats the pair check below admits within a
- * run: detecting a repeat across the whole half costs an allocation over every
- * matched pair on the `one-to-one` path too, where the local half's strict ascent
- * costs nothing.
+ * lands on the PARTNER half, whose repeats sit ACROSS runs of equal local rows --
+ * the local half being strictly ascending -- where the pair check below never
+ * allocates or fires; a repeat WITHIN one run is a repeated pair and is refused
+ * below regardless. Detecting a repeat across the whole half costs an allocation
+ * over every matched pair on the `one-to-one` path too, where the local half's
+ * strict ascent costs nothing.
  *
  * What no cardinality produces, and what no consumer could read, is refused. A
  * local half out of order would put the result rows and the payload rows in an
