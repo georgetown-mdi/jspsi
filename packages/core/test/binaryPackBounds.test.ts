@@ -60,27 +60,45 @@ function fixstr(s: string): Array<number> {
 }
 
 /** One mapped-element record `{theirIndex, iteration}` as BinaryPack: a `fixmap`
- * of two pairs with the real string keys and two small (fixint) values, exactly
- * the shape `conn.send` serializes for the largest legitimate inbound frame. */
+ * of two pairs with the real string keys, a small (fixint) `iteration`, and
+ * `theirIndex` under one of the two index widths the budget derivation uses -- a
+ * fixint at 127 and below, a `uint32` above it. Those two are the only widths this
+ * helper emits, which is what its call sites here need; it does not reproduce the
+ * packer's own `uint8`/`uint16` choices in between, and the width the real packer
+ * gives an index at scale is pinned against the packer itself in the differential
+ * suite. Exactly the shape `conn.send` serializes for the largest legitimate
+ * inbound frame. */
 function mappedRecord(theirIndex: number, iteration: number): Array<number> {
+  const index =
+    theirIndex > 0x7f
+      ? [
+          0xce,
+          (theirIndex >>> 24) & 0xff,
+          (theirIndex >>> 16) & 0xff,
+          (theirIndex >>> 8) & 0xff,
+          theirIndex & 0xff,
+        ]
+      : [theirIndex];
   return [
     0x82, // fixmap(2)
     ...fixstr("theirIndex"),
-    theirIndex & 0x7f, // fixint
+    ...index,
     ...fixstr("iteration"),
     iteration & 0x7f, // fixint
   ];
 }
 
-/** A BinaryPack array16 of `n` mapped-element records (the mapped-element frame).
+/** A BinaryPack array16 of `n` mapped-element records (the mapped-element frame),
+ * indexed from `firstIndex` so the frame can be built at either index width.
  * Bounded to the array16 count so a large `n` fails loud rather than silently
  * truncating the header; the budget derivation uses {@link expectedMappedCost}
  * (pure arithmetic) for the multi-million-record ceiling, never a real buffer. */
-function mappedElementFrame(n: number): Uint8Array {
+function mappedElementFrame(n: number, firstIndex = 0): Uint8Array {
   if (n > 0xffff)
     throw new RangeError(`mappedElementFrame: n=${n} exceeds array16`);
   const out: Array<number> = [0xdc, (n >>> 8) & 0xff, n & 0xff];
-  for (let i = 0; i < n; i++) out.push(...mappedRecord(i % 128, 0));
+  for (let i = 0; i < n; i++)
+    out.push(...mappedRecord(firstIndex + (i % 128), 0));
   return new Uint8Array(out);
 }
 
@@ -92,18 +110,26 @@ function stringWeightOf(byteLen: number): number {
   );
 }
 
-/** The charged retained cost of an `n`-record mapped-element frame under the cost
- * model: a root array, plus per record its slot in that array, one object, the
- * object's four declared slots, and two key strings. This is the derivation the
- * production budget is sized against. */
-function expectedMappedCost(n: number): number {
-  const perRecord =
+/** The charged retained cost of one mapped-element record under the cost model: its
+ * slot in the root array, one object, the object's four declared slots, and two key
+ * strings -- plus the boxed-number weight when the record's index is wide enough to
+ * take a `uint32` marker. */
+function mappedRecordCost(wideIndex: boolean): number {
+  return (
     WEBRTC_VALUE_WEIGHTS.scalar +
     WEBRTC_VALUE_WEIGHTS.object +
     4 * WEBRTC_VALUE_WEIGHTS.scalar +
     stringWeightOf("theirIndex".length) +
-    stringWeightOf("iteration".length);
-  return WEBRTC_VALUE_WEIGHTS.array + n * perRecord;
+    stringWeightOf("iteration".length) +
+    (wideIndex ? WEBRTC_VALUE_WEIGHTS.boxedNumber : 0)
+  );
+}
+
+/** The charged retained cost of an `n`-record mapped-element frame: the root array
+ * plus each record's cost. This is the derivation the production budget is sized
+ * against. */
+function expectedMappedCost(n: number, wideIndex = false): number {
+  return WEBRTC_VALUE_WEIGHTS.array + n * mappedRecordCost(wideIndex);
 }
 
 describe("the WebRTC inbound bound constants", () => {
@@ -126,6 +152,7 @@ describe("the WebRTC inbound bound constants", () => {
       object: 64,
       array: 40,
       scalar: 8,
+      boxedNumber: 16,
       stringBase: 16,
       stringPerByte: 2,
       binary: 256,
@@ -180,15 +207,47 @@ describe("scanFrameStructure: the per-value cost model", () => {
     );
   });
 
-  test("charges a wide number marker (double) the same one slot", () => {
-    // double (0xcb + 8 payload bytes) is a HeapNumber at runtime but is charged
-    // only its container's slot here; this pins the documented under-count -- the
-    // wire-byte cap, not the structure budget, is the backstop for a number-heavy
-    // frame.
-    atBoundary(
-      new Uint8Array([0x91, 0xcb, 0, 0, 0, 0, 0, 0, 0, 0]),
-      WEBRTC_VALUE_WEIGHTS.array + WEBRTC_VALUE_WEIGHTS.scalar,
-    );
+  test("charges every wide number marker the boxed weight above its slot", () => {
+    // A number the container's slot cannot hold is boxed on the heap, so each
+    // marker wide enough to carry such a value is charged that box on top of the
+    // slot -- whatever value the marker actually carries, so the charge reads the
+    // wire alone rather than the engine's small-integer range.
+    const payload = (n: number): Array<number> => new Array<number>(n).fill(0);
+    for (const marker of [
+      [0xca, ...payload(4)], // float
+      [0xce, ...payload(4)], // uint32
+      [0xd2, ...payload(4)], // int32
+      [0xcb, ...payload(8)], // double
+      [0xcf, ...payload(8)], // uint64
+      [0xd3, ...payload(8)], // int64
+    ]) {
+      atBoundary(
+        new Uint8Array([0x91, ...marker]),
+        WEBRTC_VALUE_WEIGHTS.array +
+          WEBRTC_VALUE_WEIGHTS.scalar +
+          WEBRTC_VALUE_WEIGHTS.boxedNumber,
+      );
+    }
+  });
+
+  test("charges a narrow number marker its container's slot alone", () => {
+    // The markers whose whole value range fits the smallest small-integer range an
+    // engine draws: nothing is ever boxed for them, so the slot is the whole cost
+    // and the boxed weight would be dead over-charge.
+    const payload = (n: number): Array<number> => new Array<number>(n).fill(0);
+    for (const marker of [
+      [0x01], // positive fixint
+      [0xff], // negative fixint
+      [0xcc, ...payload(1)], // uint8
+      [0xd0, ...payload(1)], // int8
+      [0xcd, ...payload(2)], // uint16
+      [0xd1, ...payload(2)], // int16
+    ]) {
+      atBoundary(
+        new Uint8Array([0x91, ...marker]),
+        WEBRTC_VALUE_WEIGHTS.array + WEBRTC_VALUE_WEIGHTS.scalar,
+      );
+    }
   });
 
   test("charges a bin/raw value its view overhead above the container's slot", () => {
@@ -289,13 +348,42 @@ describe("scanFrameStructure: the per-value cost model", () => {
     ).toBe(true);
   });
 
+  test("a wide index adds the boxed weight to the record's cost", () => {
+    // The same record at an index past 65,535 -- where every record of a
+    // multi-million-record frame sits -- costs the boxed weight more, the
+    // difference the budget's admitted-record derivation turns on.
+    const frame = mappedElementFrame(1, 100_000);
+    const cost = expectedMappedCost(1, true);
+    expect(cost - expectedMappedCost(1)).toBe(WEBRTC_VALUE_WEIGHTS.boxedNumber);
+    expect(scanRefuses(frame, cost, 256)).toBe(false);
+    expect(scanRefuses(frame, cost - 1, 256)).toBe(true);
+  });
+
   test("the mapped cost of 2^22 records stays under the structure budget", () => {
     // The wire-byte cap and the structure budget are independent, with no
     // headroom relation between them -- this pins the mapped cost of a
     // 4.19M-record (2^22) frame against the structure budget alone, at the
-    // conservative per-record weight.
-    expect(expectedMappedCost(4_194_304)).toBeLessThan(
+    // conservative per-record weight a multi-million-record frame's wide indices
+    // carry.
+    expect(expectedMappedCost(4_194_304, true)).toBeLessThan(
       MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
+    );
+  });
+
+  test("the budget refuses a boxed-number frame before the wire cap does", () => {
+    // What the boxed weight closes: the cheapest boxed number is 5 wire bytes (a
+    // 4-byte payload behind its marker) charged 24 with its slot, so the wire a
+    // frame must spend to meet this budget stays inside the wire-byte cap. The
+    // structure budget is therefore the binding control for a number-heavy frame,
+    // rather than leaving its retention to the wire cap.
+    const CHEAPEST_BOXED_WIRE_BYTES = 5;
+    const perValue =
+      WEBRTC_VALUE_WEIGHTS.scalar + WEBRTC_VALUE_WEIGHTS.boxedNumber;
+    const valuesAtBudget = Math.ceil(
+      MAX_WEBRTC_FRAME_STRUCTURE_BYTES / perValue,
+    );
+    expect(valuesAtBudget * CHEAPEST_BOXED_WIRE_BYTES).toBeLessThan(
+      MAX_WEBRTC_FRAME_BYTES,
     );
   });
 });

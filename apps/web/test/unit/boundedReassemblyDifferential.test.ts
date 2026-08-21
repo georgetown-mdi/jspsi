@@ -738,10 +738,11 @@ function stringWeightOf(declaredBytes: number): number {
  * the retained cost the structure implies under the published `WEBRTC_VALUE_WEIGHTS`
  * -- each container its own weight plus a backing slot per declared child, each
  * string its header-plus-per-byte weight, each `bin`/`raw` value the fixed overhead
- * of the view it decodes to. A value the weights charge no more than its container's
- * slot adds nothing here. This walk reports the modelled cost and never a measured
- * allocation. `cost` is the exact budget the production scan should charge;
- * `endOffset` is the byte offset the real unpacker finishes at.
+ * of the view it decodes to, and each number marker wider than 16 bits the heap
+ * number its value may be boxed in. A value the weights charge no more than its
+ * container's slot adds nothing here. This walk reports the modelled cost and
+ * never a measured allocation. `cost` is the exact budget the production scan
+ * should charge; `endOffset` is the byte offset the real unpacker finishes at.
  * Deliberately not derived from `scanFrameStructure`, so a source marker-dispatch
  * bug shows up as a boundary mismatch against this reference rather than being
  * masked by a shared walk.
@@ -775,6 +776,14 @@ function referenceWalk(bytes: Uint8Array): {
    * position it is a key the scan refuses. */
   const binaryValue = (atKeyPosition: boolean): void => {
     cost += WEBRTC_VALUE_WEIGHTS.binary;
+    if (atKeyPosition) nonStringKey = true;
+  };
+
+  /** A number marker wider than 16 bits: the heap number its value is held in when
+   * the container's slot cannot hold it, charged on top of that slot whatever the
+   * marker carries. At a key position it is a key the scan refuses. */
+  const boxedNumber = (atKeyPosition: boolean): void => {
+    cost += WEBRTC_VALUE_WEIGHTS.boxedNumber;
     if (atKeyPosition) nonStringKey = true;
   };
 
@@ -832,13 +841,13 @@ function referenceWalk(bytes: Uint8Array): {
       case 0xce: // uint32
       case 0xd2: // int32
         i += 4;
-        slotOnly(atKeyPosition);
+        boxedNumber(atKeyPosition);
         return;
       case 0xcb: // double
       case 0xcf: // uint64
       case 0xd3: // int64
         i += 8;
-        slotOnly(atKeyPosition);
+        boxedNumber(atKeyPosition);
         return;
       case 0xd8: {
         // str16

@@ -113,17 +113,19 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
  *   count (`new Array(N)`) before reading any element, so the scan likewise charges
  *   a container's slots at its header rather than as each child is read. A value
  *   that allocates nothing beyond that slot -- an integer, boolean, null, or
- *   undefined -- therefore adds nothing of its own. (The number markers that unpack
- *   to a HeapNumber rather than a SMI -- `float`, `double`, `uint32`/`int32` past
- *   the SMI range, `uint64`/`int64` -- retain ~24 bytes incl. their slot, more than
- *   the 8 charged here. A homogeneous numeric array stores them unboxed at ~8
- *   bytes, matching the charge; but a peer can force per-element boxing by mixing
- *   in one non-number to make the array general-elements kind, reaching ~24
- *   bytes/value.
- *   Each such value costs >= 5 wire bytes, so the wire-byte cap -- not this
- *   structure budget -- is the binding control for a number-heavy frame, bounding
- *   even an all-boxed one to ~1.2 GiB: on the order of, and slightly above, this
- *   budget, a fixed transient freed once the schema layer rejects the frame.)
+ *   undefined -- therefore adds nothing of its own.
+ * - `boxedNumber` (16): the heap number a wide number marker's value is held in
+ *   when the slot cannot hold it, charged on top of that slot. A fractional value,
+ *   or an integer past the engine's small-integer range, is boxed at a measured 24
+ *   bytes with its slot; an otherwise unboxed numeric array is forced to
+ *   per-element boxing by one non-number mixed in, which makes it general-elements
+ *   kind. The charge is decided by the MARKER, not the decoded value: `float`,
+ *   `double`, `uint32`, `int32`, `uint64` and `int64` are charged it whatever they
+ *   carry, so the model reads the wire alone rather than resting on where a
+ *   particular engine draws its small-integer range (the narrower number markers --
+ *   `uint8`, `uint16`, `int8`, `int16` and the fixints -- are inside it on any
+ *   engine). It over-charges by this weight for a wide marker whose value the slot
+ *   would have held, the conservative direction.
  * - `string` (`stringBase` 16 + `stringPerByte` 2 per declared wire byte): a
  *   SeqString header (~16 bytes) plus its characters. `unpack_string` decodes the
  *   declared UTF-8 wire length into a JS string of at most that many UTF-16 code
@@ -145,20 +147,30 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
  * is not a string on the wire (see {@link scanFrameStructure}), and a string key
  * IS the property name, already charged in full by the `string` weight.
  *
- * The model is deliberately a *conservative* upper bound for the kinds it charges
- * in full: e.g. it charges every object key string in full, though V8 internalizes
- * repeated property keys to one shared string, so the real retained peak of a
- * key-heavy frame is lower. A true memory envelope is simpler for a security
- * reviewer to audit than one resting on V8 interning/representation choices an
- * engine update could change; the cost of conservatism is a budget sized above the
- * realistic legitimate frame rather than hugging it (see
- * {@link MAX_WEBRTC_FRAME_STRUCTURE_BYTES}). Fixed, not configurable, for the same
- * reason as the budget itself.
+ * Each weight is set deliberately high where the retention it stands for is
+ * understood: an object key string is charged in full, though V8 internalizes
+ * repeated property keys to one shared string, and a wide number marker its boxed
+ * cost, though a small integer written in one is held in the slot. A model a
+ * security reviewer can audit is worth more than one resting on V8
+ * interning/representation choices an engine update could change; the cost of that
+ * conservatism is a budget sized above the realistic legitimate frame rather than
+ * hugging it (see {@link MAX_WEBRTC_FRAME_STRUCTURE_BYTES}).
+ *
+ * The weights are model figures, and the differential suites score both sides of
+ * their comparison by them: they pin the scan to THIS MODEL -- the charge equals
+ * the modelled cost of the real unpacker's own value inventory -- rather than
+ * pinning the model to the heap, and no check here compares a decoded value's
+ * retained bytes against the weight charged for it. How closely a weight tracks
+ * what `unpack` really retains for its kind is therefore an open limit of this
+ * control, backed only where a measurement is recorded for that kind
+ * (docs/spec/CHANNEL_SECURITY.md carries the residual). Fixed, not configurable,
+ * for the same reason as the budget itself.
  */
 export const WEBRTC_VALUE_WEIGHTS = {
   object: 64,
   array: 40,
   scalar: 8,
+  boxedNumber: 16,
   stringBase: 16,
   stringPerByte: 2,
   binary: 256,
@@ -191,28 +203,36 @@ export const WEBRTC_VALUE_WEIGHTS = {
  * iteration}>`, one entry per matched record -- which `unpack`s, per record, to
  * one object (64) + its slot in the root array (8) + the object's four declared
  * slots (8 each) + two key strings ("theirIndex" 16+20, "iteration" 16+18) ~= 174
- * bytes under the weights above, a per-record cost the unit tests pin against the
- * real frame shape; 2^30 therefore admits a mapped-element frame of about 6.17
- * million matched records. This path enforces that budget and
+ * bytes under the weights above, plus the boxed-number weight (16) once the index
+ * passes 65,535 and takes a `uint32` marker: a per-record cost the unit tests pin
+ * against the real frame shape. 2^30 therefore admits a mapped-element frame of
+ * about 5.65 million matched records at that 190-byte cost, and more of the
+ * narrower-indexed records below it. This path enforces that budget and
  * {@link MAX_WEBRTC_FRAME_BYTES}, and no element-count ceiling: the two are
  * independent bounds, with no headroom relation between them at the 35 bytes an
  * encrypted element occupies on the wire (see docs/spec/PROTOCOL.md). A set frame
  * filling the 256 MiB wire cap carries about 7.67 million elements, whose
- * mapped-element frame would reach about 1.24 GiB and be rejected here.
- * Residual: the per-frame worst case for the kinds this budget charges in full is
- * the budget itself. A frame of the heaviest such kind (~4.07M declared
- * empty-payload `bin` views at 264 charged bytes each with their array slot)
- * meets the refusal at ~4 MB of proportional wire while retaining ~0.79x the
- * budget; the same count with 60-63-byte payloads is equally admitted and
- * retains ~1.09x, its payload bytes the ~1x-wire addition the spec residual
- * states (docs/spec/CHANNEL_SECURITY.md), held by the wire cap rather than
- * here. An all-empty-object frame needs ~16.7M elements and ~16 MiB of wire to
- * meet the same refusal (the per-container byte check ties cost to wire), freed
- * once the schema layer rejects the frame. A tighter budget is available only by
- * making the weights less conservative (e.g. crediting key-string
- * internalization); that aggressiveness is a security-review judgment (see
- * docs/spec/CHANNEL_SECURITY.md). Fixed, not configurable: a configurable bound
- * risks being raised to reintroduce the denial of service.
+ * mapped-element frame would reach about 1.36 GiB and be rejected here.
+ * Residual: this budget bounds what the scan CHARGES a frame, so the per-frame
+ * worst case for the deserialized structure is this budget itself under the
+ * weights above -- a modelled envelope rather than a measured ceiling on the heap,
+ * since how closely a weight tracks the retention it stands for is backed only
+ * where a measurement is recorded for that kind (see
+ * {@link WEBRTC_VALUE_WEIGHTS}). The frame that reaches the refusal on the least
+ * wire (~4.07M declared empty-payload `bin` views at 264 charged bytes each with
+ * their array slot) meets it at ~4 MB of proportional wire while retaining ~0.79x
+ * the budget; the same count with 60-63-byte payloads is equally admitted and
+ * retains ~1.09x, its payload bytes the ~1x-wire addition the spec residual states
+ * (docs/spec/CHANNEL_SECURITY.md), held by the wire cap rather than here -- a
+ * retention this budget charges nothing for. An all-empty-object frame
+ * needs ~16.7M elements and ~16 MiB of wire to meet the same refusal (the
+ * per-container byte check ties cost to wire), and a frame of the cheapest boxed
+ * numbers needs ~213 MiB of wire -- inside the wire cap, so this budget is what
+ * refuses it. Any of them is freed once the schema layer rejects the frame. A
+ * tighter budget is available only by making the weights less conservative (e.g.
+ * crediting key-string internalization); that aggressiveness is a security-review
+ * judgment (see docs/spec/CHANNEL_SECURITY.md). Fixed, not configurable: a
+ * configurable bound risks being raised to reintroduce the denial of service.
  */
 export const MAX_WEBRTC_FRAME_STRUCTURE_BYTES = 1_073_741_824;
 
@@ -276,8 +296,8 @@ export const MAX_WEBRTC_STRING_BYTES = 1024 * 1024;
  *
  * - `structure-bytes`: the running retained-byte cost passed
  *   `maxStructureBytes` (the budget every per-kind weight is charged against, so
- *   a frame of any one kind -- objects, arrays, strings, `bin`/`raw` views --
- *   meets it here).
+ *   a frame of any one kind -- objects, arrays, strings, `bin`/`raw` views, wide
+ *   number markers -- meets it here).
  * - `nesting-depth`: the structure nests deeper than `maxDepth`.
  * - `string-bytes`: a string declares more wire bytes than `maxStringBytes`.
  * - `unbacked-elements`: a container declares more elements than the bytes that
@@ -442,6 +462,15 @@ const BINARY: ValueHeader = {
   kind: "plain",
 };
 
+/** A number marker wider than 16 bits: the heap number its value is held in when
+ * the container's slot cannot hold it, charged on top of that slot whatever the
+ * marker carries (see {@link WEBRTC_VALUE_WEIGHTS}). */
+const BOXED_NUMBER: ValueHeader = {
+  children: 0,
+  weight: WEBRTC_VALUE_WEIGHTS.boxedNumber,
+  kind: "plain",
+};
+
 /** Reads one BinaryPack value's header at the cursor, skipping a scalar's
  * payload, and returns the value's {@link ValueHeader} (its declared child count,
  * its retained-byte weight including a container's declared backing slots, and the
@@ -450,9 +479,11 @@ const BINARY: ValueHeader = {
  * `Unpacker.unpack` marker dispatch: a map of K pairs declares 2K children (K keys
  * + K values). A `bin`/`raw` value is charged the decoded view's fixed overhead on
  * top of its parent's slot, its payload alone being ~1x wire and so bounded by the
- * wire-byte cap (see {@link BINARY}). An unknown marker is charged nothing of its
- * own and declares 0 children (BinaryPack returns `undefined` for it without
- * consuming a payload). */
+ * wire-byte cap (see {@link BINARY}); a number marker wider than 16 bits is charged
+ * the heap number its value may be boxed in, likewise on top of that slot (see
+ * {@link BOXED_NUMBER}). An unknown marker is charged nothing of its own and
+ * declares 0 children (BinaryPack returns `undefined` for it without consuming a
+ * payload). */
 function readValueHeader(
   cursor: ByteCursor,
   maxStringBytes: number,
@@ -496,12 +527,12 @@ function readValueHeader(
     case 0xce: // uint32
     case 0xd2: // int32
       cursor.skip(4);
-      return SCALAR;
+      return BOXED_NUMBER;
     case 0xcb: // double
     case 0xcf: // uint64
     case 0xd3: // int64
       cursor.skip(8);
-      return SCALAR;
+      return BOXED_NUMBER;
     case 0xda: // raw16
       cursor.skip(cursor.u16()); // unpack_raw copies `size` bytes (~1x wire),
       return BINARY; // bounded by the wire-byte cap; the view itself charged here
