@@ -10,6 +10,7 @@ import {
   NestingDepthExceededError,
   parseExchangeSpec,
   sanitizeErrorForDisplay,
+  snakeizeKeys,
   UsageError,
 } from "@psilink/core";
 import {
@@ -1927,16 +1928,16 @@ test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => 
   );
 });
 
-// The three parse-error formatters route every issue-path segment through
-// the display boundary, like describeDecodeError, so a control/ANSI or
-// deceptive-Unicode byte in a path can never reach the operator raw. No reachable
-// failure produces such a path today (the linkage schemas are non-strict, so
-// unrecognized keys are stripped before they can appear), so this drives the one
-// schema position that can carry a partner-style string into a path -- a
-// transform `params` record key, whose key schema bounds length -- with an
-// over-long key built from control and bidi-override bytes. The guard must escape
-// it; the two tests below pin both the escaping and the absence of over-escaping.
-test("loadConfigLinkageSource escapes control/ANSI bytes in a linkage_terms issue path", () => {
+// A camelized issue path names every segment in the spelling the file writes,
+// and it can do that only for a key the camelize pass itself built. The one
+// schema position holding a key it did not -- a transform `params` record key,
+// the schema's only free-form record and the only position whose key schema
+// bounds length, so the only one that can surface a key in a path at all -- is
+// where the path stops instead: `_evil_key` and `EvilKey` on disk both arrive as
+// the camelized `EvilKey`, so naming either spelling names a key one of those
+// files does not contain. The three tests below pin the stop, what survives it,
+// and the absence of over-escaping on the segments that do get named.
+test("loadConfigLinkageSource stops a linkage_terms issue path at the params block", () => {
   const configPath = path.join(dir, "psilink.yaml");
   const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
   // An ESC-driven ANSI sequence and a right-to-left override (U+202E). The key
@@ -1956,21 +1957,50 @@ test("loadConfigLinkageSource escapes control/ANSI bytes in a linkage_terms issu
   expect(caught).toBeInstanceOf(UsageError);
   const rendered = sanitizeErrorForDisplay(caught);
   expect(rendered).toContain("invalid linkage_terms");
-  // The fixed path prefix passes through verbatim; only the partner-style key
-  // segment is escaped.
-  expect(rendered).toContain("linkageKeys.0.elements.0.transform.0.params.");
-  // The raw bytes are neutralized: their escaped forms appear, never the bytes.
+  // Every segment before the block still locates the problem, and it is fixed
+  // schema structure the whole way.
+  expect(rendered).toContain("linkage_keys.0.elements.0.transform.0.params: ");
+  // The key itself reaches the operator in no form: not raw, which the display
+  // boundary would have had to escape, and not as the escape either.
   expect(rendered).not.toContain("\x1b");
   expect(rendered).not.toContain("\u202e");
-  expect(rendered).toContain("\\x1b");
-  expect(rendered).toContain("\\u202e");
+  expect(rendered).not.toContain("\\x1b");
+  expect(rendered).not.toContain("\\u202e");
+});
+
+test("loadConfigLinkageSource names no spelling of a params key it cannot invert", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+  // Capitals the camelize pass leaves untouched, so the segment reaching the
+  // formatter is the file's own spelling -- and is equally the spelling a file
+  // writing `_evil_key` would have arrived as. Over MAX_NAME_LENGTH so the key
+  // reaches the issue path at all.
+  const authorKey = "EvilKey" + "x".repeat(MAX_NAME_LENGTH);
+  terms.linkageKeys[0].elements[0].transform = [
+    { function: "noop", params: { [authorKey]: 1 } },
+  ];
+  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+  let caught: unknown;
+  try {
+    loadConfigLinkageSource(configPath);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as Error).message;
+  expect(message).toContain("linkage_keys.0.elements.0.transform.0.params: ");
+  // Neither the rewrite the schema-fixed segments take, which would name
+  // `_evil_key...` -- a key this file does not contain -- nor the raw segment,
+  // which would name it for this file while mis-naming the other one.
+  expect(message).not.toContain("_evil_key");
+  expect(message).not.toContain(authorKey);
 });
 
 test("loadConfigLinkageSource leaves a schema-fixed linkage_terms issue path unescaped", () => {
   const configPath = path.join(dir, "psilink.yaml");
   const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
   // An empty name fails the linkage-key `name` min-length, locating the issue
-  // at the schema-fixed path linkageKeys.0.name (field names + a numeric index).
+  // at the schema-fixed path linkage_keys.0.name (field names + a numeric index).
   terms.linkageKeys[0].name = "";
   fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
   let caught: unknown;
@@ -1982,7 +2012,69 @@ test("loadConfigLinkageSource leaves a schema-fixed linkage_terms issue path une
   expect(caught).toBeInstanceOf(UsageError);
   // Ordinary path components survive untouched: the `.` separators and the
   // numeric index are not over-escaped.
-  expect((caught as Error).message).toContain("linkageKeys.0.name");
+  expect((caught as Error).message).toContain("linkage_keys.0.name");
+});
+
+// Validation runs on the camelized shape, so a Zod issue names its field in
+// camelCase while the operator is reading a file that writes those keys in
+// snake_case. These pin the render seam that reconciles the two: a NESTED path
+// (not just a top-level key) is named as the file writes it, and the file the
+// error names is one the CLI's own writer produced, so the key it points at is
+// literally in the bytes on disk.
+test("a nested linkage_terms schema error names its key as the file writes it", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+  // A path with two segments whose spellings differ between the file and the
+  // parsed shape, one of them under an array index: `linkage_fields.2.
+  // constraints.affixes_allowed` on disk against `linkageFields.2.constraints.
+  // affixesAllowed` once camelized.
+  const constraints = terms.linkageFields[2].constraints as {
+    affixesAllowed?: unknown;
+  };
+  constraints.affixesAllowed = "no";
+  // Written in the on-disk form the CLI's own writer produces, so the file the
+  // error names its key against is the snake_case one an operator reads.
+  fs.writeFileSync(
+    configPath,
+    YAML.stringify({ linkage_terms: snakeizeKeys(terms) }),
+  );
+
+  let caught: unknown;
+  try {
+    loadConfigLinkageSource(configPath);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as Error).message;
+  expect(message).toContain("linkage_fields.2.constraints.affixes_allowed");
+  expect(message).not.toContain("linkageFields");
+  expect(message).not.toContain("affixesAllowed");
+  // The key the message names is one the operator can find in the file.
+  expect(fs.readFileSync(configPath, "utf8")).toContain("affixes_allowed");
+});
+
+test("a nested metadata schema error names its key as the file writes it", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    YAML.stringify({
+      linkage_terms: getDefaultLinkageTerms("Agency A"),
+      metadata: [{ name: "ssn", type: "ssn", role: "linkage", is_payload: 7 }],
+    }),
+  );
+
+  let caught: unknown;
+  try {
+    loadConfigLinkageSource(configPath);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as Error).message;
+  expect(message).toContain("0.is_payload");
+  expect(message).not.toContain("isPayload");
+  expect(fs.readFileSync(configPath, "utf8")).toContain("is_payload");
 });
 
 test("loadConfigLinkageSource rejects an invalid standardization block", () => {

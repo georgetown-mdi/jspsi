@@ -211,6 +211,48 @@ export function renderedDisplayCost(fragment: string): number {
 }
 
 /**
+ * Longest prefix of `value` whose {@link renderedDisplayCost} fits `budget`,
+ * with {@link DISPLAY_TRUNCATION_MARKER} appended -- and paid for out of that
+ * same budget -- when anything was dropped. This is how a COMPOSITION SITE fits
+ * a fragment somebody else chose to a display budget: the fragment stays raw for
+ * the sink's single escape, and what the sink then renders is bounded by
+ * `budget` rather than by whatever the sink's own cap happens to be.
+ *
+ * {@link sanitizeForDisplay}'s own `maxLength` does not serve here: it appends
+ * the marker ON TOP of the cap, and it escapes, which is the sink's job rather
+ * than this one's (escaping at both altitudes doubles a literal backslash on
+ * every pass -- see CONTRIBUTING.md, Operator-facing escaping).
+ *
+ * `value` arrives raw, and a code point is kept only when its WHOLE rendered
+ * cost fits, so the clip falls on a code-point boundary and what the sink then
+ * escapes can never end inside a partial escape sequence.
+ *
+ * Redact BEFORE clipping
+ * ({@link ./sanitizeErrorForDisplay.redactPrivateKeyMaterial}), never after: the
+ * marker is appended here, so a planted `BEGIN` marker left in the kept prefix
+ * would consume it under the fail-closed dangling rule. Redacting first also
+ * spends the budget on what the operator is actually shown.
+ *
+ * The fit check measures the whole value, which materializes its escaped form
+ * (roughly ten times the input at worst), so this bounds what a fragment
+ * RENDERS to, not what it costs to measure: a caller holding a fragment nothing
+ * upstream has bounded is bounding a display budget here, not a memory one.
+ */
+export function clipToRenderedCost(value: string, budget: number): string {
+  if (renderedDisplayCost(value) <= budget) return value;
+  const room = budget - DISPLAY_TRUNCATION_MARKER.length;
+  let kept = "";
+  let cost = 0;
+  for (const ch of value) {
+    const next = cost + renderedDisplayCost(ch);
+    if (next > room) break;
+    kept += ch;
+    cost = next;
+  }
+  return `${kept}${DISPLAY_TRUNCATION_MARKER}`;
+}
+
+/**
  * Compose fixed first-party copy with already-sanitized values into a
  * {@link Displayable}, as a tagged template:
  * ``displayText`${fieldLabel} (${marker})` ``. Its result is exactly the string

@@ -18,6 +18,7 @@ import {
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
   safeParseMetadata,
+  snakeizeKey,
   snakeizeKeys,
   StandardizationSchema,
   UsageError,
@@ -1101,6 +1102,56 @@ export type ConfigLinkageSourceResult =
   | { status: "loaded"; source: ConfigLinkageSource };
 
 /**
+ * Render a config block's schema issues as `<key path>: <reason>` clauses, so the
+ * operator can locate each offending field, mirroring accept's decode-error
+ * formatting. Each path is relative to the block it came from.
+ *
+ * `keys` says how the block was parsed, which is what decides the spelling the
+ * path is named in. A block parsed through `camelizeKeys` (`camelized`) yields
+ * issue paths in camelCase while the file writes those keys in snake_case, so
+ * each segment is put back through {@link snakeizeKey} -- the same rewrite
+ * {@link saveConfig}'s writer uses -- and the message names the key the file
+ * contains. A block whose schema parses the on-disk form directly (`as-written`)
+ * is named verbatim: its paths already carry the file's own spelling, and a
+ * rewrite there would mis-name a free-form key the operator spelled with capitals
+ * of their own.
+ *
+ * A camelized path STOPS at a `params` segment, naming the block and not the key
+ * inside it. That rewrite is exact only for a key the camelize pass built, and
+ * the one free-form record the schema carries -- a transform's `params` -- holds
+ * the author's own key: the camelized `EvilKey` is what a file writing either
+ * `_evil_key` or `EvilKey` arrives as, so the two on-disk spellings are no longer
+ * distinguishable here and naming either one names a key some file does not
+ * contain. Everything before the segment is fixed schema structure, which is what
+ * still locates the problem. The web importer's terms reader truncates the same
+ * path for its own reason (that key can be partner-supplied and its contract is
+ * value-free); an unbounded free-form key is also the one fragment here that
+ * could spend a whole rendered link on its own.
+ */
+function describeSchemaIssues(
+  issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>,
+  keys: "camelized" | "as-written",
+): string {
+  return issues
+    .map((issue) => {
+      const paramsIndex =
+        keys === "camelized" ? issue.path.indexOf("params") : -1;
+      const path =
+        paramsIndex >= 0 ? issue.path.slice(0, paramsIndex + 1) : issue.path;
+      // A Zod issue path is PropertyKey[], and Array.join throws a TypeError on a
+      // symbol segment where String() renders it, so this map is a guard rather
+      // than a redundant coercion: an error-formatting path must not fail while
+      // reporting.
+      const segments = path.map((segment) =>
+        keys === "camelized" ? snakeizeKey(String(segment)) : String(segment),
+      );
+      const at = segments.length > 0 ? `${segments.join(".")}: ` : "";
+      return `${at}${issue.message}`;
+    })
+    .join("; ");
+}
+
+/**
  * Read the linkage-terms source from a config file, reporting a missing file and
  * a config that defines no `linkage_terms` as distinct outcomes instead of one
  * absence and one throw, so each caller attributes them in its own terms.
@@ -1154,22 +1205,7 @@ export function readConfigLinkageSource(
   if (!result.success)
     throw new UsageError(
       `config file ${configPath} has invalid linkage_terms: ` +
-        result.error.issues
-          .map((i) => {
-            // Prefix each issue with its field path (e.g. "linkageKeys.0.name")
-            // so the user can locate the offending field, mirroring accept's
-            // decode-error formatting. The path is relative to linkage_terms.
-            const at =
-              i.path.length > 0
-                ? // A Zod issue path is PropertyKey[], and Array.join throws a
-                  // TypeError on a symbol segment where String() renders it, so
-                  // this map is a guard rather than a redundant coercion: an
-                  // error-formatting path must not fail while reporting.
-                  `${i.path.map((p) => String(p)).join(".")}: `
-                : "";
-            return `${at}${i.message}`;
-          })
-          .join("; "),
+        describeSchemaIssues(result.error.issues, "camelized"),
     );
 
   // The explicit standardization is optional. Its `output`/`input`/`steps` keys
@@ -1183,19 +1219,7 @@ export function readConfigLinkageSource(
     if (!stdResult.success)
       throw new UsageError(
         `config file ${configPath} has invalid standardization: ` +
-          stdResult.error.issues
-            .map((i) => {
-              const at =
-                i.path.length > 0
-                  ? // A Zod issue path is PropertyKey[], and Array.join throws a
-                    // TypeError on a symbol segment where String() renders it, so
-                    // this map is a guard rather than a redundant coercion: an
-                    // error-formatting path must not fail while reporting.
-                    `${i.path.map((p) => String(p)).join(".")}: `
-                  : "";
-              return `${at}${i.message}`;
-            })
-            .join("; "),
+          describeSchemaIssues(stdResult.error.issues, "as-written"),
       );
     standardization = stdResult.data;
   }
@@ -1212,19 +1236,7 @@ export function readConfigLinkageSource(
     if (!metaResult.success)
       throw new UsageError(
         `config file ${configPath} has invalid metadata: ` +
-          metaResult.error.issues
-            .map((i) => {
-              const at =
-                i.path.length > 0
-                  ? // A Zod issue path is PropertyKey[], and Array.join throws a
-                    // TypeError on a symbol segment where String() renders it, so
-                    // this map is a guard rather than a redundant coercion: an
-                    // error-formatting path must not fail while reporting.
-                    `${i.path.map((p) => String(p)).join(".")}: `
-                  : "";
-              return `${at}${i.message}`;
-            })
-            .join("; "),
+          describeSchemaIssues(metaResult.error.issues, "camelized"),
       );
     metadata = metaResult.data;
   }

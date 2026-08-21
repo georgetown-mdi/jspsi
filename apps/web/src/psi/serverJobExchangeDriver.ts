@@ -1,7 +1,9 @@
-import { ProcessState, getLogger } from "@psilink/core";
+import { ProcessState, getLogger, joinErrorCauseChain } from "@psilink/core";
 
 import { recordFileStamp } from "@bench/runOutputs";
 import { whenDiagnostic } from "@utils/diagnostics";
+
+import { ERROR_MESSAGE_CHAIN_FIELD } from "./relayErrorChain";
 
 import type { ExchangeDriver, ExchangeDriverEvents } from "./exchangeDriver";
 import type {
@@ -189,6 +191,26 @@ export class JobApiRequestError extends Error {
   ) {
     super(message);
     this.name = "JobApiRequestError";
+  }
+}
+
+/** The failure a relayed terminal `error` event raises, whose `message` is a
+ * RENDERED cause chain rather than a raw one: every piece of it came off the
+ * relay's own display pass -- the links {@link ERROR_MESSAGE_CHAIN_FIELD}
+ * carried apart, rejoined by the renderer's own framing, or the escaped flat
+ * field when the relay derived no chain (see {@link errorMessageOf}).
+ *
+ * The type is what carries that provenance to a seat, and the provenance is what
+ * makes splitting the message back into links exact: an escaped link cannot hold
+ * a raw newline, so the only one the message can carry is the framing. A seat
+ * that split a RAW message on the same framing would turn a literal
+ * `\ncaused by:` in the text into a forged link of its own, which is why the
+ * seat renders anything that is not one of these through the escaping renderer
+ * instead (`sanitizedFailureMessage` in `@bench/useInviterExchange`). */
+export class RelayedTerminalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RelayedTerminalError";
   }
 }
 
@@ -791,8 +813,22 @@ function errorCategoryOf(event: RelayEvent): ExchangeErrorCategory {
     : "exchange";
 }
 
-/** Read the display-safe message off an `error` relay event. */
+/** Read the display-safe message off an `error` relay event, rebuilding the
+ * cause chain from the links the relay carried apart
+ * ({@link ERROR_MESSAGE_CHAIN_FIELD}) so a terminal error arrives whole -- its
+ * explanation AND the recovery step a later link carries -- rather than cut at
+ * whatever the flat `message` field's per-value cap left of it. The flat field
+ * is the fallback: an event the relay did not derive a chain for (a
+ * manager-synthesized terminal, whose text is one first-party sentence) carries
+ * only that. */
 function errorMessageOf(event: RelayEvent): string {
+  const chain = event[ERROR_MESSAGE_CHAIN_FIELD];
+  if (Array.isArray(chain)) {
+    const links = chain.filter(
+      (link): link is string => typeof link === "string" && link.length > 0,
+    );
+    if (links.length > 0) return joinErrorCauseChain(links);
+  }
   const message = event.message;
   return typeof message === "string" && message.length > 0
     ? message
@@ -1068,7 +1104,7 @@ async function consumeJobStream(
         case "error":
           onError({
             category: errorCategoryOf(event),
-            error: new Error(errorMessageOf(event)),
+            error: new RelayedTerminalError(errorMessageOf(event)),
           });
           return;
         default:

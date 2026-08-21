@@ -6,14 +6,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import {
-  errorMessage,
+  joinErrorCauseChain,
   loadPsiBackend,
   prepareForExchange,
-  sanitizeForDisplay,
+  sanitizeErrorChainLinks,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 
 import {
   JobApiRequestError,
+  RelayedTerminalError,
   createFetchJobApiClient,
   createServerJobExchangeDriver,
 } from "@psi/serverJobExchangeDriver";
@@ -71,6 +73,36 @@ export interface RunFailure {
   category: ExchangeErrorCategory;
   title: string;
   message: string;
+}
+
+/**
+ * Escape a surfaced failure's text at this display boundary, as the composition
+ * it is rather than as one value: a message is first-party explanation and
+ * recovery text, and an appliance run's is a whole rendered cause chain (the
+ * console relay carries a terminal error's links apart and the driver rejoins
+ * them), so each link takes the composed-message budget and the count takes the
+ * renderer's own depth bound. Escaping the chain as a single value instead caps
+ * it at the per-value default, which cuts a chain inside its first link or two
+ * and drops the recovery step a later link carries.
+ *
+ * WHICH pass a failure takes is decided by its type, not by what its text looks
+ * like. Only a {@link RelayedTerminalError} carries a chain the relay already
+ * rendered and escaped, and only there is splitting on the renderer's framing
+ * exact -- an escaped link holds no raw newline, so the framing is the only one
+ * the message can carry. Every other failure is a RAW error thrown in this
+ * browser, and it goes through the escaping renderer itself, which escapes each
+ * link before any framing is joined onto it. Splitting a raw message on that
+ * framing instead is what would let a literal `\ncaused by:` inside one become a
+ * link of its own, indistinguishable at the seat from a cause psilink rendered.
+ *
+ * The framing between links is the renderer's own newline, which every alert
+ * that shows this renders with `white-space: pre-line`, so each link lands on its
+ * own line.
+ */
+function sanitizedFailureMessage(error: unknown): string {
+  return error instanceof RelayedTerminalError
+    ? joinErrorCauseChain(sanitizeErrorChainLinks(error.message))
+    : sanitizeErrorForDisplay(error);
 }
 
 /** @internal */
@@ -146,7 +178,7 @@ export function failureFor(
         "The linkage completed, so do not run this exchange again - a second " +
         "run would send your data for an exchange that already happened. On " +
         "this machine, a local write failed: " +
-        sanitizeForDisplay(errorMessage(error)),
+        sanitizedFailureMessage(error),
     };
   }
   if (category === "config") {
@@ -160,7 +192,7 @@ export function failureFor(
     return {
       category,
       title: "Could not prepare the exchange",
-      message: sanitizeForDisplay(errorMessage(error)),
+      message: sanitizedFailureMessage(error),
     };
   }
   if (category === "security") {
@@ -174,7 +206,7 @@ export function failureFor(
       return {
         category,
         title: "This invitation can no longer be used",
-        message: sanitizeForDisplay(errorMessage(error)),
+        message: sanitizedFailureMessage(error),
       };
     }
     // The authenticated key exchange failed closed: this connection could not

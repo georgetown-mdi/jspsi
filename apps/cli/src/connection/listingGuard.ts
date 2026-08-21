@@ -1,7 +1,10 @@
 import {
+  clipToRenderedCost,
+  DEFAULT_MAX_DISPLAY_LENGTH,
   DirectoryListingBoundsError,
   DISPLAY_TRUNCATION_MARKER,
   redactPrivateKeyMaterial,
+  renderedDisplayCost,
   type TransportOperationStalledError,
 } from "@psilink/core";
 
@@ -79,16 +82,52 @@ export const MAX_DIRECTORY_ENTRIES = 8192;
  */
 export const MAX_FILENAME_LENGTH = 255;
 
+const DIRECTORY_LINK_LABEL = "directory: ";
+
+/**
+ * What the `directory:` link may render to: the per-value display budget, which
+ * is what a chooser's own value is budgeted at everywhere else (the rendezvous
+ * entry guard's detail link fits to the same one). The link carries the path
+ * alone, so the whole of it is the path's plus the label's.
+ *
+ * It is well under the per-link cap the renderer applies
+ * (`COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`), which is deliberate: that cap is a
+ * ceiling, not a quota, and a path is a value rather than a composition. A real
+ * rendezvous path is an order of magnitude inside this, so the clip only ever
+ * bites a path that is itself the anomaly.
+ */
+const DIRECTORY_LINK_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
+
+/**
+ * Compose the labelled `directory:` cause link both refusals below carry, with
+ * the path fitted to {@link DIRECTORY_LINK_BUDGET} at this composition site.
+ *
+ * The path is bounded HERE rather than left to the display boundary because it
+ * is bounded nowhere upstream: it is operator-configured, but on an
+ * offline-accept config it can be seeded from a partner invitation endpoint that
+ * is charset-unconstrained and 4096 characters wide, and a value that reaches
+ * the renderer unbounded spends whatever the renderer's own cap allows. Fitting
+ * it here is the same discipline the sibling entry-name preview applies, so
+ * neither fragment somebody else chose relays an attacker-sized string onward.
+ *
+ * The path is redacted before it is clipped, and the clip appends the truncation
+ * marker itself, so a planted `BEGIN` marker cannot consume the marker that says
+ * the path was cut (see {@link clipToRenderedCost}). What is kept is raw, and is
+ * escaped once where the error is rendered, like every other fragment here.
+ */
+function directoryLink(dirPath: string): string {
+  return `${DIRECTORY_LINK_LABEL}${clipToRenderedCost(
+    redactPrivateKeyMaterial(dirPath),
+    DIRECTORY_LINK_BUDGET - renderedDisplayCost(DIRECTORY_LINK_LABEL),
+  )}`;
+}
+
 /**
  * Construct the typed, terminal error for a directory whose entry count exceeds
- * {@link MAX_DIRECTORY_ENTRIES}. `dirPath` is the rendezvous path (operator-
- * configured, but it can be seeded from a charset-unconstrained partner invitation
- * endpoint on an offline-accept config, and bounded in neither length nor
- * format), so it takes a labelled cause link of its own rather than leading the
- * summary, where it would spend the budget the bound, the refusal and the next
- * step {@link DirectoryListingBoundsError} carries need. It is interpolated raw
- * and escaped where the error is rendered, like every other fragment in this
- * module, and redacted here (see {@link redactPrivateKeyMaterial}).
+ * {@link MAX_DIRECTORY_ENTRIES}. `dirPath` takes a labelled cause link of its
+ * own ({@link directoryLink}) rather than leading the summary, where it would
+ * spend the budget the bound, the refusal and the next step
+ * {@link DirectoryListingBoundsError} carries need.
  */
 export function directoryTooLargeError(
   dirPath: string,
@@ -97,19 +136,21 @@ export function directoryTooLargeError(
   return new DirectoryListingBoundsError(
     `the rendezvous directory contains more than ${max} entries; refusing to ` +
       `enumerate it to avoid an unbounded memory allocation`,
-    { details: [`directory: ${redactPrivateKeyMaterial(dirPath)}`] },
+    { details: [directoryLink(dirPath)] },
   );
 }
 
 /**
  * Construct the typed, terminal error for a directory entry whose filename
  * exceeds {@link MAX_FILENAME_LENGTH}. Only a leading slice of the offending
- * name is interpolated: it is the one fragment here with no upper bound at all
- * (a hostile server can synthesize a name of any length in a READDIR response),
- * so the error must not relay an attacker-sized string into memory. The slice is
- * raw -- escaping is the display boundary's job, and it renders a split surrogate
- * pair as a visible escape rather than mojibake. The true length is reported
- * separately: it is a number, not partner text.
+ * name is interpolated: a hostile server can synthesize a name of any length in
+ * a READDIR response, so the error must not relay an attacker-sized string into
+ * memory. The slice is a plain leading one rather than the directory's
+ * rendered-cost fit, because what bounds it is that memory rather than a display
+ * budget, and it is far inside the budget either way. It is raw -- escaping is
+ * the display boundary's job, and it renders a split surrogate pair as a visible
+ * escape rather than mojibake. The true length is reported separately: it is a
+ * number, not partner text.
  *
  * The server chose the name and the operator (or, on an offline-accept config,
  * the partner's endpoint) chose the directory, so each takes a labelled cause
@@ -134,10 +175,7 @@ export function filenameTooLongError(
       `${name.length} characters, exceeding the maximum of ${max}; refusing ` +
       `to process it`,
     {
-      details: [
-        `directory: ${redactPrivateKeyMaterial(dirPath)}`,
-        `entry name: ${shown}`,
-      ],
+      details: [directoryLink(dirPath), `entry name: ${shown}`],
     },
   );
 }

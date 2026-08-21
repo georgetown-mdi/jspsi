@@ -8,6 +8,7 @@ import {
   parseSensitiveYaml,
   safeParseLinkageTerms,
   sanitizeForDisplay,
+  snakeizeKey,
   snakeizeKeys,
 } from "@psilink/core";
 
@@ -166,12 +167,18 @@ function readableTermsError(error: ZodError): string {
   // arbitrary keys); truncate the path at `params` so that key cannot leak into the
   // message -- everything before it is fixed schema structure. (The line is
   // sanitized too, but the contract is value-free, so this closes it at the source.)
+  //
+  // Each segment is named in the snake_case the document writes it in:
+  // {@link safeParseLinkageTerms} camelizes before validating, so an issue path
+  // locates its field by the camelCase name, while the operator is reading the
+  // file {@link exportLinkageTerms} wrote -- through {@link snakeizeKeys}, of
+  // which {@link snakeizeKey} is the per-key half.
   const paramsIndex = issue.path.indexOf("params");
   const safePath =
     paramsIndex >= 0 ? issue.path.slice(0, paramsIndex + 1) : issue.path;
   const where =
     safePath.length > 0
-      ? safePath.map((segment) => String(segment)).join(".")
+      ? safePath.map((segment) => snakeizeKey(String(segment))).join(".")
       : "the document";
 
   // Fixed, value-free phrasing per Zod code. `custom` is the schema's own refines

@@ -198,6 +198,30 @@ describe("importLinkageTerms rejection", () => {
     }
   });
 
+  test("names a nested offending key as the document writes it", () => {
+    // Validation runs on the camelized shape, so the issue path locates this
+    // field as `linkageFields.2.constraints.affixesAllowed` -- while the operator
+    // is reading the exported document, which writes every one of those keys in
+    // snake_case. The rendered error must name the spelling the document has, at
+    // every segment of a nested path and not merely at a top-level key.
+    const document = JSON.parse(exportLinkageTerms(TERMS, "json")) as {
+      linkage_fields: Array<{ constraints?: Record<string, unknown> }>;
+    };
+    const constraints = document.linkage_fields[2].constraints;
+    expect(constraints).toHaveProperty("affixes_allowed");
+    constraints!.affixes_allowed = "no";
+
+    const result = importLinkageTerms(JSON.stringify(document));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toContain(
+        "linkage_fields.2.constraints.affixes_allowed",
+      );
+      expect(result.error).not.toContain("linkageFields");
+      expect(result.error).not.toContain("affixesAllowed");
+    }
+  });
+
   test("rejects an over-length document before parsing", () => {
     const huge = " ".repeat(MAX_IMPORT_CHARS + 1);
     const result = importLinkageTerms(huge);
