@@ -14,6 +14,7 @@ import {
   parseExchangeRecord,
   parseVerificationKeys,
   reconstructCommittedData,
+  recordAlterationIsTheOnlyExplanation,
   recordedVersionMatches,
   reproductionMismatchCauses,
   sanitizeErrorForDisplay,
@@ -39,6 +40,7 @@ import type {
   LocalIdentitySource,
   ReceiptSignatureStatus,
   RecordVerificationReport,
+  ResultSizeStatus,
   RunBindingStatus,
   SignedReceiptPartyReport,
   SignedReceiptVerdictGuidance,
@@ -340,6 +342,28 @@ const COMMITMENT_WORD: Record<CommitmentStatus, string> = {
     "cannot be opened (no salt in the keys file; likely a wrong or drifted " +
     "keys file, not a problem with the record)",
 };
+
+// The recorded result size is the matched-pairs table's entry count and no
+// commitment covers it, so the verdict recounts the opened table rather than
+// opening anything. A mismatch is stated without the altered-or-wrong-file
+// hedge the commitment lines carry: a result that did not belong to this
+// exchange fails the table's own line above and never reaches this one.
+const RESULT_SIZE_WORD: Record<ResultSizeStatus, string> = {
+  verified: "matches the matched-pairs table it counts",
+  mismatch:
+    "DOES NOT MATCH the matched-pairs table it counts, which opened and " +
+    "carries a different number of pairs -- the recorded figure is what " +
+    "disagrees, not the data",
+  "not-supplied":
+    "not checked (re-supply the result file so its matched pairs can be " +
+    "recounted)",
+  unopenable:
+    "not checked (no matched pairs to recount: where the record commits to a " +
+    "table that did not open, the matched-pairs line above names the cause; a " +
+    "table that opened but is not shaped as a pairing carries no count to " +
+    "recount; a count-only exchange records no such table at all)",
+};
+
 /**
  * What this run supplied, so a "not checked" line names an input that is still
  * missing rather than one already on the command line, and the note explaining a
@@ -427,8 +451,12 @@ export function formatVerificationReport(
   const lines: string[] = [];
   if (report.outcome === "failed")
     lines.push(
-      "VERIFICATION FAILED: a check did not match -- the record may have been " +
-        "altered, or a re-supplied input/result/terms does not match this exchange.",
+      recordAlterationIsTheOnlyExplanation(report)
+        ? "VERIFICATION FAILED: the recorded result size disagrees with the " +
+            "matched pairs the record itself commits to -- the record was " +
+            "altered; the files you re-supplied check out."
+        : "VERIFICATION FAILED: a check did not match -- the record may have been " +
+            "altered, or a re-supplied input/result/terms does not match this exchange.",
     );
   else if (report.outcome === "incomplete")
     lines.push(
@@ -441,6 +469,10 @@ export function formatVerificationReport(
     [string, CommitmentStatus]
   >)
     lines.push(`  commitment ${name}: ${COMMITMENT_WORD[status]}`);
+  // Omitted when the record carries no result size: only a both-output exchange
+  // records one, and a line reporting the absence would read as a gap.
+  if (report.resultSize !== undefined)
+    lines.push(`  result size: ${RESULT_SIZE_WORD[report.resultSize]}`);
   lines.push(`  agreed-terms hash: ${termsWord(report.termsHash, supplied)}`);
   // Directly under the line it explains: a config supplying no terms is why that
   // line reads "not checked", and the two are unreadable apart.

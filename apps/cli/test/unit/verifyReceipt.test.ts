@@ -253,6 +253,122 @@ describe("formatVerificationReport", () => {
   });
 });
 
+describe("formatVerificationReport: the recorded result size", () => {
+  const sized = (
+    resultSize: RecordVerificationReport["resultSize"],
+  ): RecordVerificationReport => ({
+    outcome: resultSize === "mismatch" ? "failed" : "incomplete",
+    termsHash: "not-checked",
+    commitments: {
+      localPayloadSent: "verified",
+      partnerPayloadReceived: "verified",
+      associationTable: resultSize === "verified" ? "verified" : "not-supplied",
+    },
+    ...(resultSize !== undefined ? { resultSize } : {}),
+  });
+
+  test("a record stating no size gets no line at all", () => {
+    const { lines } = formatVerificationReport(sized(undefined), []);
+    expect(lines.join("\n")).not.toContain("result size:");
+  });
+
+  test("a matching size is reported against the table it counts", () => {
+    const { lines } = formatVerificationReport(sized("verified"), []);
+    expect(lines.join("\n")).toContain(
+      "result size: matches the matched-pairs table it counts",
+    );
+  });
+
+  test("a mismatching size names the recorded figure as the fault", () => {
+    const { lines, exitCode } = formatVerificationReport(sized("mismatch"), []);
+    const out = lines.join("\n");
+    // Its own line, distinct from every commitment line: the figure is what
+    // disagrees, and the operator is not sent looking at their own files.
+    expect(out).toContain("result size: DOES NOT MATCH");
+    expect(out).toContain(
+      "the recorded figure is what disagrees, not the data",
+    );
+    expect(out).not.toContain("commitment associationTable: DOES NOT MATCH");
+    expect(exitCode).toBe(1);
+  });
+
+  test("an unchecked size names what would let it be recounted", () => {
+    const { lines, exitCode } = formatVerificationReport(
+      sized("not-supplied"),
+      [],
+    );
+    expect(lines.join("\n")).toContain(
+      "result size: not checked (re-supply the result file",
+    );
+    expect(exitCode).toBe(0);
+  });
+
+  test("a size with no pairing behind it is not checked, never verified", () => {
+    const { lines, exitCode } = formatVerificationReport(
+      sized("unopenable"),
+      [],
+    );
+    const out = lines.join("\n");
+    expect(out).toContain("result size: not checked (no matched pairs to");
+    // Each way a figure ends up with no pair count behind it is named, so the
+    // line is not read as the one cause the matched-pairs line above explains.
+    expect(out).toContain("the matched-pairs line above names the cause");
+    expect(out).toContain("is not shaped as a pairing carries no count");
+    expect(out).toContain("count-only exchange records no such table at all");
+    expect(exitCode).toBe(0);
+  });
+
+  // The recorded figure alone at fault is the one failure the record's own
+  // artifacts settle: a re-supplied file that did not belong to this exchange
+  // fails the pairing's commitment first, so the headline states what happened
+  // instead of offering the operator two causes to choose between.
+  const onlyTheSizeFailed: RecordVerificationReport = {
+    outcome: "failed",
+    termsHash: "verified",
+    commitments: {
+      localPayloadSent: "verified",
+      partnerPayloadReceived: "verified",
+      associationTable: "verified",
+    },
+    resultSize: "mismatch",
+  };
+
+  test("a result-size-only failure names the record, dropping the hedge", () => {
+    const { lines, exitCode } = formatVerificationReport(onlyTheSizeFailed, []);
+    expect(lines[0]).toMatch(/^VERIFICATION FAILED/);
+    expect(lines[0]).toContain("the record was altered");
+    expect(lines[0]).toContain("the files you re-supplied check out");
+    expect(lines[0]).not.toContain("may have been altered");
+    expect(lines[0]).not.toContain("does not match this exchange");
+    expect(exitCode).toBe(1);
+  });
+
+  test("a commitment failing alongside the size keeps the two-cause headline", () => {
+    const { lines } = formatVerificationReport(
+      {
+        ...onlyTheSizeFailed,
+        commitments: {
+          ...onlyTheSizeFailed.commitments,
+          partnerPayloadReceived: "mismatch",
+        },
+      },
+      [],
+    );
+    expect(lines[0]).toContain("the record may have been altered");
+    expect(lines[0]).toContain("does not match this exchange");
+  });
+
+  test("an unchecked terms hash keeps the two-cause headline", () => {
+    // The headline asserts the rest of the record checked out, so it is not
+    // reached while any element is merely unchecked rather than verified.
+    const { lines } = formatVerificationReport(
+      { ...onlyTheSizeFailed, termsHash: "not-checked" },
+      [],
+    );
+    expect(lines[0]).toContain("the record may have been altered");
+  });
+});
+
 describe("formatSignedRecordReport", () => {
   const party = (
     role: SignedReceiptPartyReport["role"],

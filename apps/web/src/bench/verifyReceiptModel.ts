@@ -13,6 +13,7 @@ import {
   parseExchangeRecord,
   parseSensitiveJson,
   parseVerificationKeys,
+  recordAlterationIsTheOnlyExplanation,
   recordedVersionMatches,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
@@ -33,6 +34,7 @@ import type {
   LinkageTerms,
   ReceiptSignatureStatus,
   RecordVerificationReport,
+  ResultSizeStatus,
   RunBindingStatus,
   SignedReceiptVerdictAnchor,
   SignedReceiptVerdictCheck,
@@ -326,18 +328,18 @@ export function pinnedFingerprintProblem(value: string): string | undefined {
  * icon in the view. */
 export type VerdictTone = "verified" | "failed" | "incomplete";
 
-/** The headline for each overall outcome, honest about the ambiguity of a
- * mismatch (a failed verdict never asserts tamper alone) and never reporting a
- * not-checked artifact as verified. */
+/** The headline for the verdict, honest about what a failure can and cannot
+ * distinguish (a commitment mismatch never asserts tamper alone) and never
+ * reporting a not-checked artifact as verified. */
 export interface VerdictHeadline {
   tone: VerdictTone;
   title: string;
   detail: string;
 }
 
-/** One plain-language row: a commitment or the terms hash, with a status label
- * and the tone that colors it. `explanation` carries the "supply your files"
- * framing for a not-opened commitment. */
+/** One plain-language row: a commitment, the result size, or the terms hash, with
+ * a status label and the tone that colors it. `explanation` carries the "supply
+ * your files" framing for a not-opened commitment. */
 export interface VerdictRow {
   label: string;
   status: string;
@@ -349,6 +351,10 @@ export interface VerdictRow {
 export interface VerdictViewModel {
   headline: VerdictHeadline;
   commitments: Array<VerdictRow>;
+  /** The recorded result size's row, absent when the record carries no result
+   * size (only a both-output exchange records one, and that absence is not a
+   * gap to show the reader). */
+  resultSize?: VerdictRow;
   termsHash: VerdictRow;
   /** Reconstruction caveats, each already sanitized for display. */
   warnings: Array<string>;
@@ -358,9 +364,11 @@ export interface VerdictViewModel {
 }
 
 // The verbatim headline copy per outcome. The failed headline states the honest
-// ambiguity core's own type docs require (recordVerification.ts): a mismatch means
-// the record was altered OR the keys/input/result do not belong to this exchange
-// -- cryptographically indistinguishable -- so it never asserts "tampered" alone.
+// ambiguity core's own type docs require (recordVerification.ts): a commitment
+// mismatch means the record was altered OR the keys/input/result do not belong to
+// this exchange -- cryptographically indistinguishable -- so it never asserts
+// "tampered" alone. A failure carrying no commitment mismatch at all takes
+// RESULT_SIZE_ONLY_HEADLINE below, where there is nothing to be ambiguous about.
 const HEADLINES: Record<RecordVerificationReport["outcome"], VerdictHeadline> =
   {
     verified: {
@@ -368,7 +376,9 @@ const HEADLINES: Record<RecordVerificationReport["outcome"], VerdictHeadline> =
       title: "Verified",
       detail:
         "The record is internally consistent: every commitment opened against " +
-        "the files you supplied, and the agreed-terms hash re-derives.",
+        "the files you supplied, the recorded result size recounts from the " +
+        "opened pairing where the record carries one, and the agreed-terms " +
+        "hash re-derives.",
     },
     incomplete: {
       tone: "incomplete",
@@ -386,6 +396,27 @@ const HEADLINES: Record<RecordVerificationReport["outcome"], VerdictHeadline> =
         "input, a result, or the linkage terms) does not belong to this exchange.",
     },
   };
+
+// The failure where the recorded result size is the only element at fault:
+// every commitment opened and the terms hash re-derived, so the two-causes
+// ambiguity the generic failed headline states cannot apply -- a file that did
+// not belong to this exchange fails the matched-pairs commitment first, and the
+// number then reports not checked rather than at fault.
+const RESULT_SIZE_ONLY_HEADLINE: VerdictHeadline = {
+  tone: "failed",
+  title: "Verification failed",
+  detail:
+    "The recorded result size disagrees with the matched pairs the record " +
+    "itself commits to. The record was altered; the files you supplied check " +
+    "out -- every commitment opened and the agreed-terms hash re-derives.",
+};
+
+function headlineFor(report: RecordVerificationReport): VerdictHeadline {
+  return report.outcome === "failed" &&
+    recordAlterationIsTheOnlyExplanation(report)
+    ? RESULT_SIZE_ONLY_HEADLINE
+    : HEADLINES[report.outcome];
+}
 
 // The per-commitment status label and tone. `unopenable` here is the missing-salt
 // signal -- a wrong or drifted keys file -- stated distinctly from a mismatch and
@@ -410,6 +441,44 @@ const COMMITMENT_ROWS: Record<
       "The keys file has no salt for this commitment, so it cannot be opened. " +
       "This is likely a wrong or drifted keys file, not a problem with the " +
       "record.",
+  },
+};
+
+// The recorded result size counts the matched-pairs table, and no commitment
+// covers it, so the row reports a recount of the table that did open. Its
+// mismatch copy carries no altered-or-wrong-file hedge: a file that did not
+// belong to this exchange fails the table's own row instead, leaving this one
+// not checked.
+const RESULT_SIZE_ROWS: Record<
+  ResultSizeStatus,
+  { status: string; tone: VerdictTone; explanation?: string }
+> = {
+  verified: { status: "Matches the matched pairs", tone: "verified" },
+  mismatch: {
+    status: "Does not match",
+    tone: "failed",
+    explanation:
+      "The matched-pairs table opened and holds a different number of pairs " +
+      "than the record states. The recorded number is what disagrees, not the " +
+      "files you supplied.",
+  },
+  "not-supplied": {
+    status: "Not checked",
+    tone: "incomplete",
+    explanation:
+      "Supply your retained result so its matched pairs can be recounted. " +
+      "Without it the recorded number cannot be checked -- this is not a " +
+      "failure.",
+  },
+  unopenable: {
+    status: "Not checked",
+    tone: "incomplete",
+    explanation:
+      "No matched pairs stand behind the recorded number, so there is nothing " +
+      "to recount it from. Where the record commits to a table that did not " +
+      "open, its own row above names the cause; a table that opened but is not " +
+      "shaped as a pairing carries no count to recount; a count-only exchange " +
+      "records no such table at all.",
   },
 };
 
@@ -463,7 +532,8 @@ const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
  * supplied column name), so the caller passes the raw warnings straight from
  * {@link reconstructCommittedData}. Only the commitments the report carries are
  * shown; the mandatory pair is always present in a parsed record, and the
- * association table appears only when the record holds it.
+ * association table appears only when the record holds it. The result-size row
+ * follows the same rule -- shown only where the record records a size.
  *
  * Pass `signedRecordVerified` when the same run also verified a dual-signed
  * record, so the standing caveat points at that verdict rather than telling the
@@ -487,9 +557,23 @@ export function verdictViewModel(
     });
   }
   const termsRow = TERMS_ROWS[report.termsHash];
+  const sizeRow =
+    report.resultSize === undefined
+      ? undefined
+      : RESULT_SIZE_ROWS[report.resultSize];
   return {
-    headline: HEADLINES[report.outcome],
+    headline: headlineFor(report),
     commitments,
+    ...(sizeRow !== undefined
+      ? {
+          resultSize: {
+            label: "The recorded result size",
+            status: sizeRow.status,
+            tone: sizeRow.tone,
+            explanation: sizeRow.explanation,
+          },
+        }
+      : {}),
     termsHash: {
       label: "The agreed-terms hash",
       status: termsRow.status,

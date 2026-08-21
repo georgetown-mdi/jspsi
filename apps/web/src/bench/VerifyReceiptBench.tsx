@@ -558,11 +558,12 @@ export function VerifyReceiptBench() {
       </h1>
       <p className={`${styles.small} ${styles.sub}`}>
         Check that an exchange record you kept is internally consistent: its
-        commitments open against the files you re-supply, and its agreed-terms
-        hash re-derives. If the exchange was signed, check a dual-signed record
-        too: both parties&apos; signatures, and what anchors each certificate
-        outside the record. This is read-only and runs entirely in your browser
-        -- nothing is uploaded.
+        commitments open against the files you re-supply, the result size it
+        records is the number of matched pairs it commits to, and its
+        agreed-terms hash re-derives. If the exchange was signed, check a
+        dual-signed record too: both parties&apos; signatures, and what anchors
+        each certificate outside the record. This is read-only and runs entirely
+        in your browser -- nothing is uploaded.
       </p>
 
       <Stack gap="lg" mt="md">
@@ -637,6 +638,9 @@ export function VerifyReceiptBench() {
                 {verdict.commitments.map((row) => (
                   <VerdictCheckRow key={row.label} row={row} />
                 ))}
+                {verdict.resultSize !== undefined && (
+                  <VerdictCheckRow row={verdict.resultSize} />
+                )}
                 <VerdictCheckRow row={verdict.termsHash} />
               </Stack>
               {verdict.warnings.length > 0 && (
