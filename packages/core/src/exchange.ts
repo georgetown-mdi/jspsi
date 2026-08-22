@@ -145,16 +145,18 @@ export interface PreparedExchange {
    * exchange to it and refuses a contradiction before any key or payload moves
    * (see {@link assertPresentedDeduplicateMatchesInvitation}).
    *
-   * Populated by the caller (the accept front end that holds the token), NOT by
+   * Populated by the caller -- the accept front end that holds the token, or the
+   * recurring front end that restores the acceptance's persisted
+   * `expectedPartnerDeduplicate` off its config -- NOT by
    * {@link prepareForExchange}, for the same reason as
    * {@link expectedPayloadColumns} beside it: it is a consent-fidelity
    * expectation carried by the invitation rather than a property derived from
    * this party's own data or terms -- `deriveAcceptedLinkageTerms` sets this
    * party's own `deduplicate` to `false` and retains nothing of the inviter's.
    *
-   * Absent (undefined) on every exchange authored from a party's own
-   * configuration file, where there is no declaration to hold the partner to and
-   * the two documents legitimately differ.
+   * Absent (undefined) where no invitation was accepted: an exchange authored
+   * from two parties' own configuration files carries no declaration to hold the
+   * partner to, and the two documents legitimately differ.
    */
   expectedPartnerDeduplicate?: boolean;
   dataset: StandardizedDataset;
@@ -868,14 +870,17 @@ export function prepareForExchange(
     // A self-facing operator note, passed through untouched from the local
     // config to the record builder; absent when the config omits it.
     retentionDisposition: exchangeDataSpec.retentionDisposition,
-    // NOTE: expectedPayloadColumns (the received-payload lock-in) is deliberately
-    // NOT threaded here, unlike retentionDisposition above. The caller sets it on
-    // the returned PreparedExchange after this returns, because the accept path's
-    // source is the invitation token (not this dataSpec) and the recurring path
-    // applies a fallback (config expectedPayloadColumns, else payload.receive). A
-    // caller that wants the lock-in must set it explicitly; see
-    // PreparedExchange.expectedPayloadColumns. (It rides ExchangeDataSpec only so
-    // the exchange command can read it off the parsed config.)
+    // NOTE: the two invitation lock-ins -- expectedPayloadColumns (the
+    // received-payload set) and expectedPartnerDeduplicate (the partner's declared
+    // cardinality side) -- are deliberately NOT threaded here, unlike
+    // retentionDisposition above. The caller sets each on the returned
+    // PreparedExchange after this returns, because the accept path's source is the
+    // invitation token (not this dataSpec) and the recurring path applies a
+    // fallback for the payload set (config expectedPayloadColumns, else
+    // payload.receive). A caller that wants a lock-in must set it explicitly; see
+    // PreparedExchange.expectedPayloadColumns and
+    // PreparedExchange.expectedPartnerDeduplicate. (Both ride ExchangeDataSpec only
+    // so the exchange command can read them off the parsed config.)
     dataset,
     rawRows,
     rowCount: rawRows.length,

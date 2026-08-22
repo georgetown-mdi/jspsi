@@ -110,11 +110,11 @@ sharply:
   `z.strictObject`, so a key the older CLI's schema does not know -- whether a
   newer web app's addition or an operator's typo -- surfaces from `loadConfig` as
   a load-time `UsageError` (CLI exit 64) naming the key, and the exchange never
-  starts. Three of the top-level keys are enforcement records whose absence is a
+  starts. Four of the top-level keys are enforcement records whose absence is a
   valid state (`outbound_payload_consent`, `disclosed_payload_columns`,
-  `expected_payload_columns`), so stripping a misspelling of one would silently
-  disable the control it names; that hazard governs the whole top level rather
-  than being spot-checked key by key.
+  `expected_payload_columns`, `expected_partner_deduplicate`), so stripping a
+  misspelling of one would silently disable the control it names; that hazard
+  governs the whole top level rather than being spot-checked key by key.
 - **An unknown field INSIDE a spec block is silently stripped.** The blocks
   themselves (`linkage_terms`, `metadata`, `standardization`, `connection`) strip
   unrecognized keys on parse. That property, not any one schema kind, is what this
@@ -382,6 +382,45 @@ party with `expects_output: false` expects the empty set and aborts with the
 the protocol, alongside the schema rule forbidding a no-output party from
 declaring `payload.receive` columns; it is left neither to the data dictionary
 nor to operator discipline.
+
+## Terms-binding consent
+
+One top-level key carries a commitment about the partner's *terms* rather than
+its payload: `expected_partner_deduplicate`, a sibling of `linkage_terms` and a
+boolean. It records the [`deduplicate`](PROTOCOL.md#deduplicating-cardinalities-many-to-x-matching)
+an accepted invitation declared for the *inviting* party's own side. Like the
+payload records above it is per-party and local -- never exchanged,
+cross-checked, or folded into the agreed-terms hash -- and like them it is
+enforced at run time rather than merely recorded.
+
+`runExchange` holds the value the partner presents at the terms exchange to it
+(`assertPresentedDeduplicateMatchesInvitation`, `packages/core/src/exchange.ts`)
+and aborts on a contradiction as an `InvitationTermDivergenceError` -- a
+`ConnectionError` of kind `protocol`, CLI exit 69 -- before any key or payload
+moves. The refusal is one-sided by construction: only the accepting party holds
+the declaration.
+
+Two states, not three: the empty case has no analogue here.
+
+- **Absent** binds nothing. It is the state of an exchange authored from two
+  parties' own configuration files, where the differing pair is exactly what
+  makes one of them the "many" side.
+- **Present** binds strictly, `false` no less than `true`. A declared `false`
+  against a presented `true` is the widening the record exists to refuse.
+
+The field is deliberately distinct from `linkage_terms.deduplicate` beside it,
+which is *this* party's own side: `deriveAcceptedLinkageTerms` sets an
+acceptance's own value to `false` and retains nothing of the inviter's, so a run
+that read the binding off its own terms would refuse the legitimate differing
+pair. The two are read from separate keys and never derived from one another.
+
+Every path that reaches an acceptance records it: the CLI's offline accept writes
+it into the config it composes, the online accept carries it on the bootstrap's
+config write and refreshes a reused config in place, the browser's managed
+deposit persists it into the record's document, and a console server-job accept
+forwards it into the composed config. A later run restores it from the config
+onto `prepared.expectedPartnerDeduplicate`. No mint path records it: an inviter
+accepted no declaration.
 
 ## Channel-binding semantics
 

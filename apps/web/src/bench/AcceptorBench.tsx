@@ -1033,8 +1033,12 @@ export function AcceptorBench() {
   // expectedPayloadColumns (empty = strict receive-nothing; an absent set stays
   // absent = lazy), exactly as the CLI accept persists it, so a managed re-run
   // fails closed if the partner transmits a set diverging from what was
-  // consented to here. This party's OWN outbound set -- the one the columns step
-  // showed -- is recorded as the document's outboundPayloadConsent when its
+  // consented to here. The token's declared deduplicate -- the inviter's own side
+  // of the cardinality, which the consent screen stated -- is persisted beside it
+  // as expectedPartnerDeduplicate, so a re-run refuses an inviter presenting a
+  // different value at the terms exchange. This party's OWN outbound set -- the
+  // one the columns step showed -- is recorded as the document's
+  // outboundPayloadConsent when its
   // mirrored terms share with the partner (with shareWithPartner false nothing
   // is recorded, and nothing is transmitted to confirm), derived by the
   // composer from the same metadata persisted beside it, so a later run that
@@ -1065,6 +1069,8 @@ export function AcceptorBench() {
                       invitationToken.disclosedPayloadColumns,
                   }
                 : {}),
+              expectedPartnerDeduplicate:
+                invitationToken.linkageTerms.deduplicate,
             },
             connection: webrtcLocatorFromEndpoint(endpoint),
             sharedSecret: invitationToken.sharedSecret,

@@ -3953,6 +3953,124 @@ test("handler: offline accept-reuse writes an empty consented set verbatim (stri
   }
 });
 
+// --- the acceptance's terms-side lock-in reaches the config ------------------
+
+test("handler: offline accept writes the invitation's declared deduplicate to the config", async () => {
+  // Offline accept writes a config and stops, so the binding the invitation
+  // declared has to reach DISK or the later `psilink exchange` holds the partner
+  // to nothing. Both booleans, and read back off the schema so the snake_case
+  // serialization is part of what is pinned: `false` is a real declaration, and
+  // the one a hostile inviter would widen away from.
+  for (const declared of [false, true]) {
+    const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    try {
+      const base = sampleToken(FUTURE());
+      const encoded = await encodeInvitation({
+        ...base,
+        linkageTerms: { ...base.linkageTerms, deduplicate: declared },
+      });
+      await acceptHandler({
+        _: [],
+        $0: "psilink",
+        args: [encoded, input],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+      expect(exit).not.toHaveBeenCalled();
+      const parsed = parseExchangeSpec(
+        YAML.parse(fs.readFileSync(configFile, "utf8")),
+      );
+      expect(parsed.expectedPartnerDeduplicate).toBe(declared);
+      // The written config states this party's OWN side as the mirror's false,
+      // separately from the partner's declaration: one is not read off the other.
+      expect(parsed.linkageTerms.deduplicate).toBe(false);
+    } finally {
+      exit.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("handler: offline accept-reuse refreshes a stale declaration, preserving operator content", async () => {
+  // A kept config carrying a PRIOR acceptance's declaration, re-accepted over an
+  // invitation declaring the other value. Leaving the stale `true` would refuse
+  // the honest partner now presenting `false`; the surgical refresh overwrites it
+  // and leaves the operator's comment and connection block alone.
+  const { dir, input, configFile } = offlineAcceptFixture();
+  try {
+    writeExistingConfig(configFile);
+    fs.appendFileSync(
+      configFile,
+      "# operator-authored note\nexpected_partner_deduplicate: true\n",
+    );
+    const base = sampleToken(FUTURE());
+    const raw = await runOfflineAcceptReuse({
+      configFile,
+      input,
+      disclosed: undefined,
+      token: {
+        ...base,
+        linkageTerms: { ...base.linkageTerms, deduplicate: false },
+      },
+    });
+    expect(raw).toContain("# operator-authored note");
+    expect(raw).toContain("/mnt/share");
+    expect(parseExchangeSpec(YAML.parse(raw)).expectedPartnerDeduplicate).toBe(
+      false,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: online accept forwards the invitation's declared deduplicate to runOnlineBootstrap", async () => {
+  // The online wiring, fresh and reuse alike: the handler must hand the
+  // declaration to the persistence layer (runOnlineBootstrap's own tests cover
+  // the write), or a config born of an online acceptance runs its later recurring
+  // exchanges unbound. Mocked, so no connection is opened.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    for (const declared of [false, true]) {
+      runOnlineBootstrapMock.mockClear();
+      const base = sampleToken(FUTURE());
+      const encoded = await encodeInvitation({
+        ...base,
+        linkageTerms: { ...base.linkageTerms, deduplicate: declared },
+      });
+      await acceptHandler({
+        _: [],
+        $0: "psilink",
+        args: ["sftp://host/drop", encoded, input],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+      expect(exit).not.toHaveBeenCalled();
+      expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
+      expect(
+        runOnlineBootstrapMock.mock.calls[0][0].expectedPartnerDeduplicate,
+      ).toBe(declared);
+    }
+  } finally {
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- accept-reuse warns when the re-acceptance drops the lock-in -------------
 
 // The distinctive clause of the removal warning, kept apart from the column list

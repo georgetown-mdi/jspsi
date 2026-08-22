@@ -267,6 +267,15 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 #   status: confirmed
 #   columns:
 #     - matched_record_id
+
+# expected_partner_deduplicate: the linkage_terms.deduplicate your partner
+# declared for its own side in the invitation you accepted. 'psilink accept'
+# fills this in; you rarely set it by hand. An exchange refuses a partner that
+# presents a different value than the invitation declared, before any key or
+# payload moves. Omit the field for an exchange you and your partner each
+# authored from your own configuration, where neither side declared anything to
+# the other.
+# expected_partner_deduplicate: false
 `;
 
 // The commented metadata + standardization block shown only when no input file

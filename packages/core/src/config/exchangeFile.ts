@@ -139,6 +139,13 @@ export interface ExchangeFileInput {
   /** See {@link ExchangeSpecAssembly.outboundPayloadConsent} -- carried verbatim
    * through {@link mintExchangeFile} on the same caller's-obligation terms. */
   outboundPayloadConsent?: OutboundPayloadConsent;
+  /**
+   * The `deduplicate` an accepted invitation declared for the PARTNER's own side
+   * -- the top-level `expected_partner_deduplicate` a later `psilink exchange`
+   * holds the presented value to. Optional; omit where no invitation was accepted
+   * (there is then no declaration to bind).
+   */
+  expectedPartnerDeduplicate?: boolean;
 }
 
 /**
@@ -170,6 +177,8 @@ export interface ExchangeSpecAssembly {
    * `deriveOutboundPayloadConsent` from the same metadata this call persists.
    */
   outboundPayloadConsent?: OutboundPayloadConsent;
+  /** See {@link ExchangeFileInput.expectedPartnerDeduplicate}. */
+  expectedPartnerDeduplicate?: boolean;
 }
 
 /**
@@ -209,6 +218,9 @@ export function assembleExchangeSpec(
       : {}),
     ...(input.outboundPayloadConsent !== undefined
       ? { outboundPayloadConsent: input.outboundPayloadConsent }
+      : {}),
+    ...(input.expectedPartnerDeduplicate !== undefined
+      ? { expectedPartnerDeduplicate: input.expectedPartnerDeduplicate }
       : {}),
   };
   return ExchangeSpecSchema.parse(assembled);

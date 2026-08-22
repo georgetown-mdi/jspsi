@@ -25,16 +25,17 @@ import { boundedArray } from "../utils/boundedArray.js";
  * path rather than used literally. Apply `readAtSignFile` (or equivalent) to
  * credential fields before parsing.
  *
- * `strictObject`: three of the top-level keys below -- `outboundPayloadConsent`,
- * `disclosedPayloadColumns`, `expectedPayloadColumns` -- are enforcement records
- * whose ABSENCE is a valid state (reconcile lazily, no consent on record), so a
- * misspelled key that `strip` discards silently disables the control it names
- * rather than failing anything. That is the same reason `AuthenticationSchema`
- * is strict, and it applies to a machine-managed key the more sharply: an
- * operator editing a config around one has no display that would show the
- * control had gone missing. The nested blocks still strip -- see
- * EXCHANGE_FILE.md ("Versioning and compatibility policy") for what that means
- * for a file minted by a newer web app.
+ * `strictObject`: four of the top-level keys below -- `outboundPayloadConsent`,
+ * `disclosedPayloadColumns`, `expectedPayloadColumns`,
+ * `expectedPartnerDeduplicate` -- are enforcement records whose ABSENCE is a
+ * valid state (reconcile lazily, no consent on record), so a misspelled key that
+ * `strip` discards silently disables the control it names rather than failing
+ * anything. That is the same reason `AuthenticationSchema` is strict, and it
+ * applies to a machine-managed key the more sharply: an operator editing a
+ * config around one has no display that would show the control had gone missing.
+ * The nested blocks still strip -- see EXCHANGE_FILE.md ("Versioning and
+ * compatibility policy") for what that means for a file minted by a newer web
+ * app.
  */
 export const ExchangeSpecSchema = z.strictObject({
   connection: ConnectionConfigSchema,
@@ -129,6 +130,23 @@ export const ExchangeSpecSchema = z.strictObject({
   // made TO THE PARTNER (which locked it in) rather than a choice made BY this
   // party, and which an acceptance does not set. See config/outboundPayloadConsent.ts.
   outboundPayloadConsent: OutboundPayloadConsentSchema.optional(),
+  // Optional local TERMS-side lock-in, the deduplicate counterpart of
+  // expectedPayloadColumns above: the `deduplicate` the accepted INVITATION
+  // declared for the INVITING party's own side, which a later `psilink exchange`
+  // holds the partner's presented value to at the terms exchange
+  // (assertPresentedDeduplicateMatchesInvitation), refusing a contradiction before
+  // any key or payload moves. Per-party and local like the three payload records
+  // above -- NOT negotiated, swapped, cross-validated, or folded into the
+  // agreed-terms hash -- and deliberately distinct from linkageTerms.deduplicate,
+  // which is THIS party's own side (deriveAcceptedLinkageTerms sets an
+  // acceptance's own value to false and retains nothing of the inviter's).
+  // Written by every acceptance that persists a config: the offline accept's
+  // fresh write, the online accept's bootstrap write and its reuse-path refresh,
+  // and the browser's managed-record and server-job composers. ABSENT means no
+  // invitation binding -- an exchange authored from two parties' own
+  // configuration files, where the differing pair that makes one of them the
+  // "many" side is legitimate and runs unaffected.
+  expectedPartnerDeduplicate: z.boolean().optional(),
 });
 
 export type ExchangeSpec = z.infer<typeof ExchangeSpecSchema>;

@@ -16,6 +16,15 @@
  * `prepareAcceptorExchange` applies from the invitation's disclosed set. An absent
  * persisted set (a lazy token) stays undefined and the party reconciles lazily.
  *
+ * The terms-side lock-in beside it is the acceptor's persisted
+ * `expectedPartnerDeduplicate` -- the `deduplicate` the invitation declared for
+ * the inviter's own side -- threaded onto
+ * {@link PreparedExchange.expectedPartnerDeduplicate} so a re-run refuses an
+ * inviter presenting any other value at the terms exchange
+ * (`assertPresentedDeduplicateMatchesInvitation`), before any key or payload
+ * moves. Absent on an inviter's record, and on a document composed from no
+ * acceptance, where nothing was declared to bind.
+ *
  * The send side has its own persisted gate: the acceptor's `outboundPayloadConsent`
  * rides the document into `prepareForExchange`, which refuses before connecting if
  * the set this re-run resolves is not the one the operator confirmed at accept
@@ -36,8 +45,9 @@ import type { CSVRow, ExchangeSpec, PreparedExchange } from "@psilink/core";
  * same identity the exchange record commits to. The metadata and standardization
  * ride the persisted document when authored, otherwise core infers them from the
  * columns exactly as the quick path does. The persisted `expectedPayloadColumns`
- * is threaded onto the prepared object after `prepareForExchange` (the same seam
- * the accept path uses), never inferred here.
+ * and the persisted `expectedPartnerDeduplicate` are threaded onto the prepared
+ * object after `prepareForExchange` (the same seam the accept path uses), never
+ * inferred here.
  */
 export function prepareManagedRerunExchange(
   exchangeFile: ExchangeSpec,
@@ -70,5 +80,10 @@ export function prepareManagedRerunExchange(
   // nothing" lock-in. runExchange prefers this explicit lock-in over the
   // payload.receive fallback.
   prepared.expectedPayloadColumns = exchangeFile.expectedPayloadColumns;
+  // The terms-side lock-in, mirrored from the persisted document exactly as the
+  // accept path mirrors it from the invitation's declared terms: passed AS-IS, so
+  // an absent declaration (an inviter's record, or a document no acceptance
+  // composed) stays undefined and binds nothing.
+  prepared.expectedPartnerDeduplicate = exchangeFile.expectedPartnerDeduplicate;
   return prepared;
 }

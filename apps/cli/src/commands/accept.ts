@@ -26,6 +26,7 @@ import type {
 import {
   diffLinkageTerms,
   formatReconcileDiffs,
+  persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
   persistOutboundPayloadConsent,
   type ReconcileDiff,
@@ -809,6 +810,14 @@ export async function handler(argv: Arguments): Promise<void> {
           // reuse derivation above) -- identical to the invitation-derived record
           // on the fresh path, where the written config's terms are the mirror's.
           outboundPayloadConsent: reuseOutboundPayloadConsent,
+          // Record the invitation's declared cardinality side in the same write,
+          // and refresh it in place under reuse, so a later `psilink exchange`
+          // from this configuration refuses a partner presenting a value this
+          // acceptance did not consent to. The in-memory binding set on `prepared`
+          // covers only this single run. Unlike the received-column lock-in it has
+          // no "carried nothing" case: `deduplicate` is mandatory in the linkage
+          // terms every invitation carries.
+          expectedPartnerDeduplicate: ready.token.linkageTerms.deduplicate,
         });
         // The summary only; the exit code a failed persistence implies was set
         // where that persistence was lost, so nothing here can raise or lower it.
@@ -835,6 +844,15 @@ export async function handler(argv: Arguments): Promise<void> {
         ...(ready.token.disclosedPayloadColumns !== undefined
           ? { expectedPayloadColumns: ready.token.disclosedPayloadColumns }
           : {}),
+        // Persist the invitation's declared cardinality side so the later
+        // `psilink exchange` holds the partner's presented value to it
+        // (assertPresentedDeduplicateMatchesInvitation). The terms-side twin of
+        // the received-column lock-in above, and needed here for the same reason:
+        // offline accept's enforcement happens at a separate invocation, so a
+        // declaration held only in memory would bind nothing. The invitation's
+        // linkage terms carry the INVITER's own side; this party's own value is
+        // the mirror's false and rides `linkageTerms` in the spread above.
+        expectedPartnerDeduplicate: ready.token.linkageTerms.deduplicate,
         // This party's consent to its own outbound set (see its derivation above),
         // so the later `psilink exchange` sends exactly what was consented to here
         // or stops to ask. Omitted -- and the run left ungated -- only where nothing
@@ -870,6 +888,17 @@ export async function handler(argv: Arguments): Promise<void> {
         persistExpectedPayloadColumns(
           configPath,
           ready.token.disclosedPayloadColumns,
+        );
+        // Refresh the invitation's declared cardinality side in the reused config
+        // for the same reason and at the same moment: the operator has just
+        // consented to THIS invitation's declaration, so a prior acceptance's
+        // value is rewritten rather than left to bind the next recurring exchange
+        // to terms nobody consented to. Always a boolean here -- the linkage-terms
+        // schema makes `deduplicate` mandatory -- so this acceptance never leaves
+        // the kept config unbound.
+        persistExpectedPartnerDeduplicate(
+          configPath,
+          ready.token.linkageTerms.deduplicate,
         );
         // Refresh this party's own outbound-set consent in the reused config for the
         // same reason: the operator has just re-consented on THIS acceptance, so the

@@ -173,6 +173,29 @@ describe("composeManagedDocument", () => {
     expect(lazy).not.toHaveProperty("disclosedPayloadColumns");
     expect(lazy).not.toHaveProperty("expectedPayloadColumns");
   });
+
+  test("carries the caller's terms-side lock-in verbatim, absent when none binds", () => {
+    // The declaration is the token's, never re-derived from the terms composed
+    // beside it: an acceptor's own `deduplicate` is the mirror's false whatever
+    // the inviter declared, so deriving it here would bind the wrong value.
+    for (const declared of [false, true]) {
+      const doc = composeManagedDocument(
+        {
+          side: "acceptor",
+          linkageTerms: deriveAcceptedLinkageTerms(inviterTerms, "Clinic A"),
+          expectedPartnerDeduplicate: declared,
+        },
+        webrtcLocatorFromEndpoint(inviterEndpoint),
+      );
+      expect(doc.expectedPartnerDeduplicate).toBe(declared);
+      expect(doc.linkageTerms.deduplicate).toBe(false);
+    }
+    const none = composeManagedDocument(
+      { side: "inviter", linkageTerms: inviterTerms },
+      webrtcLocatorFromEndpoint(inviterEndpoint),
+    );
+    expect(none).not.toHaveProperty("expectedPartnerDeduplicate");
+  });
 });
 
 // The acceptor's own perspective of the inviter's terms: identity replaced,
@@ -356,7 +379,10 @@ describe("buildManagedDeposit (acceptor)", () => {
   // The acceptor's own perspective: identity replaced, output/payload mirrored.
   const acceptorTerms = deriveAcceptedLinkageTerms(inviterTerms, "Clinic A");
 
-  function acceptorDeposit(tokenSet: Array<string> | undefined) {
+  function acceptorDeposit(
+    tokenSet: Array<string> | undefined,
+    declaredDeduplicate?: boolean,
+  ) {
     return buildManagedDeposit(
       {
         documentParts: {
@@ -365,6 +391,9 @@ describe("buildManagedDeposit (acceptor)", () => {
           metadata: acceptorMetadata,
           ...(tokenSet !== undefined
             ? { expectedPayloadColumns: tokenSet }
+            : {}),
+          ...(declaredDeduplicate !== undefined
+            ? { expectedPartnerDeduplicate: declaredDeduplicate }
             : {}),
         },
         connection: webrtcLocatorFromEndpoint(invitationEndpoint),
@@ -413,6 +442,16 @@ describe("buildManagedDeposit (acceptor)", () => {
   test("a token with no set leaves the lock-in absent (lazy)", () => {
     const deposit = acceptorDeposit(undefined);
     expect(deposit.exchangeFile).not.toHaveProperty("expectedPayloadColumns");
+  });
+
+  test("locks in the token's declared deduplicate for later re-runs", () => {
+    // A managed re-run runs from this document alone, with no token in hand, so
+    // the declaration the acceptance consented to has to be in it or every re-run
+    // after the one-shot runs unbound.
+    for (const declared of [false, true]) {
+      const deposit = acceptorDeposit(tokenDisclosedColumns, declared);
+      expect(deposit.exchangeFile.expectedPartnerDeduplicate).toBe(declared);
+    }
   });
 });
 

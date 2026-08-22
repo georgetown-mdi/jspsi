@@ -739,6 +739,18 @@ export async function prepareDataset(
     exchangeDataSpec.linkageTerms?.payload?.receive?.map((c) => c.name);
   if (expectedFromConfig !== undefined)
     prepared.expectedPayloadColumns = expectedFromConfig;
+  // The terms-side half of the same acceptance's lock-in: the `deduplicate` the
+  // invitation declared for the inviting party's own side, written by the accept
+  // paths into the config this run loads. Restored so the partner's presented
+  // value is held to it at the terms exchange, before any key or payload moves
+  // (assertPresentedDeduplicateMatchesInvitation). No fallback and no derivation:
+  // this party's own linkage_terms.deduplicate is its OWN side, so reading the
+  // binding off it would refuse the legitimate differing pair. An absent field --
+  // an exchange authored from two parties' own documents -- binds nothing, as
+  // before.
+  if (exchangeDataSpec.expectedPartnerDeduplicate !== undefined)
+    prepared.expectedPartnerDeduplicate =
+      exchangeDataSpec.expectedPartnerDeduplicate;
   return prepared;
 }
 

@@ -2,6 +2,8 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
+import { parse as parseYaml } from "yaml";
+
 import {
   prepareForExchange,
   runExchange,
@@ -17,6 +19,8 @@ import {
   parseLinkageTerms,
 } from "../src/config/linkageTerms";
 import { inferMetadata } from "../src/config/metadata";
+import { mintExchangeFile } from "../src/config/exchangeFile";
+import { parseExchangeSpec } from "../src/config/exchangeSpec";
 import { buildOutputTable } from "../src/payloadExchange";
 import { UsageError } from "../src/errors";
 
@@ -700,6 +704,78 @@ test("a partner presenting a deduplicate its invitation did not declare is refus
   // Neither party reaches a PSI round: the accepting side refuses before the
   // rounds, and the presenting side is left with a failed exchange rather than
   // the many-to-one result it presented for.
+  expect(inviter.status).toBe("rejected");
+});
+
+test("a run driven from a PERSISTED config refuses the same contradiction", async () => {
+  // The recurring case, which the in-memory binding above does not reach: an
+  // acceptance writes its config and stops, and the exchange happens at a later
+  // invocation that holds no token. The declaration must survive to disk and back
+  // for the refusal to fire, so this sources it from a minted exchange file --
+  // serialized to snake_case YAML and re-parsed exactly as a later run loads it --
+  // rather than setting the field directly.
+  const declared = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: false,
+  });
+  const presented = parseLinkageTerms({
+    ...termsBase,
+    identity: "Presented Partner Identity",
+    deduplicate: true,
+  });
+  const acceptorTerms = deriveAcceptedLinkageTerms(declared, "B");
+  const persisted = parseExchangeSpec(
+    parseYaml(
+      mintExchangeFile({
+        connection: { channel: "filedrop", path: "/mnt/share/drop" },
+        linkageTerms: acceptorTerms,
+        expectedPartnerDeduplicate: declared.deduplicate,
+      }),
+    ),
+  );
+  // The persisted document states this party's OWN deduplicate as the mirror's
+  // false and the partner's declaration separately; reading the binding off the
+  // former would refuse the legitimate differing pair instead.
+  expect(persisted.linkageTerms.deduplicate).toBe(false);
+  expect(persisted.expectedPartnerDeduplicate).toBe(false);
+
+  const acceptorPrepared = prepareForExchange(
+    { linkageTerms: persisted.linkageTerms },
+    "B",
+    rowsB,
+    ["first_name"],
+  );
+  acceptorPrepared.expectedPartnerDeduplicate =
+    persisted.expectedPartnerDeduplicate;
+
+  const [connInviter, connAcceptor] = createMessagePipe();
+  const inviterRun = Promise.allSettled([
+    runExchange(
+      connInviter,
+      "initiator",
+      prepareForExchange({ linkageTerms: presented }, "A", rowsA, [
+        "first_name",
+      ]),
+      { psiLibrary },
+    ),
+  ]);
+
+  const reason = await runExchange(
+    connAcceptor,
+    "responder",
+    acceptorPrepared,
+    { psiLibrary },
+  ).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
+  expect(reason).toBeInstanceOf(InvitationTermDivergenceError);
+  expect(reason?.message).toMatch(/contradict the invitation/);
+  expect(reason?.message).not.toContain("Presented Partner Identity");
+
+  await connAcceptor.close();
+  const [inviter] = await inviterRun;
   expect(inviter.status).toBe("rejected");
 });
 

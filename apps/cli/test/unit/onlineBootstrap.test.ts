@@ -2405,6 +2405,49 @@ test("runOnlineBootstrap persists the acceptor's up-front token received set int
   }
 });
 
+test("runOnlineBootstrap persists the acceptance's declared deduplicate into the fresh config", async () => {
+  // The terms-side twin of the lock-in above, known at the same moment (the
+  // consent surface stated it) and carried on the same first write. Without it a
+  // config born of an ONLINE acceptance runs its later recurring exchanges with
+  // nothing to hold the partner's presented cardinality to.
+  for (const declared of [false, true]) {
+    mockSuccessfulExchange(undefined);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+    const configPath = path.join(dir, "psilink.yaml");
+    try {
+      await runOnlineBootstrap({
+        ...onlineBootstrapParams(configPath),
+        expectedPartnerDeduplicate: declared,
+      });
+      const reloaded = parseExchangeSpec(
+        YAML.parse(fs.readFileSync(configPath, "utf8")),
+      );
+      expect(reloaded.expectedPartnerDeduplicate).toBe(declared);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("runOnlineBootstrap writes no declaration for a party that accepted none", async () => {
+  // The online INVITER accepted no invitation, so its fresh config carries no
+  // binding at all -- an absent field, not a `false` that would refuse a partner
+  // legitimately running as the "many" side.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap(onlineBootstrapParams(configPath));
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).not.toContain("expected_partner_deduplicate");
+    expect(
+      parseExchangeSpec(YAML.parse(raw)).expectedPartnerDeduplicate,
+    ).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runOnlineBootstrap persists the acceptor's own outbound consent into the fresh config", async () => {
   // The send-side sibling of the lock-in above, known at the same moment (it is the
   // set the acceptance displayed), so it rides the same first write. Without it the
@@ -2628,6 +2671,35 @@ test("runOnlineBootstrap refreshes a stale received lock-in surgically on a reus
       getDefaultLinkageTerms("Acceptor Org"),
     );
     expect(reloaded.expectedPayloadColumns).toEqual(["diagnosis", "notes"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap refreshes a stale declaration surgically on a reused config", async () => {
+  // The reuse path writes no fresh config, so the declaration this acceptance
+  // consented to reaches the kept config only through the surgical write. A prior
+  // acceptance's `true` left standing would refuse the honest partner now
+  // presenting `false`; the operator's comment and other keys survive the write.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  writeReusedConfigWithStaleLockIn(configPath);
+  fs.appendFileSync(configPath, "expected_partner_deduplicate: true\n");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+      expectedPartnerDeduplicate: false,
+    });
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).toContain("# operator note");
+    const reloaded = parseExchangeSpec(YAML.parse(raw));
+    expect(reloaded.expectedPartnerDeduplicate).toBe(false);
+    expect(reloaded.connection).toEqual({
+      channel: "filedrop",
+      path: "/tmp/psilink-drop",
+    });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

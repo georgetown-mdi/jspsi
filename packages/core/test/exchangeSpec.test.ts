@@ -66,6 +66,36 @@ test("expectedPayloadColumns: the local lock-in field round-trips, including the
   expect(parseExchangeSpec(minimalSpec).expectedPayloadColumns).toBeUndefined();
 });
 
+test("expectedPartnerDeduplicate: the terms-side lock-in round-trips both booleans", () => {
+  // The acceptance's terms-side binding: a top-level, per-party field (camelCase
+  // parsed, snake_case on disk). `false` is a real declaration -- the one a
+  // hostile inviter would widen away from by presenting `true` -- so it must
+  // survive the parse as `false` and not collapse into the absent state.
+  expect(
+    parseExchangeSpec({ ...minimalSpec, expected_partner_deduplicate: true })
+      .expectedPartnerDeduplicate,
+  ).toBe(true);
+  expect(
+    parseExchangeSpec({ ...minimalSpec, expected_partner_deduplicate: false })
+      .expectedPartnerDeduplicate,
+  ).toBe(false);
+  // Absent means no invitation binding: the two-config case, unchanged.
+  expect(
+    parseExchangeSpec(minimalSpec).expectedPartnerDeduplicate,
+  ).toBeUndefined();
+});
+
+test("expectedPartnerDeduplicate: a non-boolean is rejected", () => {
+  // The field decides whether a partner's presented cardinality is refused, so a
+  // string a hand-edit or a newer minter wrote must fail the parse rather than
+  // reach the comparison as a truthy non-boolean.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    expected_partner_deduplicate: "false",
+  });
+  expect(result.success).toBe(false);
+});
+
 test("expectedPayloadColumns: an empty column name is rejected", () => {
   // Names are partner-controlled; the per-entry min(1) floor rejects an empty name,
   // matching the payload/metadata name floors.

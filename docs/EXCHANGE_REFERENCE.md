@@ -19,7 +19,7 @@ An exchange specification has four top-level components:
 | `metadata` | no | Descriptions of input fields and their roles |
 | `standardization` | no | Data cleaning and standardizing transformations applied before linkage |
 
-Beside them sit the optional top-level blocks documented below -- [`authentication`](#authentication), [`signing`](#signing), [`retention_disposition`](#retention_disposition) -- and the three payload enforcement records (`outbound_payload_consent`, `disclosed_payload_columns`, `expected_payload_columns`), which psilink writes and refreshes for you on an online invite or accept and which you may also author by hand in a recurring configuration, under the rules in [`linkage_terms.payload`](#linkage_termspayload). Any other top-level key is rejected at config-parse time with a user-facing error naming it, and no exchange runs until it is corrected: those enforcement records are optional, and an absent one means "nothing to enforce", so a misspelling that was quietly dropped would disable a consent or disclosure check with no signal. Unrecognized keys *inside* `linkage_terms`, `connection`, `metadata`, and `standardization` are dropped instead -- see [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md) for what each behavior means when a file minted by a newer web application is loaded by an older CLI.
+Beside them sit the optional top-level blocks documented below -- [`authentication`](#authentication), [`signing`](#signing), [`retention_disposition`](#retention_disposition) -- the three payload enforcement records (`outbound_payload_consent`, `disclosed_payload_columns`, `expected_payload_columns`), under the rules in [`linkage_terms.payload`](#linkage_termspayload), and the terms enforcement record [`expected_partner_deduplicate`](#expected_partner_deduplicate). psilink writes and refreshes all four for you on an online invite or accept, and you may also author them by hand in a recurring configuration. Any other top-level key is rejected at config-parse time with a user-facing error naming it, and no exchange runs until it is corrected: those enforcement records are optional, and an absent one means "nothing to enforce", so a misspelling that was quietly dropped would disable a consent or disclosure check with no signal. Unrecognized keys *inside* `linkage_terms`, `connection`, `metadata`, and `standardization` are dropped instead -- see [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md) for what each behavior means when a file minted by a newer web application is loaded by an older CLI.
 
 ## File references
 
@@ -142,6 +142,25 @@ linkage_terms:
 Any party indicating `true` must have `expects_output: true`: the grouping a deduplicating match produces is delivered only in the output, so a "many" party that received none would have widened its own match for nothing. The requirement to receive output is already captured by the cross-party `output` consistency check, so no separate consistency check is applied to this field.
 
 The partner may still be the one with `expects_output: false`. Where it is, the deduplicating party is the only one resolving the match and takes on the uniqueness rule the partner would otherwise have applied to its own values, so that each of its own records is still matched to at most one partner record. That obligation and the rest of the procedure are specified in [`docs/spec/PROTOCOL.md`](spec/PROTOCOL.md#deduplicating-cardinalities-many-to-x-matching).
+
+### `expected_partner_deduplicate`
+
+*Type:* boolean
+*Required:* no
+*Consistency:* none (a local record, never exchanged)
+
+A top-level key of `psilink.yaml`, a sibling of `linkage_terms` rather than a member of it: the [`deduplicate`](#linkage_termsdeduplicate) an accepted invitation declared for the *inviting* party's own side. It is what makes the paragraph above hold for a configuration rather than only for the moment of acceptance -- an accepting party keeps the declaration here, and an exchange run from this file refuses a partner presenting any other value at the terms exchange, before any key or payload moves. Every accept path records it: `psilink accept`, online and offline, and the browser's managed and console flows.
+
+Do not confuse it with `linkage_terms.deduplicate` beside it, which is *your own* side. Accepting sets your own value to `false` whatever the invitation declared, so the two legitimately differ, and the run reads the binding only from this key.
+
+Omit it for an exchange you and your partner each authored from your own configuration files: there is no declaration between you, the differing pair is what makes one of you the "many" side, and an absent key holds the partner to nothing. Do not add one by hand to make a partner's setting "official" -- it records what an invitation stated, and a value you chose yourself would abort an honest exchange.
+
+```yaml
+linkage_terms:
+  deduplicate: false
+
+expected_partner_deduplicate: true
+```
 
 ### `linkage_terms.linkage_fields`
 

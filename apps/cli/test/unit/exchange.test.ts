@@ -1621,3 +1621,40 @@ test("prepareDataset: an empty expectedPayloadColumns locks in the strict empty 
   );
   expect(prepared.expectedPayloadColumns).toEqual([]);
 });
+
+// --- prepareDataset: recurring terms lock-in ---------------------------------
+
+test("prepareDataset: the config's expectedPartnerDeduplicate is restored onto the run", async () => {
+  // The terms-side half of an acceptance's lock-in, written into the config by
+  // every accept path and restored here so a RECURRING run holds the partner to
+  // what the invitation declared. Both booleans, because `false` is the
+  // declaration a hostile inviter widens away from by presenting `true`.
+  const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
+  for (const declared of [false, true]) {
+    const prepared = await prepareDataset(
+      {
+        linkageTerms: ssnAndNameDobTerms,
+        expectedPartnerDeduplicate: declared,
+      },
+      "Test Party",
+      input,
+      consentContext(),
+    );
+    expect(prepared.expectedPartnerDeduplicate).toBe(declared);
+  }
+});
+
+test("prepareDataset: a config with no declaration binds nothing (the two-config case)", async () => {
+  // An exchange both parties authored from their own documents carries no
+  // declaration between them, so the partner's presented value is unconstrained
+  // and the differing pair that makes one of them the "many" side still runs.
+  // This party's own linkage_terms.deduplicate is NOT read as a binding.
+  const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
+  const prepared = await prepareDataset(
+    { linkageTerms: { ...ssnAndNameDobTerms, deduplicate: true } },
+    "Test Party",
+    input,
+    consentContext(),
+  );
+  expect(prepared.expectedPartnerDeduplicate).toBeUndefined();
+});

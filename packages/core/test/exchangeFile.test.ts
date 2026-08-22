@@ -169,6 +169,7 @@ test("mintExchangeFile: FileSyncOptions, metadata, standardization, and payload 
     ],
     disclosedPayloadColumns: ["first_name"],
     expectedPayloadColumns: ["last_name"],
+    expectedPartnerDeduplicate: false,
   };
   const yaml = mintExchangeFile(input);
   const reparsed = parseExchangeSpec(parseYaml(yaml));
@@ -181,6 +182,11 @@ test("mintExchangeFile: FileSyncOptions, metadata, standardization, and payload 
   expect(reparsed.standardization).toBeDefined();
   expect(reparsed.disclosedPayloadColumns).toEqual(["first_name"]);
   expect(reparsed.expectedPayloadColumns).toEqual(["last_name"]);
+  // The terms-side lock-in survives the snake_case wire form as `false` rather
+  // than as an absent key: absent would bind nothing, which is the state the
+  // acceptance is persisting to avoid.
+  expect(parseYaml(yaml)).toHaveProperty("expected_partner_deduplicate", false);
+  expect(reparsed.expectedPartnerDeduplicate).toBe(false);
 });
 
 test("mintExchangeFile: absent optional blocks are omitted keys, not explicit nulls", () => {
@@ -195,6 +201,7 @@ test("mintExchangeFile: absent optional blocks are omitted keys, not explicit nu
   expect(raw).not.toHaveProperty("standardization");
   expect(raw).not.toHaveProperty("disclosed_payload_columns");
   expect(raw).not.toHaveProperty("expected_payload_columns");
+  expect(raw).not.toHaveProperty("expected_partner_deduplicate");
   // Never an authentication block: the secret rides only the invitation code.
   expect(raw).not.toHaveProperty("authentication");
 });
