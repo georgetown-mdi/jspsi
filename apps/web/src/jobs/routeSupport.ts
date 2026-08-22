@@ -145,10 +145,13 @@ function rejectDisallowedHost(
 /**
  * Gate a job route: read config, enforce the feature gate, resolve the manager,
  * and reject a browser-reachable request. Every job route calls this first,
- * before any filesystem use or spawn. The API is unauthenticated loopback-local
- * (the deployment publishes to host loopback), so there is no per-request auth
- * beyond the feature gate; two complementary browser defenses run after it. The
- * loopback Host-allowlist ({@link rejectDisallowedHost}) refuses a request whose
+ * before any filesystem use or spawn -- `scripts/job-route-gate.test.mjs`
+ * enumerates the handlers under `src/routes/api/jobs` and fails on one that
+ * calls it late or not at all, so that is a checked property rather than this
+ * sentence. The API is unauthenticated loopback-local (the deployment publishes
+ * to host loopback), so there is no per-request auth beyond the feature gate;
+ * two complementary browser defenses run after it. The loopback Host-allowlist
+ * ({@link rejectDisallowedHost}) refuses a request whose
  * `Host` is not the appliance's own loopback name, closing DNS rebinding; the
  * browser-CSRF check ({@link rejectCrossOriginBrowserRequest}) refuses a request a
  * browser marks as cross-origin. Both run after the feature gate, so a disabled
