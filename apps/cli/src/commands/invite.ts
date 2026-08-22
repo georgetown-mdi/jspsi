@@ -417,6 +417,22 @@ export async function validateInvite(params: {
       log,
     );
 
+    // --accept-timeout is bound to this connection's peer budget above and takes
+    // precedence unconditionally -- it is always set, by the flag or its default
+    // -- so a --peer-timeout typed here is parsed and dropped. Name the timeout
+    // that governs the phase instead of leaving the operator to read silence as
+    // the budget they asked for.
+    if (options.peerTimeout !== undefined)
+      log.warn(
+        "--peer-timeout has no effect on an online invitation: " +
+          `--accept-timeout (${acceptTimeout}s) is bound to this run's peer ` +
+          "budget instead, bounding both the wait for the partner to accept " +
+          "and the peer waits of the exchange that follows. Pass " +
+          "--accept-timeout to set that budget, or edit " +
+          "connection.options.peer_timeout_ms in the saved configuration " +
+          "before a later 'psilink exchange'.",
+      );
+
     // An accept-timeout longer than the token's lifetime would keep waiting at
     // the rendezvous past the point the token can be honored. Compare against
     // the resolved lifetime so an --expires-in override is respected here too.
