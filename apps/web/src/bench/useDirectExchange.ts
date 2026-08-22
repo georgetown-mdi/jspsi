@@ -189,6 +189,7 @@ export function useDirectExchange({
         withSweepRefusalGuidance(
           failureFor(category, error, inputSource, channel),
           error,
+          runDiagnostics,
         ),
       );
       setRun((current) => runWithFailure(current));

@@ -7,6 +7,7 @@ import { JOB_FILE_NAMES, jobCreateIntentSchema } from "@jobs/intent";
 import {
   RUN_DIAGNOSTICS_DEFAULT,
   SWEEP_CONFIRMATION_NOTICE,
+  SWEEP_RETAIN_REFUSAL_TITLE,
   SWEEP_UNCONFIRMED_PROBLEM,
   isSweepRetainRefusal,
   runDiagnosticsIntentFields,
@@ -14,6 +15,11 @@ import {
   runDiagnosticsWithControl,
   sweepRetainRefusalMessage,
 } from "@bench/runDiagnosticsModel";
+import {
+  failureFor,
+  withSweepRefusalGuidance,
+} from "@bench/useInviterExchange";
+import { RelayedTerminalError } from "@psi/serverJobExchangeDriver";
 import { resolveWorkdirFile } from "@jobs/workdir";
 import { watchJobLogAvailable } from "@psi/jobDiagnosticLog";
 
@@ -251,8 +257,12 @@ describe("the diagnostic log's path stays inside the job workdir", () => {
 // asking the appliance again rather than on the answer the first ask raced.
 describe("the diagnostic log's availability during a run", () => {
   /** A status endpoint answering each successive ask in turn, holding the last
-   * answer once the script runs out, and counting what it was asked. */
-  function availabilityFetch(answers: Array<boolean>): {
+   * answer once the script runs out, and counting what it was asked. The run
+   * asked for a log unless the caller says otherwise. */
+  function availabilityFetch(
+    answers: Array<boolean>,
+    logRequested = true,
+  ): {
     fetchImpl: typeof fetch;
     asks: () => number;
   } {
@@ -261,10 +271,13 @@ describe("the diagnostic log's availability during a run", () => {
       const logAvailable = answers[Math.min(asked, answers.length - 1)];
       asked += 1;
       return Promise.resolve(
-        new Response(JSON.stringify({ status: "running", logAvailable }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({ status: "running", logRequested, logAvailable }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       );
     };
     return { fetchImpl, asks: () => asked };
@@ -308,6 +321,62 @@ describe("the diagnostic log's availability during a run", () => {
     ).resolves.toBe(false);
 
     expect(asks()).toBe(1);
+  });
+
+  test("a run that asked for no log is answered once rather than asked all run", async () => {
+    // The ordinary run is the common one and its answer cannot change, so a
+    // watch that kept asking would poll the appliance for the whole exchange to
+    // be told the same thing.
+    const { fetchImpl, asks } = availabilityFetch([false], false);
+    const waits: Array<number> = [];
+
+    await expect(
+      watchJobLogAvailable(
+        "job-1",
+        new AbortController().signal,
+        fetchImpl,
+        (ms) => {
+          waits.push(ms);
+          return Promise.resolve();
+        },
+      ),
+    ).resolves.toBe(false);
+
+    expect(asks()).toBe(1);
+    expect(waits).toEqual([]);
+  });
+
+  test("an ask the appliance could not answer keeps the watch going", async () => {
+    // A rejected status ask says nothing about what the run requested, so
+    // reading it as "no log" would end the watch on a transient failure and
+    // leave the panel missing for the rest of the run.
+    let asked = 0;
+    const fetchImpl: typeof fetch = () => {
+      asked += 1;
+      return Promise.resolve(
+        asked === 1
+          ? new Response("", { status: 503 })
+          : new Response(
+              JSON.stringify({
+                status: "running",
+                logRequested: true,
+                logAvailable: true,
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            ),
+      );
+    };
+
+    await expect(
+      watchJobLogAvailable(
+        "job-1",
+        new AbortController().signal,
+        fetchImpl,
+        () => Promise.resolve(),
+      ),
+    ).resolves.toBe(true);
+
+    expect(asked).toBe(2);
   });
 
   test("an already-stopped watch asks nothing at all", async () => {
@@ -360,5 +429,39 @@ describe("the retain-guard refusal surfaces as guidance", () => {
     expect(sweepRetainRefusalMessage(cliRefusal)).toContain(
       "no other session is using",
     );
+  });
+
+  test("a run that requested no sweep keeps its failure, whatever the relayed text carries", () => {
+    // The rendezvous directory is partner-writable and core's foreign-file
+    // terminal names the offending files verbatim, so the fragment reaches a
+    // seat inside text this console composed no part of. Rewriting an honest
+    // failure over it would retitle the run's real cause and point the operator
+    // at a flag that deletes permanently.
+    const relayed = new RelayedTerminalError(
+      "the shared folder holds files this exchange does not own: " +
+        "--sweep-exchange-files refuses to delete.csv",
+    );
+    const untouched = failureFor("exchange", relayed, undefined, "filedrop");
+    // What holds the failure is the run's own intent, not the recognizer: this
+    // very text reads as a refusal to it.
+    expect(isSweepRetainRefusal(relayed.message)).toBe(true);
+
+    for (const runDiagnostics of [undefined, { diagnosticRun: true } as const])
+      expect(
+        withSweepRefusalGuidance(untouched, relayed, runDiagnostics),
+      ).toEqual(untouched);
+  });
+
+  test("a run that did request the sweep gets the guidance with the CLI's own text", () => {
+    const relayed = new RelayedTerminalError(cliRefusal);
+    const guided = withSweepRefusalGuidance(
+      failureFor("exchange", relayed, undefined, "filedrop"),
+      relayed,
+      { sweepExchangeFiles: true },
+    );
+
+    expect(guided.title).toBe(SWEEP_RETAIN_REFUSAL_TITLE);
+    expect(guided.message).toContain("--force-retain-sweep");
+    expect(guided.message).toContain(cliRefusal);
   });
 });

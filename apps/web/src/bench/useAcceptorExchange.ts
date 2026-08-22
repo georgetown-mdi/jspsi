@@ -497,6 +497,7 @@ export function useAcceptorExchange({
         withSweepRefusalGuidance(
           failureFor(category, error, jobInputSource, channel, "acceptor"),
           error,
+          runDiagnostics,
         ),
       );
       setRun((prev) => runWithFailure(prev));

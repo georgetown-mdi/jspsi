@@ -22,10 +22,11 @@ import styles from "./bench.module.css";
  *
  * Availability comes from the appliance rather than from what this tab
  * remembers requesting, which is what lets a re-attached run offer it too. A run
- * in progress is asked repeatedly until the appliance holds the log, because the
- * ask at mount races the CLI child's own creation of the file; a settled run is
- * asked once, its log being either written or never captured. The endpoint
- * itself is the only place the file is read.
+ * in progress that asked for a log is asked repeatedly until the appliance holds
+ * it, because the ask at mount races the CLI child's own creation of the file; a
+ * run that asked for none says so on the first ask and is not asked again, and a
+ * settled run is asked once, its log being either written or never captured. The
+ * endpoint itself is the only place the file is read.
  */
 export function DiagnosticLogPanel({
   jobId,

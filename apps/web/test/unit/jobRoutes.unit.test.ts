@@ -652,25 +652,45 @@ describe("the diagnostic log route serves only a workdir-contained log", () => {
     expect(await response.text()).toContain("rendezvous opened");
   });
 
-  test("the status body reports the log only once it is on disk", async () => {
+  /** The status body's two log fields, as a client watching for the log reads
+   * them. */
+  async function logStatusOf(
+    id: string,
+  ): Promise<{ logRequested: boolean; logAvailable: boolean }> {
+    const response = (await handlersOf(JobRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}`),
+      params: { jobId: id },
+    })) as Response;
+    return (await response.json()) as {
+      logRequested: boolean;
+      logAvailable: boolean;
+    };
+  }
+
+  test("the status body reports the log only once it is on disk, and says all along that one is coming", async () => {
     const id = await createSucceededJob(
       { STUB_OUTPUT_FILE: "id\n1\n" },
       { ...validIntent(), diagnosticRun: true },
     );
-    const before = (await handlersOf(JobRoute).GET({
-      request: jobRequest(`http://localhost/api/jobs/${id}`),
-      params: { jobId: id },
-    })) as Response;
-    expect((await before.json()) as { logAvailable: boolean }).toMatchObject({
+    expect(await logStatusOf(id)).toMatchObject({
+      logRequested: true,
       logAvailable: false,
     });
     seedLog(id, "x\n");
-    const after = (await handlersOf(JobRoute).GET({
-      request: jobRequest(`http://localhost/api/jobs/${id}`),
-      params: { jobId: id },
-    })) as Response;
-    expect((await after.json()) as { logAvailable: boolean }).toMatchObject({
+    expect(await logStatusOf(id)).toMatchObject({
+      logRequested: true,
       logAvailable: true,
+    });
+  });
+
+  test("an ordinary run's status body says outright that it captured no log", async () => {
+    // Both fields answer from the log path the server set at creation from the
+    // intent, so a client is told the log is never coming rather than left to
+    // read a false availability as "not yet".
+    const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
+    expect(await logStatusOf(id)).toMatchObject({
+      logRequested: false,
+      logAvailable: false,
     });
   });
 

@@ -162,6 +162,11 @@ export interface JobView {
   resultAvailable: boolean;
   recordAvailable: boolean;
   recordCreatedAt?: string;
+  /** Whether this run's intent asked for a diagnostic log, whether or not the
+   * CLI has opened the file yet. It is what separates a run that will never have
+   * a log from one whose log has not appeared, so a client watching for the file
+   * knows when to stop. */
+  logRequested: boolean;
   /** Whether this run captured a diagnostic log and the file is on disk. */
   logAvailable: boolean;
   /** The four servable file paths (result, record, keys, log) inside the
@@ -1222,6 +1227,10 @@ function liveJobView(record: JobRecord): JobView {
     eventCount: record.events.length,
     resultAvailable: record.status === "succeeded",
     ...liveRecordAvailability(record),
+    // Both answer from the log path set at creation from the intent, so what a
+    // client is told about this run's log comes from what the appliance
+    // launched rather than from anything the reading request carries.
+    logRequested: record.logPath !== null,
     // Not gated on the run having finished: a diagnostic log's whole point is a
     // run that misbehaved, including one still stalled, so it is offered as soon
     // as the CLI has opened the file.

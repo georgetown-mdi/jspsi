@@ -132,21 +132,25 @@ export function runDiagnosticsProblems(
 }
 
 /**
- * The fragment of the CLI's refusal this seat keys its guidance on. Core
- * composes it when a sweep meets a retain-mode signal, and it names the very
- * flag the console put on the argv, so a match is a match on this console's own
- * request rather than on partner text that happens to read like one.
+ * The fragment of the CLI's refusal this seat keys its guidance on, duplicated
+ * from the text core composes when a sweep meets a retain-mode signal.
  *
- * A best-effort enrichment by construction: a reworded refusal stops the match
- * firing and the operator reads the CLI's own message, which already carries the
- * escalation. That is the behaviour of a match that never fires, not a wrong
- * answer.
+ * The duplication is the stated limit of a bare substring test, in both
+ * directions: a core rewording stops the match firing, and a terminal message
+ * that carries the fragment for some other reason -- partner-chosen bytes reach
+ * a relayed terminal verbatim -- matches without being a refusal. Neither
+ * misleads an operator, because the caller asks this only about a run whose own
+ * intent requested the sweep, and an unmatched refusal leaves the CLI's own
+ * message standing, which already carries the escalation. Sharing the constant
+ * across packages would close the first direction and neither the second nor the
+ * need for that gate, so the seat holds its own copy.
  */
 const SWEEP_RETAIN_REFUSAL_FRAGMENT =
   "--sweep-exchange-files refuses to delete";
 
-/** Whether a rendered terminal-failure message is the CLI refusing the sweep
- * over a retain-mode signal. */
+/** Whether a rendered terminal-failure message reads as the CLI refusing the
+ * sweep over a retain-mode signal. Recognition alone does not establish that the
+ * run swept at all: ask it only about a run that requested one. */
 export function isSweepRetainRefusal(message: string): boolean {
   return message.includes(SWEEP_RETAIN_REFUSAL_FRAGMENT);
 }

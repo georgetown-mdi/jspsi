@@ -22,26 +22,51 @@ export function jobDiagnosticLogFileName(jobId: string): string {
 }
 
 /**
- * Whether the appliance holds a diagnostic log for this job, read off
- * `GET /api/jobs/:jobId`. False for a run that captured none, for a job the
- * appliance has forgotten, and for any failure.
+ * Where a job's diagnostic log stands with the appliance: `none` for a run whose
+ * intent asked for no log, `pending` for one that did and whose file has not
+ * appeared, `available` once it is on disk.
+ *
+ * An unreadable answer -- a rejected request, a job the appliance has forgotten,
+ * a body that is not the status body -- is `pending` rather than `none`, so only
+ * the appliance saying outright that this run asked for no log ends a watch.
+ */
+export type JobDiagnosticLogState = "none" | "pending" | "available";
+
+/**
+ * Where this job's diagnostic log stands, read off `GET /api/jobs/:jobId`.
+ *
+ * The two fields are read together because either alone leaves a watcher
+ * guessing: `logAvailable` false covers both a log that is coming and one that
+ * never was, and it is `logRequested` -- the appliance's own record of the intent
+ * it launched -- that separates them.
+ */
+export async function fetchJobLogState(
+  jobId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<JobDiagnosticLogState> {
+  try {
+    const response = await fetchImpl(`/api/jobs/${jobId}`, { method: "GET" });
+    if (!response.ok) return "pending";
+    const body: unknown = await response.json();
+    if (body === null || typeof body !== "object") return "pending";
+    const status = body as { logAvailable?: unknown; logRequested?: unknown };
+    if (status.logAvailable === true) return "available";
+    return status.logRequested === false ? "none" : "pending";
+  } catch {
+    return "pending";
+  }
+}
+
+/**
+ * Whether the appliance holds a diagnostic log for this job. False for a run
+ * that captured none, for a job the appliance has forgotten, and for any
+ * failure.
  */
 export async function fetchJobLogAvailable(
   jobId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<boolean> {
-  try {
-    const response = await fetchImpl(`/api/jobs/${jobId}`, { method: "GET" });
-    if (!response.ok) return false;
-    const body: unknown = await response.json();
-    return (
-      body !== null &&
-      typeof body === "object" &&
-      (body as { logAvailable?: unknown }).logAvailable === true
-    );
-  } catch {
-    return false;
-  }
+  return (await fetchJobLogState(jobId, fetchImpl)) === "available";
 }
 
 /**
@@ -63,8 +88,11 @@ const LOG_AVAILABILITY_RETRY_MS = 2_000;
  * what makes the log readable WHILE the run is in progress -- the stalled run
  * the log exists for -- rather than only once it has settled.
  *
- * A run that captured no log answers no for as long as it is watched, so the
- * caller is what bounds the watch: it stops asking when the run settles.
+ * A run that asked for no log is answered by the first ask and the watch stops
+ * there: the ordinary run is the common one, and asking it repeatedly would
+ * poll the appliance for the whole exchange to be told the same thing. Only a
+ * pending answer is re-asked, which the caller still bounds by stopping the
+ * watch when the run settles.
  */
 export async function watchJobLogAvailable(
   jobId: string,
@@ -77,7 +105,8 @@ export async function watchJobLogAvailable(
   const aborted = () => signal.aborted;
   for (;;) {
     if (aborted()) return false;
-    if (await fetchJobLogAvailable(jobId, fetchImpl)) return true;
+    const state = await fetchJobLogState(jobId, fetchImpl);
+    if (state !== "pending") return state === "available";
     if (aborted()) return false;
     await delay(LOG_AVAILABILITY_RETRY_MS, signal);
   }

@@ -257,25 +257,39 @@ export function failureFor(
 
 /**
  * Replace a terminal failure with the sweep-refusal guidance when the CLI
- * refused this run's recovery sweep over a retain-mode signal, else return it
+ * refused THIS run's recovery sweep over a retain-mode signal, else return it
  * unchanged.
  *
  * Applied where a seat sets a run's failure, so the console's one explanation of
  * the retain guard -- and of the command-line escalation it deliberately does
  * not offer -- lives in one place rather than in each seat's alert.
  *
- * The refusal is the one `exchange`-category terminal whose text is surfaced.
- * That is safe and warranted here: it is a first-party refusal composed around
- * the very flag this console put on the argv, it arrives as a relayed chain the
- * appliance already escaped and bounded, and the concrete retain signal it names
- * is what tells the operator whose transcript they were about to delete.
+ * The run's own intent decides whether the guidance is considered at all: a run
+ * that requested no sweep keeps its failure whatever the relayed text says. That
+ * gate is what makes keying on text admissible, because a terminal message can
+ * carry partner-chosen bytes verbatim -- a rendezvous directory is
+ * partner-writable and core's foreign-file terminal names the offending files --
+ * so on an unsweeping run the recognizer's substring match would retitle an
+ * honest failure as a refused sweep and steer the operator toward a flag that
+ * deletes permanently.
+ *
+ * Past that gate the refusal is the one `exchange`-category terminal whose text
+ * is surfaced. That is warranted here: it is a first-party refusal composed
+ * around the very flag this console put on the argv, it arrives as a relayed
+ * chain the appliance already escaped and bounded, and the concrete retain
+ * signal it names is what tells the operator whose transcript they were about to
+ * delete.
  *
  * @internal
  */
 export function withSweepRefusalGuidance(
   failure: RunFailure,
   error: unknown,
+  /** The per-run diagnostic and recovery fields this run's intent carried, as
+   * the seat emitted them; absent for a run that carried none. */
+  runDiagnostics: RunDiagnosticsIntentFields | undefined,
 ): RunFailure {
+  if (runDiagnostics?.sweepExchangeFiles !== true) return failure;
   if (!(error instanceof RelayedTerminalError)) return failure;
   const message = sanitizedFailureMessage(error);
   if (!isSweepRetainRefusal(message)) return failure;
@@ -608,6 +622,7 @@ export function useInviterExchange({
         withSweepRefusalGuidance(
           failureFor(category, error, inputSource, channel),
           error,
+          runDiagnostics,
         ),
       );
       setRun((current) => runWithFailure(current));
