@@ -307,6 +307,11 @@ describe("reattachOnBusy", () => {
 // can carry text an untrusted party chose. This pins that the replay's failure
 // reaches the operator as the seat composes any other one -- the re-attach adds
 // nothing of its own to it.
+//
+// This pin exercises failureFor directly, the same composition point the
+// class-kill pins in jobRunDiagnostics.unit.test.ts measure: a future seat
+// hook that decorated the returned failure before setFailure would not
+// redden it either.
 describe("a re-attached run's terminal surfaces as it arrived", () => {
   /** A terminal the CLI never composed as a refusal: the CLI's own refusal
    * wording reaches the seat inside a filename an untrusted party chose, which

@@ -441,6 +441,13 @@ describe("the escalation is stated before the run, not composed from its failure
 // of. What keeps that inert is that a failure's alert is composed from the
 // lifecycle's category alone: no relayed byte selects a title, and no per-run
 // choice changes what a failure says.
+//
+// These pins exercise failureFor, the one composition point all three seats
+// share: all eight call sites pass its result to setFailure undecorated
+// today. A future seat hook that decorated the returned failure before
+// setFailure would not redden these tests -- the unit project is node-only,
+// so seat hooks are not renderable here. A call-site check is follow-on
+// work, not a property these pins claim.
 describe("relayed terminal text never retitles a failure", () => {
   /** The CLI's own refusal wording, planted inside a filename an untrusted party
    * chose -- the shape no text test can tell from the real refusal. */
