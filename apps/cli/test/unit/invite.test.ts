@@ -727,6 +727,75 @@ test("validateInvite: a webrtc invite reports --server-port/--server-username ig
   warnSpy.mockRestore();
 });
 
+// --- --peer-timeout on the online path ---------------------------------------
+
+// --accept-timeout is bound to the connection's peer budget on this path and
+// takes precedence unconditionally, so a --peer-timeout typed alongside it is
+// parsed and dropped. Reported rather than silent: the operator who set it
+// otherwise reads the accept-timeout's silence as the budget they asked for.
+
+test("validateInvite: online reports --peer-timeout superseded by --accept-timeout", async () => {
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-peer-timeout-superseded-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  const ready = await validateInvite({
+    resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+    options: { ...options, peerTimeout: 60 },
+    acceptTimeout: 900,
+    log,
+  });
+  const warnings = warnSpy.mock.calls.map((c) => String(c[0]));
+  const superseded = warnings.filter((m) => m.startsWith("--peer-timeout "));
+  expect(superseded).toHaveLength(1);
+  // The flag that was dropped, and the one that governs the phase instead.
+  expect(superseded[0]).toContain("no effect on an online invitation");
+  expect(superseded[0]).toContain("--accept-timeout (900s)");
+  // The claim the warning makes, asserted against the connection this invite
+  // runs: the budget is the accept-timeout, not the 60s that was typed.
+  if (ready.mode !== "online") throw new Error("expected online mode");
+  expect(ready.connection.options?.peerTimeoutMs).toBe(900_000);
+  warnSpy.mockRestore();
+});
+
+test("validateInvite: online without --peer-timeout says nothing about it", async () => {
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-peer-timeout-quiet-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  await validateInvite({
+    resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+    options,
+    acceptTimeout: 900,
+    log,
+  });
+  const warnings = warnSpy.mock.calls.map((c) => String(c[0]));
+  expect(warnings.some((m) => m.includes("--peer-timeout"))).toBe(false);
+  warnSpy.mockRestore();
+});
+
+test("validateInvite: offline --peer-timeout keeps its own ignored-offline warning", async () => {
+  // Offline the flag is dropped for a different reason and has a different
+  // remedy (the written placeholder's connection.options block), so the online
+  // supersession must not displace or duplicate that diagnostic.
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-peer-timeout-offline-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  await validateInvite({
+    resolved: { mode: "offline", input },
+    options: { ...options, peerTimeout: 60 },
+    acceptTimeout: 900,
+    log,
+  });
+  const warnings = warnSpy.mock.calls.map((c) => String(c[0]));
+  expect(
+    warnings.some((m) => m.startsWith("--peer-timeout has no effect")),
+  ).toBe(true);
+  expect(warnings.some((m) => m.includes("online invitation"))).toBe(false);
+  warnSpy.mockRestore();
+});
+
 test("validateInvite: online carries the disclosed-columns subset from the inferred metadata", async () => {
   // An input with non-linkage columns: `notes` infers as an `other` payload column
   // and `member_id` as an `_id` row-identifier, both transmitted; the name/dob/ssn
