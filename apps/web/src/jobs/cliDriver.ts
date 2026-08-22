@@ -142,6 +142,18 @@ const FD3_LINE_CAP = 1_048_576;
 /** The CLI log level a diagnostic run asks for. */
 const DIAGNOSTIC_LOG_LEVEL = "debug";
 
+/** The run controls both spawn helpers accept: the recovery sweep, and the log
+ * file a diagnostic run captures to. Both are server-decided -- the sweep from a
+ * validated boolean on the intent, the path from the job's own workdir. */
+export interface CliRunControls {
+  /** Pass `--sweep-exchange-files`, the CLI's own pre-rendezvous recovery of a
+   * directory a crashed prior run left protocol files in. */
+  sweepExchangeFiles: boolean;
+  /** The workdir-contained file the run's debug-level log is captured to, or
+   * undefined for a run at today's verbosity with no capture. */
+  logFilePath: string | undefined;
+}
+
 /**
  * The extra argv a run's diagnostic and recovery choices contribute, shared by
  * both invocation forms so the two cannot state them differently.
@@ -161,10 +173,7 @@ const DIAGNOSTIC_LOG_LEVEL = "debug";
  * Every value-bearing flag here uses the single `--flag=value` token form, so a
  * value cannot be misparsed by yargs as its own flag.
  */
-function runControlArgv(controls: {
-  sweepExchangeFiles: boolean;
-  logFilePath: string | undefined;
-}): Array<string> {
+function runControlArgv(controls: CliRunControls): Array<string> {
   return [
     ...(controls.sweepExchangeFiles ? ["--sweep-exchange-files"] : []),
     ...(controls.logFilePath !== undefined
@@ -175,18 +184,6 @@ function runControlArgv(controls: {
         ]
       : []),
   ];
-}
-
-/** The run controls both spawn helpers accept: the recovery sweep, and the log
- * file a diagnostic run captures to. Both are server-decided -- the sweep from a
- * validated boolean on the intent, the path from the job's own workdir. */
-export interface CliRunControls {
-  /** Pass `--sweep-exchange-files`, the CLI's own pre-rendezvous recovery of a
-   * directory a crashed prior run left protocol files in. */
-  sweepExchangeFiles: boolean;
-  /** The workdir-contained file the run's debug-level log is captured to, or
-   * undefined for a run at today's verbosity with no capture. */
-  logFilePath: string | undefined;
 }
 
 /**

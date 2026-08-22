@@ -26,18 +26,20 @@ import {
 
 import {
   awaitJobTerminalState,
+  captureExchangeArgv,
   captureZeroSetupArgv,
   tempDataRoot,
   testSplitSftpServerEntry,
 } from "../utils/jobFixtures";
 
-// The console's file-handling card and the CLI's own parser, met at the one place
-// they touch: the zero-setup argv. The tokens under test are produced by the card's
-// model and the intent's argv builder, spawned through the production driver, and
-// then handed to the REAL built CLI -- never compared against a hand-written token
-// list, which would only assert that this file and the emitter agree about flags the
-// CLI may not have (CLAUDE.md: settle a question about an external tool by driving
-// it).
+// The console's authoring cards and the CLI's own parser, met where they touch:
+// the argv the appliance drives -- the zero-setup one throughout, and the exchange
+// one for the per-run controls both forms carry. The tokens under test are produced
+// by the cards' models and the intent's argv builder, spawned through the production
+// driver, and then handed to the REAL built CLI -- never compared against a
+// hand-written token list, which would only assert that this file and the emitter
+// agree about flags the CLI may not have (CLAUDE.md: settle a question about an
+// external tool by driving it).
 //
 // apps/web must not import apps/cli (apps consume packages, not each other), so the
 // parser is reached the way the appliance reaches it: as a subprocess of the built
@@ -258,6 +260,30 @@ describe(
       // Parsing ran to completion rather than short-circuiting: the run reached the
       // input file, which this argv deliberately does not create.
       expect(parsed.stderr).toContain("input.csv does not exist");
+    });
+
+    test("the diagnostic-run and sweep tokens survive a real parse on the exchange form too", async () => {
+      // The per-run controls ride BOTH invocation forms, and the two commands
+      // declare their options separately, so the exchange form gets the same
+      // verdict from the same parser rather than inheriting the zero-setup one.
+      const dir = scratchDir("ex-diag");
+      const logFilePath = path.join(dir, "run.log");
+      const argv = await captureExchangeArgv({
+        workdir: dir,
+        eventStream: true,
+        runControls: { sweepExchangeFiles: true, logFilePath },
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+      expect(argv[0]).toBe("exchange");
+
+      const parsed = parseWithRealCli(argv, dir);
+      expect(parsed.stderr).not.toContain("Unknown argument");
+      // Parsing ran to completion: the run reached the config file this argv
+      // deliberately does not create, and reported it into the log file the
+      // diagnostic tokens pointed the CLI at rather than to stderr.
+      expect(fs.readFileSync(logFilePath, "utf8")).toContain(
+        "psilink.yaml does not exist",
+      );
     });
 
     test("the diagnostic-run and sweep tokens survive a real parse", async () => {
