@@ -23,6 +23,11 @@ const serverAliases = {
 };
 
 export default defineNitroConfig({
+  // Nitro gates its preset behavior changes behind this date, and an unset one
+  // silently builds on its 2024-04-03 fallback: the deployed server would take
+  // whatever defaults a date nobody chose implies. Moving it forward opts into
+  // the changes dated between the two, so it is a deliberate, deployed edit.
+  compatibilityDate: "2026-08-22",
   preset: "node_server",
   entry: "./server/custom-entry.ts",
   alias: serverAliases,

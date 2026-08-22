@@ -4,7 +4,6 @@
   "exclude": ["node_modules"],
   "references": [{ "path": "../../packages/core" }],
   "compilerOptions": {
-    "target": "ES2022",
     "jsx": "react-jsx",
     "module": "esnext",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],

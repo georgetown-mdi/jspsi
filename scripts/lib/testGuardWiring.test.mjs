@@ -52,7 +52,7 @@ const WEB_CONFIG = "apps/web/vite.config.ts";
 const CONFIGS = [
   { path: "vitest.config.ts", distGuard: false },
   { path: "packages/core/vitest.config.ts", distGuard: false },
-  { path: "apps/cli/vitest.config.ts", distGuard: true },
+  { path: "apps/cli/vitest.config.mts", distGuard: true },
   { path: WEB_CONFIG, distGuard: true },
 ];
 

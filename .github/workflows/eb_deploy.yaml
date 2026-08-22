@@ -27,7 +27,13 @@ on:
       - "packages/core/package.json"
       - "packages/core/rollup.config.ts"
       - "packages/core/tsconfig.json"
-      - "packages/peerjs-broker/src/**"
+      # Only the broker sources the deployed server bundles: the web app reaches
+      # this workspace through `@psilink/peerjs-broker`, whose "." export is
+      # src/contrib/index.ts. Its sibling src/standalone.ts is the local
+      # `npm start` entry, in no deployed import graph. The two PR gates keep the
+      # broad packages/peerjs-broker/** glob, so an edit there is still built and
+      # tested -- it just does not redeploy an unchanged server.
+      - "packages/peerjs-broker/src/contrib/**"
       - "packages/peerjs-broker/package.json"
       - "packages/peerjs-broker/tsconfig.json"
       - ".github/actions/setup/**"

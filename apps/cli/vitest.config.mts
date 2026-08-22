@@ -1,3 +1,10 @@
+// The `.mts` extension is load-bearing. This workspace ships a CommonJS bundle
+// (rollup.config.ts emits `format: "cjs"` to the `bin` entry), so its
+// package.json carries no `"type": "module"` and a `.ts` config here resolves as
+// CommonJS. Vite's `configLoader: 'native'`, announced as a future default,
+// hands the config to Node's own loader, which rejects ESM syntax in a file it
+// resolves that way; the explicit ESM extension keeps every vitest invocation in
+// this workspace loading under either loader.
 import { configDefaults, defineConfig } from "vitest/config";
 
 // The console sentinel and its captured-log prerequisite, shared by every
