@@ -64,6 +64,19 @@ export function serviceWorkerConstant(name: string): number {
   return Number(match[1]);
 }
 
+/** A string constant declared at the worker's top level, read from its source
+ * for the same reason as {@link serviceWorkerConstant} -- and, for a value the
+ * client half declares its own copy of, so a test can hold the two against each
+ * other rather than against a literal. */
+export function serviceWorkerString(name: string): string {
+  const match = new RegExp(`const ${name} = "([^"]*)";`).exec(
+    serviceWorkerSource(),
+  );
+  if (match === null)
+    throw new Error(`serviceWorker.js declares no string const ${name}`);
+  return match[1];
+}
+
 /** A string-array constant declared at the worker's top level, read from its
  * source for the same reason as {@link serviceWorkerConstant}. */
 export function serviceWorkerStringArray(name: string): Array<string> {

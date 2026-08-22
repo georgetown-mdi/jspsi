@@ -95,7 +95,8 @@ export interface RegisterAppShellOptions {
 
 /**
  * Register the worker, watch for a newer one, and -- in an installed app -- have
- * it cache every route's code.
+ * it cache every route's code. Resolves whether or not the registration
+ * succeeded, so the call site can fire it and move on.
  *
  * `updateViaCache: "none"` keeps the browser's HTTP cache out of the worker
  * script's own update check, so a redeployed worker is seen on the next check
@@ -138,10 +139,20 @@ export async function registerAppShell(
     }
     warmRoutes();
   });
-  registration = await container.register(SERVICE_WORKER_URL, {
-    scope: "/",
-    updateViaCache: "none",
-  });
+  try {
+    registration = await container.register(SERVICE_WORKER_URL, {
+      scope: "/",
+      updateViaCache: "none",
+    });
+  } catch {
+    // register() rejects on a network failure -- a first load that is already
+    // offline, the case this feature exists for -- and on a script or security
+    // error. What is lost is the offline shell, not a capability: an
+    // uncontrolled page fetches everything from the network and works. So this
+    // degrades in silence, the way the worker's own precache does, rather than
+    // rejecting into a caller that has nothing to do about it.
+    return;
+  }
   warmRoutes();
   // A worker installed on an earlier visit and never applied is already waiting
   // by the time this runs, so there is no `updatefound` left to hear.

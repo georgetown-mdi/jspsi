@@ -10,6 +10,8 @@ import {
   subscribeAppShellUpdate,
 } from "@utils/appShellUpdate";
 
+import { serviceWorkerString } from "../utils/serviceWorkerHarness";
+
 import type { ShellContainer, ShellWorker } from "@utils/appShellUpdate";
 
 // The client half of the app-shell update path: which worker states are an
@@ -226,5 +228,38 @@ describe("registration", () => {
     expect(calls).toEqual([
       ["/serviceWorker.js", { scope: "/", updateViaCache: "none" }],
     ]);
+  });
+
+  test("that the browser refuses leaves the app running from the network", async () => {
+    const fake = fakeContainer({ controller: fakeWorker("activated").worker });
+    let reloads = 0;
+    const container: ShellContainer = {
+      ...fake.container,
+      register: () =>
+        Promise.reject(new TypeError("Failed to register a ServiceWorker")),
+    };
+
+    // register() rejects on the offline first load this feature is for, and the
+    // call site fires this without awaiting it: a rejection here would be an
+    // unhandled one.
+    await expect(
+      registerAppShell(container, { reload: () => (reloads += 1) }),
+    ).resolves.toBeUndefined();
+
+    expect(appShellUpdateReady()).toBe(false);
+    applyAppShellUpdate();
+    fake.changeController();
+    expect(reloads).toBe(0);
+  });
+});
+
+describe("the messages the client and the worker exchange", () => {
+  test("are the same strings on both sides", () => {
+    expect(SKIP_WAITING_MESSAGE).toBe(
+      serviceWorkerString("SKIP_WAITING_MESSAGE"),
+    );
+    expect(WARM_ROUTES_MESSAGE).toBe(
+      serviceWorkerString("WARM_ROUTES_MESSAGE"),
+    );
   });
 });

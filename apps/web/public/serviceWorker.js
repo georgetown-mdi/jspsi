@@ -218,8 +218,7 @@ async function precacheShell() {
     const shell = await caches.open(SHELL_CACHE);
     await shell.put(shellUrl(), response);
     await addAllIndividually(shell, STATIC_ASSETS);
-    const assets = await caches.open(ASSET_CACHE);
-    await addAllIndividually(assets, hashedAssetPathsIn(shellDocument));
+    await cacheAssetsWithinCap(hashedAssetPathsIn(shellDocument));
   } catch {
     // Offline or a failing origin at install time; the first online navigation
     // fills the cache instead.
@@ -238,7 +237,6 @@ async function precacheShell() {
  * stops rather than working through the list failing.
  */
 async function warmRouteAssets() {
-  const assets = await caches.open(ASSET_CACHE);
   for (const route of SHELL_ROUTES) {
     let routeDocument;
     try {
@@ -250,7 +248,7 @@ async function warmRouteAssets() {
     } catch {
       return;
     }
-    await addAllIndividually(assets, hashedAssetPathsIn(routeDocument));
+    await cacheAssetsWithinCap(hashedAssetPathsIn(routeDocument));
   }
 }
 
@@ -380,6 +378,25 @@ async function addAllIndividually(cache, paths) {
       }
     }),
   );
+}
+
+/**
+ * Store `paths` in the asset cache, then bring it back within
+ * {@link MAX_ASSET_ENTRIES}. The trim belongs to every writer of that cache
+ * rather than the fetch path alone: an installed app warms every route's code at
+ * each launch, so a writer that added without trimming would let a continuously
+ * deployed origin accumulate past deployments' chunks whatever the cap says.
+ *
+ * The trim runs after the batch, not before it, so nothing this batch just wrote
+ * is dropped while an older entry survives: first to go is what has been stored
+ * longest -- an earlier deployment's chunks, then earlier routes of this same
+ * warm. A batch larger than the whole cap is the one case that loses entries of
+ * its own, keeping the {@link MAX_ASSET_ENTRIES} it stored last.
+ */
+async function cacheAssetsWithinCap(paths) {
+  const assets = await caches.open(ASSET_CACHE);
+  await addAllIndividually(assets, paths);
+  await trimCache(assets, MAX_ASSET_ENTRIES);
 }
 
 /** Drop the oldest entries until `cache` holds at most `max`. */

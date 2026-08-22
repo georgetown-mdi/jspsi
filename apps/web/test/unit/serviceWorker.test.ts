@@ -416,6 +416,77 @@ describe("build assets", () => {
   });
 });
 
+describe("the asset-cache cap", () => {
+  const cap = serviceWorkerConstant("MAX_ASSET_ENTRIES");
+
+  /** `count` distinct build-asset paths, numbered so their insertion order is
+   * readable in a failure. */
+  function chunkPaths(prefix: string, count: number): Array<string> {
+    return Array.from(
+      { length: count },
+      (_, index) => `/assets/${prefix}-${String(index).padStart(4, "0")}.js`,
+    );
+  }
+
+  /** Serve `assets` from `route`, as a document naming them plus the assets
+   * themselves. */
+  function routeServing(
+    harness: ServiceWorkerHarness,
+    route: string,
+    assets: Array<string>,
+  ): void {
+    const scripts = assets
+      .map((asset) => `<script src="${asset}"></script>`)
+      .join("");
+    harness.network.route(route, () =>
+      html(`<html><head>${scripts}</head></html>`),
+    );
+    for (const asset of assets)
+      harness.network.route(asset, () => javascript(`// ${asset}`));
+  }
+
+  test("bounds an install whose own asset graph overflows it", async () => {
+    const harness = servedHarness(chunkPaths("install", cap + 12));
+
+    await harness.install();
+
+    // Which of the batch's own entries survive is the order its concurrent adds
+    // completed in, so the count is what the worker fixes here.
+    expect(harness.cachedUrls(ASSET_CACHE).length).toBe(cap);
+    expect(harness.cachedUrls(SHELL_CACHE)).toContain(`${HARNESS_ORIGIN}/`);
+  });
+
+  test("bounds a warm, keeping the routes it reached last", async () => {
+    const routes = serviceWorkerStringArray("SHELL_ROUTES");
+    const perRoute = Math.ceil((cap * 2) / routes.length);
+    const harness = servedHarness();
+    await harness.install();
+    await harness.activate();
+    // Registered after the install so the shell's own asset is the cache's
+    // oldest entry, which is what the cap should reach first.
+    const assetsOf = new Map(
+      routes.map((route) => [
+        route,
+        chunkPaths(`route${route.replaceAll("/", "-")}`, perRoute),
+      ]),
+    );
+    for (const [route, assets] of assetsOf)
+      routeServing(harness, route, assets);
+
+    await harness.postMessage("psilink-warm-routes");
+
+    const cached = harness.cachedUrls(ASSET_CACHE);
+    expect(cached.length).toBe(cap);
+    expect(cached).not.toContain(`${HARNESS_ORIGIN}/assets/index-AAAA1111.js`);
+    // The warm stores a route's batch whole before moving on, so eviction walks
+    // the route list from its start rather than touching what was just written.
+    for (const asset of assetsOf.get(routes[routes.length - 1]) ?? [])
+      expect(cached).toContain(`${HARNESS_ORIGIN}${asset}`);
+    for (const asset of assetsOf.get(routes[0]) ?? [])
+      expect(cached).not.toContain(`${HARNESS_ORIGIN}${asset}`);
+  });
+});
+
 describe("the manifest and icons", () => {
   test("come from the cache and are revalidated behind the response", async () => {
     const harness = servedHarness();
