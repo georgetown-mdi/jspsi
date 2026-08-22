@@ -1430,33 +1430,6 @@ test("persistExpectedPartnerDeduplicate refreshes a stale declaration", () => {
   expect(YAML.parse(raw).expected_partner_deduplicate).toBe(false);
 });
 
-test("persistExpectedPartnerDeduplicate removes the field when no declaration binds", () => {
-  // undefined is "no acceptance stands behind this config", so a previously
-  // recorded declaration is cleared rather than left to bind a run nobody
-  // consented to. The rest of the config is intact.
-  const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "connection:",
-      "  channel: sftp",
-      "  server:",
-      "    host: h",
-      "expected_partner_deduplicate: true",
-      "",
-    ].join("\n"),
-  );
-  persistExpectedPartnerDeduplicate(configPath, undefined);
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(raw).not.toContain("expected_partner_deduplicate");
-  const parsed = YAML.parse(raw) as {
-    connection: { channel: string };
-    expected_partner_deduplicate?: boolean;
-  };
-  expect(parsed.connection.channel).toBe("sftp");
-  expect(parsed.expected_partner_deduplicate).toBeUndefined();
-});
-
 test("persistExpectedPartnerDeduplicate writes the config owner-read-only (0600)", () => {
   if (process.platform === "win32") return;
   const configPath = path.join(dir, "psilink.yaml");

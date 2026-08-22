@@ -404,7 +404,9 @@ Two states, not three: the empty case has no analogue here.
 
 - **Absent** binds nothing. It is the state of an exchange authored from two
   parties' own configuration files, where the differing pair is exactly what
-  makes one of them the "many" side.
+  makes one of them the "many" side. No write produces it: an acceptance always
+  has a boolean to record, so absence is only ever the state of a file no
+  acceptance wrote.
 - **Present** binds strictly, `false` no less than `true`. A declared `false`
   against a presented `true` is the widening the record exists to refuse.
 

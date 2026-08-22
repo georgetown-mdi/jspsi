@@ -31,6 +31,7 @@ import {
   exchangeBootstrapSecret,
   reportsCountToSender,
   resolveRole,
+  sendAbort,
 } from "./protocolSetup.js";
 import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
 import {
@@ -497,8 +498,20 @@ export function assertSigningModeImplemented(
  * than this operator's configuration. The CLI's `instanceof UsageError ? 64 : 69`
  * mapping therefore yields 69, and a consumer keeping per-failure bookkeeping can
  * branch on the type.
+ *
+ * It carries `psilinkRecoveryHintEmitted` (the class-field form its
+ * `PeerAbortError` and `FrameSizeExceededError` siblings use in `errors.ts`) so
+ * the CLI's hint-walker suppresses the generic "retry the exchange without
+ * re-inviting" advisory. The refusal is terminal against the invitation this
+ * party holds, and its own message prescribes the opposite step -- obtain an
+ * invitation declaring the setting the partner will run -- so the generic line
+ * would tell an operator to re-run a refusal that repeats identically, and an
+ * unattended recurring exchange would loop on it. The advisory's window is
+ * reached on the online path, where the token rotates before the run.
  */
 export class InvitationTermDivergenceError extends ConnectionError {
+  readonly psilinkRecoveryHintEmitted = true;
+
   constructor(message: string) {
     super(message, "protocol");
     this.name = "InvitationTermDivergenceError";
@@ -1286,10 +1299,27 @@ export async function runExchange(
   // cardinality is resolved from it, and before any key or payload moves. A no-op
   // on an exchange authored from configuration files, which carries no
   // declaration. See assertPresentedDeduplicateMatchesInvitation.
-  assertPresentedDeduplicateMatchesInvitation(
-    prepared.expectedPartnerDeduplicate,
-    partnerTerms.deduplicate,
-  );
+  try {
+    assertPresentedDeduplicateMatchesInvitation(
+      prepared.expectedPartnerDeduplicate,
+      partnerTerms.deduplicate,
+    );
+  } catch (err) {
+    // Best-effort abort before the throw, as every refusal inside exchangeTerms
+    // sends one. This one is one-sided -- only this party holds the declaration
+    // -- so the partner derives no refusal of its own and would otherwise wait
+    // out its whole peer-inactivity budget (a full poll budget on a file
+    // channel) for rounds this party will never run. Sent in the abort
+    // decision's own shape rather than as a private signal of its own, though no
+    // decision slot is left to read it here: what ends the partner's run is the
+    // frame's arrival, and the specific fault stays with this party. The reason
+    // is a fixed literal about values the partner itself declared, so the frame
+    // discloses nothing new.
+    await sendAbort(conn, [
+      "partner presented a deduplicate its invitation did not declare",
+    ]);
+    throw err;
+  }
 
   // Resolve the matching cardinality from both parties' agreed deduplicate
   // settings as the first step after the terms exchange: the resolution is

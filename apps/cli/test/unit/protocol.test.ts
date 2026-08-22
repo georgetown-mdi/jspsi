@@ -231,6 +231,7 @@ import {
   ConnectionError,
   FrameSizeExceededError,
   InternalConsistencyError,
+  InvitationTermDivergenceError,
   FileSyncConnection,
   fromEventConnection,
   authenticateConnection,
@@ -2455,6 +2456,57 @@ test("runProtocol suppresses the generic advisory for the reply-cap internal fau
   // contradicting line, not the guidance.
   expect((resultA as PromiseRejectedResult).reason).toBeInstanceOf(
     InternalConsistencyError,
+  );
+  expectNoGenericRecoveryAdvisory(mockState.errors);
+}, 20_000);
+
+test("runProtocol suppresses the generic advisory for the invitation-term divergence refusal", async () => {
+  // The binding refuses at the terms exchange, inside the data exchange and so
+  // after the token has rotated -- the window where the generic "retry without
+  // re-inviting" advisory fires. A retry re-runs the same refusal against the
+  // same invitation, so the advisory would tell an operator to loop; the
+  // refusal's own message prescribes the step that ends it, obtaining an
+  // invitation declaring what the partner will run.
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  async function waitForRotationThenThrowDivergence(): Promise<never> {
+    await waitForBothKeysRotated(keyFileA, keyFileB);
+    throw new InvitationTermDivergenceError(
+      "the partner presented linkage terms that contradict the invitation " +
+        "this acceptance consented to",
+    );
+  }
+  vi.mocked(runExchange)
+    .mockImplementationOnce(waitForRotationThenThrowDivergence)
+    .mockImplementationOnce(waitForRotationThenThrowDivergence);
+
+  const pA = runProtocol(
+    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+    { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-a",
+  );
+  const pB = runProtocol(
+    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+    { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    minimalPrepared,
+    undefined,
+    -1,
+    "test-b",
+  );
+
+  const [resultA, resultB] = await Promise.allSettled([pA, pB]);
+  expect(resultA.status).toBe("rejected");
+  expect(resultB.status).toBe("rejected");
+  // The refusal itself still reaches the command boundary, which renders its own
+  // remedy: the suppression removes the contradicting line, not the guidance.
+  expect((resultA as PromiseRejectedResult).reason).toBeInstanceOf(
+    InvitationTermDivergenceError,
   );
   expectNoGenericRecoveryAdvisory(mockState.errors);
 }, 20_000);

@@ -25,6 +25,7 @@ import { buildOutputTable } from "../src/payloadExchange";
 import { UsageError } from "../src/errors";
 
 import type { PreparedExchange, ExchangeResult } from "../src/exchange";
+import type { MessageConnection } from "../src/connection/messageConnection";
 import type { LinkageStrategy, LinkageTerms } from "../src/config/linkageTerms";
 import type { CSVRow } from "../src/file";
 
@@ -670,9 +671,8 @@ test("a partner presenting a deduplicate its invitation did not declare is refus
 
   const [connInviter, connAcceptor] = createMessagePipe();
   // The refusal is ONE-SIDED -- only the accepting party holds the declaration --
-  // so the two runs are not awaited together: the presenting party stays parked
-  // on the round that never comes until its connection is closed, which is what
-  // a caller does when the run throws.
+  // so the two runs are not awaited together: the presenting party is ended by
+  // the abort this side sends it (pinned below), not by a refusal it derives.
   const inviterRun = Promise.allSettled([
     runExchange(
       connInviter,
@@ -698,6 +698,13 @@ test("a partner presenting a deduplicate its invitation did not declare is refus
   // The refusal names the two booleans and no partner-controlled value: the
   // identity the partner authored is the string most likely to be reached for.
   expect(reason?.message).not.toContain("Presented Partner Identity");
+  // The advisory tag the CLI's hint-walker reads: this refusal is terminal
+  // against the invitation this party holds, so the generic "retry without
+  // re-inviting" line would prescribe a retry that repeats the refusal.
+  expect(
+    (reason as { psilinkRecoveryHintEmitted?: unknown })
+      .psilinkRecoveryHintEmitted,
+  ).toBe(true);
 
   await connAcceptor.close();
   const [inviter] = await inviterRun;
@@ -705,6 +712,83 @@ test("a partner presenting a deduplicate its invitation did not declare is refus
   // rounds, and the presenting side is left with a failed exchange rather than
   // the many-to-one result it presented for.
   expect(inviter.status).toBe("rejected");
+});
+
+test("the one-sided refusal aborts the partner instead of leaving it parked", async () => {
+  // Every refusal inside the terms exchange best-effort sends an abort first so
+  // the partner is not left on its own receive timeout. This one fires just past
+  // that exchange and is one-sided, so nothing else tells an honest partner to
+  // stop: without the abort it waits out its whole peer-inactivity budget -- a
+  // full poll budget on a file channel -- for rounds this party will never run.
+  const declared = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: false,
+  });
+  const presented = parseLinkageTerms({
+    ...termsBase,
+    identity: "Presented Partner Identity",
+    deduplicate: true,
+  });
+  const acceptorPrepared = prepareForExchange(
+    { linkageTerms: deriveAcceptedLinkageTerms(declared, "B") },
+    "B",
+    rowsB,
+    ["first_name"],
+  );
+  acceptorPrepared.expectedPartnerDeduplicate = declared.deduplicate;
+
+  const [connInviter, connAcceptor] = createMessagePipe();
+  const sentByAcceptor: unknown[] = [];
+  const recordingAcceptorConn: MessageConnection = {
+    send: async (data) => {
+      sentByAcceptor.push(data);
+      await connAcceptor.send(data);
+    },
+    receive: (timeoutMs) => connAcceptor.receive(timeoutMs),
+    close: () => connAcceptor.close(),
+  };
+
+  const inviterRun = runExchange(
+    connInviter,
+    "initiator",
+    prepareForExchange({ linkageTerms: presented }, "A", rowsA, ["first_name"]),
+    { psiLibrary },
+  ).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
+
+  const reason = await runExchange(
+    recordingAcceptorConn,
+    "responder",
+    acceptorPrepared,
+    { psiLibrary },
+  ).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
+  expect(reason).toBeInstanceOf(InvitationTermDivergenceError);
+
+  // The abort is the last thing this party sends, and it carries fixed literals
+  // only: no terms, no counts, and nothing the partner authored.
+  expect(sentByAcceptor.at(-1)).toStrictEqual({
+    decision: "abort",
+    abortReasons: [
+      "partner presented a deduplicate its invitation did not declare",
+    ],
+  });
+  expect(JSON.stringify(sentByAcceptor.at(-1))).not.toContain(
+    "Presented Partner Identity",
+  );
+
+  // The partner's run ends on its own, without this side closing the connection
+  // and without waiting out a receive budget. What ends it is the frame's
+  // arrival: the terms exchange's decision slots are behind both parties by this
+  // point, so nothing on the partner reads the reason it states, and the specific
+  // fault stays with the party that refused.
+  expect(await inviterRun).toBeInstanceOf(Error);
+  await connAcceptor.close();
 });
 
 test("a run driven from a PERSISTED config refuses the same contradiction", async () => {

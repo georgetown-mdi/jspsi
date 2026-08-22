@@ -1162,9 +1162,46 @@ export function assertCountOnlyTermsShape(terms: LinkageTerms): void {
 }
 
 /**
+ * Which linkage strategies realize a deduplicating match, one entry per
+ * strategy. The cascade does (`linkViaPSI`); `single-pass` matches strictly
+ * one-to-one, so it realizes none.
+ *
+ * A total table over {@link LinkageStrategy} rather than a comparison against one
+ * named strategy: a strategy added to the union states its own verdict here or
+ * the build fails, so neither the refusal below nor the consent copy that reads
+ * the same verdict can be left behind by an addition. Typed `boolean` rather than
+ * the literal values so each reader's gate gives a genuine runtime branch.
+ *
+ * @internal exported for the test that drives both readers over every strategy.
+ */
+export const DEDUPLICATE_IMPLEMENTED_BY_STRATEGY: Record<
+  LinkageStrategy,
+  boolean
+> = {
+  cascade: true,
+  "single-pass": false,
+};
+
+/**
+ * Whether an exchange on `strategy` honors a `deduplicate: true` term.
+ *
+ * The one predicate behind both readers of that verdict:
+ * {@link assertDeduplicateImplemented} refuses the pair it returns `false` for,
+ * and the consent summary's `deduplicateApplied` withholds the grouping
+ * disclosure copy on the same answer (`invitationSummary.ts`). Stating it twice
+ * would let the copy stay withheld for a strategy the refusal had stopped
+ * refusing -- a silent divergence, since each side's own tests keep passing.
+ */
+export function deduplicateIsImplementedForStrategy(
+  strategy: LinkageStrategy,
+): boolean {
+  return DEDUPLICATE_IMPLEMENTED_BY_STRATEGY[strategy];
+}
+
+/**
  * Refuse a linkage-terms `deduplicate: true` the run cannot honor, before any
  * matching begins: the term under a linkage strategy that does not match a
- * deduplicating cardinality.
+ * deduplicating cardinality ({@link deduplicateIsImplementedForStrategy}).
  *
  * The cascade implements the deduplicating match (`linkViaPSI`), and the surfaces
  * downstream of the association table -- the payload frame, the output table, and
@@ -1204,7 +1241,7 @@ export function assertCountOnlyTermsShape(terms: LinkageTerms): void {
  */
 export function assertDeduplicateImplemented(terms: LinkageTerms): void {
   if (!terms.deduplicate) return;
-  if (terms.linkageStrategy !== "single-pass") return;
+  if (deduplicateIsImplementedForStrategy(terms.linkageStrategy)) return;
   throw new UsageError(
     "deduplicated matching is not yet implemented for the single-pass " +
       'linkage strategy: single-pass matches strictly one-to-one, so a "' +

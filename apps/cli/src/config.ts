@@ -1048,12 +1048,12 @@ export function persistOutboundPayloadConsent(
 }
 
 /**
- * Write, overwrite, or remove the top-level `expected_partner_deduplicate` in an
- * existing `psilink.yaml`. This is the TERMS-side consent lock-in: the
- * `deduplicate` the accepted invitation declared for the INVITING party's own
- * side, which a later `psilink exchange` holds the value the partner presents at
- * the terms exchange to ({@link assertPresentedDeduplicateMatchesInvitation} in
- * core), refusing a contradiction before any key or payload moves.
+ * Write or overwrite the top-level `expected_partner_deduplicate` in an existing
+ * `psilink.yaml`. This is the TERMS-side consent lock-in: the `deduplicate` the
+ * accepted invitation declared for the INVITING party's own side, which a later
+ * `psilink exchange` holds the value the partner presents at the terms exchange
+ * to ({@link assertPresentedDeduplicateMatchesInvitation} in core), refusing a
+ * contradiction before any key or payload moves.
  *
  * The terms-side twin of {@link persistExpectedPayloadColumns}, written by the
  * same accept-reuse paths -- offline, and the online hook's reuse branch -- and
@@ -1064,11 +1064,10 @@ export function persistOutboundPayloadConsent(
  * lagging the latest acceptance (a re-accept over a changed declaration refreshes
  * it here).
  *
- * `declared === undefined` REMOVES the field (deleteIn), never leaves a stale
- * value: it is the state of a config no acceptance stands behind, where the
- * exchange is authored from two parties' own documents and the partner's side is
- * legitimately its own. A prior acceptance's declaration left standing there
- * would refuse an honest partner.
+ * Takes a plain `boolean`: an acceptance always has a declaration to record --
+ * `deduplicate` is mandatory on the linkage-terms schema -- so there is no
+ * removal to express. The absent field is the state of a config no acceptance
+ * stands behind, reached by never writing one rather than by clearing one.
  *
  * The value is a schema boolean, not partner free text, but the file is rewritten
  * with the same owner-only permissions {@link saveConfig} uses (a config may carry
@@ -1080,7 +1079,7 @@ export function persistOutboundPayloadConsent(
  */
 export function persistExpectedPartnerDeduplicate(
   configPath: string,
-  declared: boolean | undefined,
+  declared: boolean,
 ): void {
   // Parse, edit, and re-serialize through the sensitive-file chokepoint (see
   // persistHostKeyFingerprint), preserving the operator's comments and key order
@@ -1089,10 +1088,6 @@ export function persistExpectedPartnerDeduplicate(
     fs.readFileSync(configPath, "utf8"),
     `config file ${configPath}`,
     (doc) => {
-      if (declared === undefined) {
-        doc.deleteIn(["expected_partner_deduplicate"]);
-        return;
-      }
       doc.setIn(["expected_partner_deduplicate"], declared);
     },
   );
