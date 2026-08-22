@@ -2317,7 +2317,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
   });
 
-  test("a sole-receiver deduplicating invitation states the grouping stays with the inviter", async () => {
+  test("a sole-receiver deduplicating invitation states psilink presents the acceptor no grouping when the inviter alone receives", async () => {
     // The other output shape a deduplicating invitation can take. This party is
     // sent no result, so it is presented no grouping: the shared-result sentence
     // would state a disclosure this client does not make, and the sole-receiver

@@ -2149,7 +2149,7 @@ test("displayInvitation: a deduplicating term states what it discloses and whose
   );
 });
 
-test("displayInvitation: a sole-receiver deduplicating term states the grouping stays with the inviter", () => {
+test("displayInvitation: a sole-receiver deduplicating term states psilink presents the acceptor no grouping when the inviter alone receives", () => {
   // The other output shape a deduplicating invitation can take: the inviting
   // party receives the result and shares none of it, so this party is sent no
   // table and is presented no grouping. The shared-result sentence would tell it
