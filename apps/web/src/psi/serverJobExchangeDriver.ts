@@ -20,6 +20,7 @@ import type {
 } from "@jobs/intent";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
+import type { RunDiagnosticsIntentFields } from "@bench/runDiagnosticsModel";
 import type { RunOutputs } from "@bench/runOutputs";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
@@ -88,6 +89,11 @@ export interface ServerJobExchangeDriverConfig {
    * leaves it undefined -- the lock-in is the acceptor's. */
   expectedPayloadColumns?: Array<string>;
   options?: JobExchangeOptions;
+  /** The operator's per-run diagnostic and recovery choices, forwarded to the
+   * intent unchanged ({@link RunDiagnosticsIntentFields}). Absent for a run that
+   * asked for neither, which is the intent every caller sent before the controls
+   * existed. */
+  runDiagnostics?: RunDiagnosticsIntentFields;
   /** Invoked with the created job's id the moment `POST /api/jobs` resolves,
    * before the event stream opens. The seam the console's strand-recovery record
    * is written from ({@link ../psi/consoleJobAttachment}): the job exists on the
@@ -850,6 +856,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     standardization,
     expectedPayloadColumns,
     options,
+    runDiagnostics,
   } = config;
   const shared = {
     side,
@@ -862,6 +869,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     ...(standardization !== undefined ? { standardization } : {}),
     ...(expectedPayloadColumns !== undefined ? { expectedPayloadColumns } : {}),
     ...(options !== undefined ? { options } : {}),
+    ...runDiagnostics,
     eventStream: true,
   };
   return transport.channel === "sftp"
@@ -884,6 +892,9 @@ export interface ServerJobZeroSetupDriverConfig {
    * work-input directory. Mapped to the intent's `inputCsv` / `inputFile` arm. */
   inputSource: JobInputSource;
   options?: JobExchangeOptions;
+  /** The operator's per-run diagnostic and recovery choices, exactly as the
+   * exchange mode's ({@link RunDiagnosticsIntentFields}). */
+  runDiagnostics?: RunDiagnosticsIntentFields;
   /** The optional operator label forwarded to the CLI's `--identity`, so the
    * previewed identity and the disclosure record's attribution match the run.
    * Omitted when blank -- the CLI then defaults to the appliance user. */
@@ -914,6 +925,7 @@ function zeroSetupIntentFor(
       ? { inputCsv: inputSource.csv }
       : { inputFile: { name: inputSource.name } }),
     ...(options !== undefined ? { options } : {}),
+    ...config.runDiagnostics,
     ...(identity !== undefined ? { identity } : {}),
     ...(linkageStrategy !== undefined ? { linkageStrategy } : {}),
     eventStream: true,

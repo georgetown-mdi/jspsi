@@ -22,7 +22,9 @@ import {
 } from "./inviterModel";
 import { ConnectionTuningCard } from "./ConnectionTuningCard";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
+import { RunDiagnosticsCard } from "./RunDiagnosticsCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
+import { runDiagnosticsProblems } from "./runDiagnosticsModel";
 import { splitDirectoryRetainProblem } from "./sftpConnectionChoice";
 import { splitRendezvousRetainProblem } from "./filedropRendezvousChoice";
 import styles from "./bench.module.css";
@@ -38,6 +40,7 @@ import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { OutputDirection } from "@psi/advancedInvite";
+import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 const DIRECTION_CHOICES: ReadonlyArray<{
@@ -77,6 +80,10 @@ export function ReviewCreateSection({
   connectionTuningOpen,
   onConnectionTuning,
   onConnectionTuningOpen,
+  runDiagnostics,
+  runDiagnosticsOpen,
+  onRunDiagnostics,
+  onRunDiagnosticsOpen,
   onLifetime,
   onDirection,
   onTransport,
@@ -121,6 +128,14 @@ export function ReviewCreateSection({
   connectionTuningOpen: boolean;
   onConnectionTuning: (draft: ConnectionTuningDraft) => void;
   onConnectionTuningOpen: (open: boolean) => void;
+  /** The operator's per-run diagnostic and recovery choices for the same run,
+   * offered on the same transports the two cards above are. */
+  runDiagnostics: RunDiagnosticsDraft;
+  /** Whether the diagnostics disclosure is expanded (held by the host for the
+   * same reason as the two above). */
+  runDiagnosticsOpen: boolean;
+  onRunDiagnostics: (draft: RunDiagnosticsDraft) => void;
+  onRunDiagnosticsOpen: (open: boolean) => void;
   onLifetime: (seconds: number) => void;
   onDirection: (direction: OutputDirection) => void;
   onTransport: (transport: Transport) => void;
@@ -195,6 +210,8 @@ export function ReviewCreateSection({
   const connectionTuningBlocked =
     exchangeFilesOffered &&
     connectionTuningProblems(connectionTuning).length > 0;
+  const runDiagnosticsBlocked =
+    exchangeFilesOffered && runDiagnosticsProblems(runDiagnostics).length > 0;
   // The SFTP session mode applies only where a session exists, so the card
   // withholds it on the shared-directory transport.
   const tuningCapabilities =
@@ -217,7 +234,8 @@ export function ReviewCreateSection({
     !connectionIncomplete &&
     splitDirectoryProblem === undefined &&
     !exchangeFilesBlocked &&
-    !connectionTuningBlocked;
+    !connectionTuningBlocked &&
+    !runDiagnosticsBlocked;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
   const readiness = useDeferredAnnouncement(
@@ -229,9 +247,11 @@ export function ReviewCreateSection({
           ? "Resolve the file-handling settings above before you can create."
           : connectionTuningBlocked
             ? "Resolve the connection-tuning settings above before you can create."
-            : problems.length === 0
-              ? "Ready to create the invitation."
-              : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
+            : runDiagnosticsBlocked
+              ? "Resolve the diagnostics-and-recovery settings above before you can create."
+              : problems.length === 0
+                ? "Ready to create the invitation."
+                : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
   );
   return (
     <>
@@ -345,6 +365,12 @@ export function ReviewCreateSection({
             open={connectionTuningOpen}
             onToggleOpen={onConnectionTuningOpen}
             onChange={onConnectionTuning}
+          />
+          <RunDiagnosticsCard
+            draft={runDiagnostics}
+            open={runDiagnosticsOpen}
+            onToggleOpen={onRunDiagnosticsOpen}
+            onChange={onRunDiagnostics}
           />
         </>
       )}

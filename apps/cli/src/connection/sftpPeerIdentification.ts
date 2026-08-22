@@ -252,14 +252,50 @@ export function observePeerAnswer(
   });
 }
 
-/** The diagnostic this module raises. A distinct subtype so a future caller
- * can classify on the type rather than the text; nothing classifies on it
- * today. */
+/**
+ * What the read established, in the form a machine consumer reads it: the two
+ * {@link PeerAnswer} arms that say something about the peer, without the two
+ * that say nothing (`identified` and `unobserved` compose no diagnostic at all).
+ * Carried on the raised error so a caller classifies on structure rather than on
+ * the composed sentence.
+ */
+export type PeerIdentificationDiagnosis =
+  | { kind: "non-ssh"; shape: PeerAnswerShape; excerpt: string }
+  | { kind: "closed-unanswered" };
+
+/** The diagnostic this module raises. A distinct subtype carrying the
+ * {@link PeerIdentificationDiagnosis} the composed message was written from, so
+ * a caller emitting a machine-readable form reads the classification and the
+ * peer's bytes off the error rather than parsing them back out of prose. */
 class PeerIdentificationError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(
+    message: string,
+    readonly diagnosis: PeerIdentificationDiagnosis,
+    options?: ErrorOptions,
+  ) {
     super(message, options);
     this.name = "PeerIdentificationError";
   }
+}
+
+/**
+ * The diagnosis a failure carries, or undefined when no link in its cause chain
+ * is one of this module's. Walks the chain rather than reading the value handed
+ * over, for the same reason {@link isPreIdentificationDialFailure} does: the
+ * dial paths re-raise, keeping the diagnostic as a cause.
+ *
+ * @internal
+ */
+export function peerIdentificationDiagnosisOf(
+  error: unknown,
+): PeerIdentificationDiagnosis | undefined {
+  let found: PeerIdentificationDiagnosis | undefined;
+  causeChainSome(error, (link) => {
+    if (!(link instanceof PeerIdentificationError)) return false;
+    found = link.diagnosis;
+    return true;
+  });
+  return found;
 }
 
 /**
@@ -330,6 +366,7 @@ export function explainPeerIdentificationFailure(
         `connection and closed it having sent nothing. An SSH server sends ` +
         `its identification string first, so the connection was most likely ` +
         `stopped in front of the server.`,
+      { kind: "closed-unanswered" },
       {
         cause: chainDetailCauses(
           [
@@ -348,6 +385,7 @@ export function explainPeerIdentificationFailure(
     `the SFTP server did not identify itself: the first bytes the peer ` +
       `answering this endpoint sent were ` +
       `${NON_SSH_SHAPE_DESCRIPTION[answer.shape]}.`,
+    { kind: "non-ssh", shape: answer.shape, excerpt: answer.excerpt },
     {
       cause: chainDetailCauses(
         [

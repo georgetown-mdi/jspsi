@@ -72,6 +72,9 @@ export interface DirectServerGates {
    * Separate from {@link exchangeFilesBlocked} because the two are separate
    * cards, and the sentence below names the one to open. */
   connectionTuningBlocked: boolean;
+  /** Whether the diagnostics-and-recovery card holds an unconfirmed sweep. A
+   * third separate card, gated separately for the same reason. */
+  runDiagnosticsBlocked: boolean;
   /** Whether the authored connection and the retain choice disagree over the
    * split-directory precondition. The remedy is stated in full by the step's own
    * alert, so the gate carries the state rather than a second copy of it. */
@@ -101,6 +104,8 @@ export function directServerBlockedReason(
     return "Resolve the file-handling settings above to continue.";
   if (gates.connectionTuningBlocked)
     return "Resolve the connection-tuning settings above to continue.";
+  if (gates.runDiagnosticsBlocked)
+    return "Resolve the diagnostics-and-recovery settings above to continue.";
   if (gates.splitDirectoryBlocked)
     return "Resolve the retain-mode requirement above to continue.";
   return undefined;

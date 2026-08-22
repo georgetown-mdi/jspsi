@@ -361,6 +361,7 @@ describe("acceptor launch gates", () => {
           connectionBlocked: true,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
+          runDiagnosticsBlocked: false,
         },
       ),
     ).toBe("Set up the SFTP connection above before you can start.");
@@ -380,6 +381,7 @@ describe("acceptor launch gates", () => {
           connectionBlocked: false,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
+          runDiagnosticsBlocked: false,
           splitDirectoryProblem: splitRendezvousRetainProblem(
             { configured: true, split: true, locator: "in" },
             false,
@@ -399,6 +401,7 @@ describe("acceptor launch gates", () => {
           connectionBlocked: false,
           exchangeFilesBlocked: true,
           connectionTuningBlocked: false,
+          runDiagnosticsBlocked: false,
         },
       ),
     ).toBe("Resolve the file-handling settings above before you can start.");
@@ -420,6 +423,7 @@ describe("acceptor launch gates", () => {
           ...CONNECTION_TUNING_DEFAULT,
           peerTimeout: { magnitude: "soon", unit: "m" },
         }).length > 0,
+      runDiagnosticsBlocked: false,
     };
     expect(stepBlocks.exchangeFilesBlocked).toBe(false);
     expect(stepBlocks.connectionTuningBlocked).toBe(true);
@@ -453,6 +457,7 @@ describe("acceptor launch gates", () => {
           connectionBlocked: false,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
+          runDiagnosticsBlocked: false,
         },
       ),
     );
@@ -472,6 +477,7 @@ describe("acceptor launch gates", () => {
         connectionBlocked: true,
         exchangeFilesBlocked: true,
         connectionTuningBlocked: true,
+        runDiagnosticsBlocked: false,
       }),
     ).toBe(
       "Set your columns to the missing field types above before you can start.",

@@ -66,6 +66,11 @@ import {
   withConnectionTuning,
 } from "./connectionTuningModel";
 import {
+  RUN_DIAGNOSTICS_DEFAULT,
+  runDiagnosticsIntentFields,
+  runDiagnosticsProblems,
+} from "./runDiagnosticsModel";
+import {
   acceptorCleaningAttention,
   acceptorColumnsEditorState,
   acceptorInitialColumnsState,
@@ -88,6 +93,7 @@ import { Ledger } from "./Ledger";
 import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { Problems } from "./Problems";
 import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
+import { RunDiagnosticsCard } from "./RunDiagnosticsCard";
 import { ServerFilePicker } from "./ServerFilePicker";
 import { TopBar } from "./TopBar";
 import { acceptorTimelineSteps } from "./exchangeRun";
@@ -130,6 +136,7 @@ import type { FileRejection } from "@mantine/dropzone";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { RailStep } from "./inviterModel";
+import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
 import type { SftpConnectionInfo } from "@psi/serverJobExchangeDriver";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 import type { SftpEndpointLocator } from "./sftpConnectionForm";
@@ -239,6 +246,12 @@ export function AcceptorBench() {
   const [connectionTuning, setConnectionTuning] =
     useState<ConnectionTuningDraft>(CONNECTION_TUNING_DEFAULT);
   const [connectionTuningOpen, setConnectionTuningOpen] = useState(false);
+  // The operator's per-run diagnostic and recovery choices for the same run, held
+  // beside the two drafts above for the same reasons.
+  const [runDiagnostics, setRunDiagnostics] = useState<RunDiagnosticsDraft>(
+    RUN_DIAGNOSTICS_DEFAULT,
+  );
+  const [runDiagnosticsOpen, setRunDiagnosticsOpen] = useState(false);
   const [acceptorName, setAcceptorName] = useState("");
   // The name recorded in the exchange record, committed through the consent gate
   // at "Accept and continue" and fixed thereafter -- the run adopts the terms
@@ -752,6 +765,7 @@ export function AcceptorBench() {
       edits: launched.edits,
       inputSource,
       ...(options !== undefined ? { options } : {}),
+      runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
     };
     // `launched` is the launch key: it is set once, from the same render that
     // fixes the acquired CSV, its input source, the committed name, and the ready
@@ -1438,6 +1452,12 @@ export function AcceptorBench() {
                       onToggleOpen={setConnectionTuningOpen}
                       onChange={setConnectionTuning}
                     />
+                    <RunDiagnosticsCard
+                      draft={runDiagnostics}
+                      open={runDiagnosticsOpen}
+                      onToggleOpen={setRunDiagnosticsOpen}
+                      onChange={setRunDiagnostics}
+                    />
                   </>
                 ) : undefined
               }
@@ -1449,6 +1469,10 @@ export function AcceptorBench() {
               connectionTuningBlocked={
                 acceptServerJob &&
                 connectionTuningProblems(connectionTuning).length > 0
+              }
+              runDiagnosticsBlocked={
+                acceptServerJob &&
+                runDiagnosticsProblems(runDiagnostics).length > 0
               }
               splitDirectoryProblem={splitDirectoryProblem}
               onMetadataChange={changeMetadata}

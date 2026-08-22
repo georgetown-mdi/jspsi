@@ -17,6 +17,7 @@ import {
   readRecordCreatedAt,
   removeWorkdir,
   resolveWorkdir,
+  resolveWorkdirFile,
   workdirDirectoryExists,
   writeJobFile,
 } from "./workdir";
@@ -34,6 +35,7 @@ import { validateAuthoredSftpServer } from "./sftpServer";
 import type {
   CliDriverHandle,
   CliDriverHandlers,
+  CliRunControls,
   JobTerminalState,
   RelayEvent,
 } from "./cliDriver";
@@ -160,10 +162,14 @@ export interface JobView {
   resultAvailable: boolean;
   recordAvailable: boolean;
   recordCreatedAt?: string;
-  /** The three servable file paths (result, record, keys) inside the workdir. */
+  /** Whether this run captured a diagnostic log and the file is on disk. */
+  logAvailable: boolean;
+  /** The four servable file paths (result, record, keys, log) inside the
+   * workdir. `logPath` is null for a run that captured no log. */
   outputPath: string;
   recordPath: string;
   keysPath: string;
+  logPath: string | null;
 }
 
 /** A job record. Lives in server memory only; never persisted. */
@@ -177,6 +183,13 @@ export interface JobRecord {
   recordPath: string;
   /** The private verification-keys path paired with {@link recordPath}. */
   keysPath: string;
+  /**
+   * The diagnostic log the CLI was pointed at with `--log-file`, or null when
+   * this run was not a diagnostic one. Set at creation from the intent's
+   * `diagnosticRun`, so a run that did not ask for a log has no log path to
+   * serve at all rather than a path that happens to name no file.
+   */
+  logPath: string | null;
   status: JobStatus;
   events: Array<BufferedEvent>;
   /** True once a terminal event has been buffered; the SSE stream closes after it. */
@@ -609,6 +622,7 @@ export class JobManager {
     const outputPath = path.join(workdir, JOB_FILE_NAMES.output);
     const recordPath = path.join(workdir, JOB_FILE_NAMES.record);
     const keysPath = path.join(workdir, JOB_FILE_NAMES.recordKeys);
+    const logPath = intent.diagnosticRun === true ? jobLogPath(workdir) : null;
 
     const handoff = buildJobHandoff(intent, serverEntry, {
       credentialPasted: this.authoredMaterializedCredentialPath !== undefined,
@@ -621,6 +635,7 @@ export class JobManager {
       outputPath,
       recordPath,
       keysPath,
+      logPath,
       status: "running",
       events: [],
       terminalEmitted: false,
@@ -666,6 +681,10 @@ export class JobManager {
       recordPath,
       workdir,
       eventStream: intent.eventStream ?? true,
+      runControls: {
+        sweepExchangeFiles: intent.sweepExchangeFiles === true,
+        logFilePath: logPath ?? undefined,
+      },
       handlers,
     });
 
@@ -722,6 +741,7 @@ export class JobManager {
       recordPath: string;
       workdir: string;
       eventStream: boolean;
+      runControls: CliRunControls;
       handlers: CliDriverHandlers;
     },
   ): CliDriverHandle {
@@ -736,6 +756,7 @@ export class JobManager {
         recordPath: args.recordPath,
         workdir: args.workdir,
         eventStream: args.eventStream,
+        runControls: args.runControls,
         ...(intent.identity !== undefined ? { identity: intent.identity } : {}),
         ...(intent.linkageStrategy !== undefined
           ? { linkageStrategy: intent.linkageStrategy }
@@ -755,6 +776,7 @@ export class JobManager {
       recordPath: args.recordPath,
       workdir: args.workdir,
       eventStream: args.eventStream,
+      runControls: args.runControls,
       ...(extraEnv !== undefined ? { extraEnv } : {}),
       handlers: args.handlers,
     });
@@ -1176,6 +1198,20 @@ function liveRecordAvailability(
   return { recordAvailable: true, recordCreatedAt };
 }
 
+/**
+ * The diagnostic log's path inside a job workdir, resolved through the
+ * containment check {@link resolveWorkdirFile} applies rather than joined
+ * directly. The name is a server constant, so a null resolution is a caller bug
+ * (a name that grew a separator) surfaced as a hard error instead of a path
+ * outside the workdir the log endpoint would then serve.
+ */
+function jobLogPath(workdir: string): string {
+  const logPath = resolveWorkdirFile(workdir, JOB_FILE_NAMES.log);
+  if (logPath === null)
+    throw new Error("the job log name did not resolve inside the workdir");
+  return logPath;
+}
+
 /** The live view of an in-memory record, mirroring what the routes report. */
 function liveJobView(record: JobRecord): JobView {
   return {
@@ -1186,9 +1222,14 @@ function liveJobView(record: JobRecord): JobView {
     eventCount: record.events.length,
     resultAvailable: record.status === "succeeded",
     ...liveRecordAvailability(record),
+    // Not gated on the run having finished: a diagnostic log's whole point is a
+    // run that misbehaved, including one still stalled, so it is offered as soon
+    // as the CLI has opened the file.
+    logAvailable: record.logPath !== null && jobFileExists(record.logPath),
     outputPath: record.outputPath,
     recordPath: record.recordPath,
     keysPath: record.keysPath,
+    logPath: record.logPath,
   };
 }
 

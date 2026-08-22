@@ -30,10 +30,10 @@ import {
   runWithStages,
   stagesFor,
 } from "./exchangeRun";
+import { failureFor, withSweepRefusalGuidance } from "./useInviterExchange";
 import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
 import { appendSanitizedRunWarning } from "./runWarnings";
 import { buildRunOutputs } from "./runOutputs";
-import { failureFor } from "./useInviterExchange";
 import { invitationUsable } from "./inviterModel";
 import { prepareAcceptorExchange } from "./acceptorExchange";
 
@@ -58,6 +58,7 @@ import type {
 } from "@psi/serverJobExchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
 import type { JobExchangeOptions } from "@jobs/intent";
+import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
 import type { Transport } from "./inviterModel";
@@ -130,6 +131,7 @@ export function acceptorServerJobConfig({
   inputSource,
   transport,
   options,
+  runDiagnostics,
 }: {
   token: InvitationToken;
   acceptorName: string;
@@ -140,11 +142,15 @@ export function acceptorServerJobConfig({
    * core's retain-mode implication. Absent when the operator changed nothing, so
    * the composed config carries no `options` block at all. */
   options?: JobExchangeOptions;
+  /** The same step's per-run diagnostic and recovery choices, forwarded to the
+   * intent unchanged. */
+  runDiagnostics?: RunDiagnosticsIntentFields;
 }): ServerJobExchangeDriverConfig {
   return {
     transport,
     side: "acceptor",
     ...(options !== undefined ? { options } : {}),
+    ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
     linkageTerms: deriveAcceptedLinkageTerms(token.linkageTerms, acceptorName),
     sharedSecret: token.sharedSecret,
     inputSource,
@@ -194,6 +200,9 @@ export interface AcceptorLaunch {
    * so the run cannot be retuned under itself; absent when the operator changed
    * nothing, and unused on the browser (WebRTC) path. */
   options?: JobExchangeOptions;
+  /** The same step's per-run diagnostic and recovery choices, fixed into the
+   * launch for the same reason and unused on the browser path. */
+  runDiagnostics?: RunDiagnosticsIntentFields;
 }
 
 /** Resolve an {@link AcceptorLaunchSource} to the driver's {@link JobInputSource}:
@@ -340,7 +349,7 @@ export function useAcceptorExchange({
 
     const { invitation, acceptorName, rawRows, columns, edits, inputSource } =
       current;
-    const { options } = current;
+    const { options, runDiagnostics } = current;
     const { token, endpoint } = invitation;
     // The bench transport this endpoint runs over, threaded to failureFor so a
     // console mounted-file create rejection (a workFile 400) names the file cause
@@ -444,6 +453,7 @@ export function useAcceptorExchange({
           inputSource: jobInputSource,
           transport: serverJobTransport,
           ...(options !== undefined ? { options } : {}),
+          ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
         }),
         // Persist the created job's id so a reload or hard tab close can re-attach
         // to the appliance's run, and track it for the deliberate-discard paths.
@@ -484,7 +494,10 @@ export function useAcceptorExchange({
     // error except a busy (409) create, which re-attaches below instead.
     const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
       setFailure(
-        failureFor(category, error, jobInputSource, channel, "acceptor"),
+        withSweepRefusalGuidance(
+          failureFor(category, error, jobInputSource, channel, "acceptor"),
+          error,
+        ),
       );
       setRun((prev) => runWithFailure(prev));
     };

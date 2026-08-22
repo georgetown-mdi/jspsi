@@ -16,6 +16,7 @@ import {
   SERVER_JOB_PEER_WINDOW_BODY,
   recoveredExchangeHeading,
 } from "./BenchRunSurface";
+import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { awaitingPartner } from "./exchangeRun";
@@ -206,6 +207,12 @@ export function DirectRunSection({
             </>
           )}
         </>
+      )}
+      {jobId !== undefined && (
+        <DiagnosticLogPanel
+          jobId={jobId}
+          settled={done || failure !== undefined}
+        />
       )}
       {/* Available from job creation onward, collapsed until the run completes
           -- the inviter seat's rule, applied identically here. */}

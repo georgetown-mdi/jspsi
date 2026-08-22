@@ -112,6 +112,7 @@ async function relayErrorFromChild(
       recordPath: path.join(workdir, "record.json"),
       workdir,
       eventStream: true,
+      runControls: { sweepExchangeFiles: false, logFilePath: undefined },
       extraEnv: {
         STUB_FD3_EVENTS: JSON.stringify([
           { v: 1, type: "error", category: "config", message },

@@ -264,6 +264,9 @@ export type JobExchangeSide = "inviter" | "acceptor";
  *   the empty-vs-absent semantics.
  * - `side` is a closed two-value enum selecting which composition rules apply to
  *   this party; it contributes no value to the composed config.
+ * - `diagnosticRun` and `sweepExchangeFiles` are the per-run controls
+ *   ({@link jobRunControlFields}): booleans that select a fixed CLI flag and
+ *   carry no value of their own.
  */
 interface JobExchangeIntentBase {
   /**
@@ -308,6 +311,8 @@ interface JobExchangeIntentBase {
   side?: JobExchangeSide;
   options?: JobExchangeOptions;
   eventStream?: boolean;
+  diagnosticRun?: boolean;
+  sweepExchangeFiles?: boolean;
 }
 
 /**
@@ -364,8 +369,8 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  * input file, and there is no application-layer encryption to key. It therefore
  * carries none of the exchange mode's `sharedSecret`, `linkageTerms`, `metadata`,
  * `standardization`, or `expectedPayloadColumns` -- only an input source, the
- * tuning `options` subset, the `eventStream` toggle, and two optional, bounded
- * selectors:
+ * tuning `options` subset, the `eventStream` toggle, the per-run controls
+ * ({@link jobRunControlFields}), and two optional, bounded selectors:
  *
  * - `linkageStrategy` is a closed enum forwarded to the CLI's `--linkage-strategy`.
  * - `identity` is a bounded operator label forwarded to the CLI's `--identity`
@@ -385,6 +390,8 @@ interface JobZeroSetupIntentBase {
   inputFile?: JobInputFileReference;
   options?: JobExchangeOptions;
   eventStream?: boolean;
+  diagnosticRun?: boolean;
+  sweepExchangeFiles?: boolean;
   linkageStrategy?: JobZeroSetupLinkageStrategy;
   identity?: string;
 }
@@ -520,7 +527,28 @@ const jobInputFileReferenceSchema: z.ZodType<JobInputFileReference> = z
   })
   .strict();
 
+/**
+ * The per-run diagnostic and recovery controls, admitted on every arm of both
+ * modes. Each is a bare boolean that SELECTS a fixed CLI flag rather than
+ * contributing a value: neither can become a path, host, credential, or argv
+ * fragment, so both leave the create surface injection-closed exactly as it was.
+ *
+ * They are per-run rather than appliance state, matching the console's
+ * author-and-run-once shape: nothing about one run's choice survives into the
+ * next.
+ *
+ * `sweepExchangeFiles` reaches the CLI as `--sweep-exchange-files` and nothing
+ * else -- the classification of what is a protocol file and the retain-mode
+ * guard over it are the CLI's, and the escalation past that guard
+ * (`--force-retain-sweep`) is deliberately not representable here.
+ */
+const jobRunControlFields = {
+  diagnosticRun: z.boolean().optional(),
+  sweepExchangeFiles: z.boolean().optional(),
+};
+
 const jobExchangeIntentCommonFields = {
+  ...jobRunControlFields,
   linkageTerms: LinkageTermsSchema,
   sharedSecret: z
     .string()
@@ -630,6 +658,7 @@ export { MAX_IDENTITY_LENGTH };
 // expectedPayloadColumns -- only an input source, the tuning options, the event
 // toggle, and the two bounded selectors. `inputCsv` reuses the exchange mode's cap.
 const jobZeroSetupIntentCommonFields = {
+  ...jobRunControlFields,
   inputCsv: z.string().min(1).max(MAX_INPUT_CSV_LENGTH).optional(),
   inputFile: jobInputFileReferenceSchema.optional(),
   eventStream: z.boolean().optional(),
@@ -727,6 +756,11 @@ export const JOB_FILE_NAMES = {
    * Must equal the CLI's `keysPathFor` derivation of the record name (`.json` ->
    * `.keys.json`); a unit test pins this cross-workspace pairing. */
   recordKeys: "record.keys.json",
+  /** The CLI's own diagnostic log, written only when the run asked to be a
+   * diagnostic one (`--log-file`). A debug-level log can carry partner identity,
+   * linkage keys, and data categories, so it stays inside the owner-only workdir
+   * and is served only through the job's own log endpoint. */
+  log: "run.log",
 } as const;
 
 /**

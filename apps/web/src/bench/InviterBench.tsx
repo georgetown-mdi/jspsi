@@ -61,6 +61,10 @@ import {
   saveTrustFooter,
 } from "./saveExchangeModel";
 import {
+  RUN_DIAGNOSTICS_DEFAULT,
+  runDiagnosticsIntentFields,
+} from "./runDiagnosticsModel";
+import {
   acceptKitEndpointForRendezvous,
   filedropEndpointForRendezvous,
   splitRendezvousRetainProblem,
@@ -156,6 +160,7 @@ import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
+import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
 import type { SavedExchange } from "./SaveExchangeSection";
 import type { Section } from "./stepRestore";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
@@ -322,6 +327,12 @@ export function InviterBench() {
   const [connectionTuning, setConnectionTuning] =
     useState<ConnectionTuningDraft>(CONNECTION_TUNING_DEFAULT);
   const [connectionTuningOpen, setConnectionTuningOpen] = useState(false);
+  // The operator's per-run diagnostic and recovery choices for the same run, held
+  // beside the two drafts above for the same reasons.
+  const [runDiagnostics, setRunDiagnostics] = useState<RunDiagnosticsDraft>(
+    RUN_DIAGNOSTICS_DEFAULT,
+  );
+  const [runDiagnosticsOpen, setRunDiagnosticsOpen] = useState(false);
   const [demoActive, setDemoActive] = useState(false);
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
 
@@ -417,6 +428,7 @@ export function InviterBench() {
     inputSource,
     sftpConfigured,
     options: runOptions,
+    runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
   });
 
   // The coverage input, unified across builds: the browser's parsed rows on the
@@ -1275,6 +1287,10 @@ export function InviterBench() {
                 connectionTuningOpen={connectionTuningOpen}
                 onConnectionTuning={setConnectionTuning}
                 onConnectionTuningOpen={setConnectionTuningOpen}
+                runDiagnostics={runDiagnostics}
+                runDiagnosticsOpen={runDiagnosticsOpen}
+                onRunDiagnostics={setRunDiagnostics}
+                onRunDiagnosticsOpen={setRunDiagnosticsOpen}
                 onLifetime={(seconds) =>
                   applyEditor(editorWithLifetime(editor, seconds))
                 }

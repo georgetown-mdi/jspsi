@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-import { HOST_KEY_FINGERPRINT_REGEX } from "@psilink/core";
+import { HOST_KEY_FINGERPRINT_REGEX, sanitizeForDisplay } from "@psilink/core";
 
 import { sanitizedChildEnv } from "./cliDriver";
 
@@ -15,14 +15,38 @@ import type { ChildProcess } from "node:child_process";
  * value, never authors a connection, and never sends a credential: the CLI's
  * probe verifier refuses before authenticating.
  *
+ * A dial that reached the port and read no host key carries the child's own
+ * diagnosis of what answered instead, so the console's guided audience -- the
+ * likeliest to sit behind an intercepting middlebox -- is told the peer answered
+ * with non-SSH bytes rather than only that the host was unreachable. The
+ * diagnosis crosses STRUCTURALLY (a closed vocabulary plus a bounded, escaped
+ * excerpt), never as forwarded stderr.
+ *
  * Every server-controlled byte is re-validated at this trust boundary
- * (fingerprint regex, key-type charset and length), stderr is discarded entirely
- * (it can carry server-controlled bytes), and the child is watchdog-bounded so
- * the endpoint's latency stays bounded regardless of the child's own timeout.
+ * (fingerprint regex, key-type charset and length, the diagnosis vocabulary and
+ * its escaped excerpt), stderr is discarded entirely (it can carry
+ * server-controlled bytes), and the child is watchdog-bounded so the endpoint's
+ * latency stays bounded regardless of the child's own timeout.
  */
 
-/** The connect timeout handed to the CLI child (its ssh2 `readyTimeout`). */
-const PROBE_CONNECT_TIMEOUT = "10s";
+/**
+ * The connect timeout handed to the CLI child (its ssh2 `readyTimeout`), as a
+ * number so the watchdog headroom below is arithmetic rather than a claim, and
+ * as the duration token the flag's grammar takes.
+ */
+export const PROBE_CONNECT_TIMEOUT_MS = 10_000;
+const PROBE_CONNECT_TIMEOUT = `${PROBE_CONNECT_TIMEOUT_MS / 1000}s`;
+
+/**
+ * The child's own bounded read of the peer's first bytes on a dial that died
+ * before the peer identified itself (`PEER_ANSWER_READ_BUDGET_MS` in
+ * apps/cli/src/connection/sftpPeerIdentification.ts). Mirrored rather than
+ * imported -- the CLI is a separate workspace this server drives as a subprocess
+ * -- so that the watchdog headroom this file depends on is stated where the
+ * watchdog is; a unit test holds the two constants and the watchdog to the
+ * ordering the diagnosis needs.
+ */
+export const PROBE_PEER_READ_BUDGET_MS = 2_000;
 
 /**
  * The server-side watchdog: SIGTERM the child at this point so the endpoint's
@@ -59,19 +83,59 @@ const MAX_KEY_TYPE_LENGTH = 64;
  * other byte -- a control sequence a hostile server smuggled -- fails the check. */
 const KEY_TYPE_CHARSET = /^[A-Za-z0-9._@-]+$/;
 
+// The three bounds below mirror the CLI's own diagnosis vocabulary
+// (`PeerAnswerShape`) and excerpt bound (`PEER_EXCERPT_MAX_BYTES`, 128 bytes) in
+// apps/cli/src/connection/sftpPeerIdentification.ts. Duplicating them rather
+// than importing is deliberate, for the same reason the key-type bounds above
+// are duplicated: this is a re-validation of a distrusted child process's stdout
+// at a trust boundary, so what it accepts has to be what this side is willing to
+// accept, independent of the producer that emitted it.
+/** The shapes a non-SSH answer may be reported as. Any other value is a
+ * malformed diagnosis and is dropped, leaving the bare `unreachable`. */
+const PEER_ANSWER_SHAPES = new Set(["http", "tls-alert", "unrecognized"]);
+/**
+ * The cap on the ESCAPED excerpt, in UTF-16 code units. Four times the CLI's
+ * 128-byte excerpt bound, since the display escape expands a non-printable byte
+ * to a four-character `\xHH`, so an excerpt made entirely of them still crosses
+ * whole; a child that emitted more than its own bound is truncated here rather
+ * than trusted.
+ */
+export const PROBE_EXCERPT_MAX_DISPLAY_LENGTH = 512;
+
+/** What the peer's first bytes were, for a shape the CLI recognizes. */
+export type SftpPeerAnswerShape = "http" | "tls-alert" | "unrecognized";
+
+/**
+ * Why a dial reached the port and still read no host key, as the CLI's own
+ * bounded, credential-free read of the peer's first bytes established it:
+ * - `nonSsh`: the peer answered with something that is not an SSH
+ *   identification string, carrying the shape and the ESCAPED excerpt of what
+ *   it sent (bytes an untrusted party chose).
+ * - `closedUnanswered`: the peer accepted the connection and closed it having
+ *   sent nothing.
+ *
+ * Absent on an `unreachable` the child could not diagnose -- a refused
+ * connection, an unresolvable name, a peer that stalled -- where the categorical
+ * answer is all there is to say.
+ */
+export type SftpProbeDiagnosis =
+  | { kind: "nonSsh"; shape: SftpPeerAnswerShape; excerpt: string }
+  | { kind: "closedUnanswered" };
+
 /**
  * The reconciled outcome of a probe attempt:
  * - `ok`: the child read a host key; carries the re-validated fingerprint and
  *   key type.
  * - `unreachable`: the child could not reach or connect to the server (CLI exit
- *   69).
+ *   69), optionally carrying the child's own {@link SftpProbeDiagnosis} of what
+ *   answered the port.
  * - `timeout`: the watchdog killed the child (it exceeded the server budget).
  * - `error`: the child exited non-zero for another reason, produced no valid
  *   line, or could not be spawned.
  */
 export type SftpProbeResult =
   | { kind: "ok"; fingerprint: string; keyType: string }
-  | { kind: "unreachable" }
+  | { kind: "unreachable"; diagnosis?: SftpProbeDiagnosis }
   | { kind: "timeout" }
   | { kind: "error" };
 
@@ -122,10 +186,63 @@ export function reconcileProbeExit(
   code: number | null,
   stdout: string | undefined,
 ): SftpProbeResult {
-  if (code === 69) return { kind: "unreachable" };
+  if (code === 69) {
+    const diagnosis =
+      stdout === undefined ? undefined : parseProbeDiagnosis(stdout);
+    return diagnosis === undefined
+      ? { kind: "unreachable" }
+      : { kind: "unreachable", diagnosis };
+  }
   if (code !== 0) return { kind: "error" };
   if (stdout === undefined) return { kind: "error" };
   return parseProbeStdout(stdout);
+}
+
+/**
+ * Parse and re-validate the diagnosis line the `--json` form emits on the
+ * exit-69 path, or undefined when the child emitted none or emitted one this
+ * boundary does not accept. Every field is checked here: the discriminant
+ * against a closed two-value vocabulary, the shape against the closed shape set,
+ * and the excerpt -- bytes an untrusted party chose -- ESCAPED and capped before
+ * it is retained, so nothing past this point holds a raw control byte.
+ *
+ * A malformed or unrecognized line degrades to undefined rather than to an
+ * `error` result: the exit code already established what happened, and the
+ * diagnosis is an enrichment of it. That keeps a CLI that has not grown the line
+ * yet -- or one whose vocabulary moved on -- reporting exactly the `unreachable`
+ * it reports today.
+ *
+ * @internal exported for testing
+ */
+export function parseProbeDiagnosis(
+  stdout: string,
+): SftpProbeDiagnosis | undefined {
+  const line = stdout.trim();
+  if (line.length === 0) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+    return undefined;
+  const record = parsed as Record<string, unknown>;
+  if (record["diagnosis"] === "closed_unanswered")
+    return { kind: "closedUnanswered" };
+  if (record["diagnosis"] !== "non_ssh") return undefined;
+  const shape = record["shape"];
+  const excerpt = record["excerpt"];
+  if (typeof shape !== "string" || !PEER_ANSWER_SHAPES.has(shape))
+    return undefined;
+  if (typeof excerpt !== "string") return undefined;
+  return {
+    kind: "nonSsh",
+    shape: shape as SftpPeerAnswerShape,
+    excerpt: sanitizeForDisplay(excerpt, {
+      maxLength: PROBE_EXCERPT_MAX_DISPLAY_LENGTH,
+    }),
+  };
 }
 
 /**

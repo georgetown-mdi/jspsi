@@ -8,6 +8,7 @@ import { discardServerJob, writeAttachment } from "@psi/consoleJobAttachment";
 
 import { whenDiagnostic } from "@utils/diagnostics";
 
+import { failureFor, withSweepRefusalGuidance } from "./useInviterExchange";
 import {
   initialRun,
   runWithCompletion,
@@ -17,7 +18,6 @@ import {
 } from "./exchangeRun";
 import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
 import { appendSanitizedRunWarning } from "./runWarnings";
-import { failureFor } from "./useInviterExchange";
 
 import type {
   JobExchangeOptions,
@@ -31,6 +31,7 @@ import type { DirectTransport } from "./directExchangeModel";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { ExchangeRun } from "./exchangeRun";
+import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
 
@@ -55,6 +56,7 @@ export function useDirectExchange({
   identity,
   linkageStrategy,
   options,
+  runDiagnostics,
 }: {
   /** The agreed transport; maps to the zero-setup intent's channel. */
   channel: DirectTransport;
@@ -73,6 +75,9 @@ export function useDirectExchange({
    * command carrying no configuration document; undefined when the operator
    * changed nothing. */
   options?: JobExchangeOptions;
+  /** The agreed-server step's per-run diagnostic and recovery choices, forwarded
+   * to the intent unchanged. */
+  runDiagnostics?: RunDiagnosticsIntentFields;
 }): {
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
@@ -164,6 +169,7 @@ export function useDirectExchange({
       ...(identity !== undefined ? { identity } : {}),
       ...(linkageStrategy !== undefined ? { linkageStrategy } : {}),
       ...(options !== undefined ? { options } : {}),
+      ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
       // Persist the created job's id so a reload or hard tab close can re-attach,
       // and track it for the deliberate-discard paths. The strand-recovery record
       // carries a seat only to label the re-attached run's waiting stage; a direct
@@ -179,7 +185,12 @@ export function useDirectExchange({
     // Raise a failure's alert and freeze the run: the terminal path for every
     // error except a busy (409) create, which re-attaches below instead.
     const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
-      setFailure(failureFor(category, error, inputSource, channel));
+      setFailure(
+        withSweepRefusalGuidance(
+          failureFor(category, error, inputSource, channel),
+          error,
+        ),
+      );
       setRun((current) => runWithFailure(current));
     };
 

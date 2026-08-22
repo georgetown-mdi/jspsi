@@ -188,7 +188,8 @@ export async function deleteSftpConnection(
  *   field-path-only reason, safe to surface.
  * - `busy`: a `409` -- a probe is already running; the operator can retry.
  * - `unreachable` / `timeout`: the probe ran but read no key (the server could not
- *   be reached, or the attempt exceeded the appliance's budget).
+ *   be reached, or the attempt exceeded the appliance's budget). An `unreachable`
+ *   may carry the appliance's {@link ProbePeerAnswer} of what answered the port.
  * - `disabled`: a `404` -- the job API is off (a hosted build).
  * - `error`: another non-2xx, a network fault, or a malformed/`error` body.
  */
@@ -196,10 +197,28 @@ export type ProbeSftpHostKeyResult =
   | { kind: "ok"; fingerprint: string; keyType: string }
   | { kind: "invalid"; message: string }
   | { kind: "busy" }
-  | { kind: "unreachable" }
+  | { kind: "unreachable"; peerAnswer?: ProbePeerAnswer }
   | { kind: "timeout" }
   | { kind: "disabled" }
   | { kind: "error" };
+
+/** The shapes the appliance reports a non-SSH answer as. */
+export type ProbePeerAnswerShape = "http" | "tls-alert" | "unrecognized";
+
+/**
+ * What answered the port on a probe that reached it and read no host key: the
+ * peer sent bytes that are not an SSH identification string (with the shape and
+ * an excerpt of what it sent), or it accepted the connection and closed it
+ * having sent nothing.
+ *
+ * `excerpt` is a fragment somebody else chose. It arrives already bounded and
+ * escaped by the appliance -- the display sink for those bytes is on the server
+ * side of this boundary -- so it renders as ordinary React text and is never
+ * escaped a second time.
+ */
+export type ProbePeerAnswer =
+  | { kind: "nonSsh"; shape: ProbePeerAnswerShape; excerpt: string }
+  | { kind: "closedUnanswered" };
 
 /** Read the probe-outcome body defensively: re-check the fingerprint against the
  * canonical regex client-side (the appliance is trusted, but a malformed body
@@ -208,7 +227,13 @@ export type ProbeSftpHostKeyResult =
 function probeOutcomeOf(body: unknown): ProbeSftpHostKeyResult {
   if (!isRecord(body)) return { kind: "error" };
   const status = body.status;
-  if (status === "unreachable" || status === "timeout") return { kind: status };
+  if (status === "unreachable") {
+    const peerAnswer = probePeerAnswerOf(body);
+    return peerAnswer === undefined
+      ? { kind: "unreachable" }
+      : { kind: "unreachable", peerAnswer };
+  }
+  if (status === "timeout") return { kind: "timeout" };
   if (status === "ok") {
     const { fingerprint, keyType } = body;
     if (
@@ -222,6 +247,33 @@ function probeOutcomeOf(body: unknown): ProbeSftpHostKeyResult {
   }
   // A `status: "error"` category, or anything unmodeled, is the error state.
   return { kind: "error" };
+}
+
+const PROBE_PEER_ANSWER_SHAPES: ReadonlySet<string> = new Set([
+  "http",
+  "tls-alert",
+  "unrecognized",
+]);
+
+/**
+ * Read the peer-answer diagnosis off an `unreachable` body, or undefined when it
+ * carries none or carries one outside the closed vocabulary. A body without one
+ * is the state every unreachable probe was in before the appliance grew the
+ * field, so an unrecognized value degrades to the bare category rather than to
+ * an error.
+ */
+function probePeerAnswerOf(
+  body: Record<string, unknown>,
+): ProbePeerAnswer | undefined {
+  const peerAnswer = body.peerAnswer;
+  if (peerAnswer === "closedUnanswered") return { kind: "closedUnanswered" };
+  if (peerAnswer !== "nonSsh") return undefined;
+  const shape = body.peerAnswerShape;
+  const excerpt = body.peerAnswerExcerpt;
+  if (typeof shape !== "string" || !PROBE_PEER_ANSWER_SHAPES.has(shape))
+    return undefined;
+  if (typeof excerpt !== "string") return undefined;
+  return { kind: "nonSsh", shape: shape as ProbePeerAnswerShape, excerpt };
 }
 
 /** Read the field-path-only message off a probe `400` body, or a fixed fallback.

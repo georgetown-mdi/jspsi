@@ -20,6 +20,7 @@ import {
   SERVER_JOB_PEER_WINDOW_BODY,
   recoveredExchangeHeading,
 } from "./BenchRunSurface";
+import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { reattachedRunState } from "./reattachedRunState";
@@ -313,6 +314,12 @@ export function InviterExchangeSection({
             </>
           )}
         </>
+      )}
+      {serverJob && jobId !== undefined && (
+        <DiagnosticLogPanel
+          jobId={jobId}
+          settled={phase === "done" || failure !== undefined}
+        />
       )}
       {/* The hand-off is composed at job creation and served for the record's
           lifetime, so the panel stands from the moment the appliance holds the

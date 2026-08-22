@@ -31,6 +31,11 @@ import { isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import {
+  SWEEP_RETAIN_REFUSAL_TITLE,
+  isSweepRetainRefusal,
+  sweepRetainRefusalMessage,
+} from "./runDiagnosticsModel";
+import {
   WAITING_STAGE_ID,
   initialRun,
   runWithCompletion,
@@ -62,6 +67,7 @@ import type {
 } from "@psi/serverJobExchangeDriver";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { JobExchangeOptions } from "@jobs/intent";
+import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
 import type { RunOutputs } from "./runOutputs";
 import type { Transport } from "./inviterModel";
 
@@ -250,6 +256,37 @@ export function failureFor(
 }
 
 /**
+ * Replace a terminal failure with the sweep-refusal guidance when the CLI
+ * refused this run's recovery sweep over a retain-mode signal, else return it
+ * unchanged.
+ *
+ * Applied where a seat sets a run's failure, so the console's one explanation of
+ * the retain guard -- and of the command-line escalation it deliberately does
+ * not offer -- lives in one place rather than in each seat's alert.
+ *
+ * The refusal is the one `exchange`-category terminal whose text is surfaced.
+ * That is safe and warranted here: it is a first-party refusal composed around
+ * the very flag this console put on the argv, it arrives as a relayed chain the
+ * appliance already escaped and bounded, and the concrete retain signal it names
+ * is what tells the operator whose transcript they were about to delete.
+ *
+ * @internal
+ */
+export function withSweepRefusalGuidance(
+  failure: RunFailure,
+  error: unknown,
+): RunFailure {
+  if (!(error instanceof RelayedTerminalError)) return failure;
+  const message = sanitizedFailureMessage(error);
+  if (!isSweepRetainRefusal(message)) return failure;
+  return {
+    category: failure.category,
+    title: SWEEP_RETAIN_REFUSAL_TITLE,
+    message: sweepRetainRefusalMessage(message),
+  };
+}
+
+/**
  * Assemble the {@link ServerJobExchangeDriverConfig} for a console server-job
  * invite -- a file-drop or an SFTP exchange the console appliance runs on this
  * party's behalf. The `transport` picks the intent arm (the SFTP arm carries no
@@ -282,6 +319,7 @@ export function inviterServerJobConfig({
   inputSource,
   transport,
   options,
+  runDiagnostics,
 }: {
   minted: Pick<
     GeneratedInvitation,
@@ -293,6 +331,9 @@ export function inviterServerJobConfig({
    * retain-mode implication. Absent when the operator changed nothing, so the
    * composed config carries no `options` block at all. */
   options?: JobExchangeOptions;
+  /** The review step's per-run diagnostic and recovery choices, forwarded to the
+   * intent unchanged. */
+  runDiagnostics?: RunDiagnosticsIntentFields;
 }): ServerJobExchangeDriverConfig {
   return {
     transport,
@@ -305,6 +346,7 @@ export function inviterServerJobConfig({
       ? { standardization: minted.standardization }
       : {}),
     ...(options !== undefined ? { options } : {}),
+    ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
   };
 }
 
@@ -329,6 +371,7 @@ export function useInviterExchange({
   inputSource,
   sftpConfigured,
   options,
+  runDiagnostics,
 }: {
   invitation: GeneratedInvitation | undefined;
   inviterName: string;
@@ -349,6 +392,9 @@ export function useInviterExchange({
    * the operator changed nothing; unused on the browser path, which conducts the
    * exchange over WebRTC and has no shared directory to tune. */
   options?: JobExchangeOptions;
+  /** The review step's per-run diagnostic and recovery choices, forwarded to the
+   * intent unchanged; unused on the browser path for the same reason. */
+  runDiagnostics?: RunDiagnosticsIntentFields;
 }): {
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
@@ -533,6 +579,7 @@ export function useInviterExchange({
           inputSource,
           transport,
           ...(options !== undefined ? { options } : {}),
+          ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
         }),
         // Persist the created job's id so a reload or hard tab close can re-attach
         // to the appliance's run, and track it for the deliberate-discard paths.
@@ -557,7 +604,12 @@ export function useInviterExchange({
     // Raise a failure's alert and freeze the run: the terminal path for every
     // error except a busy (409) create, which re-attaches below instead.
     const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
-      setFailure(failureFor(category, error, inputSource, channel));
+      setFailure(
+        withSweepRefusalGuidance(
+          failureFor(category, error, inputSource, channel),
+          error,
+        ),
+      );
       setRun((current) => runWithFailure(current));
     };
 

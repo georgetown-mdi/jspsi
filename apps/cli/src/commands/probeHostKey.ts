@@ -7,9 +7,11 @@ import {
   redactAndSanitizeForDisplay,
 } from "@psilink/core";
 import type { PresentedHostKey, SFTPConnectionConfig } from "@psilink/core";
+import type { PeerIdentificationDiagnosis } from "../connection/sftpPeerIdentification";
 
 import { channelFromURL } from "../connectionFromUrl";
 import { SSH2SFTPClientAdapter } from "../connection/ssh2SftpAdapter";
+import { peerIdentificationDiagnosisOf } from "../connection/sftpPeerIdentification";
 import {
   decodeUrlComponent,
   redactUrlCredentials,
@@ -77,7 +79,10 @@ export function builder(cmd: Argv): Argv {
       describe:
         "print one line of machine-readable JSON " +
         '({"fingerprint":"SHA256:...","key_type":"..."}) on stdout instead ' +
-        "of the human-readable summary",
+        "of the human-readable summary. A dial that failed because something " +
+        "other than an SSH server answered the port prints a diagnosis line " +
+        '({"diagnosis":"non_ssh"|"closed_unanswered", ...}) on stdout before ' +
+        "exiting 69, so a caller that discards stderr still gets the cause",
     })
     .option("log-level", {
       type: "string",
@@ -188,6 +193,35 @@ function probeJsonLine(presented: PresentedHostKey): string {
   });
 }
 
+/**
+ * The single stdout line the `--json` form emits for a dial that died before the
+ * peer identified itself: the classification and, for a peer that answered with
+ * something, the shape and the first bytes it sent. Snake_case keys like the
+ * success line, and `diagnosis` is the discriminant -- the success line carries
+ * no such key, so the two shapes can never be read for one another.
+ *
+ * The excerpt is bytes an untrusted party chose. It is already bounded at
+ * composition (see `PEER_EXCERPT_MAX_BYTES` in connection/sftpPeerIdentification)
+ * and rides here as a JSON string value, whose encoding escapes every control
+ * byte, so the line stays one line; a consumer re-validates and escapes it at
+ * its own display boundary.
+ *
+ * @internal exported for testing
+ */
+export function probeDiagnosisJsonLine(
+  diagnosis: PeerIdentificationDiagnosis,
+): string {
+  return JSON.stringify(
+    diagnosis.kind === "closed-unanswered"
+      ? { diagnosis: "closed_unanswered" }
+      : {
+          diagnosis: "non_ssh",
+          shape: diagnosis.shape,
+          excerpt: diagnosis.excerpt,
+        },
+  );
+}
+
 /** The human-readable summary, mirroring the trust-prompt copy in
  * hostKeyTrust.ts. `keyType` is the server's choice within core's bound, so it
  * is escaped before display, exactly as sftpSession.ts treats it; the
@@ -246,13 +280,14 @@ export async function handler(argv: Arguments): Promise<void> {
     }),
   );
 
+  const json = argv["json"] === true;
   try {
     // singleValue and durationFlagSeconds raise a flag-named UsageError (exit 64)
     // on a repeated or malformed flag; buildProbeConfig raises one on a bad URL.
     const result = await probeHostKeyLines({
       sftpUrl: singleValue(argv, "sftp-url") as string,
       connectTimeoutSeconds: durationFlagSeconds(argv, "connect-timeout"),
-      json: argv["json"] === true,
+      json,
       verbosity: (argv["verbose"] as number | undefined) ?? 0,
     });
     // The --json line is the command's sole result, so it goes to stdout via
@@ -261,6 +296,14 @@ export async function handler(argv: Arguments): Promise<void> {
     if (result.stdout !== undefined) console.log(result.stdout);
     if (result.summary !== undefined) log.info(result.summary);
   } catch (err) {
+    // The dial's own diagnosis of a peer that never identified itself goes to
+    // stdout on the --json path, where the exit-69 result would otherwise be
+    // indistinguishable from an unreachable host: a machine consumer discards
+    // stderr precisely because it can carry server-controlled bytes, so the
+    // classification and the bounded excerpt need a route of their own. The
+    // human path keeps reading it off the rendered cause chain below.
+    const diagnosis = json ? peerIdentificationDiagnosisOf(err) : undefined;
+    if (diagnosis !== undefined) console.log(probeDiagnosisJsonLine(diagnosis));
     // A UsageError (bad URL/scheme, malformed flag) is exit 64; a transport
     // failure -- unreachable host, refused connection, timeout -- or a
     // non-canonical fingerprint is exit 69, matching the exchange command's

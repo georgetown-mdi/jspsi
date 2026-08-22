@@ -531,6 +531,10 @@ describe(
             recordPath: path.join(dir, "record.json"),
             workdir: dir,
             eventStream: true,
+            runControls: {
+              sweepExchangeFiles: false,
+              logFilePath: undefined,
+            },
             handlers: {
               onEvent: () => undefined,
               onDegraded: () => undefined,

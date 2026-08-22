@@ -47,7 +47,14 @@ function formatFirstIssue(
  * (`unreachable` / `timeout` / `error`). Non-2xx is reserved for HTTP-level
  * conditions (a bad body, a probe already in flight, the gate off, or an
  * unexpected internal fault), so the client reads a probe outcome from the body,
- * never from the status. No banner, no latency, no stderr crosses the boundary.
+ * never from the status.
+ *
+ * An `unreachable` may carry the child's diagnosis of what answered the port:
+ * `peerAnswer` from a closed two-value vocabulary and, for a non-SSH answer, the
+ * shape and the ESCAPED, capped excerpt of the peer's first bytes. That excerpt
+ * is the one field on this surface an untrusted party chose the content of; it
+ * is bounded and escaped in `sftpProbe` before it reaches here. No latency, no
+ * stderr, and no unbounded or unescaped banner crosses the boundary.
  */
 function probeEnvelope(result: SftpProbeResult): Record<string, unknown> {
   if (result.kind === "ok")
@@ -56,7 +63,17 @@ function probeEnvelope(result: SftpProbeResult): Record<string, unknown> {
       fingerprint: result.fingerprint,
       keyType: result.keyType,
     };
-  return { status: result.kind };
+  if (result.kind !== "unreachable" || result.diagnosis === undefined)
+    return { status: result.kind };
+  const { diagnosis } = result;
+  return diagnosis.kind === "closedUnanswered"
+    ? { status: "unreachable", peerAnswer: "closedUnanswered" }
+    : {
+        status: "unreachable",
+        peerAnswer: "nonSsh",
+        peerAnswerShape: diagnosis.shape,
+        peerAnswerExcerpt: diagnosis.excerpt,
+      };
 }
 
 /**
@@ -68,9 +85,11 @@ function probeEnvelope(result: SftpProbeResult): Record<string, unknown> {
  *
  * The request carries host + port ONLY; the response carries a fingerprint and a
  * key type ONLY (fingerprint regex-validated, key type charset/length-capped), or
- * a probe-outcome category. No username, path, or credential is representable in;
- * no banner, stderr, latency, or saved-hosts list crosses out. These SSRF bounds
- * are the module contract, pinned by tests.
+ * a probe-outcome category and, on an `unreachable` the child diagnosed, a closed
+ * peer-answer vocabulary with a bounded escaped excerpt of the peer's first
+ * bytes. No username, path, or credential is representable in; no stderr,
+ * latency, or saved-hosts list crosses out. These SSRF bounds are the module
+ * contract, pinned by tests.
  *
  * `gateJobRoute` runs first, so a hosted build or an unset `JOB_DATA_ROOT` answers
  * 404. The body is read under a tight byte cap ({@link MAX_SFTP_PROBE_BODY_BYTES})

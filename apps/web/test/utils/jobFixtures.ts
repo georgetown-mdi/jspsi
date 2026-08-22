@@ -7,6 +7,7 @@ import { parse as parseYaml } from "yaml";
 
 import { spawnZeroSetupJob } from "@jobs/cliDriver";
 
+import type { CliRunControls, JobTerminalState } from "@jobs/cliDriver";
 import type {
   JobFiledropExchangeIntent,
   JobInputFileReference,
@@ -15,7 +16,6 @@ import type {
   JobZeroSetupSftpIntent,
 } from "@jobs/intent";
 import type { JobSftpServerEntry } from "@jobs/sftpServer";
-import type { JobTerminalState } from "@jobs/cliDriver";
 import type { LinkageTerms } from "@psilink/core";
 
 /** The stub CLI the driver tests point JOB_CLI_BINARY at. */
@@ -228,6 +228,9 @@ export async function captureZeroSetupArgv(args: {
   eventStream: boolean;
   identity?: string;
   linkageStrategy?: "cascade" | "single-pass";
+  /** The run's diagnostic/recovery controls; defaults to neither, the shape
+   * every caller predating them drives. */
+  runControls?: CliRunControls;
   timeoutMs?: number;
 }): Promise<Array<string>> {
   const { workdir } = args;
@@ -243,6 +246,10 @@ export async function captureZeroSetupArgv(args: {
         recordPath: path.join(workdir, "record.json"),
         workdir,
         eventStream: args.eventStream,
+        runControls: args.runControls ?? {
+          sweepExchangeFiles: false,
+          logFilePath: undefined,
+        },
         ...(args.identity !== undefined ? { identity: args.identity } : {}),
         ...(args.linkageStrategy !== undefined
           ? { linkageStrategy: args.linkageStrategy }

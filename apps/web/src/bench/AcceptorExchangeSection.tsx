@@ -20,6 +20,7 @@ import {
   SERVER_JOB_PEER_WINDOW_BODY,
   recoveredExchangeHeading,
 } from "./BenchRunSurface";
+import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { reattachedRunState } from "./reattachedRunState";
@@ -284,6 +285,12 @@ export function AcceptorExchangeSection({
             </>
           )}
         </>
+      )}
+      {serverJob && jobId !== undefined && (
+        <DiagnosticLogPanel
+          jobId={jobId}
+          settled={phase === "done" || failure !== undefined}
+        />
       )}
       {/* Available from job creation onward, collapsed until the run completes
           -- the inviter seat's rule, applied identically here. */}
