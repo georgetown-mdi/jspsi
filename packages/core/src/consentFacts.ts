@@ -537,11 +537,11 @@ export const DEDUPLICATE_DISCLOSURE_STATEMENT =
  * Fixed first-party copy naming no value, so a surface may render it verbatim.
  */
 export const DEDUPLICATE_ACCEPTOR_SIDE_NOTE =
-  "Accepting turns this on for the inviting party alone: the accepting party's " +
-  "own records are not grouped, so several of its own rows naming one " +
-  "individual stay separate here. Grouping the accepting party's records " +
-  "instead is set up from each party's own configuration file, where each " +
-  "party declares its own side.";
+  "This setting is the inviting party's own and applies to its records " +
+  "alone: the accepting party's records are not grouped, so several of its " +
+  "rows naming one individual stay separate here. Grouping the accepting " +
+  "party's records instead is set up from each party's own configuration " +
+  "file, where each party declares its own side.";
 
 /**
  * The caveat copy for a term an inviter may declare that today's exchange does

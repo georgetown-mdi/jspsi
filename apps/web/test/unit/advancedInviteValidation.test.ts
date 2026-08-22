@@ -111,8 +111,8 @@ describe("the deduplicating-pair gate (the run refuses what the schema admits)",
   // before matching begins, so terms authored on that pair are ones both sides
   // abort on. These pin the refusal at the moment of authoring, and pin that it
   // is the PAIR it names: a single-pass draft that does not deduplicate
-  // generates, and the deduplicating half is refused by the invitation gate
-  // below rather than by this one.
+  // generates, and a deduplicating draft generates too once it names cascade
+  // instead -- pinned by the strategy gate below rather than by this one.
   const now = new Date("2026-01-01T00:00:00Z");
 
   test("blocks Generate on a deduplicating draft under single-pass", () => {
