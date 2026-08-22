@@ -9,6 +9,7 @@ import {
   assertDeduplicateImplemented,
   assertMatchedPairsWellFormed,
   matchedPairCount,
+  InvitationTermDivergenceError,
 } from "../src/exchange";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import {
@@ -634,6 +635,112 @@ test("a deduplicating term under single-pass is refused by both parties before t
   );
   expectRefusedWith(initiator, /single-pass/);
   expectRefusedWith(responder, /single-pass/);
+});
+
+test("a partner presenting a deduplicate its invitation did not declare is refused", async () => {
+  // The invitation declares `false`, so the consent surface showed no grouping
+  // disclosure at all and the acceptance agreed to a one-to-one run. Its author
+  // then presents `true` after the connection opens, which would run the pair
+  // many-to-one: more of the accepting party's records match, each disclosing
+  // its membership. The acceptance retained what the invitation declared, so the
+  // run is refused at the terms exchange -- before any key or payload moves.
+  const declared = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: false,
+  });
+  const presented = parseLinkageTerms({
+    ...termsBase,
+    identity: "Presented Partner Identity",
+    deduplicate: true,
+  });
+  const acceptorTerms = deriveAcceptedLinkageTerms(declared, "B");
+
+  const acceptorPrepared = prepareForExchange(
+    { linkageTerms: acceptorTerms },
+    "B",
+    rowsB,
+    ["first_name"],
+  );
+  acceptorPrepared.expectedPartnerDeduplicate = declared.deduplicate;
+
+  const [connInviter, connAcceptor] = createMessagePipe();
+  // The refusal is ONE-SIDED -- only the accepting party holds the declaration --
+  // so the two runs are not awaited together: the presenting party stays parked
+  // on the round that never comes until its connection is closed, which is what
+  // a caller does when the run throws.
+  const inviterRun = Promise.allSettled([
+    runExchange(
+      connInviter,
+      "initiator",
+      prepareForExchange({ linkageTerms: presented }, "A", rowsA, [
+        "first_name",
+      ]),
+      { psiLibrary },
+    ),
+  ]);
+
+  const reason = await runExchange(
+    connAcceptor,
+    "responder",
+    acceptorPrepared,
+    { psiLibrary },
+  ).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
+  expect(reason).toBeInstanceOf(InvitationTermDivergenceError);
+  expect(reason?.message).toMatch(/contradict the invitation/);
+  // The refusal names the two booleans and no partner-controlled value: the
+  // identity the partner authored is the string most likely to be reached for.
+  expect(reason?.message).not.toContain("Presented Partner Identity");
+
+  await connAcceptor.close();
+  const [inviter] = await inviterRun;
+  // Neither party reaches a PSI round: the accepting side refuses before the
+  // rounds, and the presenting side is left with a failed exchange rather than
+  // the many-to-one result it presented for.
+  expect(inviter.status).toBe("rejected");
+});
+
+test("the same run proceeds when the presented value is the declared one", async () => {
+  // Non-vacuity for the refusal above, and the property the binding must not
+  // break: a deduplicating invitation whose author presents what it declared is
+  // exactly the accepted many-to-one run.
+  const declared = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: true,
+  });
+  const acceptorTerms = deriveAcceptedLinkageTerms(declared, "B");
+  const acceptorPrepared = prepareForExchange(
+    { linkageTerms: acceptorTerms },
+    "B",
+    rowsB,
+    ["first_name"],
+  );
+  acceptorPrepared.expectedPartnerDeduplicate = declared.deduplicate;
+
+  const [connInviter, connAcceptor] = createMessagePipe();
+  const [inviter, acceptor] = await Promise.all([
+    runExchange(
+      connInviter,
+      "initiator",
+      prepareForExchange({ linkageTerms: declared }, "A", rowsA, [
+        "first_name",
+      ]),
+      { psiLibrary },
+    ),
+    runExchange(connAcceptor, "responder", acceptorPrepared, { psiLibrary }),
+  ]);
+  expect(inviter.associationTable).toStrictEqual([
+    [1, 2, 3],
+    [0, 0, 1],
+  ]);
+  expect(acceptor.associationTable).toStrictEqual([
+    [0, 0, 1],
+    [1, 2, 3],
+  ]);
 });
 
 test("prepareForExchange refuses a deduplicating term under single-pass", () => {

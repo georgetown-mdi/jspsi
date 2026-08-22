@@ -139,6 +139,25 @@ export interface PreparedExchange {
    * data, and the party that is lazy on this direction leaves it undefined.
    */
   expectedPayloadColumns?: string[];
+  /**
+   * The `deduplicate` the accepted INVITATION declared for the partner's own
+   * side, if this run was reached by accepting one. When set,
+   * {@link runExchange} holds the value the partner presents at the terms
+   * exchange to it and refuses a contradiction before any key or payload moves
+   * (see {@link assertPresentedDeduplicateMatchesInvitation}).
+   *
+   * Populated by the caller (the accept front end that holds the token), NOT by
+   * {@link prepareForExchange}, for the same reason as
+   * {@link expectedPayloadColumns} beside it: it is a consent-fidelity
+   * expectation carried by the invitation rather than a property derived from
+   * this party's own data or terms -- `deriveAcceptedLinkageTerms` sets this
+   * party's own `deduplicate` to `false` and retains nothing of the inviter's.
+   *
+   * Absent (undefined) on every exchange authored from a party's own
+   * configuration file, where there is no declaration to hold the partner to and
+   * the two documents legitimately differ.
+   */
+  expectedPartnerDeduplicate?: boolean;
   dataset: StandardizedDataset;
   /**
    * The original parsed CSV rows, retained for payload extraction after
@@ -464,6 +483,69 @@ export function assertSigningModeImplemented(
       "unsigned record while the configuration asks for a signed receipt, so " +
       "it is refused before the exchange runs. Set signing.mode to " +
       '"certificate" to sign receipts, or to "none" to run unsigned.',
+  );
+}
+
+/**
+ * The refusal raised when a partner presents a `deduplicate` its invitation did
+ * not declare ({@link assertPresentedDeduplicateMatchesInvitation}).
+ *
+ * A {@link ConnectionError} of kind `protocol` rather than a {@link UsageError},
+ * for the same reason as {@link AlgorithmDivergenceError}: the contradiction is
+ * between two documents the PARTNER authored, so the fault is the peer's rather
+ * than this operator's configuration. The CLI's `instanceof UsageError ? 64 : 69`
+ * mapping therefore yields 69, and a consumer keeping per-failure bookkeeping can
+ * branch on the type.
+ */
+export class InvitationTermDivergenceError extends ConnectionError {
+  constructor(message: string) {
+    super(message, "protocol");
+    this.name = "InvitationTermDivergenceError";
+  }
+}
+
+/**
+ * Bind the `deduplicate` a partner presents at the terms exchange to the value
+ * its INVITATION declared, for a run this party reached by accepting one.
+ *
+ * The term is per-party, so nothing in the agreed terms compares the two sides:
+ * `deriveAcceptedLinkageTerms` sets this party's own value to `false` and the
+ * partner's arrives on its terms message, where a value contradicting the
+ * invitation would otherwise run unremarked. The declaration is what the consent
+ * surfaces stated and what this party agreed to -- an invitation declaring
+ * `false` shows no grouping disclosure at all, while the run its author can
+ * produce by presenting `true` widens what this party's own records disclose
+ * (more of them match, each disclosing its membership and any payload columns
+ * this party sends). So the presented value is held to the declared one, and the
+ * exchange is refused before any key or payload moves.
+ *
+ * Scoped to the invitation path, and NOT a cross-party equality rule: the
+ * expectation is set only by an accept path that holds the token
+ * ({@link PreparedExchange.expectedPartnerDeduplicate}), and `undefined` -- every
+ * exchange authored from two parties' own configuration files -- is a no-op. A
+ * one-sided deduplicating exchange whose two documents legitimately differ is
+ * exactly what makes one party the "many" side, and it still runs.
+ *
+ * The message names the contradiction with the two declared booleans and no
+ * partner-controlled value: the invitation's `deduplicate` is a schema boolean,
+ * and nothing else about the partner's document is quoted.
+ */
+export function assertPresentedDeduplicateMatchesInvitation(
+  invitationDeclared: boolean | undefined,
+  presented: boolean,
+): void {
+  if (invitationDeclared === undefined) return;
+  if (invitationDeclared === presented) return;
+  throw new InvitationTermDivergenceError(
+    "the partner presented linkage terms that contradict the invitation this " +
+      `acceptance consented to: the invitation declared deduplicate ` +
+      `${invitationDeclared}, and the terms presented at the exchange declare ` +
+      `${presented}. That setting decides whether several of the partner's ` +
+      "records may match one of this party's, which changes how many of this " +
+      "party's records match and therefore what they disclose -- so a value " +
+      "the accepted invitation did not state is refused before any key or " +
+      "payload moves. Ask your partner for an invitation declaring the " +
+      "setting it will run, and accept that one.",
   );
 }
 
@@ -1192,6 +1274,18 @@ export async function runExchange(
     localEffectiveKeyCount,
   );
   for (const warning of warnings) onWarning(warning);
+
+  // Hold the partner's presented `deduplicate` to what its invitation declared,
+  // where this run came from accepting one: the term is per-party, so no
+  // compatibility rule compares the two sides, and the value this party consented
+  // to is the invitation's rather than whatever arrives here. Before the
+  // cardinality is resolved from it, and before any key or payload moves. A no-op
+  // on an exchange authored from configuration files, which carries no
+  // declaration. See assertPresentedDeduplicateMatchesInvitation.
+  assertPresentedDeduplicateMatchesInvitation(
+    prepared.expectedPartnerDeduplicate,
+    partnerTerms.deduplicate,
+  );
 
   // Resolve the matching cardinality from both parties' agreed deduplicate
   // settings as the first step after the terms exchange: the resolution is

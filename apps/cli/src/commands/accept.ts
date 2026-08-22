@@ -384,6 +384,13 @@ export async function validateAccept(params: {
     // invitation that carried no disclosed-subset (an older or metadata-unknown
     // mint path) -- then this party reconciles lazily, as before.
     prepared.expectedPayloadColumns = token.disclosedPayloadColumns;
+    // Bind the inviting party's own side of the cardinality to what this
+    // acceptance consented to: the invitation declared it, the consent surface
+    // stated it, and nothing in the agreed terms compares the two sides -- so a
+    // partner presenting a different value at the terms exchange is refused
+    // before any key or payload moves (see
+    // assertPresentedDeduplicateMatchesInvitation).
+    prepared.expectedPartnerDeduplicate = token.linkageTerms.deduplicate;
     return {
       mode: "online",
       url,

@@ -279,6 +279,32 @@ test("validateAccept: a deduplicating invitation leaves this party one-to-one", 
   expect(ready.token.linkageTerms.deduplicate).toBe(true);
 });
 
+test("validateAccept: online retains the invitation's declared deduplicate for the run", async () => {
+  // The other half of that guard. This party's own side is derived, so the
+  // invitation's declaration for the INVITING party's side is what the consent
+  // surface stated and what the exchange must hold its partner to -- and it
+  // survives nowhere in the derived terms. The acceptance records it on the
+  // prepared exchange, where runExchange refuses a partner presenting anything
+  // else before a key or payload moves.
+  for (const declared of [false, true]) {
+    const base = sampleToken(FUTURE());
+    const { error, ready } = await acceptWarnings({
+      token: {
+        ...base,
+        linkageTerms: { ...base.linkageTerms, deduplicate: declared },
+      },
+      columns: LINKAGE_COLUMNS,
+      loggerName: `accept-declared-deduplicate-${declared}`,
+      mode: "online",
+    });
+    expect(error).toBeUndefined();
+    const prepared = (
+      ready as { prepared: { expectedPartnerDeduplicate?: boolean } }
+    ).prepared;
+    expect(prepared.expectedPartnerDeduplicate).toBe(declared);
+  }
+});
+
 test("validateAccept: a deduplicating single-pass invitation is refused before the prompt", async () => {
   // The pair the exchange refuses, caught where the operator is still deciding:
   // validateAccept derives the acceptor's terms ahead of the input, the

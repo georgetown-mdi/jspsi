@@ -105,6 +105,26 @@ describe("prepareAcceptorExchange", () => {
     ]);
   });
 
+  test("retains the invitation's declared deduplicate as the partner's expected value", () => {
+    // The terms-side lock-in: the acceptor's own value is derived as false, so
+    // the invitation's declaration for the INVITER's side would otherwise be
+    // lost between the consent screen and the terms exchange. Both values the
+    // invitation can carry are retained as-is -- never defaulted -- so the run
+    // holds the partner to what this acceptance consented to.
+    for (const declared of [false, true]) {
+      const prepared = prepareAcceptorExchange({
+        linkageTerms: { ...inviterTerms, deduplicate: declared },
+        acceptorName: "Sam Alvarez",
+        edits: baseEdits,
+        rawRows,
+        columns,
+        disclosedPayloadColumns: undefined,
+      });
+      expect(prepared.linkageTerms.deduplicate).toBe(false);
+      expect(prepared.expectedPartnerDeduplicate).toBe(declared);
+    }
+  });
+
   test("the empty disclosed set locks in 'receive nothing' (not lazy)", () => {
     const prepared = prepareAcceptorExchange({
       linkageTerms: inviterTerms,

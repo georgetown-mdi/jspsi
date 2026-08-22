@@ -1469,6 +1469,13 @@ export function safeParseLinkageTerms(raw: unknown) {
  *   An acceptor that wants its OWN records grouped authors that in its own
  *   configuration, which does not call this function.
  *
+ *   What the derived value does not carry, and what an accept path must retain
+ *   separately, is the value the invitation declared for the INVITER's side. It
+ *   is what the consent surfaces stated, and nothing in the agreed terms compares
+ *   the two sides afterwards -- so a caller holding the token records it as the
+ *   run's `expectedPartnerDeduplicate` (`PreparedExchange`, exchange.ts), which
+ *   binds what the partner presents at the terms exchange to what it declared.
+ *
  *   What the derived `false` does NOT hold constant is how many of this party's
  *   records match. A value the inviter holds on several rows is ambiguous under
  *   `one-to-one` and drops out of the round, so this party's record holding it goes
