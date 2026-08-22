@@ -280,15 +280,17 @@ describe("prepareForExchange: an unimplemented algorithm is refused", () => {
   });
 });
 
-// --- Deduplication fails closed before connecting -----------------------------
+// --- Deduplication prepares under every strategy that matches it --------------
 
-describe("prepareForExchange: a deduplicating term is refused off cascade", () => {
-  // Single-pass matches strictly one-to-one, so a deduplicate: true term there
-  // would be matched one-to-one rather than honored -- refuse it before any
-  // connection, with the actionable UsageError (CLI exit 64), never the generic
-  // mid-run cardinality throw. The base `terms` are cascade, which is the
-  // strategy that matches it, and their output block already satisfies the
-  // schema's deduplicate-requires-output constraint.
+describe("prepareForExchange: a deduplicating term is read against the strategy", () => {
+  // The prepare step refuses a deduplicate: true term the agreed strategy cannot
+  // match, before any connection and with the actionable UsageError (CLI exit 64)
+  // rather than the generic mid-run cardinality throw. Both shipped strategies do
+  // match one, so every case here is the admitted half; that the refusal still
+  // fires for a strategy declaring otherwise is driven in
+  // linkageCardinality.test.ts, which can flip the verdict. The base `terms`
+  // output block already satisfies the schema's deduplicate-requires-output
+  // constraint.
   const prepareDeduplicating = (linkageStrategy: LinkageStrategy) =>
     prepareForExchange(
       {
@@ -300,14 +302,11 @@ describe("prepareForExchange: a deduplicating term is refused off cascade", () =
       columns,
     );
 
-  test("deduplicate: true under single-pass is refused before connecting", () => {
-    expect(() => prepareDeduplicating("single-pass")).toThrow(UsageError);
-    expect(() => prepareDeduplicating("single-pass")).toThrow(/single-pass/);
-  });
-
-  test("deduplicate: true under cascade prepares, the strategy that matches it", () => {
-    expect(() => prepareDeduplicating("cascade")).not.toThrow();
-  });
+  for (const linkageStrategy of ["cascade", "single-pass"] as const) {
+    test(`deduplicate: true under ${linkageStrategy} prepares`, () => {
+      expect(() => prepareDeduplicating(linkageStrategy)).not.toThrow();
+    });
+  }
 });
 
 // --- A fan-out transform fails closed before connecting -----------------------

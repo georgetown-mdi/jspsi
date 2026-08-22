@@ -12,6 +12,7 @@ import {
   decodeInt32LE,
   encodeSinglePassReply,
   decodeSinglePassReply,
+  type LinkageCardinality,
 } from "../src/link";
 import { MAX_WEBRTC_FRAME_BYTES } from "../src/connection/binaryPackBounds";
 import { MAX_KEY_CANDIDATES_PER_ROW } from "../src/fanOutFunctions";
@@ -442,10 +443,19 @@ test("withholdsSenderAssociationTable withholds only for a non-receiving, no-pay
 // receiver's OUTBOUND is what catches a regression that sends an empty [[], []]
 // table instead of suppressing the frame: the sender's inbound alone would miss it,
 // since a withholding sender never awaits that frame.
+function mirrorCardinality(
+  cardinality: LinkageCardinality,
+): LinkageCardinality {
+  if (cardinality === "many-to-one") return "one-to-many";
+  if (cardinality === "one-to-many") return "many-to-one";
+  return cardinality;
+}
+
 async function runSinglePassCapturingFrames(
   senderSet: Array<string>,
   receiverSet: Array<string>,
   withhold: boolean,
+  senderCardinality: LinkageCardinality = "one-to-one",
 ): Promise<{
   senderResult: AssociationTable;
   receiverResult: AssociationTable;
@@ -487,7 +497,7 @@ async function runSinglePassCapturingFrames(
   );
   const [senderResult, receiverResult] = await Promise.all([
     linkViaSinglePassPSI(
-      { cardinality: "one-to-one" },
+      { cardinality: senderCardinality },
       sp,
       capturingSenderConn,
       [senderSet],
@@ -496,7 +506,7 @@ async function runSinglePassCapturingFrames(
       -1,
     ),
     linkViaSinglePassPSI(
-      { cardinality: "one-to-one" },
+      { cardinality: mirrorCardinality(senderCardinality) },
       cp,
       capturingReceiverConn,
       [receiverSet],
@@ -546,6 +556,48 @@ test("single-pass withholding keeps a blind helper's table off the wire; the rec
   // forbids) would send an Array here and fail this assertion, which the sender's
   // inbound alone -- a withholding sender never awaits the frame -- would not catch.
   expect(held.receiverOutbound.some((f) => Array.isArray(f))).toBe(false);
+});
+
+test("a deduplicating cardinality does not move the withholding rule", async () => {
+  // The rule reads the sender's output entitlement and payload intent, neither of
+  // which the multiplicity touches -- and only one of the two deduplicating
+  // arrangements can reach the withheld path at all. A "many" party must be
+  // entitled to output (the linkage-terms schema refines it), so it is never a
+  // non-receiving helper; a "one" party may be one, and role resolution then makes
+  // it the SENDER, since the party entitled to output becomes the receiver. That
+  // is the arrangement below: the helper stays blind while the "many" receiver
+  // resolves the whole pairing, including the helper's own uniqueness rule.
+  expect(withholdsSenderAssociationTable(true, false)).toBe(false);
+  const held = await runSinglePassCapturingFrames(
+    ["A", "B", "C"],
+    ["B", "B", "C"],
+    true,
+    "one-to-many",
+  );
+  // The receiver's two "B" rows group onto the helper's single one, which is the
+  // widening -- and the helper learns none of it: no table frame is sent, and it
+  // returns the empty table.
+  expect(held.receiverResult).toStrictEqual([
+    [0, 1, 2],
+    [1, 1, 2],
+  ]);
+  expect(held.senderResult).toStrictEqual([[], []]);
+  expect(held.senderInbound).toHaveLength(1);
+  expect(held.senderInbound[0]).toBeInstanceOf(Uint8Array);
+  expect(held.receiverOutbound.some((f) => Array.isArray(f))).toBe(false);
+
+  // Delivering it instead hands the helper the repeating half the widening
+  // produces, which is the disclosure the withholding closes.
+  const delivered = await runSinglePassCapturingFrames(
+    ["A", "B", "C"],
+    ["B", "B", "C"],
+    false,
+    "one-to-many",
+  );
+  expect(delivered.senderResult).toStrictEqual([
+    [1, 1, 2],
+    [0, 1, 2],
+  ]);
 });
 
 test("single-pass withholding does not leak the match count by frame presence or size", async () => {

@@ -356,18 +356,23 @@ presents the acceptor none of it.
 
 That second half is display-scoped on purpose, and the surfaces say so. What
 holds it is the entitlement gate on the table `runExchange` returns, so a
-sole-receiver acceptance is handed none. The wire is not what holds it: the one
-wire-level withholding covers single-pass alone, and a deduplicating match runs
-cascade, whose rounds carry the grouping to the acceptor's own process -- its
-matched position repeated once per group member, against the inviter's row
-indices.
+sole-receiver acceptance is handed none. The wire is not what holds it in
+general. Under cascade the rounds carry the grouping to the acceptor's own
+process -- its matched position repeated once per group member, against the
+inviter's row indices. Under single-pass the one wire-level withholding can
+reach it, since the sole receiver is the party entitled to output and role
+resolution therefore makes the acceptor the sender that withholding covers, but
+only where the acceptor transmits no payload column of its own; an invitation
+requesting one leaves the table exchanged and the grouping in that party's
+process again.
 
 Stating the withholding as an absolute would put a trust-contingent fact under an
 `enforced` headline, which is the one error this classification exists to
 prevent. So the two halves are two facts. The STATEMENT says what psilink
 presents, which is the display withholding this client makes. The limit -- that
-the rounds carry the grouping to the acceptor's process all the same, so what its
-operator is shown rests on the software that party runs -- is a
+the matching still carries the grouping to the acceptor's process wherever the
+withholding above does not reach, so what its operator is shown rests on the
+software that party runs -- is a
 `trust-contingent` entry of its own in the shared table
 (`duplicateGroupingDisplayLimit`), rendered beside the statement by both
 surfaces. A limit that is a claim about software rather than about the run is
@@ -506,9 +511,8 @@ spec's remaining `psi-c` shape refusals are held on the same footing: more than
 one linkage key and `linkage_strategy: single-pass` would falsify the tier's own
 copy -- the round-disclosure note speaks of one key's exactly-once values, and
 the result note denies any record-by-record pairing -- and `deduplicate` is
-refused by the count-only rule, with `assertDeduplicateImplemented` refusing it a
-second time under `single-pass`, the strategy no deduplicating match runs on.
-None of those
+refused by the count-only rule, a count-only run reporting a size rather than a
+pairing for any multiplicity to widen. None of those
 three -- more than one linkage key, single-pass, and deduplicate -- has a render
 backstop, by decision rather than omission: the refusals reach them where the
 terms are authored, at parse, and at accept, which is where a document that

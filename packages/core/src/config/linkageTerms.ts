@@ -1163,14 +1163,19 @@ export function assertCountOnlyTermsShape(terms: LinkageTerms): void {
 
 /**
  * Which linkage strategies realize a deduplicating match, one entry per
- * strategy. The cascade does (`linkViaPSI`); `single-pass` matches strictly
- * one-to-one, so it realizes none.
+ * strategy. Both do: the cascade re-expands a match on a kept value across the
+ * group in each round (`linkViaPSI`), and `single-pass` applies the same per-side
+ * rules in the receiver's local replay over the index table it already ships
+ * (`linkViaSinglePassPSI`).
  *
  * A total table over {@link LinkageStrategy} rather than a comparison against one
  * named strategy: a strategy added to the union states its own verdict here or
  * the build fails, so neither the refusal below nor the consent copy that reads
- * the same verdict can be left behind by an addition. Typed `boolean` rather than
- * the literal values so each reader's gate gives a genuine runtime branch.
+ * the same verdict can be left behind by an addition. That is what the table is
+ * for while no shipped strategy answers `false`: the entry is where a new strategy
+ * declares it cannot match a group, and the refusal below is what then stops the
+ * run. Typed `boolean` rather than the literal values so each reader's gate gives
+ * a genuine runtime branch.
  *
  * @internal exported for the test that drives both readers over every strategy.
  */
@@ -1179,7 +1184,7 @@ export const DEDUPLICATE_IMPLEMENTED_BY_STRATEGY: Record<
   boolean
 > = {
   cascade: true,
-  "single-pass": false,
+  "single-pass": true,
 };
 
 /**
@@ -1203,14 +1208,17 @@ export function deduplicateIsImplementedForStrategy(
  * matching begins: the term under a linkage strategy that does not match a
  * deduplicating cardinality ({@link deduplicateIsImplementedForStrategy}).
  *
- * The cascade implements the deduplicating match (`linkViaPSI`), and the surfaces
- * downstream of the association table -- the payload frame, the output table, and
- * the exchange record with its re-supply path -- carry a table with several links
- * per record. `single-pass` implements neither deduplicating cardinality: its
- * accept-list admits `one-to-one` alone, so an exchange on that strategy would
- * abort mid-round against terms that asked for a group. Refusing the pair here
- * puts the answer where the operator is still configuring, and keeps the
- * strategy's own guard as the second, fail-closed half rather than the first.
+ * Both shipped strategies match one (`linkViaPSI` and `linkViaSinglePassPSI`), and
+ * the surfaces downstream of the association table -- the payload frame, the output
+ * table, and the exchange record with its re-supply path -- carry a table with
+ * several links per record, so this refuses nothing an operator can configure
+ * today. It stays as the boundary a strategy answering `false` in
+ * {@link DEDUPLICATE_IMPLEMENTED_BY_STRATEGY} is stopped at: refusing the pair here
+ * puts the answer where the operator is still configuring, rather than mid-round
+ * against terms that asked for a group, and keeps the strategy's own guard as the
+ * second, fail-closed half rather than the first. What IS refused today is the
+ * `(true, true)` pair, which `resolveLinkageCardinality` answers separately -- a
+ * cardinality no strategy pairs past, rather than a strategy that cannot pair one.
  *
  * Applied where a document is authored or minted, at the local prepare step
  * (`prepareForExchange`), where a received invitation is accepted
@@ -1243,12 +1251,11 @@ export function assertDeduplicateImplemented(terms: LinkageTerms): void {
   if (!terms.deduplicate) return;
   if (deduplicateIsImplementedForStrategy(terms.linkageStrategy)) return;
   throw new UsageError(
-    "deduplicated matching is not yet implemented for the single-pass " +
-      'linkage strategy: single-pass matches strictly one-to-one, so a "' +
-      'deduplicate: true" term would be matched one-to-one rather than ' +
-      "honored. The exchange is refused before matching begins. Set " +
-      "linkage_strategy to cascade to run a deduplicating match, or set " +
-      "deduplicate to false.",
+    "deduplicated matching is not implemented for the linkage strategy these " +
+      'terms name: a "deduplicate: true" term would be matched one-to-one ' +
+      "rather than honored, so the exchange is refused before matching " +
+      "begins. Set linkage_strategy to cascade or single-pass to run a " +
+      "deduplicating match, or set deduplicate to false.",
   );
 }
 

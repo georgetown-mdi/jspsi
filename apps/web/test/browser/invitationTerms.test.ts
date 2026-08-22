@@ -2402,26 +2402,26 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     ).toBeGreaterThan(0);
   });
 
-  test("a deduplicating invitation the run refuses states no grouping disclosure at all", async () => {
-    // single-pass matches no deduplicating cardinality, so acceptance refuses the
-    // invitation before this screen is reached (assertDeduplicateImplemented).
-    // The screen holds the same line from its own side: what a deduplicating run
-    // discloses is not stated for a run that cannot happen. The headline still
-    // reports the term the invitation declares.
+  test("a deduplicating invitation states its grouping disclosure under either strategy", async () => {
+    // The screen withholds what a deduplicating run discloses where the strategy
+    // cannot match one, since stating it would describe a run acceptance refuses
+    // (assertDeduplicateImplemented). It reads that verdict from core rather than
+    // from the strategy's name, and both strategies this build ships match one --
+    // so an invitation naming the other still states the disclosure. That the
+    // withholding follows a `false` verdict is driven over the whole verdict
+    // table in core's invitationSummary.test.ts, which can flip one.
     renderCaveatTerms({ linkageStrategy: "single-pass" });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     const collapse = await readyCollapse("Other details");
     expect(collapse.textContent).toContain(
       "More than one of the inviting party's records",
     );
-    expect(app.container.textContent).not.toContain(
+    expect(collapse.textContent).toContain(
       DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
     );
+    expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
     expect(app.container.textContent).not.toContain(
       DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
-    );
-    expect(app.container.textContent).not.toContain(
-      DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
     );
   });
 

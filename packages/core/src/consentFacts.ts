@@ -256,17 +256,23 @@ export const CONSENT_FACTS = {
     reason:
       "What a sole-receiver acceptance is not handed is the RESULT, and the " +
       "entitlement gate on the table `runExchange` returns holds that. The " +
-      "grouping itself still reaches the accepting party's process: the one " +
-      "wire-level withholding (`withholdsSenderAssociationTable`) covers " +
-      "single-pass alone, and a deduplicating match runs cascade, whose rounds " +
-      "carry each matched position once per group member. So presenting none " +
-      "of it is the client's doing rather than the exchange's, and what an " +
-      "operator on that side is shown rests on the software that side runs -- " +
-      "the partner's register, not the run's. Carried as a fact of its own " +
-      "rather than inside " +
-      "DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT, so the " +
-      "trust-contingent half is classified and pinned rather than resting on a " +
-      "clause under an enforced headline.",
+      "grouping itself still reaches the accepting party's process on the paths " +
+      "this basis is measured over. Under cascade its rounds carry each matched " +
+      "position once per group member. Under single-pass the one wire-level " +
+      "withholding (`withholdsSenderAssociationTable`) can close that -- the " +
+      "sole receiver being the party entitled to output, role resolution makes " +
+      "the acceptor the sender the withholding covers -- but only where that " +
+      "party also transmits no payload column, and an invitation requesting one " +
+      "of it leaves the table exchanged. So presenting none of the grouping is " +
+      "the client's doing rather than the exchange's wherever the exchange has " +
+      "not closed it, and what an operator on that side is shown rests on the " +
+      "software that side runs -- the partner's register, not the run's. The " +
+      "note states that general case and so never claims a protection a " +
+      "particular run withholds beyond it. Carried as a fact of its own rather " +
+      "than inside DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT: it renders " +
+      "beside that statement, under the same enforced headline, but as a " +
+      "classified fact of its own rather than as a clause of a sentence whose " +
+      "basis is the headline's.",
     note:
       "The matching rounds do carry that grouping to the accepting party's " +
       "software, so presenting none of it is this client's doing rather than a " +

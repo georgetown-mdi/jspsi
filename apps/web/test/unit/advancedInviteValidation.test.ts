@@ -107,28 +107,28 @@ describe("the fan-out gate (the run refuses what the schema admits)", () => {
 });
 
 describe("the deduplicating-pair gate (the run refuses what the schema admits)", () => {
-  // Core refuses a `deduplicate: true` term under `single-pass` on both parties
-  // before matching begins, so terms authored on that pair are ones both sides
-  // abort on. These pin the refusal at the moment of authoring, and pin that it
-  // is the PAIR it names: a single-pass draft that does not deduplicate
-  // generates, and a deduplicating draft generates too once it names cascade
-  // instead -- pinned by the strategy gate below rather than by this one.
+  // Core refuses a `deduplicate: true` term under a strategy that cannot run one,
+  // on both parties before matching begins, so terms authored on that pair are
+  // ones both sides abort on. The gate reads core's own verdict rather than
+  // restating the pair, and every strategy this build offers can run one -- so
+  // what these pin is that the pairs the run does honor generate here.
   const now = new Date("2026-01-01T00:00:00Z");
 
-  test("blocks Generate on a deduplicating draft under single-pass", () => {
-    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
-    const result = validateAdvancedInvite(
-      { ...draft, deduplicate: true, linkageStrategy: "single-pass" },
-      seed,
-      now,
-    );
-    expect(result.canGenerate).toBe(false);
-    expect(result.terms).toBeUndefined();
-    // Both ways out, each named as the control that carries it, rather than the
-    // config-file wording core's own refusal uses.
-    expect(result.errors.keys).toMatch(/Set Linkage strategy to Cascade/);
-    expect(result.errors.keys).toMatch(/Allow several of your records/);
-  });
+  test.each(["cascade", "single-pass"] as const)(
+    "a deduplicating draft under %s generates",
+    (linkageStrategy) => {
+      const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+      const result = validateAdvancedInvite(
+        { ...draft, deduplicate: true, linkageStrategy },
+        seed,
+        now,
+      );
+      expect(result.errors).toEqual({});
+      expect(result.canGenerate).toBe(true);
+      expect(result.terms?.deduplicate).toBe(true);
+      expect(result.terms?.linkageStrategy).toBe(linkageStrategy);
+    },
+  );
 
   test("a single-pass draft that does not deduplicate generates", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
@@ -145,12 +145,12 @@ describe("the deduplicating-pair gate (the run refuses what the schema admits)",
 describe("the strategy gate on a deduplicating term", () => {
   // Acceptance derives the accepting party's own deduplicate as false rather than
   // adopting the inviting party's, so a deduplicating invitation reaches the run
-  // as the one-sided pair the cascade matches. What stays refused is the pair no
-  // strategy matches, and this editor refuses it where the operator still holds
-  // both controls.
+  // as the one-sided pair both strategies match. What stays refused is the pair
+  // no strategy matches, and this editor refuses it where the operator still
+  // holds both controls.
   const now = new Date("2026-01-01T00:00:00Z");
 
-  test("a deduplicating draft under cascade generates, the strategy that matches it", () => {
+  test("a deduplicating draft generates, the exchange applying the setting", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const result = validateAdvancedInvite(
       { ...draft, deduplicate: true, linkageStrategy: "cascade" },
@@ -163,19 +163,6 @@ describe("the strategy gate on a deduplicating term", () => {
     // exchange applies it, which is the one question this control is gated on.
     expect(APPLIED_SETTINGS.deduplicate).toBe(true);
     expect(result.terms?.deduplicate).toBe(true);
-  });
-
-  test("blocks Generate on a deduplicating single-pass draft, naming both controls", () => {
-    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
-    const result = validateAdvancedInvite(
-      { ...draft, deduplicate: true, linkageStrategy: "single-pass" },
-      seed,
-      now,
-    );
-    expect(result.canGenerate).toBe(false);
-    expect(result.terms).toBeUndefined();
-    expect(result.errors.keys).toMatch(/Set Linkage strategy to Cascade/);
-    expect(result.errors.keys).toMatch(/Allow several of your records/);
   });
 
   test("an import that turns the setting on is not refused", () => {

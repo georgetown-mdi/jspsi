@@ -937,6 +937,17 @@ function relieveTransientMemory(): void {
  * empty-versus-populated association table would leak the match count by the
  * frame's presence and size, so only omitting it closes the channel. See
  * docs/notes/one-sided-disclosure.md and docs/spec/PROTOCOL.md.
+ *
+ * A deduplicating cardinality does not move the rule, and it cannot reach the
+ * withheld path from the "many" side: a party declaring `deduplicate: true` must
+ * declare `output.expectsOutput` (the linkage-terms schema refines it), so a "many"
+ * sender is entitled to output and is never a non-receiving helper. What the
+ * withheld path does cover under multiplicity is the design-intent shape -- the
+ * "one" party a no-output helper, which role resolution then makes the SENDER,
+ * since the party entitled to output becomes the receiver -- so the "many" party
+ * resolves the whole pairing and applies the one-side uniqueness rule to the
+ * helper's index table on its behalf. The helper needs nothing back there for the
+ * same two reasons as under `one-to-one`. Pinned in psiLink.test.ts.
  */
 export function withholdsSenderAssociationTable(
   senderExpectsOutput: boolean,
@@ -989,13 +1000,15 @@ export interface SinglePassSessionBounds {
  * {@link replaySinglePassCascade}. A fan-out-free exchange ships and replays
  * exactly what it did before fan-out existed.
  *
- * It matches `one-to-one` alone. The receiver's replay resolves the whole pairing
- * from the fixed-width index table, and no clause of it keeps a party's
- * within-dataset duplicate values, so every deduplicating cardinality is refused
- * here rather than aliased onto the one-to-one arm -- an alias would match a
- * consented many-cardinality term one-to-one and say nothing. exchange.ts refuses
- * the same pair before the run (`assertDeduplicateImplemented`); this is the
- * strategy's own fail-closed half, which holds for a direct caller too.
+ * It matches the one-sided deduplicating cardinalities as well as `one-to-one`,
+ * over the same frames: the index table already carries one value per (key,
+ * record) for every party, so which side keeps a value several of its records hold
+ * is a rule of the receiver's replay rather than anything on the wire
+ * (docs/spec/PROTOCOL.md, The per-side rules). `many-to-many` throws, as it does in
+ * the cascade: its pairing rules are specified but the entity closure that makes
+ * such a table actionable is not. exchange.ts refuses that pair before the run
+ * (`resolveLinkageCardinality`); this is the strategy's own fail-closed half, which
+ * holds for a direct caller too.
  *
  * @param bounds - The authenticated session state every derived bound reads; see
  *   {@link SinglePassSessionBounds}. Together they fix the per-exchange frame cap,
@@ -1026,7 +1039,12 @@ export async function linkViaSinglePassPSI(
 ): Promise<AssociationTable> {
   if (participant.config.role === "either")
     throw new Error("participants role is unresolved");
-  if (protocol.cardinality !== "one-to-one") {
+  // Which side of a round's incidence keeps its within-dataset duplicate values,
+  // read off this party's own resolved label exactly as the cascade reads it. The
+  // sender's copy is what its returned table is checked against, and the
+  // receiver's is what its replay resolves under.
+  const sides = multiplicitySides(protocol.cardinality);
+  if (sides === undefined) {
     throw new Error(
       `psi for cardinality '${protocol.cardinality}' not yet implemented`,
     );
@@ -1213,21 +1231,37 @@ export async function linkViaSinglePassPSI(
     // contract (types.ts) that the cascade produces structurally and the receiver
     // sorts this table into, and the result rows and the record's reconstruction
     // of them read the table in it.
+    //
+    // Under a deduplicating cardinality one half repeats -- the "one" side's rows,
+    // several of the MANY side's linking to each -- so the distinctness that
+    // otherwise makes the local half STRICTLY ascending and caps the table's length
+    // is relaxed on exactly that half, leaving it non-decreasing and the length
+    // pinned by the many side's row count instead (docs/spec/PROTOCOL.md, Deriving
+    // one table from the exchanged association maps). Which half that is comes from
+    // this party's own resolved label rather than from the table, and the other
+    // half -- the many side's, one entry per record it matched -- is the anchor.
     const table = await receiveParsed(conn, associationTableMessage);
-    assertPartnerIndexTable(
-      participant.id,
-      {
-        what: "the resolved association table's local half",
-        indices: table[0],
-        exclusiveBound: numRecords,
-        ascending: true,
-      },
-      {
-        what: "the resolved association table's partner half",
-        indices: table[1],
-        exclusiveBound: partnerRecordCount,
-      },
-    );
+    const localHalf = {
+      what: "the resolved association table's local half",
+      indices: table[0],
+      exclusiveBound: numRecords,
+      ascending: true,
+    };
+    const partnerHalf = {
+      what: "the resolved association table's partner half",
+      indices: table[1],
+      exclusiveBound: partnerRecordCount,
+    };
+    if (sides.partnerKeepsDuplicates)
+      assertPartnerIndexTable(participant.id, partnerHalf, {
+        ...localHalf,
+        repeats: true,
+      });
+    else
+      assertPartnerIndexTable(participant.id, localHalf, {
+        ...partnerHalf,
+        repeats: sides.localKeepsDuplicates,
+      });
     stage("done");
     return [table[0], table[1]];
   }
@@ -1329,6 +1363,7 @@ export async function linkViaSinglePassPSI(
     senderToReceiverDistinctValue,
     numRecords,
     numSenderRecords,
+    sides,
   );
 
   // Collect the cascade's per-key reconstruction maps before returning.
@@ -1349,8 +1384,12 @@ export async function linkViaSinglePassPSI(
     return result;
   }
 
+  // The same pairs read from the sender's side, in that side's own row order. The
+  // tiebreak is explicit because a deduplicating cardinality can put several pairs
+  // on one sender row, and the order within such a run is part of what the
+  // sender's half carries.
   const pairs = result[0].map((i, k): [number, number] => [result[1][k], i]);
-  pairs.sort((a, b) => a[0] - b[0]);
+  pairs.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   const theirResult: AssociationTable = [
     pairs.map((p) => p[0]),
     pairs.map((p) => p[1]),
@@ -1670,30 +1709,80 @@ export function decodeRaggedIndexTable(
 
 // --- the record-level resolution ---------------------------------------------
 
-// The values exactly one of this round's candidate records holds, mapped to that
-// record. Uniqueness is per VALUE, not per record: a value two candidate records
-// share is ambiguous and leaves the round, while those records' other candidates
-// stay in it (docs/spec/PROTOCOL.md, Value-level round participation). A record
-// out of candidacy contributes nothing, which is how a value ambiguous in one
+// The candidate records each of one round's values stands for, on one party.
+// Uniqueness is per VALUE, not per record: a value two candidate records share is
+// ambiguous and leaves the round on a party that does not deduplicate, while those
+// records' other candidates stay in it (docs/spec/PROTOCOL.md, Value-level round
+// participation). A "many" party keeps such a value instead and stands it for the
+// whole GROUP of its records holding it (The per-side rules), which is the whole of
+// the per-side difference a deduplicating cardinality makes here. A record out of
+// candidacy contributes nothing either way, which is how a value ambiguous in one
 // round becomes usable in a later one.
-function uniqueValueOwners(
-  cells: KeyCells,
-  numRecords: number,
-  outOfCandidacy: Uint8Array,
-): Map<number, number> {
-  const firstRow = new Map<number, number>();
-  const recurring = new Set<number>();
-  for (let row = 0; row < numRecords; ++row) {
-    if (outOfCandidacy[row]) continue;
-    const width = cells.count(row);
-    for (let k = 0; k < width; ++k) {
-      const value = cells.valueAt(row, k);
-      if (firstRow.has(value)) recurring.add(value);
-      else firstRow.set(value, row);
+class RoundValueOwners {
+  // `groups` is absent on a party that drops its duplicates, where a value the
+  // round keeps has exactly one owner and `firstRow` is the whole answer. On a
+  // "many" party it holds the ascending group behind every value more than one of
+  // its candidate rows contributed, which is the only case that allocates past the
+  // single-owner map.
+  private constructor(
+    private readonly firstRow: Map<number, number>,
+    private readonly groups: Map<number, Array<number>> | undefined,
+  ) {}
+
+  static forRound(
+    cells: KeyCells,
+    numRecords: number,
+    outOfCandidacy: Uint8Array,
+    keepsDuplicates: boolean,
+  ): RoundValueOwners {
+    const firstRow = new Map<number, number>();
+    const recurring = new Set<number>();
+    for (let row = 0; row < numRecords; ++row) {
+      if (outOfCandidacy[row]) continue;
+      const width = cells.count(row);
+      for (let k = 0; k < width; ++k) {
+        const value = cells.valueAt(row, k);
+        if (firstRow.has(value)) recurring.add(value);
+        else firstRow.set(value, row);
+      }
     }
+    if (!keepsDuplicates) {
+      for (const value of recurring) firstRow.delete(value);
+      return new RoundValueOwners(firstRow, undefined);
+    }
+    const groups = new Map<number, Array<number>>();
+    for (const value of recurring) groups.set(value, []);
+    // A second pass over the recurring values alone, in row order, so each group
+    // ascends -- which is what makes the sweep's candidate order reproducible. A
+    // row holding one value twice (a candidate producer whose set did not collapse
+    // its repeats) stands in the group once.
+    for (let row = 0; row < numRecords; ++row) {
+      if (outOfCandidacy[row]) continue;
+      const width = cells.count(row);
+      for (let k = 0; k < width; ++k) {
+        const group = groups.get(cells.valueAt(row, k));
+        if (group !== undefined && group[group.length - 1] !== row)
+          group.push(row);
+      }
+    }
+    return new RoundValueOwners(firstRow, groups);
   }
-  for (const value of recurring) firstRow.delete(value);
-  return firstRow;
+
+  /** Whether `row` takes part in this round with `value`. */
+  holds(value: number, row: number): boolean {
+    return this.groups === undefined
+      ? this.firstRow.get(value) === row
+      : this.firstRow.has(value);
+  }
+
+  /** Appends every candidate row `value` stands for, ascending, to `into`. */
+  appendOwners(value: number, into: Array<number>): void {
+    const first = this.firstRow.get(value);
+    if (first === undefined) return;
+    const group = this.groups?.get(value);
+    if (group === undefined) into.push(first);
+    else for (const row of group) into.push(row);
+  }
 }
 
 /**
@@ -1712,13 +1801,22 @@ function uniqueValueOwners(
  * wins, and both of its components are role-derived, so both parties and any other
  * implementation reproduce the same table from the same frames. Nothing here reads
  * a map's iteration order, a value's bytes, or an encrypted element's position:
- * the sweep walks sender rows in ascending order and sorts each row's few receiver
+ * the sweep walks sender rows in ascending order and sorts each row's receiver
  * candidates, so the pairs are emitted already in the normative order.
  *
- * On inputs where every cell holds at most one value this reduces to the
- * single-valued cascade: each round's candidate pairs are then a partial
- * one-to-one correspondence, so the sweep accepts every pair and removal on a
- * potential match coincides with removal on a match.
+ * `sides` carries the receiver's own resolved cardinality into both steps that a
+ * deduplicating one relaxes, and nothing else moves: the "many" side keeps a value
+ * several of its candidate records hold and stands the round's position for that
+ * group ({@link RoundValueOwners}), and step 2's acceptance clause binds the MANY
+ * side's record alone, whether or not the "one" side's record has already been
+ * accepted (docs/spec/PROTOCOL.md, The per-side rules). Which side is which is read
+ * from the receiver's label, so this reproduces what the cascade computes from the
+ * two parties' mirror labels for the same exchange.
+ *
+ * On inputs where every cell holds at most one value and neither side deduplicates
+ * this reduces to the single-valued cascade: each round's candidate pairs are then
+ * a partial one-to-one correspondence, so the sweep accepts every pair and removal
+ * on a potential match coincides with removal on a match.
  */
 function replaySinglePassCascade(
   receiverCells: Array<KeyCells>,
@@ -1726,22 +1824,56 @@ function replaySinglePassCascade(
   senderToReceiverDistinctValue: ReadonlyMap<number, number>,
   numReceiverRecords: number,
   numSenderRecords: number,
+  sides: MultiplicitySides,
 ): AssociationTable {
+  const receiverKeepsDuplicates = sides.localKeepsDuplicates;
+  const senderKeepsDuplicates = sides.partnerKeepsDuplicates;
+  // A side is held to one accepted pair per round exactly when it is NOT the "one"
+  // side of a deduplicating cardinality -- which is to say, when the other side
+  // does not carry the multiplicity.
+  const senderAcceptsOnce = !receiverKeepsDuplicates;
+  const receiverAcceptsOnce = !senderKeepsDuplicates;
+
   const receiverOut = new Uint8Array(numReceiverRecords);
   const senderOut = new Uint8Array(numSenderRecords);
   const pairedWith = new Int32Array(numReceiverRecords).fill(-1);
+  // Only a "many" SENDER pairs several of its records with one receiver record.
+  // The first of them stays in `pairedWith`, so every other cardinality allocates
+  // nothing here and records a pairing by assignment alone -- which is also what
+  // leaves the second-pair path unreachable from those cardinalities rather than
+  // guarded within one.
+  const furtherSenderRows = senderKeepsDuplicates
+    ? new Map<number, Array<number>>()
+    : undefined;
+  const acceptPair =
+    furtherSenderRows === undefined
+      ? (receiverRow: number, senderRow: number): void => {
+          pairedWith[receiverRow] = senderRow;
+        }
+      : (receiverRow: number, senderRow: number): void => {
+          if (pairedWith[receiverRow] < 0) {
+            pairedWith[receiverRow] = senderRow;
+            return;
+          }
+          const further = furtherSenderRows.get(receiverRow);
+          if (further === undefined)
+            furtherSenderRows.set(receiverRow, [senderRow]);
+          else further.push(senderRow);
+        };
   const receiverCandidates: Array<number> = [];
 
   for (let j = 0; j < receiverCells.length; ++j) {
-    const receiverOwners = uniqueValueOwners(
+    const receiverOwners = RoundValueOwners.forRound(
       receiverCells[j],
       numReceiverRecords,
       receiverOut,
+      receiverKeepsDuplicates,
     );
-    const senderOwners = uniqueValueOwners(
+    const senderOwners = RoundValueOwners.forRound(
       senderCells[j],
       numSenderRecords,
       senderOut,
+      senderKeepsDuplicates,
     );
     const touchedReceiverRows: Array<number> = [];
     const touchedSenderRows: Array<number> = [];
@@ -1753,33 +1885,35 @@ function replaySinglePassCascade(
       const width = senderCells[j].count(senderRow);
       for (let k = 0; k < width; ++k) {
         const senderValue = senderCells[j].valueAt(senderRow, k);
-        // Absent from the owners map means the value was ambiguous within the
-        // sender's own round and left it.
-        if (senderOwners.get(senderValue) !== senderRow) continue;
+        // Not held here means the value left the round: ambiguous within the
+        // sender's own round, which only a side that drops its duplicates does.
+        if (!senderOwners.holds(senderValue, senderRow)) continue;
         const receiverValue = senderToReceiverDistinctValue.get(senderValue);
         if (receiverValue === undefined) continue;
-        const receiverRow = receiverOwners.get(receiverValue);
-        if (receiverRow === undefined) continue;
-        receiverCandidates.push(receiverRow);
+        receiverOwners.appendOwners(receiverValue, receiverCandidates);
       }
       if (receiverCandidates.length === 0) continue;
-      // At most MAX_KEY_CANDIDATES_PER_ROW entries, so the sort is a handful of
-      // comparisons; ascending here plus the ascending sender-row loop is exactly
-      // the normative lexicographic order.
+      // Ascending here plus the ascending sender-row loop is exactly the normative
+      // lexicographic order. Each of the sender row's at most
+      // MAX_KEY_CANDIDATES_PER_ROW values contributes one receiver row, or the
+      // group behind it where the receiver deduplicates.
       receiverCandidates.sort((a, b) => a - b);
       touchedSenderRows.push(senderRow);
       let previous = -1;
-      let accepted = false;
+      let senderAccepted = false;
       for (const receiverRow of receiverCandidates) {
         // Several equal value pairs between the same two records are one
         // candidate pair.
         if (receiverRow === previous) continue;
         previous = receiverRow;
         touchedReceiverRows.push(receiverRow);
-        if (accepted || acceptedReceiverRows.has(receiverRow)) continue;
-        pairedWith[receiverRow] = senderRow;
-        acceptedReceiverRows.add(receiverRow);
-        accepted = true;
+        if (senderAcceptsOnce && senderAccepted) continue;
+        if (receiverAcceptsOnce) {
+          if (acceptedReceiverRows.has(receiverRow)) continue;
+          acceptedReceiverRows.add(receiverRow);
+        }
+        acceptPair(receiverRow, senderRow);
+        senderAccepted = true;
       }
     }
 
@@ -1787,11 +1921,21 @@ function replaySinglePassCascade(
     for (const row of touchedSenderRows) senderOut[row] = 1;
   }
 
+  // Walking the receiver's rows ascending, and each row's further sender rows in
+  // the order the ascending sweep accepted them, leaves the table ordered by
+  // (receiver row, sender row) -- the local half ascending, strictly so wherever a
+  // receiver record stands in one pair.
   const result: AssociationTable = [[], []];
   for (let row = 0; row < numReceiverRecords; ++row) {
     if (pairedWith[row] < 0) continue;
     result[0].push(row);
     result[1].push(pairedWith[row]);
+    const further = furtherSenderRows?.get(row);
+    if (further === undefined) continue;
+    for (const senderRow of further) {
+      result[0].push(row);
+      result[1].push(senderRow);
+    }
   }
   return result;
 }

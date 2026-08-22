@@ -15,6 +15,7 @@ import {
   ConnectionError,
   type MessageConnection,
 } from "../src/connection/messageConnection";
+import type { AssociationTable } from "../src/types";
 
 // Every index list a party receives from its partner addresses rows or per-round
 // candidate positions the RECEIVING party owns, so each is checked against that
@@ -288,6 +289,115 @@ test("single-pass sender accepts a resolved table whose partner half descends", 
     onIndexTable((table) => [table[0], [...table[1]].reverse()]),
   );
   expect(err).toBeUndefined();
+});
+
+// --- The same table under a deduplicating cardinality -------------------------
+// One of the two halves names the "one" side's rows, which several of the MANY
+// side's records link to, so its distinctness -- and with it the strictness of the
+// ascending rule and the cap distinctness puts on the table's LENGTH -- is exactly
+// what the widening spends. The other half keeps distinctness and is what the
+// length is then anchored on. Which half is which is the sender's own resolved
+// label, so a repeat on the wrong half is still refused.
+
+// The "many" side holds a value twice, so one of its partner's rows takes two
+// links and the resolved table genuinely repeats -- a table the strict rule would
+// have rejected.
+const groupedKeys = [["Bob", "Bob", "Carol"]];
+const ungroupedKeys = [["Alice", "Bob", "Carol"]];
+
+async function singlePassDeduplicating(
+  senderCardinality: "many-to-one" | "one-to-many",
+  deviate: Deviation = (frame) => frame,
+): Promise<{ outcome: unknown; table: AssociationTable | undefined }> {
+  const senderIsMany = senderCardinality === "many-to-one";
+  const senderKeys = senderIsMany ? groupedKeys : ungroupedKeys;
+  const receiverKeys = senderIsMany ? ungroupedKeys : groupedKeys;
+  const [senderConn, receiverConn] = createMessagePipe();
+  const senderRun = linkViaSinglePassPSI(
+    { cardinality: senderCardinality },
+    makeParticipant("starter"),
+    deviatingInbound(senderConn, deviate),
+    senderKeys,
+    fanOutFreeBounds(1, ROWS),
+    false,
+    -1,
+  );
+  const receiverRun = linkViaSinglePassPSI(
+    { cardinality: senderIsMany ? "one-to-many" : "many-to-one" },
+    makeParticipant("joiner"),
+    receiverConn,
+    receiverKeys,
+    fanOutFreeBounds(1, ROWS),
+    false,
+    -1,
+  );
+  const settled = await senderRun.then(
+    (table) => ({ outcome: undefined, table }),
+    (err: unknown) => ({ outcome: err, table: undefined }),
+  );
+  await senderConn.close();
+  await receiverRun.catch(() => undefined);
+  return settled;
+}
+
+test("single-pass sender accepts the repeat its resolved cardinality produces", async () => {
+  // The "one" side's half is non-decreasing rather than strictly ascending, and
+  // the strict rule would have rejected exactly this table. Both arrangements of
+  // the deduplicating pair are driven, since which half repeats follows the label.
+  const asOneSide = await singlePassDeduplicating("one-to-many");
+  expect(asOneSide.outcome).toBeUndefined();
+  expect(asOneSide.table).toStrictEqual([
+    [1, 1, 2],
+    [0, 1, 2],
+  ]);
+  const asManySide = await singlePassDeduplicating("many-to-one");
+  expect(asManySide.outcome).toBeUndefined();
+  expect(asManySide.table).toStrictEqual([
+    [0, 1, 2],
+    [1, 1, 2],
+  ]);
+});
+
+test("single-pass sender refuses a repeat on the half that keeps distinctness", async () => {
+  // The many side's own rows stand in one pair each, so a repeat there is a table
+  // no resolution produces -- refused on whichever half the label puts it.
+  const asOneSide = await singlePassDeduplicating(
+    "one-to-many",
+    onIndexTable((table) => [table[0], [0, 0, 2]]),
+  );
+  expectProtocolRefusal(asOneSide.outcome, /partner half repeats an index/);
+  const asManySide = await singlePassDeduplicating(
+    "many-to-one",
+    onIndexTable((table) => [[0, 0, 2], table[1]]),
+  );
+  expectProtocolRefusal(asManySide.outcome, /local half repeats an index/);
+});
+
+test("single-pass sender still holds the repeating half to ascending order", async () => {
+  // Distinctness is what the widening spends; the order the result rows and the
+  // record's reconstruction of them read the table in is not.
+  const { outcome } = await singlePassDeduplicating(
+    "one-to-many",
+    onIndexTable((table) => [[...table[0]].reverse(), table[1]]),
+  );
+  expectProtocolRefusal(outcome, /local half is not in ascending order/);
+});
+
+test("single-pass sender bounds the table by the many side's row count", async () => {
+  // Where the SENDER is the "one" side, its own row count does not cap the
+  // table: the partner half's distinctness does, against the count the partner
+  // carried on the terms exchange.
+  const { outcome } = await singlePassDeduplicating(
+    "one-to-many",
+    onIndexTable(() => [
+      [1, 1, 1, 2],
+      [0, 1, 2, 2],
+    ]),
+  );
+  expectProtocolRefusal(
+    outcome,
+    /partner half carries 4 entries, more than the 3/,
+  );
 });
 
 // --- The cascade round's association table ------------------------------------

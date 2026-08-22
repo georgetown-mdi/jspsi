@@ -1249,12 +1249,12 @@ export function summarizeInvitation(
   // here so the element markers, the key summaries and the consent fact a surface
   // renders all follow the same verdict.
   const fanOutMatches = terms.linkageStrategy === "single-pass";
-  // The other direction of the same strategy split: the cascade matches a
-  // deduplicating cardinality and single-pass matches none, so a deduplicating
-  // term under single-pass is refused at acceptance rather than run. Read from
-  // the refusal's OWN predicate rather than restated here, so the copy cannot
-  // stay withheld for a strategy the refusal has stopped refusing, and read once
-  // so both surfaces withhold it on the same verdict.
+  // Whether the strategy this invitation names matches the deduplicating
+  // cardinality its term asks for; a strategy that does not is refused at
+  // acceptance rather than run. Read from the refusal's OWN predicate rather than
+  // restated here, so the copy cannot stay withheld for a strategy the refusal has
+  // stopped refusing, and read once so both surfaces withhold it on the same
+  // verdict.
   const deduplicateApplied =
     APPLIED_SETTINGS.deduplicate &&
     deduplicateIsImplementedForStrategy(terms.linkageStrategy);

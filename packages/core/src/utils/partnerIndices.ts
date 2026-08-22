@@ -152,6 +152,24 @@ export interface PartnerIndexRules {
    * this function then bounds the entries alone.
    */
   repeatsGroupedBy?: PartnerIndexGrouping;
+  /**
+   * Admit a repeated entry with NO grouping to hold it to: the half of a
+   * resolved association table naming the "one" side's rows under a
+   * deduplicating cardinality, where several of the MANY side's records link to
+   * one of them and the resolver -- not this party -- computed the pairing
+   * (docs/spec/PROTOCOL.md, Deriving one table from the exchanged association
+   * maps). There is no counterpart grouping to check against at that seam, which
+   * is what separates this from {@link repeatsGroupedBy}; the two are alternatives
+   * and setting both is a caller fault.
+   *
+   * Alongside `ascending` it leaves the half NON-DECREASING, the strictness being
+   * exactly what distinctness carried. Distinctness is also what otherwise caps a
+   * list's LENGTH at `exclusiveBound`, so a caller setting this must pin the
+   * length against a count it computed or holds from authenticated session state
+   * first; {@link assertPartnerIndexTable} does that by taking the half that
+   * keeps its distinctness as the anchor.
+   */
+  repeats?: boolean;
 }
 
 /**
@@ -161,9 +179,11 @@ export interface PartnerIndexRules {
  * Distinctness is the protocol invariant on all three matching paths -- one-to-one
  * matching pairs each row at most once -- and it is what caps the list's LENGTH at
  * `exclusiveBound`, since a longer list cannot hold distinct in-range entries. The
- * length is therefore not a separate argument, except under
- * `rules.repeatsGroupedBy`, which relaxes distinctness to injectivity modulo the
- * grouping it carries and leaves the length to the caller's own count check.
+ * length is therefore not a separate argument, except under the two rules that
+ * relax distinctness -- `rules.repeatsGroupedBy`, which replaces it with
+ * injectivity modulo the grouping it carries, and `rules.repeats`, which drops it
+ * for a half whose multiplicity the partner's own side carries -- each of which
+ * leaves the length to the caller's own count check.
  *
  * @param participantId - This party's participant id.
  * @param what - Names the list, for the error message.
@@ -194,13 +214,27 @@ export function assertPartnerIndices(
         `${grouping.rounds.length} round(s) and ${grouping.positions.length} ` +
         `position(s) for ${entryCount(indices.length)}`,
     );
-  if (grouping === undefined && indices.length > exclusiveBound)
+  if (grouping !== undefined && rules.repeats === true)
+    throw new Error(
+      `${what}: a grouped index check holds every repeat to its grouping, so it ` +
+        "cannot also admit ungrouped repeats",
+    );
+  // Distinctness is what caps the length; the two rules that relax it leave the
+  // cap to the caller's own count check (see PartnerIndexRules).
+  const distinct = grouping === undefined && rules.repeats !== true;
+  if (distinct && indices.length > exclusiveBound)
     throw partnerProtocolError(
       participantId,
       `${what} carries ${entryCount(indices.length)}, more than the ` +
         `${exclusiveBound} this side can address`,
     );
-  const repeats = createRepeatDetector(indices.length, exclusiveBound);
+  // A half admitting ungrouped repeats reports none, and allocates no detector for
+  // the entries it would have tracked; a grouped one still needs the detector, for
+  // the across-group half of its rule.
+  const repeats =
+    grouping === undefined && rules.repeats === true
+      ? () => false
+      : createRepeatDetector(indices.length, exclusiveBound);
   // Which index each group has taken so far, by round and then by position. Only
   // the first entry of a group consults the repeat detector, so a legitimate
   // repeat within one group never reads as one across groups.
@@ -253,11 +287,11 @@ export function assertPartnerIndices(
   }
 }
 
-// `repeatsGroupedBy` is deliberately not offered here: the two-half form holds the
-// partner half to the LENGTH of the range-checked local half, and that length is a
-// local quantity only while distinctness caps it at the local half's own bound. A
-// seam whose table admits a repeat therefore checks its halves itself, against a
-// count it computed, rather than through this form.
+// `repeatsGroupedBy` is deliberately not offered here: it replaces distinctness
+// with a rule read entry by entry against a grouping, which says nothing about a
+// list's length, where this form needs one half's length pinned before it holds the
+// other to it. A seam whose table admits a GROUPED repeat therefore checks its
+// halves itself, against a count it computed, rather than through this form.
 /** One half of a partner-supplied association table, with what bounds it. */
 export interface PartnerIndexTableHalf extends Omit<
   PartnerIndexRules,
@@ -272,51 +306,68 @@ export interface PartnerIndexTableHalf extends Omit<
 }
 
 /**
+ * The half a two-half check anchors on: the one that keeps its distinctness, and
+ * so cannot admit repeats. See {@link assertPartnerIndexTable}.
+ */
+export type PartnerIndexTableAnchorHalf = Omit<
+  PartnerIndexTableHalf,
+  "repeats"
+>;
+
+/**
  * Requires both halves of a partner-supplied association table to hold whole,
- * in-range, non-repeating indices, and to pair up: one entry of each half per
- * matched record.
+ * in-range indices and to pair up, one entry of each half per matched pair.
  *
  * The halves are checked in this order for a reason the callers cannot enforce
- * themselves: the pairing is expressed as the partner half carrying as many
- * entries as the local half, and that expected count is only a local quantity
- * once the local half has been range-checked -- which caps its length at
- * `localHalf.exclusiveBound`. Running the halves through this one entry point
- * keeps the order out of the callers' hands.
+ * themselves: the pairing is expressed as the second half carrying as many entries
+ * as the first, and that expected count is only a quantity this party holds once
+ * the first half has been range-checked -- which caps its length at
+ * `anchorHalf.exclusiveBound`, distinctness being what makes a longer list
+ * impossible. Running the halves through this one entry point keeps the order out
+ * of the callers' hands.
+ *
+ * Which half anchors is therefore whichever one keeps its distinctness. That is
+ * the half addressing this party's own rows for a table with one entry per matched
+ * record; under a deduplicating cardinality it is the half naming the MANY side's
+ * rows, whichever party those belong to, since the "one" side's rows are what a
+ * group of them repeats (docs/spec/PROTOCOL.md, Deriving one table from the
+ * exchanged association maps). Either bound is a quantity this party holds
+ * independently of the frame -- one of its own counts, or a record count carried on
+ * the authenticated terms exchange.
  *
  * Either half may additionally carry the {@link PartnerIndexRules} a seam's own
  * table has to satisfy, applied to that half alone.
  *
  * @param participantId - This party's participant id.
- * @param localHalf - The half addressing state this party owns, whose bound is
- *   therefore one of its own counts.
- * @param partnerHalf - The half addressing the partner's rows or masked-set
- *   elements, bounded by a count carried on the authenticated terms exchange.
+ * @param anchorHalf - The distinct half, whose range-checked length pins the
+ *   other's.
+ * @param pairedHalf - The half held to that length, which may admit repeats.
  * @throws A `"protocol"` {@link ConnectionError} on a bad entry in either half,
  *   on halves of unequal length, or on a half breaking a rule it declared.
  */
 export function assertPartnerIndexTable(
   participantId: string,
-  localHalf: PartnerIndexTableHalf,
-  partnerHalf: PartnerIndexTableHalf,
+  anchorHalf: PartnerIndexTableAnchorHalf,
+  pairedHalf: PartnerIndexTableHalf,
 ): void {
   assertPartnerIndices(
     participantId,
-    localHalf.what,
-    localHalf.indices,
-    localHalf.exclusiveBound,
-    { ascending: localHalf.ascending },
+    anchorHalf.what,
+    anchorHalf.indices,
+    anchorHalf.exclusiveBound,
+    { ascending: anchorHalf.ascending },
   );
   assertPartnerIndexCount(
     participantId,
-    partnerHalf.what,
-    partnerHalf.indices.length,
-    localHalf.indices.length,
+    pairedHalf.what,
+    pairedHalf.indices.length,
+    anchorHalf.indices.length,
   );
   assertPartnerIndices(
     participantId,
-    partnerHalf.what,
-    partnerHalf.indices,
-    partnerHalf.exclusiveBound,
-    { ascending: partnerHalf.ascending },
+    pairedHalf.what,
+    pairedHalf.indices,
+    pairedHalf.exclusiveBound,
+    { ascending: pairedHalf.ascending, repeats: pairedHalf.repeats },
   );
 }
