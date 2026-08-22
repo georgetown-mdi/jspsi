@@ -387,7 +387,7 @@ test("single-pass sender bounds the table by the many side's row count", async (
   // Where the SENDER is the "one" side, its own row count does not cap the
   // table: the partner half's distinctness does, against the count the partner
   // carried on the terms exchange.
-  const { outcome } = await singlePassDeduplicating(
+  const asOneSide = await singlePassDeduplicating(
     "one-to-many",
     onIndexTable(() => [
       [1, 1, 1, 2],
@@ -395,8 +395,21 @@ test("single-pass sender bounds the table by the many side's row count", async (
     ]),
   );
   expectProtocolRefusal(
-    outcome,
+    asOneSide.outcome,
     /partner half carries 4 entries, more than the 3/,
+  );
+  // Where the SENDER is the "many" side, its own half is the one that keeps
+  // distinctness, so its own row count is what caps the table.
+  const asManySide = await singlePassDeduplicating(
+    "many-to-one",
+    onIndexTable(() => [
+      [0, 1, 2, 2],
+      [0, 0, 1, 1],
+    ]),
+  );
+  expectProtocolRefusal(
+    asManySide.outcome,
+    /local half carries 4 entries, more than the 3/,
   );
 });
 

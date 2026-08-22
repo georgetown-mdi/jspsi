@@ -750,6 +750,49 @@ test("single-pass refuses many-to-many", async () => {
   ).rejects.toThrow("psi for cardinality 'many-to-many' not yet implemented");
 });
 
+test("the cascade and single-pass refuse many-to-many with the same message", async () => {
+  // The two resolvers carry this literal independently rather than through a
+  // shared constant, so nothing but a test would catch the copies drifting apart.
+  const [conn] = createMessagePipe();
+  const settle = (run: Promise<unknown>): Promise<unknown> =>
+    run.then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+  const cascadeError = await settle(
+    linkViaPSI(
+      { cardinality: "many-to-many" },
+      makeParticipant("starter"),
+      conn,
+      singlePassStarterData,
+      singlePassJoinerData[0].length,
+      -1,
+    ),
+  );
+  const singlePassError = await settle(
+    linkViaSinglePassPSI(
+      { cardinality: "many-to-many" },
+      makeParticipant("starter"),
+      conn,
+      singlePassStarterData,
+      fanOutFreeBounds(
+        singlePassStarterData.length,
+        singlePassJoinerData[0].length,
+      ),
+      false,
+      -1,
+    ),
+  );
+  expect(cascadeError).toBeInstanceOf(Error);
+  expect(singlePassError).toBeInstanceOf(Error);
+  expect((cascadeError as Error).message).toBe(
+    "psi for cardinality 'many-to-many' not yet implemented",
+  );
+  expect((singlePassError as Error).message).toBe(
+    (cascadeError as Error).message,
+  );
+});
+
 // --- the two strategies agree, table for table --------------------------------
 // The equivalence property the cascade and single-pass hold under `one-to-one`
 // (psiLink.test.ts), extended to the cardinality where multiplicity governs the
