@@ -64,7 +64,8 @@ export function AppShellStatus() {
           radius={0}
           title="A new version of psilink is ready"
         >
-          Reload to use it. Nothing saved in this browser is affected.{" "}
+          Reload to use it. It replaces the app&apos;s code; your saved
+          exchanges stay in this browser.{" "}
           <Button
             size="compact-sm"
             variant="default"

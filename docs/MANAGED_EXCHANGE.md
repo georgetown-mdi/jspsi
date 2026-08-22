@@ -144,8 +144,8 @@ needs:
   own window, not in a service worker (WebRTC is unavailable there).
 - **Launch at sign-in**, where the browser offers it, so the runtime is present
   without the operator remembering to open it.
-- **A durable home for the input-file pointer**, whose read permission an
-  installed app holds across restarts rather than re-prompting.
+- **A durable home for the input-file pointer**, where the browser preserves an
+  installed app's read permission across restarts rather than re-prompting.
 
 ### Enabling launch at sign-in
 
@@ -188,7 +188,8 @@ installed copy must not pin itself to old code:
   so an online launch renders the deployment currently served.
 - A new version installs in the background and takes over at the next launch of
   the app. When one is ready while the app is open, the app offers a reload
-  rather than swapping code under a run in progress.
+  rather than swapping code under a run in progress, and the browser asks the
+  operator to confirm a reload pressed while a run is under way.
 - Nothing stored in the browser is touched by an update: the recurring
   exchanges, their secrets, and the accounting are the browser's own storage,
   not the cache the worker manages.

@@ -22,7 +22,21 @@ export function useUnloadGuard({
   finalized: boolean;
   demoActive?: boolean;
 }): void {
-  const armed = unloadGuardArmed({ hasFile, finalized, demoActive });
+  useBeforeUnloadPrompt(unloadGuardArmed({ hasFile, finalized, demoActive }));
+}
+
+/**
+ * Ask the browser to confirm before it unloads the page, while `armed`.
+ *
+ * The primitive {@link useUnloadGuard} arms from the bench's own loss condition,
+ * exposed on its own for a surface whose loss condition is a different one: the
+ * managed re-run arms it for the length of a run, which an unload -- a tab
+ * close, a typed URL, or the app-shell update's Reload button, which renders
+ * above every route -- would otherwise end with nothing intercepting it.
+ * Disarming is the effect's own cleanup, so a finished run or an unmount leaves
+ * no listener behind.
+ */
+export function useBeforeUnloadPrompt(armed: boolean): void {
   useEffect(() => {
     if (!armed) return;
     function handleBeforeUnload(event: BeforeUnloadEvent) {

@@ -200,6 +200,27 @@ function shellUrl() {
 }
 
 /**
+ * Run one CacheStorage operation, resolving `undefined` if it rejects.
+ *
+ * Every open, match, put, and trim goes through this, so no served response is
+ * ever a function of whether storage worked. A cache can refuse for reasons the
+ * request has nothing to do with -- a put over quota (QuotaExceededError is the
+ * documented Cache API failure), an evicted bucket, a browser with storage
+ * switched off -- and a worker that let one of those decide would be worse than
+ * no worker at all: the fetch handlers would fail subresources the network
+ * delivered, and a navigation would serve the OLD cached document while the
+ * network was handing back the NEW one, breaking the network-first invariant
+ * above. A storage failure costs the client its offline copy, and nothing else.
+ */
+async function tryCache(operation) {
+  try {
+    return await operation();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Install: fetch the shell document past the HTTP cache, store it, and precache
  * the build assets it references so a browser that goes offline immediately
  * after installing still has a working app. The asset graph is read out of the
@@ -259,15 +280,19 @@ async function warmRouteAssets() {
  * nothing it loads reaches a cache and a reload straight into offline finds
  * nothing. A worker that reaches activate while a client is open is either that
  * first install or one whose predecessor's clients have all gone, so claiming
- * never swaps code under a running exchange.
+ * never swaps code under a running exchange. The claim does not depend on the
+ * discard: a storage that will not enumerate leaves the old caches in place,
+ * which costs disk, while an unclaimed worker leaves the page uncontrolled.
  */
 async function claimAndDiscardOldCaches() {
-  const names = await caches.keys();
-  await Promise.all(
-    names
-      .filter((name) => !CURRENT_CACHES.includes(name))
-      .map((name) => caches.delete(name)),
-  );
+  await tryCache(async () => {
+    const names = await caches.keys();
+    await Promise.all(
+      names
+        .filter((name) => !CURRENT_CACHES.includes(name))
+        .map((name) => caches.delete(name)),
+    );
+  });
   await self.clients.claim();
 }
 
@@ -280,18 +305,24 @@ async function claimAndDiscardOldCaches() {
  * anything at all.
  */
 async function handleNavigation(request) {
+  let response;
   try {
-    const response = await fetch(request);
-    const url = new URL(request.url);
-    if (response.ok && url.pathname === SHELL_PATH && url.search === "") {
-      const shell = await caches.open(SHELL_CACHE);
-      await shell.put(shellUrl(), response.clone());
-    }
-    return response;
+    response = await fetch(request);
   } catch {
-    const cached = await caches.match(shellUrl(), { cacheName: SHELL_CACHE });
+    const cached = await tryCache(() =>
+      caches.match(shellUrl(), { cacheName: SHELL_CACHE }),
+    );
     return cached ?? uncachedOfflineResponse();
   }
+  const url = new URL(request.url);
+  if (response.ok && url.pathname === SHELL_PATH && url.search === "") {
+    const toStore = response.clone();
+    await tryCache(async () => {
+      const shell = await caches.open(SHELL_CACHE);
+      await shell.put(shellUrl(), toStore);
+    });
+  }
+  return response;
 }
 
 /**
@@ -302,13 +333,19 @@ async function handleNavigation(request) {
  * finds the whole graph.
  */
 async function handleHashedAsset(request) {
-  const cache = await caches.open(ASSET_CACHE);
-  const cached = await cache.match(request);
+  const cache = await tryCache(() => caches.open(ASSET_CACHE));
+  const cached =
+    cache === undefined
+      ? undefined
+      : await tryCache(() => cache.match(request));
   if (cached !== undefined) return cached;
   const response = await fetch(request);
-  if (response.ok) {
-    await cache.put(request, response.clone());
-    await trimCache(cache, MAX_ASSET_ENTRIES);
+  if (cache !== undefined && response.ok) {
+    const toStore = response.clone();
+    await tryCache(async () => {
+      await cache.put(request, toStore);
+      await trimCache(cache, MAX_ASSET_ENTRIES);
+    });
   }
   return response;
 }
@@ -320,14 +357,20 @@ async function handleHashedAsset(request) {
  * copy in place.
  */
 async function handleStaticAsset(request) {
-  const cache = await caches.open(SHELL_CACHE);
-  const cached = await cache.match(request);
+  const cache = await tryCache(() => caches.open(SHELL_CACHE));
+  const cached =
+    cache === undefined
+      ? undefined
+      : await tryCache(() => cache.match(request));
   if (cached !== undefined) {
     void refreshInBackground(cache, request);
     return cached;
   }
   const response = await fetch(request);
-  if (response.ok) await cache.put(request, response.clone());
+  if (cache !== undefined && response.ok) {
+    const toStore = response.clone();
+    await tryCache(() => cache.put(request, toStore));
+  }
   return response;
 }
 
@@ -394,9 +437,10 @@ async function addAllIndividually(cache, paths) {
  * its own, keeping the {@link MAX_ASSET_ENTRIES} it stored last.
  */
 async function cacheAssetsWithinCap(paths) {
-  const assets = await caches.open(ASSET_CACHE);
+  const assets = await tryCache(() => caches.open(ASSET_CACHE));
+  if (assets === undefined) return;
   await addAllIndividually(assets, paths);
-  await trimCache(assets, MAX_ASSET_ENTRIES);
+  await tryCache(() => trimCache(assets, MAX_ASSET_ENTRIES));
 }
 
 /** Drop the oldest entries until `cache` holds at most `max`. */
@@ -409,7 +453,14 @@ async function trimCache(cache, max) {
 }
 
 /** The offline document served when nothing is cached, as a 503 so it is never
- * mistaken for a successful render of the app. */
+ * mistaken for a successful render of the app.
+ *
+ * It is the one document of this origin the server never rendered, so it is also
+ * the one that would carry no security headers unless they are written here. The
+ * four below are the literal mirror of `securityResponseHeaders` in
+ * `apps/web/src/utils/securityHeaders.ts` (a worker with no build step cannot
+ * import it); `apps/web/test/unit/serviceWorker.test.ts` holds this response
+ * against that module, so the mirror cannot drift. */
 function uncachedOfflineResponse() {
   return new Response(UNCACHED_OFFLINE_DOCUMENT, {
     status: 503,
@@ -417,6 +468,10 @@ function uncachedOfflineResponse() {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
+      "Referrer-Policy": "no-referrer",
+      "X-Frame-Options": "DENY",
+      "Content-Security-Policy": "frame-ancestors 'none'",
+      "X-Content-Type-Options": "nosniff",
     },
   });
 }

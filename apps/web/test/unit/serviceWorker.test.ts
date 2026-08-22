@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 
+import { securityResponseHeaders } from "@utils/securityHeaders";
+
 import {
   HARNESS_ORIGIN,
   createServiceWorkerHarness,
@@ -525,5 +527,153 @@ describe("the manifest and icons", () => {
       subresourceRequest("/site.webmanifest"),
     );
     expect(await again?.text()).toBe("icon");
+  });
+});
+
+// A browser can refuse a cache at any moment -- quota exhausted, storage
+// switched off, the bucket evicted under the worker -- and the worker is in
+// front of every document and asset the app loads. So what a storage failure may
+// cost is the offline copy, and never the response: it must not fail a request
+// the network answered, nor serve the stale document over the fresh one the
+// network delivered, which would leave the app worse off than with no worker at
+// all.
+
+describe("a fetch handler meeting a failing cache", () => {
+  let harness: ServiceWorkerHarness;
+  const NEW_ASSET = "/assets/index-CCCC3333.js";
+
+  beforeEach(async () => {
+    harness = servedHarness();
+    await harness.install();
+    await harness.activate();
+    harness.network.route(NEW_ASSET, () => javascript("// the new deployment"));
+  });
+
+  test("serves the navigation the network delivered when the write fails", async () => {
+    harness.network.route("/", () => html("<html>fresh deployment</html>"));
+    harness.storageFails.put(true);
+
+    const response = await harness.handleFetch(navigationRequest("/"));
+
+    expect(response?.status).toBe(200);
+    expect(await response?.text()).toContain("fresh deployment");
+  });
+
+  test("serves the navigation the network delivered when the cache will not open", async () => {
+    harness.network.route("/", () => html("<html>fresh deployment</html>"));
+    harness.storageFails.open(true);
+
+    const response = await harness.handleFetch(navigationRequest("/"));
+
+    expect(response?.status).toBe(200);
+    expect(await response?.text()).toContain("fresh deployment");
+  });
+
+  test("says the app is offline when the network is gone and the fallback cannot be read", async () => {
+    harness.network.goOffline();
+    harness.storageFails.match(true);
+
+    const response = await harness.handleFetch(navigationRequest("/"));
+
+    expect(response?.status).toBe(503);
+    expect(await response?.text()).toContain("psilink is offline");
+  });
+
+  test("serves a build asset when the cache will not open", async () => {
+    harness.storageFails.open(true);
+
+    const response = await harness.handleFetch(subresourceRequest(NEW_ASSET));
+
+    expect(await response?.text()).toContain("the new deployment");
+  });
+
+  test("serves a build asset when the write fails", async () => {
+    harness.storageFails.put(true);
+
+    const response = await harness.handleFetch(subresourceRequest(NEW_ASSET));
+
+    expect(await response?.text()).toContain("the new deployment");
+    expect(harness.cachedUrls(ASSET_CACHE)).not.toContain(
+      `${HARNESS_ORIGIN}${NEW_ASSET}`,
+    );
+  });
+
+  test("serves a build asset when the trim fails, having stored it", async () => {
+    harness.storageFails.keys(true);
+
+    const response = await harness.handleFetch(subresourceRequest(NEW_ASSET));
+
+    expect(await response?.text()).toContain("the new deployment");
+    expect(harness.cachedUrls(ASSET_CACHE)).toContain(
+      `${HARNESS_ORIGIN}${NEW_ASSET}`,
+    );
+  });
+
+  test("re-fetches a stored build asset when the lookup fails", async () => {
+    harness.storageFails.match(true);
+
+    const response = await harness.handleFetch(
+      subresourceRequest("/assets/index-AAAA1111.js"),
+    );
+
+    expect(await response?.text()).toContain("/assets/index-AAAA1111.js");
+  });
+
+  test("serves a static asset when the cache will not open", async () => {
+    harness.storageFails.open(true);
+
+    const response = await harness.handleFetch(
+      subresourceRequest("/site.webmanifest"),
+    );
+
+    expect(await response?.text()).toBe("icon");
+  });
+});
+
+describe("the worker's lifecycle meeting a failing cache", () => {
+  test("installs with nothing stored rather than failing the install", async () => {
+    const harness = servedHarness();
+    harness.storageFails.open(true);
+
+    await expect(harness.install()).resolves.toBeUndefined();
+
+    expect(harness.cacheNames()).toEqual([]);
+  });
+
+  test("still claims its clients when the caches cannot be enumerated", async () => {
+    const harness = servedHarness();
+    await harness.install();
+    harness.storageFails.keys(true);
+
+    await expect(harness.activate()).resolves.toBeUndefined();
+
+    expect(harness.clientsClaimed).toBe(1);
+  });
+
+  test("settles a route warm rather than leaving waitUntil rejected", async () => {
+    const harness = servedHarness();
+    await harness.install();
+    await harness.activate();
+    harness.storageFails.open(true);
+
+    await expect(
+      harness.postMessage("psilink-warm-routes"),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("the synthesized offline document", () => {
+  test("carries the security headers every other document of this origin does", async () => {
+    const cold = createServiceWorkerHarness();
+    cold.network.goOffline();
+
+    const response = await cold.handleFetch(navigationRequest("/"));
+
+    // Held against the server's own header set rather than a copy of the values,
+    // so the worker's literals cannot drift from what every rendered document
+    // carries. The count keeps the loop from passing vacuously.
+    expect(Object.keys(securityResponseHeaders).length).toBe(4);
+    for (const [header, value] of Object.entries(securityResponseHeaders))
+      expect(response?.headers.get(header)).toBe(value);
   });
 });

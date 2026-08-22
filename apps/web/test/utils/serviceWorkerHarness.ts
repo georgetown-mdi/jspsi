@@ -19,7 +19,9 @@ import { readFileSync } from "node:fs";
  * rests on: a `match` hands back a fresh `Response` each time (a real cache does,
  * which is why one cached shell can answer more than one navigation), and
  * `keys()` enumerates in insertion order (which is what makes the trim drop the
- * oldest entries). Everything else about it is a plain map.
+ * oldest entries). It also refuses on demand ({@link HarnessStorageFailures}),
+ * which is how the worker is driven against a browser whose storage is full or
+ * switched off. Everything else about it is a plain map.
  *
  * Requests are plain `{ url, method, mode }` objects rather than `Request`s
  * because `new Request(url, { mode: "navigate" })` is required to throw, so a
@@ -91,6 +93,30 @@ export function serviceWorkerStringArray(name: string): Array<string> {
 /** How the harness answers one request path. */
 export type RouteHandler = () => Response;
 
+/**
+ * The CacheStorage failures a test switches on, so the worker can be driven
+ * against a browser whose storage refuses.
+ *
+ * Every one of these is a documented Cache API failure rather than an invented
+ * one: `open` rejects where storage is disabled or the bucket is gone, `put`
+ * rejects with QuotaExceededError, and `match`/`keys` reject on a cache the
+ * browser has torn down under the worker. What they establish is one property --
+ * a served response never depends on whether the cache worked -- so each is
+ * switchable mid-test: the interesting cases are a worker that cached
+ * successfully and then meets a failing storage.
+ */
+export interface HarnessStorageFailures {
+  /** Reject every `caches.open`. */
+  open: (failing: boolean) => void;
+  /** Reject every `cache.put` and `cache.add`, as an over-quota browser does. */
+  put: (failing: boolean) => void;
+  /** Reject every `cache.match` and `caches.match`. */
+  match: (failing: boolean) => void;
+  /** Reject every `cache.keys` and `caches.keys` -- the first step of both the
+   * asset-cache trim and the activate sweep. */
+  keys: (failing: boolean) => void;
+}
+
 /** The harness's fabricated network. */
 export interface HarnessNetwork {
   /** Answer a GET of `path` with `handler`'s response. */
@@ -106,6 +132,8 @@ export interface HarnessNetwork {
 /** The driver a test uses to run the worker's lifecycle and its fetch handler. */
 export interface ServiceWorkerHarness {
   readonly network: HarnessNetwork;
+  /** Switch the fabricated CacheStorage's failures on and off. */
+  readonly storageFails: HarnessStorageFailures;
   /** Fire `install` and settle everything it passed to `waitUntil`. */
   install: () => Promise<void>;
   /** Fire `activate` and settle everything it passed to `waitUntil`. */
@@ -157,11 +185,28 @@ export function createServiceWorkerHarness(): ServiceWorkerHarness {
 
   const caches = new Map<string, Map<string, Response>>();
 
+  const failing = { open: false, put: false, match: false, keys: false };
+
+  /** Reject the way the platform does when the switched-on failure applies. A
+   * real `put` over quota rejects with a QuotaExceededError DOMException; the
+   * rest reject with whatever the browser's storage layer raises, so a plain
+   * DOMException stands in. */
+  function refuseWhenFailing(operation: keyof typeof failing): void {
+    if (!failing[operation]) return;
+    throw operation === "put"
+      ? new DOMException("Quota exceeded", "QuotaExceededError")
+      : new DOMException(
+          `cache ${operation} is unavailable`,
+          "InvalidStateError",
+        );
+  }
+
   function cacheApi(entries: Map<string, Response>) {
     async function store(
       request: RequestLike,
       response: Response,
     ): Promise<void> {
+      refuseWhenFailing("put");
       // Delete before setting so a re-put moves the entry to the end of the
       // insertion order, matching a real cache's replace-then-append.
       const key = requestUrl(request);
@@ -169,8 +214,10 @@ export function createServiceWorkerHarness(): ServiceWorkerHarness {
       entries.set(key, response);
     }
     return {
-      match: async (request: RequestLike) =>
-        entries.get(requestUrl(request))?.clone(),
+      match: async (request: RequestLike) => {
+        refuseWhenFailing("match");
+        return entries.get(requestUrl(request))?.clone();
+      },
       put: store,
       add: async (request: RequestLike) => {
         const response = await fetchImpl(request);
@@ -178,7 +225,10 @@ export function createServiceWorkerHarness(): ServiceWorkerHarness {
           throw new TypeError(`add() failed for ${requestUrl(request)}`);
         await store(request, response);
       },
-      keys: async () => [...entries.keys()].map((url) => ({ url })),
+      keys: async () => {
+        refuseWhenFailing("keys");
+        return [...entries.keys()].map((url) => ({ url }));
+      },
       delete: async (request: RequestLike) =>
         entries.delete(requestUrl(request)),
     };
@@ -186,19 +236,25 @@ export function createServiceWorkerHarness(): ServiceWorkerHarness {
 
   const cacheStorage = {
     open: async (name: string) => {
+      refuseWhenFailing("open");
       const existing = caches.get(name);
       if (existing !== undefined) return cacheApi(existing);
       const created = new Map<string, Response>();
       caches.set(name, created);
       return cacheApi(created);
     },
-    keys: async (): Promise<Array<string>> => [...caches.keys()],
+    keys: async (): Promise<Array<string>> => {
+      refuseWhenFailing("keys");
+      return [...caches.keys()];
+    },
     delete: async (name: string): Promise<boolean> => caches.delete(name),
     match: async (
       request: RequestLike,
       options: { cacheName: string },
-    ): Promise<Response | undefined> =>
-      caches.get(options.cacheName)?.get(requestUrl(request))?.clone(),
+    ): Promise<Response | undefined> => {
+      refuseWhenFailing("match");
+      return caches.get(options.cacheName)?.get(requestUrl(request))?.clone();
+    },
   };
 
   const listeners = new Map<string, (event: never) => void>();
@@ -253,6 +309,20 @@ export function createServiceWorkerHarness(): ServiceWorkerHarness {
         offline = false;
       },
       requested,
+    },
+    storageFails: {
+      open: (fails) => {
+        failing.open = fails;
+      },
+      put: (fails) => {
+        failing.put = fails;
+      },
+      match: (fails) => {
+        failing.match = fails;
+      },
+      keys: (fails) => {
+        failing.keys = fails;
+      },
     },
     install: () => fireLifecycle("install"),
     activate: () => fireLifecycle("activate"),

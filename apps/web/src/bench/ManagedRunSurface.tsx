@@ -54,6 +54,7 @@ import { DeleteExchangeButton } from "./SavedExchanges";
 import { ManagedExchangeDetail } from "./ManagedExchangeDetail";
 import { appendSanitizedRunWarning } from "./runWarnings";
 import styles from "./bench.module.css";
+import { useBeforeUnloadPrompt } from "./useUnloadGuard";
 
 import type { Ref } from "react";
 
@@ -146,6 +147,13 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const reinvitePanelRef = useRef<HTMLDivElement | null>(null);
 
   const navigate = useNavigate();
+
+  // A run is a live two-party session with no resumption: an unload ends it, the
+  // partner's side fails with it, and nothing else on the page intercepts one.
+  // The app-shell update notice renders above every route, so its Reload button
+  // is reachable throughout a run -- this is what puts the browser's own
+  // confirmation in front of it, and in front of a tab close or a typed URL.
+  useBeforeUnloadPrompt(running);
 
   useEffect(() => {
     let live = true;
