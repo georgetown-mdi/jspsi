@@ -377,9 +377,9 @@ in a renderer.
 
 The split is also what keeps the duplicate-matches marker where it belongs. That
 marker carries its headline's own fact, match multiplicity, which the run does
-hold; the limit sitting past what the marker holds is now a classified fact
-beside it, in the other register, rather than something the headline's marker
-could be read as covering. Reclassifying the headline instead would understate a
+hold; the limit sitting past what the marker holds is a classified fact beside
+it, in the other register, rather than something the headline's marker could be
+read as covering. Reclassifying the headline instead would understate a
 multiplicity the exchange enforces in order to qualify a display fact standing
 beside it -- the same division the partner's result receipt takes above and the
 retain-mode line takes below.
@@ -412,13 +412,21 @@ per-party configuration path that does.
 
 That note carries a second fact for the same reason it carries the first: what
 the derivation closes is the grouping, not the acceptor's own outbound
-disclosure. A value the inviting party holds on several rows drops out of a
-one-to-one round as ambiguous and matches under a deduplicating one, so more of
-the accepting party's records can match -- disclosing their membership and any
-payload columns that party sends -- on the inviting party's declaration alone. A
-note stating only that the accepting party's records are not grouped would read
-as the setting costing that party nothing, which is the reading the run does not
-support.
+disclosure. More of the accepting party's records can match than in a one-to-one
+run of the same two files -- disclosing their membership and any payload columns
+that party sends -- on the inviting party's declaration alone. A note stating
+only that the accepting party's records are not grouped would read as the setting
+costing that party nothing, which is the reading the run does not support.
+
+It states that outcome rather than the mechanism behind it. The mechanism -- a
+value the inviting party holds on several rows is ambiguous under `one-to-one`
+and drops out of the round, while a deduplicating run contributes it once and
+matches -- is what makes the outcome true, and it is recorded in
+[deduplicate-matching-semantics.md](deduplicate-matching-semantics.md) and beside
+the constant rather than in the copy. A reader deciding whether to accept needs
+what changes about their own disclosure, and a clause about dropped ambiguous
+values asks them to derive that for themselves. Consent copy states the outcome;
+the mechanism belongs where someone auditing the classification looks for it.
 
 ## The count-only tier
 

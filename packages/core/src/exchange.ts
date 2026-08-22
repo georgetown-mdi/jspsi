@@ -86,9 +86,8 @@ import type { SigningMode } from "./config/signing.js";
 import type { DualSignedRecord, ReceiptContent } from "./signedReceipt.js";
 
 // The deduplicating-strategy refusal is defined beside the accept path it also
-// guards (config/linkageTerms.ts) and re-exported here, where the run boundary
-// applies it, so the exchange-side callers and its exchange-side name are
-// unchanged by that placement.
+// guards (config/linkageTerms.ts), which cannot import this module without
+// closing a cycle, and re-exported here at the run boundary that applies it.
 export { assertDeduplicateImplemented };
 
 /**

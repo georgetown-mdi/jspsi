@@ -582,8 +582,8 @@ export const DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT =
  * That split is what keeps the `duplicateMatches` marker at `enforced` while the
  * limit is marked for what it is. The marker carries its headline's own fact --
  * matching multiplicity, which the run does hold -- and the limit sitting past
- * what that marker holds is now a classified fact beside it rather than an
- * unmarked clause within it. Reclassifying the headline instead would understate
+ * what that marker holds is a classified fact beside it rather than an unmarked
+ * clause within it. Reclassifying the headline instead would understate
  * a multiplicity the exchange enforces in order to qualify a display fact
  * standing beside it.
  *
@@ -619,19 +619,25 @@ export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
  * being grouped.
  *
  * What the derivation closes is the grouping direction, and NOT the accepting
- * party's outbound disclosure, which the setting does move: a value the inviting
- * party holds on several rows is ambiguous under `one-to-one` and drops out of
- * the round, so the accepting party's record holding it goes unmatched, while
- * under a deduplicating run the inviting party contributes that value once and
- * the record matches. More of the accepting party's records can therefore match
- * -- disclosing their membership, and any payload columns that party sends --
- * than in a one-to-one run of the same two files, on the inviting party's
- * declaration alone. That is the second fact this note carries, and a reader told
- * only that their records are not grouped would read it as no consequence at all.
+ * party's outbound disclosure, which the setting does move: more of that party's
+ * records can match than in a one-to-one run of the same two files, each one
+ * disclosing its membership and any payload columns that party sends, on the
+ * inviting party's declaration alone. That is the second fact this note carries,
+ * and a reader told only that their records are not grouped would read it as no
+ * consequence at all.
+ *
+ * The note states that OUTCOME and not the mechanism behind it. The mechanism --
+ * a value the inviting party holds on several rows is ambiguous under
+ * `one-to-one` and drops out of the round, while a deduplicating run contributes
+ * it once and matches -- is what makes the outcome true, and it is recorded here
+ * and in docs/notes/deduplicate-matching-semantics.md rather than in the copy: a
+ * reader deciding whether to accept needs what changes about their own
+ * disclosure, and a clause about dropped ambiguous values asks them to derive it.
  * It is a widening rather than a new capability: an inviting party that collapsed
  * its own duplicate rows before the exchange would match exactly the same records
  * one-to-one, so the setting buys a hostile inviter nothing it could not do
- * locally.
+ * locally. That is why the note discloses the widening rather than refusing it,
+ * and it is a fact about the design rather than a sentence the copy owes.
  *
  * It names the way to the other direction rather than leaving it unsaid, because
  * the invitation path offers no control for it: each party's own `deduplicate`
@@ -645,14 +651,11 @@ export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
  */
 export const DEDUPLICATE_ACCEPTOR_SIDE_NOTE =
   "This setting is the inviting party's own: the accepting party's records are " +
-  "never grouped, so several of its rows naming one individual stay separate " +
-  "here. It still reaches what the accepting party discloses, because a value " +
-  "the inviting party holds on several rows matches here instead of dropping " +
-  "out as ambiguous: more of the accepting party's records can match -- each " +
-  "one disclosing its membership, and any payload columns the accepting party " +
-  "sends -- than in a one-to-one run of the same two files. Grouping the " +
-  "accepting party's records instead is set up from each party's own " +
-  "configuration file, where each party declares its own side.";
+  "never grouped. It still widens what the accepting party discloses -- more " +
+  "of its records can match than in a plain one-to-one run of the same two " +
+  "files, each one disclosing its membership and any payload columns it sends. " +
+  "Grouping the accepting party's records instead is set up from each party's " +
+  "own configuration file, where each party declares its own side.";
 
 /**
  * The caveat copy for a term an inviter may declare that today's exchange does
