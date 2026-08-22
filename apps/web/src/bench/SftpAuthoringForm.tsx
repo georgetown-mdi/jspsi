@@ -829,10 +829,10 @@ function HostKeyProbe({
               {state.message}
               {/* The block and its monospace framing partition the excerpt on
                   screen only: the accessibility tree flattens the alert to one
-                  text run, and the quotation marks are not announced at default
-                  punctuation settings. These phrases carry the same partition
-                  into the announced form, so the peer's bytes are heard as the
-                  peer's rather than inside the console's own voice. */}
+                  text run. These phrases put first-party attribution into that
+                  run as a best-effort cue, not a boundary -- they are printable
+                  ASCII, so the excerpt can reproduce them; the on-screen
+                  partition is what the render check holds. */}
               <VisuallyHidden>
                 {" Start of the bytes that answered the port. "}
               </VisuallyHidden>
