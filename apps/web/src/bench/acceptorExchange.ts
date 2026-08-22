@@ -20,6 +20,13 @@ import type { AcceptorDataEdits } from "@psi/acceptInvitation";
  * (an older or metadata-unknown mint) stays undefined, and the acceptor reconciles
  * lazily; whenever it is present (including the empty set) it locks in.
  *
+ * The terms-side lock-in beside it is `expectedPartnerDeduplicate`, the value the
+ * invitation declared for the inviter's own side: the consent screen stated it,
+ * the acceptor's own value is derived as false, and nothing in the agreed terms
+ * compares the two -- so an inviter presenting a different value at the terms
+ * exchange aborts the run before any key or payload moves
+ * ({@link assertPresentedDeduplicateMatchesInvitation}).
+ *
  * Pure and exported so the lock-in and the spec assembly are the tested boundary,
  * pinned without running the run lifecycle.
  */
@@ -45,5 +52,6 @@ export function prepareAcceptorExchange({
     columns,
   );
   prepared.expectedPayloadColumns = disclosedPayloadColumns;
+  prepared.expectedPartnerDeduplicate = linkageTerms.deduplicate;
   return prepared;
 }

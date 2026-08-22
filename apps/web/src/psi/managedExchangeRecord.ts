@@ -341,6 +341,10 @@ export interface ManagedExchangeFileComposition {
   disclosedPayloadColumns?: Array<string>;
   /** This party's receive-side lock-in. */
   expectedPayloadColumns?: Array<string>;
+  /** The `deduplicate` an accepted invitation declared for the partner's own
+   * side -- this party's terms-side lock-in. Absent for a party that accepted
+   * no invitation, which has no declaration to bind. */
+  expectedPartnerDeduplicate?: boolean;
   /** This party's consent to its own outbound payload set. Absent for a party
    * that records none -- every side but the acceptor, whose record the bench's
    * deposit builder derives at composition. */

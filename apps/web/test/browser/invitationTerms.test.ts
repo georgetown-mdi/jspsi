@@ -2315,6 +2315,11 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     // and whose records are grouped to make it are one reading, so neither may sit
     // an expand away from the other.
     expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
+    // This shape presents the accepting party the grouping, so the sole
+    // receiver's display limit has nothing to qualify and must not appear.
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
+    );
   });
 
   test("a sole-receiver deduplicating invitation states psilink presents the acceptor no grouping when the inviter alone receives", async () => {
@@ -2332,6 +2337,12 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     const collapse = await readyCollapse("Other details");
     expect(collapse.textContent).toContain(
       DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+    );
+    // The limit on that withholding keeps the same level as the statement it
+    // qualifies, and is read from the shared table with its own basis rather
+    // than written into either surface's copy.
+    expect(collapse.textContent).toContain(
+      CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
     );
     expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
     expect(app.container.textContent).not.toContain(
@@ -2362,6 +2373,11 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     async (probe) => {
       renderTerms(probe.variant);
       await expect.element(toggle("Other details")).toBeInTheDocument();
+      // Every required and forbidden copy here belongs to the deduplicate term,
+      // which sits inside "Other details" (see the co-hidden test above), so
+      // waiting for that panel's content to commit is enough to read the whole
+      // container safely.
+      await readyPanel("Other details");
       // Per probe, not only over the set: an entry carrying an empty list would
       // otherwise pass by rendering nothing at all.
       const copies = probe.requiredVariantCopy ?? [];
@@ -2386,12 +2402,36 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     ).toBeGreaterThan(0);
   });
 
+  test("a deduplicating invitation the run refuses states no grouping disclosure at all", async () => {
+    // single-pass matches no deduplicating cardinality, so acceptance refuses the
+    // invitation before this screen is reached (assertDeduplicateImplemented).
+    // The screen holds the same line from its own side: what a deduplicating run
+    // discloses is not stated for a run that cannot happen. The headline still
+    // reports the term the invitation declares.
+    renderCaveatTerms({ linkageStrategy: "single-pass" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.textContent).toContain(
+      "More than one of the inviting party's records",
+    );
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+    );
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+    );
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+    );
+  });
+
   test("a one-to-one invitation states no grouping disclosure at all", async () => {
     // Non-vacuous the other way: the sentences are the setting's doing rather than
     // a fixture of the screen, and a one-to-one exchange discloses no grouping to
     // state and groups neither party's records.
     renderCaveatTerms({ deduplicate: false });
     await expect.element(toggle("Other details")).toBeInTheDocument();
+    await readyPanel("Other details");
     expect(app.container.textContent).not.toContain(
       DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
     );

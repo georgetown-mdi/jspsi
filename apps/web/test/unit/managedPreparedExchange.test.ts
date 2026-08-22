@@ -47,6 +47,29 @@ describe("prepareManagedRerunExchange", () => {
     expect(prepared.expectedPayloadColumns).toBeUndefined();
   });
 
+  test("threads the persisted terms-side lock-in onto the prepared exchange", () => {
+    // A managed re-run holds no invitation token, so the declaration it binds the
+    // inviter to comes from the record's own document. Both booleans: `false` is a
+    // real declaration, and the one an inviter would widen away from by presenting
+    // `true` at a later re-run's terms exchange.
+    for (const declared of [false, true]) {
+      const document = composeManagedExchangeFile({
+        connection: { channel: "webrtc", host: "signaling.example.org" },
+        linkageTerms: getDefaultLinkageTerms("County Health Dept"),
+        expectedPartnerDeduplicate: declared,
+      });
+      const prepared = prepareManagedRerunExchange(document, rows, columns);
+      expect(prepared.expectedPartnerDeduplicate).toBe(declared);
+    }
+  });
+
+  test("a record with no declaration binds nothing", () => {
+    // An inviter's record, or one composed from no acceptance: nothing was
+    // declared to this party, so the partner's presented value is unconstrained.
+    const prepared = prepareManagedRerunExchange(exchangeFile(), rows, columns);
+    expect(prepared.expectedPartnerDeduplicate).toBeUndefined();
+  });
+
   test("refuses before connecting when the run's set is not the one consented to", () => {
     // A stored acceptor document whose consent names a set this run's columns no
     // longer resolve: the re-run must refuse rather than transmit it. The document

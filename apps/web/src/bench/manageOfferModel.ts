@@ -122,6 +122,15 @@ export interface ManagedExchangeDocumentParts {
    * mint (the CLI inviter crystallizes it only by observing the first exchange).
    */
   expectedPayloadColumns?: Array<string>;
+  /**
+   * This party's TERMS-side lock-in -- the acceptor supplies the invitation
+   * token's `linkageTerms.deduplicate` (the value the invitation declared for the
+   * INVITER's own side, and the one the consent screen stated), so a managed
+   * re-run refuses an inviter presenting anything else at the terms exchange,
+   * exactly as the CLI accept persists it. The inviter omits it: it accepted no
+   * declaration, and its partner's side is the acceptor's own mirrored `false`.
+   */
+  expectedPartnerDeduplicate?: boolean;
 }
 
 /**
@@ -130,11 +139,12 @@ export interface ManagedExchangeDocumentParts {
  * are caller-supplied and carried verbatim -- `disclosedPayloadColumns` is the
  * token's published set (the inviter's send commitment), and
  * `expectedPayloadColumns` is the token's set from the partner's side (the
- * acceptor's receive lock-in) -- never re-derived here, so the persisted
- * commitment cannot disagree with the one the token carried. An empty array is
- * a strict commitment and is preserved; only an absent field is omitted. The
- * document carries no `authentication` block and no credential by construction
- * (see {@link composeManagedExchangeFile}).
+ * acceptor's receive lock-in), and `expectedPartnerDeduplicate` is the token's
+ * declared value for the inviter's own side (the acceptor's terms-side lock-in)
+ * -- never re-derived here, so the persisted commitment cannot disagree with the
+ * one the token carried. An empty array is a strict commitment and is preserved;
+ * only an absent field is omitted. The document carries no `authentication` block
+ * and no credential by construction (see {@link composeManagedExchangeFile}).
  *
  * The one field this composer DERIVES rather than carries is the acceptor's
  * `outboundPayloadConsent`. Nobody authors an acceptance's own outbound set --
@@ -175,6 +185,9 @@ export function composeManagedDocument(
       : {}),
     ...(parts.expectedPayloadColumns !== undefined
       ? { expectedPayloadColumns: parts.expectedPayloadColumns }
+      : {}),
+    ...(parts.expectedPartnerDeduplicate !== undefined
+      ? { expectedPartnerDeduplicate: parts.expectedPartnerDeduplicate }
       : {}),
     ...(outboundPayloadConsent !== undefined ? { outboundPayloadConsent } : {}),
   });

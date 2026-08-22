@@ -1,4 +1,5 @@
 import {
+  assertDeduplicateImplemented,
   decodeInvitation,
   deriveAcceptedLinkageTerms,
   isInvitationExpired,
@@ -62,9 +63,12 @@ export interface AcceptableInvitation {
  * a loosening to arbitrary endpoints. An admitted SFTP endpoint carries only its
  * credential-free locator; the review step still refuses a console SFTP accept
  * whose shape the appliance cannot run (a split inbound/outbound pair), the
- * file-sync sibling of the file-drop shape gate. Because every failure throws, a
- * caller that only proceeds on success cannot dial or launch on an expired,
- * malformed, or undrivable invitation.
+ * file-sync sibling of the file-drop shape gate. It also refuses the one terms
+ * combination the run cannot honor -- a deduplicating term under a strategy that
+ * matches no deduplicating cardinality -- so such an invitation reaches neither
+ * the consent screen nor a connection. Because every failure throws, a caller
+ * that only proceeds on success cannot dial or launch on an expired, malformed,
+ * undrivable, or unrunnable invitation.
  *
  * @param encoded  The encoded invitation string (bare code or deep-link
  *                 fragment).
@@ -76,6 +80,9 @@ export interface AcceptableInvitation {
  *                         and testable, mirroring {@link selectExchangeDriver}.
  * @throws {Error}    on an expired token, or one whose endpoint this build cannot
  *   drive.
+ * @throws {UsageError} on a token whose linkage terms declare `deduplicate`
+ *   under a strategy that matches no deduplicating cardinality
+ *   (`assertDeduplicateImplemented`).
  * @throws {Error}    on invalid base64url or a checksum mismatch (`decodeInvitation`).
  * @throws {ZodError} on schema validation failure (`decodeInvitation`).
  * @throws {NestingDepthExceededError|NodeCountExceededError} on a token whose
@@ -103,6 +110,15 @@ export async function prepareAcceptedInvitation(
         "accept, so it cannot be run here.",
     );
   }
+
+  // The terms half of the same fail-closed rule, at the boundary that decides
+  // whether the review step is reached at all: a deduplicating term under a
+  // strategy that matches no deduplicating cardinality is refused by the run, so
+  // it is refused here -- before the consent screen states what its grouping
+  // discloses, and before any rendezvous. The launch path applies the same
+  // refusal through `deriveAcceptedLinkageTerms`; this is what puts it ahead of
+  // the display. See `assertDeduplicateImplemented`.
+  assertDeduplicateImplemented(token.linkageTerms);
 
   return { token, endpoint };
 }

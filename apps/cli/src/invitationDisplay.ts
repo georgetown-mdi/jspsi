@@ -573,7 +573,12 @@ export function displayInvitation(params: {
   // the inviting party's own, since acceptance derives this party's side as false
   // (deriveAcceptedLinkageTerms) rather than adopting the invitation's, and the
   // note also carries what a deduplicating run still widens on this side.
-  if (summary.deduplicate) {
+  //
+  // Gated on the applied flag as well as the setting: an invitation whose
+  // strategy matches no deduplicating cardinality is refused at acceptance
+  // (assertDeduplicateImplemented), so stating what its grouping discloses would
+  // describe a run that does not happen.
+  if (summary.deduplicate && summary.deduplicateApplied) {
     emit(
       `    ${
         summary.inviterSharesResult
@@ -581,6 +586,14 @@ export function displayInvitation(params: {
           : DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT
       }`,
     );
+    // The sole-receiver statement states the withholding this client makes; what
+    // the rounds still carry to this party's own process is the fact beside it,
+    // read from the shared table with its own basis rather than folded into the
+    // sentence. It follows only that shape: where the inviter shares the result,
+    // this party is presented the grouping and there is no display limit to
+    // qualify.
+    if (!summary.inviterSharesResult)
+      emit(`    ${CONSENT_FACTS.duplicateGroupingDisplayLimit.note}`);
     emit(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
   }
 

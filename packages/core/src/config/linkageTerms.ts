@@ -1161,6 +1161,97 @@ export function assertCountOnlyTermsShape(terms: LinkageTerms): void {
   throw new UsageError(COUNT_ONLY_SHAPE_REFUSALS[violation]);
 }
 
+/**
+ * Which linkage strategies realize a deduplicating match, one entry per
+ * strategy. The cascade does (`linkViaPSI`); `single-pass` matches strictly
+ * one-to-one, so it realizes none.
+ *
+ * A total table over {@link LinkageStrategy} rather than a comparison against one
+ * named strategy: a strategy added to the union states its own verdict here or
+ * the build fails, so neither the refusal below nor the consent copy that reads
+ * the same verdict can be left behind by an addition. Typed `boolean` rather than
+ * the literal values so each reader's gate gives a genuine runtime branch.
+ *
+ * @internal exported for the test that drives both readers over every strategy.
+ */
+export const DEDUPLICATE_IMPLEMENTED_BY_STRATEGY: Record<
+  LinkageStrategy,
+  boolean
+> = {
+  cascade: true,
+  "single-pass": false,
+};
+
+/**
+ * Whether an exchange on `strategy` honors a `deduplicate: true` term.
+ *
+ * The one predicate behind both readers of that verdict:
+ * {@link assertDeduplicateImplemented} refuses the pair it returns `false` for,
+ * and the consent summary's `deduplicateApplied` withholds the grouping
+ * disclosure copy on the same answer (`invitationSummary.ts`). Stating it twice
+ * would let the copy stay withheld for a strategy the refusal had stopped
+ * refusing -- a silent divergence, since each side's own tests keep passing.
+ */
+export function deduplicateIsImplementedForStrategy(
+  strategy: LinkageStrategy,
+): boolean {
+  return DEDUPLICATE_IMPLEMENTED_BY_STRATEGY[strategy];
+}
+
+/**
+ * Refuse a linkage-terms `deduplicate: true` the run cannot honor, before any
+ * matching begins: the term under a linkage strategy that does not match a
+ * deduplicating cardinality ({@link deduplicateIsImplementedForStrategy}).
+ *
+ * The cascade implements the deduplicating match (`linkViaPSI`), and the surfaces
+ * downstream of the association table -- the payload frame, the output table, and
+ * the exchange record with its re-supply path -- carry a table with several links
+ * per record. `single-pass` implements neither deduplicating cardinality: its
+ * accept-list admits `one-to-one` alone, so an exchange on that strategy would
+ * abort mid-round against terms that asked for a group. Refusing the pair here
+ * puts the answer where the operator is still configuring, and keeps the
+ * strategy's own guard as the second, fail-closed half rather than the first.
+ *
+ * Applied where a document is authored or minted, at the local prepare step
+ * (`prepareForExchange`), where a received invitation is accepted
+ * ({@link deriveAcceptedLinkageTerms}), and for both parties' agreed terms by
+ * `resolveLinkageCardinality` after the terms exchange, before the PSI rounds
+ * begin. The accept boundary is what keeps a crafted pair off the consent
+ * surfaces: an acceptance refused here reaches neither a consent display nor a
+ * connection, so no surface states what a deduplicating run discloses for a run
+ * that cannot happen.
+ *
+ * It sits beside {@link assertCountOnlyTermsShape} rather than in `exchange.ts`
+ * for the reason that guard does: the accept path is here, and importing the run
+ * module from it would close an import cycle.
+ *
+ * Reads the whole terms document rather than the two values, so a caller cannot
+ * pass one party's `deduplicate` against the other's strategy. `linkageStrategy`
+ * is a mandatory-consistency term, so the agreed pair carries one value and both
+ * parties reach the same verdict from their own copy; the resolver asserts over
+ * both documents regardless, which makes the refusal symmetric in the pair even
+ * where the consistency check has not run.
+ *
+ * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
+ * same reason as `assertAlgorithmImplemented`: the refusing party is not
+ * necessarily the one whose value refuses, since `resolveLinkageCardinality`
+ * asserts over the PARTNER's terms document as well as its own, and the accept
+ * boundary reads the partner's invitation, so the fault is not unconditionally
+ * this operator's own content. The message carries only fixed literals.
+ */
+export function assertDeduplicateImplemented(terms: LinkageTerms): void {
+  if (!terms.deduplicate) return;
+  if (deduplicateIsImplementedForStrategy(terms.linkageStrategy)) return;
+  throw new UsageError(
+    "deduplicated matching is not yet implemented for the single-pass " +
+      'linkage strategy: single-pass matches strictly one-to-one, so a "' +
+      'deduplicate: true" term would be matched one-to-one rather than ' +
+      "honored. The exchange is refused before matching begins. Set " +
+      "linkage_strategy to cascade to run a deduplicating match, or set " +
+      "deduplicate to false.",
+  );
+}
+
 export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
   LinkageTermsBaseSchema.refine(
     (a) => !a.deduplicate || a.output.expectsOutput,
@@ -1415,6 +1506,13 @@ export function safeParseLinkageTerms(raw: unknown) {
  *   An acceptor that wants its OWN records grouped authors that in its own
  *   configuration, which does not call this function.
  *
+ *   What the derived value does not carry, and what an accept path must retain
+ *   separately, is the value the invitation declared for the INVITER's side. It
+ *   is what the consent surfaces stated, and nothing in the agreed terms compares
+ *   the two sides afterwards -- so a caller holding the token records it as the
+ *   run's `expectedPartnerDeduplicate` (`PreparedExchange`, exchange.ts), which
+ *   binds what the partner presents at the terms exchange to what it declared.
+ *
  *   What the derived `false` does NOT hold constant is how many of this party's
  *   records match. A value the inviter holds on several rows is ambiguous under
  *   `one-to-one` and drops out of the round, so this party's record holding it goes
@@ -1455,8 +1553,17 @@ export function safeParseLinkageTerms(raw: unknown) {
  * than the derived ones is what makes the account the partner's document: the
  * mirror moves payload between the two directions, and the rule refuses both.
  *
+ * It refuses a deduplicating invitation under a strategy that cannot match one
+ * on the same reading and for the same reason ({@link assertDeduplicateImplemented}):
+ * the pair the exchange boundary refuses is readable from the invitation alone --
+ * `linkageStrategy` is a mandatory-consistency term, so the invitation's value is
+ * the agreed one -- and the derived `deduplicate: false` would otherwise hide it
+ * from every check between here and the run. Refusing at the accept boundary
+ * keeps such an invitation off the consent surfaces and off the wire.
+ *
  * @throws {UsageError} when the inviter's terms are `psi-c` outside the
- *   count-only shape.
+ *   count-only shape, or declare `deduplicate` under a strategy that matches no
+ *   deduplicating cardinality.
  * @throws {Error} when the inviter's terms cannot be coherently accepted for the
  *   mirrored output direction.
  */
@@ -1465,6 +1572,7 @@ export function deriveAcceptedLinkageTerms(
   acceptorIdentity: string,
 ): LinkageTerms {
   assertCountOnlyTermsShape(inviterTerms);
+  assertDeduplicateImplemented(inviterTerms);
   const derived: LinkageTerms = {
     ...inviterTerms,
     identity: acceptorIdentity,

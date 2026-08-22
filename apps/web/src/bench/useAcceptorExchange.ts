@@ -165,6 +165,16 @@ export function acceptorServerJobConfig({
     // columns but carries no payload.send -- a shape that would then fail OPEN,
     // silently ingesting extra partner columns where the browser aborts.
     expectedPayloadColumns: token.disclosedPayloadColumns,
+    // The terms-side lock-in, mirrored from the invitation's declared
+    // `deduplicate` for the INVITER's own side exactly as the browser accept path
+    // does (prepareAcceptorExchange -> prepared.expectedPartnerDeduplicate). The
+    // appliance runs this config through `psilink exchange` at a separate
+    // invocation, so a binding held only in the browser's memory would bind
+    // nothing there; carrying it makes the CLI refuse an inviter presenting a
+    // value this acceptance did not consent to. Read off the token's own terms,
+    // never the derived acceptor perspective above, whose `deduplicate` is this
+    // party's own mirrored false.
+    expectedPartnerDeduplicate: token.linkageTerms.deduplicate,
   };
 }
 

@@ -256,3 +256,33 @@ describe("acceptorServerJobConfig received-payload lock-in", () => {
     expect(config.expectedPayloadColumns).toBeUndefined();
   });
 });
+
+// The terms-side lock-in the console acceptor must carry for the same reason as
+// the received-payload one, and more sharply: the appliance runs `psilink
+// exchange` at a separate invocation, so a binding the browser held only in
+// memory would bind nothing there. The value is the invitation's declaration for
+// the INVITER's side, never read off the acceptor's derived mirror.
+describe("acceptorServerJobConfig terms-side lock-in", () => {
+  function configWithDeclared(declared: boolean) {
+    return acceptorServerJobConfig({
+      token: {
+        ...token,
+        linkageTerms: { ...inviterTerms, deduplicate: declared },
+      },
+      acceptorName: "Accepting Org",
+      edits,
+      inputSource: { kind: "inline", csv: inputCsv },
+      transport: { channel: "filedrop" },
+    });
+  }
+
+  test("carries the invitation's declared deduplicate, not the derived mirror", () => {
+    for (const declared of [false, true]) {
+      const config = configWithDeclared(declared);
+      expect(config.expectedPartnerDeduplicate).toBe(declared);
+      // The composed run's own terms are the mirror's false whatever the inviter
+      // declared, so reading the binding off them would bind the wrong value.
+      expect(config.linkageTerms.deduplicate).toBe(false);
+    }
+  });
+});

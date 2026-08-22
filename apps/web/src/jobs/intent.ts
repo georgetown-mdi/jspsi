@@ -262,6 +262,8 @@ export type JobExchangeSide = "inviter" | "acceptor";
  * - `expectedPayloadColumns` is the acceptor's received-payload lock-in: a list of
  *   partner-namespace column names, no path/host/credential. See the field doc for
  *   the empty-vs-absent semantics.
+ * - `expectedPartnerDeduplicate` is the acceptor's terms-side lock-in: a schema
+ *   boolean, contributing one YAML `true`/`false` and no free text at all.
  * - `side` is a closed two-value enum selecting which composition rules apply to
  *   this party; it contributes no value to the composed config.
  * - `diagnosticRun` and `sweepExchangeFiles` are the per-run controls
@@ -295,6 +297,20 @@ interface JobExchangeIntentBase {
    * INCLUDING an empty array, so the strict form is preserved.
    */
   expectedPayloadColumns?: Array<string>;
+  /**
+   * The acceptor's TERMS-side lock-in: the `deduplicate` the invitation declared
+   * for the INVITING party's own side. Mirrors the browser acceptor, which sets
+   * `prepared.expectedPartnerDeduplicate` from the same source so an inviter
+   * presenting a different value at the terms exchange aborts the exchange before
+   * any key or payload moves rather than running terms nobody consented to. A
+   * schema boolean -- never a path, host, or credential, and never free text.
+   *
+   * Absent is a party with no declaration to bind (the inviter, or a config
+   * authored rather than accepted), which binds nothing; it is forwarded (below)
+   * whenever present, including `false`, which is a real declaration and the one
+   * a hostile inviter would widen away from.
+   */
+  expectedPartnerDeduplicate?: boolean;
   /**
    * Which side of the partnership this party runs. The composers read it for one
    * decision: only an acceptance derives an `outbound_payload_consent` record
@@ -368,9 +384,10 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  * positional `$0` form against the same server, terms inferred from each party's
  * input file, and there is no application-layer encryption to key. It therefore
  * carries none of the exchange mode's `sharedSecret`, `linkageTerms`, `metadata`,
- * `standardization`, or `expectedPayloadColumns` -- only an input source, the
- * tuning `options` subset, the `eventStream` toggle, the per-run controls
- * ({@link jobRunControlFields}), and two optional, bounded selectors:
+ * `standardization`, `expectedPayloadColumns`, or `expectedPartnerDeduplicate`
+ * -- only an input source, the tuning `options` subset, the `eventStream`
+ * toggle, the per-run controls ({@link jobRunControlFields}),and two optional,
+ * bounded selectors:
  *
  * - `linkageStrategy` is a closed enum forwarded to the CLI's `--linkage-strategy`.
  * - `identity` is a bounded operator label forwarded to the CLI's `--identity`
@@ -564,6 +581,7 @@ const jobExchangeIntentCommonFields = {
     .array(z.string().max(MAX_NAME_LENGTH))
     .max(MAX_EXPECTED_PAYLOAD_COLUMNS)
     .optional(),
+  expectedPartnerDeduplicate: z.boolean().optional(),
   side: z.enum(["inviter", "acceptor"]).optional(),
   eventStream: z.boolean().optional(),
 };
@@ -654,9 +672,10 @@ export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
 export { MAX_IDENTITY_LENGTH };
 
 // The zero-setup common fields carry NONE of the exchange mode's credential or
-// terms material -- no sharedSecret, linkageTerms, metadata, standardization, or
-// expectedPayloadColumns -- only an input source, the tuning options, the event
-// toggle, and the two bounded selectors. `inputCsv` reuses the exchange mode's cap.
+// terms material -- no sharedSecret, linkageTerms, metadata, standardization,
+// expectedPayloadColumns, or expectedPartnerDeduplicate -- only an input source,
+// the tuning options, the event toggle, and the two bounded selectors.
+// `inputCsv` reuses the exchange mode's cap.
 const jobZeroSetupIntentCommonFields = {
   ...jobRunControlFields,
   inputCsv: z.string().min(1).max(MAX_INPUT_CSV_LENGTH).optional(),
@@ -823,6 +842,14 @@ function outboundPayloadConsentFor(
  * an empty array is forwarded verbatim -- it means "receive nothing" and must lock
  * in strictly -- and only an omitted field reconciles lazily.
  *
+ * `expectedPartnerDeduplicate`, when present, is forwarded as the config's
+ * `expected_partner_deduplicate` so the acceptance's terms-side binding survives
+ * into the unattended run this composer hands the operator: the CLI holds the
+ * inviter's presented `deduplicate` to the value its invitation declared and
+ * refuses a contradiction before any key or payload moves. `false` is forwarded
+ * verbatim -- it is a real declaration, and the one a hostile inviter would widen
+ * away from -- and only an omitted field binds nothing.
+ *
  * The send-side counterpart is `outbound_payload_consent`, derived here for an
  * acceptance alone (see {@link outboundPayloadConsentFor}), so the config this
  * composer hands an operator to graduate to cron is one a later unattended run is
@@ -834,7 +861,12 @@ export function composeConfigDocument(
   outboundRendezvousPath?: string,
 ): string {
   const options = intentOptionsToFileSyncOptions(intent.options);
-  const { metadata, standardization, expectedPayloadColumns } = intent;
+  const {
+    metadata,
+    standardization,
+    expectedPayloadColumns,
+    expectedPartnerDeduplicate,
+  } = intent;
   const outboundPayloadConsent = outboundPayloadConsentFor(intent);
   const fileInput: ExchangeFileInput = {
     connection: {
@@ -852,6 +884,9 @@ export function composeConfigDocument(
     ...(standardization !== undefined ? { standardization } : {}),
     ...(expectedPayloadColumns !== undefined ? { expectedPayloadColumns } : {}),
     ...(outboundPayloadConsent !== undefined ? { outboundPayloadConsent } : {}),
+    ...(expectedPartnerDeduplicate !== undefined
+      ? { expectedPartnerDeduplicate }
+      : {}),
   };
   return mintExchangeFile(fileInput);
 }
@@ -866,8 +901,9 @@ export function composeConfigDocument(
  * `@path` credential strings land in the YAML verbatim: they are references the
  * CLI child resolves
  * at exchange time, so no secret byte transits this process. The client's
- * `linkageTerms`, `metadata`, `standardization`, and `expectedPayloadColumns`
- * reach the file exactly as they do on the filedrop path -- as schema-validated
+ * `linkageTerms`, `metadata`, `standardization`, `expectedPayloadColumns`, and
+ * `expectedPartnerDeduplicate` reach the file exactly as they do on the
+ * filedrop path -- as schema-validated
  * YAML values -- the acceptance's `outbound_payload_consent` is derived exactly as
  * it is there (see {@link outboundPayloadConsentFor}), and the tuning `options`
  * are the same numeric/boolean/enum subset, plus the `connectionPerPoll` dialing
@@ -889,7 +925,12 @@ export function composeSftpConfigDocument(
   serverEntry: JobSftpServerEntry,
 ): string {
   const options = intentOptionsToFileSyncOptions(intent.options);
-  const { metadata, standardization, expectedPayloadColumns } = intent;
+  const {
+    metadata,
+    standardization,
+    expectedPayloadColumns,
+    expectedPartnerDeduplicate,
+  } = intent;
   const outboundPayloadConsent = outboundPayloadConsentFor(intent);
   const assembled: ExchangeSpec = {
     connection: {
@@ -902,6 +943,9 @@ export function composeSftpConfigDocument(
     ...(standardization !== undefined ? { standardization } : {}),
     ...(expectedPayloadColumns !== undefined ? { expectedPayloadColumns } : {}),
     ...(outboundPayloadConsent !== undefined ? { outboundPayloadConsent } : {}),
+    ...(expectedPartnerDeduplicate !== undefined
+      ? { expectedPartnerDeduplicate }
+      : {}),
   };
   const validated = ExchangeSpecSchema.parse(assembled);
   return stringifyYaml(snakeizeKeys(validated));

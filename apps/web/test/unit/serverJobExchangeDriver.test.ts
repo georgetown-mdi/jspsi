@@ -754,6 +754,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     expect(intent.metadata).toBeUndefined();
     expect(intent.standardization).toBeUndefined();
     expect(intent.expectedPayloadColumns).toBeUndefined();
+    expect(intent.expectedPartnerDeduplicate).toBeUndefined();
   });
 
   test("forwards expectedPayloadColumns into the intent, empty array included", async () => {
@@ -777,6 +778,23 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       (empty.createdIntents[0] as { expectedPayloadColumns?: unknown })
         .expectedPayloadColumns,
     ).toEqual([]);
+  });
+
+  test("forwards expectedPartnerDeduplicate into the intent, false included", async () => {
+    // The terms-side lock-in must reach the intent as-is: `false` is a real
+    // declaration and must not be collapsed into the absent state, which binds
+    // nothing at the run the appliance conducts.
+    for (const declared of [false, true]) {
+      const scripted = scriptedClient([result(true)]);
+      await createServerJobExchangeDriver(
+        { ...driverConfig(), expectedPartnerDeduplicate: declared },
+        scripted.client,
+      ).run(driverEvents(new AbortController().signal));
+      expect(
+        (scripted.createdIntents[0] as { expectedPartnerDeduplicate?: unknown })
+          .expectedPartnerDeduplicate,
+      ).toBe(declared);
+    }
   });
 
   test("an already-aborted signal starts no job", async () => {
