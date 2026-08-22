@@ -1,6 +1,18 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["**/*.ts", "**/*.tsx", "nitro.config.ts", "vite.config.ts"],
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "nitro.config.ts",
+    "vite.config.ts",
+    /* The app-shell service worker, a classic script served from public/. It is
+       here so ESLint's type-aware rules can resolve it (the shared config points
+       the parser at this project); `checkJs` stays off, since the app's DOM lib
+       types `self` as a Window rather than a ServiceWorkerGlobalScope and would
+       reject the worker's own globals. Its behavior is covered by
+       test/unit/serviceWorker.test.ts, which drives the real handlers. */
+    "public/serviceWorker.js"
+  ],
   "exclude": ["node_modules"],
   "references": [{ "path": "../../packages/core" }],
   "compilerOptions": {
@@ -12,6 +24,7 @@
 
     /* Bundler mode */
     "moduleResolution": "bundler",
+    "allowJs": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,

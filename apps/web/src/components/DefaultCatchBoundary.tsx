@@ -13,10 +13,13 @@ import {
 import { BenchPage } from "@bench/BenchPage";
 import { whenDiagnostic } from "@utils/diagnostics";
 
+import { useOnlineStatus } from "./useOnlineStatus";
+
 import type { ErrorComponentProps } from "@tanstack/react-router";
 
 export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
   const router = useRouter();
+  const online = useOnlineStatus();
   const isRoot = useMatch({
     strict: false,
     select: (state) => state.id === rootRouteId,
@@ -34,6 +37,18 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
   return (
     <BenchPage>
       <Stack component="main" gap="sm" p="xl">
+        {/* An offline browser is by far the likeliest reason a page failed here,
+            and the sanitized error alone ("Failed to fetch") does not say so.
+            Name it, and name the recovery: a part of the app this browser has
+            not stored yet needs one visit with a connection, after which it
+            opens without one. */}
+        {!online && (
+          <p>
+            This device is offline. A part of psilink this browser has not
+            stored yet cannot be opened without a connection -- reconnect and
+            open it once, and it will open offline after that.
+          </p>
+        )}
         {/* ErrorComponent renders only `error.message` (auto-shown in dev, behind
             a toggle in production), never `.stack`. Hand it a sanitized message
             rather than the raw Error so the at-the-sink escaping and the

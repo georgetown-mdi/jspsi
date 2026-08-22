@@ -16,6 +16,7 @@ import {
 } from "@mantine/core";
 
 import { cssVariablesResolver, mantineTheme } from "@theme";
+import { AppShellStatus } from "@components/AppShellStatus";
 import { DefaultCatchBoundary } from "@components/DefaultCatchBoundary";
 import { NotFound } from "@components/NotFound";
 import { seo } from "@utils/seo";
@@ -31,6 +32,13 @@ export const Route = createRootRoute({
       {
         name: "viewport",
         content: "width=device-width, initial-scale=1",
+      },
+      {
+        // Matches the manifest's theme_color and the bench's paper surface, so
+        // an installed window's title bar is the app's own ground rather than
+        // browser white.
+        name: "theme-color",
+        content: "#f6f5f1",
       },
       ...seo({
         title: "Secure Online PSI",
@@ -88,6 +96,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
           theme={mantineTheme}
           cssVariablesResolver={cssVariablesResolver}
         >
+          <AppShellStatus />
           {children}
           <TanStackRouterDevtools position="bottom-right" />
           <Scripts />

@@ -4,6 +4,7 @@ import { Alert, Button, CopyButton, FileButton, Loader } from "@mantine/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 
 import { triggerBlobDownload } from "@components/blobDownload";
+import { useOnlineStatus } from "@components/useOnlineStatus";
 
 import {
   COMPROMISE_RESPONSE_MESSAGE,
@@ -108,6 +109,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [migrated, setMigrated] = useState(false);
   const [reselected, setReselected] = useState<File>();
   const [running, setRunning] = useState(false);
+  // The record, its detail, and the backup affordances all read the browser's own
+  // store and render offline; a run is a live two-party session and cannot. Gating
+  // the action names that rather than letting the operator press it into an opaque
+  // connection failure. Only the offline direction is gated -- being online is no
+  // promise the partner is there (see @utils/networkStatus).
+  const online = useOnlineStatus();
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [finishedAt, setFinishedAt] = useState<Date>();
   const [failure, setFailure] = useState<ManagedRunFailure>();
@@ -675,11 +682,18 @@ export function ManagedRunSurface({ id }: { id: string }) {
               <Button
                 onClick={run}
                 loading={running}
-                disabled={inputSource() === undefined}
+                disabled={inputSource() === undefined || !online}
               >
                 Run exchange
               </Button>
             </p>
+            {!online && (
+              <p className={styles.sub}>
+                This device is offline, so this exchange cannot run: it connects
+                straight to your partner, who has to be running their side at
+                the same time. Everything else here is available.
+              </p>
+            )}
             {running && (
               <p className={styles.sub}>
                 Connecting to your partner and running the exchange. Keep this

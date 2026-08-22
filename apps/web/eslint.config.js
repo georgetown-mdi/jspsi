@@ -155,6 +155,19 @@ export default [
     },
   },
   {
+    // The app-shell service worker is a classic (non-module) script served as a
+    // static asset from public/: it declares globals rather than exports, so the
+    // shared config's `sourceType: "module"` would misread its top level. It is
+    // linted rather than ignored -- a fetch interceptor in front of the whole
+    // origin is the last file that should go unlinted -- which is also why
+    // apps/web/tsconfig.json lists it, since the shared config's type-aware
+    // rules need it inside the project. The browser globals the shared config
+    // supplies cover everything it touches; the service-worker extras
+    // (skipWaiting, clients) it reaches through `self`.
+    files: ["public/serviceWorker.js"],
+    languageOptions: { sourceType: "script" },
+  },
+  {
     // The enumerated rawRows consumers keep the sensitive-parse and warning-sink
     // bans but are exempt from the rawRows-access ban. A separate block (not an
     // `ignores`) because flat config replaces a rule's whole options across blocks:
