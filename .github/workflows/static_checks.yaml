@@ -176,7 +176,8 @@ jobs:
       # compares, naming the file and the generator on a difference. It restores
       # every file it touches, classifies each entry in that directory
       # (generator, verifier, or no generator) so an unclassified addition
-      # fails, and masks only the randomized ECDSA signature values, by name.
+      # fails, and masks only the two values a rerun does not reproduce -- the
+      # randomized ECDSA signatures and the recorded openssl version -- by name.
       - name: Vectors against their generators
         run: npm run check:vectors
       # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain

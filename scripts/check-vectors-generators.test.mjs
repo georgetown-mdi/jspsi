@@ -67,12 +67,57 @@ describe("maskExcusedValues", () => {
   });
 
   it("masks nothing when no key is excused", () => {
-    expect(maskExcusedValues(signed, [])).toEqual({ text: signed, count: 0 });
+    expect(maskExcusedValues(signed, [])).toEqual({
+      text: signed,
+      count: 0,
+      byKey: [],
+    });
+  });
+
+  it("counts each excused key separately", () => {
+    const both = `{\n  "signature": "abc-DEF_123",\n  "signatureProducer": "OpenSSL 3.0.13"\n}\n`;
+    expect(
+      maskExcusedValues(both, [
+        "signature",
+        { key: "signatureProducer", value: 'OpenSSL [^"]*' },
+      ]).byKey,
+    ).toEqual([
+      { key: "signature", count: 1 },
+      { key: "signatureProducer", count: 1 },
+    ]);
   });
 
   it("does not match a value outside the base64url alphabet, so a changed encoding fails closed", () => {
     const padded = `{\n  "signature": "abc+DEF/123="\n}\n`;
     expect(maskExcusedValues(padded, ["signature"]).count).toBe(0);
+  });
+
+  it("masks a value the entry gives its own shape for", () => {
+    const banner = `{\n  "signatureProducer": "OpenSSL 3.0.13 30 Jan 2024",\n  "note": "kept"\n}\n`;
+    const masked = maskExcusedValues(banner, [
+      { key: "signatureProducer", value: 'OpenSSL [^"]*' },
+    ]);
+    expect(masked.count).toBe(1);
+    expect(masked.text).toContain(
+      `"signatureProducer": "${EXCUSED_PLACEHOLDER}"`,
+    );
+    expect(masked.text).toContain('"note": "kept"');
+  });
+
+  it("does not match a value outside the shape its entry names, so a changed producer fails closed", () => {
+    const banner = `{\n  "signatureProducer": "LibreSSL 3.3.6"\n}\n`;
+    expect(
+      maskExcusedValues(banner, [
+        { key: "signatureProducer", value: 'OpenSSL [^"]*' },
+      ]).count,
+    ).toBe(0);
+  });
+
+  it("masks by the key an entry names and not a key that merely starts with it", () => {
+    const both = `{\n  "signature": "abc-DEF_123",\n  "signatureProducer": "OpenSSL 3.0.13"\n}\n`;
+    const masked = maskExcusedValues(both, ["signature"]);
+    expect(masked.count).toBe(1);
+    expect(masked.text).toContain('"signatureProducer": "OpenSSL 3.0.13"');
   });
 });
 
@@ -346,7 +391,7 @@ describe("the check against injected generators", () => {
   });
 });
 
-describe("excused randomized values", () => {
+describe("excused values", () => {
   let root;
   let dir;
 
@@ -388,7 +433,7 @@ describe("excused randomized values", () => {
     const result = await run(resigned);
     expect(result.ok).toBe(true);
     expect(result.results[0].excused).toBe(1);
-    expect(result.report).toContain("1 randomized value(s) excused");
+    expect(result.report).toContain("1 excused value(s)");
   });
 
   it("still fails on a deterministic field beside an excused one", async () => {
@@ -428,6 +473,129 @@ describe("excused randomized values", () => {
   });
 });
 
+describe("an excused value recorded from the host", () => {
+  let root;
+  let dir;
+
+  const excusedEntry = {
+    vectors: "signed-vectors.json",
+    generator: "generate-signed.mjs",
+    writes: "stdout",
+    excusedKeys: [{ key: "signatureProducer", value: 'OpenSSL [^"]*' }],
+    excuse: "signatureProducer records the openssl that signed the file.",
+  };
+  const onThisHost = `{\n  "signatureProducer": "OpenSSL 3.0.20 7 Apr 2026",\n  "fingerprint": "pinned"\n}\n`;
+  const onTheRunner = `{\n  "signatureProducer": "OpenSSL 3.0.13 30 Jan 2024",\n  "fingerprint": "pinned"\n}\n`;
+
+  const run = (produced) =>
+    checkVectorsGenerators({
+      root,
+      directory: FIXTURE_DIRECTORY,
+      generated: [excusedEntry],
+      verifiers: [],
+      ungenerated: [],
+      format: (text) => text,
+      coreDistStaleness: () => null,
+      runGenerator: () => produced,
+    });
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "vectors-producer-test-"));
+    dir = join(root, FIXTURE_DIRECTORY);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, excusedEntry.vectors), onThisHost);
+    writeFileSync(join(dir, excusedEntry.generator), "// signed\n");
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("passes when only the recorded producer moved, so another host's openssl does not fail the check", async () => {
+    const result = await run(onTheRunner);
+    expect(result.ok).toBe(true);
+    expect(result.results[0].excused).toBe(1);
+  });
+
+  it("still fails on a deterministic field beside it", async () => {
+    const result = await run(
+      `{\n  "signatureProducer": "OpenSSL 3.0.13 30 Jan 2024",\n  "fingerprint": "moved"\n}\n`,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.results[0].status).toBe("differs");
+    expect(result.results[0].detail).toContain("fingerprint");
+  });
+
+  it("fails closed when the producer stops matching the shape the excuse names", async () => {
+    const result = await run(
+      `{\n  "signatureProducer": "LibreSSL 3.3.6",\n  "fingerprint": "pinned"\n}\n`,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.results[0].status).toBe("excuse-inert");
+    expect(result.results[0].detail).toContain("signatureProducer");
+  });
+});
+
+describe("an entry excusing more than one key", () => {
+  let root;
+  let dir;
+
+  const excusedEntry = {
+    vectors: "signed-vectors.json",
+    generator: "generate-signed.mjs",
+    writes: "stdout",
+    excusedKeys: [
+      "signature",
+      { key: "signatureProducer", value: 'OpenSSL [^"]*' },
+    ],
+    excuse: "Both are values a rerun does not reproduce.",
+  };
+  const committed = `{\n  "first": {\n    "signature": "AAAA-bbbb_1"\n  },\n  "second": {\n    "signature2": "CCCC-dddd_2"\n  },\n  "signatureProducer": "OpenSSL 3.0.20 7 Apr 2026"\n}\n`;
+
+  const run = (produced) =>
+    checkVectorsGenerators({
+      root,
+      directory: FIXTURE_DIRECTORY,
+      generated: [excusedEntry],
+      verifiers: [],
+      ungenerated: [],
+      format: (text) => text,
+      coreDistStaleness: () => null,
+      runGenerator: () => produced,
+    });
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "vectors-multikey-test-"));
+    dir = join(root, FIXTURE_DIRECTORY);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, excusedEntry.vectors), committed);
+    writeFileSync(join(dir, excusedEntry.generator), "// signed\n");
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("passes when every excused key moved, counting them all", async () => {
+    const result = await run(
+      `{\n  "first": {\n    "signature": "EEEE-ffff_3"\n  },\n  "second": {\n    "signature2": "CCCC-dddd_2"\n  },\n  "signatureProducer": "OpenSSL 3.0.13 30 Jan 2024"\n}\n`,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.results[0].excused).toBe(2);
+  });
+
+  // Both sides total two masked values here, so only a per-key comparison sees
+  // that one mask picked up a second match while the other stopped matching.
+  it("fails closed on an inert mask the totals agree over", async () => {
+    const result = await run(
+      `{\n  "first": {\n    "signature": "EEEE-ffff_3"\n  },\n  "second": {\n    "signature": "GGGG-hhhh_4"\n  },\n  "signatureProducer": "LibreSSL 3.3.6"\n}\n`,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.results[0].status).toBe("excuse-inert");
+    expect(result.results[0].detail).toContain("signatureProducer");
+  });
+});
+
 describe("the manifests against the real vectors directory", () => {
   const dir = resolve(repoRoot, VECTORS_DIRECTORY);
 
@@ -450,6 +618,25 @@ describe("the manifests against the real vectors directory", () => {
     }
     for (const entry of UNGENERATED_VECTORS) expect(entry.reason).toBeTruthy();
     for (const entry of VERIFIERS) expect(entry.reason).toBeTruthy();
+  });
+
+  // Every excused key has to fire against the committed bytes here, where the
+  // suite runs on any host, rather than first being noticed by the gate on a
+  // host whose openssl differs from the one that last regenerated the file.
+  it("matches every excused key against the vectors file it is declared for", () => {
+    const inert = [];
+    for (const entry of GENERATED_VECTORS) {
+      const committed = readFileSync(join(dir, entry.vectors), "utf8");
+      for (const excused of entry.excusedKeys ?? []) {
+        if (maskExcusedValues(committed, [excused]).count === 0) {
+          inert.push({
+            vectors: entry.vectors,
+            key: typeof excused === "string" ? excused : excused.key,
+          });
+        }
+      }
+    }
+    expect(inert).toEqual([]);
   });
 });
 

@@ -50,27 +50,41 @@
 //        fact rather than an assumption. A `file` generator that leaves the
 //        mtime untouched, and a `stdout` generator that moves it, each fail --
 //        the declared shape and the observed one have to agree.
-//      - The EXCUSED-VALUE probe. Where a generator's output carries randomized
-//        values (below), those values are masked on both sides before the
-//        comparison. The mask must fire the same non-zero number of times on
-//        both, so a mask that has quietly stopped matching fails instead of
-//        excusing the whole file.
+//      - The EXCUSED-VALUE probe. Where a generator's output carries values it
+//        does not reproduce (below), those values are masked on both sides
+//        before the comparison. Each mask must fire the same non-zero number of
+//        times on both, counted per key so an entry excusing two of them cannot
+//        hide an inert mask behind one that matches; a mask that has quietly
+//        stopped matching fails instead of excusing the whole file.
 //      - The BUILT-CORE probe. The generators marked `needsCoreDist` below
 //        import packages/core/dist, so a dist older than its sources makes the
 //        comparison meaningless; that fails here, naming them, rather than
 //        passing on yesterday's library.
 //
-// Randomized output, stated rather than skipped: generate-signed-receipt-vectors
-// and generate-signing-cert-vectors sign with `openssl`, and ECDSA draws a fresh
-// nonce per signature, so their `signature` values differ on every run. Measured
-// by regenerating each and diffing the whole file: those values are the ONLY
-// bytes that move -- every fingerprint, binder, coordinate, and canonical
-// layout in both files reproduces exactly -- so they are masked by name rather
-// than the files being dropped from the check. What the mask gives up is covered
-// elsewhere, also measured: flipping one character of every masked signature
-// fails signedReceipt.test.ts, signedReceiptVerification.test.ts, and
+// Unreproducible output, stated rather than skipped: generate-signed-receipt-
+// vectors and generate-signing-cert-vectors sign by shelling out to `openssl`,
+// and two of the values that land in their files do not come back the same:
+//
+//   - `signature`. ECDSA draws a fresh nonce per signature, so the value is not
+//     a known answer; it moves on every run, on one host or across hosts.
+//   - `signatureProducer`. Each generator records `openssl version` as the
+//     provenance of the signatures beside it, so the value is whatever the
+//     GENERATING host's openssl was. It reproduces only on a host carrying that
+//     same build, which neither a contributor's machine nor the runner image
+//     owes the machine the files were last regenerated on.
+//
+// Measured by regenerating both files against an openssl reporting a different
+// version and diffing the whole file: those values are the ONLY bytes that move
+// -- every fingerprint, binder, coordinate, and canonical layout in both files
+// reproduces exactly -- so they are masked by name rather than the files being
+// dropped from the check. What the signature mask gives up is covered elsewhere,
+// also measured: flipping one character of every masked signature fails
+// signedReceipt.test.ts, signedReceiptVerification.test.ts, and
 // signingIdentity.test.ts, which verify them (apps/web/test/browser/
-// signedReceipt.test.ts loads them in real Chromium as well).
+// signedReceipt.test.ts loads them in real Chromium as well). What the producer
+// mask gives up is a record of history rather than a fact this check could pin:
+// it names the openssl that signed the CHECKED-IN bytes, which a regeneration
+// here does not reproduce and does not need to.
 //
 // What this check cannot see:
 //   - Whether a vectors file is CORRECT. It asserts only that the checked-in
@@ -113,13 +127,17 @@ import {
 /** The vectors directory this check covers, relative to the repository root. */
 export const VECTORS_DIRECTORY = "packages/core/test/vectors";
 
-// The randomized values masked before a comparison, by the JSON key that holds
-// them. Only `signature`: ECDSA draws a fresh nonce per signature, so the value
-// is not a known answer. Everything else in those files is deterministic.
-const EXCUSED_RANDOM_KEYS = ["signature"];
+// The values masked before a comparison, as the JSON key holding each and the
+// shape that key's value takes. The shape is half the excuse: a value that stops
+// matching it takes the EXCUSED-VALUE probe down rather than passing masked.
+// Everything else in those files is deterministic and host-independent.
+const EXCUSED_OPENSSL_KEYS = [
+  { key: "signature", value: "[A-Za-z0-9_-]+" },
+  { key: "signatureProducer", value: 'OpenSSL [^"]*' },
+];
 
-const EXCUSE_ECDSA =
-  "ECDSA signing draws a fresh nonce per signature, so the `signature` values are not known answers; they are masked, and their validity is asserted by the suites that verify them.";
+const EXCUSE_OPENSSL =
+  "ECDSA signing draws a fresh nonce per signature, so the `signature` values are not known answers, and `signatureProducer` records the openssl that signed the checked-in bytes rather than the one this run has. Both are masked; the signatures' validity is asserted by the suites that verify them.";
 
 /** Every vectors file with a generator, and how that generator emits it. */
 export const GENERATED_VECTORS = [
@@ -155,16 +173,16 @@ export const GENERATED_VECTORS = [
     generator: "generate-signed-receipt-vectors.mjs",
     writes: "file",
     needsCoreDist: true,
-    excusedKeys: EXCUSED_RANDOM_KEYS,
-    excuse: EXCUSE_ECDSA,
+    excusedKeys: EXCUSED_OPENSSL_KEYS,
+    excuse: EXCUSE_OPENSSL,
   },
   {
     vectors: "signing-cert-vectors.json",
     generator: "generate-signing-cert-vectors.mjs",
     writes: "file",
     needsCoreDist: true,
-    excusedKeys: EXCUSED_RANDOM_KEYS,
-    excuse: EXCUSE_ECDSA,
+    excusedKeys: EXCUSED_OPENSSL_KEYS,
+    excuse: EXCUSE_OPENSSL,
   },
   {
     vectors: "transform-regex-divergent-vectors.json",
@@ -206,32 +224,52 @@ export const UNGENERATED_VECTORS = [
   },
 ];
 
-/** The masking token a randomized value is replaced with before comparison. */
-export const EXCUSED_PLACEHOLDER = "<excused-randomized-value>";
+/** The masking token an excused value is replaced with before comparison. */
+export const EXCUSED_PLACEHOLDER = "<excused-value>";
 
 // The write probe's fixed past instant. Any value the filesystem can hold that
 // no real write would land on; the epoch's first second reads unambiguously in a
 // stat if a run is killed between setting it and restoring.
 const PROBE_MTIME = new Date(1000);
 
+/** The value shape assumed for an excused key given as a bare name. */
+const DEFAULT_EXCUSED_VALUE = "[A-Za-z0-9_-]+";
+
+/** The JSON key an excused-key entry names, in either accepted shape. */
+const excusedKeyName = (excused) =>
+  typeof excused === "string" ? excused : excused.key;
+
 /**
- * Replace the value of every `"<key>": "<base64url>"` line with
- * {@link EXCUSED_PLACEHOLDER}, returning the masked text and how many values
- * were replaced. Textual rather than parse-and-reserialize so everything else
- * -- key order, spacing, the whole formatted shape -- still compares byte for
- * byte.
+ * Replace the value of every excused `"<key>": "<value>"` line with
+ * {@link EXCUSED_PLACEHOLDER}, returning the masked text, how many values were
+ * replaced, and that count broken down by key. An entry is a bare key name,
+ * whose value is matched as base64url, or `{key, value}` naming the shape that
+ * key's value takes. Textual rather than parse-and-reserialize so everything
+ * else -- key order, spacing, the whole formatted shape -- still compares byte
+ * for byte.
  */
 export function maskExcusedValues(text, keys = []) {
   let masked = text;
-  let count = 0;
-  for (const key of keys) {
-    const pattern = new RegExp(`^(\\s*"${key}": ")[A-Za-z0-9_-]+(",?)$`, "gm");
+  const byKey = [];
+  for (const excused of keys) {
+    const key = excusedKeyName(excused);
+    const value =
+      typeof excused === "string"
+        ? DEFAULT_EXCUSED_VALUE
+        : (excused.value ?? DEFAULT_EXCUSED_VALUE);
+    const pattern = new RegExp(`^(\\s*"${key}": ")${value}(",?)$`, "gm");
+    let count = 0;
     masked = masked.replace(pattern, (_match, head, tail) => {
       count += 1;
       return `${head}${EXCUSED_PLACEHOLDER}${tail}`;
     });
+    byKey.push({ key, count });
   }
-  return { text: masked, count };
+  return {
+    text: masked,
+    count: byKey.reduce((total, entry) => total + entry.count, 0),
+    byKey,
+  };
 }
 
 /**
@@ -474,15 +512,24 @@ async function compareOne({
     const excusedKeys = entry.excusedKeys ?? [];
     const maskedCommitted = maskExcusedValues(committed, excusedKeys);
     const maskedProduced = maskExcusedValues(formatted, excusedKeys);
-    if (
-      excusedKeys.length > 0 &&
-      (maskedCommitted.count === 0 ||
-        maskedCommitted.count !== maskedProduced.count)
-    ) {
+    // Per key rather than over their total: an entry excusing more than one key
+    // could otherwise carry a mask matching nothing behind another that matches
+    // plenty, and the totals would still agree.
+    const inert = maskedCommitted.byKey
+      .map((excused, index) => ({
+        key: excused.key,
+        committed: excused.count,
+        produced: maskedProduced.byKey[index].count,
+      }))
+      .filter(
+        (excused) =>
+          excused.committed === 0 || excused.committed !== excused.produced,
+      );
+    if (inert.length > 0) {
       return {
         ...named,
         status: "excuse-inert",
-        detail: `the randomized values excused for ${entry.vectors} (${excusedKeys.map((key) => `\`${key}\``).join(", ")}) matched ${maskedCommitted.count} time(s) in the committed file and ${maskedProduced.count} in the regenerated one. The excuse must cover the same values on both sides or it is excusing something other than what it names -- so this fails rather than compare masked-out bytes. Reason the excuse exists: ${entry.excuse}`,
+        detail: `${inert.map((excused) => `\`${excused.key}\` matched ${excused.committed} time(s) in the committed ${entry.vectors} and ${excused.produced} in the regenerated one`).join("; ")}. The excuse must cover the same values on both sides or it is excusing something other than what it names -- so this fails rather than compare masked-out bytes. Reason the excuse exists: ${entry.excuse}`,
       };
     }
 
@@ -574,9 +621,7 @@ function formatReport({
     lines.push("", "Regenerated and compared:");
     for (const result of results) {
       const excused =
-        result.excused > 0
-          ? ` (${result.excused} randomized value(s) excused)`
-          : "";
+        result.excused > 0 ? ` (${result.excused} excused value(s))` : "";
       lines.push(
         result.status === "reproduces"
           ? `  ok    ${result.vectors} <- ${result.generator}${excused}`
