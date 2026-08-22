@@ -11,22 +11,22 @@ import type { ExchangeSpec } from "@psilink/core";
 import {
   builder as exchangeBuilder,
   handler as exchangeHandler,
-} from "../../src/commands/exchange";
+} from "../../../src/commands/exchange";
 import {
   builder as zeroSetupBuilder,
   handler as zeroSetupHandler,
-} from "../../src/commands/zeroSetup";
-import { saveConfig } from "../../src/config";
-import { saveKeyFile } from "../../src/keyFile";
-import { DEFAULT_RECORD_BASENAME, keysPathFor } from "../../src/recordFile";
+} from "../../../src/commands/zeroSetup";
+import { saveConfig } from "../../../src/config";
+import { saveKeyFile } from "../../../src/keyFile";
+import { DEFAULT_RECORD_BASENAME, keysPathFor } from "../../../src/recordFile";
 
 // Net-new coverage: the per-command-handler wiring that turns the default-on
 // audit record into files on disk. `psilink exchange` and the zero-setup command
 // each default `--record` to true, read that default in their handler, and pass
 // resolveRecordOutput(...) into the shared runProtocol write path. The write
 // mechanism itself is unit-tested (recordFile.test.ts, protocol.test.ts), core's
-// record building is tested (exchangeRecord*.test.ts), and the sibling
-// onlineInviteAccept.test.ts covers the same default-on assertion for the
+// record building is tested (exchangeRecord*.test.ts), and
+// ../onlineInviteAccept.test.ts covers the same default-on assertion for the
 // invite/accept (runOnlineBootstrap) handlers. The remaining gap this file closes
 // is the exchange and zero-setup HANDLERS: that, run with no record-related flags
 // at all, each writes the default record and its private verification-keys file.
@@ -55,17 +55,15 @@ import { DEFAULT_RECORD_BASENAME, keysPathFor } from "../../src/recordFile";
 // filedrop only: the record-write wiring is transport-agnostic (the handler reads
 // the same `--record` default and calls the same runProtocol regardless of
 // channel), so driving a real SFTP server buys nothing here -- the same rationale
-// the sibling file gives for its transport-agnostic (failure-path) assertions.
-//
-// CLI integration tests are self-managing: the integration project's vitest
-// globalSetup (test/sftpServer/globalSetup.ts) starts and stops the SFTP server
-// the suite selects, in process by default. Run with `npm run test:integration
-// -w apps/cli`.
+// ../onlineInviteAccept.test.ts gives for its transport-agnostic (failure-path)
+// assertions. That is also why this file sits in the backend-agnostic project,
+// which starts no SFTP server: run it with `npm run
+// test:integration:backend-agnostic -w apps/cli`.
 
 // 32 zero bytes as base64url (43 chars): a valid shared secret. Both exchange
 // parties' key files start from it so the authenticated handshake succeeds; each
 // rotates to the same fresh value on success (the rotation itself is asserted by
-// authenticatedExchange.test.ts, not re-checked here).
+// ../authenticatedExchange.test.ts, not re-checked here).
 const INITIAL_SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 // Bound each party's transport wait well under the per-test timeout so a genuine

@@ -76,6 +76,12 @@ jobs:
       # runner time. Those legs run the `integration` project, which excludes it.
       - name: WebRTC integration tests (CLI)
         run: npm run test:integration:webrtc -w apps/cli
+      # The integration files no SFTP backend differentiates are a project of
+      # their own for the same reason (apps/cli/vitest.config.ts): each drives a
+      # filedrop directory or a listener of its own, so repeating them on the
+      # native leg below and on each hardened-sshd matrix leg would buy nothing.
+      - name: Backend-agnostic integration tests (CLI)
+        run: npm run test:integration:backend-agnostic -w apps/cli
       # A second leg runs the same suite against a native OpenSSH sshd, so the
       # adapter is also exercised against a real server. sshd ships on the Ubuntu
       # runner, but its build fatally checks for the privilege-separation

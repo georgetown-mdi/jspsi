@@ -164,19 +164,53 @@ in the field. It is pinned in `apps/cli/test/unit/webrtcNegotiation.test.ts`,
 which drives the negotiation against a scripted broker and peer connection and
 asserts the ORDER of what goes on the wire.
 
-A standing console sentinel guards both CLI projects above: it wraps `console`
-directly and fails a test file at `afterAll` on any `console.log`/`warn`/`error`
-that no allowlist matcher accepts (the inverse of blanket silencing, and the one
-check that sees third-party `console.*` which the loglevel-based
-`withCapturedLogs` cannot). If your change makes the suite emit new console
-output, the fix is to eliminate it at the source -- route it through the logger
-or assert it under `withCapturedLogs`; accept it as intended only by adding a
-matcher to the allowlist in `apps/cli/test/integration/consoleAllowlist.ts`, a
-visible edit a reviewer sees. A matcher that never fires across a run is reported
-at teardown so the allowlist cannot accumulate dead entries. That report is
-advisory (a warning, never a failure) and is produced by the `integration`
-project's `globalSetup`, so it sees only that project's files: a matcher fired
-solely by a `webrtc` file reads as dead there.
+### The backend-agnostic project
+
+The integration files no SFTP backend differentiates are a third project,
+`backend-agnostic`, holding the files under
+`apps/cli/test/integration/backendAgnostic/`:
+
+```sh
+npm run test:integration:backend-agnostic -w apps/cli
+```
+
+Each drives a filedrop directory, a listener it stands up itself, or nothing on
+a socket at all, so every backend and hardened profile would reach the same
+result for it -- and `test:integration` is run six times per pull request. Like
+the WebRTC project it starts no SFTP server, runs exactly once (see
+`.github/workflows/cli_build_and_test.yaml`, and the ship-gate step in
+`release.yaml`), and a new file joins it by being written in that directory.
+
+The bar for writing a file there is that no leg differentiates what it
+EXERCISES, not merely what it asserts. A file that reaches the suite's server at
+all -- including incidentally, through a fixture, a control case, or a teardown
+-- belongs in `integration`, because moving it takes that exercise off the
+native and hardened legs entirely. Where only part of a file clears that bar the
+file is split rather than moved whole: `dialPeerIdentification.test.ts` keeps the
+dial paths that run over the server, while its two host-key probe entry points,
+which dial a peer of their own, are
+`backendAgnostic/hostKeyProbePeerIdentification.test.ts`, with the assertions
+both halves share in `apps/cli/test/integration/peerIdentification.ts`.
+
+A move trades a recurring per-leg cost for a one-off one, so measure it first: a
+case costing milliseconds saves milliseconds five times over and still leaves a
+split file to keep in step. Several leg-agnostic cases are deliberately left in
+`integration` on that measurement.
+
+A standing console sentinel guards all three CLI integration projects:
+it wraps `console` directly and fails a test file at `afterAll` on any
+`console.log`/`warn`/`error` that no allowlist matcher accepts (the inverse
+of blanket silencing, and the one check that sees third-party `console.*`
+which the loglevel-based `withCapturedLogs` cannot). If your change makes
+the suite emit new console output, the fix is to eliminate it at the source
+-- route it through the logger or assert it under `withCapturedLogs`;
+accept it as intended only by adding a matcher to the allowlist in
+`apps/cli/test/integration/consoleAllowlist.ts`, a visible edit a reviewer
+sees. A matcher that never fires across a run is reported at teardown so the
+allowlist cannot accumulate dead entries. That report is advisory (a warning,
+never a failure) and is produced by the `integration` project's `globalSetup`,
+so it sees only that project's files: a matcher fired solely by a `webrtc` or
+`backend-agnostic` file reads as dead there.
 
 Web (dev server managed automatically -- same pattern as the CLI integration tests):
 
@@ -455,10 +489,11 @@ The denominator is scoped to product source under each `src/` tree, with the
 generated route tree excluded, so the numbers reflect hand-written product code;
 the vendored signaling broker is a workspace of its own (`packages/peerjs-broker`)
 and runs no coverage, so it sits outside every denominator. The report runs `core` unit, `cli`
-unit, integration, and webrtc (the SFTP adapter is exercised only by the
-integration suite and the WebRTC transport only by the webrtc suite, so dropping
-either would read its adapter as near-uncovered), and `web` unit plus `web`
-browser (real Chromium via Playwright). The web
+unit, integration, webrtc, and backend-agnostic (the SFTP adapter is exercised
+only by the integration suite, the WebRTC transport only by the webrtc suite,
+and the exchange and zero-setup command handlers only by the backend-agnostic
+suite, so dropping any of them would read what it covers as near-uncovered), and
+`web` unit plus `web` browser (real Chromium via Playwright). The web
 unit and browser projects run together and their coverage is merged, so the
 component, live-exchange, and consent-gate paths exercised only in the browser
 are reflected instead of reading as near-zero; running `npm run coverage` for the

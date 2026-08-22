@@ -1,9 +1,9 @@
 import { installCapturedLogsInterceptor } from "@psilink/core/testing";
 
-// A `setupFiles` entry, so this runs once in EACH integration file's worker (the
-// integration project uses the `forks` pool: one process per file), before the
-// test module -- and thus any named logger it constructs at import time -- is
-// loaded. loglevel binds a logger's methods from the methodFactory live at
+// A `setupFiles` entry, so this runs once in EACH file's worker across every
+// project that uses it (each runs on the `forks` pool: one process per file),
+// before the test module -- and thus any named logger it constructs at import
+// time -- is loaded. loglevel binds a logger's methods from the methodFactory live at
 // getLogger time, so installing the withCapturedLogs interceptor here, ahead of
 // every logger, makes capture independent of creation order: a logger
 // materialized before the suite's first withCapturedLogs call is still routed
