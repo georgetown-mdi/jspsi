@@ -2,6 +2,7 @@
 // EncryptedMessageConnection AEAD encrypt path. Run from the repo root:
 //
 //   node packages/core/test/vectors/generate-aead-envelope-vectors.mjs
+//   npm run format
 //
 // The vectors are produced by an INDEPENDENT oracle -- Node's crypto.hkdfSync +
 // createCipheriv, a different code path than the decorator's WebCrypto

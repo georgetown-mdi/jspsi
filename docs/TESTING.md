@@ -384,6 +384,25 @@ generator that produces it, and a suite in any workspace reads it by relative
 path -- the Node suites with `node:fs`, the browser suites with Vite's `?raw`.
 Nothing about it enters `packages/core/src` or ships in `dist/testing.*`.
 
+The suites assert that the code reproduces the checked-in JSON;
+`npm run check:vectors` asserts the other direction on every pull request, so a
+failing conformance assertion cannot be silenced by editing the vectors file. It
+regenerates each file with its generator and fails on a difference, naming both,
+and it classifies every file in the directory -- generated, a verifier
+(`verify-native-wire-vectors.mjs`), or hand-authored with no generator
+(`canonical-vectors.json` and `psi-prebuild-manifest.json`) -- so a file added
+beside the others fails until it is classified rather than passing unchecked.
+
+Two files carry values the check cannot compare, both in
+`signed-receipt-vectors.json` and `signing-cert-vectors.json`: the ECDSA
+`signature` fields, freshly randomized on every signing run, and
+`signatureProducer`, which records the `openssl version` of the host that signed
+the checked-in bytes and so reproduces only on a host carrying that same build.
+Those are masked by name and by the shape each value takes, the mask fails closed
+if it stops matching, and the signatures' validity is asserted by the suites that
+verify them. Refreshing any vectors file is running its generator and then
+`npm run format`, as each generator's header states.
+
 Reading one from more than one workspace is deliberate, along two axes. A
 construction that two applications implement independently is guarded only when
 each application's OWN call sites are driven against one pinned answer; a test

@@ -23,7 +23,8 @@
 // once.
 //
 // Run:  node packages/core/test/vectors/generate-kex-vectors.mjs
-// It prints the JSON to stdout; redirect into kex-vectors.json to refresh.
+// It prints the JSON to stdout; redirect into kex-vectors.json to refresh,
+// then run `npm run format`.
 
 import { createECDH, createHash, createHmac, hkdfSync } from "node:crypto";
 
