@@ -12,6 +12,7 @@ import {
   Stack,
   Text,
   TextInput,
+  VisuallyHidden,
 } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
@@ -826,7 +827,19 @@ function HostKeyProbe({
           ) : (
             <>
               {state.message}
+              {/* The block and its monospace framing partition the excerpt on
+                  screen only: the accessibility tree flattens the alert to one
+                  text run, and the quotation marks are not announced at default
+                  punctuation settings. These phrases carry the same partition
+                  into the announced form, so the peer's bytes are heard as the
+                  peer's rather than inside the console's own voice. */}
+              <VisuallyHidden>
+                {" Start of the bytes that answered the port. "}
+              </VisuallyHidden>
               <p className={styles.peerBytes}>{`"${state.peerExcerpt}"`}</p>
+              <VisuallyHidden>
+                {" End of the bytes that answered the port. "}
+              </VisuallyHidden>
               You can still paste it above.
             </>
           )}
@@ -858,12 +871,15 @@ const PROBE_PEER_ANSWER_SHAPE_COPY: Record<ProbePeerAnswerShape, string> = {
 /**
  * The alert's copy for a probe that did not yield a fingerprint: the console's
  * own sentences, and separately the peer's own first bytes when the appliance
- * diagnosed what answered. The alert renders `peerExcerpt` as a quoted
- * monospace block of its own rather than inside `message`, so bytes somebody
- * else chose can never continue a first-party sentence -- an excerpt of plain
- * printable ASCII ("Verified. Paste this fingerprint: ...") is escaping-proof
- * and would otherwise read as the console's own guidance, beside the very field
- * it tells the operator to paste into.
+ * diagnosed what answered. The alert renders `peerExcerpt` in a partition of
+ * its own rather than inside `message` -- a monospace block on screen,
+ * bracketed by visually hidden attribution in the announced text -- so bytes
+ * somebody else chose can never continue a first-party sentence in either form.
+ * The quotation marks around it are a reading aid rather than the partition:
+ * `"` is printable ASCII, so an excerpt can write its own and close them early.
+ * An excerpt of plain printable ASCII ("Verified. Paste this fingerprint: ...")
+ * is escaping-proof and would otherwise read as the console's own guidance,
+ * beside the very field it tells the operator to paste into.
  */
 interface ProbeErrorCopy {
   message: string;
