@@ -31,12 +31,6 @@ import { isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import {
-  REATTACHED_RUN_INTENT,
-  SWEEP_RETAIN_REFUSAL_TITLE,
-  isSweepRetainRefusal,
-  sweepRetainRefusalMessage,
-} from "./runDiagnosticsModel";
-import {
   WAITING_STAGE_ID,
   initialRun,
   runWithCompletion,
@@ -66,12 +60,9 @@ import type {
   ServerJobExchangeDriverConfig,
   ServerJobExchangeTransport,
 } from "@psi/serverJobExchangeDriver";
-import type {
-  RunDiagnosticsIntentFields,
-  RunDiagnosticsIntentSource,
-} from "./runDiagnosticsModel";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { JobExchangeOptions } from "@jobs/intent";
+import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
 import type { RunOutputs } from "./runOutputs";
 import type { Transport } from "./inviterModel";
 
@@ -256,60 +247,6 @@ export function failureFor(
           "try again."
         : "The exchange could not be completed - usually a temporary " +
           "connection problem rather than an issue with your data.",
-  };
-}
-
-/**
- * Replace a terminal failure with the sweep-refusal guidance when the CLI
- * refused THIS run's recovery sweep over a retain-mode signal, else return it
- * unchanged.
- *
- * Applied where a seat sets a run's failure, so the console's one explanation of
- * the retain guard -- and of the command-line escalation it deliberately does
- * not offer -- lives in one place rather than in each seat's alert.
- *
- * The run's own intent decides whether the guidance is considered at all: a run
- * that requested no sweep keeps its failure whatever the relayed text says. That
- * gate is what makes keying on text admissible, because a terminal message can
- * carry partner-chosen bytes verbatim -- a rendezvous directory is
- * partner-writable and core's foreign-file terminal names the offending files --
- * so on an unsweeping run the recognizer's substring match would retitle an
- * honest failure as a refused sweep and steer the operator toward a flag that
- * deletes permanently.
- *
- * The limit that follows from the same gate: the guidance applies ONLY to a run
- * this seat launched with a sweeping intent. A re-attached run
- * ({@link REATTACHED_RUN_INTENT}) is a job this seat did not create, so it can
- * attest nothing about what that job requested and decorates none of its
- * failures -- the CLI's own text stands as it arrived, including when it really
- * was a refused sweep somebody else asked for.
- *
- * Past that gate the refusal is the one `exchange`-category terminal whose text
- * is surfaced. That is warranted here: it is a first-party refusal composed
- * around the very flag this console put on the argv, it arrives as a relayed
- * chain the appliance already escaped and bounded, and the concrete retain
- * signal it names is what tells the operator whose transcript they were about to
- * delete.
- *
- * @internal
- */
-export function withSweepRefusalGuidance(
-  failure: RunFailure,
-  error: unknown,
-  /** What the seat knows about this run's per-run controls: the fields it
-   * emitted for a run it launched (absent when that launch carried none), or
-   * {@link REATTACHED_RUN_INTENT} for a run it only re-attached to. */
-  runDiagnostics: RunDiagnosticsIntentSource,
-): RunFailure {
-  if (runDiagnostics === REATTACHED_RUN_INTENT) return failure;
-  if (runDiagnostics?.sweepExchangeFiles !== true) return failure;
-  if (!(error instanceof RelayedTerminalError)) return failure;
-  const message = sanitizedFailureMessage(error);
-  if (!isSweepRetainRefusal(message)) return failure;
-  return {
-    category: failure.category,
-    title: SWEEP_RETAIN_REFUSAL_TITLE,
-    message: sweepRetainRefusalMessage(message),
   };
 }
 
@@ -629,21 +566,9 @@ export function useInviterExchange({
     ).kind;
 
     // Raise a failure's alert and freeze the run: the terminal path for every
-    // error except a busy (409) create, which re-attaches below instead. The
-    // intent is the caller's to state, since a re-attached run's failure belongs
-    // to a job this seat did not launch.
-    const raiseFailure = (
-      category: ExchangeErrorCategory,
-      error: unknown,
-      runIntent: RunDiagnosticsIntentSource,
-    ) => {
-      setFailure(
-        withSweepRefusalGuidance(
-          failureFor(category, error, inputSource, channel),
-          error,
-          runIntent,
-        ),
-      );
+    // error except a busy (409) create, which re-attaches below instead.
+    const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
+      setFailure(failureFor(category, error, inputSource, channel));
       setRun((current) => runWithFailure(current));
     };
 
@@ -681,7 +606,6 @@ export function useInviterExchange({
             seat: "inviter",
             channel,
             events: runEvents,
-            raiseFailure,
             onReattaching: (id, status) => {
               currentJobIdRef.current = id;
               setCurrentJobId(id);
@@ -691,12 +615,12 @@ export function useInviterExchange({
           }).then((didReattach) => {
             if (!didReattach) {
               setReattaching(false);
-              raiseFailure(category, error, runDiagnostics);
+              raiseFailure(category, error);
             }
           });
           return;
         }
-        raiseFailure(category, error, runDiagnostics);
+        raiseFailure(category, error);
       },
     };
 

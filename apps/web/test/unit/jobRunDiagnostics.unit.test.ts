@@ -5,23 +5,17 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { JOB_FILE_NAMES, jobCreateIntentSchema } from "@jobs/intent";
 import {
-  REATTACHED_RUN_INTENT,
   RUN_DIAGNOSTICS_DEFAULT,
   SWEEP_CONFIRMATION_NOTICE,
-  SWEEP_RETAIN_REFUSAL_TITLE,
+  SWEEP_RETAIN_ESCALATION_NOTICE,
   SWEEP_UNCONFIRMED_PROBLEM,
-  isSweepRetainRefusal,
   runDiagnosticsAfterRetarget,
   runDiagnosticsIntentFields,
   runDiagnosticsProblems,
   runDiagnosticsWithControl,
-  sweepRetainRefusalMessage,
 } from "@bench/runDiagnosticsModel";
-import {
-  failureFor,
-  withSweepRefusalGuidance,
-} from "@bench/useInviterExchange";
 import { RelayedTerminalError } from "@psi/serverJobExchangeDriver";
+import { failureFor } from "@bench/useInviterExchange";
 import { resolveWorkdirFile } from "@jobs/workdir";
 import { watchJobLogAvailable } from "@psi/jobDiagnosticLog";
 
@@ -428,86 +422,75 @@ describe("the diagnostic log's availability during a run", () => {
   });
 });
 
-// The console offers the safe sweep and explains the escalation; it never
-// performs one. The guidance is what carries that explanation, so it is pinned
-// against the CLI's own refusal text.
-describe("the retain-guard refusal surfaces as guidance", () => {
-  // The wording core composes when a sweep meets a retain-mode signal. Held here
-  // as the text the seat must recognize; a core rewording turns the match off,
-  // which leaves the CLI's own message standing on its own.
-  const cliRefusal =
-    "path /srv/rendezvous shows a retain-mode signal (this party is in " +
-    "retain mode), so --sweep-exchange-files refuses to delete what may be a " +
-    "durable audit transcript. Re-run with --force-retain-sweep to wipe the " +
-    "prior transcript and start a fresh exchange, after confirming no " +
-    "concurrent session is using this path.";
-
-  test("the refusal is recognized", () => {
-    expect(isSweepRetainRefusal(cliRefusal)).toBe(true);
-  });
-
-  test("an ordinary transport failure is not", () => {
-    expect(
-      isSweepRetainRefusal("the partner never appeared in the shared folder"),
-    ).toBe(false);
-  });
-
-  test("the guidance names the command-line escalation and keeps the CLI's own message", () => {
-    const message = sweepRetainRefusalMessage(cliRefusal);
-    expect(message).toContain("--force-retain-sweep");
-    expect(message).toContain("command line");
-    expect(message).toContain(cliRefusal);
-  });
-
-  test("the guidance states the same concurrent-session condition the confirmation does", () => {
-    expect(sweepRetainRefusalMessage(cliRefusal)).toContain(
-      "no other session is using",
+// The console offers the safe sweep and names the escalation past the CLI's
+// retain guard in fixed copy the operator's own draft brings up, so nothing a
+// run says decides what the console tells them about it.
+describe("the escalation is stated before the run, not composed from its failure", () => {
+  test("the card names the command-line escalation and what it costs", () => {
+    expect(SWEEP_RETAIN_ESCALATION_NOTICE).toContain(
+      "--sweep-exchange-files --force-retain-sweep",
     );
+    expect(SWEEP_RETAIN_ESCALATION_NOTICE).toContain("command line");
+    expect(SWEEP_RETAIN_ESCALATION_NOTICE).toContain("permanently");
   });
+});
 
-  test("a run that requested no sweep keeps its failure, whatever the relayed text carries", () => {
-    // The rendezvous directory is partner-writable and core's foreign-file
-    // terminal names the offending files verbatim, so the fragment reaches a
-    // seat inside text this console composed no part of. Rewriting an honest
-    // failure over it would retitle the run's real cause and point the operator
-    // at a flag that deletes permanently.
-    const relayed = new RelayedTerminalError(
-      "the shared folder holds files this exchange does not own: " +
-        "--sweep-exchange-files refuses to delete.csv",
+// A rendezvous directory is partner-writable and core's foreign-file terminal
+// names the offending files verbatim, so text an operator would read as
+// first-party can reach a seat inside a message this console composed no part
+// of. What keeps that inert is that a failure's alert is composed from the
+// lifecycle's category alone: no relayed byte selects a title, and no per-run
+// choice changes what a failure says.
+describe("relayed terminal text never retitles a failure", () => {
+  /** The CLI's own refusal wording, planted inside a filename an untrusted party
+   * chose -- the shape no text test can tell from the real refusal. */
+  const plantedTerminal =
+    "the shared folder holds files this exchange does not own: " +
+    "--sweep-exchange-files refuses to delete.csv";
+
+  const sweepingDraft = {
+    ...RUN_DIAGNOSTICS_DEFAULT,
+    sweepExchangeFiles: true,
+    sweepConfirmed: true,
+  };
+
+  test("a run that requested the sweep surfaces what a run that did not surfaces", () => {
+    // The two runs differ in what they asked the CLI to do...
+    expect(runDiagnosticsIntentFields(sweepingDraft)).toEqual({
+      sweepExchangeFiles: true,
+    });
+    expect(runDiagnosticsIntentFields(RUN_DIAGNOSTICS_DEFAULT)).toEqual({});
+
+    // ...and neither reaches the failure, so the planted fragment cannot become
+    // the console's own words on either run.
+    const surfaced = failureFor(
+      "exchange",
+      new RelayedTerminalError(plantedTerminal),
+      undefined,
+      "filedrop",
     );
-    const untouched = failureFor("exchange", relayed, undefined, "filedrop");
-    // What holds the failure is the run's own intent, not the recognizer: this
-    // very text reads as a refusal to it.
-    expect(isSweepRetainRefusal(relayed.message)).toBe(true);
-
-    for (const runDiagnostics of [undefined, { diagnosticRun: true } as const])
-      expect(
-        withSweepRefusalGuidance(untouched, relayed, runDiagnostics),
-      ).toEqual(untouched);
+    expect(surfaced.title).toBe("Exchange failed");
+    expect(surfaced.message).not.toContain("--force-retain-sweep");
+    expect(surfaced.message).not.toContain("refuses to delete");
   });
 
-  test("a run this seat only re-attached to keeps the CLI's own text, refusal or not", () => {
-    // The exchange holding the appliance's slot is not the one this seat
-    // launched, so the seat knows nothing about what it requested and attests
-    // nothing about it -- including when the text really is the refusal, where
-    // the CLI's own message already names the escalation.
-    const relayed = new RelayedTerminalError(cliRefusal);
-    const untouched = failureFor("exchange", relayed, undefined, "filedrop");
-    expect(
-      withSweepRefusalGuidance(untouched, relayed, REATTACHED_RUN_INTENT),
-    ).toEqual(untouched);
-  });
-
-  test("a run that did request the sweep gets the guidance with the CLI's own text", () => {
-    const relayed = new RelayedTerminalError(cliRefusal);
-    const guided = withSweepRefusalGuidance(
-      failureFor("exchange", relayed, undefined, "filedrop"),
-      relayed,
-      { sweepExchangeFiles: true },
-    );
-
-    expect(guided.title).toBe(SWEEP_RETAIN_REFUSAL_TITLE);
-    expect(guided.message).toContain("--force-retain-sweep");
-    expect(guided.message).toContain(cliRefusal);
+  test("every category keeps the title it gives an ordinary terminal", () => {
+    const categories = ["exchange", "config", "security", "output"] as const;
+    for (const category of categories) {
+      const planted = failureFor(
+        category,
+        new RelayedTerminalError(plantedTerminal),
+        undefined,
+        "filedrop",
+      );
+      const ordinary = failureFor(
+        category,
+        new RelayedTerminalError("the partner never appeared"),
+        undefined,
+        "filedrop",
+      );
+      expect(planted.title).toBe(ordinary.title);
+      expect(planted.message).not.toContain("--force-retain-sweep");
+    }
   });
 });

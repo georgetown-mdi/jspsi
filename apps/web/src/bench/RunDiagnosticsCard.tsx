@@ -7,6 +7,7 @@ import {
   DIAGNOSTIC_LOG_NOTICE,
   SWEEP_CONFIRMATION_LABEL,
   SWEEP_CONFIRMATION_NOTICE,
+  SWEEP_RETAIN_ESCALATION_NOTICE,
   runDiagnosticsProblems,
   runDiagnosticsWithControl,
 } from "./runDiagnosticsModel";
@@ -38,8 +39,9 @@ function draftSummary(draft: RunDiagnosticsDraft): string {
  * What the sweep DOES is entirely the CLI's: it passes `--sweep-exchange-files`
  * and nothing else, so which files count as the exchange's own and whether a
  * retain-mode transcript may be deleted are decided where they always were. The
- * escalation past that guard is deliberately not offered here -- the seat
- * explains it when the guard refuses.
+ * escalation past that guard is named here and not offered, in fixed copy the
+ * operator's own draft brings up -- nothing a run says decides what this card
+ * tells them.
  */
 export function RunDiagnosticsCard({
   draft,
@@ -125,6 +127,9 @@ export function RunDiagnosticsCard({
               }
               label={SWEEP_CONFIRMATION_LABEL}
             />
+            <Text size="sm" c="dimmed">
+              {SWEEP_RETAIN_ESCALATION_NOTICE}
+            </Text>
           </>
         )}
 

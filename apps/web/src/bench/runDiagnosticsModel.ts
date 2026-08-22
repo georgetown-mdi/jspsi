@@ -2,11 +2,11 @@
  * The pure model behind the console's "Diagnostics and recovery" card: the two
  * PER-RUN controls an operator reaches for when a run misbehaves -- capture a
  * detailed log, and sweep a rendezvous directory a crashed prior run left
- * protocol files in -- plus what the card refuses before the run starts and what
- * the seat says when the CLI refuses the sweep.
+ * protocol files in -- plus what the card states and refuses before the run
+ * starts.
  *
  * No React and no I/O, so the emitted intent fields, the acknowledgement gate,
- * and the refusal guidance are the tested boundary.
+ * and the card's copy are the tested boundary.
  *
  * Both controls are per-run and nothing about either survives the run: the
  * console authors and runs ONE exchange and then graduates to the command line,
@@ -52,6 +52,24 @@ export const SWEEP_CONFIRMATION_NOTICE =
  * the fact they are asserting, not as agreement to a warning. */
 export const SWEEP_CONFIRMATION_LABEL =
   "No other session is using this directory";
+
+/**
+ * What the card says about the CLI's retain guard while the operator is still
+ * choosing, rather than leaving it to be discovered from a run that stopped: a
+ * directory holding an audit transcript refuses the sweep, and the way past that
+ * is the command line's.
+ *
+ * The escalation is named, not offered: the console deliberately carries no
+ * one-click way to delete an audit transcript, and the command line -- where the
+ * flag is spelled out and the run is the operator's own -- stays open. It is
+ * stated from the operator's own draft, so no run output decides whether they
+ * see it.
+ */
+export const SWEEP_RETAIN_ESCALATION_NOTICE =
+  "If this directory holds a retain-mode transcript -- yours, or your " +
+  "partner's -- the sweep is refused, and only the command line can overrule " +
+  "that: run the exchange with --sweep-exchange-files --force-retain-sweep, " +
+  "which loses the prior transcript permanently.";
 
 /** The problem shown while the sweep is on and unconfirmed. */
 export const SWEEP_UNCONFIRMED_PROBLEM =
@@ -119,25 +137,6 @@ export interface RunDiagnosticsIntentFields {
 }
 
 /**
- * The intent of a run this seat did not launch: the exchange already holding the
- * appliance's single slot, which a busy (409) create re-attaches to. The seat
- * emitted no intent for that run and cannot read the one it was created with, so
- * this is what it knows about it -- nothing.
- */
-export const REATTACHED_RUN_INTENT = "reattached-run";
-
-/**
- * What a seat knows about the per-run controls of the run whose failure it is
- * raising: the fields it emitted for a run it launched itself (absent when that
- * launch carried none), or {@link REATTACHED_RUN_INTENT} for a run it only
- * re-attached to. Written at every call site, so a seat that cannot attest an
- * intent has to say so rather than omit the argument and have its own launch's
- * intent stand in.
- */
-export type RunDiagnosticsIntentSource =
-  RunDiagnosticsIntentFields | undefined | typeof REATTACHED_RUN_INTENT;
-
-/**
  * The per-run fields a draft contributes to a job intent. Only an enabled
  * control is emitted, so a run that changed nothing sends the same intent it
  * sent before the card existed.
@@ -165,55 +164,4 @@ export function runDiagnosticsProblems(
   return draft.sweepExchangeFiles && !draft.sweepConfirmed
     ? [SWEEP_UNCONFIRMED_PROBLEM]
     : [];
-}
-
-/**
- * The fragment of the CLI's refusal this seat keys its guidance on, duplicated
- * from the text core composes when a sweep meets a retain-mode signal.
- *
- * The duplication is the stated limit of a bare substring test, in both
- * directions: a core rewording stops the match firing, and a terminal message
- * that carries the fragment for some other reason -- partner-chosen bytes reach
- * a relayed terminal verbatim -- matches without being a refusal. Neither
- * misleads an operator, because the caller asks this only about a run whose own
- * intent requested the sweep, and an unmatched refusal leaves the CLI's own
- * message standing, which already carries the escalation. Sharing the constant
- * across packages would close the first direction and neither the second nor the
- * need for that gate, so the seat holds its own copy.
- */
-const SWEEP_RETAIN_REFUSAL_FRAGMENT =
-  "--sweep-exchange-files refuses to delete";
-
-/** Whether a rendered terminal-failure message reads as the CLI refusing the
- * sweep over a retain-mode signal. Recognition alone does not establish that the
- * run swept at all: ask it only about a run that requested one. */
-export function isSweepRetainRefusal(message: string): boolean {
-  return message.includes(SWEEP_RETAIN_REFUSAL_FRAGMENT);
-}
-
-/** The alert title for that refusal: the run stopped, and it stopped on the
- * recovery step rather than on the exchange. */
-export const SWEEP_RETAIN_REFUSAL_TITLE = "The sweep was refused";
-
-/**
- * What the console tells an operator whose sweep the retain guard refused. It
- * explains the escalation rather than offering it: the console deliberately
- * carries no one-click way to delete an audit transcript, and the command line
- * -- where the flag is spelled out and the run is the operator's own -- stays
- * open. Not offering the affordance is not a block; the operator's own path is
- * intact.
- *
- * The CLI's own refusal follows, naming the concrete retain signal it found.
- */
-export function sweepRetainRefusalMessage(cliMessage: string): string {
-  return (
-    "This directory holds a retain-mode transcript, or its peer is running " +
-    "in retain mode, so psilink stopped rather than delete files that may be " +
-    "somebody's audit record. The console offers no way to overrule that. If " +
-    "the transcript really is expendable, run the exchange from the command " +
-    "line with --sweep-exchange-files --force-retain-sweep, which deletes it " +
-    "permanently -- after confirming no other session is using the " +
-    "directory.\n\n" +
-    cliMessage
-  );
 }

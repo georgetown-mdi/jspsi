@@ -307,7 +307,14 @@ function probePeerAnswerOf(
  * {@link DISPLAY_TRUNCATION_MARKER} appended -- on top of the cap, as the
  * appliance's own escape appends it -- when anything was dropped. Escaping is
  * the appliance's, since doing it again here would double every backslash it
- * wrote, so this only shortens. */
+ * wrote, so this only shortens.
+ *
+ * Measured limit: an appliance escape that stopped at an escape boundary BELOW
+ * the cap still arrives past it with the marker attached, and the clip then lands
+ * inside that marker and appends a second one, ending the excerpt
+ * `......[truncated]`. Cosmetic, and out of an honest CLI's reach, whose
+ * 128-byte excerpt escapes to at most the 512 characters the appliance caps at,
+ * so the appliance never truncates one. */
 function boundedExcerpt(excerpt: string): string {
   return excerpt.length <= PROBE_EXCERPT_MAX_LENGTH
     ? excerpt

@@ -202,8 +202,10 @@ function probeJsonLine(presented: PresentedHostKey): string {
  *
  * The excerpt is bytes an untrusted party chose. It is already bounded at
  * composition (see `PEER_EXCERPT_MAX_BYTES` in connection/sftpPeerIdentification)
- * and rides here as a JSON string value, whose encoding escapes every control
- * byte, so the line stays one line; a consumer re-validates and escapes it at
+ * and rides here as a JSON string value, whose encoding escapes U+0000-U+001F
+ * along with the quote and the backslash -- which is what keeps the line one
+ * line. That is the whole of what the encoding gives: DEL and the C1 range cross
+ * unescaped, so it is the consumer that re-validates and escapes the value at
  * its own display boundary.
  *
  * @internal exported for testing
