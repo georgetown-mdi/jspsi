@@ -116,6 +116,7 @@ import {
   sftpEndpointForConnection,
   splitDirectoryRetainProblem,
 } from "./sftpConnectionChoice";
+import { useBeforeUnloadPrompt, useUnloadGuard } from "./useUnloadGuard";
 import { AgreementTab } from "./AgreementTab";
 import { BenchShell } from "./BenchShell";
 import { CleaningTab } from "./CleaningTab";
@@ -135,7 +136,6 @@ import { restorableSection } from "./stepRestore";
 import { timelineSteps } from "./exchangeRun";
 import { useInviterExchange } from "./useInviterExchange";
 import { useStepHistory } from "./useStepHistory";
-import { useUnloadGuard } from "./useUnloadGuard";
 
 import type { AcceptKitEndpoint, AcceptKitExchange } from "./acceptKit";
 import type { AcquiredCsv, InviterEditor, RailStep } from "./inviterModel";
@@ -601,6 +601,21 @@ export function InviterBench() {
     finalized: invitation !== undefined || savedExchange !== undefined,
     demoActive,
   });
+
+  // The live exchange itself, armed exactly where the guard above disarms and
+  // held until the run settles: this browser listens from the mint onward, an
+  // unload ends the session for BOTH parties, and the app-shell update notice
+  // renders its Reload button above this route throughout the run. A server-job
+  // run stays out for the same reason it is out above -- the appliance carries
+  // that one out -- and so does the synthetic sample, which loses nothing worth
+  // a prompt.
+  useBeforeUnloadPrompt(
+    chosenRunMode === "browser" &&
+      invitation !== undefined &&
+      !demoActive &&
+      outputs === undefined &&
+      failure === undefined,
+  );
 
   function goTo(next: Section) {
     if (next === section) return;

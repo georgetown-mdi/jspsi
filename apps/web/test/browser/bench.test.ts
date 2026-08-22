@@ -902,7 +902,7 @@ describe("inviter bench", () => {
     expect(page.getByText("Share this invitation").query()).toBeNull();
   });
 
-  test("the unload prompt arms with the file and disarms once the invitation exists", async () => {
+  test("the unload prompt arms with the file and lets go once the invitation exists and its run is over", async () => {
     // A cancelable beforeunload dispatched at the window is answered by the
     // same listener the browser consults on a real unload; dispatchEvent
     // returning false means the guard called preventDefault (prompt armed).
@@ -943,8 +943,24 @@ describe("inviter bench", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Your invitation is ready");
-    // The invitation is minted: leaving costs nothing unsecured, so the
-    // prompt disarms (again polled past the commit, for the detach effect).
+    // The mint releases this guard -- the file's terms are sealed into an
+    // invitation -- and in the same moment starts the browser listening for the
+    // partner, which the live run's own guard covers
+    // (test/browser/benchRunUnloadGuard.test.ts). So the release shows once that
+    // run is over: nothing re-arms over the loaded file (again polled past the
+    // commit, for the detach effect).
+    await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
+    lifecycleCall(0).onError({
+      category: "security",
+      error: new Error("kex failed"),
+    });
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: "Start over with a fresh invitation",
+        }),
+      )
+      .toBeInTheDocument();
     await vi.waitFor(() => expect(unloadPrompted()).toBe(false));
   });
 

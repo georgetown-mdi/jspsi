@@ -190,9 +190,11 @@ installed copy must not pin itself to old code:
   the app. When one is ready while the app is open, the app offers a reload
   rather than swapping code under a run in progress, and the browser asks the
   operator to confirm a reload pressed while a run is under way.
-- Nothing stored in the browser is touched by an update: the recurring
-  exchanges, their secrets, and the accounting are the browser's own storage,
-  not the cache the worker manages.
+- An update replaces the app's cached code, not the browser's own storage: the
+  recurring exchanges, their secrets, and the accounting stay in that storage,
+  which is not the cache the worker manages. What an upgrade can still cost is a
+  stored record the new version can no longer load, whose recovery is
+  [a fast re-invite](#recovery-fast-re-invite).
 
 ## The schedule and its run windows
 

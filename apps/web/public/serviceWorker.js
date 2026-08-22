@@ -190,7 +190,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (STATIC_ASSETS.includes(url.pathname)) {
-    event.respondWith(handleStaticAsset(request));
+    // The revalidation runs beside a response already served, so it is handed to
+    // the event: without that hold the browser may terminate the worker the
+    // moment the response settles, and the re-fetch never lands.
+    event.respondWith(
+      handleStaticAsset(request, (work) => event.waitUntil(work)),
+    );
   }
 });
 
@@ -355,15 +360,19 @@ async function handleHashedAsset(request) {
  * they are tiny, they must be there for an install prompt raised offline, and
  * their URLs are stable, so a revalidation that fails simply leaves the stored
  * copy in place.
+ *
+ * `hold` extends the fetch event's lifetime over that refresh (the caller's
+ * `event.waitUntil`), which is what keeps the worker alive long enough for it to
+ * land -- the response itself is returned from the cache immediately either way.
  */
-async function handleStaticAsset(request) {
+async function handleStaticAsset(request, hold) {
   const cache = await tryCache(() => caches.open(SHELL_CACHE));
   const cached =
     cache === undefined
       ? undefined
       : await tryCache(() => cache.match(request));
   if (cached !== undefined) {
-    void refreshInBackground(cache, request);
+    hold(refreshInBackground(cache, request));
     return cached;
   }
   const response = await fetch(request);

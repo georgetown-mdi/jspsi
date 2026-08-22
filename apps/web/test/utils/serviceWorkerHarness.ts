@@ -146,6 +146,13 @@ export interface ServiceWorkerHarness {
    * worker declining to intercept, leaving the request to the browser.
    */
   handleFetch: (request: HarnessRequest) => Promise<Response | undefined>;
+  /**
+   * What the last {@link handleFetch} handed the fetch event's `waitUntil`: the
+   * work a browser holds the worker alive to finish after its response is
+   * served. Empty when the handler asked for no such hold, which is how a test
+   * tells work that is held from work merely started.
+   */
+  readonly heldByLastFetch: ReadonlyArray<Promise<unknown>>;
   /** Create a cache the worker did not, standing in for a previous scheme's
    * leftovers. */
   seedCache: (name: string) => Promise<void>;
@@ -258,6 +265,9 @@ export function createServiceWorkerHarness(): ServiceWorkerHarness {
   };
 
   const listeners = new Map<string, (event: never) => void>();
+  // Reused across fetches rather than replaced, so the array the harness exposes
+  // stays the live one; each fetch clears it before the handler runs.
+  const heldByLastFetch: Array<Promise<unknown>> = [];
   let skipWaitingCalls = 0;
   let clientsClaimed = 0;
 
@@ -336,14 +346,17 @@ export function createServiceWorkerHarness(): ServiceWorkerHarness {
     },
     handleFetch: async (request) => {
       let responded: Promise<Response> | undefined;
+      heldByLastFetch.length = 0;
       fire("fetch", {
         request,
         respondWith: (promise: Promise<Response>) => {
           responded = promise;
         },
+        waitUntil: (promise: Promise<unknown>) => heldByLastFetch.push(promise),
       });
       return responded === undefined ? undefined : await responded;
     },
+    heldByLastFetch,
     seedCache: async (name) => {
       await cacheStorage.open(name);
     },

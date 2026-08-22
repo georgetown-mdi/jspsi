@@ -99,13 +99,15 @@ export function stepFromPopState(state: unknown): string | undefined {
  * gracefully -- closing the tab, reloading, typing a URL, or following an external
  * link -- before the loaded file and in-progress terms are lost.
  *
- * `finalized` covers the point of no data loss: once the invitation is minted (a
- * browser run is listening, or the appliance is running a server-job exchange the
- * recovery panel can re-attach to) or the exchange file is saved, leaving costs
- * nothing the operator has not already secured, so the guard disarms. A console
- * server-job run is deliberately NOT re-armed after finalization: leaving the page
- * does not abandon it (the recovery panel re-attaches), so a prompt would assert a
- * loss that does not happen.
+ * `finalized` covers the point at which THIS guard's loss is past: once the
+ * invitation is minted (a browser run is listening, or the appliance is running a
+ * server-job exchange the recovery panel can re-attach to) or the exchange file is
+ * saved, the loaded file and its terms are secured, so the guard disarms. The live
+ * browser run that a mint starts puts a different loss at stake -- the session,
+ * for both parties -- and the seats arm that one separately
+ * ({@link useBeforeUnloadPrompt}). A console server-job run gets neither, since
+ * leaving the page does not abandon it (the recovery panel re-attaches), so a
+ * prompt would assert a loss that does not happen.
  *
  * `demoActive` disarms it regardless: the loaded file is the synthetic sample
  * (pristine or with edited terms), which the visitor did not bring and nothing regrets

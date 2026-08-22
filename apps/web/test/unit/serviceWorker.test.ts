@@ -511,6 +511,46 @@ describe("the manifest and icons", () => {
     expect(await second?.text()).toBe("a redeployed manifest");
   });
 
+  test("hold that revalidation on the fetch event, not merely start it", async () => {
+    const harness = servedHarness();
+    await harness.install();
+    await harness.activate();
+    harness.network.route(
+      "/site.webmanifest",
+      () => new Response("a redeployed manifest", { status: 200 }),
+    );
+
+    const served = await harness.handleFetch(
+      subresourceRequest("/site.webmanifest"),
+    );
+    expect(await served?.text()).toBe("icon");
+
+    // A browser may terminate the worker the moment its response settles, so the
+    // refresh is handed to the event rather than left running loose: settling
+    // exactly what the browser was handed -- no timers, nothing else -- is what
+    // stores the fresh copy.
+    expect(harness.heldByLastFetch).toHaveLength(1);
+    await Promise.all(harness.heldByLastFetch);
+
+    const second = await harness.handleFetch(
+      subresourceRequest("/site.webmanifest"),
+    );
+    expect(await second?.text()).toBe("a redeployed manifest");
+  });
+
+  test("hold nothing when the response came from the network", async () => {
+    // No install, so nothing is stored: the request is answered by the network
+    // and there is no cached copy behind it to revalidate.
+    const harness = servedHarness();
+
+    const response = await harness.handleFetch(
+      subresourceRequest("/site.webmanifest"),
+    );
+
+    expect(await response?.text()).toBe("icon");
+    expect(harness.heldByLastFetch).toHaveLength(0);
+  });
+
   test("keep the stored copy when the revalidation fails", async () => {
     const harness = servedHarness();
     await harness.install();
