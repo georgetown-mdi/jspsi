@@ -11,9 +11,11 @@ import {
   isSweepRetainRefusal,
   runDiagnosticsIntentFields,
   runDiagnosticsProblems,
+  runDiagnosticsWithControl,
   sweepRetainRefusalMessage,
 } from "@bench/runDiagnosticsModel";
 import { resolveWorkdirFile } from "@jobs/workdir";
+import { watchJobLogAvailable } from "@psi/jobDiagnosticLog";
 
 import {
   captureExchangeArgv,
@@ -95,6 +97,64 @@ describe("the run-diagnostics draft's intent fields", () => {
       forceRetainSweep: true,
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+// The draft belongs to the whole form and outlives any one visit to the card,
+// and the directory a sweep would run against can be re-targeted between those
+// visits -- so how long a confirmation lasts is pinned here rather than left to
+// the card's rendering.
+describe("the sweep confirmation's lifetime", () => {
+  test("check, confirm, uncheck, re-check leaves the sweep unattested and blocked", () => {
+    const checked = runDiagnosticsWithControl(
+      RUN_DIAGNOSTICS_DEFAULT,
+      "sweepExchangeFiles",
+      true,
+    );
+    const confirmed = runDiagnosticsWithControl(
+      checked,
+      "sweepConfirmed",
+      true,
+    );
+    expect(runDiagnosticsIntentFields(confirmed)).toEqual({
+      sweepExchangeFiles: true,
+    });
+
+    const unchecked = runDiagnosticsWithControl(
+      confirmed,
+      "sweepExchangeFiles",
+      false,
+    );
+    expect(unchecked.sweepConfirmed).toBe(false);
+
+    // Turning it back on is a fresh request for a destructive action, not a
+    // return to the confirmed state: it emits no sweep and the run is gated
+    // until the operator attests to this directory.
+    const rechecked = runDiagnosticsWithControl(
+      unchecked,
+      "sweepExchangeFiles",
+      true,
+    );
+    expect(rechecked.sweepConfirmed).toBe(false);
+    expect(runDiagnosticsIntentFields(rechecked)).toEqual({});
+    expect(runDiagnosticsProblems(rechecked)).toEqual([
+      SWEEP_UNCONFIRMED_PROBLEM,
+    ]);
+  });
+
+  test("a confirmed sweep is undisturbed by the other control", () => {
+    const confirmed = {
+      ...RUN_DIAGNOSTICS_DEFAULT,
+      sweepExchangeFiles: true,
+      sweepConfirmed: true,
+    };
+    expect(runDiagnosticsWithControl(confirmed, "diagnosticRun", true)).toEqual(
+      {
+        diagnosticRun: true,
+        sweepExchangeFiles: true,
+        sweepConfirmed: true,
+      },
+    );
   });
 });
 
@@ -183,6 +243,85 @@ describe("the diagnostic log's path stays inside the job workdir", () => {
     expect(
       resolveWorkdirFile("/srv/jobs/abc", "../abc-evil/run.log"),
     ).toBeNull();
+  });
+});
+
+// The appliance yields a job id as soon as the CLI child spawns and the child
+// opens its log after that, so what a seat can offer during a run rests on
+// asking the appliance again rather than on the answer the first ask raced.
+describe("the diagnostic log's availability during a run", () => {
+  /** A status endpoint answering each successive ask in turn, holding the last
+   * answer once the script runs out, and counting what it was asked. */
+  function availabilityFetch(answers: Array<boolean>): {
+    fetchImpl: typeof fetch;
+    asks: () => number;
+  } {
+    let asked = 0;
+    const fetchImpl: typeof fetch = () => {
+      const logAvailable = answers[Math.min(asked, answers.length - 1)];
+      asked += 1;
+      return Promise.resolve(
+        new Response(JSON.stringify({ status: "running", logAvailable }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    };
+    return { fetchImpl, asks: () => asked };
+  }
+
+  test("a log that appears mid-run is readable without waiting for the run to settle", async () => {
+    // The stalled run the log exists for reaches no terminal at all, so a seat
+    // that only re-asked at settle would stay empty for the whole stall.
+    const { fetchImpl, asks } = availabilityFetch([false, false, true]);
+    const waits: Array<number> = [];
+
+    await expect(
+      watchJobLogAvailable(
+        "job-1",
+        new AbortController().signal,
+        fetchImpl,
+        (ms) => {
+          waits.push(ms);
+          return Promise.resolve();
+        },
+      ),
+    ).resolves.toBe(true);
+
+    expect(asks()).toBe(3);
+    // One wait between successive asks, and a real one: a watch with no gap
+    // would poll the appliance as fast as it can answer.
+    expect(waits).toHaveLength(2);
+    expect(waits.every((ms) => ms > 0)).toBe(true);
+  });
+
+  test("a watch the caller stops answers no rather than asking on", async () => {
+    const { fetchImpl, asks } = availabilityFetch([false]);
+    const controller = new AbortController();
+
+    await expect(
+      watchJobLogAvailable("job-1", controller.signal, fetchImpl, () => {
+        // The run settles, or the seat unmounts, while the watch is waiting.
+        controller.abort();
+        return Promise.resolve();
+      }),
+    ).resolves.toBe(false);
+
+    expect(asks()).toBe(1);
+  });
+
+  test("an already-stopped watch asks nothing at all", async () => {
+    const { fetchImpl, asks } = availabilityFetch([true]);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      watchJobLogAvailable("job-1", controller.signal, fetchImpl, () =>
+        Promise.resolve(),
+      ),
+    ).resolves.toBe(false);
+
+    expect(asks()).toBe(0);
   });
 });
 

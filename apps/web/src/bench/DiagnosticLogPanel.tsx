@@ -4,6 +4,7 @@ import {
   fetchJobLogAvailable,
   jobDiagnosticLogFileName,
   jobDiagnosticLogUrl,
+  watchJobLogAvailable,
 } from "@psi/jobDiagnosticLog";
 
 import { DownloadRow } from "./BenchRunSurface";
@@ -20,31 +21,42 @@ import styles from "./bench.module.css";
  * completion, and a run still stalled can be read while it stalls.
  *
  * Availability comes from the appliance rather than from what this tab
- * remembers requesting, which is what lets a re-attached run offer it too.
- * `settled` re-asks once the run reaches a terminal state, so a log that grew
- * after the first look is still offered; the endpoint itself is the only place
- * the file is read.
+ * remembers requesting, which is what lets a re-attached run offer it too. A run
+ * in progress is asked repeatedly until the appliance holds the log, because the
+ * ask at mount races the CLI child's own creation of the file; a settled run is
+ * asked once, its log being either written or never captured. The endpoint
+ * itself is the only place the file is read.
  */
 export function DiagnosticLogPanel({
   jobId,
   settled = false,
 }: {
   jobId: string;
-  /** Whether the run has reached a terminal state; flipping it re-asks the
-   * appliance. */
+  /** Whether the run has reached a terminal state; while it is false the
+   * appliance is asked again until it holds the log. */
   settled?: boolean;
 }) {
-  const [available, setAvailable] = useState(false);
+  // The job whose log the appliance confirmed, rather than a bare flag: a panel
+  // handed a different id must ask for that run rather than offer the previous
+  // one's log. A confirmed log is not withdrawn -- the file stays for as long as
+  // the appliance holds the job, and the endpoint answers for it either way.
+  const [availableJobId, setAvailableJobId] = useState<string>();
+  const available = availableJobId === jobId;
 
   useEffect(() => {
-    let cancelled = false;
-    void fetchJobLogAvailable(jobId).then((logAvailable) => {
-      if (!cancelled) setAvailable(logAvailable);
+    if (available) return;
+    const controller = new AbortController();
+    void (
+      settled
+        ? fetchJobLogAvailable(jobId)
+        : watchJobLogAvailable(jobId, controller.signal)
+    ).then((logAvailable) => {
+      if (logAvailable && !controller.signal.aborted) setAvailableJobId(jobId);
     });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [jobId, settled]);
+  }, [available, jobId, settled]);
 
   if (!available) return null;
 

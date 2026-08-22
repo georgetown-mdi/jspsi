@@ -8,6 +8,7 @@ import {
   SWEEP_CONFIRMATION_LABEL,
   SWEEP_CONFIRMATION_NOTICE,
   runDiagnosticsProblems,
+  runDiagnosticsWithControl,
 } from "./runDiagnosticsModel";
 
 import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
@@ -55,7 +56,7 @@ export function RunDiagnosticsCard({
   const set = <TField extends keyof RunDiagnosticsDraft>(
     key: TField,
     value: RunDiagnosticsDraft[TField],
-  ): void => onChange({ ...draft, [key]: value });
+  ): void => onChange(runDiagnosticsWithControl(draft, key, value));
 
   return (
     <DisclosureSection

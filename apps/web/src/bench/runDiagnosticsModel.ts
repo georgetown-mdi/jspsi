@@ -69,6 +69,31 @@ export const DIAGNOSTIC_LOG_NOTICE =
   "It stays with this run's files on the appliance until you discard the " +
   "run; treat a copy you download like the results themselves.";
 
+/**
+ * The draft with one control set to a new value, which is the only way a surface
+ * changes it: the confirmation belongs to a sweep that is ON, so a draft whose
+ * sweep is off carries no confirmation.
+ *
+ * The draft outlives any one visit to the card -- it is the whole form's, and
+ * the directory the sweep would run against can be re-targeted between visits --
+ * so without that rule an operator who confirmed a sweep once, turned it off,
+ * and later turned it back on would emit the destructive `--sweep-exchange-files`
+ * on an attestation they last made about something else. Keeping it here rather
+ * than in the card is what makes it hold for every surface the draft reaches.
+ */
+export function runDiagnosticsWithControl<
+  TField extends keyof RunDiagnosticsDraft,
+>(
+  draft: RunDiagnosticsDraft,
+  field: TField,
+  value: RunDiagnosticsDraft[TField],
+): RunDiagnosticsDraft {
+  const changed = { ...draft, [field]: value };
+  return changed.sweepExchangeFiles
+    ? changed
+    : { ...changed, sweepConfirmed: false };
+}
+
 /** The subset of a job intent this card contributes: each control present only
  * when it is on, and only ever `true`. */
 export interface RunDiagnosticsIntentFields {
