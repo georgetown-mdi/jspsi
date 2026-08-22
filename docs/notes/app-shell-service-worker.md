@@ -46,7 +46,7 @@ The route list is hand-written in the worker (`SHELL_ROUTES`), which is exactly 
 
 ### The update path
 
-A new worker does **not** call `skipWaiting()` on install. Taking over immediately would purge, on activate, the very asset cache the already-loaded page lazily fetches from -- on an application whose sessions are long-running, interactive exchanges. So a new worker waits, and takes over at the next cold start; a client that has told its operator an update is ready can post a message to shorten that wait. The waiting worker is the honest form of "an update is available", not a way to defer one indefinitely: the network-first document means an online client already renders the current deployment's HTML.
+A new worker does **not** call `skipWaiting()` on install. Taking over immediately would purge, on activate, the very asset cache the already-loaded page lazily fetches from -- on an application whose sessions are long-running, interactive exchanges. So a new worker waits, and takes over at the next cold start; a client that has told its operator an update is ready can post a message to shorten that wait. That message is also the one path that reaches a live page anyway: the update banner's Reload posts it and then reloads, but an operator who declines the beforeunload confirmation that follows is left with the new worker already activated and controlling the still-open page, unreloaded. Short of that decline, the waiting worker is the honest form of "an update is available", not a way to defer one indefinitely: the network-first document means an online client already renders the current deployment's HTML.
 
 ## Hand-written, not generated
 

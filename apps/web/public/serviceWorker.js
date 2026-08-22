@@ -49,7 +49,9 @@
 "use strict";
 
 /** The caching scheme's version. Bump it when the cache layout or the entries a
- * cache may hold change; activate then discards the previous scheme's caches. */
+ * cache may hold change; activate then discards the previous scheme's caches --
+ * including, per the declined-reload path in {@link claimAndDiscardOldCaches},
+ * a live page's own asset cache. */
 const CACHE_VERSION = "v1";
 
 /** Holds the one cached navigation document plus {@link STATIC_ASSETS}. */
@@ -283,11 +285,16 @@ async function warmRouteAssets() {
  * already-open clients. Claiming matters on the first install -- the page that
  * registered the worker is otherwise uncontrolled until its next navigation, so
  * nothing it loads reaches a cache and a reload straight into offline finds
- * nothing. A worker that reaches activate while a client is open is either that
- * first install or one whose predecessor's clients have all gone, so claiming
- * never swaps code under a running exchange. The claim does not depend on the
- * discard: a storage that will not enumerate leaves the old caches in place,
- * which costs disk, while an unclaimed worker leaves the page uncontrolled.
+ * nothing. Claiming on activate takes control of whatever client is open,
+ * including a running exchange: the update banner's Reload posts SKIP_WAITING
+ * before the reload runs, and an operator who then declines the beforeunload
+ * confirmation is left with the new worker activated and controlling that
+ * still-open page. The discard beside it purges nothing today because
+ * CACHE_VERSION is constant across deployments; bumping it would make this same
+ * declined-reload path destructive to that live page's asset cache. The claim
+ * does not depend on the discard: a storage that will not enumerate leaves the
+ * old caches in place, which costs disk, while an unclaimed worker leaves the
+ * page uncontrolled.
  */
 async function claimAndDiscardOldCaches() {
   await tryCache(async () => {

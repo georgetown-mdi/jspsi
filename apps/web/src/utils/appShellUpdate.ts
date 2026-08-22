@@ -171,7 +171,10 @@ export async function registerAppShell(
 /**
  * Apply the waiting update: tell it to take over, which fires the controller
  * change that reloads the page onto the new code. Does nothing when no worker is
- * waiting, so a stale prompt cannot reload the page for nothing.
+ * waiting, which is also the state right after this already ran once: posting
+ * the message clears `registration.waiting`, so a declined reload leaves the
+ * banner's Reload inert and a manual browser reload is the operator's only way
+ * to pick the update back up.
  */
 export function applyAppShellUpdate(): void {
   const waiting = registration?.waiting;

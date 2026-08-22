@@ -607,8 +607,10 @@ export function InviterBench() {
   // unload ends the session for BOTH parties, and the app-shell update notice
   // renders its Reload button above this route throughout the run. A server-job
   // run stays out for the same reason it is out above -- the appliance carries
-  // that one out -- and so does the synthetic sample, which loses nothing worth
-  // a prompt.
+  // that one out. A sample-seeded mint (?demo=1 walked to a real mint) starts a
+  // real session with a real secret while demoActive is still true, but its
+  // partner is ordinarily the same operator's other tab, so losing it is judged
+  // not worth an unload prompt.
   useBeforeUnloadPrompt(
     chosenRunMode === "browser" &&
       invitation !== undefined &&
