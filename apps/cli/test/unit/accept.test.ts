@@ -2192,9 +2192,13 @@ test("displayInvitation: a deduplicating term states what it discloses and whose
   // rather than a screen apart.
   expect(deduplicating).toContain(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
   // The sample token shares the result with this party, so the sole-receiver
-  // sentence must not reach it.
+  // sentence must not reach it -- nor the display limit that qualifies it, since
+  // this party IS presented the grouping here.
   expect(deduplicating).not.toContain(
     DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  );
+  expect(deduplicating).not.toContain(
+    CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
   );
 });
 
@@ -2219,6 +2223,15 @@ test("displayInvitation: a sole-receiver deduplicating term states psilink prese
 
   expect(soleReceiver).toContain(
     `    ${DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}`,
+  );
+  // The limit on that withholding is its own classified fact, rendered from the
+  // shared table at the same level as the statement it qualifies: what the
+  // statement says psilink presents, this says the rounds still carry.
+  expect(soleReceiver).toContain(
+    `    ${CONSENT_FACTS.duplicateGroupingDisplayLimit.note}`,
+  );
+  expect(CONSENT_FACTS.duplicateGroupingDisplayLimit.basis).toBe(
+    "trust-contingent",
   );
   expect(soleReceiver).toContain(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
   expect(soleReceiver).not.toContain(
@@ -2379,6 +2392,19 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
     log,
     splittingKeyToken(FUTURE(), "cascade"),
   );
+  // The sole receiver's display limit is the seventh, for the reason the pair
+  // above is a pair: it is raised only by a DEDUPLICATING invitation whose
+  // inviting party receives the result alone, and no variation above declares
+  // the term at all.
+  const deduplicatingSoleReceiver = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    linkageTerms: {
+      ...CONSENT_PROBE_TERMS,
+      deduplicate: true,
+      output: { expectsOutput: true, shareWithPartner: false },
+      payload: { ...CONSENT_PROBE_TERMS.payload, receive: [] },
+    },
+  });
   const rendered = [
     acceptorWithheld,
     inviterWithheld,
@@ -2386,6 +2412,7 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
     retaining,
     fanOutMatched,
     fanOutRefused,
+    deduplicatingSoleReceiver,
   ].join("\n");
 
   // The whole table, rather than a list restated here: a caveat this renderer

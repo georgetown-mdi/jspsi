@@ -2315,6 +2315,11 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     // and whose records are grouped to make it are one reading, so neither may sit
     // an expand away from the other.
     expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
+    // This shape presents the accepting party the grouping, so the sole
+    // receiver's display limit has nothing to qualify and must not appear.
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
+    );
   });
 
   test("a sole-receiver deduplicating invitation states psilink presents the acceptor no grouping when the inviter alone receives", async () => {
@@ -2332,6 +2337,12 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     const collapse = await readyCollapse("Other details");
     expect(collapse.textContent).toContain(
       DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+    );
+    // The limit on that withholding keeps the same level as the statement it
+    // qualifies, and is read from the shared table with its own basis rather
+    // than written into either surface's copy.
+    expect(collapse.textContent).toContain(
+      CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
     );
     expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
     expect(app.container.textContent).not.toContain(

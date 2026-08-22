@@ -16,6 +16,7 @@
 
 import { parseLinkageTerms } from "./config/linkageTerms.js";
 import {
+  CONSENT_FACTS,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
@@ -411,7 +412,14 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
           DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
           DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
         ],
-        forbiddenVariantCopy: [DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT],
+        forbiddenVariantCopy: [
+          DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+          // The display limit belongs to the sole-receiver shape alone: this
+          // shape presents the accepting party the grouping, so a sentence
+          // saying what it is NOT shown would name a withholding that does not
+          // happen.
+          CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
+        ],
       },
       {
         name: "the inviting party is the sole receiver",
@@ -428,6 +436,12 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
           }),
         requiredVariantCopy: [
           DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+          // The statement's own display limit, split out so its trust-contingent
+          // basis is carried and pinned rather than living inside the sentence.
+          // Required beside the statement, at the same level, for the same
+          // reason the direction note is: a reader met by the withholding is
+          // entitled to what the rounds still reach in the same place.
+          CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
           DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
         ],
         forbiddenVariantCopy: [DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT],

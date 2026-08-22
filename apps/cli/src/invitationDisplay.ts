@@ -586,6 +586,14 @@ export function displayInvitation(params: {
           : DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT
       }`,
     );
+    // The sole-receiver statement states the withholding this client makes; what
+    // the rounds still carry to this party's own process is the fact beside it,
+    // read from the shared table with its own basis rather than folded into the
+    // sentence. It follows only that shape: where the inviter shares the result,
+    // this party is presented the grouping and there is no display limit to
+    // qualify.
+    if (!summary.inviterSharesResult)
+      emit(`    ${CONSENT_FACTS.duplicateGroupingDisplayLimit.note}`);
     emit(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
   }
 

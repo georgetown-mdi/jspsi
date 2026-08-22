@@ -354,24 +354,35 @@ presents the acceptor none of it.
 
 ### Where the acceptor's non-receipt is held, and where it is not
 
-That second half is display-scoped on purpose, and the copy says so. What holds
-it is the entitlement gate on the table `runExchange` returns, so a sole-receiver
-acceptance is handed none. The wire is not what holds it: the one wire-level
-withholding covers single-pass alone, and a deduplicating match runs cascade,
-whose rounds carry the grouping to the acceptor's own process -- its matched
-position repeated once per group member, against the inviter's row indices. So
-the sentence states what psilink presents and then names what the rounds still
-reach.
+That second half is display-scoped on purpose, and the surfaces say so. What
+holds it is the entitlement gate on the table `runExchange` returns, so a
+sole-receiver acceptance is handed none. The wire is not what holds it: the one
+wire-level withholding covers single-pass alone, and a deduplicating match runs
+cascade, whose rounds carry the grouping to the acceptor's own process -- its
+matched position repeated once per group member, against the inviter's row
+indices.
 
-Stating it as an absolute instead would put a trust-contingent fact under an
+Stating the withholding as an absolute would put a trust-contingent fact under an
 `enforced` headline, which is the one error this classification exists to
-prevent. Naming the limit in the copy is also what keeps the marker where it
-belongs: the marker carries the duplicate-matches headline's own fact, match
-multiplicity, which the run does hold, and a limit sitting past what a marker
-holds is carried by the copy rather than by reclassifying the fact -- the same
-division the partner's result receipt takes above and the retain-mode line takes
-below. Reclassifying here would understate a multiplicity the exchange enforces
-in order to qualify a display fact standing beside it.
+prevent. So the two halves are two facts. The STATEMENT says what psilink
+presents, which is the display withholding this client makes. The limit -- that
+the rounds carry the grouping to the acceptor's process all the same, so what its
+operator is shown rests on the software that party runs -- is a
+`trust-contingent` entry of its own in the shared table
+(`duplicateGroupingDisplayLimit`), rendered beside the statement by both
+surfaces. A limit that is a claim about software rather than about the run is
+classified as one rather than left as an unmarked clause inside a sentence, which
+is the same reason every other caveat in the table is an entry rather than prose
+in a renderer.
+
+The split is also what keeps the duplicate-matches marker where it belongs. That
+marker carries its headline's own fact, match multiplicity, which the run does
+hold; the limit sitting past what the marker holds is now a classified fact
+beside it, in the other register, rather than something the headline's marker
+could be read as covering. Reclassifying the headline instead would understate a
+multiplicity the exchange enforces in order to qualify a display fact standing
+beside it -- the same division the partner's result receipt takes above and the
+retain-mode line takes below.
 
 That forced the pin to grow a shape axis of its own. It names copy a surface must
 render for a variant document, so a term with two truthful sentences could
@@ -380,7 +391,9 @@ one and let the other shape render it. The classification names the shapes
 instead, and each carries both the copy its variant owes and the copy it must not
 carry, so a surface rendering one sentence under every shape fails on the shape
 whose run does not make that disclosure. Both surfaces are measured against the
-same two pairs.
+same two pairs. The display limit rides those pairs too: the sole-receiver shape
+owes it beside its statement, and the both-receive shape forbids it, since a
+screen that presents the acceptor the grouping has no withholding to qualify.
 
 Whichever sentence renders, its placement is the same rule the caveats follow,
 applied to the headline it qualifies rather than to the setting's implementation
