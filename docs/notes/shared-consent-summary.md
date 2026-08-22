@@ -324,7 +324,8 @@ about a proposed count-only exchange in the first place.
 
 Deduplicated matching runs, so what its headline needs is not a caveat but a
 statement of what it costs. The exchange discloses grouping the one-to-one match
-does not, and the acceptor is the party that reads it, so the sentence beside the
+does not, and the party that reads it is the party the result reaches. Where the
+invitation shares the result, that is the acceptor, and the sentence beside the
 duplicate-matches headline states three things the specification fixes: which
 party learns it and about which of its own records, that what is learned is a
 count and row positions rather than the matched value, and that the count is the
@@ -339,10 +340,72 @@ a surface that renders only "duplicate matches: yes" still moves when the term
 moves -- which is exactly why the pin sits beside the classification rather than
 in either surface's own test.
 
-Its placement is the same rule the caveats follow, applied to the headline it
-qualifies rather than to the setting's implementation status: the duplicate-matches
-headline states match multiplicity, so it sits inside a disclosure, and the
-sentence sits with it.
+There are two such sentences, not one, because the invitation's output shape
+decides which party reads the grouping and a deduplicating invitation can take
+either shape. The schema requires a deduplicating party to receive output, so the
+only remaining axis is whether it shares: both parties receive, or the inviting
+party alone does. Under the second the acceptor is sent nothing, so the sentence
+above would tell it what it learns from a table it never gets -- and the
+unverified-count limit that sentence ends on has nothing to bound, the party
+reading the count being the one that declared it. The sole-receiver sentence
+states the disclosure that does happen: the result the inviting party takes away
+groups several of its own records onto one of the acceptor's, and psilink
+presents the acceptor none of it.
+
+### Where the acceptor's non-receipt is held, and where it is not
+
+That second half is display-scoped on purpose, and the copy says so. What holds
+it is the entitlement gate on the table `runExchange` returns, so a sole-receiver
+acceptance is handed none. The wire is not what holds it: the one wire-level
+withholding covers single-pass alone, and a deduplicating match runs cascade,
+whose rounds carry the grouping to the acceptor's own process -- its matched
+position repeated once per group member, against the inviter's row indices. So
+the sentence states what psilink presents and then names what the rounds still
+reach.
+
+Stating it as an absolute instead would put a trust-contingent fact under an
+`enforced` headline, which is the one error this classification exists to
+prevent. Naming the limit in the copy is also what keeps the marker where it
+belongs: the marker carries the duplicate-matches headline's own fact, match
+multiplicity, which the run does hold, and a limit sitting past what a marker
+holds is carried by the copy rather than by reclassifying the fact -- the same
+division the partner's result receipt takes above and the retain-mode line takes
+below. Reclassifying here would understate a multiplicity the exchange enforces
+in order to qualify a display fact standing beside it.
+
+That forced the pin to grow a shape axis of its own. It names copy a surface must
+render for a variant document, so a term with two truthful sentences could
+otherwise pin only what both shapes share -- which is neither sentence -- or pin
+one and let the other shape render it. The classification names the shapes
+instead, and each carries both the copy its variant owes and the copy it must not
+carry, so a surface rendering one sentence under every shape fails on the shape
+whose run does not make that disclosure. Both surfaces are measured against the
+same two pairs.
+
+Whichever sentence renders, its placement is the same rule the caveats follow,
+applied to the headline it qualifies rather than to the setting's implementation
+status: the duplicate-matches headline states match multiplicity, so it sits
+inside a disclosure, and the sentence sits with it.
+
+A direction note sits beside whichever statement the shape selects, and the pin
+carries both, because what the setting discloses and whose records are grouped to
+disclose it are separate facts a reader needs together. Acceptance derives the
+accepting party's own `deduplicate` as false rather than adopting the
+invitation's, so the pair an accepted deduplicating invitation resolves to is
+one-sided by construction. A reader met only by the disclosure statement would
+have no way to tell whether their own file is the one being grouped -- and the
+invitation offers no control for the other direction, so the sentence names the
+per-party configuration path that does.
+
+That note carries a second fact for the same reason it carries the first: what
+the derivation closes is the grouping, not the acceptor's own outbound
+disclosure. A value the inviting party holds on several rows drops out of a
+one-to-one round as ambiguous and matches under a deduplicating one, so more of
+the accepting party's records can match -- disclosing their membership and any
+payload columns that party sends -- on the inviting party's declaration alone. A
+note stating only that the accepting party's records are not grouped would read
+as the setting costing that party nothing, which is the reading the run does not
+support.
 
 ## The count-only tier
 
@@ -422,8 +485,9 @@ spec's remaining `psi-c` shape refusals are held on the same footing: more than
 one linkage key and `linkage_strategy: single-pass` would falsify the tier's own
 copy -- the round-disclosure note speaks of one key's exactly-once values, and
 the result note denies any record-by-record pairing -- and `deduplicate` is
-refused twice over, by the count-only rule and by `assertDeduplicateImplemented`,
-which refuses it under every algorithm while no run honors it. None of those
+refused by the count-only rule, with `assertDeduplicateImplemented` refusing it a
+second time under `single-pass`, the strategy no deduplicating match runs on.
+None of those
 three -- more than one linkage key, single-pass, and deduplicate -- has a render
 backstop, by decision rather than omission: the refusals reach them where the
 terms are authored, at parse, and at accept, which is where a document that

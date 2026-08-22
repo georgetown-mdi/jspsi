@@ -1366,8 +1366,8 @@ export function safeParseLinkageTerms(raw: unknown) {
  * decoded from an invitation. The acceptor adopts the inviter's shared, agreed
  * fields verbatim -- `version`, `algorithm`, `linkageFields`, `linkageKeys`,
  * `legalAgreement`, and so on are cross-checked for equality at exchange time,
- * so both sides must carry an identical set -- but two facets are the acceptor's
- * own perspective and are derived, not copied:
+ * so both sides must carry an identical set -- but the facets below are the
+ * acceptor's own perspective and are derived, not copied:
  *
  * - `identity` is replaced with the acceptor's own name, so the inviter's
  *   identity does not leak into the acceptor's prepared terms (and from there
@@ -1400,21 +1400,34 @@ export function safeParseLinkageTerms(raw: unknown) {
  *   nothing, and `sameColumnSet([], [])` passes both directions. This is the strict
  *   empty case kept distinct from the absent case above, which yields an absent send.
  *
- * `deduplicate` is REFUSED, not adopted. The term is per-party -- it declares that
- * several of the DECLARING party's own records may match one of its partner's --
- * and nothing binds the value an invitation carried to what the inviter presents at
- * the terms exchange. Adopting it would let a hostile inviter carry
- * `deduplicate: true`, have the acceptor take the "many" side and disclose its
- * record grouping, then present `deduplicate: false` at the exchange so the run
- * proceeds as many-to-one rather than being refused. So a deduplicating invitation
- * is refused here, before any derived terms are built or any connection is opened,
- * and no acceptor ever holds an invitation-derived deduplicating term. A
- * deduplicating exchange is authored in both parties' own configurations (which do
- * not call this function), with the setting on for one party only; carrying the
- * acceptor's own side of the cardinality on the invitation is a separate,
- * owner-ratified follow-on. Metadata and standardization stay per-party and local
- * (they are never embedded in the token); this function shapes only the agreed
- * linkage terms.
+ * - `deduplicate` is DEFAULTED to false, neither copied nor mirrored. The term is
+ *   per-party -- it declares that several of the DECLARING party's own records may
+ *   match one of its partner's -- and nothing binds the value an invitation carried
+ *   to what the inviter presents at the terms exchange. Copying it would let a
+ *   hostile inviter carry `deduplicate: true`, have the acceptor take the "many"
+ *   side and disclose its record grouping, then present `deduplicate: false` at the
+ *   exchange so the run proceeds as many-to-one at the acceptor's expense. Deriving
+ *   it as false makes that unrepresentable rather than refused: the acceptor's own
+ *   side of the cardinality is never the inviter's to set, so this party's records
+ *   are never grouped. An accepted deduplicating invitation resolves to the
+ *   one-sided pair the cascade runs -- the inviter the "many" side, this party the
+ *   "one" -- which is the direction the consent surfaces state ahead of the accept.
+ *   An acceptor that wants its OWN records grouped authors that in its own
+ *   configuration, which does not call this function.
+ *
+ *   What the derived `false` does NOT hold constant is how many of this party's
+ *   records match. A value the inviter holds on several rows is ambiguous under
+ *   `one-to-one` and drops out of the round, so this party's record holding it goes
+ *   unmatched; under the deduplicating run the inviter contributes that value once
+ *   and the record matches, disclosing its membership and any payload columns this
+ *   party sends. The inviter's declaration therefore widens this party's own
+ *   outbound disclosure, which the consent surfaces state (see
+ *   `DEDUPLICATE_ACCEPTOR_SIDE_NOTE`). It is a widening rather than a new
+ *   capability: an inviter that collapsed its own duplicate rows before the
+ *   exchange would match exactly the same records one-to-one.
+ *
+ * Metadata and standardization stay per-party and local (they are never embedded in
+ * the token); this function shapes only the agreed linkage terms.
  *
  * It fails closed. A config that is valid for the INVITER can mirror to one that is
  * incoherent for the acceptor: an inviter that is the sole receiver (it shares no
@@ -1422,9 +1435,9 @@ export function safeParseLinkageTerms(raw: unknown) {
  * PARTNER to receive output -- the inviter's `send` mirrors to the acceptor's
  * `receive` -- but the acceptor mirrors to `expectsOutput: false`, which the
  * schema's cross-field rules forbid. (The inviter's own `payload.receive` mirrors to
- * the acceptor's `send`, which needs no output, so it is never the trigger; a
- * sole-receiver inviter's `deduplicate: true` is refused above, before the mirror is
- * built, so it never reaches this check.)
+ * the acceptor's `send`, which needs no output, so it is never the trigger; the
+ * schema's other rule for a non-receiving party, that it must not deduplicate, is
+ * met by the derived `false` whatever the invitation carried.)
  * The front ends above never produce such an inviter config, but a hand-authored
  * CLI config or a crafted invitation token could, and the derived terms are not
  * otherwise re-validated before the run. So the derived terms are re-checked
@@ -1432,7 +1445,8 @@ export function safeParseLinkageTerms(raw: unknown) {
  * acceptance cleanly rather than running an invalid configuration. The thrown
  * message names no partner-controlled value (the only reachable failures are the
  * fixed-message output-coherence refines, since the inviter's terms were already
- * validated at decode and only `identity`/`output` are changed here).
+ * validated at decode and only `identity`, `deduplicate`, `output`, and `payload`
+ * are changed here, none of them partner free text).
  *
  * It also refuses a `psi-c` document outside the count-only shape, before the
  * mirror is built rather than after ({@link assertCountOnlyTermsShape}): the
@@ -1443,8 +1457,6 @@ export function safeParseLinkageTerms(raw: unknown) {
  *
  * @throws {UsageError} when the inviter's terms are `psi-c` outside the
  *   count-only shape.
- * @throws {UsageError} when the inviter's terms carry `deduplicate: true`: a
- *   deduplicating exchange cannot be accepted from an invitation.
  * @throws {Error} when the inviter's terms cannot be coherently accepted for the
  *   mirrored output direction.
  */
@@ -1453,30 +1465,14 @@ export function deriveAcceptedLinkageTerms(
   acceptorIdentity: string,
 ): LinkageTerms {
   assertCountOnlyTermsShape(inviterTerms);
-  // Refuse a deduplicating invitation before any derived terms are built or any
-  // connection is opened. `deduplicate` is per-party with no cross-party binding to
-  // what the inviter presents at the terms exchange, and acceptance would otherwise
-  // adopt it verbatim: a hostile inviter could carry `deduplicate: true`, have the
-  // acceptor take the "many" side and disclose its record grouping, then present
-  // `deduplicate: false` at the exchange so the run proceeds as many-to-one rather
-  // than being refused. Fail closed here so no acceptor holds an invitation-derived
-  // deduplicating term. A deduplicating exchange is authored in both parties' own
-  // configurations, not on an invitation. Fixed literal naming no partner value,
-  // like the mirror-incoherence throw below.
-  if (inviterTerms.deduplicate) {
-    throw new UsageError(
-      "a deduplicating exchange cannot be accepted from an invitation: " +
-        "accepting one would set deduplication for both parties, and an exchange " +
-        "in which both parties deduplicate is refused before any matching. A " +
-        "deduplicating exchange is authored in each party's own configuration " +
-        "file, with the setting on for one party only. Ask the inviting party " +
-        "for an invitation without deduplication, or set up the exchange from " +
-        "configurations on both sides.",
-    );
-  }
   const derived: LinkageTerms = {
     ...inviterTerms,
     identity: acceptorIdentity,
+    // This party's own side of the cardinality, which the invitation does not carry
+    // to it: whether SEVERAL of this party's records may match one of the partner's
+    // is a disclosure about this party's own data, so it starts closed and is
+    // authored in this party's own configuration (see the doc comment).
+    deduplicate: false,
     output: {
       expectsOutput: inviterTerms.output.shareWithPartner,
       shareWithPartner: inviterTerms.output.expectsOutput,
@@ -1503,10 +1499,9 @@ export function deriveAcceptedLinkageTerms(
       "the invitation's linkage terms cannot be accepted unchanged: mirroring " +
         "the output direction for the accepting party produced an incompatible " +
         "configuration. The inviter is the sole receiver of the matched result, " +
-        "yet its terms also have the accepting party deduplicate or receive " +
-        "payload columns the inviter sends -- neither is possible for a party " +
-        "that receives no result. Ask the inviter to share the result, or to " +
-        "drop those settings.",
+        "yet its terms also have the accepting party receive payload columns " +
+        "the inviter sends -- which no party that receives no result can do. " +
+        "Ask the inviter to share the result, or to drop those columns.",
     );
   }
   return derived;

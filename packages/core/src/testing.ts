@@ -9,6 +9,7 @@ export {
   consentRepresentationProbes,
 } from "./linkageTermConsentCoverage.js";
 export type {
+  ConsentProbeShape,
   ConsentRelevantTerm,
   ConsentRepresentationProbe,
   ConsentSurfaceName,

@@ -53,8 +53,6 @@ export {
 } from "./advancedInviteTerms";
 
 export {
-  DEDUPLICATE_NOT_ON_INVITATION_MESSAGE,
-  INVITATION_CARRIES_DEDUPLICATE,
   gatedActiveSettingMessage,
   importedConstraintDivergenceMessage,
   validateAdvancedInvite,

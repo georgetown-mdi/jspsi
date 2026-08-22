@@ -297,10 +297,11 @@ export function resolveCountOnlyRun(
  * where the consistency check has not run.
  *
  * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
- * same reason as {@link assertAlgorithmImplemented}: on the accept side the
- * value is adopted verbatim from the partner's invitation (see
- * `deriveAcceptedLinkageTerms`), so it is not unconditionally this operator's
- * own content. The message carries only fixed literals.
+ * same reason as {@link assertAlgorithmImplemented}: the refusing party is not
+ * necessarily the one whose value refuses, since {@link resolveLinkageCardinality}
+ * asserts over the PARTNER's terms document as well as its own, so the fault is
+ * not unconditionally this operator's own content. The message carries only fixed
+ * literals.
  */
 export function assertDeduplicateImplemented(terms: LinkageTerms): void {
   if (!terms.deduplicate) return;
@@ -474,7 +475,8 @@ function assertFanOutAdvertisementMatchesStrategy(
  *
  * An {@link OperatorConfigError}, unlike its {@link assertAlgorithmImplemented}
  * and {@link assertDeduplicateImplemented} siblings: those read a linkage-terms
- * value the accept side adopts verbatim from the partner's invitation, so the
+ * value that reaches them from the partner too -- adopted from its invitation,
+ * or read off its terms document at {@link resolveLinkageCardinality} -- so the
  * fault is not provably local, while the `signing` block is only ever this
  * party's own config -- it lives on the local {@link ExchangeSpec} and no
  * invitation or accept path carries one (see `config/signing.ts`). That is

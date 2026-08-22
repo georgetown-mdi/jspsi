@@ -296,23 +296,17 @@ test("the metadata rule is a no-op on psi and on an unresolved metadata block", 
 // --- Scope -------------------------------------------------------------------
 
 test("psi terms are untouched by every count-only rule", () => {
-  for (const { rule, terms } of outOfShape) {
+  for (const { terms } of outOfShape) {
     const asPsi: LinkageTerms = { ...terms, algorithm: "psi" };
     expect(countOnlyShapeViolation(asPsi)).toBeUndefined();
     expect(() => parseLinkageTerms(asPsi)).not.toThrow();
-    // deriveAcceptedLinkageTerms applies no count-only rule to a psi document. The
-    // deduplicate case is refused there for a SEPARATE reason (an invitation
-    // cannot carry a deduplicating match), which is not a count-only refusal, so it
-    // is asserted against that gate rather than a clean derivation.
-    if (rule === "deduplicate") {
-      expect(() => deriveAcceptedLinkageTerms(asPsi, "Accepting Org")).toThrow(
-        /deduplicating exchange cannot be accepted from an invitation/,
-      );
-    } else {
-      expect(() =>
-        deriveAcceptedLinkageTerms(asPsi, "Accepting Org"),
-      ).not.toThrow();
-    }
+    // deriveAcceptedLinkageTerms applies no count-only rule to a psi document, so
+    // every one of these derives cleanly. The deduplicate case derives cleanly for
+    // a reason of its own -- the acceptor's own side is derived as false rather
+    // than adopted -- which is asserted where that derivation is pinned.
+    expect(() =>
+      deriveAcceptedLinkageTerms(asPsi, "Accepting Org"),
+    ).not.toThrow();
   }
   expect(countOnlyTransmitsColumn("psi", transmitting)).toBe(false);
 });

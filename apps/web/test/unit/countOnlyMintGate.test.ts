@@ -112,11 +112,10 @@ describe("the count-only shape gate at the Generate boundary", () => {
 
   test("under psi the identical draft is refused only for its deduplicate settings, which clearing them settles", () => {
     // Every rule above is the count-only algorithm's: under psi the same draft
-    // keeps its several keys and its marked column. What is left are the two
-    // refusals deduplicate carries at any algorithm -- the pair beside
-    // single-pass, and the invitation path itself, both gated in
-    // advancedInviteValidation.test.ts -- so clearing the setting generates and
-    // nothing here was the count-only rules'.
+    // keeps its several keys and its marked column. What is left is the one
+    // refusal deduplicate carries at any algorithm -- the pair beside
+    // single-pass, gated in advancedInviteValidation.test.ts -- so clearing the
+    // setting generates and nothing here was the count-only rules'.
     const { draft, seed } = countOnlyDraft([...LINKAGE_COLUMNS, "notes"]);
     const asPsi: AdvancedInviteDraft = {
       ...draft,

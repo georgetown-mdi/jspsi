@@ -8,8 +8,9 @@ import { createElement } from "react";
 
 import {
   CONSENT_FACTS,
-  DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
-  DEDUPLICATE_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+  DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   UNRECOGNIZED_TRANSFORM_NOTE,
   sanitizeForDisplay,
 } from "@psilink/core";
@@ -2307,11 +2308,35 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     expect(collapse.textContent).toContain(
       "More than one of the inviting party's records",
     );
-    expect(collapse.textContent).toContain(DEDUPLICATE_DISCLOSURE_STATEMENT);
-    // The refusal note keeps that level too: the disclosure this headline would
-    // make and the fact that accepting cannot produce the run making it are one
-    // reading, so neither may sit an expand away from the other.
-    expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPT_REFUSAL_NOTE);
+    expect(collapse.textContent).toContain(
+      DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+    );
+    // The direction note keeps that level too: the disclosure this headline makes
+    // and whose records are grouped to make it are one reading, so neither may sit
+    // an expand away from the other.
+    expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
+  });
+
+  test("a sole-receiver deduplicating invitation states psilink presents the acceptor no grouping when the inviter alone receives", async () => {
+    // The other output shape a deduplicating invitation can take. This party is
+    // sent no result, so it is presented no grouping: the shared-result sentence
+    // would state a disclosure this client does not make, and the sole-receiver
+    // one states what it does. The direction note stays under both shapes, its
+    // widening reaching this party either way.
+    renderCaveatTerms({
+      output: { expectsOutput: true, shareWithPartner: false },
+      payload: { send: [], receive: [] },
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.textContent).toContain(
+      DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+    );
+    expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+    );
   });
 
   // The other half of the cross-surface pin: core's consent classification names
@@ -2333,7 +2358,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
   });
 
   test.each(pinnedDisclosureProbes)(
-    "renders every pinned disclosure sentence for $path",
+    "renders every pinned disclosure sentence for $label",
     async (probe) => {
       renderTerms(probe.variant);
       await expect.element(toggle("Other details")).toBeInTheDocument();
@@ -2343,20 +2368,38 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
       expect(copies.length).toBeGreaterThan(0);
       for (const copy of copies)
         expect(app.container.textContent).toContain(copy);
+      // And the sentence another document shape owes stays off this one, so a
+      // screen rendering one sentence for every shape cannot satisfy the pin
+      // above while stating a disclosure this shape's run does not make.
+      for (const copy of probe.forbiddenVariantCopy ?? [])
+        expect(app.container.textContent).not.toContain(copy);
     },
   );
+
+  test("the coverage check measures at least one term under shapes owing different sentences", () => {
+    // Without this the forbidden-copy half of the per-probe test above would pass
+    // by matching nothing.
+    expect(
+      pinnedDisclosureProbes.filter(
+        (probe) => (probe.forbiddenVariantCopy ?? []).length > 0,
+      ).length,
+    ).toBeGreaterThan(0);
+  });
 
   test("a one-to-one invitation states no grouping disclosure at all", async () => {
     // Non-vacuous the other way: the sentences are the setting's doing rather than
     // a fixture of the screen, and a one-to-one exchange discloses no grouping to
-    // state and proposes no exchange that would be refused for one.
+    // state and groups neither party's records.
     renderCaveatTerms({ deduplicate: false });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).not.toContain(
-      DEDUPLICATE_DISCLOSURE_STATEMENT,
+      DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
     );
     expect(app.container.textContent).not.toContain(
-      DEDUPLICATE_ACCEPT_REFUSAL_NOTE,
+      DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+    );
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
     );
   });
 

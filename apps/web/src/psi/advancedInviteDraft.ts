@@ -715,9 +715,9 @@ export function draftFromTerms(
     algorithm: terms.algorithm,
     deduplicate: terms.deduplicate,
     // Reflect the imported strategy so the control shows it and an export
-    // round-trips it. Ungated, so unlike a gated deduplicate an imported
-    // single-pass is adopted as-is rather than refused (gatedActiveSettingMessage
-    // deliberately carries no branch for it).
+    // round-trips it. Adopted as-is rather than refused: the strategy is a term
+    // the run honors whichever value it carries, so gatedActiveSettingMessage
+    // deliberately carries no branch for it.
     linkageStrategy: terms.linkageStrategy,
     legalAgreement:
       terms.legalAgreement !== undefined
