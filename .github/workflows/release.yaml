@@ -39,6 +39,12 @@ jobs:
       - name: WebRTC integration tests (CLI)
         run: npm run test:integration:webrtc -w apps/cli
 
+      # The backend-agnostic integration files are a project of their own too, so
+      # the `integration` project above does not carry them either; the ship gate
+      # runs them for the same reason it runs the WebRTC ones.
+      - name: Backend-agnostic integration tests (CLI)
+        run: npm run test:integration:backend-agnostic -w apps/cli
+
   publish:
     name: Publish Docker image
     needs: test

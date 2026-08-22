@@ -9,8 +9,11 @@ import { prepareForExchange } from "@psilink/core";
 import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
-import { runProtocol, type ProtocolConnectionConfig } from "../../src/protocol";
-import { saveKeyFile } from "../../src/keyFile";
+import {
+  runProtocol,
+  type ProtocolConnectionConfig,
+} from "../../../src/protocol";
+import { saveKeyFile } from "../../../src/keyFile";
 
 // A clean authenticated exchange completes for both parties; then one party's
 // result-CSV write fails (its output path has a missing parent directory) AFTER
@@ -22,7 +25,7 @@ import { saveKeyFile } from "../../src/keyFile";
 // into the shared directory, at worst converting the peer's success into a
 // PeerAbortError while its results sit readable on disk.
 //
-// This is the complement of abortMarkerExchange.test.ts: there a genuine
+// This is the complement of ../abortMarkerExchange.test.ts: there a genuine
 // mid-exchange transport fault DOES write a marker (the peer is still waiting on
 // the protocol); that fault fires before runExchange returns, so it precedes the
 // seal this test exercises.
@@ -34,7 +37,7 @@ const INITIAL_SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 // firstName-only terms over a one-row dataset both parties share ("Bob"), so the
 // clean exchange computes a real intersection and reaches the output stage on
-// both sides (mirrors authenticatedExchange.test.ts).
+// both sides (mirrors ../authenticatedExchange.test.ts).
 const baseTerms: Omit<LinkageTerms, "identity"> = {
   version: "1.0.0",
   date: "2026-01-01",

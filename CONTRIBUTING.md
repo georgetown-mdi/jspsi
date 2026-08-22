@@ -85,13 +85,15 @@ beyond the builds above is required:
 ```sh
 npm run test:integration -w apps/cli         # SFTP adapter driven over a loopback server
 npm run test:integration:webrtc -w apps/cli  # WebRTC transport over loopback werift peers
+npm run test:integration:backend-agnostic -w apps/cli  # the integration files no SFTP backend differentiates
 npm run test:integration -w apps/web
 npm run test:browser     -w apps/web         # cross-impl vectors + live exchange, real Chromium
 ```
 
-The native SFTP backends and hardened profiles, why the WebRTC suite is a
-project of its own, the console sentinel, the warm-server inner loop, and the
-browser-suite plumbing are in [docs/TESTING.md](docs/TESTING.md).
+The native SFTP backends and hardened profiles, why the WebRTC and
+backend-agnostic suites are projects of their own, the console sentinel, the
+warm-server inner loop, and the browser-suite plumbing are in
+[docs/TESTING.md](docs/TESTING.md).
 
 ### Coverage
 

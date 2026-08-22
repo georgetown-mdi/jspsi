@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import ssh2 from "ssh2";
 import type { Connection } from "ssh2";
 
-import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
+import { SSH2SFTPClientAdapter } from "../../../src/connection/ssh2SftpAdapter";
 
 const { Server, utils } = ssh2;
 

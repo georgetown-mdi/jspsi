@@ -12,8 +12,8 @@ import {
   BOTH_SWEPT_GUIDANCE,
   runProtocol,
   type ProtocolConnectionConfig,
-} from "../../src/protocol";
-import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
+} from "../../../src/protocol";
+import { loadKeyFile, saveKeyFile } from "../../../src/keyFile";
 
 // What `--sweep-exchange-files` does when both operators reach for it, and
 // whether what each of them is then told works.

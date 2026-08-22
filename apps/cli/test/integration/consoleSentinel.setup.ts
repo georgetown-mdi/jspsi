@@ -22,11 +22,11 @@ declare module "vitest" {
 // round; the cap keeps a teardown that keeps emitting from stalling afterAll.
 const MAX_FLUSH_ROUNDS = 5;
 
-// A `setupFiles` entry, so this runs once in EACH file's worker across both
-// projects that use it (the `integration` and `webrtc` projects both run on the
-// `forks` pool: one process per file). The sentinel is installed at module load
-// -- before any test or top-level import side effect -- so it observes the
-// file's console from the first line.
+// A `setupFiles` entry, so this runs once in EACH file's worker across every
+// project that uses it (the `integration`, `webrtc` and `backend-agnostic`
+// projects all run on the `forks` pool: one process per file). The sentinel is
+// installed at module load -- before any test or top-level import side effect --
+// so it observes the file's console from the first line.
 const sentinel = new ConsoleSentinel(INTEGRATION_CONSOLE_ALLOWLIST, {
   gatedLevels: SENTINEL_GATED_LEVELS,
 });
