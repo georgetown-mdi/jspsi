@@ -1,7 +1,7 @@
 ---
 title: "Security Policy"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-15"
+last_reviewed: "2026-08-22"
 ---
 
 # Security Policy
@@ -23,6 +23,8 @@ PSI-Link maintains security patches for the current major release and the previo
 **Do not report security vulnerabilities through public GitHub issues, pull requests, or discussions.**
 
 Use GitHub's built-in [private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing/privately-reporting-a-security-vulnerability) for this repository. This opens a private thread visible only to you and the maintainers and is the fastest path to a coordinated fix.
+
+If you cannot use the GitHub path -- you have no GitHub account, or private reporting is unavailable when you arrive -- email the maintainer at [vincent.dorie@georgetown.edu](mailto:vincent.dorie@georgetown.edu) with the same details below. Prefer the GitHub path when both are open: the private thread is visible to the maintainer team rather than a single mailbox, and it is where the coordinated fix is tracked.
 
 When reporting, please include:
 
