@@ -25,9 +25,9 @@ function draftSummary(draft: RunDiagnosticsDraft): string {
 /**
  * The console's "Diagnostics and recovery" card: the two per-run controls an
  * operator reaches for when a run misbehaves. A closed disclosure, since a first
- * run needs neither -- these are the affordances the CLI has and the console
- * previously did not, which sent an operator out of the GUI for exactly the
- * situation it exists to smooth.
+ * run needs neither: they are the CLI's diagnostic and recovery affordances,
+ * offered here so a failed prototype run does not send the operator out of the
+ * GUI for exactly the situation it exists to smooth.
  *
  * Both choices are this run's alone; nothing here is remembered for the next
  * one. The rules behind them belong to {@link runDiagnosticsModel}: the sweep is
