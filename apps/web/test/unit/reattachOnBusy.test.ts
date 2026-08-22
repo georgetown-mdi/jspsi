@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import {
+  JobApiRequestError,
+  RelayedTerminalError,
+} from "@psi/serverJobExchangeDriver";
+import {
+  failureFor,
+  withSweepRefusalGuidance,
+} from "@bench/useInviterExchange";
 import { isExchangeBusyError, reattachOnBusy } from "@bench/reattachOnBusy";
-import { JobApiRequestError } from "@psi/serverJobExchangeDriver";
+import { SWEEP_RETAIN_REFUSAL_TITLE } from "@bench/runDiagnosticsModel";
 import { writeAttachment } from "@psi/consoleJobAttachment";
 
 import type {
@@ -9,7 +17,10 @@ import type {
   JobStatusProbe,
 } from "@psi/serverJobExchangeDriver";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
+import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { RelayEvent } from "@jobs/cliDriver";
+import type { RunDiagnosticsIntentSource } from "@bench/runDiagnosticsModel";
+import type { RunFailure } from "@bench/useInviterExchange";
 import type { RunOutputs } from "@bench/runOutputs";
 
 const STORAGE_KEY = "psilink-console-last-job";
@@ -76,12 +87,15 @@ function reattachClient(args: {
   return { client, statusIds, streamedIds };
 }
 
-/** The run callbacks a re-attach drives, plus their mocks for assertion. */
+/** The run callbacks a re-attach drives, plus their mocks for assertion. The
+ * seat's failure raiser rides alongside them: a re-attached run's terminal is
+ * raised through it rather than through `onError`. */
 function driverEvents(signal: AbortSignal) {
   const onStages = vi.fn();
   const onStage = vi.fn();
   const onResult = vi.fn();
   const onError = vi.fn();
+  const raiseFailure = vi.fn();
   const events: ExchangeDriverEvents<RunOutputs> = {
     signal,
     onStages,
@@ -89,7 +103,7 @@ function driverEvents(signal: AbortSignal) {
     onResult,
     onError,
   };
-  return { events, onStages, onStage, onResult, onError };
+  return { events, onStages, onStage, onResult, onError, raiseFailure };
 }
 
 afterEach(() => {
@@ -113,7 +127,7 @@ describe("reattachOnBusy", () => {
       probe: { kind: "live", status: "running" },
       events: [result(true)],
     });
-    const { events, onResult, onError } = driverEvents(
+    const { events, onResult, onError, raiseFailure } = driverEvents(
       new AbortController().signal,
     );
     const onReattaching = vi.fn();
@@ -124,6 +138,7 @@ describe("reattachOnBusy", () => {
       seat: "inviter",
       channel: "sftp",
       events,
+      raiseFailure,
       onReattaching,
     });
 
@@ -154,7 +169,9 @@ describe("reattachOnBusy", () => {
     const { client, statusIds, streamedIds } = reattachClient({
       probe: { kind: "live", status: "running" },
     });
-    const { events, onResult } = driverEvents(new AbortController().signal);
+    const { events, onResult, raiseFailure } = driverEvents(
+      new AbortController().signal,
+    );
     const onReattaching = vi.fn();
 
     const didReattach = await reattachOnBusy({
@@ -164,6 +181,7 @@ describe("reattachOnBusy", () => {
       seat: "acceptor",
       channel: "filedrop",
       events,
+      raiseFailure,
       onReattaching,
     });
 
@@ -182,7 +200,7 @@ describe("reattachOnBusy", () => {
     const { client, statusIds, streamedIds } = reattachClient({
       probe: { kind: "live", status: "running" },
     });
-    const { events } = driverEvents(new AbortController().signal);
+    const { events, raiseFailure } = driverEvents(new AbortController().signal);
 
     const didReattach = await reattachOnBusy({
       error: new JobApiRequestError(409, "busy", "job-orphan"),
@@ -190,6 +208,7 @@ describe("reattachOnBusy", () => {
       seat: "inviter",
       channel: "sftp",
       events,
+      raiseFailure,
       onReattaching: vi.fn(),
     });
 
@@ -203,7 +222,9 @@ describe("reattachOnBusy", () => {
     const { client, statusIds, streamedIds } = reattachClient({
       probe: { kind: "live", status: "running" },
     });
-    const { events, onResult } = driverEvents(new AbortController().signal);
+    const { events, onResult, raiseFailure } = driverEvents(
+      new AbortController().signal,
+    );
     const onReattaching = vi.fn();
 
     const didReattach = await reattachOnBusy({
@@ -212,6 +233,7 @@ describe("reattachOnBusy", () => {
       seat: "inviter",
       channel: "sftp",
       events,
+      raiseFailure,
       onReattaching,
     });
 
@@ -229,7 +251,9 @@ describe("reattachOnBusy", () => {
     const { client, statusIds, streamedIds } = reattachClient({
       probe: { kind: "gone" },
     });
-    const { events, onResult } = driverEvents(new AbortController().signal);
+    const { events, onResult, raiseFailure } = driverEvents(
+      new AbortController().signal,
+    );
     const onReattaching = vi.fn();
 
     const didReattach = await reattachOnBusy({
@@ -238,6 +262,7 @@ describe("reattachOnBusy", () => {
       seat: "inviter",
       channel: "sftp",
       events,
+      raiseFailure,
       onReattaching,
     });
 
@@ -254,7 +279,7 @@ describe("reattachOnBusy", () => {
     const { client, statusIds } = reattachClient({
       probe: { kind: "live", status: "running" },
     });
-    const { events } = driverEvents(new AbortController().signal);
+    const { events, raiseFailure } = driverEvents(new AbortController().signal);
 
     const didReattach = await reattachOnBusy({
       error: new JobApiRequestError(500, "server error", "job-x"),
@@ -262,6 +287,7 @@ describe("reattachOnBusy", () => {
       seat: "inviter",
       channel: "sftp",
       events,
+      raiseFailure,
       onReattaching: vi.fn(),
     });
 
@@ -276,7 +302,9 @@ describe("reattachOnBusy", () => {
     });
     const controller = new AbortController();
     controller.abort();
-    const { events, onResult, onError } = driverEvents(controller.signal);
+    const { events, onResult, onError, raiseFailure } = driverEvents(
+      controller.signal,
+    );
     const onReattaching = vi.fn();
 
     const didReattach = await reattachOnBusy({
@@ -285,6 +313,7 @@ describe("reattachOnBusy", () => {
       seat: "inviter",
       channel: "sftp",
       events,
+      raiseFailure,
       onReattaching,
     });
 
@@ -295,5 +324,87 @@ describe("reattachOnBusy", () => {
     expect(onReattaching).not.toHaveBeenCalled();
     expect(onResult).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+// A busy create leaves a seat showing a run it did not launch, and the seat's
+// own draft says nothing about what THAT job requested. The console's one
+// text-keyed decoration -- the sweep-refusal guidance -- is gated on the run's
+// intent, so this pins which intent the re-attached run's terminal is judged
+// against.
+describe("a re-attached run's failure carries no intent this seat did not attest", () => {
+  /** A terminal the CLI never composed as a refusal: the fragment reaches the
+   * seat inside a filename an untrusted party chose, which core's foreign-file
+   * terminal names verbatim and a partner-writable rendezvous directory lets
+   * them plant. */
+  const plantedTerminal =
+    "the shared folder holds files this exchange does not own: " +
+    "--sweep-exchange-files refuses to delete.csv";
+
+  /** The draft the LOCAL launch carried: a sweep the operator confirmed, which
+   * is what makes the guidance apply to this seat's own run. */
+  const localIntent = { sweepExchangeFiles: true } as const;
+
+  function errorEvent(message: string): RelayEvent {
+    return { v: 1, type: "error", category: "exchange", message };
+  }
+
+  test("the relayed terminal's own title and message stand, planted fragment and all", async () => {
+    installStorage();
+    const { client } = reattachClient({
+      probe: { kind: "live", status: "running" },
+      events: [errorEvent(plantedTerminal)],
+    });
+    const { events, onError } = driverEvents(new AbortController().signal);
+    // The seat's raiser, wired as all three bench seats wire it: the intent is
+    // whatever the caller states, and only a run this seat launched has one.
+    const raised: Array<RunFailure> = [];
+    const raiseFailure = (
+      category: ExchangeErrorCategory,
+      error: unknown,
+      runIntent: RunDiagnosticsIntentSource,
+    ) => {
+      raised.push(
+        withSweepRefusalGuidance(
+          failureFor(category, error, undefined, "filedrop"),
+          error,
+          runIntent,
+        ),
+      );
+    };
+
+    const didReattach = await reattachOnBusy({
+      error: new JobApiRequestError(409, "busy", "job-other"),
+      client,
+      seat: "inviter",
+      channel: "filedrop",
+      events,
+      raiseFailure,
+      onReattaching: vi.fn(),
+    });
+
+    expect(didReattach).toBe(true);
+    expect(raised).toHaveLength(1);
+    const undecorated = failureFor(
+      "exchange",
+      new RelayedTerminalError(plantedTerminal),
+      undefined,
+      "filedrop",
+    );
+    expect(raised[0]).toEqual(undecorated);
+    expect(raised[0].title).not.toBe(SWEEP_RETAIN_REFUSAL_TITLE);
+    expect(raised[0].message).not.toContain("--force-retain-sweep");
+    // The seat's launched-run failure path is not what fired.
+    expect(onError).not.toHaveBeenCalled();
+
+    // The suppression is what held: the very same failure, judged against the
+    // local draft's confirmed sweep, is retitled toward the escalation.
+    const asLocalRun = withSweepRefusalGuidance(
+      undecorated,
+      new RelayedTerminalError(plantedTerminal),
+      localIntent,
+    );
+    expect(asLocalRun.title).toBe(SWEEP_RETAIN_REFUSAL_TITLE);
+    expect(asLocalRun.message).toContain("--force-retain-sweep");
   });
 });

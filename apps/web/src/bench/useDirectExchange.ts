@@ -27,11 +27,14 @@ import type {
   JobInputSource,
   JobRunStatus,
 } from "@psi/serverJobExchangeDriver";
+import type {
+  RunDiagnosticsIntentFields,
+  RunDiagnosticsIntentSource,
+} from "./runDiagnosticsModel";
 import type { DirectTransport } from "./directExchangeModel";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { ExchangeRun } from "./exchangeRun";
-import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
 
@@ -183,13 +186,19 @@ export function useDirectExchange({
     });
 
     // Raise a failure's alert and freeze the run: the terminal path for every
-    // error except a busy (409) create, which re-attaches below instead.
-    const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
+    // error except a busy (409) create, which re-attaches below instead. The
+    // intent is the caller's to state, since a re-attached run's failure belongs
+    // to a job this seat did not launch.
+    const raiseFailure = (
+      category: ExchangeErrorCategory,
+      error: unknown,
+      runIntent: RunDiagnosticsIntentSource,
+    ) => {
       setFailure(
         withSweepRefusalGuidance(
           failureFor(category, error, inputSource, channel),
           error,
-          runDiagnostics,
+          runIntent,
         ),
       );
       setRun((current) => runWithFailure(current));
@@ -227,6 +236,7 @@ export function useDirectExchange({
             seat: "inviter",
             channel,
             events: runEvents,
+            raiseFailure,
             onReattaching: (id, status) => {
               currentJobIdRef.current = id;
               setCurrentJobId(id);
@@ -236,12 +246,12 @@ export function useDirectExchange({
           }).then((didReattach) => {
             if (!didReattach) {
               setReattaching(false);
-              raiseFailure(category, error);
+              raiseFailure(category, error, runDiagnostics);
             }
           });
           return;
         }
-        raiseFailure(category, error);
+        raiseFailure(category, error, runDiagnostics);
       },
     };
 

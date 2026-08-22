@@ -43,7 +43,10 @@ const PROBE_CONNECT_TIMEOUT = `${PROBE_CONNECT_TIMEOUT_MS / 1000}s`;
  * apps/cli/src/connection/sftpPeerIdentification.ts). Mirrored rather than
  * imported -- the CLI is a separate workspace this server drives as a subprocess
  * -- so that the watchdog headroom this file depends on is stated where the
- * watchdog is; a unit test holds the two constants and the watchdog to the
+ * watchdog is.
+ *
+ * Two unit tests hold the mirror: one reads the CLI's own declaration and fails
+ * when the two values part, the other holds this value and the watchdog to the
  * ordering the diagnosis needs.
  */
 export const PROBE_PEER_READ_BUDGET_MS = 2_000;

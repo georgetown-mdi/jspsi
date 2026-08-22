@@ -94,12 +94,48 @@ export function runDiagnosticsWithControl<
     : { ...changed, sweepConfirmed: false };
 }
 
+/**
+ * The draft carried across a RE-TARGET of the directory a sweep would run
+ * against -- a transport switch, or an SFTP connection authored afresh. The
+ * confirmation attests ONE directory, so it does not survive that directory
+ * changing; the operator's other choices are about the run rather than the
+ * place, and are left alone.
+ *
+ * Held here rather than in each seat's handler for the reason
+ * {@link runDiagnosticsWithControl} is: the draft outlives the surface that
+ * re-targets it.
+ */
+export function runDiagnosticsAfterRetarget(
+  draft: RunDiagnosticsDraft,
+): RunDiagnosticsDraft {
+  return { ...draft, sweepConfirmed: false };
+}
+
 /** The subset of a job intent this card contributes: each control present only
  * when it is on, and only ever `true`. */
 export interface RunDiagnosticsIntentFields {
   diagnosticRun?: true;
   sweepExchangeFiles?: true;
 }
+
+/**
+ * The intent of a run this seat did not launch: the exchange already holding the
+ * appliance's single slot, which a busy (409) create re-attaches to. The seat
+ * emitted no intent for that run and cannot read the one it was created with, so
+ * this is what it knows about it -- nothing.
+ */
+export const REATTACHED_RUN_INTENT = "reattached-run";
+
+/**
+ * What a seat knows about the per-run controls of the run whose failure it is
+ * raising: the fields it emitted for a run it launched itself (absent when that
+ * launch carried none), or {@link REATTACHED_RUN_INTENT} for a run it only
+ * re-attached to. Written at every call site, so a seat that cannot attest an
+ * intent has to say so rather than omit the argument and have its own launch's
+ * intent stand in.
+ */
+export type RunDiagnosticsIntentSource =
+  RunDiagnosticsIntentFields | undefined | typeof REATTACHED_RUN_INTENT;
 
 /**
  * The per-run fields a draft contributes to a job intent. Only an enabled

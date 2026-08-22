@@ -4,9 +4,15 @@ import {
 } from "@psi/serverJobExchangeDriver";
 import { readAttachment, writeAttachment } from "@psi/consoleJobAttachment";
 
+import { whenDiagnostic } from "@utils/diagnostics";
+
+import { REATTACHED_RUN_INTENT } from "./runDiagnosticsModel";
+
 import type { JobApiClient, JobRunStatus } from "@psi/serverJobExchangeDriver";
 import type { ConsoleJobSeat } from "@psi/consoleJobAttachment";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
+import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
+import type { RunDiagnosticsIntentSource } from "./runDiagnosticsModel";
 import type { RunOutputs } from "./runOutputs";
 
 /** Whether an error is a busy (409) job-create rejection -- the appliance's
@@ -35,6 +41,11 @@ export function isExchangeBusyError(error: unknown): boolean {
  * fresh run's would, under recovery-style copy the caller flips via
  * {@link onReattaching}.
  *
+ * The one callback that is NOT the caller's own is the failure path: the
+ * re-attached job is not the run this seat launched, so its terminal is raised
+ * through `raiseFailure` carrying {@link REATTACHED_RUN_INTENT} instead of the
+ * seat's `onError`, which would decorate it with the local launch's intent.
+ *
  * Returns true when it re-attached (the caller must NOT raise the alert), false
  * when no live job could be discovered (the caller falls back to today's alert).
  * An abort mid-handling returns true (silent, matching the drivers' own abort
@@ -47,6 +58,7 @@ export async function reattachOnBusy({
   seat,
   channel,
   events,
+  raiseFailure,
   onReattaching,
 }: {
   error: unknown;
@@ -54,6 +66,16 @@ export async function reattachOnBusy({
   seat: ConsoleJobSeat;
   channel: string;
   events: ExchangeDriverEvents<RunOutputs>;
+  /** Raise a failure's alert and freeze the run, as the seat does for its own
+   * launch. Called here for the RE-ATTACHED run's terminal, with the intent the
+   * seat can attest for it -- none. Taking the raiser rather than reusing
+   * `events.onError` is what keeps a seat from decorating a job it did not
+   * launch with the intent of the launch it did make. */
+  raiseFailure: (
+    category: ExchangeErrorCategory,
+    error: unknown,
+    runIntent: RunDiagnosticsIntentSource,
+  ) => void;
   /** Flip the run surface into recovery-style copy, carrying the resolved id and
    * its live status so the surface heads correctly before the replay lands and
    * the deliberate-leave paths discard the re-attached job. */
@@ -76,7 +98,16 @@ export async function reattachOnBusy({
   // never written becomes recoverable.
   writeAttachment({ jobId, seat, channel });
   onReattaching(jobId, probe.status);
-  await createServerJobReattachDriver(jobId, client).run(events);
+  await createServerJobReattachDriver(jobId, client).run({
+    ...events,
+    onError: ({ category, error: replayError }) => {
+      // Dev-gated like the seats' own error path: the raw error can embed
+      // partner-/server-controlled bytes, so a production console carries none
+      // of it. The alert the raiser composes is separately sanitized.
+      whenDiagnostic(() => console.error(replayError));
+      raiseFailure(category, replayError, REATTACHED_RUN_INTENT);
+    },
+  });
   return true;
 }
 

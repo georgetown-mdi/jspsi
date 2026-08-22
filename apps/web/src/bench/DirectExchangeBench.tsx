@@ -25,6 +25,7 @@ import {
 } from "./exchangeFilesModel";
 import {
   RUN_DIAGNOSTICS_DEFAULT,
+  runDiagnosticsAfterRetarget,
   runDiagnosticsIntentFields,
 } from "./runDiagnosticsModel";
 import { BenchPage } from "./BenchPage";
@@ -201,6 +202,9 @@ export function DirectExchangeBench() {
     setSftpInfo({ connection });
     // Re-authoring the server changes the trust context, so re-affirm.
     setAffirmed(false);
+    // It is also a different rendezvous directory, so any sweep confirmation is
+    // re-asked.
+    setRunDiagnostics(runDiagnosticsAfterRetarget);
   }
 
   function clearSftpConnection() {
@@ -213,6 +217,9 @@ export function DirectExchangeBench() {
     setTransport(next);
     // A different agreed server is a different trust context.
     setAffirmed(false);
+    // And a different rendezvous directory, so any sweep confirmation is
+    // re-asked.
+    setRunDiagnostics(runDiagnosticsAfterRetarget);
   }
 
   function runExchange() {

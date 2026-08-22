@@ -67,6 +67,7 @@ import {
 } from "./connectionTuningModel";
 import {
   RUN_DIAGNOSTICS_DEFAULT,
+  runDiagnosticsAfterRetarget,
   runDiagnosticsIntentFields,
   runDiagnosticsProblems,
 } from "./runDiagnosticsModel";
@@ -1012,9 +1013,13 @@ export function AcceptorBench() {
   // The operator authored an in-console SFTP connection to the partner's server
   // (its credential-free projection): hold it so launch unblocks. The connection
   // material -- credential and host-key fingerprint -- lives in appliance memory,
-  // scoped to this one exchange; the browser holds only the locator.
-  const authorSftpConnection = (connection: SftpConnectionProjection) =>
+  // scoped to this one exchange; the browser holds only the locator. A freshly
+  // authored server is a different rendezvous directory, so any sweep
+  // confirmation is re-asked.
+  const authorSftpConnection = (connection: SftpConnectionProjection) => {
     setSftpInfo({ connection });
+    setRunDiagnostics(runDiagnosticsAfterRetarget);
+  };
 
   // Clear the authored connection: forget it on the appliance and locally, so the
   // card returns to the authoring prompt and launch re-blocks.

@@ -5,11 +5,13 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { JOB_FILE_NAMES, jobCreateIntentSchema } from "@jobs/intent";
 import {
+  REATTACHED_RUN_INTENT,
   RUN_DIAGNOSTICS_DEFAULT,
   SWEEP_CONFIRMATION_NOTICE,
   SWEEP_RETAIN_REFUSAL_TITLE,
   SWEEP_UNCONFIRMED_PROBLEM,
   isSweepRetainRefusal,
+  runDiagnosticsAfterRetarget,
   runDiagnosticsIntentFields,
   runDiagnosticsProblems,
   runDiagnosticsWithControl,
@@ -146,6 +148,38 @@ describe("the sweep confirmation's lifetime", () => {
     expect(runDiagnosticsProblems(rechecked)).toEqual([
       SWEEP_UNCONFIRMED_PROBLEM,
     ]);
+  });
+
+  test("a re-target of the directory it attested un-confirms it", () => {
+    // The confirmation is about ONE directory. Switching transport, or authoring
+    // the SFTP connection afresh, points the run somewhere else, and the sweep
+    // is destructive in the folder it lands in -- so it is gated until the
+    // operator attests to the new one.
+    const confirmed = {
+      ...RUN_DIAGNOSTICS_DEFAULT,
+      diagnosticRun: true,
+      sweepExchangeFiles: true,
+      sweepConfirmed: true,
+    };
+    const retargeted = runDiagnosticsAfterRetarget(confirmed);
+
+    expect(runDiagnosticsIntentFields(retargeted)).toEqual({
+      diagnosticRun: true,
+    });
+    expect(runDiagnosticsProblems(retargeted)).toEqual([
+      SWEEP_UNCONFIRMED_PROBLEM,
+    ]);
+    // Only the attestation lapses: the run's own choices are about the run, not
+    // the place, and the operator does not re-make them.
+    expect(retargeted.diagnosticRun).toBe(true);
+    expect(retargeted.sweepExchangeFiles).toBe(true);
+
+    // Re-attesting arms it again, so the reset is a gate rather than a dead end.
+    expect(
+      runDiagnosticsIntentFields(
+        runDiagnosticsWithControl(retargeted, "sweepConfirmed", true),
+      ),
+    ).toEqual({ diagnosticRun: true, sweepExchangeFiles: true });
   });
 
   test("a confirmed sweep is undisturbed by the other control", () => {
@@ -450,6 +484,18 @@ describe("the retain-guard refusal surfaces as guidance", () => {
       expect(
         withSweepRefusalGuidance(untouched, relayed, runDiagnostics),
       ).toEqual(untouched);
+  });
+
+  test("a run this seat only re-attached to keeps the CLI's own text, refusal or not", () => {
+    // The exchange holding the appliance's slot is not the one this seat
+    // launched, so the seat knows nothing about what it requested and attests
+    // nothing about it -- including when the text really is the refusal, where
+    // the CLI's own message already names the escalation.
+    const relayed = new RelayedTerminalError(cliRefusal);
+    const untouched = failureFor("exchange", relayed, undefined, "filedrop");
+    expect(
+      withSweepRefusalGuidance(untouched, relayed, REATTACHED_RUN_INTENT),
+    ).toEqual(untouched);
   });
 
   test("a run that did request the sweep gets the guidance with the CLI's own text", () => {

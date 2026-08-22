@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -22,6 +23,9 @@ import {
   TEST_HOST_KEY_FINGERPRINT,
   tempDataRoot,
 } from "../utils/jobFixtures";
+
+/** The repository root, from this file's place at apps/web/test/unit/. */
+const REPO_ROOT = fileURLToPath(new URL("../../../..", import.meta.url));
 
 const dirs: Array<string> = [];
 afterEach(() => {
@@ -346,6 +350,34 @@ describe("the diagnosis fits inside the probe's own watchdog", () => {
   test("the connect budget plus the peer read leaves headroom before the SIGTERM", () => {
     expect(PROBE_CONNECT_TIMEOUT_MS + PROBE_PEER_READ_BUDGET_MS).toBeLessThan(
       PROBE_SIGTERM_MS,
+    );
+  });
+
+  // The headroom above is arithmetic over a value this workspace only MIRRORS:
+  // the read budget belongs to the CLI child. apps/web must not import apps/cli
+  // (apps consume packages, not each other), so the mirror is held to the CLI's
+  // own declaration by reading it, the way the record/keys pairing is held to
+  // the CLI's derivation rule. What this checks is the declared value, not what
+  // the child spends at runtime; a source that no longer declares the constant
+  // fails here rather than passing vacuously.
+  test("the mirrored peer-read budget is the value the CLI declares", () => {
+    const source = fs.readFileSync(
+      path.join(
+        REPO_ROOT,
+        "apps",
+        "cli",
+        "src",
+        "connection",
+        "sftpPeerIdentification.ts",
+      ),
+      "utf8",
+    );
+    const declared = /PEER_ANSWER_READ_BUDGET_MS\s*=\s*([0-9_]+)\s*;/.exec(
+      source,
+    );
+    expect(declared).not.toBeNull();
+    expect(Number((declared?.[1] ?? "").replaceAll("_", ""))).toBe(
+      PROBE_PEER_READ_BUDGET_MS,
     );
   });
 });
