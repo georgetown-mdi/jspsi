@@ -2362,6 +2362,11 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     async (probe) => {
       renderTerms(probe.variant);
       await expect.element(toggle("Other details")).toBeInTheDocument();
+      // Every required and forbidden copy here belongs to the deduplicate term,
+      // which sits inside "Other details" (see the co-hidden test above), so
+      // waiting for that panel's content to commit is enough to read the whole
+      // container safely.
+      await readyPanel("Other details");
       // Per probe, not only over the set: an entry carrying an empty list would
       // otherwise pass by rendering nothing at all.
       const copies = probe.requiredVariantCopy ?? [];
@@ -2392,6 +2397,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     // state and groups neither party's records.
     renderCaveatTerms({ deduplicate: false });
     await expect.element(toggle("Other details")).toBeInTheDocument();
+    await readyPanel("Other details");
     expect(app.container.textContent).not.toContain(
       DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
     );
