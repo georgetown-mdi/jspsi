@@ -23,7 +23,8 @@
 // matching input so the JS reference terminates).
 //
 // Run:  node packages/core/test/vectors/generate-transform-regex-vectors.mjs
-// It prints the JSON to stdout; redirect into transform-regex-vectors.json.
+// It prints the JSON to stdout; redirect into transform-regex-vectors.json,
+// then run `npm run format`.
 
 // --- JS-RegExp reference implementations (mirror standardization.ts) ----------
 

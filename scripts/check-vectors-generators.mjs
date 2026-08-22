@@ -33,10 +33,17 @@
 // Properties the implementation is built around:
 //
 //   1. NON-MUTATING. The bytes and timestamps of every file touched are read
-//      before the run and put back in a `finally` whatever the outcome, plus on
-//      SIGINT/SIGTERM (a `finally` does not run on a signal). A check that left
-//      a regenerated vectors file behind would be indistinguishable from the
-//      edit it exists to catch.
+//      before the run and put back in a `finally` on ordinary return or throw
+//      (a `finally` does not run on a signal). SIGINT/SIGTERM handlers restore
+//      the same way in the gaps between per-file runs, and after a run returns
+//      -- but each generator runs synchronously via execFileSync, so a signal
+//      that arrives while it is running is not dispatched to this process's JS
+//      handler until the child exits; a process-group kill that takes the
+//      parent mid-run leaves that file's probe mtime, and any in-place write
+//      the generator already made, exactly as the run left them, for git to
+//      restore. A check that left a regenerated vectors file behind on an
+//      ordinary exit would be indistinguishable from the edit it exists to
+//      catch.
 //   2. FAILS CLOSED on a comparison it did not really make. Three probes:
 //      - The WRITE probe. Each target's mtime is set to a fixed past instant
 //        before its generator runs, so whether the generator wrote the file is a
@@ -181,7 +188,7 @@ export const VERIFIERS = [
   {
     script: "verify-native-wire-vectors.mjs",
     reason:
-      "replays psi-engine-wire-vectors.json through the vendored NATIVE addon selected for the runtime, proving native/WASM interop rather than the file's provenance (which generate-psi-engine-wire-vectors.mjs above supplies). Run by packages/core/test/psiEngineWireVectorsNative.test.ts and, against the musl build, by native_alpine.yaml.",
+      "replays psi-engine-wire-vectors.json through the vendored NATIVE addon selected for the runtime, proving native/WASM interop rather than the file's provenance (which generate-psi-engine-wire-vectors.mjs above supplies). Run against the musl build by native_alpine.yaml; packages/core/test/psiEngineWireVectorsNative.test.ts reimplements the same comparison in-process rather than running this script.",
   },
 ];
 
@@ -408,6 +415,12 @@ async function compareOne({
     }
     utimesSync(target, originalStat.atime, originalStat.mtime);
   };
+  // Covers the gaps between per-file runs and the window after runGenerator
+  // returns. It does NOT cover the run itself: runGenerator blocks
+  // synchronously (execFileSync), and Node does not dispatch a signal to this
+  // handler until that call returns, so a kill that takes the whole process
+  // group mid-run leaves this file's probe mtime, and any in-place write the
+  // generator already made, as the run left them, for git to restore.
   const onSignal = (signal) => {
     restore();
     process.kill(process.pid, signal);
