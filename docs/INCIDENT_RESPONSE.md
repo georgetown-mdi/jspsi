@@ -21,7 +21,7 @@ A leaked shared secret between two exchange partners is a different event with a
 
 Confirm these once a year alongside the [tabletop exercise](#exercise-record). Each one is otherwise discovered missing at the worst moment.
 
-**The intake path is open.** [SECURITY.md](../SECURITY.md#reporting-a-vulnerability) names GitHub private vulnerability reporting as the way in. It is a repository setting, and while it is off a reporter has no private channel at all:
+**The intake path is open.** [SECURITY.md](../SECURITY.md#reporting-a-vulnerability) names GitHub private vulnerability reporting as the primary way in and the maintainer's email as the fallback for a reporter who cannot use it. A report arriving by email lands in one mailbox rather than the private thread, so open a draft security advisory for it on receipt and continue there. The GitHub path is a repository setting:
 
 ```sh
 gh api repos/georgetown-mdi/jspsi/private-vulnerability-reporting
