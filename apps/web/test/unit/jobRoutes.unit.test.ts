@@ -3,19 +3,20 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { JOB_FILE_NAMES, MAX_INPUT_CSV_LENGTH } from "@jobs/intent";
 import {
   MAX_JOB_BODY_BYTES,
   readJobRequestBody,
   validateJobIdParam,
 } from "@jobs/routeSupport";
 import { JobManager } from "@jobs/jobManager";
-import { MAX_INPUT_CSV_LENGTH } from "@jobs/intent";
 
 import { Route as CancelRoute } from "../../src/routes/api/jobs/$jobId/cancel";
 import { Route as CreateRoute } from "../../src/routes/api/jobs/index";
 import { Route as EventsRoute } from "../../src/routes/api/jobs/$jobId/events";
 import { Route as JobRoute } from "../../src/routes/api/jobs/$jobId/index";
 import { Route as KeysRoute } from "../../src/routes/api/jobs/$jobId/keys";
+import { Route as LogRoute } from "../../src/routes/api/jobs/$jobId/log";
 import { Route as RecordRoute } from "../../src/routes/api/jobs/$jobId/record";
 import { Route as RendezvousRoute } from "../../src/routes/api/jobs/rendezvous";
 import { Route as ResultRoute } from "../../src/routes/api/jobs/$jobId/result";
@@ -33,7 +34,7 @@ import {
   validSftpIntent,
 } from "../utils/jobFixtures";
 
-import type { JobInputFileReference } from "@jobs/intent";
+import type { JobCreateIntent, JobInputFileReference } from "@jobs/intent";
 import type { JobManager as JobManagerType } from "@jobs/jobManager";
 
 const roots: Array<string> = [];
@@ -139,7 +140,10 @@ function recordJson(createdAt: string): string {
  * env drops ambient STUB_* vars), create a job, and resolve its id once it has
  * succeeded. `stubEnv` scripts the stub: what output/record files it writes.
  */
-async function createSucceededJob(stubEnv: NodeJS.ProcessEnv): Promise<string> {
+async function createSucceededJob(
+  stubEnv: NodeJS.ProcessEnv,
+  intent: JobCreateIntent = validIntent(),
+): Promise<string> {
   // Create the rendezvous dir first so the data root stays the last-pushed cleanup
   // entry.
   const rendezvousDir = rvzRoot();
@@ -154,7 +158,7 @@ async function createSucceededJob(stubEnv: NodeJS.ProcessEnv): Promise<string> {
   });
   (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
     manager;
-  const id = await manager.createJob(validIntent());
+  const id = await manager.createJob(intent);
   const deadline = Date.now() + 5000;
   for (;;) {
     const record = manager.getJob(id);
@@ -606,6 +610,108 @@ describe("record and keys routes serve the exchange-record pair after success", 
       params: { jobId },
     })) as Response;
     expect(keysResp.status).toBe(404);
+  });
+});
+
+describe("the diagnostic log route serves only a workdir-contained log", () => {
+  /** Stand in for the `--log-file` write the real CLI makes: the stub honours no
+   * log flag, and whether the CLI opens the path it is given is settled against
+   * the built binary in the zero-setup argv parser suite. What is under test here
+   * is which path this route resolves and serves. */
+  function seedLog(id: string, body: string): string {
+    const manager = (globalThis as { jobManagerInstance?: JobManagerType })
+      .jobManagerInstance!;
+    const logPath = manager.getJobView(id)!.logPath!;
+    fs.writeFileSync(logPath, body);
+    return logPath;
+  }
+
+  test("a diagnostic run's log is served as a private attachment from inside the workdir", async () => {
+    const id = await createSucceededJob(
+      { STUB_OUTPUT_FILE: "id\n1\n" },
+      { ...validIntent(), diagnosticRun: true },
+    );
+    const logPath = seedLog(id, "[2026-08-22] [DEBUG] rendezvous opened\n");
+    // The served path is the workdir's own, not one derived from the request.
+    expect(path.dirname(logPath)).toBe(
+      path.join(process.env.JOB_DATA_ROOT!, id),
+    );
+    expect(path.basename(logPath)).toBe(JOB_FILE_NAMES.log);
+
+    const response = (await handlersOf(LogRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}/log`),
+      params: { jobId: id },
+    })) as Response;
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "text/plain; charset=utf-8",
+    );
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-disposition")).toContain("attachment");
+    expect(await response.text()).toContain("rendezvous opened");
+  });
+
+  test("the status body reports the log only once it is on disk", async () => {
+    const id = await createSucceededJob(
+      { STUB_OUTPUT_FILE: "id\n1\n" },
+      { ...validIntent(), diagnosticRun: true },
+    );
+    const before = (await handlersOf(JobRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}`),
+      params: { jobId: id },
+    })) as Response;
+    expect((await before.json()) as { logAvailable: boolean }).toMatchObject({
+      logAvailable: false,
+    });
+    seedLog(id, "x\n");
+    const after = (await handlersOf(JobRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}`),
+      params: { jobId: id },
+    })) as Response;
+    expect((await after.json()) as { logAvailable: boolean }).toMatchObject({
+      logAvailable: true,
+    });
+  });
+
+  test("an ordinary run has no log path at all, so the route is 404 even with a file of that name in the workdir", async () => {
+    const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
+    const manager = (globalThis as { jobManagerInstance?: JobManagerType })
+      .jobManagerInstance!;
+    const view = manager.getJobView(id)!;
+    expect(view.logPath).toBeNull();
+    // Even planting the file the diagnostic run would have written does not make
+    // it servable: a run that captured no log has no log to serve.
+    fs.writeFileSync(
+      path.join(process.env.JOB_DATA_ROOT!, id, JOB_FILE_NAMES.log),
+      "planted\n",
+    );
+    const response = (await handlersOf(LogRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}/log`),
+      params: { jobId: id },
+    })) as Response;
+    expect(response.status).toBe(404);
+  });
+
+  test("a crafted job id is refused before any filesystem use", async () => {
+    enableJobApi();
+    for (const jobId of ["../../etc/passwd", "not-a-uuid", ""]) {
+      const response = (await handlersOf(LogRoute).GET({
+        request: jobRequest(`http://localhost/api/jobs/x/log`),
+        params: { jobId },
+      })) as Response;
+      expect(response.status).toBe(404);
+    }
+  });
+
+  test("the log route is 404 when the API is disabled", async () => {
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    const jobId = "00000000-0000-4000-8000-000000000000";
+    const response = (await handlersOf(LogRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${jobId}/log`),
+      params: { jobId },
+    })) as Response;
+    expect(response.status).toBe(404);
   });
 });
 
@@ -1556,6 +1662,48 @@ describe("POST /api/jobs/sftp/probe reads a host key without authoring", () => {
     const response = await postProbe({ host: "sftp.example.org" });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "unreachable" });
+  });
+
+  test("a diagnosed exit 69 carries the peer answer and a bounded escaped excerpt", async () => {
+    seedManagerWithProbe({
+      STUB_EXIT_CODE: "69",
+      STUB_PROBE_STDOUT:
+        JSON.stringify({
+          diagnosis: "non_ssh",
+          shape: "http",
+          excerpt: "HTTP/1.1 403 Forbidden\r\n",
+        }) + "\n",
+    });
+    const response = await postProbe({ host: "sftp.example.org" });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    // The widened envelope stays closed: these four keys and nothing else -- no
+    // stderr, no latency, no host list.
+    for (const key of Object.keys(body))
+      expect([
+        "status",
+        "peerAnswer",
+        "peerAnswerShape",
+        "peerAnswerExcerpt",
+      ]).toContain(key);
+    expect(body.status).toBe("unreachable");
+    expect(body.peerAnswer).toBe("nonSsh");
+    expect(body.peerAnswerShape).toBe("http");
+    // The peer's own bytes cross escaped: the CR/LF it sent is not a raw control
+    // character in the response.
+    expect(body.peerAnswerExcerpt).toBe("HTTP/1.1 403 Forbidden\\x0d\\x0a");
+  });
+
+  test("a peer that closed without identifying itself is reported as that, not as a bare unreachable", async () => {
+    seedManagerWithProbe({
+      STUB_EXIT_CODE: "69",
+      STUB_PROBE_STDOUT: JSON.stringify({ diagnosis: "closed_unanswered" }),
+    });
+    const response = await postProbe({ host: "sftp.example.org" });
+    expect(await response.json()).toEqual({
+      status: "unreachable",
+      peerAnswer: "closedUnanswered",
+    });
   });
 
   test("a body carrying a credential-shaped field is a 400 (strict, no such field)", async () => {

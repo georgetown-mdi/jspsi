@@ -3,8 +3,15 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
+import { DISPLAY_TRUNCATION_MARKER } from "@psilink/core";
+
 import {
+  PROBE_CONNECT_TIMEOUT_MS,
+  PROBE_EXCERPT_MAX_DISPLAY_LENGTH,
+  PROBE_PEER_READ_BUDGET_MS,
+  PROBE_SIGTERM_MS,
   buildSftpProbeUrl,
+  parseProbeDiagnosis,
   parseProbeStdout,
   probeSftpHostKey,
   reconcileProbeExit,
@@ -195,5 +202,150 @@ describe("probeSftpHostKey drives the CLI probe subcommand", () => {
       sigkillGraceMs: 50,
     });
     expect(result).toEqual({ kind: "timeout" });
+  });
+});
+
+// The diagnosis is the CLI's, carried structurally. Every field is re-checked
+// here because it is a distrusted child's stdout, and the excerpt is bytes an
+// untrusted party chose.
+describe("parseProbeDiagnosis re-validates the exit-69 diagnosis line", () => {
+  test("a closed-unanswered line is carried through", () => {
+    expect(parseProbeDiagnosis('{"diagnosis":"closed_unanswered"}')).toEqual({
+      kind: "closedUnanswered",
+    });
+  });
+
+  test("a non-SSH line carries the shape and the excerpt", () => {
+    expect(
+      parseProbeDiagnosis(
+        JSON.stringify({
+          diagnosis: "non_ssh",
+          shape: "http",
+          excerpt: "HTTP/1.1 403 Forbidden",
+        }),
+      ),
+    ).toEqual({
+      kind: "nonSsh",
+      shape: "http",
+      excerpt: "HTTP/1.1 403 Forbidden",
+    });
+  });
+
+  test("the excerpt is escaped, so no control byte the peer chose survives", () => {
+    // The peer's bytes are written as escapes so this source stays printable;
+    // what the parser is handed is the control characters they denote.
+    const diagnosis = parseProbeDiagnosis(
+      JSON.stringify({
+        diagnosis: "non_ssh",
+        shape: "unrecognized",
+        excerpt: "\u001b[31mred\u0000\n",
+      }),
+    );
+    expect(diagnosis?.kind).toBe("nonSsh");
+    const excerpt =
+      diagnosis?.kind === "nonSsh" ? diagnosis.excerpt : undefined;
+    expect(excerpt).not.toContain("\u001b");
+    expect(excerpt).not.toContain("\u0000");
+    expect(excerpt).not.toContain("\n");
+    expect(excerpt).toContain("\\x1b");
+  });
+
+  test("the excerpt is capped, so a child past its own bound cannot grow the response", () => {
+    const diagnosis = parseProbeDiagnosis(
+      JSON.stringify({
+        diagnosis: "non_ssh",
+        shape: "unrecognized",
+        excerpt: "A".repeat(4000),
+      }),
+    );
+    const excerpt =
+      diagnosis?.kind === "nonSsh" ? diagnosis.excerpt : undefined;
+    // The escape's own truncation marker rides on top of the cap it applies to
+    // the escaped text, so the bound is the pair -- and either way the excerpt
+    // is a fixed length rather than whatever the child sent.
+    expect(excerpt?.length).toBeLessThanOrEqual(
+      PROBE_EXCERPT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
+    );
+    expect(excerpt?.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(true);
+  });
+
+  test("a shape outside the closed vocabulary is dropped, not carried", () => {
+    expect(
+      parseProbeDiagnosis(
+        JSON.stringify({
+          diagnosis: "non_ssh",
+          shape: "gopher",
+          excerpt: "x",
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  test("an unknown discriminant, a non-string excerpt, and a non-JSON line all degrade to no diagnosis", () => {
+    expect(parseProbeDiagnosis('{"diagnosis":"whatever"}')).toBeUndefined();
+    expect(
+      parseProbeDiagnosis(
+        JSON.stringify({ diagnosis: "non_ssh", shape: "http", excerpt: 7 }),
+      ),
+    ).toBeUndefined();
+    expect(parseProbeDiagnosis("not json")).toBeUndefined();
+    expect(parseProbeDiagnosis("")).toBeUndefined();
+  });
+
+  test("a success line carries no diagnosis, so the two shapes cannot be read for one another", () => {
+    expect(parseProbeDiagnosis(okLine())).toBeUndefined();
+  });
+});
+
+describe("an unreachable probe carries the child's diagnosis when it emitted one", () => {
+  test("exit 69 with a diagnosis line attaches it to the unreachable result", () => {
+    expect(reconcileProbeExit(69, '{"diagnosis":"closed_unanswered"}')).toEqual(
+      {
+        kind: "unreachable",
+        diagnosis: { kind: "closedUnanswered" },
+      },
+    );
+  });
+
+  test("exit 69 with no diagnosis is the bare unreachable it has always been", () => {
+    expect(reconcileProbeExit(69, "")).toEqual({ kind: "unreachable" });
+    expect(reconcileProbeExit(69, undefined)).toEqual({ kind: "unreachable" });
+  });
+
+  test("the driven child's diagnosis line reaches the caller", async () => {
+    const result = await probeSftpHostKey({
+      host: "sftp.example.org",
+      binaryPath: STUB_CLI_PATH,
+      childEnv: {
+        STUB_EXIT_CODE: "69",
+        STUB_PROBE_STDOUT:
+          JSON.stringify({
+            diagnosis: "non_ssh",
+            shape: "tls-alert",
+            excerpt: "\u0015\u0003\u0003",
+          }) + "\n",
+      },
+    });
+    expect(result).toEqual({
+      kind: "unreachable",
+      diagnosis: {
+        kind: "nonSsh",
+        shape: "tls-alert",
+        excerpt: "\\x15\\x03\\x03",
+      },
+    });
+  });
+});
+
+describe("the diagnosis fits inside the probe's own watchdog", () => {
+  // The child spends its connect budget and then, on a dial that died before the
+  // peer identified itself, a bounded read of the peer's first bytes. Both run
+  // under this server's watchdog, and crossing it would flip the typed result
+  // from `unreachable` to `timeout` -- losing the diagnosis entirely. The
+  // headroom is arithmetic here rather than a claim in a comment.
+  test("the connect budget plus the peer read leaves headroom before the SIGTERM", () => {
+    expect(PROBE_CONNECT_TIMEOUT_MS + PROBE_PEER_READ_BUDGET_MS).toBeLessThan(
+      PROBE_SIGTERM_MS,
+    );
   });
 });

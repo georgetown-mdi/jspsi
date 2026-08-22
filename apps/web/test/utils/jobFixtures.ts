@@ -5,7 +5,7 @@ import path from "node:path";
 import { getDefaultLinkageTerms } from "@psilink/core";
 import { parse as parseYaml } from "yaml";
 
-import { spawnZeroSetupJob } from "@jobs/cliDriver";
+import { spawnExchangeJob, spawnZeroSetupJob } from "@jobs/cliDriver";
 
 import type { CliRunControls, JobTerminalState } from "@jobs/cliDriver";
 import type {
@@ -210,6 +210,48 @@ export async function awaitJobTerminalState(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   return terminalRef.current;
+}
+
+/**
+ * The {@link captureZeroSetupArgv} counterpart for the exchange invocation: spawn
+ * the stub CLI through {@link spawnExchangeJob} and return the exact argv the
+ * driver invoked it with.
+ */
+export async function captureExchangeArgv(args: {
+  workdir: string;
+  eventStream: boolean;
+  runControls?: CliRunControls;
+  timeoutMs?: number;
+}): Promise<Array<string>> {
+  const { workdir } = args;
+  const argvFile = path.join(workdir, "argv.json");
+  await awaitJobTerminalState(
+    (onTerminal) =>
+      spawnExchangeJob({
+        binaryPath: STUB_CLI_PATH,
+        configPath: path.join(workdir, "psilink.yaml"),
+        keyPath: path.join(workdir, ".psilink.key"),
+        inputPath: path.join(workdir, "input.csv"),
+        outputPath: path.join(workdir, "output.csv"),
+        recordPath: path.join(workdir, "record.json"),
+        workdir,
+        eventStream: args.eventStream,
+        runControls: args.runControls ?? {
+          sweepExchangeFiles: false,
+          logFilePath: undefined,
+        },
+        extraEnv: { STUB_ARGV_FILE: argvFile, STUB_EXIT_CODE: "0" },
+        handlers: {
+          onEvent: () => undefined,
+          onDegraded: () => undefined,
+          onTerminal,
+        },
+      }),
+    args.timeoutMs,
+  );
+  return (JSON.parse(fs.readFileSync(argvFile, "utf8")) as Array<string>).slice(
+    2,
+  );
 }
 
 /**

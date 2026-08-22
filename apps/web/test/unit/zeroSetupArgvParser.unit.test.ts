@@ -260,6 +260,41 @@ describe(
       expect(parsed.stderr).toContain("input.csv does not exist");
     });
 
+    test("the diagnostic-run and sweep tokens survive a real parse", async () => {
+      // The per-run controls reach the child as CLI flags and nothing else, so
+      // whether `--log-level=debug --verbose --log-file=<path>` and
+      // `--sweep-exchange-files` are tokens this command accepts is the tool's
+      // answer to give. The log file is written where a real diagnostic run
+      // writes it: inside the job's own workdir, which this scratch dir stands
+      // for.
+      const dir = scratchDir("zs-diag");
+      const logFilePath = path.join(dir, "run.log");
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs: [RENDEZVOUS_URL],
+        eventStream: true,
+        runControls: { sweepExchangeFiles: true, logFilePath },
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+      expect(argv).toContain("--sweep-exchange-files");
+      expect(argv).toContain("--log-level=debug");
+      expect(argv).toContain("--verbose");
+      expect(argv).toContain(`--log-file=${logFilePath}`);
+      // Never the escalation past the retain guard: the console has no control
+      // that can produce it, so no argv it builds can carry it.
+      expect(argv).not.toContain("--force-retain-sweep");
+
+      const parsed = parseWithRealCli(argv, dir);
+      expect(parsed.stderr).not.toContain("Unknown argument");
+      expect(parsed.status).not.toBe(EXIT_USAGE);
+      // The run reached the input file, so every token parsed -- and the CLI
+      // opened the log file it was pointed at rather than refusing the path.
+      expect(fs.existsSync(logFilePath)).toBe(true);
+      expect(fs.readFileSync(logFilePath, "utf8")).toContain(
+        "input.csv does not exist",
+      );
+    });
+
     test("every emitted connection-tuning token survives a real parse", async () => {
       // The console composes durations in the units its own controls offer; the
       // CLI's duration flags have two different grammars (only the poll interval

@@ -5,6 +5,7 @@ import type { PresentedHostKey, SFTPConnectionConfig } from "@psilink/core";
 
 import {
   buildProbeConfig,
+  probeDiagnosisJsonLine,
   probeHostKeyLines,
   type ProbeHostKeyDeps,
 } from "../../src/commands/probeHostKey";
@@ -259,6 +260,57 @@ describe("probeHostKeyLines formats and validates the presented key", () => {
         makeDeps({ fingerprint: FP, keyType: "ssh-ed25519" }),
       ),
     ).rejects.toBeInstanceOf(UsageError);
+  });
+
+  // The exit-69 path's machine form. A caller that discards this command's stderr
+  // -- the console's probe driver does, since stderr can carry server-controlled
+  // bytes -- would otherwise see an unreachable host where the dial in fact
+  // reached a peer that answered wrongly.
+  test("the diagnosis line names a non-SSH answer, its shape, and the peer's own bytes", () => {
+    expect(
+      JSON.parse(
+        probeDiagnosisJsonLine({
+          kind: "non-ssh",
+          shape: "tls-alert",
+          excerpt: "\u0015\u0003\u0003",
+        }),
+      ),
+    ).toEqual({
+      diagnosis: "non_ssh",
+      shape: "tls-alert",
+      excerpt: "\u0015\u0003\u0003",
+    });
+  });
+
+  test("the diagnosis line is one line: the peer's control bytes are JSON-escaped", () => {
+    const line = probeDiagnosisJsonLine({
+      kind: "non-ssh",
+      shape: "http",
+      excerpt: "HTTP/1.1 403\r\nX: y\n",
+    });
+    expect(line.includes("\n")).toBe(false);
+    expect(line.includes("\r")).toBe(false);
+  });
+
+  test("a peer that closed having sent nothing carries no excerpt to carry", () => {
+    expect(
+      JSON.parse(probeDiagnosisJsonLine({ kind: "closed-unanswered" })),
+    ).toEqual({ diagnosis: "closed_unanswered" });
+  });
+
+  test("the success line carries no diagnosis key, so the two shapes cannot collide", async () => {
+    const result = await probeHostKeyLines(
+      {
+        sftpUrl: "sftp://sftp.example.org",
+        connectTimeoutSeconds: 10,
+        json: true,
+        verbosity: 0,
+      },
+      makeDeps({ fingerprint: FP, keyType: "ssh-ed25519" }),
+    );
+    expect(
+      Object.keys(JSON.parse(result.stdout!) as Record<string, unknown>),
+    ).toEqual(["fingerprint", "key_type"]);
   });
 
   test("exit mapping: a transport failure rejects a plain Error (69)", async () => {
