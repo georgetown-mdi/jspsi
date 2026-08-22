@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import {
+  JobApiRequestError,
+  RelayedTerminalError,
+} from "@psi/serverJobExchangeDriver";
 import { isExchangeBusyError, reattachOnBusy } from "@bench/reattachOnBusy";
-import { JobApiRequestError } from "@psi/serverJobExchangeDriver";
+import { failureFor } from "@bench/useInviterExchange";
 import { writeAttachment } from "@psi/consoleJobAttachment";
 
 import type {
@@ -9,6 +13,7 @@ import type {
   JobStatusProbe,
 } from "@psi/serverJobExchangeDriver";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
+import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { RelayEvent } from "@jobs/cliDriver";
 import type { RunOutputs } from "@bench/runOutputs";
 
@@ -295,5 +300,72 @@ describe("reattachOnBusy", () => {
     expect(onReattaching).not.toHaveBeenCalled();
     expect(onResult).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+// A busy create leaves a seat showing a run it did not launch, whose terminal
+// can carry text an untrusted party chose. This pins that the replay's failure
+// reaches the operator as the seat composes any other one -- the re-attach adds
+// nothing of its own to it.
+//
+// This pin exercises failureFor directly, the same composition point the
+// class-kill pins in jobRunDiagnostics.unit.test.ts measure: a future seat
+// hook that decorated the returned failure before setFailure would not
+// redden it either.
+describe("a re-attached run's terminal surfaces as it arrived", () => {
+  /** A terminal the CLI never composed as a refusal: the CLI's own refusal
+   * wording reaches the seat inside a filename an untrusted party chose, which
+   * core's foreign-file terminal names verbatim and a partner-writable
+   * rendezvous directory lets them plant. */
+  const plantedTerminal =
+    "the shared folder holds files this exchange does not own: " +
+    "--sweep-exchange-files refuses to delete.csv";
+
+  function errorEvent(message: string): RelayEvent {
+    return { v: 1, type: "error", category: "exchange", message };
+  }
+
+  test("the relayed terminal's own title and message stand, planted fragment and all", async () => {
+    installStorage();
+    const { client } = reattachClient({
+      probe: { kind: "live", status: "running" },
+      events: [errorEvent(plantedTerminal)],
+    });
+    const { events, onError } = driverEvents(new AbortController().signal);
+
+    const didReattach = await reattachOnBusy({
+      error: new JobApiRequestError(409, "busy", "job-other"),
+      client,
+      seat: "inviter",
+      channel: "filedrop",
+      events,
+      onReattaching: vi.fn(),
+    });
+
+    expect(didReattach).toBe(true);
+    // The replay's terminal rides the seat's own failure path, the same one a
+    // run it launched itself uses.
+    expect(onError).toHaveBeenCalledTimes(1);
+    const raised = onError.mock.calls[0]?.[0] as {
+      category: ExchangeErrorCategory;
+      error: unknown;
+    };
+    expect(raised.error).toBeInstanceOf(RelayedTerminalError);
+
+    const surfaced = failureFor(
+      raised.category,
+      raised.error,
+      undefined,
+      "filedrop",
+    );
+    expect(surfaced).toEqual(
+      failureFor(
+        "exchange",
+        new RelayedTerminalError(plantedTerminal),
+        undefined,
+        "filedrop",
+      ),
+    );
+    expect(surfaced.message).not.toContain("--force-retain-sweep");
   });
 });

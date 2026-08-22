@@ -5,8 +5,9 @@ import path from "node:path";
 import { getDefaultLinkageTerms } from "@psilink/core";
 import { parse as parseYaml } from "yaml";
 
-import { spawnZeroSetupJob } from "@jobs/cliDriver";
+import { spawnExchangeJob, spawnZeroSetupJob } from "@jobs/cliDriver";
 
+import type { CliRunControls, JobTerminalState } from "@jobs/cliDriver";
 import type {
   JobFiledropExchangeIntent,
   JobInputFileReference,
@@ -15,7 +16,6 @@ import type {
   JobZeroSetupSftpIntent,
 } from "@jobs/intent";
 import type { JobSftpServerEntry } from "@jobs/sftpServer";
-import type { JobTerminalState } from "@jobs/cliDriver";
 import type { LinkageTerms } from "@psilink/core";
 
 /** The stub CLI the driver tests point JOB_CLI_BINARY at. */
@@ -213,6 +213,48 @@ export async function awaitJobTerminalState(
 }
 
 /**
+ * The {@link captureZeroSetupArgv} counterpart for the exchange invocation: spawn
+ * the stub CLI through {@link spawnExchangeJob} and return the exact argv the
+ * driver invoked it with.
+ */
+export async function captureExchangeArgv(args: {
+  workdir: string;
+  eventStream: boolean;
+  runControls?: CliRunControls;
+  timeoutMs?: number;
+}): Promise<Array<string>> {
+  const { workdir } = args;
+  const argvFile = path.join(workdir, "argv.json");
+  await awaitJobTerminalState(
+    (onTerminal) =>
+      spawnExchangeJob({
+        binaryPath: STUB_CLI_PATH,
+        configPath: path.join(workdir, "psilink.yaml"),
+        keyPath: path.join(workdir, ".psilink.key"),
+        inputPath: path.join(workdir, "input.csv"),
+        outputPath: path.join(workdir, "output.csv"),
+        recordPath: path.join(workdir, "record.json"),
+        workdir,
+        eventStream: args.eventStream,
+        runControls: args.runControls ?? {
+          sweepExchangeFiles: false,
+          logFilePath: undefined,
+        },
+        extraEnv: { STUB_ARGV_FILE: argvFile, STUB_EXIT_CODE: "0" },
+        handlers: {
+          onEvent: () => undefined,
+          onDegraded: () => undefined,
+          onTerminal,
+        },
+      }),
+    args.timeoutMs,
+  );
+  return (JSON.parse(fs.readFileSync(argvFile, "utf8")) as Array<string>).slice(
+    2,
+  );
+}
+
+/**
  * Spawn the stub CLI through {@link spawnZeroSetupJob} and return the exact argv
  * the driver invoked it with, read back from the stub's `STUB_ARGV_FILE` once the
  * child has exited -- so a test asserts the driven argv rather than a
@@ -228,6 +270,9 @@ export async function captureZeroSetupArgv(args: {
   eventStream: boolean;
   identity?: string;
   linkageStrategy?: "cascade" | "single-pass";
+  /** The run's diagnostic/recovery controls; defaults to neither, the shape
+   * every caller predating them drives. */
+  runControls?: CliRunControls;
   timeoutMs?: number;
 }): Promise<Array<string>> {
   const { workdir } = args;
@@ -243,6 +288,10 @@ export async function captureZeroSetupArgv(args: {
         recordPath: path.join(workdir, "record.json"),
         workdir,
         eventStream: args.eventStream,
+        runControls: args.runControls ?? {
+          sweepExchangeFiles: false,
+          logFilePath: undefined,
+        },
         ...(args.identity !== undefined ? { identity: args.identity } : {}),
         ...(args.linkageStrategy !== undefined
           ? { linkageStrategy: args.linkageStrategy }

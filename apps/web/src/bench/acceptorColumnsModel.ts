@@ -286,6 +286,9 @@ export interface AcceptorLaunchStepBlocks {
    * {@link exchangeFilesBlocked} because the two are separate cards: folding them
    * together would send the operator to the wrong one. */
   connectionTuningBlocked: boolean;
+  /** An unconfirmed recovery sweep on the diagnostics-and-recovery card. A third
+   * separate card, gated separately for the same reason. */
+  runDiagnosticsBlocked: boolean;
   /** The requirement a split rendezvous makes of the file-handling choices, in the
    * console's own words, or undefined when it is met. Carried as its own SENTENCE
    * rather than a flag, because the remedy is the one control to turn on and the
@@ -297,6 +300,7 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
   connectionBlocked: false,
   exchangeFilesBlocked: false,
   connectionTuningBlocked: false,
+  runDiagnosticsBlocked: false,
 };
 
 /**
@@ -376,6 +380,8 @@ export function acceptorLaunchBlockedReason(
     return "Resolve the file-handling settings above before you can start.";
   if (stepBlocks.connectionTuningBlocked)
     return "Resolve the connection-tuning settings above before you can start.";
+  if (stepBlocks.runDiagnosticsBlocked)
+    return "Resolve the diagnostics-and-recovery settings above before you can start.";
   return undefined;
 }
 

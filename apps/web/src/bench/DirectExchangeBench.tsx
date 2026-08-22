@@ -23,6 +23,11 @@ import {
   ZERO_SETUP_EXCHANGE_FILES,
   exchangeFilesOptions,
 } from "./exchangeFilesModel";
+import {
+  RUN_DIAGNOSTICS_DEFAULT,
+  runDiagnosticsAfterRetarget,
+  runDiagnosticsIntentFields,
+} from "./runDiagnosticsModel";
 import { BenchPage } from "./BenchPage";
 import { BenchShell } from "./BenchShell";
 import { DirectConfirmSection } from "./DirectConfirmSection";
@@ -47,6 +52,7 @@ import type { AlertContent } from "@components/csvIntake";
 import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { RailStep } from "./inviterModel";
+import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 const TRANSPORT_NOTES: Record<DirectTransport, string> = {
@@ -89,6 +95,12 @@ export function DirectExchangeBench() {
   const [connectionTuning, setConnectionTuning] =
     useState<ConnectionTuningDraft>(CONNECTION_TUNING_DEFAULT);
   const [connectionTuningOpen, setConnectionTuningOpen] = useState(false);
+  // The operator's per-run diagnostic and recovery choices, authored on the same
+  // step: the sweep acts on the very directory settled there.
+  const [runDiagnostics, setRunDiagnostics] = useState<RunDiagnosticsDraft>(
+    RUN_DIAGNOSTICS_DEFAULT,
+  );
+  const [runDiagnosticsOpen, setRunDiagnosticsOpen] = useState(false);
 
   // Fetch the appliance's authored SFTP connection once on a console build; one
   // fetch per bench serves the session. The helper resolves to a null connection on
@@ -153,6 +165,7 @@ export function DirectExchangeBench() {
         ? SFTP_CONNECTION_TUNING
         : FILEDROP_CONNECTION_TUNING,
     ),
+    runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
   });
 
   // Move focus to the incoming section's h1 on a step change (skip mount), so a
@@ -189,6 +202,9 @@ export function DirectExchangeBench() {
     setSftpInfo({ connection });
     // Re-authoring the server changes the trust context, so re-affirm.
     setAffirmed(false);
+    // It is also a different rendezvous directory, so any sweep confirmation is
+    // re-asked.
+    setRunDiagnostics(runDiagnosticsAfterRetarget);
   }
 
   function clearSftpConnection() {
@@ -201,6 +217,9 @@ export function DirectExchangeBench() {
     setTransport(next);
     // A different agreed server is a different trust context.
     setAffirmed(false);
+    // And a different rendezvous directory, so any sweep confirmation is
+    // re-asked.
+    setRunDiagnostics(runDiagnosticsAfterRetarget);
   }
 
   function runExchange() {
@@ -302,6 +321,10 @@ export function DirectExchangeBench() {
             connectionTuningOpen={connectionTuningOpen}
             onConnectionTuning={setConnectionTuning}
             onConnectionTuningOpen={setConnectionTuningOpen}
+            runDiagnostics={runDiagnostics}
+            runDiagnosticsOpen={runDiagnosticsOpen}
+            onRunDiagnostics={setRunDiagnostics}
+            onRunDiagnosticsOpen={setRunDiagnosticsOpen}
             onAuthorConnection={authorSftpConnection}
             onClearConnection={clearSftpConnection}
             onContinue={() => goTo("confirm")}

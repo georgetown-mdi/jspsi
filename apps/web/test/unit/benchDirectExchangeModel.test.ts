@@ -114,6 +114,7 @@ describe("the agreed-server step's continue gate", () => {
     transportReady: true,
     exchangeFilesBlocked: false,
     connectionTuningBlocked: false,
+    runDiagnosticsBlocked: false,
     splitDirectoryBlocked: false,
     ...overrides,
   });

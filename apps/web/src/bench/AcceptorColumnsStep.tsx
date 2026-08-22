@@ -90,6 +90,7 @@ export function AcceptorColumnsStep({
   exchangeFilesSection,
   exchangeFilesBlocked = false,
   connectionTuningBlocked = false,
+  runDiagnosticsBlocked = false,
   splitDirectoryProblem,
   onMetadataChange,
   onRemap,
@@ -130,6 +131,10 @@ export function AcceptorColumnsStep({
    * are separate cards in {@link exchangeFilesSection}, and the blocked reason
    * names the one to open. */
   connectionTuningBlocked?: boolean;
+  /** Whether the diagnostics-and-recovery card holds an unconfirmed sweep. A
+   * third card in {@link exchangeFilesSection}, gated separately for the same
+   * reason. */
+  runDiagnosticsBlocked?: boolean;
   /** The requirement a split rendezvous makes of the file-handling choices, in the
    * console's own words, or undefined when it is met. Gates launch and IS the
    * blocked reason, so the operator meets the control to turn on rather than a
@@ -218,6 +223,7 @@ export function AcceptorColumnsStep({
       connectionBlocked,
       exchangeFilesBlocked,
       connectionTuningBlocked,
+      runDiagnosticsBlocked,
       ...(splitDirectoryProblem !== undefined ? { splitDirectoryProblem } : {}),
     },
   );

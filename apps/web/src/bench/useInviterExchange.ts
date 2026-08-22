@@ -62,6 +62,7 @@ import type {
 } from "@psi/serverJobExchangeDriver";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { JobExchangeOptions } from "@jobs/intent";
+import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
 import type { RunOutputs } from "./runOutputs";
 import type { Transport } from "./inviterModel";
 
@@ -282,6 +283,7 @@ export function inviterServerJobConfig({
   inputSource,
   transport,
   options,
+  runDiagnostics,
 }: {
   minted: Pick<
     GeneratedInvitation,
@@ -293,6 +295,9 @@ export function inviterServerJobConfig({
    * retain-mode implication. Absent when the operator changed nothing, so the
    * composed config carries no `options` block at all. */
   options?: JobExchangeOptions;
+  /** The review step's per-run diagnostic and recovery choices, forwarded to the
+   * intent unchanged. */
+  runDiagnostics?: RunDiagnosticsIntentFields;
 }): ServerJobExchangeDriverConfig {
   return {
     transport,
@@ -305,6 +310,7 @@ export function inviterServerJobConfig({
       ? { standardization: minted.standardization }
       : {}),
     ...(options !== undefined ? { options } : {}),
+    ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
   };
 }
 
@@ -329,6 +335,7 @@ export function useInviterExchange({
   inputSource,
   sftpConfigured,
   options,
+  runDiagnostics,
 }: {
   invitation: GeneratedInvitation | undefined;
   inviterName: string;
@@ -349,6 +356,9 @@ export function useInviterExchange({
    * the operator changed nothing; unused on the browser path, which conducts the
    * exchange over WebRTC and has no shared directory to tune. */
   options?: JobExchangeOptions;
+  /** The review step's per-run diagnostic and recovery choices, forwarded to the
+   * intent unchanged; unused on the browser path for the same reason. */
+  runDiagnostics?: RunDiagnosticsIntentFields;
 }): {
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
@@ -533,6 +543,7 @@ export function useInviterExchange({
           inputSource,
           transport,
           ...(options !== undefined ? { options } : {}),
+          ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
         }),
         // Persist the created job's id so a reload or hard tab close can re-attach
         // to the appliance's run, and track it for the deliberate-discard paths.

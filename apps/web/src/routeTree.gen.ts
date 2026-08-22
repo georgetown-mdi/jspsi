@@ -32,6 +32,7 @@ import { Route as ApiJobsJobIdCancelRouteImport } from './routes/api/jobs/$jobId
 import { Route as ApiJobsJobIdEventsRouteImport } from './routes/api/jobs/$jobId/events'
 import { Route as ApiJobsJobIdHandoffRouteImport } from './routes/api/jobs/$jobId/handoff'
 import { Route as ApiJobsJobIdKeysRouteImport } from './routes/api/jobs/$jobId/keys'
+import { Route as ApiJobsJobIdLogRouteImport } from './routes/api/jobs/$jobId/log'
 import { Route as ApiJobsJobIdRecordRouteImport } from './routes/api/jobs/$jobId/record'
 import { Route as ApiJobsJobIdResultRouteImport } from './routes/api/jobs/$jobId/result'
 import { Route as ApiJobsInputsIndexRouteImport } from './routes/api/jobs/inputs/index'
@@ -157,6 +158,11 @@ const ApiJobsJobIdKeysRoute = ApiJobsJobIdKeysRouteImport.update({
   path: '/api/jobs/$jobId/keys',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiJobsJobIdLogRoute = ApiJobsJobIdLogRouteImport.update({
+  id: '/api/jobs/$jobId/log',
+  path: '/api/jobs/$jobId/log',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiJobsJobIdRecordRoute = ApiJobsJobIdRecordRouteImport.update({
   id: '/api/jobs/$jobId/record',
   path: '/api/jobs/$jobId/record',
@@ -227,6 +233,7 @@ export interface FileRoutesByFullPath {
   '/api/jobs/$jobId/events': typeof ApiJobsJobIdEventsRoute
   '/api/jobs/$jobId/handoff': typeof ApiJobsJobIdHandoffRoute
   '/api/jobs/$jobId/keys': typeof ApiJobsJobIdKeysRoute
+  '/api/jobs/$jobId/log': typeof ApiJobsJobIdLogRoute
   '/api/jobs/$jobId/record': typeof ApiJobsJobIdRecordRoute
   '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
   '/api/jobs/inputs/coverage': typeof ApiJobsInputsCoverageRoute
@@ -260,6 +267,7 @@ export interface FileRoutesByTo {
   '/api/jobs/$jobId/events': typeof ApiJobsJobIdEventsRoute
   '/api/jobs/$jobId/handoff': typeof ApiJobsJobIdHandoffRoute
   '/api/jobs/$jobId/keys': typeof ApiJobsJobIdKeysRoute
+  '/api/jobs/$jobId/log': typeof ApiJobsJobIdLogRoute
   '/api/jobs/$jobId/record': typeof ApiJobsJobIdRecordRoute
   '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
   '/api/jobs/inputs/coverage': typeof ApiJobsInputsCoverageRoute
@@ -295,6 +303,7 @@ export interface FileRoutesById {
   '/api/jobs/$jobId/events': typeof ApiJobsJobIdEventsRoute
   '/api/jobs/$jobId/handoff': typeof ApiJobsJobIdHandoffRoute
   '/api/jobs/$jobId/keys': typeof ApiJobsJobIdKeysRoute
+  '/api/jobs/$jobId/log': typeof ApiJobsJobIdLogRoute
   '/api/jobs/$jobId/record': typeof ApiJobsJobIdRecordRoute
   '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
   '/api/jobs/inputs/coverage': typeof ApiJobsInputsCoverageRoute
@@ -331,6 +340,7 @@ export interface FileRouteTypes {
     | '/api/jobs/$jobId/events'
     | '/api/jobs/$jobId/handoff'
     | '/api/jobs/$jobId/keys'
+    | '/api/jobs/$jobId/log'
     | '/api/jobs/$jobId/record'
     | '/api/jobs/$jobId/result'
     | '/api/jobs/inputs/coverage'
@@ -364,6 +374,7 @@ export interface FileRouteTypes {
     | '/api/jobs/$jobId/events'
     | '/api/jobs/$jobId/handoff'
     | '/api/jobs/$jobId/keys'
+    | '/api/jobs/$jobId/log'
     | '/api/jobs/$jobId/record'
     | '/api/jobs/$jobId/result'
     | '/api/jobs/inputs/coverage'
@@ -398,6 +409,7 @@ export interface FileRouteTypes {
     | '/api/jobs/$jobId/events'
     | '/api/jobs/$jobId/handoff'
     | '/api/jobs/$jobId/keys'
+    | '/api/jobs/$jobId/log'
     | '/api/jobs/$jobId/record'
     | '/api/jobs/$jobId/result'
     | '/api/jobs/inputs/coverage'
@@ -429,6 +441,7 @@ export interface RootRouteChildren {
   ApiJobsJobIdEventsRoute: typeof ApiJobsJobIdEventsRoute
   ApiJobsJobIdHandoffRoute: typeof ApiJobsJobIdHandoffRoute
   ApiJobsJobIdKeysRoute: typeof ApiJobsJobIdKeysRoute
+  ApiJobsJobIdLogRoute: typeof ApiJobsJobIdLogRoute
   ApiJobsJobIdRecordRoute: typeof ApiJobsJobIdRecordRoute
   ApiJobsJobIdResultRoute: typeof ApiJobsJobIdResultRoute
   ApiJobsInputsCoverageRoute: typeof ApiJobsInputsCoverageRoute
@@ -604,6 +617,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiJobsJobIdKeysRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/jobs/$jobId/log': {
+      id: '/api/jobs/$jobId/log'
+      path: '/api/jobs/$jobId/log'
+      fullPath: '/api/jobs/$jobId/log'
+      preLoaderRoute: typeof ApiJobsJobIdLogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/jobs/$jobId/record': {
       id: '/api/jobs/$jobId/record'
       path: '/api/jobs/$jobId/record'
@@ -707,6 +727,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiJobsJobIdEventsRoute: ApiJobsJobIdEventsRoute,
   ApiJobsJobIdHandoffRoute: ApiJobsJobIdHandoffRoute,
   ApiJobsJobIdKeysRoute: ApiJobsJobIdKeysRoute,
+  ApiJobsJobIdLogRoute: ApiJobsJobIdLogRoute,
   ApiJobsJobIdRecordRoute: ApiJobsJobIdRecordRoute,
   ApiJobsJobIdResultRoute: ApiJobsJobIdResultRoute,
   ApiJobsInputsCoverageRoute: ApiJobsInputsCoverageRoute,

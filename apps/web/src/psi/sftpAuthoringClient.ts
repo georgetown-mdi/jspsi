@@ -1,4 +1,7 @@
-import { HOST_KEY_FINGERPRINT_REGEX } from "@psilink/core";
+import {
+  DISPLAY_TRUNCATION_MARKER,
+  HOST_KEY_FINGERPRINT_REGEX,
+} from "@psilink/core";
 
 import { isRecord, readJsonOrNull } from "./jobApiBody";
 import { sftpConnectionProjectionOf } from "./serverJobExchangeDriver";
@@ -188,7 +191,8 @@ export async function deleteSftpConnection(
  *   field-path-only reason, safe to surface.
  * - `busy`: a `409` -- a probe is already running; the operator can retry.
  * - `unreachable` / `timeout`: the probe ran but read no key (the server could not
- *   be reached, or the attempt exceeded the appliance's budget).
+ *   be reached, or the attempt exceeded the appliance's budget). An `unreachable`
+ *   may carry the appliance's {@link ProbePeerAnswer} of what answered the port.
  * - `disabled`: a `404` -- the job API is off (a hosted build).
  * - `error`: another non-2xx, a network fault, or a malformed/`error` body.
  */
@@ -196,10 +200,29 @@ export type ProbeSftpHostKeyResult =
   | { kind: "ok"; fingerprint: string; keyType: string }
   | { kind: "invalid"; message: string }
   | { kind: "busy" }
-  | { kind: "unreachable" }
+  | { kind: "unreachable"; peerAnswer?: ProbePeerAnswer }
   | { kind: "timeout" }
   | { kind: "disabled" }
   | { kind: "error" };
+
+/** The shapes the appliance reports a non-SSH answer as. */
+export type ProbePeerAnswerShape = "http" | "tls-alert" | "unrecognized";
+
+/**
+ * What answered the port on a probe that reached it and read no host key: the
+ * peer sent bytes that are not an SSH identification string (with the shape and
+ * an excerpt of what it sent), or it accepted the connection and closed it
+ * having sent nothing.
+ *
+ * `excerpt` is a fragment somebody else chose. It arrives already escaped by the
+ * appliance -- the display sink for those bytes is on the server side of this
+ * boundary -- so it renders as ordinary React text and is never escaped a second
+ * time. Its length is bounded again on the way in, like every other field this
+ * body carries.
+ */
+export type ProbePeerAnswer =
+  | { kind: "nonSsh"; shape: ProbePeerAnswerShape; excerpt: string }
+  | { kind: "closedUnanswered" };
 
 /** Read the probe-outcome body defensively: re-check the fingerprint against the
  * canonical regex client-side (the appliance is trusted, but a malformed body
@@ -208,7 +231,13 @@ export type ProbeSftpHostKeyResult =
 function probeOutcomeOf(body: unknown): ProbeSftpHostKeyResult {
   if (!isRecord(body)) return { kind: "error" };
   const status = body.status;
-  if (status === "unreachable" || status === "timeout") return { kind: status };
+  if (status === "unreachable") {
+    const peerAnswer = probePeerAnswerOf(body);
+    return peerAnswer === undefined
+      ? { kind: "unreachable" }
+      : { kind: "unreachable", peerAnswer };
+  }
+  if (status === "timeout") return { kind: "timeout" };
   if (status === "ok") {
     const { fingerprint, keyType } = body;
     if (
@@ -222,6 +251,74 @@ function probeOutcomeOf(body: unknown): ProbeSftpHostKeyResult {
   }
   // A `status: "error"` category, or anything unmodeled, is the error state.
   return { kind: "error" };
+}
+
+const PROBE_PEER_ANSWER_SHAPES: ReadonlySet<string> = new Set([
+  "http",
+  "tls-alert",
+  "unrecognized",
+]);
+
+/**
+ * The cap on the excerpt, in UTF-16 code units: the same bound the appliance
+ * applies when it escapes the peer's bytes (`PROBE_EXCERPT_MAX_DISPLAY_LENGTH`
+ * in jobs/sftpProbe.ts), re-applied here for the reason every other field on
+ * this body is re-checked -- a malformed body degrades to a bounded value rather
+ * than reaching the alert copy at whatever length it arrived with.
+ *
+ * Mirrored rather than imported: the server module it lives in is not client
+ * code, and re-validation at this boundary has to check what THIS side is
+ * willing to render, independent of the producer.
+ */
+const PROBE_EXCERPT_MAX_LENGTH = 512;
+
+/**
+ * Read the peer-answer diagnosis off an `unreachable` body, or undefined when it
+ * carries none or carries one outside the closed vocabulary. A body without one
+ * is the state every unreachable probe was in before the appliance grew the
+ * field, so an unrecognized value degrades to the bare category rather than to
+ * an error.
+ *
+ * The excerpt is bounded rather than dropped: it is a fragment somebody else
+ * chose, so an over-long one is the malformed-body case this module's other
+ * checks cover, not a reason to lose the diagnosis. The bound is applied the way
+ * the appliance applies its own -- the kept prefix plus the truncation marker --
+ * so an excerpt the appliance already truncated passes through unchanged.
+ */
+function probePeerAnswerOf(
+  body: Record<string, unknown>,
+): ProbePeerAnswer | undefined {
+  const peerAnswer = body.peerAnswer;
+  if (peerAnswer === "closedUnanswered") return { kind: "closedUnanswered" };
+  if (peerAnswer !== "nonSsh") return undefined;
+  const shape = body.peerAnswerShape;
+  const excerpt = body.peerAnswerExcerpt;
+  if (typeof shape !== "string" || !PROBE_PEER_ANSWER_SHAPES.has(shape))
+    return undefined;
+  if (typeof excerpt !== "string") return undefined;
+  return {
+    kind: "nonSsh",
+    shape: shape as ProbePeerAnswerShape,
+    excerpt: boundedExcerpt(excerpt),
+  };
+}
+
+/** The excerpt clipped to {@link PROBE_EXCERPT_MAX_LENGTH} characters, with
+ * {@link DISPLAY_TRUNCATION_MARKER} appended -- on top of the cap, as the
+ * appliance's own escape appends it -- when anything was dropped. Escaping is
+ * the appliance's, since doing it again here would double every backslash it
+ * wrote, so this only shortens.
+ *
+ * Measured limit: an appliance escape that stopped at an escape boundary BELOW
+ * the cap still arrives past it with the marker attached, and the clip then lands
+ * inside that marker and appends a second one, ending the excerpt
+ * `......[truncated]`. Cosmetic, and out of an honest CLI's reach, whose
+ * 128-byte excerpt escapes to at most the 512 characters the appliance caps at,
+ * so the appliance never truncates one. */
+function boundedExcerpt(excerpt: string): string {
+  return excerpt.length <= PROBE_EXCERPT_MAX_LENGTH
+    ? excerpt
+    : excerpt.slice(0, PROBE_EXCERPT_MAX_LENGTH) + DISPLAY_TRUNCATION_MARKER;
 }
 
 /** Read the field-path-only message off a probe `400` body, or a fixed fallback.

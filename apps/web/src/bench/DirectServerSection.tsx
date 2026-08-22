@@ -14,8 +14,10 @@ import {
 } from "./exchangeFilesModel";
 import { ConnectionTuningCard } from "./ConnectionTuningCard";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
+import { RunDiagnosticsCard } from "./RunDiagnosticsCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
 import { directServerBlockedReason } from "./directExchangeModel";
+import { runDiagnosticsProblems } from "./runDiagnosticsModel";
 import { splitDirectoryRetainProblem } from "./sftpConnectionChoice";
 import { splitRendezvousRetainProblem } from "./filedropRendezvousChoice";
 import styles from "./bench.module.css";
@@ -24,6 +26,7 @@ import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { DirectTransport } from "./directExchangeModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { JobRendezvousConfig } from "@psi/workInputClient";
+import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 /**
@@ -53,6 +56,10 @@ export function DirectServerSection({
   connectionTuningOpen,
   onConnectionTuning,
   onConnectionTuningOpen,
+  runDiagnostics,
+  runDiagnosticsOpen,
+  onRunDiagnostics,
+  onRunDiagnosticsOpen,
   onAuthorConnection,
   onClearConnection,
   onContinue,
@@ -76,6 +83,13 @@ export function DirectServerSection({
   connectionTuningOpen: boolean;
   onConnectionTuning: (draft: ConnectionTuningDraft) => void;
   onConnectionTuningOpen: (open: boolean) => void;
+  /** The operator's per-run diagnostic and recovery choices. Authored here, with
+   * the other pre-run cards, because the sweep is a decision about the very
+   * directory this step settles. */
+  runDiagnostics: RunDiagnosticsDraft;
+  runDiagnosticsOpen: boolean;
+  onRunDiagnostics: (draft: RunDiagnosticsDraft) => void;
+  onRunDiagnosticsOpen: (open: boolean) => void;
   onAuthorConnection: (connection: SftpConnectionProjection) => void;
   onClearConnection: () => void;
   onContinue: () => void;
@@ -110,6 +124,7 @@ export function DirectServerSection({
       0,
     connectionTuningBlocked:
       connectionTuningProblems(connectionTuning).length > 0,
+    runDiagnosticsBlocked: runDiagnosticsProblems(runDiagnostics).length > 0,
     splitDirectoryBlocked: splitDirectoryProblem !== undefined,
   });
   const canContinue = blockedReason === undefined;
@@ -226,6 +241,13 @@ export function DirectServerSection({
         open={connectionTuningOpen}
         onToggleOpen={onConnectionTuningOpen}
         onChange={onConnectionTuning}
+      />
+
+      <RunDiagnosticsCard
+        draft={runDiagnostics}
+        open={runDiagnosticsOpen}
+        onToggleOpen={onRunDiagnosticsOpen}
+        onChange={onRunDiagnostics}
       />
 
       {splitDirectoryProblem !== undefined && (

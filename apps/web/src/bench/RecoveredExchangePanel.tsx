@@ -31,6 +31,7 @@ import {
   RunWarningsAlert,
   recoveredExchangeHeading,
 } from "./BenchRunSurface";
+import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { appendSanitizedRunWarning } from "./runWarnings";
@@ -319,6 +320,7 @@ export function RecoveredExchangePanel() {
           throughout on this compact panel -- the run seats' rule, less the
           expanded completion render this panel has no room for. A stopped
           (failed or cancelled) run has nothing to graduate. */}
+      <DiagnosticLogPanel jobId={attachment.jobId} settled={!running} />
       {!stopped && <RecurringHandoff jobId={attachment.jobId} collapsible />}
       <Group mt="md">
         {running && (

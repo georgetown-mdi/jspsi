@@ -29,11 +29,15 @@ import { SecretsFilePicker } from "./SecretsFilePicker";
 import styles from "./bench.module.css";
 
 import type {
+  ProbePeerAnswer,
+  ProbePeerAnswerShape,
+  ProbeSftpHostKeyResult,
+} from "@psi/sftpAuthoringClient";
+import type {
   SftpConnectionFormValues,
   SftpEndpointLocator,
   SftpFormField,
 } from "./sftpConnectionForm";
-import type { ProbeSftpHostKeyResult } from "@psi/sftpAuthoringClient";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 /**
@@ -824,6 +828,56 @@ function HostKeyProbe({
   );
 }
 
+/** What the appliance says about a peer that answered the port with something
+ * other than an SSH identification string, one sentence per recognized shape.
+ * Worded as what the first bytes were rather than as a verdict on what the peer
+ * is: the read is bounded, and a real SSH server whose banner outruns that bound
+ * reads the same way (the caveat {@link probePeerAnswerMessage} appends). */
+const PROBE_PEER_ANSWER_SHAPE_COPY: Record<ProbePeerAnswerShape, string> = {
+  http:
+    "Something answered that port with an HTTP response rather than an SSH " +
+    "identification string -- most likely a web server, or a proxy or gateway " +
+    "intercepting the port.",
+  "tls-alert":
+    "Something answered that port with a TLS alert record rather than an SSH " +
+    "identification string -- most likely a service speaking TLS, or a " +
+    "TLS-terminating proxy.",
+  unrecognized:
+    "Something answered that port with bytes that are not an SSH " +
+    "identification string -- most likely something other than an SSH server.",
+};
+
+/**
+ * The operator-facing account of what answered the port, for an unreachable
+ * probe the appliance diagnosed. This is the console's half of the CLI's own
+ * diagnosis: the guided operator is the likeliest to sit behind an intercepting
+ * middlebox, and "unreachable" alone sends them to check an address that is
+ * right.
+ *
+ * `excerpt` is a fragment the peer chose. It arrives bounded and escaped from the
+ * appliance, so it is interpolated verbatim here and rendered as React text --
+ * escaping it again would double every backslash the appliance already wrote.
+ *
+ * @internal exported for the copy test
+ */
+export function probePeerAnswerMessage(answer: ProbePeerAnswer): string {
+  if (answer.kind === "closedUnanswered")
+    return (
+      "The server accepted the connection and then closed it without " +
+      "identifying itself. An SSH server sends its identification string " +
+      "first, so the connection was most likely stopped in front of the " +
+      "server -- a firewall or gateway that does not allow this machine's " +
+      "address is the usual cause. Ask whoever administers the server " +
+      "whether this machine may reach the SFTP port."
+    );
+  return (
+    `${PROBE_PEER_ANSWER_SHAPE_COPY[answer.shape]} Check that the address and ` +
+    "port name the SFTP service, and that no proxy stands in front of them. " +
+    "An SSH server with a long banner, or one that identifies itself late, " +
+    `reads this way too. The first bytes it sent were: ${answer.excerpt}`
+  );
+}
+
 /** The operator-facing message for a probe that did not yield a fingerprint. Each
  * kind names its own cause; paste stays available throughout (the caller appends
  * that reminder). */
@@ -834,10 +888,12 @@ function probeErrorMessage(result: ProbeSftpHostKeyResult): string {
     case "busy":
       return "Another read is already running; wait a moment and try again.";
     case "unreachable":
-      return (
-        "Could not reach the server to read its fingerprint. Check the " +
-        "address and that the server is reachable."
-      );
+      // A probe the appliance diagnosed says what answered instead; without one
+      // the address really is all there is to check.
+      return result.peerAnswer !== undefined
+        ? probePeerAnswerMessage(result.peerAnswer)
+        : "Could not reach the server to read its fingerprint. Check the " +
+            "address and that the server is reachable.";
     case "timeout":
       return "Reading the fingerprint took too long. Try again.";
     case "disabled":

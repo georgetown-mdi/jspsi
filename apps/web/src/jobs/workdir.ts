@@ -73,6 +73,29 @@ export async function createWorkdir(
 }
 
 /**
+ * Resolve a fixed-name file inside a job workdir and verify the resolved path
+ * stays strictly under the resolved workdir, returning null when it does not.
+ *
+ * The counterpart of {@link resolveWorkdir} one level down, for the artifacts a
+ * route serves out of a workdir rather than writes into it. Every such name is a
+ * server constant today ({@link JOB_FILE_NAMES}), so this can only fail on a
+ * caller bug -- which is exactly why it is a check rather than a comment saying
+ * so: a name that ever became client-derived, or a constant that grew a
+ * separator, is refused here instead of resolving somewhere else on disk. The
+ * path is not created, and nothing about the leaf is stat-ed.
+ */
+export function resolveWorkdirFile(
+  workdir: string,
+  name: string,
+): string | null {
+  const root = path.resolve(workdir);
+  const filePath = path.resolve(root, name);
+  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
+  if (!filePath.startsWith(rootWithSep)) return null;
+  return filePath;
+}
+
+/**
  * Write a file into a job workdir with owner-only permissions (0o600). The name
  * is a server constant (see JOB_FILE_NAMES) and is joined to the already-verified
  * workdir; content is the client-supplied bytes. Written mode is enforced with an

@@ -139,6 +139,53 @@ export const STDERR_TAIL_CAP = 8192;
  */
 const FD3_LINE_CAP = 1_048_576;
 
+/** The CLI log level a diagnostic run asks for. */
+const DIAGNOSTIC_LOG_LEVEL = "debug";
+
+/** The run controls both spawn helpers accept: the recovery sweep, and the log
+ * file a diagnostic run captures to. Both are server-decided -- the sweep from a
+ * validated boolean on the intent, the path from the job's own workdir. */
+export interface CliRunControls {
+  /** Pass `--sweep-exchange-files`, the CLI's own pre-rendezvous recovery of a
+   * directory a crashed prior run left protocol files in. */
+  sweepExchangeFiles: boolean;
+  /** The workdir-contained file the run's debug-level log is captured to, or
+   * undefined for a run at today's verbosity with no capture. */
+  logFilePath: string | undefined;
+}
+
+/**
+ * The extra argv a run's diagnostic and recovery choices contribute, shared by
+ * both invocation forms so the two cannot state them differently.
+ *
+ * A diagnostic run raises the CLI's own log level and turns on the sub-library
+ * verbosity that `-v` carries -- the console offers one control, not two -- and
+ * routes the whole lot to `--log-file` in the job's workdir. The file, rather
+ * than the child's stderr the driver already tails, is what the CLI's own append
+ * and owner-only-create semantics apply to, and it is a whole run's log rather
+ * than a rolling tail; the log path is composed server-side from the workdir and
+ * a fixed name, never from a request.
+ *
+ * `--sweep-exchange-files` is passed straight through to the CLI, which owns the
+ * protocol-file classification and the retain-mode guard entirely; the console
+ * reimplements neither and never offers `--force-retain-sweep`.
+ *
+ * Every value-bearing flag here uses the single `--flag=value` token form, so a
+ * value cannot be misparsed by yargs as its own flag.
+ */
+function runControlArgv(controls: CliRunControls): Array<string> {
+  return [
+    ...(controls.sweepExchangeFiles ? ["--sweep-exchange-files"] : []),
+    ...(controls.logFilePath !== undefined
+      ? [
+          `--log-level=${DIAGNOSTIC_LOG_LEVEL}`,
+          "--verbose",
+          `--log-file=${controls.logFilePath}`,
+        ]
+      : []),
+  ];
+}
+
 /**
  * Spawn the CLI to run an `exchange` (config-and-key driven), wiring fd 3 for the
  * event stream. argv is assembled from a fixed template plus server-generated
@@ -157,6 +204,8 @@ export function spawnExchangeJob(args: {
   recordPath: string;
   workdir: string;
   eventStream: boolean;
+  /** This run's diagnostic and recovery choices (see {@link CliRunControls}). */
+  runControls: CliRunControls;
   handlers: CliDriverHandlers;
   /**
    * Extra environment variables merged into the child's minimal environment.
@@ -181,6 +230,7 @@ export function spawnExchangeJob(args: {
     keyPath,
     "--record-file",
     recordPath,
+    ...runControlArgv(args.runControls),
     ...(eventStream ? ["--event-stream"] : []),
     inputPath,
     outputPath,
@@ -220,6 +270,8 @@ export function spawnZeroSetupJob(args: {
   recordPath: string;
   workdir: string;
   eventStream: boolean;
+  /** This run's diagnostic and recovery choices (see {@link CliRunControls}). */
+  runControls: CliRunControls;
   identity?: string;
   linkageStrategy?: "cascade" | "single-pass";
   /** See {@link spawnExchangeJob}'s `extraEnv`; identical server-only channel. */
@@ -246,6 +298,7 @@ export function spawnZeroSetupJob(args: {
       ? [`--linkage-strategy=${linkageStrategy}`]
       : []),
     `--record-file=${recordPath}`,
+    ...runControlArgv(args.runControls),
     ...(eventStream ? ["--event-stream"] : []),
     inputPath,
     outputPath,

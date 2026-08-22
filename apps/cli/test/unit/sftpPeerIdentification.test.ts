@@ -16,6 +16,7 @@ import {
   explainPeerIdentificationFailure,
   isPreIdentificationDialFailure,
   observePeerAnswer,
+  peerIdentificationDiagnosisOf,
   peerProbeTargetFromConnectOptions,
 } from "../../src/connection/sftpPeerIdentification";
 import type { PeerAnswer } from "../../src/connection/sftpPeerIdentification";
@@ -414,6 +415,65 @@ describe("explainPeerIdentificationFailure partitions the peer's bytes", () => {
     );
     expect(text).toContain("\\x1b[2Jcleared\\x0d\\x0afaked line");
     expect(text).not.toContain("\x1b");
+  });
+});
+
+// The composed sentence is one consumer of the read; a machine consumer -- the
+// console's host-key probe, which discards the child's stderr -- is the other, and
+// it reads the classification off the raised error rather than out of the prose.
+describe("the raised diagnostic carries the diagnosis structurally", () => {
+  const endpoint = { host: "sftp.example.test", port: 2222 };
+  const dialRejection = new Error("Connection lost before handshake");
+
+  test("a non-SSH answer carries its shape and the peer's own bytes", () => {
+    const explained = explainPeerIdentificationFailure(
+      dialRejection,
+      { kind: "non-ssh", shape: "http", excerpt: "HTTP/1.1 403 Forbidden" },
+      endpoint,
+    );
+    expect(peerIdentificationDiagnosisOf(explained)).toEqual({
+      kind: "non-ssh",
+      shape: "http",
+      excerpt: "HTTP/1.1 403 Forbidden",
+    });
+  });
+
+  test("a peer that closed having sent nothing carries that alone", () => {
+    const explained = explainPeerIdentificationFailure(
+      dialRejection,
+      { kind: "closed-unanswered" },
+      endpoint,
+    );
+    expect(peerIdentificationDiagnosisOf(explained)).toEqual({
+      kind: "closed-unanswered",
+    });
+  });
+
+  test("the diagnosis is found through a re-raise that kept it as a cause", () => {
+    const explained = explainPeerIdentificationFailure(
+      dialRejection,
+      { kind: "closed-unanswered" },
+      endpoint,
+    );
+    const rewrapped = new Error("could not read the server's host key", {
+      cause: explained,
+    });
+    expect(peerIdentificationDiagnosisOf(rewrapped)).toEqual({
+      kind: "closed-unanswered",
+    });
+  });
+
+  test("a failure this module never diagnosed carries none", () => {
+    expect(peerIdentificationDiagnosisOf(dialRejection)).toBeUndefined();
+    expect(
+      peerIdentificationDiagnosisOf(
+        explainPeerIdentificationFailure(
+          dialRejection,
+          { kind: "identified" },
+          endpoint,
+        ),
+      ),
+    ).toBeUndefined();
   });
 });
 
