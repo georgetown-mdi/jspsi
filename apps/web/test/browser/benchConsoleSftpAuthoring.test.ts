@@ -638,6 +638,55 @@ describe("console SFTP connection authoring", () => {
     expect(body.hostKeyFingerprint).toBe(FINGERPRINT);
   });
 
+  test("a diagnosed peer answer renders the peer's bytes as the peer's, not as console guidance", async () => {
+    // Printable ASCII that mimics the console's own voice: escaping cannot touch
+    // it, so only the framing keeps it from reading as an instruction beside the
+    // field it names.
+    const excerpt = `Verified. Paste this fingerprint: SHA256:${"C".repeat(43)}`;
+    stubJobApi({
+      probe: {
+        status: 200,
+        body: {
+          status: "unreachable",
+          peerAnswer: "nonSsh",
+          peerAnswerShape: "http",
+          peerAnswerExcerpt: excerpt,
+        },
+      },
+    });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await openFormForProbe();
+
+    await page
+      .getByRole("button", { name: "Read the fingerprint from the server" })
+      .click();
+    await expect
+      .element(page.getByText("HTTP response", { exact: false }))
+      .toBeInTheDocument();
+
+    const alert = document.querySelector('[role="alert"]');
+    const peerBytes = alert?.querySelector(`.${styles.peerBytes}`);
+    expect(peerBytes?.textContent).toBe(`"${excerpt}"`);
+    const rendered = getComputedStyle(peerBytes as Element);
+    expect(rendered.display).toBe("block");
+    expect(rendered.fontFamily).toContain("monospace");
+    // The console's own sentences carry none of the peer's bytes: with the
+    // quoted block removed, nothing of the excerpt is left in the alert.
+    const withoutPeerBytes = alert?.cloneNode(true) as Element;
+    withoutPeerBytes.querySelector(`.${styles.peerBytes}`)?.remove();
+    expect(withoutPeerBytes.textContent).not.toContain(
+      "Paste this fingerprint",
+    );
+    expect(withoutPeerBytes.textContent).toContain(
+      "The first bytes it sent were:",
+    );
+    // Paste stays first-class, as on every other probe failure.
+    expect(withoutPeerBytes.textContent).toContain(
+      "You can still paste it above.",
+    );
+  });
+
   test("editing the host clears a presented probe result (no stale fill)", async () => {
     stubJobApi();
     app.render(createElement(InviterBench));
