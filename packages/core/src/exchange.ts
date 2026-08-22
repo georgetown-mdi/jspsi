@@ -4,7 +4,10 @@ import {
   inferMetadata,
   isDisclosedToPartner,
 } from "./config/metadata.js";
-import { assertCountOnlyTermsShape } from "./config/linkageTerms.js";
+import {
+  assertCountOnlyTermsShape,
+  assertDeduplicateImplemented,
+} from "./config/linkageTerms.js";
 import { getDefaultLinkageTerms } from "./defaults/linkageTerms.js";
 import { getDefaultStandardization } from "./defaults/standardization.js";
 import {
@@ -81,6 +84,12 @@ import type { BuiltExchangeRecord } from "./exchangeRecord.js";
 import type { SigningIdentity } from "./signingIdentity.js";
 import type { SigningMode } from "./config/signing.js";
 import type { DualSignedRecord, ReceiptContent } from "./signedReceipt.js";
+
+// The deduplicating-strategy refusal is defined beside the accept path it also
+// guards (config/linkageTerms.ts) and re-exported here, where the run boundary
+// applies it, so the exchange-side callers and its exchange-side name are
+// unchanged by that placement.
+export { assertDeduplicateImplemented };
 
 /**
  * The subset of an exchange specification that governs data preparation.
@@ -269,51 +278,6 @@ export function resolveCountOnlyRun(
   assertCountOnlyTermsShape(localTerms);
   assertCountOnlyTermsShape(partnerTerms);
   return localTerms.algorithm === "psi-c";
-}
-
-/**
- * Refuse a linkage-terms `deduplicate: true` the run cannot honor, before any
- * matching begins: the term under a linkage strategy that does not match a
- * deduplicating cardinality.
- *
- * The cascade implements the deduplicating match (`linkViaPSI`), and the surfaces
- * downstream of the association table -- the payload frame, the output table, and
- * the exchange record with its re-supply path -- carry a table with several links
- * per record. `single-pass` implements neither deduplicating cardinality: its
- * accept-list admits `one-to-one` alone, so an exchange on that strategy would
- * abort mid-round against terms that asked for a group. Refusing the pair here
- * puts the answer where the operator is still configuring, and keeps the
- * strategy's own guard as the second, fail-closed half rather than the first.
- * Refused at prepare time in {@link prepareForExchange} for this party's own
- * terms, and for both parties' agreed terms by
- * {@link resolveLinkageCardinality} after the terms exchange, before the PSI
- * rounds begin.
- *
- * Reads the whole terms document rather than the two values, so a caller cannot
- * pass one party's `deduplicate` against the other's strategy. `linkageStrategy`
- * is a mandatory-consistency term, so the agreed pair carries one value and both
- * parties reach the same verdict from their own copy; the resolver asserts over
- * both documents regardless, which makes the refusal symmetric in the pair even
- * where the consistency check has not run.
- *
- * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
- * same reason as {@link assertAlgorithmImplemented}: the refusing party is not
- * necessarily the one whose value refuses, since {@link resolveLinkageCardinality}
- * asserts over the PARTNER's terms document as well as its own, so the fault is
- * not unconditionally this operator's own content. The message carries only fixed
- * literals.
- */
-export function assertDeduplicateImplemented(terms: LinkageTerms): void {
-  if (!terms.deduplicate) return;
-  if (terms.linkageStrategy !== "single-pass") return;
-  throw new UsageError(
-    "deduplicated matching is not yet implemented for the single-pass " +
-      'linkage strategy: single-pass matches strictly one-to-one, so a "' +
-      'deduplicate: true" term would be matched one-to-one rather than ' +
-      "honored. The exchange is refused before matching begins. Set " +
-      "linkage_strategy to cascade to run a deduplicating match, or set " +
-      "deduplicate to false.",
-  );
 }
 
 /**

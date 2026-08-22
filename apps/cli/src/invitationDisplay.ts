@@ -573,7 +573,12 @@ export function displayInvitation(params: {
   // the inviting party's own, since acceptance derives this party's side as false
   // (deriveAcceptedLinkageTerms) rather than adopting the invitation's, and the
   // note also carries what a deduplicating run still widens on this side.
-  if (summary.deduplicate) {
+  //
+  // Gated on the applied flag as well as the setting: an invitation whose
+  // strategy matches no deduplicating cardinality is refused at acceptance
+  // (assertDeduplicateImplemented), so stating what its grouping discloses would
+  // describe a run that does not happen.
+  if (summary.deduplicate && summary.deduplicateApplied) {
     emit(
       `    ${
         summary.inviterSharesResult

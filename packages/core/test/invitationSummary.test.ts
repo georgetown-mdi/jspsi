@@ -271,6 +271,19 @@ describe("the consent summary's fan-out register", () => {
     expect(summary.fansOut).toBe(false);
   });
 
+  test("the deduplicate register follows the same strategy split, the other way", () => {
+    // The cascade matches a deduplicating cardinality and single-pass matches
+    // none, so the applied flag is the strategy's verdict on the term -- the
+    // signal a surface reads to withhold what a deduplicating run discloses for
+    // an invitation acceptance refuses outright.
+    const applied = (linkageStrategy: "cascade" | "single-pass"): boolean =>
+      summarizeInvitation({
+        linkageTerms: { ...baseTerms, deduplicate: true, linkageStrategy },
+      }).deduplicateApplied;
+    expect(applied("cascade")).toBe(true);
+    expect(applied("single-pass")).toBe(false);
+  });
+
   test("the glossary line for the splitting step describes what it does to matching", () => {
     // The line an acceptor reads beside the step, which must state the widening
     // rather than a refusal that no longer covers every strategy.

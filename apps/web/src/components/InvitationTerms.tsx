@@ -1633,10 +1633,13 @@ export function InvitationTerms({
                 a reader who expands "Other details" to find that several of the
                 inviting party's records may match one of theirs meets what that
                 costs, and whose file pays it, in the same place. Rendered for
-                exactly a deduplicating invitation: a one-to-one exchange
-                discloses no grouping and groups neither party's records, so
-                either sentence would name something that does not happen. */}
-                {summary.deduplicate && (
+                exactly a deduplicating invitation the run applies: a one-to-one
+                exchange discloses no grouping and groups neither party's
+                records, and a deduplicating term under a strategy that matches
+                no deduplicating cardinality is refused at acceptance
+                (assertDeduplicateImplemented), so either sentence would name
+                something that does not happen. */}
+                {summary.deduplicate && summary.deduplicateApplied && (
                   <>
                     <Text size="xs" c="dimmed">
                       {summary.inviterSharesResult

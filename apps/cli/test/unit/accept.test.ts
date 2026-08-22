@@ -279,6 +279,29 @@ test("validateAccept: a deduplicating invitation leaves this party one-to-one", 
   expect(ready.token.linkageTerms.deduplicate).toBe(true);
 });
 
+test("validateAccept: a deduplicating single-pass invitation is refused before the prompt", async () => {
+  // The pair the exchange refuses, caught where the operator is still deciding:
+  // validateAccept derives the acceptor's terms ahead of the input, the
+  // connection, and the consent display, so an invitation the run cannot honor
+  // never reaches a screen that would state what its grouping discloses.
+  const base = sampleToken(new Date(Date.now() + 3_600_000).toISOString());
+  const encoded = await encodeInvitation({
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      deduplicate: true,
+      linkageStrategy: "single-pass",
+    },
+  });
+  await expect(
+    validateAccept({
+      resolved: { mode: "offline", invitation: encoded },
+      options: testOptions(),
+      log: silentLog,
+    }),
+  ).rejects.toThrow(/deduplicated matching is not yet implemented/);
+});
+
 test("validateAccept: online rejects a missing input file before the prompt, preserving its exit code", async () => {
   const encoded = await encodeInvitation(
     sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
@@ -2175,6 +2198,33 @@ test("displayInvitation: a sole-receiver deduplicating term states psilink prese
   expect(soleReceiver).not.toContain(
     DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   );
+});
+
+test("displayInvitation: a deduplicating term the run refuses states no disclosure at all", () => {
+  // single-pass matches no deduplicating cardinality, so acceptance refuses the
+  // pair before this surface is reached (assertDeduplicateImplemented). The
+  // renderer holds the same line from its own side: stating what the grouping
+  // discloses would describe a run that cannot happen. The headline still
+  // reports the term the invitation declares.
+  const log = getLogger("accept-display-deduplicate-refused-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  const refused = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      deduplicate: true,
+      linkageStrategy: "single-pass",
+    },
+  });
+
+  expect(refused).toContain(
+    "duplicate matches (enforced): more than one of the inviting party's " +
+      "records may match a single one of the accepting party's records",
+  );
+  expect(refused).not.toContain(DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT);
+  expect(refused).not.toContain(DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT);
+  expect(refused).not.toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
 });
 
 test("displayInvitation: the retain line is printed at both decision blocks, and only where retention is disclosed", () => {

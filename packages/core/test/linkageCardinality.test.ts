@@ -190,6 +190,47 @@ test("assertDeduplicateImplemented refuses only the strategy that cannot match",
   ).toThrow(UsageError);
 });
 
+test("acceptance refuses the pair the run refuses, with the run's own message", () => {
+  // The derived acceptor value is false whatever the invitation declares, so the
+  // pair the exchange boundary refuses is invisible in the DERIVED document: the
+  // accept path reads the inviter's terms to catch it. The strategy is a
+  // mandatory-consistency term, so the invitation's value is the agreed one and
+  // the verdict is readable from the invitation alone.
+  let thrown: unknown;
+  try {
+    deriveAcceptedLinkageTerms(
+      cardinalityTerms(true, "single-pass"),
+      "Acceptor",
+    );
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  // The same refusal the exchange-time path gives, not a second account of it.
+  let atExchange: unknown;
+  try {
+    assertDeduplicateImplemented(cardinalityTerms(true, "single-pass"));
+  } catch (err) {
+    atExchange = err;
+  }
+  expect((thrown as Error).message).toBe((atExchange as Error).message);
+
+  // The other three combinations still derive: a cascade invitation either way,
+  // and a single-pass invitation that declares no deduplication.
+  for (const [deduplicate, strategy] of [
+    [false, "cascade"],
+    [true, "cascade"],
+    [false, "single-pass"],
+  ] as Array<[boolean, LinkageStrategy]>) {
+    expect(
+      deriveAcceptedLinkageTerms(
+        cardinalityTerms(deduplicate, strategy),
+        "Acceptor",
+      ).deduplicate,
+    ).toBe(false);
+  }
+});
+
 // --- the table shapes the consuming seam admits and refuses -------------------
 // Everything downstream of the table reads it as matched PAIRS: one payload row
 // per distinct matched record, one result row per pair, and the attested result
