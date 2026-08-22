@@ -18,7 +18,8 @@ import {
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
-  DEDUPLICATE_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
   UNRECOGNIZED_TRANSFORM_NOTE,
@@ -426,11 +427,13 @@ function CondensableDetails({
  * their qualifying sentences sit with them, co-hidden. A HEADLINE stating what is
  * disclosed would have to sit always-visible in the core instead, which is where
  * the count-only tier below sits. What each sentence SAYS is fixed copy read from
- * `PROPOSED_NOT_APPLIED_NOTES`, `DEDUPLICATE_DISCLOSURE_STATEMENT`, and
+ * `PROPOSED_NOT_APPLIED_NOTES`, the two deduplicate disclosure statements, and
  * `DEDUPLICATE_ACCEPTOR_SIDE_NOTE` in `@psilink/core`, which the CLI accept
  * prompt renders too, so no partner text enters one and neither surface can
- * restate it. Deduplicate takes two of them: what the setting discloses, and
- * whose records are grouped to disclose it -- the inviting party's alone, since
+ * restate it. Deduplicate takes two of them: what the setting discloses -- in the
+ * shared-result wording where the invitation shares the result, and the
+ * sole-receiver wording where the inviting party alone receives it -- and whose
+ * records are grouped to disclose it, the inviting party's alone, since
  * acceptance derives the accepting party's own side as false. Render tests pin
  * each at its headline's level against the accessibility tree.
  *
@@ -1620,7 +1623,11 @@ export function InvitationTerms({
                 inviting party's alone, since acceptance derives the accepting
                 party's own side as false (deriveAcceptedLinkageTerms) rather
                 than adopting the invitation's. Both are the shared wording the
-                CLI accept prompt uses beneath its own copy of this headline. By
+                CLI accept prompt uses beneath its own copy of this headline, and
+                WHICH disclosure statement is rendered follows the output shape
+                the two surfaces read alike: the accepting party reads the
+                grouping where the inviting party shares the result, and reads
+                none of it where the inviting party is the sole receiver. By
                 the placement rule on {@link InvitationTerms} they sit at the
                 visibility level of the headline they qualify, which is here -- so
                 a reader who expands "Other details" to find that several of the
@@ -1632,7 +1639,9 @@ export function InvitationTerms({
                 {summary.deduplicate && (
                   <>
                     <Text size="xs" c="dimmed">
-                      {DEDUPLICATE_DISCLOSURE_STATEMENT}
+                      {summary.inviterSharesResult
+                        ? DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT
+                        : DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}
                     </Text>
                     <Text size="xs" c="dimmed">
                       {DEDUPLICATE_ACCEPTOR_SIDE_NOTE}

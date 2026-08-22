@@ -615,6 +615,98 @@ test("prepareForExchange refuses a deduplicating term under single-pass", () => 
   ).toThrow(UsageError);
 });
 
+// --- the accepted invitation's other output shape -----------------------------
+// An invitation may declare that it receives the result and shares none of it,
+// which acceptance mirrors to a party that expects no output. The pair still
+// resolves many-to-one, so the grouping runs -- and lands entirely on the
+// inviting party, the accepting party being sent no table to read it from. The
+// same two files as above, with a column beside the linkage one so what the
+// accepting party transmits is observable rather than inferred.
+const payloadRowsA: Array<CSVRow> = rowsA.map((row, index) => ({
+  ...row,
+  note: `a-${index}`,
+}));
+const payloadRowsB: Array<CSVRow> = rowsB.map((row, index) => ({
+  ...row,
+  note: `b-${index}`,
+}));
+
+async function runAcceptedInvitation(declaredDeduplicate: boolean): Promise<{
+  inviter: ExchangeResult;
+  acceptor: ExchangeResult;
+}> {
+  const inviterTerms = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: declaredDeduplicate,
+    output: { expectsOutput: true, shareWithPartner: false },
+  });
+  const acceptorTerms = deriveAcceptedLinkageTerms(inviterTerms, "B");
+  const [connInviter, connAcceptor] = createMessagePipe();
+  const [inviter, acceptor] = await Promise.all([
+    runExchange(
+      connInviter,
+      "initiator",
+      prepareForExchange({ linkageTerms: inviterTerms }, "A", payloadRowsA, [
+        "first_name",
+        "note",
+      ]),
+      { psiLibrary },
+    ),
+    runExchange(
+      connAcceptor,
+      "responder",
+      prepareForExchange({ linkageTerms: acceptorTerms }, "B", payloadRowsB, [
+        "first_name",
+        "note",
+      ]),
+      { psiLibrary },
+    ),
+  ]);
+  return { inviter, acceptor };
+}
+
+test("a sole-receiver deduplicating invitation hands the accepting party no table", async () => {
+  // What the consent surfaces state for this shape rests on it: the accepting
+  // party reads no grouping because it is sent no result at all, so a surface
+  // telling it what it learns about the inviting party's groups would name a
+  // disclosure this run does not make.
+  const { inviter, acceptor } = await runAcceptedInvitation(true);
+  expect(acceptor.associationTable).toBeUndefined();
+  // The run is the deduplicating one all the same: the inviting party's
+  // duplicate rows group onto the accepting party's single record.
+  expect(inviter.associationTable).toStrictEqual([
+    [1, 2, 3],
+    [0, 0, 1],
+  ]);
+});
+
+test("the accepting party's declared setting is false yet more of its records match", async () => {
+  // The widening the consent copy states, measured rather than argued: the
+  // accepting party's own `deduplicate` is derived false under both runs and its
+  // file is byte-identical between them, so every difference here is the
+  // inviting party's declaration alone.
+  const oneToOne = await runAcceptedInvitation(false);
+  const deduplicating = await runAcceptedInvitation(true);
+
+  // Under one-to-one the inviting party's duplicated "Carol" is ambiguous and
+  // drops out of the round, so the accepting party's row 0 goes unmatched and
+  // its payload row never leaves. Under the deduplicating run that value matches,
+  // and the row's membership and payload column go to the inviting party.
+  expect(oneToOne.inviter.partnerPayload.rowIndices).toStrictEqual([1]);
+  expect(deduplicating.inviter.partnerPayload.rowIndices).toStrictEqual([0, 1]);
+  expect(oneToOne.inviter.partnerPayload.rows).toStrictEqual([["b-1"]]);
+  expect(deduplicating.inviter.partnerPayload.rows).toStrictEqual([
+    ["b-0"],
+    ["b-1"],
+  ]);
+
+  // Both runs derive the accepting party's own side as false, so the widening is
+  // not that party taking the "many" side: its records are never grouped.
+  for (const run of [oneToOne, deduplicating])
+    expect(run.acceptor.associationTable).toBeUndefined();
+});
+
 test("deduplicate: false on both parties runs the exchange to completion", async () => {
   const [initiator, responder] = await runBothWithDeduplicate(false, false);
   // The one-to-one path is untouched: A's duplicated "Carol" is ambiguous and

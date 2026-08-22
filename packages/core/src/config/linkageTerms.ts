@@ -1408,12 +1408,23 @@ export function safeParseLinkageTerms(raw: unknown) {
  *   side and disclose its record grouping, then present `deduplicate: false` at the
  *   exchange so the run proceeds as many-to-one at the acceptor's expense. Deriving
  *   it as false makes that unrepresentable rather than refused: the acceptor's own
- *   side of the cardinality is never the inviter's to set, so no invitation moves
- *   what this party's records disclose. An accepted deduplicating invitation
- *   resolves to the one-sided pair the cascade runs -- the inviter the "many" side,
- *   this party the "one" -- which is the direction the consent surfaces state ahead
- *   of the accept. An acceptor that wants its OWN records grouped authors that in
- *   its own configuration, which does not call this function.
+ *   side of the cardinality is never the inviter's to set, so this party's records
+ *   are never grouped. An accepted deduplicating invitation resolves to the
+ *   one-sided pair the cascade runs -- the inviter the "many" side, this party the
+ *   "one" -- which is the direction the consent surfaces state ahead of the accept.
+ *   An acceptor that wants its OWN records grouped authors that in its own
+ *   configuration, which does not call this function.
+ *
+ *   What the derived `false` does NOT hold constant is how many of this party's
+ *   records match. A value the inviter holds on several rows is ambiguous under
+ *   `one-to-one` and drops out of the round, so this party's record holding it goes
+ *   unmatched; under the deduplicating run the inviter contributes that value once
+ *   and the record matches, disclosing its membership and any payload columns this
+ *   party sends. The inviter's declaration therefore widens this party's own
+ *   outbound disclosure, which the consent surfaces state (see
+ *   `DEDUPLICATE_ACCEPTOR_SIDE_NOTE`). It is a widening rather than a new
+ *   capability: an inviter that collapsed its own duplicate rows before the
+ *   exchange would match exactly the same records one-to-one.
  *
  * Metadata and standardization stay per-party and local (they are never embedded in
  * the token); this function shapes only the agreed linkage terms.

@@ -10,7 +10,8 @@ import YAML from "yaml";
 import {
   CONSENT_FACTS,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
-  DEDUPLICATE_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   encodeInvitation,
   getDefaultLinkageTerms,
   getLogger,
@@ -2020,12 +2021,24 @@ test("displayInvitation: represents every consent-relevant linkage term, bar the
     // Per probe, not only over the set: an entry carrying an empty list would
     // otherwise satisfy the loop below by rendering nothing at all.
     const copies = probe.requiredVariantCopy ?? [];
-    expect(copies.length, probe.path).toBeGreaterThan(0);
+    expect(copies.length, probe.label).toBeGreaterThan(0);
     for (const copy of copies) {
-      expect(render(probe.variant), probe.path).toContain(copy);
-      expect(render(probe.base), probe.path).not.toContain(copy);
+      expect(render(probe.variant), probe.label).toContain(copy);
+      expect(render(probe.base), probe.label).not.toContain(copy);
     }
+    // And the other half of a term measured under several document shapes: the
+    // sentence another shape owes must be absent here, or one sentence rendered
+    // for every shape would satisfy the pin above while stating a disclosure this
+    // shape's run does not make.
+    for (const copy of probe.forbiddenVariantCopy ?? [])
+      expect(render(probe.variant), probe.label).not.toContain(copy);
   }
+  // Non-vacuous: at least one term is measured under shapes that owe different
+  // sentences, so the loop above is a check rather than an empty pass.
+  expect(
+    pinned.filter((probe) => (probe.forbiddenVariantCopy ?? []).length > 0)
+      .length,
+  ).toBeGreaterThan(0);
 });
 
 test("displayInvitation: shows each matching rule the acceptor is consenting to", () => {
@@ -2109,7 +2122,12 @@ test("displayInvitation: a deduplicating term states what it discloses and whose
   // A one-to-one exchange discloses no grouping at all, so neither sentence must
   // reach it: their presence below is the setting's doing rather than the
   // fixture's.
-  expect(oneToOne).not.toContain(DEDUPLICATE_DISCLOSURE_STATEMENT);
+  expect(oneToOne).not.toContain(
+    DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+  );
+  expect(oneToOne).not.toContain(
+    DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  );
   expect(oneToOne).not.toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
 
   const deduplicating = render({ deduplicate: true });
@@ -2117,11 +2135,46 @@ test("displayInvitation: a deduplicating term states what it discloses and whose
     "duplicate matches (enforced): more than one of the inviting party's " +
       "records may match a single one of the accepting party's records",
   );
-  expect(deduplicating).toContain(`    ${DEDUPLICATE_DISCLOSURE_STATEMENT}`);
+  expect(deduplicating).toContain(
+    `    ${DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT}`,
+  );
   // Same indent as the statement it follows, so the acceptor reads what the
   // setting discloses and whose file is grouped to disclose it in one place
   // rather than a screen apart.
   expect(deduplicating).toContain(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
+  // The sample token shares the result with this party, so the sole-receiver
+  // sentence must not reach it.
+  expect(deduplicating).not.toContain(
+    DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  );
+});
+
+test("displayInvitation: a sole-receiver deduplicating term states the grouping stays with the inviter", () => {
+  // The other output shape a deduplicating invitation can take: the inviting
+  // party receives the result and shares none of it, so this party is sent no
+  // table and reads no grouping. The shared-result sentence would tell it what it
+  // learns about the inviting party's groups, which this run discloses to it not
+  // at all -- so the shape selects the other statement, and the direction note
+  // stays, its widening applying to either shape.
+  const log = getLogger("accept-display-deduplicate-sole-receiver-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  const soleReceiver = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      deduplicate: true,
+      output: { expectsOutput: true, shareWithPartner: false },
+    },
+  });
+
+  expect(soleReceiver).toContain(
+    `    ${DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}`,
+  );
+  expect(soleReceiver).toContain(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
+  expect(soleReceiver).not.toContain(
+    DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+  );
 });
 
 test("displayInvitation: the retain line is printed at both decision blocks, and only where retention is disclosed", () => {

@@ -478,8 +478,20 @@ export const COUNT_ONLY_DISCLOSURE_STATEMENT =
 
 /**
  * The disclosure statement a surface renders beside the duplicate-matches
- * headline of a deduplicating invitation: what a deduplicating match reveals that
- * a one-to-one match does not.
+ * headline of a deduplicating invitation whose result reaches the ACCEPTING
+ * party: what a deduplicating match reveals to that party that a one-to-one match
+ * does not.
+ *
+ * One of the two statements the same headline takes, selected by the invitation's
+ * output shape, since which party reads the grouping is what the shape decides.
+ * The axis is `output.shareWithPartner` alone: a deduplicating document must
+ * declare `output.expectsOutput` (the schema refines it, since a "many" party
+ * entitled to nothing would widen its own match and take nothing back), so the
+ * two shapes a deduplicating invitation can have are exactly this one -- both
+ * parties receive -- and the inviting party as sole receiver, whose statement is
+ * {@link DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}. Rendering this one for
+ * a sole-receiver invitation would state a disclosure the run cannot make: the
+ * accepting party is sent no result and reads no grouping at all.
  *
  * Drafted from the disclosure rows of docs/spec/PROTOCOL.md (The disclosure delta
  * a deduplicating match pays) rather than composed here, and it states three
@@ -502,7 +514,7 @@ export const COUNT_ONLY_DISCLOSURE_STATEMENT =
  * a viewer-relative variant of it. Fixed first-party copy naming no value, so a
  * surface may render it verbatim.
  */
-export const DEDUPLICATE_DISCLOSURE_STATEMENT =
+export const DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT =
   "Grouping is what a deduplicating match discloses: for each of the accepting " +
   "party's matched records, that party learns how many of the inviting party's " +
   "records share the matched linkage-key value and which of the inviting " +
@@ -511,20 +523,69 @@ export const DEDUPLICATE_DISCLOSURE_STATEMENT =
   "own declaration, which psilink does not check against its data.";
 
 /**
- * The direction note a surface renders beside
- * {@link DEDUPLICATE_DISCLOSURE_STATEMENT}, for the same deduplicating
- * invitation: which party the setting the statement describes belongs to, and
- * which it does not.
+ * The disclosure statement for the other output shape a deduplicating invitation
+ * can have: the inviting party receives the result and the accepting party
+ * receives none, so the grouping is disclosed to the declaring party alone.
+ *
+ * The shape is representable and derives cleanly -- an invitation declaring
+ * `output.expectsOutput` with `shareWithPartner` cleared, which acceptance
+ * mirrors to an accepting party that expects nothing -- and it discloses
+ * something real, so it takes a statement rather than silence: the result the
+ * inviting party takes away links several of its own records to one of the
+ * accepting party's, which is the grouping evidence a deduplicating run exists to
+ * produce. What it must not carry is either half of
+ * {@link DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT}'s account. The accepting
+ * party learns no count and no row positions, so stating them would name a
+ * disclosure that does not happen; and the unverified-count limit that statement
+ * ends on has nothing to bound here, since the party reading the count is the one
+ * that declared it.
+ *
+ * What the accepting party does pay under either shape is the widening
+ * {@link DEDUPLICATE_ACCEPTOR_SIDE_NOTE} carries, which is why that note renders
+ * beside both statements rather than beside one.
+ *
+ * Written in party names rather than "you", and fixed first-party copy naming no
+ * value, for the same reasons as its sibling.
+ */
+export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
+  "Grouping is what a deduplicating match discloses, and under this invitation " +
+  "the inviting party alone reads it: the result it receives links several of " +
+  "its own records to a single one of the accepting party's records, which is " +
+  "the evidence that those of its own rows name one individual. The accepting " +
+  "party receives no result from this exchange, so it is shown none of that " +
+  "grouping -- neither how many of the inviting party's records stand in a " +
+  "group nor which of its rows they are.";
+
+/**
+ * The direction note a surface renders beside whichever of the two disclosure
+ * statements above the invitation's output shape selects, for the same
+ * deduplicating invitation: whose records the setting groups, and what it still
+ * costs the party whose records it does not group.
  *
  * The two are separate facts and a reader is entitled to both. The statement says
  * what a deduplicating match discloses; this says whose records are grouped to
  * disclose it. Accepting does NOT turn the setting on for the accepting party:
  * `deriveAcceptedLinkageTerms` derives that party's own `deduplicate` as false
  * rather than adopting the invitation's, so the agreed pair is one-sided by
- * construction and no invitation can widen what the accepting party's own records
- * disclose. Without this note a reader meeting a headline about grouping, and a
- * statement about what grouping discloses, would have no way to tell whether
- * their own file is the one being grouped.
+ * construction and the accepting party's rows are never grouped. Without this
+ * note a reader meeting a headline about grouping, and a statement about what
+ * grouping discloses, would have no way to tell whether their own file is the one
+ * being grouped.
+ *
+ * What the derivation closes is the grouping direction, and NOT the accepting
+ * party's outbound disclosure, which the setting does move: a value the inviting
+ * party holds on several rows is ambiguous under `one-to-one` and drops out of
+ * the round, so the accepting party's record holding it goes unmatched, while
+ * under a deduplicating run the inviting party contributes that value once and
+ * the record matches. More of the accepting party's records can therefore match
+ * -- disclosing their membership, and any payload columns that party sends --
+ * than in a one-to-one run of the same two files, on the inviting party's
+ * declaration alone. That is the second fact this note carries, and a reader told
+ * only that their records are not grouped would read it as no consequence at all.
+ * It is a widening rather than a new capability: an inviting party that collapsed
+ * its own duplicate rows before the exchange would match exactly the same records
+ * one-to-one, so the setting buys a hostile inviter nothing it could not do
+ * locally.
  *
  * It names the way to the other direction rather than leaving it unsaid, because
  * the invitation path offers no control for it: each party's own `deduplicate`
@@ -537,11 +598,15 @@ export const DEDUPLICATE_DISCLOSURE_STATEMENT =
  * Fixed first-party copy naming no value, so a surface may render it verbatim.
  */
 export const DEDUPLICATE_ACCEPTOR_SIDE_NOTE =
-  "This setting is the inviting party's own and applies to its records " +
-  "alone: the accepting party's records are not grouped, so several of its " +
-  "rows naming one individual stay separate here. Grouping the accepting " +
-  "party's records instead is set up from each party's own configuration " +
-  "file, where each party declares its own side.";
+  "This setting is the inviting party's own: the accepting party's records are " +
+  "never grouped, so several of its rows naming one individual stay separate " +
+  "here. It still reaches what the accepting party discloses, because a value " +
+  "the inviting party holds on several rows matches here instead of dropping " +
+  "out as ambiguous: more of the accepting party's records can match -- each " +
+  "one disclosing its membership, and any payload columns the accepting party " +
+  "sends -- than in a one-to-one run of the same two files. Grouping the " +
+  "accepting party's records instead is set up from each party's own " +
+  "configuration file, where each party declares its own side.";
 
 /**
  * The caveat copy for a term an inviter may declare that today's exchange does

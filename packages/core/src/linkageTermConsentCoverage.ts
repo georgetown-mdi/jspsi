@@ -17,7 +17,8 @@
 import { parseLinkageTerms } from "./config/linkageTerms.js";
 import {
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
-  DEDUPLICATE_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
 } from "./consentFacts.js";
 
 import type {
@@ -80,8 +81,24 @@ export interface ConsentRelevantTerm {
    * holding only the first leaves a reader unable to tell whose file the cost
    * lands on. Every entry is held to the same present-for-variant,
    * absent-for-base rule.
+   *
+   * Left unset by a field measured under {@link shapes}, which carries its copy
+   * per shape instead.
    */
   requiredVariantCopy?: ReadonlyArray<string>;
+  /**
+   * The surrounding shapes this field is measured under, for a field whose
+   * variant discloses something DIFFERENT depending on the rest of the document.
+   * One probe pair is built per shape, each still differing at this field alone.
+   *
+   * The pin above cannot express that on its own: it names copy a surface must
+   * render for the variant, so a field with two truthful sentences would have to
+   * pin the one both shapes share -- which is neither -- or pin one and let the
+   * other shape render a sentence for a disclosure its run does not make. Naming
+   * the shapes here holds both surfaces to both sentences, each present for its
+   * own shape and absent for the other.
+   */
+  shapes?: ReadonlyArray<ConsentProbeShape>;
   /**
    * Surfaces that do not render this field, each with why it is still absent.
    * Recorded rather than closed here: surfacing a field changes what an acceptor
@@ -92,6 +109,40 @@ export interface ConsentRelevantTerm {
    * without striking its entry fails too.
    */
   unrepresented?: Partial<Record<ConsentSurfaceName, string>>;
+}
+
+/**
+ * @internal
+ *
+ * One surrounding shape a {@link ConsentRelevantTerm} is measured under, with the
+ * copy that shape's variant owes a reader and the copy it must not carry.
+ */
+export interface ConsentProbeShape {
+  /**
+   * What this shape is, in a few words. Appended to the field path as the
+   * probe's {@link ConsentRepresentationProbe.label}, so a failing assertion
+   * names the shape rather than only the field.
+   */
+  name: string;
+  /**
+   * Applied to BOTH sides of this shape's pair, after
+   * {@link ConsentRelevantTerm.prepare}, so the pair still differs at the field
+   * under test alone. Absent where the shape is the prepared base as it stands.
+   */
+  shape?: (terms: LinkageTerms) => LinkageTerms;
+  /**
+   * Copy every surface MUST render for this shape's variant and MUST NOT render
+   * for its base, exactly as {@link ConsentRelevantTerm.requiredVariantCopy}.
+   */
+  requiredVariantCopy: ReadonlyArray<string>;
+  /**
+   * Copy every surface MUST NOT render for this shape's variant: the sentence
+   * another shape of the same field owes, which this one's run does not make.
+   * Without it a surface could render one sentence for every shape and satisfy
+   * that shape's required copy while stating a disclosure that does not happen
+   * in the other.
+   */
+  forbiddenVariantCopy: ReadonlyArray<string>;
 }
 
 /**
@@ -346,11 +397,41 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "Whether several of the inviter's records may match the same one of " +
       "the acceptor's, which changes how many records the intersection holds " +
-      "-- and discloses to the acceptor, for each of its own matched records, " +
-      "how many of the inviter's records group onto it and which rows they are.",
-    requiredVariantCopy: [
-      DEDUPLICATE_DISCLOSURE_STATEMENT,
-      DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+      "-- and discloses to whichever party receives the result how the " +
+      "inviter's records group onto each matched record of the acceptor's.",
+    // Which party reads the grouping follows the output shape, so the two shapes
+    // a deduplicating document can take are measured separately. The schema
+    // requires the declaring party to receive output, so `shareWithPartner` is
+    // the whole of the remaining axis: both parties receive, or the inviter
+    // alone does.
+    shapes: [
+      {
+        name: "both parties receive the result",
+        requiredVariantCopy: [
+          DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+          DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+        ],
+        forbiddenVariantCopy: [DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT],
+      },
+      {
+        name: "the inviting party is the sole receiver",
+        // The acceptor mirrors to a party that receives nothing, so the inviter
+        // may transmit no payload to it: an invitation declaring a `send` here
+        // is one deriveAcceptedLinkageTerms refuses, and the probe would measure
+        // the surfaces on a document no acceptance can reach. The request FROM
+        // the acceptor stays, since that direction is exactly what the widening
+        // the side note states reaches.
+        shape: (terms) =>
+          edited(terms, (draft) => {
+            draft.output.shareWithPartner = false;
+            if (draft.payload !== undefined) draft.payload.send = [];
+          }),
+        requiredVariantCopy: [
+          DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+          DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+        ],
+        forbiddenVariantCopy: [DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT],
+      },
     ],
     vary: (terms) =>
       edited(terms, (draft) => {
@@ -587,14 +668,29 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
  * renders the two differently.
  */
 export interface ConsentRepresentationProbe {
-  /** The derived `LinkageTerms` field path this pair varies. */
+  /**
+   * The derived `LinkageTerms` field path this pair varies. Shared by every pair
+   * of a field measured under several {@link ConsentRelevantTerm.shapes}, which
+   * {@link label} tells apart.
+   */
   path: string;
+  /** {@link path}, with the shape's name where the field carries shapes. */
+  label: string;
   /** {@link ConsentRelevantTerm.reason} for the field. */
   reason: string;
   base: LinkageTerms;
   variant: LinkageTerms;
-  /** {@link ConsentRelevantTerm.requiredVariantCopy} for the field, if any. */
+  /**
+   * The copy this pair's variant must render and its base must not: the field's
+   * {@link ConsentRelevantTerm.requiredVariantCopy}, or this shape's.
+   */
   requiredVariantCopy?: ReadonlyArray<string>;
+  /**
+   * The copy this pair's variant must NOT render:
+   * {@link ConsentProbeShape.forbiddenVariantCopy}, absent for a field measured
+   * under one shape.
+   */
+  forbiddenVariantCopy?: ReadonlyArray<string>;
   /** {@link ConsentRelevantTerm.unrepresented} for the field, never absent. */
   unrepresented: Partial<Record<ConsentSurfaceName, string>>;
 }
@@ -603,7 +699,8 @@ export interface ConsentRepresentationProbe {
  * @internal
  *
  * The rendering pairs for every consent-relevant entry of
- * {@link LINKAGE_TERM_CONSENT_CLASSIFICATION}.
+ * {@link LINKAGE_TERM_CONSENT_CLASSIFICATION} -- one per entry, or one per shape
+ * for an entry that names {@link ConsentRelevantTerm.shapes}.
  *
  * Both sides go through `parseLinkageTerms`, so a variant that is not a coherent
  * terms document -- a renamed field with no element updated to reference it, a
@@ -618,16 +715,25 @@ export function consentRepresentationProbes(): Array<ConsentRepresentationProbe>
     if (entry.classification !== "consent-relevant") continue;
     const prepared =
       entry.prepare?.(CONSENT_PROBE_TERMS) ?? CONSENT_PROBE_TERMS;
-    probes.push({
-      path,
-      reason: entry.reason,
-      base: parseLinkageTerms(prepared),
-      variant: parseLinkageTerms(entry.vary(prepared)),
-      ...(entry.requiredVariantCopy !== undefined
-        ? { requiredVariantCopy: entry.requiredVariantCopy }
-        : {}),
-      unrepresented: entry.unrepresented ?? {},
-    });
+    const shapes: ReadonlyArray<ConsentProbeShape | undefined> =
+      entry.shapes ?? [undefined];
+    for (const shape of shapes) {
+      const shaped = shape?.shape?.(prepared) ?? prepared;
+      const requiredVariantCopy =
+        shape?.requiredVariantCopy ?? entry.requiredVariantCopy;
+      probes.push({
+        path,
+        label: shape === undefined ? path : `${path} (${shape.name})`,
+        reason: entry.reason,
+        base: parseLinkageTerms(shaped),
+        variant: parseLinkageTerms(entry.vary(shaped)),
+        ...(requiredVariantCopy !== undefined ? { requiredVariantCopy } : {}),
+        ...(shape?.forbiddenVariantCopy !== undefined
+          ? { forbiddenVariantCopy: shape.forbiddenVariantCopy }
+          : {}),
+        unrepresented: entry.unrepresented ?? {},
+      });
+    }
   }
   return probes;
 }

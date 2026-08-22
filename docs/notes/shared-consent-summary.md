@@ -324,7 +324,8 @@ about a proposed count-only exchange in the first place.
 
 Deduplicated matching runs, so what its headline needs is not a caveat but a
 statement of what it costs. The exchange discloses grouping the one-to-one match
-does not, and the acceptor is the party that reads it, so the sentence beside the
+does not, and the party that reads it is the party the result reaches. Where the
+invitation shares the result, that is the acceptor, and the sentence beside the
 duplicate-matches headline states three things the specification fixes: which
 party learns it and about which of its own records, that what is learned is a
 count and row positions rather than the matched value, and that the count is the
@@ -339,20 +340,51 @@ a surface that renders only "duplicate matches: yes" still moves when the term
 moves -- which is exactly why the pin sits beside the classification rather than
 in either surface's own test.
 
-Its placement is the same rule the caveats follow, applied to the headline it
-qualifies rather than to the setting's implementation status: the duplicate-matches
-headline states match multiplicity, so it sits inside a disclosure, and the
-sentence sits with it.
+There are two such sentences, not one, because the invitation's output shape
+decides which party reads the grouping and a deduplicating invitation can take
+either shape. The schema requires a deduplicating party to receive output, so the
+only remaining axis is whether it shares: both parties receive, or the inviting
+party alone does. Under the second the acceptor is sent nothing, so the sentence
+above would tell it what it learns from a table it never gets -- and the
+unverified-count limit that sentence ends on has nothing to bound, the party
+reading the count being the one that declared it. The sole-receiver sentence
+states the disclosure that does happen: the result the inviting party takes away
+groups several of its own records onto one of the acceptor's, and the acceptor
+reads none of it.
 
-A second sentence sits beside it, and the pin carries both, because what the
-setting discloses and whose records are grouped to disclose it are separate facts
-a reader needs together. Acceptance derives the accepting party's own
-`deduplicate` as false rather than adopting the invitation's, so the pair an
-accepted deduplicating invitation resolves to is one-sided by construction. A
-reader met only by the disclosure statement would have no way to tell whether
-their own file is the one being grouped -- and the invitation offers no control
-for the other direction, so the sentence names the per-party configuration path
-that does.
+That forced the pin to grow a shape axis of its own. It names copy a surface must
+render for a variant document, so a term with two truthful sentences could
+otherwise pin only what both shapes share -- which is neither sentence -- or pin
+one and let the other shape render it. The classification names the shapes
+instead, and each carries both the copy its variant owes and the copy it must not
+carry, so a surface rendering one sentence under every shape fails on the shape
+whose run does not make that disclosure. Both surfaces are measured against the
+same two pairs.
+
+Whichever sentence renders, its placement is the same rule the caveats follow,
+applied to the headline it qualifies rather than to the setting's implementation
+status: the duplicate-matches headline states match multiplicity, so it sits
+inside a disclosure, and the sentence sits with it.
+
+A direction note sits beside whichever statement the shape selects, and the pin
+carries both, because what the setting discloses and whose records are grouped to
+disclose it are separate facts a reader needs together. Acceptance derives the
+accepting party's own `deduplicate` as false rather than adopting the
+invitation's, so the pair an accepted deduplicating invitation resolves to is
+one-sided by construction. A reader met only by the disclosure statement would
+have no way to tell whether their own file is the one being grouped -- and the
+invitation offers no control for the other direction, so the sentence names the
+per-party configuration path that does.
+
+That note carries a second fact for the same reason it carries the first: what
+the derivation closes is the grouping, not the acceptor's own outbound
+disclosure. A value the inviting party holds on several rows drops out of a
+one-to-one round as ambiguous and matches under a deduplicating one, so more of
+the accepting party's records can match -- disclosing their membership and any
+payload columns that party sends -- on the inviting party's declaration alone. A
+note stating only that the accepting party's records are not grouped would read
+as the setting costing that party nothing, which is the reading the run does not
+support.
 
 ## The count-only tier
 

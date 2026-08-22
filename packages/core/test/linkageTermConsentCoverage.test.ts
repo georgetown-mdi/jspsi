@@ -143,11 +143,21 @@ describe("the linkage-term consent classification", () => {
   test("varies each consent-relevant position at that position alone", () => {
     // A variant differing anywhere else would let a surface's rendering change
     // for a reason other than the field under test, and the probe would report
-    // that field represented when it is not.
+    // that field represented when it is not. A shaped pair is held to the same
+    // rule: the shape is applied to both of its sides, so it moves neither.
     for (const probe of consentRepresentationProbes())
-      expect(differingPositions(probe.base, probe.variant, declared)).toEqual([
-        probe.path,
-      ]);
+      expect(
+        differingPositions(probe.base, probe.variant, declared),
+        probe.label,
+      ).toEqual([probe.path]);
+  });
+
+  test("pins a field measured under several shapes to a distinct label each", () => {
+    // The label is what a failing surface assertion names, and what the two
+    // shapes of one field are told apart by. Two probes sharing one would report
+    // a shape's missing sentence against the other shape's name.
+    const labels = consentRepresentationProbes().map((probe) => probe.label);
+    expect(labels.length).toBe(new Set(labels).size);
   });
 
   test("builds every probe from a coherent, fully populated base", () => {
@@ -155,8 +165,20 @@ describe("the linkage-term consent classification", () => {
     const consentRelevant = Object.entries(
       LINKAGE_TERM_CONSENT_CLASSIFICATION,
     ).filter(([, entry]) => entry.classification === "consent-relevant");
-    expect(probes.map((probe) => probe.path)).toEqual(
+    // One probe per entry, or one per shape for an entry that names shapes, in
+    // the classification's own order.
+    expect([...new Set(probes.map((probe) => probe.path))]).toEqual(
       consentRelevant.map(([position]) => position),
+    );
+    expect(probes.length).toBe(
+      consentRelevant.reduce(
+        (total, [, entry]) =>
+          total +
+          (entry.classification === "consent-relevant"
+            ? (entry.shapes?.length ?? 1)
+            : 0),
+        0,
+      ),
     );
 
     // Every consent-relevant position must hold a value in the shared base, or

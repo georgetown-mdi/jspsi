@@ -5,7 +5,8 @@ import {
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
-  DEDUPLICATE_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   PROPOSED_NOT_APPLIED_NOTES,
   redactAndSanitizeForDisplay,
   summarizeInvitation,
@@ -564,12 +565,22 @@ export function displayInvitation(params: {
   // the headline it qualifies -- the same shared wording the web consent screen
   // renders with its own copy of that headline. Printed for exactly a
   // deduplicating invitation: a one-to-one exchange discloses no grouping at all,
-  // so the sentence would name a disclosure that does not happen. The direction
-  // note follows it at the same level and for the same invitation: the setting is
+  // so the sentence would name a disclosure that does not happen. WHICH sentence
+  // follows the output shape, since that is what decides who reads the grouping:
+  // this party reads it where the inviter shares the result, and where the
+  // inviter is the sole receiver it reads none of it. The direction note follows
+  // either of them at the same level and for the same invitation: the setting is
   // the inviting party's own, since acceptance derives this party's side as false
-  // (deriveAcceptedLinkageTerms) rather than adopting the invitation's.
+  // (deriveAcceptedLinkageTerms) rather than adopting the invitation's, and the
+  // note also carries what a deduplicating run still widens on this side.
   if (summary.deduplicate) {
-    emit(`    ${DEDUPLICATE_DISCLOSURE_STATEMENT}`);
+    emit(
+      `    ${
+        summary.inviterSharesResult
+          ? DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT
+          : DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT
+      }`,
+    );
     emit(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
   }
 
