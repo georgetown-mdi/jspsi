@@ -276,7 +276,7 @@ green is read as evidence. Three guards keep the gap visible, each a run-level
 vitest option -- read once for a run rather than per project, so a project added
 later is covered without registering anything of its own. The dist guard is in
 both app configs, the prerequisite guard in `apps/web`'s, and the reporter in
-every workspace config and in the root `vitest.config.ts` as well, since
+every workspace config and in the root `vitest.config.mts` as well, since
 reporters belong to the config that starts a run rather than to a project it
 reaches.
 
