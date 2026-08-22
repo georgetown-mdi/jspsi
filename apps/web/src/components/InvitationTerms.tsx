@@ -1633,16 +1633,31 @@ export function InvitationTerms({
                 a reader who expands "Other details" to find that several of the
                 inviting party's records may match one of theirs meets what that
                 costs, and whose file pays it, in the same place. Rendered for
-                exactly a deduplicating invitation: a one-to-one exchange
-                discloses no grouping and groups neither party's records, so
-                either sentence would name something that does not happen. */}
-                {summary.deduplicate && (
+                exactly a deduplicating invitation the run applies: a one-to-one
+                exchange discloses no grouping and groups neither party's
+                records, and a deduplicating term under a strategy that matches
+                no deduplicating cardinality is refused at acceptance
+                (assertDeduplicateImplemented), so either sentence would name
+                something that does not happen. */}
+                {summary.deduplicate && summary.deduplicateApplied && (
                   <>
                     <Text size="xs" c="dimmed">
                       {summary.inviterSharesResult
                         ? DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT
                         : DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}
                     </Text>
+                    {/* The sole-receiver statement states the withholding this
+                    client makes; what the rounds still carry to the accepting
+                    party's own process is the fact beside it, read from the
+                    shared table with its own basis rather than folded into the
+                    sentence. Only that shape carries it: where the inviting
+                    party shares the result, the accepting party is presented
+                    the grouping and there is no display limit to qualify. */}
+                    {!summary.inviterSharesResult && (
+                      <Text size="xs" c="dimmed">
+                        {CONSENT_FACTS.duplicateGroupingDisplayLimit.note}
+                      </Text>
+                    )}
                     <Text size="xs" c="dimmed">
                       {DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
                     </Text>

@@ -2,6 +2,8 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
+import { parse as parseYaml } from "yaml";
+
 import {
   prepareForExchange,
   runExchange,
@@ -9,6 +11,7 @@ import {
   assertDeduplicateImplemented,
   assertMatchedPairsWellFormed,
   matchedPairCount,
+  InvitationTermDivergenceError,
 } from "../src/exchange";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import {
@@ -16,10 +19,13 @@ import {
   parseLinkageTerms,
 } from "../src/config/linkageTerms";
 import { inferMetadata } from "../src/config/metadata";
+import { mintExchangeFile } from "../src/config/exchangeFile";
+import { parseExchangeSpec } from "../src/config/exchangeSpec";
 import { buildOutputTable } from "../src/payloadExchange";
 import { UsageError } from "../src/errors";
 
 import type { PreparedExchange, ExchangeResult } from "../src/exchange";
+import type { MessageConnection } from "../src/connection/messageConnection";
 import type { LinkageStrategy, LinkageTerms } from "../src/config/linkageTerms";
 import type { CSVRow } from "../src/file";
 
@@ -188,6 +194,47 @@ test("assertDeduplicateImplemented refuses only the strategy that cannot match",
   expect(() =>
     assertDeduplicateImplemented(cardinalityTerms(true, "single-pass")),
   ).toThrow(UsageError);
+});
+
+test("acceptance refuses the pair the run refuses, with the run's own message", () => {
+  // The derived acceptor value is false whatever the invitation declares, so the
+  // pair the exchange boundary refuses is invisible in the DERIVED document: the
+  // accept path reads the inviter's terms to catch it. The strategy is a
+  // mandatory-consistency term, so the invitation's value is the agreed one and
+  // the verdict is readable from the invitation alone.
+  let thrown: unknown;
+  try {
+    deriveAcceptedLinkageTerms(
+      cardinalityTerms(true, "single-pass"),
+      "Acceptor",
+    );
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  // The same refusal the exchange-time path gives, not a second account of it.
+  let atExchange: unknown;
+  try {
+    assertDeduplicateImplemented(cardinalityTerms(true, "single-pass"));
+  } catch (err) {
+    atExchange = err;
+  }
+  expect((thrown as Error).message).toBe((atExchange as Error).message);
+
+  // The other three combinations still derive: a cascade invitation either way,
+  // and a single-pass invitation that declares no deduplication.
+  for (const [deduplicate, strategy] of [
+    [false, "cascade"],
+    [true, "cascade"],
+    [false, "single-pass"],
+  ] as Array<[boolean, LinkageStrategy]>) {
+    expect(
+      deriveAcceptedLinkageTerms(
+        cardinalityTerms(deduplicate, strategy),
+        "Acceptor",
+      ).deduplicate,
+    ).toBe(false);
+  }
 });
 
 // --- the table shapes the consuming seam admits and refuses -------------------
@@ -593,6 +640,272 @@ test("a deduplicating term under single-pass is refused by both parties before t
   );
   expectRefusedWith(initiator, /single-pass/);
   expectRefusedWith(responder, /single-pass/);
+});
+
+test("a partner presenting a deduplicate its invitation did not declare is refused", async () => {
+  // The invitation declares `false`, so the consent surface showed no grouping
+  // disclosure at all and the acceptance agreed to a one-to-one run. Its author
+  // then presents `true` after the connection opens, which would run the pair
+  // many-to-one: more of the accepting party's records match, each disclosing
+  // its membership. The acceptance retained what the invitation declared, so the
+  // run is refused at the terms exchange -- before any key or payload moves.
+  const declared = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: false,
+  });
+  const presented = parseLinkageTerms({
+    ...termsBase,
+    identity: "Presented Partner Identity",
+    deduplicate: true,
+  });
+  const acceptorTerms = deriveAcceptedLinkageTerms(declared, "B");
+
+  const acceptorPrepared = prepareForExchange(
+    { linkageTerms: acceptorTerms },
+    "B",
+    rowsB,
+    ["first_name"],
+  );
+  acceptorPrepared.expectedPartnerDeduplicate = declared.deduplicate;
+
+  const [connInviter, connAcceptor] = createMessagePipe();
+  // The refusal is ONE-SIDED -- only the accepting party holds the declaration --
+  // so the two runs are not awaited together: the presenting party is ended by
+  // the abort this side sends it (pinned below), not by a refusal it derives.
+  const inviterRun = Promise.allSettled([
+    runExchange(
+      connInviter,
+      "initiator",
+      prepareForExchange({ linkageTerms: presented }, "A", rowsA, [
+        "first_name",
+      ]),
+      { psiLibrary },
+    ),
+  ]);
+
+  const reason = await runExchange(
+    connAcceptor,
+    "responder",
+    acceptorPrepared,
+    { psiLibrary },
+  ).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
+  expect(reason).toBeInstanceOf(InvitationTermDivergenceError);
+  expect(reason?.message).toMatch(/contradict the invitation/);
+  // The refusal names the two booleans and no partner-controlled value: the
+  // identity the partner authored is the string most likely to be reached for.
+  expect(reason?.message).not.toContain("Presented Partner Identity");
+  // The advisory tag the CLI's hint-walker reads: this refusal is terminal
+  // against the invitation this party holds, so the generic "retry without
+  // re-inviting" line would prescribe a retry that repeats the refusal.
+  expect(
+    (reason as { psilinkRecoveryHintEmitted?: unknown })
+      .psilinkRecoveryHintEmitted,
+  ).toBe(true);
+
+  await connAcceptor.close();
+  const [inviter] = await inviterRun;
+  // Neither party reaches a PSI round: the accepting side refuses before the
+  // rounds, and the presenting side is left with a failed exchange rather than
+  // the many-to-one result it presented for.
+  expect(inviter.status).toBe("rejected");
+});
+
+test("the one-sided refusal aborts the partner instead of leaving it parked", async () => {
+  // Every refusal inside the terms exchange best-effort sends an abort first so
+  // the partner is not left on its own receive timeout. This one fires just past
+  // that exchange and is one-sided, so nothing else tells an honest partner to
+  // stop: without the abort it waits out its whole peer-inactivity budget -- a
+  // full poll budget on a file channel -- for rounds this party will never run.
+  const declared = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: false,
+  });
+  const presented = parseLinkageTerms({
+    ...termsBase,
+    identity: "Presented Partner Identity",
+    deduplicate: true,
+  });
+  const acceptorPrepared = prepareForExchange(
+    { linkageTerms: deriveAcceptedLinkageTerms(declared, "B") },
+    "B",
+    rowsB,
+    ["first_name"],
+  );
+  acceptorPrepared.expectedPartnerDeduplicate = declared.deduplicate;
+
+  const [connInviter, connAcceptor] = createMessagePipe();
+  const sentByAcceptor: unknown[] = [];
+  const recordingAcceptorConn: MessageConnection = {
+    send: async (data) => {
+      sentByAcceptor.push(data);
+      await connAcceptor.send(data);
+    },
+    receive: (timeoutMs) => connAcceptor.receive(timeoutMs),
+    close: () => connAcceptor.close(),
+  };
+
+  const inviterRun = runExchange(
+    connInviter,
+    "initiator",
+    prepareForExchange({ linkageTerms: presented }, "A", rowsA, ["first_name"]),
+    { psiLibrary },
+  ).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
+
+  const reason = await runExchange(
+    recordingAcceptorConn,
+    "responder",
+    acceptorPrepared,
+    { psiLibrary },
+  ).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
+  expect(reason).toBeInstanceOf(InvitationTermDivergenceError);
+
+  // The abort is the last thing this party sends, and it carries fixed literals
+  // only: no terms, no counts, and nothing the partner authored.
+  expect(sentByAcceptor.at(-1)).toStrictEqual({
+    decision: "abort",
+    abortReasons: [
+      "partner presented a deduplicate its invitation did not declare",
+    ],
+  });
+  expect(JSON.stringify(sentByAcceptor.at(-1))).not.toContain(
+    "Presented Partner Identity",
+  );
+
+  // The partner's run ends on its own, without this side closing the connection
+  // and without waiting out a receive budget. What ends it is the frame's
+  // arrival: the terms exchange's decision slots are behind both parties by this
+  // point, so nothing on the partner reads the reason it states, and the specific
+  // fault stays with the party that refused. What the partner surfaces instead
+  // is not a refusal: the frame reaches its PSI binary seam still awaiting its
+  // own next round, so its run ends with the PSI library's own "Type not
+  // convertible to a Uint8Array" error, with no psilink framing or cause
+  // attached -- fast-fail without diagnosis. Classifying that seam's decode
+  // failure is follow-on work, not a property this branch claims.
+  expect(await inviterRun).toBeInstanceOf(Error);
+  await connAcceptor.close();
+});
+
+test("a run driven from a PERSISTED config refuses the same contradiction", async () => {
+  // The recurring case, which the in-memory binding above does not reach: an
+  // acceptance writes its config and stops, and the exchange happens at a later
+  // invocation that holds no token. The declaration must survive to disk and back
+  // for the refusal to fire, so this sources it from a minted exchange file --
+  // serialized to snake_case YAML and re-parsed exactly as a later run loads it --
+  // rather than setting the field directly.
+  const declared = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: false,
+  });
+  const presented = parseLinkageTerms({
+    ...termsBase,
+    identity: "Presented Partner Identity",
+    deduplicate: true,
+  });
+  const acceptorTerms = deriveAcceptedLinkageTerms(declared, "B");
+  const persisted = parseExchangeSpec(
+    parseYaml(
+      mintExchangeFile({
+        connection: { channel: "filedrop", path: "/mnt/share/drop" },
+        linkageTerms: acceptorTerms,
+        expectedPartnerDeduplicate: declared.deduplicate,
+      }),
+    ),
+  );
+  // The persisted document states this party's OWN deduplicate as the mirror's
+  // false and the partner's declaration separately; reading the binding off the
+  // former would refuse the legitimate differing pair instead.
+  expect(persisted.linkageTerms.deduplicate).toBe(false);
+  expect(persisted.expectedPartnerDeduplicate).toBe(false);
+
+  const acceptorPrepared = prepareForExchange(
+    { linkageTerms: persisted.linkageTerms },
+    "B",
+    rowsB,
+    ["first_name"],
+  );
+  acceptorPrepared.expectedPartnerDeduplicate =
+    persisted.expectedPartnerDeduplicate;
+
+  const [connInviter, connAcceptor] = createMessagePipe();
+  const inviterRun = Promise.allSettled([
+    runExchange(
+      connInviter,
+      "initiator",
+      prepareForExchange({ linkageTerms: presented }, "A", rowsA, [
+        "first_name",
+      ]),
+      { psiLibrary },
+    ),
+  ]);
+
+  const reason = await runExchange(
+    connAcceptor,
+    "responder",
+    acceptorPrepared,
+    { psiLibrary },
+  ).then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
+  expect(reason).toBeInstanceOf(InvitationTermDivergenceError);
+  expect(reason?.message).toMatch(/contradict the invitation/);
+  expect(reason?.message).not.toContain("Presented Partner Identity");
+
+  await connAcceptor.close();
+  const [inviter] = await inviterRun;
+  expect(inviter.status).toBe("rejected");
+});
+
+test("the same run proceeds when the presented value is the declared one", async () => {
+  // Non-vacuity for the refusal above, and the property the binding must not
+  // break: a deduplicating invitation whose author presents what it declared is
+  // exactly the accepted many-to-one run.
+  const declared = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: true,
+  });
+  const acceptorTerms = deriveAcceptedLinkageTerms(declared, "B");
+  const acceptorPrepared = prepareForExchange(
+    { linkageTerms: acceptorTerms },
+    "B",
+    rowsB,
+    ["first_name"],
+  );
+  acceptorPrepared.expectedPartnerDeduplicate = declared.deduplicate;
+
+  const [connInviter, connAcceptor] = createMessagePipe();
+  const [inviter, acceptor] = await Promise.all([
+    runExchange(
+      connInviter,
+      "initiator",
+      prepareForExchange({ linkageTerms: declared }, "A", rowsA, [
+        "first_name",
+      ]),
+      { psiLibrary },
+    ),
+    runExchange(connAcceptor, "responder", acceptorPrepared, { psiLibrary }),
+  ]);
+  expect(inviter.associationTable).toStrictEqual([
+    [1, 2, 3],
+    [0, 0, 1],
+  ]);
+  expect(acceptor.associationTable).toStrictEqual([
+    [0, 0, 1],
+    [1, 2, 3],
+  ]);
 });
 
 test("prepareForExchange refuses a deduplicating term under single-pass", () => {

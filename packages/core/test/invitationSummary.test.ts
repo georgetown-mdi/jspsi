@@ -6,8 +6,13 @@ import {
   TRANSFORM_FUNCTION_GLOSSARY,
 } from "../src/invitationSummary.js";
 import { disclosedColumnNames, inferMetadata } from "../src/config/metadata.js";
+import {
+  assertDeduplicateImplemented,
+  DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
+} from "../src/config/linkageTerms.js";
 
 import type { ConnectionEndpoint } from "../src/config/invitation.js";
+import type { LinkageStrategy } from "../src/config/linkageTerms.js";
 
 // A linkable column set (ssn + names + dob give satisfiable keys) that ALSO
 // carries columns the inferred metadata discloses: `notes` infers as an `other`
@@ -269,6 +274,46 @@ describe("the consent summary's fan-out register", () => {
       linkageTerms: { ...baseTerms, linkageStrategy: "single-pass" },
     });
     expect(summary.fansOut).toBe(false);
+  });
+
+  test("the deduplicate register follows the same strategy split, the other way", () => {
+    // The cascade matches a deduplicating cardinality and single-pass matches
+    // none, so the applied flag is the strategy's verdict on the term -- the
+    // signal a surface reads to withhold what a deduplicating run discloses for
+    // an invitation acceptance refuses outright.
+    const applied = (linkageStrategy: "cascade" | "single-pass"): boolean =>
+      summarizeInvitation({
+        linkageTerms: { ...baseTerms, deduplicate: true, linkageStrategy },
+      }).deduplicateApplied;
+    expect(applied("cascade")).toBe(true);
+    expect(applied("single-pass")).toBe(false);
+  });
+
+  test("the applied flag and the acceptance refusal agree on every strategy", () => {
+    // The two read one verdict, and the whole table is driven so neither can be
+    // left behind: were the flag restated as its own expression, retiring the
+    // refusal for a strategy would leave the copy wrongly withheld for it, and
+    // each side's own tests would keep passing.
+    for (const strategy of Object.keys(
+      DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
+    ) as LinkageStrategy[]) {
+      const terms = {
+        ...baseTerms,
+        deduplicate: true,
+        linkageStrategy: strategy,
+      };
+      const refuses = ((): boolean => {
+        try {
+          assertDeduplicateImplemented(terms);
+          return false;
+        } catch {
+          return true;
+        }
+      })();
+      expect(
+        summarizeInvitation({ linkageTerms: terms }).deduplicateApplied,
+      ).toBe(!refuses);
+    }
   });
 
   test("the glossary line for the splitting step describes what it does to matching", () => {

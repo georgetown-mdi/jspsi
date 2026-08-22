@@ -35,6 +35,7 @@ import type {
 } from "@psilink/core";
 
 import {
+  persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
   persistOutboundPayloadConsent,
   saveConfig,
@@ -753,6 +754,24 @@ export async function runOnlineBootstrap(params: {
    * `receivedPayloadLockIn` refresh.
    */
   outboundPayloadConsent?: OutboundPayloadConsent;
+  /**
+   * The online ACCEPTOR's terms-side lock-in for THIS acceptance: the
+   * `deduplicate` the invitation declared for the INVITING party's own side
+   * (`token.linkageTerms.deduplicate`), recorded as the config's
+   * `expectedPartnerDeduplicate` so a later recurring `psilink exchange` refuses a
+   * partner presenting any other value at the terms exchange
+   * (assertPresentedDeduplicateMatchesInvitation) -- the online sibling of the
+   * offline-accept persistence, and the terms-side twin of
+   * `receivedPayloadLockIn` above. Known at the same moment (the consent surface
+   * stated it), so it rides the same first write on a fresh config and the same
+   * surgical in-place refresh of the kept config on the reuse path.
+   *
+   * `undefined` is a caller with no declaration to bind -- the online INVITER,
+   * which accepted nothing -- and persists no field, leaving whatever the config
+   * already has. The linkage-terms schema makes `deduplicate` mandatory, so an
+   * acceptance always passes a boolean and never lands the config unbound.
+   */
+  expectedPartnerDeduplicate?: boolean;
 }): Promise<{ configWriteError?: unknown }> {
   // The two received-payload persistence inputs are mutually exclusive by design:
   // the online ACCEPTOR passes receivedPayloadLockIn (its set is known up front from
@@ -949,6 +968,29 @@ export async function runOnlineBootstrap(params: {
               reportPersistenceLoss(notice, eventStream);
             }
           }
+          // The terms-side lock-in is refreshed on the same gate as the received
+          // one: its presence marks an acceptance, whose declaration the operator
+          // has just consented to, while the inviter never reaches this write.
+          if (params.expectedPartnerDeduplicate !== undefined) {
+            try {
+              persistExpectedPartnerDeduplicate(
+                params.configPath,
+                params.expectedPartnerDeduplicate,
+              );
+            } catch (err) {
+              const notice =
+                `the exchange continues and the existing configuration at ` +
+                `${params.configPath} stands, but recording the duplicate ` +
+                `matching your partner declared in it failed; the next ` +
+                `'psilink exchange' holds your partner to the value that ` +
+                `configuration already records, and to no value if it records ` +
+                `none`;
+              getLogger(params.loggerName).warn(
+                `${notice}: ${sanitizeErrorForDisplay(err)}`,
+              );
+              reportPersistenceLoss(notice, eventStream);
+            }
+          }
           // Unlike the offline path (provisionConfigAndKey re-gates the config's
           // presence before writing the key) and the non-reuse branch below
           // (which re-gates before saveConfig), there is deliberately no config
@@ -993,6 +1035,14 @@ export async function runOnlineBootstrap(params: {
           // handshake, so it is known here exactly as the received lock-in above is.
           ...(params.outboundPayloadConsent !== undefined
             ? { outboundPayloadConsent: params.outboundPayloadConsent }
+            : {}),
+          // The acceptance's terms-side lock-in, from that same moment: the
+          // invitation declared the inviter's cardinality side and the consent
+          // surface stated it, so a later recurring run refuses a partner
+          // presenting anything else. Absent for the inviter, which accepted no
+          // declaration.
+          ...(params.expectedPartnerDeduplicate !== undefined
+            ? { expectedPartnerDeduplicate: params.expectedPartnerDeduplicate }
             : {}),
         });
         configWritten = true;
@@ -1054,6 +1104,16 @@ export async function runOnlineBootstrap(params: {
               // against.
               ...(params.outboundPayloadConsent !== undefined
                 ? { outboundPayloadConsent: params.outboundPayloadConsent }
+                : {}),
+              // Carried for the same reason as the outbound consent above: this
+              // second full-spec write re-serializes the config the acceptance
+              // hook wrote, so omitting it would drop a recorded terms-side
+              // binding and leave the next run holding the partner to nothing.
+              ...(params.expectedPartnerDeduplicate !== undefined
+                ? {
+                    expectedPartnerDeduplicate:
+                      params.expectedPartnerDeduplicate,
+                  }
                 : {}),
             });
           } catch (err) {

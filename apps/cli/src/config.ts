@@ -1047,6 +1047,53 @@ export function persistOutboundPayloadConsent(
   writeFileOwnerOnly(configPath, serialized);
 }
 
+/**
+ * Write or overwrite the top-level `expected_partner_deduplicate` in an existing
+ * `psilink.yaml`. This is the TERMS-side consent lock-in: the `deduplicate` the
+ * accepted invitation declared for the INVITING party's own side, which a later
+ * `psilink exchange` holds the value the partner presents at the terms exchange
+ * to ({@link assertPresentedDeduplicateMatchesInvitation} in core), refusing a
+ * contradiction before any key or payload moves.
+ *
+ * The terms-side twin of {@link persistExpectedPayloadColumns}, written by the
+ * same accept-reuse paths -- offline, and the online hook's reuse branch -- and
+ * for the same reason: they keep the operator's existing config rather than
+ * rewriting it, so like the payload lock-in this edits the file in place through
+ * the YAML document model, preserving comments, key order, and formatting.
+ * Binding the write to the accept-reuse path is what keeps the declaration from
+ * lagging the latest acceptance (a re-accept over a changed declaration refreshes
+ * it here).
+ *
+ * Takes a plain `boolean`: an acceptance always has a declaration to record --
+ * `deduplicate` is mandatory on the linkage-terms schema -- so there is no
+ * removal to express. The absent field is the state of a config no acceptance
+ * stands behind, reached by never writing one rather than by clearing one.
+ *
+ * The value is a schema boolean, not partner free text, but the file is rewritten
+ * with the same owner-only permissions {@link saveConfig} uses (a config may carry
+ * an SFTP credential). The key is written snake_case to match the on-disk
+ * convention. Throws if the file cannot be read or parsed -- the caller has just
+ * reconciled the same file, so a failure here is unexpected and must not be
+ * silently swallowed (it would leave the operator believing the binding was
+ * refreshed).
+ */
+export function persistExpectedPartnerDeduplicate(
+  configPath: string,
+  declared: boolean,
+): void {
+  // Parse, edit, and re-serialize through the sensitive-file chokepoint (see
+  // persistHostKeyFingerprint), preserving the operator's comments and key order
+  // on this surgical one-field write.
+  const serialized = editSensitiveYamlDocument(
+    fs.readFileSync(configPath, "utf8"),
+    `config file ${configPath}`,
+    (doc) => {
+      doc.setIn(["expected_partner_deduplicate"], declared);
+    },
+  );
+  writeFileOwnerOnly(configPath, serialized);
+}
+
 // --- Config reader -----------------------------------------------------------
 
 /**

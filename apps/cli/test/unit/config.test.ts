@@ -20,6 +20,7 @@ import {
   formatReconcileDiffs,
   loadConfigLinkageSource,
   persistDisclosedPayloadColumns,
+  persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
   persistHostKeyFingerprint,
   persistOutboundPayloadConsent,
@@ -1374,6 +1375,79 @@ test("persistExpectedPayloadColumns throws (not silently) on a malformed config"
   expect(() =>
     persistExpectedPayloadColumns(configPath, ["diagnosis"]),
   ).toThrow(UsageError);
+  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+});
+
+// --- persistExpectedPartnerDeduplicate ---------------------------------------
+
+test("persistExpectedPartnerDeduplicate writes a boolean the spec schema reads back", () => {
+  // The surgical one-field write, driven end to end rather than reasoned about:
+  // the value must land as a YAML boolean the exchange-spec parse accepts, and
+  // the operator's comments and other fields must survive it.
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "# hand-authored config",
+      "connection:",
+      "  channel: sftp",
+      "  server:",
+      "    host: sftp.example.org # the drop",
+      "",
+    ].join("\n"),
+  );
+  persistExpectedPartnerDeduplicate(configPath, false);
+  const raw = fs.readFileSync(configPath, "utf8");
+  expect(raw).toContain("# hand-authored config");
+  expect(raw).toContain("host: sftp.example.org # the drop");
+  expect(YAML.parse(raw).expected_partner_deduplicate).toBe(false);
+  persistExpectedPartnerDeduplicate(configPath, true);
+  expect(
+    YAML.parse(fs.readFileSync(configPath, "utf8"))
+      .expected_partner_deduplicate,
+  ).toBe(true);
+});
+
+test("persistExpectedPartnerDeduplicate refreshes a stale declaration", () => {
+  // A config carrying a PRIOR acceptance's declaration, re-accepted over an
+  // invitation declaring the other value: the field is overwritten to what the
+  // operator has just consented to, never left stale (a stale `true` would refuse
+  // an honest partner now presenting `false`).
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "connection:",
+      "  channel: sftp",
+      "  server:",
+      "    host: h",
+      "expected_partner_deduplicate: true",
+      "",
+    ].join("\n"),
+  );
+  persistExpectedPartnerDeduplicate(configPath, false);
+  const raw = fs.readFileSync(configPath, "utf8");
+  expect(YAML.parse(raw).expected_partner_deduplicate).toBe(false);
+});
+
+test("persistExpectedPartnerDeduplicate writes the config owner-read-only (0600)", () => {
+  if (process.platform === "win32") return;
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    "connection:\n  channel: sftp\n  server:\n    host: h\n",
+  );
+  persistExpectedPartnerDeduplicate(configPath, true);
+  expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+});
+
+test("persistExpectedPartnerDeduplicate throws (not silently) on a malformed config", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const original = "connection: [unbalanced\n";
+  fs.writeFileSync(configPath, original);
+  expect(() => persistExpectedPartnerDeduplicate(configPath, true)).toThrow(
+    UsageError,
+  );
   expect(fs.readFileSync(configPath, "utf8")).toBe(original);
 });
 

@@ -244,7 +244,35 @@ export const CONSENT_FACTS = {
       "Matching multiplicity is fixed by the run: the cardinality both parties " +
       "resolve from the agreed pair decides which side's within-dataset " +
       "duplicates take part, and a pair no strategy matches aborts the " +
-      "exchange rather than matching looser.",
+      "exchange rather than matching looser. The marker carries that fact and " +
+      "no more. Where the invitation makes the inviting party the sole " +
+      "receiver, what the accepting party is presented of the grouping is this " +
+      "client's doing rather than the run's, and that limit is " +
+      "`duplicateGroupingDisplayLimit` below -- a fact of its own in the other " +
+      "register, so this marker is never read as covering it.",
+  },
+  duplicateGroupingDisplayLimit: {
+    basis: "trust-contingent",
+    reason:
+      "What a sole-receiver acceptance is not handed is the RESULT, and the " +
+      "entitlement gate on the table `runExchange` returns holds that. The " +
+      "grouping itself still reaches the accepting party's process: the one " +
+      "wire-level withholding (`withholdsSenderAssociationTable`) covers " +
+      "single-pass alone, and a deduplicating match runs cascade, whose rounds " +
+      "carry each matched position once per group member. So presenting none " +
+      "of it is the client's doing rather than the exchange's, and what an " +
+      "operator on that side is shown rests on the software that side runs -- " +
+      "the partner's register, not the run's. Carried as a fact of its own " +
+      "rather than inside " +
+      "DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT, so the " +
+      "trust-contingent half is classified and pinned rather than resting on a " +
+      "clause under an enforced headline.",
+    note:
+      "The matching rounds do carry that grouping to the accepting party's " +
+      "software, so presenting none of it is this client's doing rather than a " +
+      "property of the wire: the accepting party is shown no group sizes and " +
+      "no row positions because psilink withholds them, not because the " +
+      "exchange kept them from that party's machine.",
   },
   matchedFields: {
     basis: "enforced",
@@ -540,25 +568,24 @@ export const DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT =
  * statement ends on has nothing to bound here, since the party reading the count
  * is the one that declared it.
  *
- * The non-receipt half is stated at the altitude that actually holds it, which is
- * the DISPLAY rather than the wire. {@link runExchange} gates the association
- * table it returns on this party's own output entitlement, so a sole-receiver
- * acceptance is handed none (pinned in
- * packages/core/test/linkageCardinality.test.ts). The one wire-level withholding,
- * {@link withholdsSenderAssociationTable}, covers single-pass alone -- and a
- * deduplicating run is cascade, whose rounds carry the grouping to the accepting
- * party's process. So the sentence states what psilink presents and then names
- * what the rounds still reach: the withholding is this client's doing, and a
- * sentence asserting it as a property of the exchange would put a
- * trust-contingent fact under an enforced headline.
+ * The non-receipt half this statement carries is the DISPLAY half, which is the
+ * altitude that holds it: {@link runExchange} gates the association table it
+ * returns on this party's own output entitlement, so a sole-receiver acceptance
+ * is handed none (pinned in packages/core/test/linkageCardinality.test.ts). The
+ * statement therefore says what this client presents and stops there. What the
+ * wire does NOT withhold is a fact of its own, carried by the
+ * `duplicateGroupingDisplayLimit` entry of {@link CONSENT_FACTS} and rendered
+ * beside this statement: it belongs to the partner's register rather than the
+ * run's, and a sentence folding it in would leave a trust-contingent fact
+ * unclassified inside a sentence under an enforced headline.
  *
- * Naming that limit in the copy is what keeps the `duplicateMatches` marker at
- * `enforced` rather than moving it. The marker carries its headline's own fact --
- * matching multiplicity, which the run does hold -- and where a limit sits past
- * what a marker holds, this table's settled shape is to carry it in the copy
- * rather than to reclassify the fact (`retainedFiles` and `partnerReceivesResult`
- * both do exactly that). Reclassifying would understate a multiplicity the
- * exchange enforces in order to qualify a display fact beside it.
+ * That split is what keeps the `duplicateMatches` marker at `enforced` while the
+ * limit is marked for what it is. The marker carries its headline's own fact --
+ * matching multiplicity, which the run does hold -- and the limit sitting past
+ * what that marker holds is a classified fact beside it rather than an unmarked
+ * clause within it. Reclassifying the headline instead would understate
+ * a multiplicity the exchange enforces in order to qualify a display fact
+ * standing beside it.
  *
  * What the accepting party does pay under either shape is the widening
  * {@link DEDUPLICATE_ACCEPTOR_SIDE_NOTE} carries, which is why that note renders
@@ -573,9 +600,7 @@ export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
   "its own records to a single one of the accepting party's records, which is " +
   "the evidence that those of its own rows name one individual. The accepting " +
   "party receives no result from this exchange, so psilink presents it no " +
-  "group sizes and no row positions. The matching rounds do carry that " +
-  "grouping to the accepting party's software, so what that party's operator " +
-  "is shown is this client's doing rather than a property of the wire.";
+  "group sizes and no row positions.";
 
 /**
  * The direction note a surface renders beside whichever of the two disclosure
@@ -594,19 +619,25 @@ export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
  * being grouped.
  *
  * What the derivation closes is the grouping direction, and NOT the accepting
- * party's outbound disclosure, which the setting does move: a value the inviting
- * party holds on several rows is ambiguous under `one-to-one` and drops out of
- * the round, so the accepting party's record holding it goes unmatched, while
- * under a deduplicating run the inviting party contributes that value once and
- * the record matches. More of the accepting party's records can therefore match
- * -- disclosing their membership, and any payload columns that party sends --
- * than in a one-to-one run of the same two files, on the inviting party's
- * declaration alone. That is the second fact this note carries, and a reader told
- * only that their records are not grouped would read it as no consequence at all.
+ * party's outbound disclosure, which the setting does move: more of that party's
+ * records can match than in a one-to-one run of the same two files, each one
+ * disclosing its membership and any payload columns that party sends, on the
+ * inviting party's declaration alone. That is the second fact this note carries,
+ * and a reader told only that their records are not grouped would read it as no
+ * consequence at all.
+ *
+ * The note states that OUTCOME and not the mechanism behind it. The mechanism --
+ * a value the inviting party holds on several rows is ambiguous under
+ * `one-to-one` and drops out of the round, while a deduplicating run contributes
+ * it once and matches -- is what makes the outcome true, and it is recorded here
+ * and in docs/notes/deduplicate-matching-semantics.md rather than in the copy: a
+ * reader deciding whether to accept needs what changes about their own
+ * disclosure, and a clause about dropped ambiguous values asks them to derive it.
  * It is a widening rather than a new capability: an inviting party that collapsed
  * its own duplicate rows before the exchange would match exactly the same records
  * one-to-one, so the setting buys a hostile inviter nothing it could not do
- * locally.
+ * locally. That is why the note discloses the widening rather than refusing it,
+ * and it is a fact about the design rather than a sentence the copy owes.
  *
  * It names the way to the other direction rather than leaving it unsaid, because
  * the invitation path offers no control for it: each party's own `deduplicate`
@@ -620,14 +651,11 @@ export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
  */
 export const DEDUPLICATE_ACCEPTOR_SIDE_NOTE =
   "This setting is the inviting party's own: the accepting party's records are " +
-  "never grouped, so several of its rows naming one individual stay separate " +
-  "here. It still reaches what the accepting party discloses, because a value " +
-  "the inviting party holds on several rows matches here instead of dropping " +
-  "out as ambiguous: more of the accepting party's records can match -- each " +
-  "one disclosing its membership, and any payload columns the accepting party " +
-  "sends -- than in a one-to-one run of the same two files. Grouping the " +
-  "accepting party's records instead is set up from each party's own " +
-  "configuration file, where each party declares its own side.";
+  "never grouped. It still widens what the accepting party discloses -- more " +
+  "of its records can match than in a plain one-to-one run of the same two " +
+  "files, each one disclosing its membership and any payload columns it sends. " +
+  "Grouping the accepting party's records instead is set up from each party's " +
+  "own configuration file, where each party declares its own side.";
 
 /**
  * The caveat copy for a term an inviter may declare that today's exchange does

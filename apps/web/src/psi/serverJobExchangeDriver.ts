@@ -87,6 +87,13 @@ export interface ServerJobExchangeDriverConfig {
    * "receive nothing"); only an omitted field reconciles lazily. The inviter path
    * leaves it undefined -- the lock-in is the acceptor's. */
   expectedPayloadColumns?: Array<string>;
+  /** The acceptor's terms-side lock-in: the `deduplicate` the invitation declared
+   * for the INVITER's own side. Carried into the intent so the composed config
+   * binds it and the CLI refuses a partner presenting any other value at the
+   * terms exchange, before any key or payload moves. The inviter path leaves it
+   * undefined -- the binding is the acceptor's, and an absent field binds
+   * nothing. */
+  expectedPartnerDeduplicate?: boolean;
   options?: JobExchangeOptions;
   /** Invoked with the created job's id the moment `POST /api/jobs` resolves,
    * before the event stream opens. The seam the console's strand-recovery record
@@ -849,6 +856,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     metadata,
     standardization,
     expectedPayloadColumns,
+    expectedPartnerDeduplicate,
     options,
   } = config;
   const shared = {
@@ -861,6 +869,9 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     ...(metadata !== undefined ? { metadata } : {}),
     ...(standardization !== undefined ? { standardization } : {}),
     ...(expectedPayloadColumns !== undefined ? { expectedPayloadColumns } : {}),
+    ...(expectedPartnerDeduplicate !== undefined
+      ? { expectedPartnerDeduplicate }
+      : {}),
     ...(options !== undefined ? { options } : {}),
     eventStream: true,
   };
@@ -873,9 +884,9 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
  * analog of {@link ServerJobExchangeDriverConfig} for the CLI's positional
  * `$0`/zero-setup command: it carries NONE of the exchange mode's credential or
  * terms material (no `sharedSecret`, `linkageTerms`, `metadata`,
- * `standardization`, or `expectedPayloadColumns`), because both parties infer
- * terms from their own files and there is no application-layer encryption to
- * key. It supplies only the channel, the input source, the tuning subset, and
+ * `standardization`, `expectedPayloadColumns`, or
+ * `expectedPartnerDeduplicate`), because both parties infer terms from their own
+ * files and there is no application-layer encryption to key. It supplies only the channel, the input source, the tuning subset, and
  * the two optional bounded selectors the zero-setup intent carries. */
 export interface ServerJobZeroSetupDriverConfig {
   transport: ServerJobExchangeTransport;

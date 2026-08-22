@@ -538,8 +538,14 @@ function partnerWidthAboveAgreedNotice(
  * same-version partner as a version skew rather than as the reason it states. The
  * initiator's decision-only frame closes an exchange whose versions both parties
  * have already reconciled, and no reconcile reads it, so it carries none.
+ *
+ * Exported for the one refusal that fires just PAST this exchange: the
+ * invitation-term binding, which `runExchange` applies to the terms this
+ * function's caller returned (see `assertPresentedDeduplicateMatchesInvitation`).
+ * `abortReasons` is written by the calling code and must stay a fixed literal --
+ * the frame is a disclosure to the partner like any other.
  */
-async function sendAbort(
+export async function sendAbort(
   conn: MessageConnection,
   abortReasons: string[],
   localTerms?: LinkageTerms,

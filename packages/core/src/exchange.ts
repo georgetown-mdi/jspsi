@@ -4,7 +4,10 @@ import {
   inferMetadata,
   isDisclosedToPartner,
 } from "./config/metadata.js";
-import { assertCountOnlyTermsShape } from "./config/linkageTerms.js";
+import {
+  assertCountOnlyTermsShape,
+  assertDeduplicateImplemented,
+} from "./config/linkageTerms.js";
 import { getDefaultLinkageTerms } from "./defaults/linkageTerms.js";
 import { getDefaultStandardization } from "./defaults/standardization.js";
 import {
@@ -28,6 +31,7 @@ import {
   exchangeBootstrapSecret,
   reportsCountToSender,
   resolveRole,
+  sendAbort,
 } from "./protocolSetup.js";
 import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
 import {
@@ -82,6 +86,11 @@ import type { SigningIdentity } from "./signingIdentity.js";
 import type { SigningMode } from "./config/signing.js";
 import type { DualSignedRecord, ReceiptContent } from "./signedReceipt.js";
 
+// The deduplicating-strategy refusal is defined beside the accept path it also
+// guards (config/linkageTerms.ts), which cannot import this module without
+// closing a cycle, and re-exported here at the run boundary that applies it.
+export { assertDeduplicateImplemented };
+
 /**
  * The subset of an exchange specification that governs data preparation.
  * Connection-agnostic, so both the CLI and the web application can pass their
@@ -130,6 +139,27 @@ export interface PreparedExchange {
    * data, and the party that is lazy on this direction leaves it undefined.
    */
   expectedPayloadColumns?: string[];
+  /**
+   * The `deduplicate` the accepted INVITATION declared for the partner's own
+   * side, if this run was reached by accepting one. When set,
+   * {@link runExchange} holds the value the partner presents at the terms
+   * exchange to it and refuses a contradiction before any key or payload moves
+   * (see {@link assertPresentedDeduplicateMatchesInvitation}).
+   *
+   * Populated by the caller -- the accept front end that holds the token, or the
+   * recurring front end that restores the acceptance's persisted
+   * `expectedPartnerDeduplicate` off its config -- NOT by
+   * {@link prepareForExchange}, for the same reason as
+   * {@link expectedPayloadColumns} beside it: it is a consent-fidelity
+   * expectation carried by the invitation rather than a property derived from
+   * this party's own data or terms -- `deriveAcceptedLinkageTerms` sets this
+   * party's own `deduplicate` to `false` and retains nothing of the inviter's.
+   *
+   * Absent (undefined) where no invitation was accepted: an exchange authored
+   * from two parties' own configuration files carries no declaration to hold the
+   * partner to, and the two documents legitimately differ.
+   */
+  expectedPartnerDeduplicate?: boolean;
   dataset: StandardizedDataset;
   /**
    * The original parsed CSV rows, retained for payload extraction after
@@ -269,51 +299,6 @@ export function resolveCountOnlyRun(
   assertCountOnlyTermsShape(localTerms);
   assertCountOnlyTermsShape(partnerTerms);
   return localTerms.algorithm === "psi-c";
-}
-
-/**
- * Refuse a linkage-terms `deduplicate: true` the run cannot honor, before any
- * matching begins: the term under a linkage strategy that does not match a
- * deduplicating cardinality.
- *
- * The cascade implements the deduplicating match (`linkViaPSI`), and the surfaces
- * downstream of the association table -- the payload frame, the output table, and
- * the exchange record with its re-supply path -- carry a table with several links
- * per record. `single-pass` implements neither deduplicating cardinality: its
- * accept-list admits `one-to-one` alone, so an exchange on that strategy would
- * abort mid-round against terms that asked for a group. Refusing the pair here
- * puts the answer where the operator is still configuring, and keeps the
- * strategy's own guard as the second, fail-closed half rather than the first.
- * Refused at prepare time in {@link prepareForExchange} for this party's own
- * terms, and for both parties' agreed terms by
- * {@link resolveLinkageCardinality} after the terms exchange, before the PSI
- * rounds begin.
- *
- * Reads the whole terms document rather than the two values, so a caller cannot
- * pass one party's `deduplicate` against the other's strategy. `linkageStrategy`
- * is a mandatory-consistency term, so the agreed pair carries one value and both
- * parties reach the same verdict from their own copy; the resolver asserts over
- * both documents regardless, which makes the refusal symmetric in the pair even
- * where the consistency check has not run.
- *
- * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
- * same reason as {@link assertAlgorithmImplemented}: the refusing party is not
- * necessarily the one whose value refuses, since {@link resolveLinkageCardinality}
- * asserts over the PARTNER's terms document as well as its own, so the fault is
- * not unconditionally this operator's own content. The message carries only fixed
- * literals.
- */
-export function assertDeduplicateImplemented(terms: LinkageTerms): void {
-  if (!terms.deduplicate) return;
-  if (terms.linkageStrategy !== "single-pass") return;
-  throw new UsageError(
-    "deduplicated matching is not yet implemented for the single-pass " +
-      'linkage strategy: single-pass matches strictly one-to-one, so a "' +
-      'deduplicate: true" term would be matched one-to-one rather than ' +
-      "honored. The exchange is refused before matching begins. Set " +
-      "linkage_strategy to cascade to run a deduplicating match, or set " +
-      "deduplicate to false.",
-  );
 }
 
 /**
@@ -500,6 +485,81 @@ export function assertSigningModeImplemented(
       "unsigned record while the configuration asks for a signed receipt, so " +
       "it is refused before the exchange runs. Set signing.mode to " +
       '"certificate" to sign receipts, or to "none" to run unsigned.',
+  );
+}
+
+/**
+ * The refusal raised when a partner presents a `deduplicate` its invitation did
+ * not declare ({@link assertPresentedDeduplicateMatchesInvitation}).
+ *
+ * A {@link ConnectionError} of kind `protocol` rather than a {@link UsageError},
+ * for the same reason as {@link AlgorithmDivergenceError}: the contradiction is
+ * between two documents the PARTNER authored, so the fault is the peer's rather
+ * than this operator's configuration. The CLI's `instanceof UsageError ? 64 : 69`
+ * mapping therefore yields 69, and a consumer keeping per-failure bookkeeping can
+ * branch on the type.
+ *
+ * It carries `psilinkRecoveryHintEmitted` (the class-field form its
+ * `PeerAbortError` and `FrameSizeExceededError` siblings use in `errors.ts`) so
+ * the CLI's hint-walker suppresses the generic "retry the exchange without
+ * re-inviting" advisory. The refusal is terminal against the invitation this
+ * party holds, and its own message prescribes the opposite step -- obtain an
+ * invitation declaring the setting the partner will run -- so the generic line
+ * would tell an operator to re-run a refusal that repeats identically, and an
+ * unattended recurring exchange would loop on it. The advisory's window is
+ * reached on the online path, where the token rotates before the run.
+ */
+export class InvitationTermDivergenceError extends ConnectionError {
+  readonly psilinkRecoveryHintEmitted = true;
+
+  constructor(message: string) {
+    super(message, "protocol");
+    this.name = "InvitationTermDivergenceError";
+  }
+}
+
+/**
+ * Bind the `deduplicate` a partner presents at the terms exchange to the value
+ * its INVITATION declared, for a run this party reached by accepting one.
+ *
+ * The term is per-party, so nothing in the agreed terms compares the two sides:
+ * `deriveAcceptedLinkageTerms` sets this party's own value to `false` and the
+ * partner's arrives on its terms message, where a value contradicting the
+ * invitation would otherwise run unremarked. The declaration is what the consent
+ * surfaces stated and what this party agreed to -- an invitation declaring
+ * `false` shows no grouping disclosure at all, while the run its author can
+ * produce by presenting `true` widens what this party's own records disclose
+ * (more of them match, each disclosing its membership and any payload columns
+ * this party sends). So the presented value is held to the declared one, and the
+ * exchange is refused before any key or payload moves.
+ *
+ * Scoped to the invitation path, and NOT a cross-party equality rule: the
+ * expectation is set only by an accept path that holds the token
+ * ({@link PreparedExchange.expectedPartnerDeduplicate}), and `undefined` -- every
+ * exchange authored from two parties' own configuration files -- is a no-op. A
+ * one-sided deduplicating exchange whose two documents legitimately differ is
+ * exactly what makes one party the "many" side, and it still runs.
+ *
+ * The message names the contradiction with the two declared booleans and no
+ * partner-controlled value: the invitation's `deduplicate` is a schema boolean,
+ * and nothing else about the partner's document is quoted.
+ */
+export function assertPresentedDeduplicateMatchesInvitation(
+  invitationDeclared: boolean | undefined,
+  presented: boolean,
+): void {
+  if (invitationDeclared === undefined) return;
+  if (invitationDeclared === presented) return;
+  throw new InvitationTermDivergenceError(
+    "the partner presented linkage terms that contradict the invitation this " +
+      `acceptance consented to: the invitation declared deduplicate ` +
+      `${invitationDeclared}, and the terms presented at the exchange declare ` +
+      `${presented}. That setting decides whether several of the partner's ` +
+      "records may match one of this party's, which changes how many of this " +
+      "party's records match and therefore what they disclose -- so a value " +
+      "the accepted invitation did not state is refused before any key or " +
+      "payload moves. Ask your partner for an invitation declaring the " +
+      "setting it will run, and accept that one.",
   );
 }
 
@@ -823,14 +883,17 @@ export function prepareForExchange(
     // A self-facing operator note, passed through untouched from the local
     // config to the record builder; absent when the config omits it.
     retentionDisposition: exchangeDataSpec.retentionDisposition,
-    // NOTE: expectedPayloadColumns (the received-payload lock-in) is deliberately
-    // NOT threaded here, unlike retentionDisposition above. The caller sets it on
-    // the returned PreparedExchange after this returns, because the accept path's
-    // source is the invitation token (not this dataSpec) and the recurring path
-    // applies a fallback (config expectedPayloadColumns, else payload.receive). A
-    // caller that wants the lock-in must set it explicitly; see
-    // PreparedExchange.expectedPayloadColumns. (It rides ExchangeDataSpec only so
-    // the exchange command can read it off the parsed config.)
+    // NOTE: the two invitation lock-ins -- expectedPayloadColumns (the
+    // received-payload set) and expectedPartnerDeduplicate (the partner's declared
+    // cardinality side) -- are deliberately NOT threaded here, unlike
+    // retentionDisposition above. The caller sets each on the returned
+    // PreparedExchange after this returns, because the accept path's source is the
+    // invitation token (not this dataSpec) and the recurring path applies a
+    // fallback for the payload set (config expectedPayloadColumns, else
+    // payload.receive). A caller that wants a lock-in must set it explicitly; see
+    // PreparedExchange.expectedPayloadColumns and
+    // PreparedExchange.expectedPartnerDeduplicate. (Both ride ExchangeDataSpec only
+    // so the exchange command can read them off the parsed config.)
     dataset,
     rawRows,
     rowCount: rawRows.length,
@@ -1228,6 +1291,40 @@ export async function runExchange(
     localEffectiveKeyCount,
   );
   for (const warning of warnings) onWarning(warning);
+
+  // Hold the partner's presented `deduplicate` to what its invitation declared,
+  // where this run came from accepting one: the term is per-party, so no
+  // compatibility rule compares the two sides, and the value this party consented
+  // to is the invitation's rather than whatever arrives here. Before the
+  // cardinality is resolved from it, and before any key or payload moves. A no-op
+  // on an exchange authored from configuration files, which carries no
+  // declaration. See assertPresentedDeduplicateMatchesInvitation.
+  try {
+    assertPresentedDeduplicateMatchesInvitation(
+      prepared.expectedPartnerDeduplicate,
+      partnerTerms.deduplicate,
+    );
+  } catch (err) {
+    // Best-effort abort before the throw, as every refusal inside exchangeTerms
+    // sends one. This one is one-sided -- only this party holds the declaration
+    // -- so the partner derives no refusal of its own and would otherwise wait
+    // out its whole peer-inactivity budget (a full poll budget on a file
+    // channel) for rounds this party will never run. Sent in the abort
+    // decision's own shape rather than as a private signal of its own, though no
+    // decision slot is left to read it here: what ends the partner's run is the
+    // frame's arrival, and the specific fault stays with this party. The reason
+    // is a fixed literal about values the partner itself declared, so the frame
+    // discloses nothing new. What the partner surfaces from that arrival is not
+    // a refusal at all: the frame reaches the partner's PSI binary seam still
+    // awaiting its own next round, so that run ends with the PSI library's own
+    // "Type not convertible to a Uint8Array" error, with no psilink framing or
+    // cause attached -- fast-fail without diagnosis. Classifying that seam's
+    // decode failure is follow-on work, not a property this branch claims.
+    await sendAbort(conn, [
+      "partner presented a deduplicate its invitation did not declare",
+    ]);
+    throw err;
+  }
 
   // Resolve the matching cardinality from both parties' agreed deduplicate
   // settings as the first step after the terms exchange: the resolution is

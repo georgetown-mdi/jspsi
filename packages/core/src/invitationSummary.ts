@@ -11,6 +11,7 @@ import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js"
 
 import { endpointRequiresRetainedFiles } from "./config/invitation.js";
 import type { InvitationToken } from "./config/invitation.js";
+import { deduplicateIsImplementedForStrategy } from "./config/linkageTerms.js";
 import type {
   LinkageField,
   LinkageKey,
@@ -481,15 +482,19 @@ export interface InvitationSummary {
    */
   deduplicate: boolean;
   /**
-   * Whether today's exchange actually applies the deduplicate setting above
+   * Whether an exchange on these terms applies the deduplicate setting above
    * (see {@link APPLIED_SETTINGS}). True: the cascade matches the resolved
    * cardinality and every surface downstream of the association table carries
-   * the multiplicity. What stays refused -- the both-sided pair, and a
-   * deduplicating term under `single-pass` -- is a property of the agreed PAIR
-   * rather than of the inviter's setting, so it is not readable from an
-   * invitation alone and this flag does not carry it. What it carries is this
-   * build's applied setting for the term, kept as the summary's applied-settings
-   * surface for it beside the per-element `fuzzyComparisonApplied`.
+   * the multiplicity. False where the strategy this invitation names matches no
+   * deduplicating cardinality, which acceptance refuses outright
+   * (`assertDeduplicateImplemented`) -- so a surface reading this flag never
+   * states what a deduplicating run discloses for a run that cannot happen.
+   *
+   * Read alongside {@link deduplicate}, like `fansOut` and `fanOutApplied`: this
+   * flag answers what the strategy would do with a deduplicating term, whether or
+   * not these terms declare one. The one refusal it does NOT carry is the
+   * both-sided pair, which is a property of the agreed PAIR and unreadable from
+   * an invitation alone.
    */
   deduplicateApplied: boolean;
   /**
@@ -1244,6 +1249,15 @@ export function summarizeInvitation(
   // here so the element markers, the key summaries and the consent fact a surface
   // renders all follow the same verdict.
   const fanOutMatches = terms.linkageStrategy === "single-pass";
+  // The other direction of the same strategy split: the cascade matches a
+  // deduplicating cardinality and single-pass matches none, so a deduplicating
+  // term under single-pass is refused at acceptance rather than run. Read from
+  // the refusal's OWN predicate rather than restated here, so the copy cannot
+  // stay withheld for a strategy the refusal has stopped refusing, and read once
+  // so both surfaces withhold it on the same verdict.
+  const deduplicateApplied =
+    APPLIED_SETTINGS.deduplicate &&
+    deduplicateIsImplementedForStrategy(terms.linkageStrategy);
 
   const summary: InvitationSummary = {
     invitingParty: redactAndSanitizeForDisplay(terms.identity),
@@ -1252,7 +1266,7 @@ export function summarizeInvitation(
     inviterReceivesOutput: terms.output.expectsOutput,
     inviterSharesResult: terms.output.shareWithPartner,
     deduplicate: terms.deduplicate,
-    deduplicateApplied: APPLIED_SETTINGS.deduplicate,
+    deduplicateApplied,
     fansOut: terms.linkageKeys.some((key) => key.elements.some(declaresFanOut)),
     fanOutApplied: fanOutMatches,
     linkageKeys: terms.linkageKeys.map((key) =>

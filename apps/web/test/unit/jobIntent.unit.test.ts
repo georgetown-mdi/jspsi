@@ -131,6 +131,23 @@ describe("jobExchangeIntentSchema validates metadata and standardization", () =>
     const intent = { ...validIntent(), expectedPayloadColumns: [1, 2] };
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
+
+  test("accepts expectedPartnerDeduplicate, both booleans", () => {
+    for (const declared of [false, true])
+      expect(
+        jobExchangeIntentSchema.safeParse(
+          validIntent({ expectedPartnerDeduplicate: declared }),
+        ).success,
+      ).toBe(true);
+  });
+
+  test("rejects a non-boolean expectedPartnerDeduplicate", () => {
+    // A string reaching the composed config would be refused by core's schema at
+    // config-parse time on the appliance, after the job was created; refusing it
+    // at this boundary keeps it a create-time error instead.
+    const intent = { ...validIntent(), expectedPartnerDeduplicate: "false" };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
 });
 
 // The size caps live on the shared common fields, so both arms inherit them.
@@ -400,6 +417,41 @@ describe("composeConfigDocument carries the received-payload lock-in", () => {
     const yaml = composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange");
     const doc = parseYaml(yaml) as Record<string, unknown>;
     expect(doc.expected_payload_columns).toBeUndefined();
+  });
+});
+
+describe("the composers carry the terms-side lock-in", () => {
+  // The appliance runs `psilink exchange` from this document at a separate
+  // invocation, so an acceptance's declaration binds the run only if it reaches
+  // the YAML. Both composers, because an sftp job assembles its spec directly
+  // rather than through mintExchangeFile.
+  test("forwards expectedPartnerDeduplicate as expected_partner_deduplicate", () => {
+    for (const declared of [false, true]) {
+      const intent = validIntent({ expectedPartnerDeduplicate: declared });
+      const doc = parseYaml(
+        composeConfigDocument(intent, "/srv/jobs/abc/exchange"),
+      ) as Record<string, unknown>;
+      expect(doc.expected_partner_deduplicate).toBe(declared);
+    }
+  });
+
+  test("the sftp composer forwards it too", () => {
+    for (const declared of [false, true]) {
+      const intent = validSftpIntent({
+        expectedPartnerDeduplicate: declared,
+      });
+      const doc = parseYaml(
+        composeSftpConfigDocument(intent, testSftpServerEntry()),
+      ) as Record<string, unknown>;
+      expect(doc.expected_partner_deduplicate).toBe(declared);
+    }
+  });
+
+  test("omits it when the intent carries no declaration (the two-config case)", () => {
+    const doc = parseYaml(
+      composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange"),
+    ) as Record<string, unknown>;
+    expect(doc.expected_partner_deduplicate).toBeUndefined();
   });
 });
 
@@ -1291,12 +1343,13 @@ describe("jobZeroSetupIntentSchema is injection-closed and strict", () => {
     }
   });
 
-  test("rejects linkageTerms, metadata, standardization, expectedPayloadColumns, side", () => {
+  test("rejects linkageTerms, metadata, standardization, the two lock-ins, side", () => {
     for (const smuggled of [
       { linkageTerms: validLinkageTerms() },
       { metadata: editedMetadata },
       { standardization: editedStandardization },
       { expectedPayloadColumns: ["program_code"] },
+      { expectedPartnerDeduplicate: false },
       { side: "acceptor" },
     ]) {
       const intent = { ...validZeroSetupIntent(), ...smuggled };

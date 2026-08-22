@@ -22,6 +22,10 @@ import {
 import type { LinkageKey } from "../src/config/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import {
+  assertPresentedDeduplicateMatchesInvitation,
+  InvitationTermDivergenceError,
+} from "../src/exchange";
+import {
   DISPLAY_TRUNCATION_MARKER,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   sanitizeForDisplay,
@@ -2763,13 +2767,37 @@ test.each([
       // two documents make is the runnable one-sided one rather than an abort.
       expect(derived.identity).toBe("Accepting Org");
       expect(derived.linkageKeys).toEqual(inviterTerms.linkageKeys);
-      // `deduplicate` carries no cross-party consistency rule, so the differing
-      // pair passes compatibility from both sides.
+      // `deduplicate` carries no cross-party consistency rule -- the differing
+      // pair IS the one-sided run -- so it passes compatibility from both sides.
+      // What binds the inviter's side is not an equality rule here but the
+      // invitation's own declaration, held at the run boundary
+      // (assertPresentedDeduplicateMatchesInvitation).
       expect(validateCompatibility(inviterTerms, derived).errors).toEqual([]);
       expect(validateCompatibility(derived, inviterTerms).errors).toEqual([]);
+      expect(() =>
+        assertPresentedDeduplicateMatchesInvitation(declared, declared),
+      ).not.toThrow();
+      expect(() =>
+        assertPresentedDeduplicateMatchesInvitation(declared, !declared),
+      ).toThrow(InvitationTermDivergenceError);
     }
   },
 );
+
+test("nothing binds a deduplicate pair authored from two configuration files", () => {
+  // The scope of the binding above: it is the INVITATION's declaration this
+  // party consented to, not a cross-party equality rule. Two parties that
+  // authored their own documents have no such declaration between them, and the
+  // difference is what makes one of them the "many" side -- so the pair runs.
+  const many: LinkageTerms = { ...inviterBase, deduplicate: true };
+  const one: LinkageTerms = { ...inviterBase, identity: "Other Org" };
+  expect(validateCompatibility(many, one).errors).toEqual([]);
+  expect(validateCompatibility(one, many).errors).toEqual([]);
+  for (const presented of [false, true])
+    expect(() =>
+      assertPresentedDeduplicateMatchesInvitation(undefined, presented),
+    ).not.toThrow();
+});
 
 test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (payload.send to a non-receiving partner)", () => {
   // Same shape via payload, but through the MIRROR: an inviter that is the sole

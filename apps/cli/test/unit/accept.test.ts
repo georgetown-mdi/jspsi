@@ -279,6 +279,55 @@ test("validateAccept: a deduplicating invitation leaves this party one-to-one", 
   expect(ready.token.linkageTerms.deduplicate).toBe(true);
 });
 
+test("validateAccept: online retains the invitation's declared deduplicate for the run", async () => {
+  // The other half of that guard. This party's own side is derived, so the
+  // invitation's declaration for the INVITING party's side is what the consent
+  // surface stated and what the exchange must hold its partner to -- and it
+  // survives nowhere in the derived terms. The acceptance records it on the
+  // prepared exchange, where runExchange refuses a partner presenting anything
+  // else before a key or payload moves.
+  for (const declared of [false, true]) {
+    const base = sampleToken(FUTURE());
+    const { error, ready } = await acceptWarnings({
+      token: {
+        ...base,
+        linkageTerms: { ...base.linkageTerms, deduplicate: declared },
+      },
+      columns: LINKAGE_COLUMNS,
+      loggerName: `accept-declared-deduplicate-${declared}`,
+      mode: "online",
+    });
+    expect(error).toBeUndefined();
+    const prepared = (
+      ready as { prepared: { expectedPartnerDeduplicate?: boolean } }
+    ).prepared;
+    expect(prepared.expectedPartnerDeduplicate).toBe(declared);
+  }
+});
+
+test("validateAccept: a deduplicating single-pass invitation is refused before the prompt", async () => {
+  // The pair the exchange refuses, caught where the operator is still deciding:
+  // validateAccept derives the acceptor's terms ahead of the input, the
+  // connection, and the consent display, so an invitation the run cannot honor
+  // never reaches a screen that would state what its grouping discloses.
+  const base = sampleToken(new Date(Date.now() + 3_600_000).toISOString());
+  const encoded = await encodeInvitation({
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      deduplicate: true,
+      linkageStrategy: "single-pass",
+    },
+  });
+  await expect(
+    validateAccept({
+      resolved: { mode: "offline", invitation: encoded },
+      options: testOptions(),
+      log: silentLog,
+    }),
+  ).rejects.toThrow(/deduplicated matching is not yet implemented/);
+});
+
 test("validateAccept: online rejects a missing input file before the prompt, preserving its exit code", async () => {
   const encoded = await encodeInvitation(
     sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
@@ -2143,9 +2192,13 @@ test("displayInvitation: a deduplicating term states what it discloses and whose
   // rather than a screen apart.
   expect(deduplicating).toContain(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
   // The sample token shares the result with this party, so the sole-receiver
-  // sentence must not reach it.
+  // sentence must not reach it -- nor the display limit that qualifies it, since
+  // this party IS presented the grouping here.
   expect(deduplicating).not.toContain(
     DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  );
+  expect(deduplicating).not.toContain(
+    CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
   );
 });
 
@@ -2171,10 +2224,46 @@ test("displayInvitation: a sole-receiver deduplicating term states psilink prese
   expect(soleReceiver).toContain(
     `    ${DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}`,
   );
+  // The limit on that withholding is its own classified fact, rendered from the
+  // shared table at the same level as the statement it qualifies: what the
+  // statement says psilink presents, this says the rounds still carry.
+  expect(soleReceiver).toContain(
+    `    ${CONSENT_FACTS.duplicateGroupingDisplayLimit.note}`,
+  );
+  expect(CONSENT_FACTS.duplicateGroupingDisplayLimit.basis).toBe(
+    "trust-contingent",
+  );
   expect(soleReceiver).toContain(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
   expect(soleReceiver).not.toContain(
     DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   );
+});
+
+test("displayInvitation: a deduplicating term the run refuses states no disclosure at all", () => {
+  // single-pass matches no deduplicating cardinality, so acceptance refuses the
+  // pair before this surface is reached (assertDeduplicateImplemented). The
+  // renderer holds the same line from its own side: stating what the grouping
+  // discloses would describe a run that cannot happen. The headline still
+  // reports the term the invitation declares.
+  const log = getLogger("accept-display-deduplicate-refused-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  const refused = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      deduplicate: true,
+      linkageStrategy: "single-pass",
+    },
+  });
+
+  expect(refused).toContain(
+    "duplicate matches (enforced): more than one of the inviting party's " +
+      "records may match a single one of the accepting party's records",
+  );
+  expect(refused).not.toContain(DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT);
+  expect(refused).not.toContain(DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT);
+  expect(refused).not.toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
 });
 
 test("displayInvitation: the retain line is printed at both decision blocks, and only where retention is disclosed", () => {
@@ -2303,6 +2392,19 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
     log,
     splittingKeyToken(FUTURE(), "cascade"),
   );
+  // The sole receiver's display limit is the seventh, for the reason the pair
+  // above is a pair: it is raised only by a DEDUPLICATING invitation whose
+  // inviting party receives the result alone, and no variation above declares
+  // the term at all.
+  const deduplicatingSoleReceiver = renderDisplayInvitation(log, {
+    ...sampleToken(FUTURE()),
+    linkageTerms: {
+      ...CONSENT_PROBE_TERMS,
+      deduplicate: true,
+      output: { expectsOutput: true, shareWithPartner: false },
+      payload: { ...CONSENT_PROBE_TERMS.payload, receive: [] },
+    },
+  });
   const rendered = [
     acceptorWithheld,
     inviterWithheld,
@@ -2310,6 +2412,7 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
     retaining,
     fanOutMatched,
     fanOutRefused,
+    deduplicatingSoleReceiver,
   ].join("\n");
 
   // The whole table, rather than a list restated here: a caveat this renderer
@@ -3846,6 +3949,124 @@ test("handler: offline accept-reuse writes an empty consented set verbatim (stri
       ),
     ).toThrow(/payload disclosure mismatch/);
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- the acceptance's terms-side lock-in reaches the config ------------------
+
+test("handler: offline accept writes the invitation's declared deduplicate to the config", async () => {
+  // Offline accept writes a config and stops, so the binding the invitation
+  // declared has to reach DISK or the later `psilink exchange` holds the partner
+  // to nothing. Both booleans, and read back off the schema so the snake_case
+  // serialization is part of what is pinned: `false` is a real declaration, and
+  // the one a hostile inviter would widen away from.
+  for (const declared of [false, true]) {
+    const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    try {
+      const base = sampleToken(FUTURE());
+      const encoded = await encodeInvitation({
+        ...base,
+        linkageTerms: { ...base.linkageTerms, deduplicate: declared },
+      });
+      await acceptHandler({
+        _: [],
+        $0: "psilink",
+        args: [encoded, input],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+      expect(exit).not.toHaveBeenCalled();
+      const parsed = parseExchangeSpec(
+        YAML.parse(fs.readFileSync(configFile, "utf8")),
+      );
+      expect(parsed.expectedPartnerDeduplicate).toBe(declared);
+      // The written config states this party's OWN side as the mirror's false,
+      // separately from the partner's declaration: one is not read off the other.
+      expect(parsed.linkageTerms.deduplicate).toBe(false);
+    } finally {
+      exit.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("handler: offline accept-reuse refreshes a stale declaration, preserving operator content", async () => {
+  // A kept config carrying a PRIOR acceptance's declaration, re-accepted over an
+  // invitation declaring the other value. Leaving the stale `true` would refuse
+  // the honest partner now presenting `false`; the surgical refresh overwrites it
+  // and leaves the operator's comment and connection block alone.
+  const { dir, input, configFile } = offlineAcceptFixture();
+  try {
+    writeExistingConfig(configFile);
+    fs.appendFileSync(
+      configFile,
+      "# operator-authored note\nexpected_partner_deduplicate: true\n",
+    );
+    const base = sampleToken(FUTURE());
+    const raw = await runOfflineAcceptReuse({
+      configFile,
+      input,
+      disclosed: undefined,
+      token: {
+        ...base,
+        linkageTerms: { ...base.linkageTerms, deduplicate: false },
+      },
+    });
+    expect(raw).toContain("# operator-authored note");
+    expect(raw).toContain("/mnt/share");
+    expect(parseExchangeSpec(YAML.parse(raw)).expectedPartnerDeduplicate).toBe(
+      false,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: online accept forwards the invitation's declared deduplicate to runOnlineBootstrap", async () => {
+  // The online wiring, fresh and reuse alike: the handler must hand the
+  // declaration to the persistence layer (runOnlineBootstrap's own tests cover
+  // the write), or a config born of an online acceptance runs its later recurring
+  // exchanges unbound. Mocked, so no connection is opened.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    for (const declared of [false, true]) {
+      runOnlineBootstrapMock.mockClear();
+      const base = sampleToken(FUTURE());
+      const encoded = await encodeInvitation({
+        ...base,
+        linkageTerms: { ...base.linkageTerms, deduplicate: declared },
+      });
+      await acceptHandler({
+        _: [],
+        $0: "psilink",
+        args: ["sftp://host/drop", encoded, input],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+      expect(exit).not.toHaveBeenCalled();
+      expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
+      expect(
+        runOnlineBootstrapMock.mock.calls[0][0].expectedPartnerDeduplicate,
+      ).toBe(declared);
+    }
+  } finally {
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
