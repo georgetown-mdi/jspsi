@@ -2319,9 +2319,9 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
 
   test("a sole-receiver deduplicating invitation states the grouping stays with the inviter", async () => {
     // The other output shape a deduplicating invitation can take. This party is
-    // sent no result, so it reads no grouping at all: the shared-result sentence
-    // would state a disclosure the run does not make, and the sole-receiver one
-    // states what it does. The direction note stays under both shapes, its
+    // sent no result, so it is presented no grouping: the shared-result sentence
+    // would state a disclosure this client does not make, and the sole-receiver
+    // one states what it does. The direction note stays under both shapes, its
     // widening reaching this party either way.
     renderCaveatTerms({
       output: { expectsOutput: true, shareWithPartner: false },

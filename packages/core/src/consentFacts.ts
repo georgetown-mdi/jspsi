@@ -490,8 +490,8 @@ export const COUNT_ONLY_DISCLOSURE_STATEMENT =
  * two shapes a deduplicating invitation can have are exactly this one -- both
  * parties receive -- and the inviting party as sole receiver, whose statement is
  * {@link DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}. Rendering this one for
- * a sole-receiver invitation would state a disclosure the run cannot make: the
- * accepting party is sent no result and reads no grouping at all.
+ * a sole-receiver invitation would state a disclosure this client does not make:
+ * the accepting party is handed no result, so no grouping reaches its operator.
  *
  * Drafted from the disclosure rows of docs/spec/PROTOCOL.md (The disclosure delta
  * a deduplicating match pays) rather than composed here, and it states three
@@ -525,7 +525,7 @@ export const DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT =
 /**
  * The disclosure statement for the other output shape a deduplicating invitation
  * can have: the inviting party receives the result and the accepting party
- * receives none, so the grouping is disclosed to the declaring party alone.
+ * receives none, so psilink presents the grouping to the declaring party alone.
  *
  * The shape is representable and derives cleanly -- an invitation declaring
  * `output.expectsOutput` with `shareWithPartner` cleared, which acceptance
@@ -535,10 +535,30 @@ export const DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT =
  * accepting party's, which is the grouping evidence a deduplicating run exists to
  * produce. What it must not carry is either half of
  * {@link DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT}'s account. The accepting
- * party learns no count and no row positions, so stating them would name a
- * disclosure that does not happen; and the unverified-count limit that statement
- * ends on has nothing to bound here, since the party reading the count is the one
- * that declared it.
+ * party is presented no count and no row positions, so stating them would name a
+ * disclosure this client does not make; and the unverified-count limit that
+ * statement ends on has nothing to bound here, since the party reading the count
+ * is the one that declared it.
+ *
+ * The non-receipt half is stated at the altitude that actually holds it, which is
+ * the DISPLAY rather than the wire. {@link runExchange} gates the association
+ * table it returns on this party's own output entitlement, so a sole-receiver
+ * acceptance is handed none (pinned in
+ * packages/core/test/linkageCardinality.test.ts). The one wire-level withholding,
+ * {@link withholdsSenderAssociationTable}, covers single-pass alone -- and a
+ * deduplicating run is cascade, whose rounds carry the grouping to the accepting
+ * party's process. So the sentence states what psilink presents and then names
+ * what the rounds still reach: the withholding is this client's doing, and a
+ * sentence asserting it as a property of the exchange would put a
+ * trust-contingent fact under an enforced headline.
+ *
+ * Naming that limit in the copy is what keeps the `duplicateMatches` marker at
+ * `enforced` rather than moving it. The marker carries its headline's own fact --
+ * matching multiplicity, which the run does hold -- and where a limit sits past
+ * what a marker holds, this table's settled shape is to carry it in the copy
+ * rather than to reclassify the fact (`retainedFiles` and `partnerReceivesResult`
+ * both do exactly that). Reclassifying would understate a multiplicity the
+ * exchange enforces in order to qualify a display fact beside it.
  *
  * What the accepting party does pay under either shape is the widening
  * {@link DEDUPLICATE_ACCEPTOR_SIDE_NOTE} carries, which is why that note renders
@@ -552,9 +572,10 @@ export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
   "the inviting party alone reads it: the result it receives links several of " +
   "its own records to a single one of the accepting party's records, which is " +
   "the evidence that those of its own rows name one individual. The accepting " +
-  "party receives no result from this exchange, so it is shown none of that " +
-  "grouping -- neither how many of the inviting party's records stand in a " +
-  "group nor which of its rows they are.";
+  "party receives no result from this exchange, so psilink presents it no " +
+  "group sizes and no row positions. The matching rounds do carry that " +
+  "grouping to the accepting party's software, so what that party's operator " +
+  "is shown is this client's doing rather than a property of the wire.";
 
 /**
  * The direction note a surface renders beside whichever of the two disclosure

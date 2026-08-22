@@ -667,10 +667,12 @@ async function runAcceptedInvitation(declaredDeduplicate: boolean): Promise<{
 }
 
 test("a sole-receiver deduplicating invitation hands the accepting party no table", async () => {
-  // What the consent surfaces state for this shape rests on it: the accepting
-  // party reads no grouping because it is sent no result at all, so a surface
-  // telling it what it learns about the inviting party's groups would name a
-  // disclosure this run does not make.
+  // The enforced half of what the consent surfaces state for this shape: the
+  // entitlement gate hands the accepting party no table, so a surface telling it
+  // what it learns about the inviting party's groups would name a disclosure
+  // this client does not make. It is the gate rather than the wire -- the
+  // cascade rounds carry the grouping to that party's process -- which is the
+  // limit the sole-receiver statement goes on to name.
   const { inviter, acceptor } = await runAcceptedInvitation(true);
   expect(acceptor.associationTable).toBeUndefined();
   // The run is the deduplicating one all the same: the inviting party's

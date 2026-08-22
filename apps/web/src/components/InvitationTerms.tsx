@@ -1626,8 +1626,8 @@ export function InvitationTerms({
                 CLI accept prompt uses beneath its own copy of this headline, and
                 WHICH disclosure statement is rendered follows the output shape
                 the two surfaces read alike: the accepting party reads the
-                grouping where the inviting party shares the result, and reads
-                none of it where the inviting party is the sole receiver. By
+                grouping where the inviting party shares the result, and is
+                presented none where the inviting party is the sole receiver. By
                 the placement rule on {@link InvitationTerms} they sit at the
                 visibility level of the headline they qualify, which is here -- so
                 a reader who expands "Other details" to find that several of the

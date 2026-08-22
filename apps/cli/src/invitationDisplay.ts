@@ -568,7 +568,7 @@ export function displayInvitation(params: {
   // so the sentence would name a disclosure that does not happen. WHICH sentence
   // follows the output shape, since that is what decides who reads the grouping:
   // this party reads it where the inviter shares the result, and where the
-  // inviter is the sole receiver it reads none of it. The direction note follows
+  // inviter is the sole receiver it is presented none. The direction note follows
   // either of them at the same level and for the same invitation: the setting is
   // the inviting party's own, since acceptance derives this party's side as false
   // (deriveAcceptedLinkageTerms) rather than adopting the invitation's, and the

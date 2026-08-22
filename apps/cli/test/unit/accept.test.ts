@@ -2152,10 +2152,10 @@ test("displayInvitation: a deduplicating term states what it discloses and whose
 test("displayInvitation: a sole-receiver deduplicating term states the grouping stays with the inviter", () => {
   // The other output shape a deduplicating invitation can take: the inviting
   // party receives the result and shares none of it, so this party is sent no
-  // table and reads no grouping. The shared-result sentence would tell it what it
-  // learns about the inviting party's groups, which this run discloses to it not
-  // at all -- so the shape selects the other statement, and the direction note
-  // stays, its widening applying to either shape.
+  // table and is presented no grouping. The shared-result sentence would tell it
+  // what it learns about the inviting party's groups, which this client shows it
+  // not at all -- so the shape selects the other statement, and the direction
+  // note stays, its widening applying to either shape.
   const log = getLogger("accept-display-deduplicate-sole-receiver-test");
   log.setLevel("silent");
   const base = sampleToken(FUTURE());
