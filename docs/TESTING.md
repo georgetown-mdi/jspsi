@@ -197,20 +197,20 @@ case costing milliseconds saves milliseconds five times over and still leaves a
 split file to keep in step. Several leg-agnostic cases are deliberately left in
 `integration` on that measurement.
 
-A standing console sentinel guards all three CLI integration projects: it wraps
-`console` directly and fails a test file at `afterAll` on any
-`console.log`/`warn`/`error` that no allowlist matcher
-accepts (the inverse of blanket silencing, and the one
-check that sees third-party `console.*` which the loglevel-based
-`withCapturedLogs` cannot). If your change makes the suite emit new console
-output, the fix is to eliminate it at the source -- route it through the logger
-or assert it under `withCapturedLogs`; accept it as intended only by adding a
-matcher to the allowlist in `apps/cli/test/integration/consoleAllowlist.ts`, a
-visible edit a reviewer sees. A matcher that never fires across a run is reported
-at teardown so the allowlist cannot accumulate dead entries. That report is
-advisory (a warning, never a failure) and is produced by the `integration`
-project's `globalSetup`, so it sees only that project's files: a matcher fired
-solely by a `webrtc` or `backend-agnostic` file reads as dead there.
+A standing console sentinel guards all three CLI integration projects:
+it wraps `console` directly and fails a test file at `afterAll` on any
+`console.log`/`warn`/`error` that no allowlist matcher accepts (the inverse
+of blanket silencing, and the one check that sees third-party `console.*`
+which the loglevel-based `withCapturedLogs` cannot). If your change makes
+the suite emit new console output, the fix is to eliminate it at the source
+-- route it through the logger or assert it under `withCapturedLogs`;
+accept it as intended only by adding a matcher to the allowlist in
+`apps/cli/test/integration/consoleAllowlist.ts`, a visible edit a reviewer
+sees. A matcher that never fires across a run is reported at teardown so the
+allowlist cannot accumulate dead entries. That report is advisory (a warning,
+never a failure) and is produced by the `integration` project's `globalSetup`,
+so it sees only that project's files: a matcher fired solely by a `webrtc` or
+`backend-agnostic` file reads as dead there.
 
 Web (dev server managed automatically -- same pattern as the CLI integration tests):
 
