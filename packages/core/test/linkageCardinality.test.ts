@@ -786,7 +786,12 @@ test("the one-sided refusal aborts the partner instead of leaving it parked", as
   // and without waiting out a receive budget. What ends it is the frame's
   // arrival: the terms exchange's decision slots are behind both parties by this
   // point, so nothing on the partner reads the reason it states, and the specific
-  // fault stays with the party that refused.
+  // fault stays with the party that refused. What the partner surfaces instead
+  // is not a refusal: the frame reaches its PSI binary seam still awaiting its
+  // own next round, so its run ends with the PSI library's own "Type not
+  // convertible to a Uint8Array" error, with no psilink framing or cause
+  // attached -- fast-fail without diagnosis. Classifying that seam's decode
+  // failure is follow-on work, not a property this branch claims.
   expect(await inviterRun).toBeInstanceOf(Error);
   await connAcceptor.close();
 });

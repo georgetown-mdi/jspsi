@@ -1314,7 +1314,12 @@ export async function runExchange(
     // decision slot is left to read it here: what ends the partner's run is the
     // frame's arrival, and the specific fault stays with this party. The reason
     // is a fixed literal about values the partner itself declared, so the frame
-    // discloses nothing new.
+    // discloses nothing new. What the partner surfaces from that arrival is not
+    // a refusal at all: the frame reaches the partner's PSI binary seam still
+    // awaiting its own next round, so that run ends with the PSI library's own
+    // "Type not convertible to a Uint8Array" error, with no psilink framing or
+    // cause attached -- fast-fail without diagnosis. Classifying that seam's
+    // decode failure is follow-on work, not a property this branch claims.
     await sendAbort(conn, [
       "partner presented a deduplicate its invitation did not declare",
     ]);

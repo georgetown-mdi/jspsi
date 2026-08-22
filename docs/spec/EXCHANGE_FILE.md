@@ -402,11 +402,14 @@ the declaration.
 
 Two states, not three: the empty case has no analogue here.
 
-- **Absent** binds nothing. It is the state of an exchange authored from two
+- **Absent** means no binding is enforced, not that only a file with nothing to
+  bind reaches this state. It is the state of an exchange authored from two
   parties' own configuration files, where the differing pair is exactly what
-  makes one of them the "many" side. No write produces it: an acceptance always
-  has a boolean to record, so absence is only ever the state of a file no
-  acceptance wrote.
+  makes one of them the "many" side, and no acceptance ever had a value to
+  record. Two further paths reach it despite an acceptance: the online-accept
+  reuse branch warns and continues when persisting the declaration to an
+  existing config fails ("...and to no value if it records none"), and a
+  config written by a build predating the field carries none to read back.
 - **Present** binds strictly, `false` no less than `true`. A declared `false`
   against a presented `true` is the widening the record exists to refuse.
 
