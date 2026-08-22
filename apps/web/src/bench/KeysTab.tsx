@@ -253,11 +253,6 @@ export function KeysTab({
       derives it as false, so what this authors is one-sided by construction. */}
       <Checkbox
         label="Allow several of your records to match one partner record"
-        description={
-          APPLIED_SETTINGS.deduplicate
-            ? undefined
-            : "Deduplication of your own inputs is not available yet; each record matches at most once."
-        }
         disabled={!APPLIED_SETTINGS.deduplicate}
         checked={editor.draft.deduplicate}
         onChange={(event) => onDeduplicate(event.currentTarget.checked)}
