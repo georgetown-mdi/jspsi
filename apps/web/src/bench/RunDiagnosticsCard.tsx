@@ -7,6 +7,7 @@ import {
   DIAGNOSTIC_LOG_NOTICE,
   SWEEP_CONFIRMATION_LABEL,
   SWEEP_CONFIRMATION_NOTICE,
+  SWEEP_CONTROL_LABEL,
   SWEEP_RETAIN_ESCALATION_NOTICE,
   runDiagnosticsProblems,
   runDiagnosticsWithControl,
@@ -103,7 +104,7 @@ export function RunDiagnosticsCard({
           onChange={(event) =>
             set("sweepExchangeFiles", event.currentTarget.checked)
           }
-          label="Clear leftover exchange files before starting"
+          label={SWEEP_CONTROL_LABEL}
           description={
             "Use this when a previous run crashed or stopped mismatched and " +
             "left the shared directory in a state the next run cannot meet a " +

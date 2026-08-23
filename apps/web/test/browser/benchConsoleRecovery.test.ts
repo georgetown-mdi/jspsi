@@ -771,8 +771,8 @@ describe("console strand recovery panel run warnings", () => {
   // composed raw by the appliance for the console sink's single escape.
   const NOT_EMPTY_LEAD =
     "the rendezvous directory /mnt/rendezvous is not empty; an exchange " +
-    "refuses to start on files an earlier exchange left there, so delete " +
-    "those on the host first. Your own input and results are not what it " +
+    "refuses to start on an earlier run's files. Turn on \"Clear leftover " +
+    'exchange files" and re-run. Your own input and results are not what it ' +
     "refuses over.";
   const PARTNER_ENTRY = "q1\\cohorté.csv";
   const PARTNER_ENTRY_ESCAPED = "q1\\\\cohort\\xe9.csv";

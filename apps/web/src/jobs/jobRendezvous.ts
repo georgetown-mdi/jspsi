@@ -455,12 +455,18 @@ function legNoun(leg: RendezvousLeg, noun: "directory" | "path"): string {
 
 /**
  * The lead of a non-empty rendezvous directory's warning: what is wrong, what an
- * exchange does about it, the step that clears it, and the files the operator must
- * NOT be read as being told to delete.
+ * exchange does about it, the control that clears it, and the files the operator
+ * must NOT be read as being told to delete.
+ *
+ * The recovery is the console's own sweep rather than a host-side deletion: the
+ * operator is reading this inside the GUI, and the run form carries a control that
+ * does exactly this job. It quotes the opening of that control's visible label,
+ * which is as much of it as the budget below leaves beside the mount path; the two
+ * are held together by a check rather than by matching copy in two files.
  *
  * The sink escapes and CAPS what it renders, so the whole sentence has to fit
- * {@link RENDEZVOUS_NOTICE_BUDGET} or the clause that neutralizes the delete
- * instruction is what falls off the end.
+ * {@link RENDEZVOUS_NOTICE_BUDGET} or the clause that keeps this from reading as
+ * "empty the folder" is what falls off the end.
  *
  * @internal exported for testing
  */
@@ -470,8 +476,8 @@ export function notEmptyLead(
 ): string {
   const label = legNoun(leg, "directory");
   const recovery =
-    " is not empty; an exchange refuses to start on files an earlier " +
-    "exchange left there, so delete those on the host first. Your own " +
+    " is not empty; an exchange refuses to start on an earlier run's " +
+    'files. Turn on "Clear leftover exchange files" and re-run. Your own ' +
     "input and results are not what it refuses over.";
   return fitNotice(
     `${label} ${rendezvousDir}${recovery}`,

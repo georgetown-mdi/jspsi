@@ -34,6 +34,14 @@ export const RUN_DIAGNOSTICS_DEFAULT: RunDiagnosticsDraft = {
 };
 
 /**
+ * The sweep control's visible label. Named here because the rendezvous
+ * preflight's not-empty warning sends the operator to this control, and a
+ * warning quoting a label the card no longer carries sends them nowhere.
+ */
+export const SWEEP_CONTROL_LABEL =
+  "Clear leftover exchange files before starting";
+
+/**
  * What the card states before a sweep runs, saying what the CLI's own reference
  * says: the sweep is safe about WHICH files it deletes (psilink's own protocol
  * files, never anything else in the folder) and unsafe about WHEN, because it is
