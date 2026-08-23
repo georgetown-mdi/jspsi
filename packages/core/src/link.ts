@@ -1752,7 +1752,8 @@ export function roundValueFirstRows(
 
 // The sender's form on a party that DROPS its duplicates: the values the round
 // keeps, each against the one candidate row holding it.
-class RoundValueParticipation {
+/** @internal exported for the round-value participation differential test. */
+export class RoundValueParticipation {
   private constructor(private readonly firstRow: Map<number, number>) {}
 
   static forRound(
@@ -1863,8 +1864,11 @@ class RoundValueOwners {
  * this reduces to the single-valued cascade: each round's candidate pairs are then
  * a partial one-to-one correspondence, so the sweep accepts every pair and removal
  * on a potential match coincides with removal on a match.
+ *
+ * @internal exported for the round-value participation differential test, which
+ *   drives the sweep over instrumented cells.
  */
-function replaySinglePassCascade(
+export function replaySinglePassCascade(
   receiverCells: Array<KeyCells>,
   senderCells: Array<KeyCells>,
   senderToReceiverDistinctValue: ReadonlyMap<number, number>,
@@ -1915,10 +1919,10 @@ function replaySinglePassCascade(
       receiverOut,
       receiverKeepsDuplicates,
     );
-    // Absent on a deduplicating sender: the loop below reads each value off the
-    // candidate row it has reached, and a sender that keeps its duplicates keeps
-    // every value one of its candidate rows holds, so there is nothing left to
-    // ask. Only a sender that drops them has a round its own rows can fall out of.
+    // Absent on a sender that keeps its duplicates: the loop below reads each
+    // value off the candidate row it has reached, and such a sender keeps every
+    // value one of its candidate rows holds, so there is nothing left to ask. Only
+    // a sender that drops them has a round its own rows can fall out of.
     const senderParticipation = senderKeepsDuplicates
       ? undefined
       : RoundValueParticipation.forRound(

@@ -486,6 +486,49 @@ test("a fanned-out record on the many side still takes one link, and its group f
   ]);
 });
 
+test("a ragged round groups the deduplicating sender's survivors and no others", async () => {
+  // The ragged layout carried across two rounds by a sender that both fans out and
+  // deduplicates, which is the widest cell shape the replay resolves a sender's
+  // side of. Worked through:
+  //
+  //   round 0: the sender's rows 0 and 1 are one entity on "S1" and both pair with
+  //     the receiver's row 0, which leaves all three out of candidacy;
+  //   round 1: the receiver's surviving rows hold "N1" (row 1) and "P" (row 2). All
+  //     four sender rows hold "N1", so a round reading past candidacy would group
+  //     all four onto the receiver's row 1; rows 2 and 3 are the survivors and form
+  //     that group alone. Row 3's second candidate "P" reaches the receiver's row 2
+  //     in the same round, and the clause the many side keeps discards that pair --
+  //     leaving the receiver's row 2 out of candidacy and unmatched.
+  const senderData: Array<Column> = [
+    [new Set(["S1"]), new Set(["S1"]), undefined, undefined],
+    [new Set(["N1"]), new Set(["N1"]), new Set(["N1"]), new Set(["N1", "P"])],
+  ];
+  const receiverData: Array<Column> = [
+    ["S1", "X", "Y"],
+    [undefined, "N1", "P"],
+  ];
+  const { senderTable, receiverTable } = await runFanOutExchange(
+    senderData,
+    receiverData,
+    false,
+    "many-to-one",
+  );
+  expect(receiverTable).toStrictEqual([
+    [0, 0, 1, 1],
+    [0, 1, 2, 3],
+  ]);
+  expect(senderTable).toStrictEqual([
+    [0, 1, 2, 3],
+    [0, 0, 1, 1],
+  ]);
+
+  // The multiplicity is what decides this table: matched one-to-one, both groups
+  // are within-dataset duplicates that leave their round, and only row 3's
+  // unshared "P" survives to match.
+  const oneToOne = await runFanOutExchange(senderData, receiverData);
+  expect(oneToOne.receiverTable).toStrictEqual([[2], [3]]);
+});
+
 // --- withholding is unaffected by fan-out ------------------------------------
 
 test("a blind helper sending a fan-out table still receives no message 3", async () => {
