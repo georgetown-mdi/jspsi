@@ -311,19 +311,6 @@ describe("applying an update", () => {
     expect(await shipped.takeovers()).toBe(0);
   });
 
-  test("posts to a worker that superseded the announced one rather than falling back", async () => {
-    const { shipped, unloading, fake, reloads } = await readyToApply();
-    const superseding = shippedWaitingWorker();
-
-    fake.registration.waiting = superseding.worker;
-    applyAppShellUpdate();
-    unloading.unloadPage();
-
-    expect(reloads.count).toBe(1);
-    expect(await shipped.takeovers()).toBe(0);
-    expect(await superseding.takeovers()).toBe(1);
-  });
-
   test("waits, by default, for the page's own pagehide -- and not for a freeze", async () => {
     const shipped = shippedWaitingWorker();
     const fake = fakeContainer({

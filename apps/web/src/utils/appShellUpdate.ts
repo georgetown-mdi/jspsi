@@ -16,11 +16,6 @@
  * the browser's own confirmation therefore costs nothing -- the page keeps its
  * code, the update keeps waiting, and the banner's Reload applies it whenever
  * the operator is ready.
- *
- * Each tab holds this state for itself, and the takeover one tab asks for is
- * origin-wide, so a tab still showing the banner can have no waiting worker left
- * to message. Applying there is a plain reload onto the code that already
- * activated.
  */
 
 /** The worker's URL. It is served from `public/`, so its scope is the origin
@@ -164,11 +159,6 @@ export async function registerAppShell(
   applyUpdate = () => {
     const waiting = registration?.waiting;
     if (waiting === null || waiting === undefined) {
-      // An announced update with nothing left waiting is one another tab
-      // applied: that takeover cleared this registration's waiting worker, and
-      // the code it activated is what a plain reload lands on. Reading `waiting`
-      // before this fallback is what keeps a worker that superseded the
-      // announced one on the message path.
       if (updateReady) reload();
       return;
     }
