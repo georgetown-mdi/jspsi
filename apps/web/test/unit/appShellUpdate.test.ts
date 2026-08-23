@@ -250,7 +250,7 @@ describe("applying an update", () => {
     expect(await superseding.takeovers()).toBe(1);
   });
 
-  test("does nothing when no worker is waiting", async () => {
+  test("does nothing when nothing is waiting and nothing was announced", async () => {
     const unloading = fakePageUnloading();
     const fake = fakeContainer({ controller: fakeWorker("activated").worker });
     let reloads = 0;
@@ -263,6 +263,65 @@ describe("applying an update", () => {
 
     expect(reloads).toBe(0);
     expect(unloading.armed).toBe(0);
+  });
+
+  test("reloads onto the code another tab's takeover already activated", async () => {
+    const controller = fakeWorker("activated");
+    const shipped = shippedWaitingWorker();
+    const unloading = fakePageUnloading();
+    const fake = fakeContainer({
+      controller: controller.worker,
+      waiting: shipped.worker,
+    });
+    let reloads = 0;
+    await registerAppShell(fake.container, {
+      reload: () => (reloads += 1),
+      onPageUnloading: unloading.onPageUnloading,
+    });
+    expect(appShellUpdateReady()).toBe(true);
+
+    // The other tab applies: the worker takes over origin-wide, so this tab's
+    // registration has nothing waiting left and the announcement it is still
+    // showing has no worker behind it.
+    fake.registration.waiting = null;
+    fake.changeController();
+
+    applyAppShellUpdate();
+    unloading.unloadPage();
+
+    expect(reloads).toBe(1);
+    expect(unloading.armed).toBe(0);
+    expect(controller.messages).toEqual([]);
+    expect(await shipped.takeovers()).toBe(0);
+  });
+
+  test("declined and then applied from another tab, still reloads and posts nothing", async () => {
+    const { shipped, unloading, fake, reloads } = await readyToApply();
+    applyAppShellUpdate();
+
+    // The operator answers the confirmation with Stay, and the other tab applies
+    // while this page is still on the old code with its takeover armed.
+    fake.registration.waiting = null;
+
+    applyAppShellUpdate();
+    unloading.unloadPage();
+
+    expect(reloads.count).toBe(2);
+    expect(unloading.armed).toBe(1);
+    expect(await shipped.takeovers()).toBe(0);
+  });
+
+  test("posts to a worker that superseded the announced one rather than falling back", async () => {
+    const { shipped, unloading, fake, reloads } = await readyToApply();
+    const superseding = shippedWaitingWorker();
+
+    fake.registration.waiting = superseding.worker;
+    applyAppShellUpdate();
+    unloading.unloadPage();
+
+    expect(reloads.count).toBe(1);
+    expect(await shipped.takeovers()).toBe(0);
+    expect(await superseding.takeovers()).toBe(1);
   });
 
   test("waits, by default, for the page's own pagehide -- and not for a freeze", async () => {
