@@ -814,8 +814,8 @@ describe("console acceptor re-attaches on a busy create", () => {
 // see them.
 const NOT_EMPTY_LEAD =
   "the rendezvous directory /mnt/rendezvous is not empty; an exchange refuses " +
-  "to start on files an earlier exchange left there, so delete those on the " +
-  "host first. Your own input and results are not what it refuses over.";
+  "to start on an earlier run's files. Turn on \"Clear leftover exchange " +
+  'files" and re-run. Your own input and results are not what it refuses over.';
 // A partner-chosen entry name carrying a literal backslash and a non-ASCII code
 // point, composed RAW by the appliance for the console sink's single escape.
 const PARTNER_ENTRY = "q1\\cohorté.csv";

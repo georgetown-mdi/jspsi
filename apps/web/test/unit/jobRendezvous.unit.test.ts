@@ -14,6 +14,7 @@ import {
 } from "@psilink/core";
 
 import { MAX_INPUT_NAME_LENGTH } from "@jobs/workInputName";
+import { SWEEP_CONTROL_LABEL } from "@bench/runDiagnosticsModel";
 import { appendSanitizedRunWarning } from "@bench/runWarnings";
 
 import {
@@ -695,11 +696,22 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     // the one that keeps the recovery from reading as "empty this folder".
     const [lead] = renderedContentWarnings(["console-hello.json"]);
     expect(lead).toContain("an exchange refuses to start");
-    expect(lead).toContain("delete those on the host first");
+    expect(lead).toContain('Turn on "Clear leftover exchange files"');
     expect(lead).toContain(
       "Your own input and results are not what it refuses over",
     );
     expect(lead).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  });
+
+  test("the recovery sends the operator to a control the console carries", () => {
+    // The recovery is the console's own sweep, quoted by the opening of the
+    // control's visible label because the whole label does not fit beside the
+    // mount path. Either side of that pair drifting leaves the operator hunting
+    // the run form for a control worded differently, so the pair is checked here
+    // rather than kept in step by hand.
+    const quoted = /"([^"]+)"/.exec(notEmptyLead("/data", "shared"));
+    expect(quoted, "the lead names no control at all").not.toBeNull();
+    expect(SWEEP_CONTROL_LABEL.startsWith(quoted![1])).toBe(true);
   });
 
   test("a console mount path rides in the lead", () => {
