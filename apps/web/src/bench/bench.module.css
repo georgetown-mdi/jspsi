@@ -496,6 +496,24 @@
   font-weight: 650;
 }
 
+/* The peer's own first bytes inside the probe alert: a block of its own, in
+   monospace and in neutral ink rather than the alert's voice, so a fragment
+   somebody else chose reads as theirs and can never continue one of the
+   console's own sentences -- the excerpt arrives escaped, but plain printable
+   ASCII that mimics guidance has nothing to escape. Wraps rather than scrolls:
+   the whole capped excerpt is what the operator judges. */
+.peerBytes {
+  margin: 0.5rem 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--bench-rule);
+  background: var(--bench-code-bg);
+  color: var(--bench-ink);
+  font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+  font-size: 0.92em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .stateInset {
   border: 1px dashed var(--bench-faint);
   border-radius: 8px;

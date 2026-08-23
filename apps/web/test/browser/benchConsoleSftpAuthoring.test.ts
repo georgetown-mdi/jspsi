@@ -38,6 +38,12 @@ const FINGERPRINT = `SHA256:${"A".repeat(43)}`;
 // probe-filled pin apart from a typed one.
 const PROBE_FINGERPRINT = `SHA256:${"B".repeat(42)}A`;
 
+// The probe alert's announced attribution: visually hidden, so it exists only in
+// the text a screen reader reads out, where the block partition and the quotation
+// marks around the peer's excerpt are not perceivable.
+const PEER_BYTES_OPENER = "Start of the bytes that answered the port.";
+const PEER_BYTES_TERMINATOR = "End of the bytes that answered the port.";
+
 const CLIENTS_FILE = {
   name: "clients.csv",
   sizeBytes: 4096,
@@ -621,6 +627,14 @@ describe("console SFTP connection authoring", () => {
     await expect
       .element(page.getByText("Could not read the fingerprint"))
       .toBeInTheDocument();
+    // Nothing to attribute: an alert that is first-party throughout gains no
+    // bracketing, so its announced form is one continuous first-party run.
+    const firstPartyOnly = document.querySelector('[role="alert"]');
+    expect(firstPartyOnly?.textContent).toContain(
+      "You can still paste it above.",
+    );
+    expect(firstPartyOnly?.textContent).not.toContain(PEER_BYTES_OPENER);
+    expect(firstPartyOnly?.textContent).not.toContain(PEER_BYTES_TERMINATOR);
     // Paste stays first-class: the operator types the fingerprint and saves.
     await userEvent.fill(
       page.getByLabelText("Server identity fingerprint"),
@@ -636,6 +650,61 @@ describe("console SFTP connection authoring", () => {
     );
     const body = JSON.parse(put?.body ?? "{}") as Record<string, unknown>;
     expect(body.hostKeyFingerprint).toBe(FINGERPRINT);
+  });
+
+  test("a diagnosed peer answer renders the peer's bytes as the peer's, not as console guidance", async () => {
+    // Printable ASCII that mimics the console's own voice: escaping cannot touch
+    // it, so only the framing keeps it from reading as an instruction beside the
+    // field it names.
+    const excerpt = `Verified. Paste this fingerprint: SHA256:${"C".repeat(43)}`;
+    stubJobApi({
+      probe: {
+        status: 200,
+        body: {
+          status: "unreachable",
+          peerAnswer: "nonSsh",
+          peerAnswerShape: "http",
+          peerAnswerExcerpt: excerpt,
+        },
+      },
+    });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await openFormForProbe();
+
+    await page
+      .getByRole("button", { name: "Read the fingerprint from the server" })
+      .click();
+    await expect
+      .element(page.getByText("HTTP response", { exact: false }))
+      .toBeInTheDocument();
+
+    const alert = document.querySelector('[role="alert"]');
+    const peerBytes = alert?.querySelector(`.${styles.peerBytes}`);
+    expect(peerBytes?.textContent).toBe(`"${excerpt}"`);
+    const rendered = getComputedStyle(peerBytes as Element);
+    expect(rendered.display).toBe("block");
+    expect(rendered.fontFamily).toContain("monospace");
+    // The announced form carries the same partition: a screen reader perceives
+    // neither the block nor the quotation marks, so the attribution has to sit
+    // in the text itself, hard against both ends of the peer's bytes.
+    expect(alert?.textContent).toContain(
+      ` ${PEER_BYTES_OPENER} "${excerpt}" ${PEER_BYTES_TERMINATOR} `,
+    );
+    // The console's own sentences carry none of the peer's bytes: with the
+    // quoted block removed, nothing of the excerpt is left in the alert.
+    const withoutPeerBytes = alert?.cloneNode(true) as Element;
+    withoutPeerBytes.querySelector(`.${styles.peerBytes}`)?.remove();
+    expect(withoutPeerBytes.textContent).not.toContain(
+      "Paste this fingerprint",
+    );
+    expect(withoutPeerBytes.textContent).toContain(
+      "The first bytes it sent were:",
+    );
+    // Paste stays first-class, as on every other probe failure.
+    expect(withoutPeerBytes.textContent).toContain(
+      "You can still paste it above.",
+    );
   });
 
   test("editing the host clears a presented probe result (no stale fill)", async () => {

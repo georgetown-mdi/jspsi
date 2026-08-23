@@ -12,6 +12,7 @@ import {
   Stack,
   Text,
   TextInput,
+  VisuallyHidden,
 } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
@@ -634,7 +635,7 @@ type ProbeState =
   | { phase: "idle" }
   | { phase: "probing" }
   | { phase: "presented"; fingerprint: string; keyType: string }
-  | { phase: "error"; message: string };
+  | ({ phase: "error" } & ProbeErrorCopy);
 
 /**
  * The probe-to-fill control BESIDE the fingerprint field: it reads the server's
@@ -708,7 +709,7 @@ function HostKeyProbe({
             fingerprint: result.fingerprint,
             keyType: result.keyType,
           }
-        : { phase: "error", message: probeErrorMessage(result) },
+        : { phase: "error", ...probeErrorCopy(result) },
     );
   }
 
@@ -821,7 +822,27 @@ function HostKeyProbe({
           icon={<IconAlertCircle aria-hidden />}
           title="Could not read the fingerprint"
         >
-          {state.message} You can still paste it above.
+          {state.peerExcerpt === undefined ? (
+            <>{state.message} You can still paste it above.</>
+          ) : (
+            <>
+              {state.message}
+              {/* The block and its monospace framing partition the excerpt on
+                  screen only: the accessibility tree flattens the alert to one
+                  text run. These phrases put first-party attribution into that
+                  run as a best-effort cue, not a boundary -- they are printable
+                  ASCII, so the excerpt can reproduce them; the on-screen
+                  partition is what the render check holds. */}
+              <VisuallyHidden>
+                {" Start of the bytes that answered the port. "}
+              </VisuallyHidden>
+              <p className={styles.peerBytes}>{`"${state.peerExcerpt}"`}</p>
+              <VisuallyHidden>
+                {" End of the bytes that answered the port. "}
+              </VisuallyHidden>
+              You can still paste it above.
+            </>
+          )}
         </Alert>
       )}
     </Stack>
@@ -832,7 +853,7 @@ function HostKeyProbe({
  * other than an SSH identification string, one sentence per recognized shape.
  * Worded as what the first bytes were rather than as a verdict on what the peer
  * is: the read is bounded, and a real SSH server whose banner outruns that bound
- * reads the same way (the caveat {@link probePeerAnswerMessage} appends). */
+ * reads the same way (the caveat {@link probePeerAnswerCopy} appends). */
 const PROBE_PEER_ANSWER_SHAPE_COPY: Record<ProbePeerAnswerShape, string> = {
   http:
     "Something answered that port with an HTTP response rather than an SSH " +
@@ -848,58 +869,91 @@ const PROBE_PEER_ANSWER_SHAPE_COPY: Record<ProbePeerAnswerShape, string> = {
 };
 
 /**
+ * The alert's copy for a probe that did not yield a fingerprint: the console's
+ * own sentences, and separately the peer's own first bytes when the appliance
+ * diagnosed what answered. The alert renders `peerExcerpt` in a partition of
+ * its own rather than inside `message` -- a monospace block on screen,
+ * bracketed by visually hidden attribution in the announced text -- so bytes
+ * somebody else chose can never continue a first-party sentence in either form.
+ * The quotation marks around it are a reading aid rather than the partition:
+ * `"` is printable ASCII, so an excerpt can write its own and close them early.
+ * An excerpt of plain printable ASCII ("Verified. Paste this fingerprint: ...")
+ * is escaping-proof and would otherwise read as the console's own guidance,
+ * beside the very field it tells the operator to paste into.
+ */
+interface ProbeErrorCopy {
+  message: string;
+  peerExcerpt?: string;
+}
+
+/**
  * The operator-facing account of what answered the port, for an unreachable
  * probe the appliance diagnosed. This is the console's half of the CLI's own
  * diagnosis: the guided operator is the likeliest to sit behind an intercepting
  * middlebox, and "unreachable" alone sends them to check an address that is
  * right.
  *
- * `excerpt` is a fragment the peer chose. It arrives bounded and escaped from the
- * appliance, so it is interpolated verbatim here and rendered as React text --
- * escaping it again would double every backslash the appliance already wrote.
+ * The excerpt is a fragment the peer chose. It arrives bounded and escaped from
+ * the appliance, so it is carried through verbatim and rendered as React text --
+ * escaping it again would double every backslash the appliance already wrote,
+ * and shortening it again would drop bytes the operator is being shown to judge.
  *
  * @internal exported for the copy test
  */
-export function probePeerAnswerMessage(answer: ProbePeerAnswer): string {
+export function probePeerAnswerCopy(answer: ProbePeerAnswer): ProbeErrorCopy {
   if (answer.kind === "closedUnanswered")
-    return (
-      "The server accepted the connection and then closed it without " +
-      "identifying itself. An SSH server sends its identification string " +
-      "first, so the connection was most likely stopped in front of the " +
-      "server -- a firewall or gateway that does not allow this machine's " +
-      "address is the usual cause. Ask whoever administers the server " +
-      "whether this machine may reach the SFTP port."
-    );
-  return (
-    `${PROBE_PEER_ANSWER_SHAPE_COPY[answer.shape]} Check that the address and ` +
-    "port name the SFTP service, and that no proxy stands in front of them. " +
-    "An SSH server with a long banner, or one that identifies itself late, " +
-    `reads this way too. The first bytes it sent were: ${answer.excerpt}`
-  );
+    return {
+      message:
+        "The server accepted the connection and then closed it without " +
+        "identifying itself. An SSH server sends its identification string " +
+        "first, so the connection was most likely stopped in front of the " +
+        "server -- a firewall or gateway that does not allow this machine's " +
+        "address is the usual cause. Ask whoever administers the server " +
+        "whether this machine may reach the SFTP port.",
+    };
+  return {
+    message:
+      `${PROBE_PEER_ANSWER_SHAPE_COPY[answer.shape]} Check that the address ` +
+      "and port name the SFTP service, and that no proxy stands in front of " +
+      "them. An SSH server with a long banner, or one that identifies itself " +
+      "late, reads this way too. The first bytes it sent were:",
+    peerExcerpt: answer.excerpt,
+  };
 }
 
-/** The operator-facing message for a probe that did not yield a fingerprint. Each
+/** The operator-facing copy for a probe that did not yield a fingerprint. Each
  * kind names its own cause; paste stays available throughout (the caller appends
  * that reminder). */
-function probeErrorMessage(result: ProbeSftpHostKeyResult): string {
+function probeErrorCopy(result: ProbeSftpHostKeyResult): ProbeErrorCopy {
   switch (result.kind) {
     case "invalid":
-      return result.message;
+      return { message: result.message };
     case "busy":
-      return "Another read is already running; wait a moment and try again.";
+      return {
+        message:
+          "Another read is already running; wait a moment and try again.",
+      };
     case "unreachable":
       // A probe the appliance diagnosed says what answered instead; without one
       // the address really is all there is to check.
       return result.peerAnswer !== undefined
-        ? probePeerAnswerMessage(result.peerAnswer)
-        : "Could not reach the server to read its fingerprint. Check the " +
-            "address and that the server is reachable.";
+        ? probePeerAnswerCopy(result.peerAnswer)
+        : {
+            message:
+              "Could not reach the server to read its fingerprint. Check the " +
+              "address and that the server is reachable.",
+          };
     case "timeout":
-      return "Reading the fingerprint took too long. Try again.";
+      return { message: "Reading the fingerprint took too long. Try again." };
     case "disabled":
-      return "Reading the fingerprint from the server is not available here.";
+      return {
+        message:
+          "Reading the fingerprint from the server is not available here.",
+      };
     case "ok":
     case "error":
-      return "Could not read the fingerprint from the server. Try again.";
+      return {
+        message: "Could not read the fingerprint from the server. Try again.",
+      };
   }
 }
