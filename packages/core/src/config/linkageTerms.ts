@@ -1177,7 +1177,8 @@ export function assertCountOnlyTermsShape(terms: LinkageTerms): void {
  * run. Typed `boolean` rather than the literal values so each reader's gate gives
  * a genuine runtime branch.
  *
- * @internal exported for the test that drives both readers over every strategy.
+ * @internal exported for the tests that drive its readers over every strategy,
+ * here and in the web editor's own Generate gate.
  */
 export const DEDUPLICATE_IMPLEMENTED_BY_STRATEGY: Record<
   LinkageStrategy,

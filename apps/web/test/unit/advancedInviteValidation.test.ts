@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   APPLIED_SETTINGS,
+  DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
   FAN_OUT_FUNCTION_NAMES,
   MAX_INVITATION_LIFETIME_SECONDS,
 } from "@psilink/core";
@@ -12,6 +13,8 @@ import {
 } from "../../src/psi/advancedInviteValidation.js";
 import { buildAdvancedTerms } from "../../src/psi/advancedInviteTerms.js";
 import { seedAdvancedInvite } from "../../src/psi/advancedInviteDraft.js";
+
+import type { LinkageStrategy } from "@psilink/core";
 
 const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
 
@@ -111,8 +114,27 @@ describe("the deduplicating-pair gate (the run refuses what the schema admits)",
   // on both parties before matching begins, so terms authored on that pair are
   // ones both sides abort on. The gate reads core's own verdict rather than
   // restating the pair, and every strategy this build offers can run one -- so
-  // what these pin is that the pairs the run does honor generate here.
+  // these pin both halves: the pairs the run does honor generate here, and the
+  // refusal fires with its own message where the verdict says it cannot.
   const now = new Date("2026-01-01T00:00:00Z");
+
+  // The gate is what a strategy declaring it cannot match a group is stopped at,
+  // and no shipped strategy declares that -- so the verdict is driven to `false`
+  // here, over the same table core drives its own refusal from, rather than left
+  // as a branch nothing reaches. Synchronous throughout, so no other test observes
+  // the flipped table.
+  function withDeduplicateUnimplemented<T>(
+    strategy: LinkageStrategy,
+    read: () => T,
+  ): T {
+    const shipped = DEDUPLICATE_IMPLEMENTED_BY_STRATEGY[strategy];
+    DEDUPLICATE_IMPLEMENTED_BY_STRATEGY[strategy] = false;
+    try {
+      return read();
+    } finally {
+      DEDUPLICATE_IMPLEMENTED_BY_STRATEGY[strategy] = shipped;
+    }
+  }
 
   test.each(["cascade", "single-pass"] as const)(
     "a deduplicating draft under %s generates",
@@ -140,6 +162,42 @@ describe("the deduplicating-pair gate (the run refuses what the schema admits)",
     expect(result.errors).toEqual({});
     expect(result.canGenerate).toBe(true);
   });
+
+  test.each(["cascade", "single-pass"] as const)(
+    "blocks Generate where %s declares no deduplicating match",
+    (linkageStrategy) => {
+      const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+      const deduplicating = { ...draft, deduplicate: true, linkageStrategy };
+      const refused = withDeduplicateUnimplemented(linkageStrategy, () =>
+        validateAdvancedInvite(deduplicating, seed, now),
+      );
+      expect(refused.canGenerate).toBe(false);
+      expect(refused.terms).toBeUndefined();
+      // Against the key list, in this editor's own words, naming the two controls
+      // that settle it and no strategy -- which one cannot run a deduplicating
+      // match is core's verdict rather than this message's.
+      expect(refused.errors.keys).toMatch(/cannot run a deduplicating/);
+      expect(refused.errors.keys).toMatch(/Choose another Linkage strategy/);
+      expect(refused.errors.keys).toMatch(/Allow several of your records/);
+      expect(refused.errors.keys).not.toMatch(new RegExp(linkageStrategy));
+      // A draft that does not ask for the match is untouched by the verdict.
+      expect(
+        withDeduplicateUnimplemented(
+          linkageStrategy,
+          () =>
+            validateAdvancedInvite(
+              { ...deduplicating, deduplicate: false },
+              seed,
+              now,
+            ).canGenerate,
+        ),
+      ).toBe(true);
+      // Restored, so the pair the shipped table admits generates again.
+      expect(validateAdvancedInvite(deduplicating, seed, now).canGenerate).toBe(
+        true,
+      );
+    },
+  );
 });
 
 describe("the strategy gate on a deduplicating term", () => {
