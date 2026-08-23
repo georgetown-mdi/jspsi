@@ -458,6 +458,12 @@ describe("verify receipt bench", () => {
     await expect
       .element(page.getByText("Verification failed"))
       .toBeInTheDocument();
+    // The absence below means nothing unless the mismatch the note would sit
+    // beside is the one it explains: a run failing somewhere else entirely would
+    // carry no note either.
+    await expect
+      .element(page.getByText("The payload you received: Does not match"))
+      .toBeInTheDocument();
     await expect
       .element(
         page.getByText("a committed empty string from a committed null", {

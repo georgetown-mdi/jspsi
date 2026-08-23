@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import { describe, expect, test } from "vitest";
 
 import { buildExchangeRecord } from "../src/exchangeRecord";
-import { buildOutputTable } from "../src/payloadExchange";
+import { buildOutputTable, preparePayload } from "../src/payloadExchange";
 import { loadCSVFile } from "../src/file";
 import {
   reconstructCommittedData,
@@ -649,34 +649,40 @@ const partnerPayloadAsSent: PartnerPayload = {
   rows: [["active"], [null]],
 };
 
+function csvStream(text: string): Readable {
+  const stream = new Readable({ read() {} });
+  stream.push(Buffer.from(text, "utf8"));
+  stream.push(null);
+  return stream;
+}
+
 // buildOutputTable emits already-escaped cells and every writer only joins them,
 // so serializing that way and reading the bytes back through the shared reader is
 // the round trip a holder's retained result makes.
 async function retainedResultFor(
   partnerPayload: PartnerPayload,
+  inputRows: CSVRow[] = retainedInputRows,
 ): Promise<RetainedResult> {
   const table = buildOutputTable(
     associationTable,
-    retainedInputRows,
+    inputRows,
     retainedMetadata,
     partnerPayload,
   );
   const csv = [table.headers, ...table.rows]
     .map((cells) => cells.join(",") + "\n")
     .join("");
-  const stream = new Readable({ read() {} });
-  stream.push(Buffer.from(csv, "utf8"));
-  stream.push(null);
-  return toRetainedResult(await loadCSVFile(stream));
+  return toRetainedResult(await loadCSVFile(csvStream(csv)));
 }
 
 function reconstructFrom(
   record: Parameters<typeof reconstructCommittedData>[0]["record"],
   result: RetainedResult,
+  inputRows: CSVRow[] = retainedInputRows,
 ) {
   return reconstructCommittedData({
     record,
-    inputRows: retainedInputRows,
+    inputRows,
     result,
     ourIdColumn: "pid",
   });
@@ -696,10 +702,7 @@ describe("reproductionMismatchCauses", () => {
     // empty cell come back from the shared reader as the same empty string, so no
     // reader-side distinction is available to reconstruct a null from.
     const csv = 'pid,row_id,status\nP0,1,""\nP2,0,\n';
-    const stream = new Readable({ read() {} });
-    stream.push(Buffer.from(csv, "utf8"));
-    stream.push(null);
-    const result = toRetainedResult(await loadCSVFile(stream));
+    const result = toRetainedResult(await loadCSVFile(csvStream(csv)));
     expect(result.rows.map((row) => row[2])).toEqual(["", ""]);
   });
 
@@ -725,6 +728,36 @@ describe("reproductionMismatchCauses", () => {
     );
     // The cause is named, not accepted: the verdict is still a failure.
     expect(report.outcome).toBe("failed");
+  });
+
+  test("an empty cell the sent payload committed reproduces from the input", async () => {
+    // The exclusion that bounds the caveat to the received payload, driven on the
+    // run that raises it: the retained input holds an empty payload cell at a
+    // matched row, and the partner's second value was null. Both reach the
+    // re-supply as an empty string, but the sent side reads its cell back from
+    // the input the send side read it from, through the same reader, so
+    // localPayloadSent opens and the note stands against the received payload
+    // alone.
+    const inputRows = (
+      await loadCSVFile(csvStream("pid,dose\nP0,\nP1,15mg\nP2,20mg\n"))
+    ).data;
+    const sent = preparePayload(inputRows, retainedMetadata, associationTable);
+    if (!sent.hasData) throw new Error("expected hasData:true");
+    expect(sent.rows).toEqual([[""], ["20mg"]]);
+
+    const { record, keys } = await buildExchangeRecord({
+      ...baseInputs,
+      localPayloadSent: { columns: sent.columns, rows: sent.rows },
+    });
+    const result = await retainedResultFor(partnerPayloadAsSent, inputRows);
+    const { data, warnings } = reconstructFrom(record, result, inputRows);
+    const report = await verifyExchangeRecord(record, keys, { data });
+    expect(warnings).toEqual([]);
+    expect(report.commitments.localPayloadSent).toBe("verified");
+    expect(report.commitments.partnerPayloadReceived).toBe("mismatch");
+    const causes = reproductionMismatchCauses(report, data);
+    expect(causes).toHaveLength(1);
+    expect(causes[0]).toContain("the re-supplied received payload carries");
   });
 
   test("an empty string in that cell opens the commitment and earns no note", async () => {
