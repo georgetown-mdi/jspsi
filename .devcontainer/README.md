@@ -31,8 +31,11 @@ Three layers, so prompt-free operation inside is safe:
 2. **Egress firewall** (`init-firewall.sh`, run via passwordless sudo on start):
    default-deny outbound (IPv4 and IPv6, failing closed if it cannot build the
    full ruleset), allowing only the hosts a real `npm ci` trace showed (the npm
-   registry and `nodejs.org`), GitHub (its published IP ranges), the Anthropic
-   API and login, and the VS Code extension CDN. Telemetry and updater hosts are
+   registry and `nodejs.org`), GitHub (its published IP ranges, plus the
+   `productionresultssa*.blob.core.windows.net` storage shards -- resolved by
+   enumeration at start, since GitHub publishes no ranges for them -- that the
+   API redirects Actions log bodies and run artifacts to), the Anthropic API and
+   login, and the VS Code extension CDN. Telemetry and updater hosts are
    absent: the container sets `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` and
    `DISABLE_AUTOUPDATER`, so Claude makes no such calls.
 3. **Command deny-list and a protected-branch push hook** (`.claude/settings.json`,
@@ -73,6 +76,12 @@ the host filesystem, not an airtight seal:
   Pages/`raw`/the API are allowlisted wholesale) can be reached by sending a
   different SNI/Host to that IP. GitHub in particular is a usable exfiltration
   channel via `git`/`gh` whenever a token is present.
+- **Actions log storage widens that to shared Azure clusters.** The
+  `productionresultssa*` addresses are storage-cluster VIPs rather than addresses
+  of GitHub's own, and many shards share one, so unrelated storage accounts --
+  including ones an attacker creates -- sit on the same IPs and become reachable
+  by the same different-Host trick. Same class as the GitHub channel above, and
+  accepted for the same reason: reading a failed job's log is worth it.
 - **A provided token grants real GitHub write access.** When `GH_TOKEN` is set in
   `.env` (see Prerequisites), the container can push feature branches and open
   PRs. The push hook refuses `staging`/`main` and branch protection rejects them
