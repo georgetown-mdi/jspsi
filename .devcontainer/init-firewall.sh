@@ -11,6 +11,10 @@ IFS=$'\n\t'        # vars, and pipeline failures; stricter word splitting.
 #   - GitHub's published IP ranges -- the trace's other two hosts (github.com and
 #     release-assets.githubusercontent.com, which resolves into 185.199.108.0/22)
 #     both fall in these, and they also cover gh, the API, and raw.
+#   - productionresultssa*.blob.core.windows.net -- the Azure storage shards the
+#     GitHub API redirects Actions log bodies and run artifacts to; outside the
+#     published ranges above, so enumerated and resolved at start (rationale and
+#     limits at the block below).
 #   - api.anthropic.com -- the Claude model API.
 #   - claude.ai / console.anthropic.com -- interactive Claude login (API-key auth
 #     via ANTHROPIC_API_KEY needs neither; these are best-effort).
@@ -141,6 +145,44 @@ for domain in \
   "registry.npmjs.org"; do
   add_domain "$domain" optional || true
 done
+
+# Actions job/run log BODIES and `gh run download` artifacts do not come from
+# api.github.com: it answers with a 302 to Azure storage on
+# productionresultssa<N>.blob.core.windows.net, which the GitHub meta ranges above
+# do not cover (the feed's `actions` key is runner egress, not results storage).
+# Without these addresses the redirect target hits the catch-all REJECT and a
+# failed job's log cannot be read at all. GitHub publishes no ranges for this
+# storage, so enumerating and resolving the shard names is the only source of
+# addresses available. Probed 2026-08-23: every shard in 0..99 resolves except 22
+# (NXDOMAIN), to 29 unique addresses -- many shards share one storage-cluster
+# VIP. Re-verify with `dig +short A productionresultssa<N>.blob.core.windows.net`.
+# Two limits: a shard numbered above 99 is silently unreachable if GitHub adds
+# one, and the ipset holds the addresses resolved at container start, which can
+# rotate underneath it (a limit every domain above shares). Those shared VIPs
+# also front unrelated storage accounts on the same clusters -- an accepted
+# residual, listed with the others in README.md.
+# Strictly optional and quiet: a shard that does not resolve is skipped rather
+# than fatal, so the ruleset builds exactly as it does today if this storage
+# cannot be resolved at all, and one summary line replaces the 100 add_domain
+# traces that would otherwise bury the rest of the log. `dig` is bounded per
+# query because there are 100 of them -- on its 5s x 3-retry default an
+# unanswering resolver would stall container start for minutes.
+blob_shards_resolved=0
+blob_shard_ips=""
+for shard in {0..99}; do
+  shard_ips=$(dig +time=2 +tries=1 +short A "productionresultssa$shard.blob.core.windows.net" | grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || true)
+  [ -n "$shard_ips" ] || continue
+  blob_shards_resolved=$((blob_shards_resolved + 1))
+  blob_shard_ips="$blob_shard_ips$shard_ips"$'\n'
+done
+blob_ips_added=0
+if [ -n "$blob_shard_ips" ]; then
+  while read -r ip; do
+    ipset add -exist allowed-domains "$ip"
+    blob_ips_added=$((blob_ips_added + 1))
+  done < <(printf '%s' "$blob_shard_ips" | sort -u)
+fi
+echo "Actions results storage: $blob_shards_resolved/100 shard hosts resolved, $blob_ips_added unique IPs added"
 
 # Allow the container to reach the host gateway so host-forwarded ports work.
 # Restricted to the gateway address itself rather than the whole bridge /24, so
