@@ -189,7 +189,9 @@ installed copy must not pin itself to old code:
 - A new version installs in the background and takes over at the next launch of
   the app. When one is ready while the app is open, the app offers a reload
   rather than swapping code under a run in progress, and the browser asks the
-  operator to confirm a reload pressed while a run is under way.
+  operator to confirm a reload pressed while a run is under way. Declining that
+  confirmation keeps the run and leaves the new version waiting, so the offer
+  stands and reloading later still applies it.
 - An update replaces the app's cached code, not the browser's own storage: the
   recurring exchanges, their secrets, and the accounting stay in that storage,
   which is not the cache the worker manages. What an upgrade can still cost is a

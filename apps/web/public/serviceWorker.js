@@ -35,11 +35,15 @@
  *   - A new worker does NOT call skipWaiting() on install. It waits, and takes
  *     over when the last client controlled by the old worker goes away (the next
  *     cold start), or when a client that has told its operator an update is
- *     ready posts SKIP_WAITING_MESSAGE. Swapping under a live client would
- *     purge, on activate, the very asset cache that client's already-loaded code
- *     lazily fetches from -- during an exchange, on an app whose exchanges are
- *     long-running and interactive. The waiting worker is the honest form of
- *     "an update is available"; it is not a way to defer one indefinitely.
+ *     ready posts SKIP_WAITING_MESSAGE as it unloads. Swapping under a live
+ *     client would purge, on activate, the very asset cache that client's
+ *     already-loaded code lazily fetches from -- during an exchange, on an app
+ *     whose exchanges are long-running and interactive. The waiting worker is
+ *     the honest form of "an update is available"; it is not a way to defer one
+ *     indefinitely. The unload-time post also means the confirming reload
+ *     itself is dispatched while the old worker is still the controller: the
+ *     new worker's rules govern from its activate-and-claim onward, and fully
+ *     at the next load.
  *
  * CACHE_VERSION names the caching scheme, not the deployment: activate deletes
  * every cache whose name is not in CURRENT_CACHES, so bumping it discards
@@ -50,8 +54,8 @@
 
 /** The caching scheme's version. Bump it when the cache layout or the entries a
  * cache may hold change; activate then discards the previous scheme's caches --
- * including, per the declined-reload path in {@link claimAndDiscardOldCaches},
- * a live page's own asset cache. */
+ * including, per {@link claimAndDiscardOldCaches}, the asset cache a client left
+ * open in another tab is still fetching from. */
 const CACHE_VERSION = "v1";
 
 /** Holds the one cached navigation document plus {@link STATIC_ASSETS}. */
@@ -108,8 +112,9 @@ const STATIC_ASSETS = [
 const MAX_ASSET_ENTRIES = 240;
 
 /** The message a client posts to make a waiting worker take over now, having
- * told its operator an update is ready. Mirrored by the client registration in
- * `apps/web/src/utils/appShellUpdate.ts`. */
+ * told its operator an update is ready and reached the unload that applies it.
+ * Mirrored by the client registration in `apps/web/src/utils/appShellUpdate.ts`.
+ */
 const SKIP_WAITING_MESSAGE = "psilink-skip-waiting";
 
 /** The message a client running as an INSTALLED app posts to have every route's
@@ -285,16 +290,16 @@ async function warmRouteAssets() {
  * already-open clients. Claiming matters on the first install -- the page that
  * registered the worker is otherwise uncontrolled until its next navigation, so
  * nothing it loads reaches a cache and a reload straight into offline finds
- * nothing. Claiming on activate takes control of whatever client is open,
- * including a running exchange: the update banner's Reload posts SKIP_WAITING
- * before the reload runs, and an operator who then declines the beforeunload
- * confirmation is left with the new worker activated and controlling that
- * still-open page. The discard beside it purges nothing today because
- * CACHE_VERSION is constant across deployments; bumping it would make this same
- * declined-reload path destructive to that live page's asset cache. The claim
- * does not depend on the discard: a storage that will not enumerate leaves the
- * old caches in place, which costs disk, while an unclaimed worker leaves the
- * page uncontrolled.
+ * nothing. Claiming on activate takes control of whatever client is open, and
+ * the client that asked for this takeover is not one of them -- it posts
+ * SKIP_WAITING_MESSAGE as it unloads (`apps/web/src/utils/appShellUpdate.ts`).
+ * A SECOND client of the same origin, left open in another tab, is claimed here
+ * while it goes on running the old code: the discard beside the claim purges
+ * nothing today because CACHE_VERSION is constant across deployments, and
+ * bumping it would take that tab's asset cache out from under it. The claim does
+ * not depend on the discard: a storage that will not enumerate leaves the old
+ * caches in place, which costs disk, while an unclaimed worker leaves the page
+ * uncontrolled.
  */
 async function claimAndDiscardOldCaches() {
   await tryCache(async () => {

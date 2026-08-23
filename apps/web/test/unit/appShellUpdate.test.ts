@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   SKIP_WAITING_MESSAGE,
@@ -10,7 +10,10 @@ import {
   subscribeAppShellUpdate,
 } from "@utils/appShellUpdate";
 
-import { serviceWorkerString } from "../utils/serviceWorkerHarness";
+import {
+  createServiceWorkerHarness,
+  serviceWorkerString,
+} from "../utils/serviceWorkerHarness";
 
 import type { ShellContainer, ShellWorker } from "@utils/appShellUpdate";
 
@@ -20,6 +23,11 @@ import type { ShellContainer, ShellWorker } from "@utils/appShellUpdate";
 // here with a fabricated container rather than a real registration -- the
 // worker's own half (install without skipWaiting, activate's cache purge, the
 // skip-waiting message) is test/unit/serviceWorker.test.ts.
+//
+// The apply path is the exception: the waiting worker there is
+// `apps/web/public/serviceWorker.js` itself behind the harness, so whether a
+// reload the operator declined left the update pending is measured as the
+// shipped worker's own `skipWaiting()` rather than as a string in an array.
 
 /** A worker whose state a test advances, firing `statechange` as a real one does. */
 function fakeWorker(state = "installing") {
@@ -76,8 +84,53 @@ function fakeContainer(options: {
   };
 }
 
+/**
+ * A waiting worker that is the shipped `public/serviceWorker.js`, running in the
+ * harness: what the client posts is delivered to the file that deploys, and
+ * whether the update was applied is read off that worker's `skipWaiting()`.
+ */
+function shippedWaitingWorker() {
+  const harness = createServiceWorkerHarness();
+  const delivered: Array<Promise<void>> = [];
+  const worker: ShellWorker = {
+    state: "installed",
+    postMessage: (message: unknown) => {
+      delivered.push(harness.postMessage(message));
+    },
+    addEventListener: () => undefined,
+  };
+  return {
+    worker,
+    /** How many times the shipped worker has been made to take over. */
+    async takeovers(): Promise<number> {
+      await Promise.all(delivered);
+      return harness.skipWaitingCalls;
+    },
+  };
+}
+
+/** The page-unload seam, which is where a test decides the fate of the reload
+ * the operator pressed: `unloadPage` is the page going away, and never calling
+ * it is the operator declining the browser's confirmation and staying. */
+function fakePageUnloading() {
+  const listeners: Array<() => void> = [];
+  return {
+    onPageUnloading: (listener: () => void) => {
+      listeners.push(listener);
+    },
+    /** How many listeners the module has armed. */
+    get armed(): number {
+      return listeners.length;
+    },
+    unloadPage(): void {
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
 afterEach(() => {
   resetAppShellUpdate();
+  vi.unstubAllGlobals();
 });
 
 describe("the first install", () => {
@@ -134,34 +187,115 @@ describe("a redeployment", () => {
 });
 
 describe("applying an update", () => {
-  test("tells the waiting worker to take over and reloads on the swap", async () => {
-    const waiting = fakeWorker("installed");
+  /** A registered page with the shipped worker waiting behind its banner, and
+   * the seams that decide what pressing Reload comes to. */
+  async function readyToApply() {
+    const shipped = shippedWaitingWorker();
+    const unloading = fakePageUnloading();
     const fake = fakeContainer({
       controller: fakeWorker("activated").worker,
-      waiting: waiting.worker,
+      waiting: shipped.worker,
     });
-    let reloads = 0;
-    await registerAppShell(fake.container, { reload: () => (reloads += 1) });
+    const reloads = { count: 0 };
+    await registerAppShell(fake.container, {
+      reload: () => (reloads.count += 1),
+      onPageUnloading: unloading.onPageUnloading,
+    });
+    return { shipped, unloading, fake, reloads };
+  }
+
+  test("reloads the page and has the worker take over as it goes", async () => {
+    const { shipped, unloading, reloads } = await readyToApply();
 
     applyAppShellUpdate();
 
-    expect(waiting.messages).toEqual([SKIP_WAITING_MESSAGE]);
-    expect(reloads).toBe(0);
+    expect(reloads.count).toBe(1);
+    expect(await shipped.takeovers()).toBe(0);
 
-    fake.changeController();
+    unloading.unloadPage();
 
-    expect(reloads).toBe(1);
+    expect(await shipped.takeovers()).toBe(1);
+  });
+
+  test("declined, leaves the update pending and applies it on a later confirmation", async () => {
+    const { shipped, unloading, reloads } = await readyToApply();
+
+    applyAppShellUpdate();
+
+    // The operator answers the browser's confirmation with Stay, so the page
+    // never unloads: its code, its worker, and the pending update are untouched.
+    expect(await shipped.takeovers()).toBe(0);
+    expect(appShellUpdateReady()).toBe(true);
+
+    applyAppShellUpdate();
+
+    expect(reloads.count).toBe(2);
+    expect(unloading.armed).toBe(1);
+    expect(await shipped.takeovers()).toBe(0);
+
+    unloading.unloadPage();
+
+    expect(await shipped.takeovers()).toBe(1);
+  });
+
+  test("applies the newest waiting worker, not the one the operator first pressed", async () => {
+    const { shipped, unloading, fake } = await readyToApply();
+    applyAppShellUpdate();
+
+    const superseding = shippedWaitingWorker();
+    fake.registration.waiting = superseding.worker;
+    unloading.unloadPage();
+
+    expect(await shipped.takeovers()).toBe(0);
+    expect(await superseding.takeovers()).toBe(1);
   });
 
   test("does nothing when no worker is waiting", async () => {
+    const unloading = fakePageUnloading();
     const fake = fakeContainer({ controller: fakeWorker("activated").worker });
     let reloads = 0;
-    await registerAppShell(fake.container, { reload: () => (reloads += 1) });
+    await registerAppShell(fake.container, {
+      reload: () => (reloads += 1),
+      onPageUnloading: unloading.onPageUnloading,
+    });
 
     applyAppShellUpdate();
-    fake.changeController();
 
     expect(reloads).toBe(0);
+    expect(unloading.armed).toBe(0);
+  });
+
+  test("waits, by default, for the page's own pagehide -- and not for a freeze", async () => {
+    const shipped = shippedWaitingWorker();
+    const fake = fakeContainer({
+      controller: fakeWorker("activated").worker,
+      waiting: shipped.worker,
+    });
+    const pageHidden: Array<(event: { persisted: boolean }) => void> = [];
+    vi.stubGlobal("window", {
+      addEventListener: (
+        type: string,
+        listener: (event: { persisted: boolean }) => void,
+      ) => {
+        if (type === "pagehide") pageHidden.push(listener);
+      },
+    });
+    await registerAppShell(fake.container, {
+      reload: () => undefined,
+      isInstalledRuntime: () => false,
+    });
+
+    applyAppShellUpdate();
+    for (const listener of pageHidden) listener({ persisted: true });
+
+    // A persisted pagehide is the back/forward cache freezing the page, which
+    // can be restored still running this code -- not the page going away.
+    expect(pageHidden).toHaveLength(1);
+    expect(await shipped.takeovers()).toBe(0);
+
+    for (const listener of pageHidden) listener({ persisted: false });
+
+    expect(await shipped.takeovers()).toBe(1);
   });
 });
 
@@ -191,7 +325,7 @@ describe("warming every route's code", () => {
     expect(controller.messages).toEqual([]);
   });
 
-  test("is not asked for on the controller change an applied update causes", async () => {
+  test("is not asked for once this page has asked for a takeover", async () => {
     const controller = fakeWorker("activated");
     const waiting = fakeWorker("installed");
     const fake = fakeContainer({
@@ -201,6 +335,7 @@ describe("warming every route's code", () => {
     await registerAppShell(fake.container, {
       reload: () => undefined,
       isInstalledRuntime: () => true,
+      onPageUnloading: fakePageUnloading().onPageUnloading,
     });
     controller.messages.length = 0;
 
