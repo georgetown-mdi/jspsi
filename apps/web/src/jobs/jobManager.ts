@@ -652,6 +652,11 @@ export class JobManager {
     };
     this.slot = { phase: "active", record, deleted: false };
 
+    // One value for the preflight's recovery copy and for what the child is told
+    // to do, so the notice cannot send the operator to a control this very launch
+    // already carries.
+    const sweepExchangeFiles = intent.sweepExchangeFiles === true;
+
     // Each leg preflights independently and names itself, so a split appliance's
     // two mounts raise their own notices rather than one set the operator cannot
     // attribute to a folder.
@@ -663,6 +668,7 @@ export class JobManager {
           this.jobInputDir,
           this.dataRoot,
           workdir,
+          sweepExchangeFiles,
         ))
           this.appendEvent(record, { v: 1, type: "warning", message });
 
@@ -687,7 +693,7 @@ export class JobManager {
       workdir,
       eventStream: intent.eventStream ?? true,
       runControls: {
-        sweepExchangeFiles: intent.sweepExchangeFiles === true,
+        sweepExchangeFiles,
         logFilePath: logPath ?? undefined,
       },
       handlers,

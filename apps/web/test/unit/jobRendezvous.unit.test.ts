@@ -48,6 +48,14 @@ function tempDir(label: string): string {
  * from the Latin letter. */
 const WIDE_ESCAPING_CHAR = "\u0430";
 
+/** The launch's sweep intent as the preflight reads it: the console's "Clear
+ * leftover exchange files" control left off, which is every case but the one the
+ * sweep-aware recovery is about. */
+const SWEEP_OFF = false;
+
+/** The same intent with the sweep control turned on for this launch. */
+const SWEEP_ON = true;
+
 /** A nested (existing, writable) subdirectory of `parent`. */
 function subDir(parent: string, name: string): string {
   const dir = path.join(parent, name);
@@ -475,6 +483,7 @@ describe("each leg's preflight names the mount it is about", () => {
       undefined,
       dataRoot,
       workdir,
+      SWEEP_OFF,
     );
     expect(
       inboundWarnings.some((warning) =>
@@ -488,6 +497,7 @@ describe("each leg's preflight names the mount it is about", () => {
       undefined,
       dataRoot,
       workdir,
+      SWEEP_OFF,
     );
     expect(
       outboundWarnings.some((warning) =>
@@ -506,6 +516,7 @@ describe("each leg's preflight names the mount it is about", () => {
         undefined,
         dataRoot,
         path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
       )[0],
     ).toContain("the rendezvous directory");
   });
@@ -528,6 +539,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
         undefined,
         dataRoot,
         path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
       ),
     );
     expect(warnings).toHaveLength(1);
@@ -544,6 +556,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
         undefined,
         dataRoot,
         path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
       ),
     );
     expect(warnings).toHaveLength(1);
@@ -560,6 +573,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
         shared,
         dataRoot,
         path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
       ),
     );
     expect(warnings).toHaveLength(1);
@@ -577,6 +591,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
         jobInput,
         dataRoot,
         path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
       ),
     );
     expect(warnings).toHaveLength(1);
@@ -594,6 +609,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
         jobInput,
         dataRoot,
         path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
       ),
     );
     expect(warnings).toHaveLength(2);
@@ -616,6 +632,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
         jobInput,
         dataRoot,
         path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
       ),
     ).toEqual([]);
   });
@@ -636,7 +653,10 @@ function isContentWarning(warning: string): boolean {
  * the overlap branch by non-overlapping sibling fixtures, and reduced to the
  * warnings about what the directory holds. Raw, as the preflight composes them and
  * as the job event stream carries them. */
-function contentWarnings(entries: Array<string>): Array<string> {
+function contentWarnings(
+  entries: Array<string>,
+  sweepExchangeFiles: boolean = SWEEP_OFF,
+): Array<string> {
   const rendezvous = tempDir("rendezvous");
   const dataRoot = tempDir("data");
   for (const entry of entries)
@@ -647,6 +667,7 @@ function contentWarnings(entries: Array<string>): Array<string> {
     tempDir("input"),
     dataRoot,
     path.join(dataRoot, "current-job"),
+    sweepExchangeFiles,
   ).filter(isContentWarning);
 }
 
@@ -662,8 +683,11 @@ function renderedAtSeat(warnings: Array<string>): Array<string> {
 }
 
 /** The content warnings as the operator reads them. */
-function renderedContentWarnings(entries: Array<string>): Array<string> {
-  return renderedAtSeat(contentWarnings(entries));
+function renderedContentWarnings(
+  entries: Array<string>,
+  sweepExchangeFiles: boolean = SWEEP_OFF,
+): Array<string> {
+  return renderedAtSeat(contentWarnings(entries, sweepExchangeFiles));
 }
 
 /** The transcript a completed retain-mode run leaves in the mount. */
@@ -703,28 +727,67 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     expect(lead).not.toContain(DISPLAY_TRUNCATION_MARKER);
   });
 
+  test("the recovery for a launch without the sweep is pinned whole", () => {
+    // The whole sentence, not a clause of it: the two forms share their opening,
+    // so a check reading only a fragment would pass while the operator who has to
+    // act on this one reads a sentence half-reworded by the other.
+    expect(notEmptyLead("/data", "shared", SWEEP_OFF)).toBe(
+      "the rendezvous directory /data is not empty; an exchange refuses to " +
+        "start on an earlier run's files. Turn on \"Clear leftover exchange " +
+        'files" and re-run. Your own input and results are not what it ' +
+        "refuses over.",
+    );
+  });
+
+  test("a launch carrying the sweep is not told to turn the sweep on", () => {
+    // The control this recovery names is the one the operator ticked to get here,
+    // so instructing them to tick it says the console did not notice.
+    const [lead] = renderedContentWarnings(["console-hello.json"], SWEEP_ON);
+    expect(lead).toContain("an exchange refuses to start");
+    expect(lead).not.toContain("Turn on");
+    expect(lead).toContain(
+      '"Clear leftover exchange files" is on, so this run clears them first',
+    );
+    expect(lead).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  });
+
+  test("a sweeping launch is told what the sweep leaves alone", () => {
+    // The operator's question changes with the sweep: what an entry guard refuses
+    // over matters when nothing is being deleted, and what a sweep about to run
+    // deletes matters when something is.
+    const [lead] = renderedContentWarnings(retainedTranscript, SWEEP_ON);
+    expect(lead).toContain("leaves your input and results alone");
+  });
+
   test("the recovery sends the operator to a control the console carries", () => {
     // The recovery is the console's own sweep, quoted by the opening of the
     // control's visible label because the whole label does not fit beside the
     // mount path. Either side of that pair drifting leaves the operator hunting
     // the run form for a control worded differently, so the pair is checked here
-    // rather than kept in step by hand.
-    const quoted = /"([^"]+)"/.exec(notEmptyLead("/data", "shared"));
-    expect(quoted, "the lead names no control at all").not.toBeNull();
-    expect(SWEEP_CONTROL_LABEL.startsWith(quoted![1])).toBe(true);
+    // rather than kept in step by hand. Both recoveries name it, so both are
+    // checked: a form that quoted a stale label would send that launch nowhere.
+    for (const sweepExchangeFiles of [SWEEP_OFF, SWEEP_ON]) {
+      const quoted = /"([^"]+)"/.exec(
+        notEmptyLead("/data", "shared", sweepExchangeFiles),
+      );
+      expect(quoted, "the lead names no control at all").not.toBeNull();
+      expect(SWEEP_CONTROL_LABEL.startsWith(quoted![1])).toBe(true);
+    }
   });
 
   test("a console mount path rides in the lead", () => {
-    const lead = notEmptyLead("/data", "shared");
-    expect(lead).toContain("/data");
-    expect(sanitizeForDisplay(lead)).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    for (const sweepExchangeFiles of [SWEEP_OFF, SWEEP_ON]) {
+      const lead = notEmptyLead("/data", "shared", sweepExchangeFiles);
+      expect(lead).toContain("/data");
+      expect(sanitizeForDisplay(lead)).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    }
   });
 
   test("a mount path too long for the lead is left out of it", () => {
     // The path is the lead's only unbounded part, and the recovery is what a
     // truncation would cut, so the path is what gives way.
     const deepMount = `/mnt/${"d".repeat(300)}`;
-    const lead = notEmptyLead(deepMount, "shared");
+    const lead = notEmptyLead(deepMount, "shared", SWEEP_OFF);
     expect(lead).not.toContain(deepMount);
     expect(lead).toContain("the rendezvous directory is not empty");
     expect(lead).toContain(
@@ -741,10 +804,12 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     const escapedMount = `/mnt/${WIDE_ESCAPING_CHAR.repeat(35)}`;
     const asciiMount = `/mnt/${"d".repeat(35)}`;
     expect(escapedMount.length).toBe(asciiMount.length);
-    expect(notEmptyLead(asciiMount, "shared")).toContain(asciiMount);
-    expect(notEmptyLead(escapedMount, "shared")).not.toContain(escapedMount);
+    expect(notEmptyLead(asciiMount, "shared", SWEEP_OFF)).toContain(asciiMount);
+    expect(notEmptyLead(escapedMount, "shared", SWEEP_OFF)).not.toContain(
+      escapedMount,
+    );
     expect(
-      sanitizeForDisplay(notEmptyLead(escapedMount, "shared")),
+      sanitizeForDisplay(notEmptyLead(escapedMount, "shared", SWEEP_OFF)),
     ).not.toContain(DISPLAY_TRUNCATION_MARKER);
   });
 
@@ -767,6 +832,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
       tempDir("input"),
       dataRoot,
       path.join(dataRoot, "current-job"),
+      SWEEP_OFF,
     ).filter(isContentWarning);
     expect(warnings).toHaveLength(2);
     expect(warnings[1]).toContain("prior-job");
@@ -784,6 +850,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
       undefined,
       shared,
       workdir,
+      SWEEP_OFF,
     ).filter(isContentWarning);
     expect(warnings).toEqual([]);
   });
@@ -798,6 +865,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
       undefined,
       shared,
       workdir,
+      SWEEP_OFF,
     ).filter(isContentWarning);
     expect(warnings).toHaveLength(2);
     expect(warnings[1]).toContain("console-hello.json");
@@ -894,6 +962,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
         tempDir("input"),
         dataRoot,
         path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
       );
       expect(
         warnings.some((warning) => warning.includes("cannot be listed")),
@@ -973,13 +1042,14 @@ function expectWithinNoticeBudget(warnings: Array<string>): void {
 }
 
 /** The preflight's own argument list: the mount, which leg it is, the work-input
- * directory, the data root, and this launch's workdir. */
+ * directory, the data root, this launch's workdir, and its sweep intent. */
 type PreflightArgs = [
   string,
   RendezvousLeg,
   string | undefined,
   string,
   string,
+  boolean,
 ];
 
 /** A mount path whose own rendered cost is far past the notice budget, under a
@@ -990,7 +1060,11 @@ function overlongMount(segment: string): string {
 
 /** Fixtures that keep every branch except this shape's own quiet: a data root and a
  * work-input directory that are siblings of the mount, never its ancestors. */
-function isolatedArgs(mount: string, leg: RendezvousLeg): PreflightArgs {
+function isolatedArgs(
+  mount: string,
+  leg: RendezvousLeg,
+  sweepExchangeFiles: boolean = SWEEP_OFF,
+): PreflightArgs {
   const dataRoot = tempDir("data");
   return [
     mount,
@@ -998,6 +1072,7 @@ function isolatedArgs(mount: string, leg: RendezvousLeg): PreflightArgs {
     tempDir("input"),
     dataRoot,
     path.join(dataRoot, "current-job"),
+    sweepExchangeFiles,
   ];
 }
 
@@ -1069,6 +1144,20 @@ const NOTICE_SHAPES: Array<NoticeShape> = [
     namesMount: true,
   },
   {
+    // The same branch on a launch that already carries the sweep: the lead has a
+    // second copy with its own length to fit, and a budget held only at the
+    // wording a fresh launch reads is one the other form can overrun unseen.
+    label: "the lead of a mount that is not empty on a sweeping launch",
+    arrange: (mount, leg) => {
+      fs.mkdirSync(mount, { recursive: true });
+      fs.writeFileSync(path.join(mount, "console-hello.json"), "");
+      return { args: isolatedArgs(mount, leg, SWEEP_ON) };
+    },
+    match: /is not empty/,
+    tail: () => "leaves your input and results alone.",
+    namesMount: true,
+  },
+  {
     label: "the listing of what a mount holds",
     arrange: (mount, leg) => {
       fs.mkdirSync(mount, { recursive: true });
@@ -1094,6 +1183,7 @@ const NOTICE_SHAPES: Array<NoticeShape> = [
           undefined,
           dataRoot,
           path.join(dataRoot, "current-job"),
+          SWEEP_OFF,
         ] as PreflightArgs,
       };
     },
@@ -1238,6 +1328,7 @@ describe("every preflight notice fits its budget once rendered", () => {
       jobInput,
       dataRoot,
       path.join(dataRoot, "current-job"),
+      SWEEP_OFF,
     );
     const overlap = warnings.find((warning) =>
       warning.includes("the work-input directory"),

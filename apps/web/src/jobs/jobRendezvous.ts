@@ -454,15 +454,29 @@ function legNoun(leg: RendezvousLeg, noun: "directory" | "path"): string {
 }
 
 /**
+ * As much of the sweep control's visible label as the notice budget leaves beside
+ * the mount path. Held as its own value because both recoveries below quote it,
+ * and tied to the label the run form renders by a check rather than by matching
+ * copy in two files.
+ */
+const QUOTED_SWEEP_CONTROL = "Clear leftover exchange files";
+
+/**
  * The lead of a non-empty rendezvous directory's warning: what is wrong, what an
  * exchange does about it, the control that clears it, and the files the operator
  * must NOT be read as being told to delete.
  *
  * The recovery is the console's own sweep rather than a host-side deletion: the
  * operator is reading this inside the GUI, and the run form carries a control that
- * does exactly this job. It quotes the opening of that control's visible label,
- * which is as much of it as the budget below leaves beside the mount path; the two
- * are held together by a check rather than by matching copy in two files.
+ * does exactly this job.
+ *
+ * Which recovery it carries follows `sweepExchangeFiles`, the launch's own sweep
+ * intent -- the same value the run's controls carry to the child. A launch that
+ * already turned the control on is told what the sweep does to the leftovers
+ * instead of being told to turn on what it turned on, and the clause about the
+ * operator's own files states what the sweep leaves alone rather than what the
+ * entry guard refuses over, because a run about to delete files is read for what
+ * it deletes.
  *
  * The sink escapes and CAPS what it renders, so the whole sentence has to fit
  * {@link RENDEZVOUS_NOTICE_BUDGET} or the clause that keeps this from reading as
@@ -473,15 +487,19 @@ function legNoun(leg: RendezvousLeg, noun: "directory" | "path"): string {
 export function notEmptyLead(
   rendezvousDir: string,
   leg: RendezvousLeg,
+  sweepExchangeFiles: boolean,
 ): string {
   const label = legNoun(leg, "directory");
-  const recovery =
-    " is not empty; an exchange refuses to start on an earlier run's " +
-    'files. Turn on "Clear leftover exchange files" and re-run. Your own ' +
-    "input and results are not what it refuses over.";
+  const problem =
+    " is not empty; an exchange refuses to start on an earlier run's files. ";
+  const recovery = sweepExchangeFiles
+    ? `"${QUOTED_SWEEP_CONTROL}" is on, so this run clears them first and ` +
+      "leaves your input and results alone."
+    : `Turn on "${QUOTED_SWEEP_CONTROL}" and re-run. Your own input and ` +
+      "results are not what it refuses over.";
   return fitNotice(
-    `${label} ${rendezvousDir}${recovery}`,
-    `${label}${recovery}`,
+    `${label} ${rendezvousDir}${problem}${recovery}`,
+    `${label}${problem}${recovery}`,
   );
 }
 
@@ -548,14 +566,16 @@ function describeRendezvousEntries(
  * whole transcript where the next run's entry guard refuses it, with no crash anywhere
  * in the story. It takes two warnings in order -- the recovery, then what the mount
  * holds -- because the display sink caps each message it renders, and one message
- * carrying both would spend the recovery's budget on the listing. The listing leaves
- * out one entry: the workdir this launch itself just created, which in the
- * single-folder layout (rendezvous directory equal to the data root) always sits
- * inside the mount by the time this preflight runs. It names what remains and leaves
- * the launch to the operator, whose own input and results may sit in that listing too
- * and are not what the guard objects to. It deliberately does not sort protocol files
- * from foreign ones: that grammar is the exchange's, and predicting the guard's
- * verdict here would be a second implementation of it.
+ * carrying both would spend the recovery's budget on the listing. Which recovery the
+ * lead carries follows this launch's own sweep intent (see {@link notEmptyLead}), so
+ * a launch already carrying the sweep is not sent to a control it is already using.
+ * The listing leaves out one entry: the workdir this launch itself just created,
+ * which in the single-folder layout (rendezvous directory equal to the data root)
+ * always sits inside the mount by the time this preflight runs. It names what
+ * remains and leaves the launch to the operator, whose own input and results may sit
+ * in that listing too and are not what the guard objects to. It deliberately does not
+ * sort protocol files from foreign ones: that grammar is the exchange's, and
+ * predicting the guard's verdict here would be a second implementation of it.
  *
  * A split appliance runs this over EACH leg independently, which is why every notice
  * takes `leg` and names the mount it is about: an outbound directory that is missing
@@ -578,6 +598,7 @@ export function rendezvousStartupWarnings(
   jobInputDir: string | undefined,
   dataRoot: string,
   jobWorkdir: string,
+  sweepExchangeFiles: boolean,
 ): Array<string> {
   const label = legNoun(leg, "directory");
   const warnings: Array<string> = [];
@@ -643,7 +664,7 @@ export function rendezvousStartupWarnings(
       }
       if (entries !== undefined && entries.length > 0)
         warnings.push(
-          notEmptyLead(rendezvousDir, leg),
+          notEmptyLead(rendezvousDir, leg, sweepExchangeFiles),
           describeRendezvousEntries(entries, leg),
         );
     }
