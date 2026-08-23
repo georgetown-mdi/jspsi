@@ -40,7 +40,10 @@
  *     already-loaded code lazily fetches from -- during an exchange, on an app
  *     whose exchanges are long-running and interactive. The waiting worker is
  *     the honest form of "an update is available"; it is not a way to defer one
- *     indefinitely.
+ *     indefinitely. The unload-time post also means the confirming reload
+ *     itself is dispatched while the old worker is still the controller: the
+ *     new worker's rules govern from its activate-and-claim onward, and fully
+ *     at the next load.
  *
  * CACHE_VERSION names the caching scheme, not the deployment: activate deletes
  * every cache whose name is not in CURRENT_CACHES, so bumping it discards

@@ -52,6 +52,8 @@ The order in which the banner's Reload does that is what keeps the choice the op
 
 The waiting worker is therefore the honest form of "an update is available", not a way to defer one indefinitely: the network-first document means an online client already renders the current deployment's HTML.
 
+One load lags a worker-logic change, by construction: the confirming reload's own navigation is dispatched while the outgoing worker is still the controller -- the takeover message posts at `pagehide`, after that navigation has begun -- so the first page after a confirmation is fetched under the old worker's rules until the new one activates and claims it. The network-first document and content-hashed assets make that invisible for content; only a change to the worker's own fetch handling arrives one step late, governing from the claim onward and fully at the next load. No in-page ordering removes this: posting before the reload is what re-created the declined-reload harm this path exists to avoid.
+
 ## Hand-written, not generated
 
 `vite-plugin-pwa` and Workbox are the obvious alternative, and their central benefit is a build-time precache manifest: the exact asset list, injected into a generated worker.
