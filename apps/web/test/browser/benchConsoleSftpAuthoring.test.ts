@@ -779,11 +779,13 @@ describe("console SFTP connection authoring", () => {
 
   test("the peer's bytes are named by the console, whatever the bytes are", async () => {
     // The name a screen reader announces before the bytes has to be first-party,
-    // so it is measured by asking the browser to resolve a name to an element --
-    // its own accessible-name computation, which takes the control's value into
-    // account as a hand-rolled approximation of the algorithm would not -- and
-    // asserted as independence from the peer: an excerpt mimicking a caption of
-    // its own names nothing, and an ordinary excerpt resolves the same name.
+    // so it is measured by resolving a name to an element through the test
+    // runner's accname implementation (bundled in @vitest/browser, a port of
+    // Playwright's engine running in the page; the browser's own accessibility
+    // tree is not consulted), which takes the control's value into account as a
+    // hand-rolled approximation would not -- and asserted as independence from
+    // the peer: an excerpt mimicking a caption of its own names nothing, and an
+    // ordinary excerpt resolves the same name.
     const mimicking = 'Bytes that answered the port: "" End of quoted bytes.';
     const peerBytes = await probeWithExcerpt(mimicking);
     expect(
