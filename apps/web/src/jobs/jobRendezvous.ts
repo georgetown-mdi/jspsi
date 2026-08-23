@@ -472,11 +472,21 @@ const QUOTED_SWEEP_CONTROL = "Clear leftover exchange files";
  *
  * Which recovery it carries follows `sweepExchangeFiles`, the launch's own sweep
  * intent -- the same value the run's controls carry to the child. A launch that
- * already turned the control on is told what the sweep does to the leftovers
- * instead of being told to turn on what it turned on, and the clause about the
- * operator's own files states what the sweep leaves alone rather than what the
- * entry guard refuses over, because a run about to delete files is read for what
- * it deletes.
+ * already turned the control on is told the control's state and the order it runs
+ * in instead of being told to turn on what it turned on, and the clause about the
+ * operator's own files states what the sweep spares rather than what the entry
+ * guard refuses over, because a run about to delete files is read for what it
+ * deletes.
+ *
+ * That form states that the sweep runs, never that it clears: the CLI's sweep
+ * refuses a retain-mode transcript unless the run escalates past that guard, and
+ * the console does not compose the escalation (`--force-retain-sweep` is
+ * unrepresentable in the job intent). A retained transcript is the headline case
+ * this warning fires on, so a promised clear would be a promise the operator is
+ * handed a refusal against. What that refusal costs and the command line that
+ * overrules it are stated beside the control itself, where a launch carrying the
+ * sweep has already read them, rather than spent from the budget this notice
+ * shares with the mount path.
  *
  * The sink escapes and CAPS what it renders, so the whole sentence has to fit
  * {@link RENDEZVOUS_NOTICE_BUDGET} or the clause that keeps this from reading as
@@ -493,8 +503,8 @@ export function notEmptyLead(
   const problem =
     " is not empty; an exchange refuses to start on an earlier run's files. ";
   const recovery = sweepExchangeFiles
-    ? `"${QUOTED_SWEEP_CONTROL}" is on, so this run clears them first and ` +
-      "leaves your input and results alone."
+    ? `"${QUOTED_SWEEP_CONTROL}" is on and runs first; your own input and ` +
+      "results are not what it sweeps."
     : `Turn on "${QUOTED_SWEEP_CONTROL}" and re-run. Your own input and ` +
       "results are not what it refuses over.";
   return fitNotice(

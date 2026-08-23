@@ -1259,13 +1259,16 @@ describe("filedrop rendezvous facilitation", () => {
 
   test("the not-empty lead follows this launch's own sweep intent", async () => {
     // The lead is composed moments before the same intent reaches the child as
-    // --sweep-exchange-files, so a launch already carrying the sweep is told what
-    // it does rather than told to turn it on -- and one that is not still gets the
-    // instruction, which is the only recovery it has.
+    // --sweep-exchange-files, so a launch already carrying the sweep is told the
+    // control's state rather than told to turn it on -- and one that is not still
+    // gets the instruction, which is the only recovery it has.
     const sweeping = await notEmptyLeadFor(
       validIntent({ sweepExchangeFiles: true }),
     );
-    expect(sweeping).toContain("is on, so this run clears them first");
+    expect(sweeping).toContain(
+      '"Clear leftover exchange files" is on and runs first; your own ' +
+        "input and results are not what it sweeps.",
+    );
     expect(sweeping).not.toContain("Turn on");
 
     expect(await notEmptyLeadFor(validIntent())).toContain(

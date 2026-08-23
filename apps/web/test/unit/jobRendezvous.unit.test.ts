@@ -739,24 +739,34 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     );
   });
 
-  test("a launch carrying the sweep is not told to turn the sweep on", () => {
-    // The control this recovery names is the one the operator ticked to get here,
-    // so instructing them to tick it says the console did not notice.
-    const [lead] = renderedContentWarnings(["console-hello.json"], SWEEP_ON);
+  test("the recovery for a launch carrying the sweep is pinned whole", () => {
+    // Pinned whole for the reason the form above is, and for one of its own: this
+    // form says the sweep RUNS, never that it clears, because the CLI's sweep
+    // refuses a retain-mode transcript and the console composes no escalation past
+    // that guard. A leftover transcript is the case this warning fires on, so a
+    // clause reworded into a promise would be read by the operator whose run is
+    // about to refuse it, and a fragment check would not see the rewording.
+    expect(notEmptyLead("/data", "shared", SWEEP_ON)).toBe(
+      "the rendezvous directory /data is not empty; an exchange refuses to " +
+        "start on an earlier run's files. " +
+        '"Clear leftover exchange files" is on and runs first; your own ' +
+        "input and results are not what it sweeps.",
+    );
+  });
+
+  test("a sweeping launch reads its own recovery at the seat", () => {
+    // Through the preflight rather than the composer, on the transcript the branch
+    // exists for: the control this recovery names is the one the operator ticked
+    // to get here, so instructing them to tick it says the console did not notice,
+    // and the clause naming what the sweep spares is what the cap would eat first.
+    const [lead] = renderedContentWarnings(retainedTranscript, SWEEP_ON);
     expect(lead).toContain("an exchange refuses to start");
     expect(lead).not.toContain("Turn on");
     expect(lead).toContain(
-      '"Clear leftover exchange files" is on, so this run clears them first',
+      '"Clear leftover exchange files" is on and runs first; your own ' +
+        "input and results are not what it sweeps.",
     );
     expect(lead).not.toContain(DISPLAY_TRUNCATION_MARKER);
-  });
-
-  test("a sweeping launch is told what the sweep leaves alone", () => {
-    // The operator's question changes with the sweep: what an entry guard refuses
-    // over matters when nothing is being deleted, and what a sweep about to run
-    // deletes matters when something is.
-    const [lead] = renderedContentWarnings(retainedTranscript, SWEEP_ON);
-    expect(lead).toContain("leaves your input and results alone");
   });
 
   test("the recovery sends the operator to a control the console carries", () => {
@@ -1154,7 +1164,7 @@ const NOTICE_SHAPES: Array<NoticeShape> = [
       return { args: isolatedArgs(mount, leg, SWEEP_ON) };
     },
     match: /is not empty/,
-    tail: () => "leaves your input and results alone.",
+    tail: () => "your own input and results are not what it sweeps.",
     namesMount: true,
   },
   {
