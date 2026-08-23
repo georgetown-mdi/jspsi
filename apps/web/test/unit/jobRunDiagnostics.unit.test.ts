@@ -3,7 +3,15 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
+import {
+  DIAGNOSTIC_LOG_UNANSWERED_LEAD,
+  DIAGNOSTIC_LOG_UNANSWERED_NOTICE,
+} from "@bench/DiagnosticLogPanel";
 import { JOB_FILE_NAMES, jobCreateIntentSchema } from "@jobs/intent";
+import {
+  LOG_AVAILABILITY_UNANSWERED_LIMIT,
+  watchJobDiagnosticLog,
+} from "@psi/jobDiagnosticLog";
 import {
   RUN_DIAGNOSTICS_DEFAULT,
   SWEEP_CONFIRMATION_NOTICE,
@@ -17,7 +25,6 @@ import {
 import { RelayedTerminalError } from "@psi/serverJobExchangeDriver";
 import { failureFor } from "@bench/useInviterExchange";
 import { resolveWorkdirFile } from "@jobs/workdir";
-import { watchJobLogAvailable } from "@psi/jobDiagnosticLog";
 
 import {
   captureExchangeArgv,
@@ -282,52 +289,75 @@ describe("the diagnostic log's path stays inside the job workdir", () => {
 
 // The appliance yields a job id as soon as the CLI child spawns and the child
 // opens its log after that, so what a seat can offer during a run rests on
-// asking the appliance again rather than on the answer the first ask raced.
+// asking the appliance again rather than on the answer the first ask raced --
+// and on what it does when those asks stop being answered at all, which is the
+// state the operator watching a stalled run is left in.
 describe("the diagnostic log's availability during a run", () => {
-  /** A status endpoint answering each successive ask in turn, holding the last
-   * answer once the script runs out, and counting what it was asked. The run
-   * asked for a log unless the caller says otherwise. */
-  function availabilityFetch(
-    answers: Array<boolean>,
-    logRequested = true,
-  ): {
+  /** The appliance's own status body, for a run that asked for a log unless the
+   * caller says otherwise. */
+  const answered =
+    (logAvailable: boolean, logRequested = true) =>
+    () =>
+      new Response(
+        JSON.stringify({ status: "running", logRequested, logAvailable }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+
+  /** An ask that carries no answer about the log: the route erroring, which is
+   * also how a job the appliance forgot across a restart reads. */
+  const unanswerable = () => new Response("", { status: 503 });
+
+  /** A 200 that is not this endpoint's status body -- a proxy's interstitial, or
+   * an appliance answering for something else -- which says no more about the
+   * log than an error does. */
+  const notTheStatusBody = () =>
+    new Response(JSON.stringify({ status: "running" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  /** A status endpoint answering each successive ask with the next entry of the
+   * script, holding the last once it runs out, and counting what it was asked. */
+  function scriptedFetch(script: Array<() => Response>): {
     fetchImpl: typeof fetch;
     asks: () => number;
   } {
     let asked = 0;
     const fetchImpl: typeof fetch = () => {
-      const logAvailable = answers[Math.min(asked, answers.length - 1)];
+      const answer = script[Math.min(asked, script.length - 1)];
       asked += 1;
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({ status: "running", logRequested, logAvailable }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        ),
-      );
+      return Promise.resolve(answer());
     };
     return { fetchImpl, asks: () => asked };
   }
 
+  /** The watch's gap between asks, recorded and not waited through, so a test
+   * still sees that the watch paced itself. */
+  const recordWaits =
+    (waits: Array<number>) =>
+    (ms: number): Promise<void> => {
+      waits.push(ms);
+      return Promise.resolve();
+    };
+
+  const noWait = () => Promise.resolve();
+
   test("a log that appears mid-run is readable without waiting for the run to settle", async () => {
     // The stalled run the log exists for reaches no terminal at all, so a seat
     // that only re-asked at settle would stay empty for the whole stall.
-    const { fetchImpl, asks } = availabilityFetch([false, false, true]);
+    const { fetchImpl, asks } = scriptedFetch([
+      answered(false),
+      answered(false),
+      answered(true),
+    ]);
     const waits: Array<number> = [];
 
     await expect(
-      watchJobLogAvailable(
-        "job-1",
-        new AbortController().signal,
+      watchJobDiagnosticLog("job-1", new AbortController().signal, {
         fetchImpl,
-        (ms) => {
-          waits.push(ms);
-          return Promise.resolve();
-        },
-      ),
-    ).resolves.toBe(true);
+        delay: recordWaits(waits),
+      }),
+    ).resolves.toBe("available");
 
     expect(asks()).toBe(3);
     // One wait between successive asks, and a real one: a watch with no gap
@@ -337,16 +367,19 @@ describe("the diagnostic log's availability during a run", () => {
   });
 
   test("a watch the caller stops answers no rather than asking on", async () => {
-    const { fetchImpl, asks } = availabilityFetch([false]);
+    const { fetchImpl, asks } = scriptedFetch([answered(false)]);
     const controller = new AbortController();
 
     await expect(
-      watchJobLogAvailable("job-1", controller.signal, fetchImpl, () => {
-        // The run settles, or the seat unmounts, while the watch is waiting.
-        controller.abort();
-        return Promise.resolve();
+      watchJobDiagnosticLog("job-1", controller.signal, {
+        fetchImpl,
+        delay: () => {
+          // The run settles, or the seat unmounts, while the watch is waiting.
+          controller.abort();
+          return Promise.resolve();
+        },
       }),
-    ).resolves.toBe(false);
+    ).resolves.toBe("unavailable");
 
     expect(asks()).toBe(1);
   });
@@ -355,70 +388,149 @@ describe("the diagnostic log's availability during a run", () => {
     // The ordinary run is the common one and its answer cannot change, so a
     // watch that kept asking would poll the appliance for the whole exchange to
     // be told the same thing.
-    const { fetchImpl, asks } = availabilityFetch([false], false);
+    const { fetchImpl, asks } = scriptedFetch([answered(false, false)]);
     const waits: Array<number> = [];
 
     await expect(
-      watchJobLogAvailable(
-        "job-1",
-        new AbortController().signal,
+      watchJobDiagnosticLog("job-1", new AbortController().signal, {
         fetchImpl,
-        (ms) => {
-          waits.push(ms);
-          return Promise.resolve();
-        },
-      ),
-    ).resolves.toBe(false);
+        delay: recordWaits(waits),
+      }),
+    ).resolves.toBe("unavailable");
 
     expect(asks()).toBe(1);
     expect(waits).toEqual([]);
+  });
+
+  test("a settled run whose file never appeared is asked once, not forever", async () => {
+    // Nothing about this answer will change once the child is gone, so the seat
+    // stops rather than re-asking a run that ended without opening its log.
+    const { fetchImpl, asks } = scriptedFetch([answered(false)]);
+
+    await expect(
+      watchJobDiagnosticLog("job-1", new AbortController().signal, {
+        settled: true,
+        fetchImpl,
+        delay: noWait,
+      }),
+    ).resolves.toBe("unavailable");
+
+    expect(asks()).toBe(1);
   });
 
   test("an ask the appliance could not answer keeps the watch going", async () => {
     // A rejected status ask says nothing about what the run requested, so
     // reading it as "no log" would end the watch on a transient failure and
     // leave the panel missing for the rest of the run.
-    let asked = 0;
-    const fetchImpl: typeof fetch = () => {
-      asked += 1;
-      return Promise.resolve(
-        asked === 1
-          ? new Response("", { status: 503 })
-          : new Response(
-              JSON.stringify({
-                status: "running",
-                logRequested: true,
-                logAvailable: true,
-              }),
-              { status: 200, headers: { "Content-Type": "application/json" } },
-            ),
-      );
-    };
+    const { fetchImpl, asks } = scriptedFetch([unanswerable, answered(true)]);
 
     await expect(
-      watchJobLogAvailable(
-        "job-1",
-        new AbortController().signal,
+      watchJobDiagnosticLog("job-1", new AbortController().signal, {
         fetchImpl,
-        () => Promise.resolve(),
-      ),
-    ).resolves.toBe(true);
+        delay: noWait,
+      }),
+    ).resolves.toBe("available");
 
-    expect(asked).toBe(2);
+    expect(asks()).toBe(2);
+  });
+
+  test("a route that never answers stops the watch instead of asking all run", async () => {
+    // An appliance that restarted and forgot the job answers this way for as
+    // long as the seat is open, so an unbounded watch would ask until the
+    // operator closed the tab and tell them nothing while it did.
+    const { fetchImpl, asks } = scriptedFetch([unanswerable]);
+    const waits: Array<number> = [];
+
+    await expect(
+      watchJobDiagnosticLog("job-1", new AbortController().signal, {
+        fetchImpl,
+        delay: recordWaits(waits),
+      }),
+    ).resolves.toBe("unanswered");
+
+    expect(asks()).toBe(LOG_AVAILABILITY_UNANSWERED_LIMIT);
+    expect(waits).toHaveLength(LOG_AVAILABILITY_UNANSWERED_LIMIT - 1);
+    // The operator waits through the bound before the seat says anything, so it
+    // is a handful of asks rather than a patient retry budget.
+    expect(LOG_AVAILABILITY_UNANSWERED_LIMIT).toBeLessThanOrEqual(10);
+  });
+
+  test("a 200 that is not the status body counts against the bound like an error", async () => {
+    const { fetchImpl, asks } = scriptedFetch([notTheStatusBody]);
+
+    await expect(
+      watchJobDiagnosticLog("job-1", new AbortController().signal, {
+        fetchImpl,
+        delay: noWait,
+      }),
+    ).resolves.toBe("unanswered");
+
+    expect(asks()).toBe(LOG_AVAILABILITY_UNANSWERED_LIMIT);
+  });
+
+  test("a settled run's asks are bounded the same way", async () => {
+    const { fetchImpl, asks } = scriptedFetch([unanswerable]);
+
+    await expect(
+      watchJobDiagnosticLog("job-1", new AbortController().signal, {
+        settled: true,
+        fetchImpl,
+        delay: noWait,
+      }),
+    ).resolves.toBe("unanswered");
+
+    expect(asks()).toBe(LOG_AVAILABILITY_UNANSWERED_LIMIT);
+  });
+
+  test("failures the appliance recovers from never accumulate into the bound", async () => {
+    // The bound is on asks that fail in a row: a flaky route that keeps coming
+    // back is a run the watch should still be watching, however many single
+    // failures it has cost by the time the log lands.
+    const nearMiss = Array.from(
+      { length: LOG_AVAILABILITY_UNANSWERED_LIMIT - 1 },
+      () => unanswerable,
+    );
+    const { fetchImpl, asks } = scriptedFetch([
+      ...nearMiss,
+      answered(false),
+      ...nearMiss,
+      answered(true),
+    ]);
+
+    await expect(
+      watchJobDiagnosticLog("job-1", new AbortController().signal, {
+        fetchImpl,
+        delay: noWait,
+      }),
+    ).resolves.toBe("available");
+
+    expect(asks()).toBe(LOG_AVAILABILITY_UNANSWERED_LIMIT * 2);
   });
 
   test("an already-stopped watch asks nothing at all", async () => {
-    const { fetchImpl, asks } = availabilityFetch([true]);
+    const { fetchImpl, asks } = scriptedFetch([answered(true)]);
     const controller = new AbortController();
     controller.abort();
 
     await expect(
-      watchJobLogAvailable("job-1", controller.signal, fetchImpl, () =>
-        Promise.resolve(),
-      ),
-    ).resolves.toBe(false);
+      watchJobDiagnosticLog("job-1", controller.signal, {
+        fetchImpl,
+        delay: noWait,
+      }),
+    ).resolves.toBe("unavailable");
 
     expect(asks()).toBe(0);
+  });
+
+  test("the seat states the silence rather than promising a log", () => {
+    // What the operator is owed at the bound is the fact that asking stopped --
+    // an unanswered ask never said whether this run captured a log, so the seat
+    // cannot claim one and must not imply the panel is still coming.
+    expect(DIAGNOSTIC_LOG_UNANSWERED_LEAD).toContain("stopped answering");
+    expect(DIAGNOSTIC_LOG_UNANSWERED_NOTICE).toContain("stopped asking");
+    expect(DIAGNOSTIC_LOG_UNANSWERED_NOTICE).toContain("reload");
+    expect(DIAGNOSTIC_LOG_UNANSWERED_NOTICE).toContain("may still be");
+    expect(DIAGNOSTIC_LOG_UNANSWERED_NOTICE).not.toContain("This run recorded");
   });
 });
 
