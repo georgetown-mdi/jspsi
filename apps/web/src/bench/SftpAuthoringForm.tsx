@@ -644,9 +644,9 @@ type ProbeState =
  * What the probe's polite region says in each phase. Fixed sentences that
  * interpolate nothing, so the announced run is the console's own voice by
  * construction rather than by an escaping argument -- the peer's own bytes and
- * the diagnosis they belong to stay on the visible surfaces below. Every phase
- * change transits a distinct value (the in-flight sentence, or ""), so a second
- * probe that settles the same way still announces.
+ * the diagnosis they belong to stay on the visible surfaces below. A phase
+ * change has to transit a distinct value: a region set to the text it already
+ * holds has not changed, and a repeated outcome would be silent.
  */
 const PROBE_ANNOUNCEMENT: Record<ProbeState["phase"], string> = {
   idle: "",
@@ -757,8 +757,8 @@ function HostKeyProbe({
 
   return (
     <Stack gap={4} data-testid="probe-result">
-      {/* The probe's one announcing channel: a stable polite region, mounted
-          ahead of the result in every phase so a settle reaches assistive tech
+      {/* The probe's one announcing channel: a stable polite region, mounted in
+          every phase and first in the result, so a settle reaches assistive tech
           as an empty -> non-empty transition of a region it is already
           observing. Nothing below it announces. */}
       <VisuallyHidden
@@ -870,7 +870,13 @@ function HostKeyProbe({
           {state.phase === "error" && (
             <>
               {/* Visible only: Mantine's Alert defaults to role="alert", which
-                  would announce this a second time and interrupt. */}
+                  would announce this a second time and interrupt, so the prop
+                  is here to displace that default. The presentational role it
+                  names does not itself apply -- ARIA's conflict resolution
+                  ignores it on an element carrying global aria-* attributes,
+                  which Mantine sets on this root -- leaving a generic element
+                  whose lack of any live role is what the stable-region test
+                  measures. */}
               <Alert
                 color="red"
                 role="presentation"

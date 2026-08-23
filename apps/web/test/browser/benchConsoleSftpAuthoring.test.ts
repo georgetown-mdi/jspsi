@@ -89,9 +89,21 @@ interface StubOptions {
    * carrying {@link PROBE_FINGERPRINT}; a `{status, body}` lets a test drive an
    * unreachable/error outcome. */
   probe?: { status?: number; body?: unknown };
-  /** A gate the probe response waits on, so a test can act on the form while the
-   * probe is genuinely in flight (the real one runs for as long as ~15s). */
-  probeGate?: Promise<void>;
+  /** Gates the probe responses wait on, taken in order: the nth probe's response
+   * settles when the nth promise does, so a test can act on the form while a
+   * probe is genuinely in flight (the real one runs for as long as ~15s). A
+   * probe past the end of the list settles immediately. */
+  probeGates?: Array<Promise<void>>;
+}
+
+/** One held-open probe response, standing in for the seconds the real probe
+ * spends reading the server. */
+function createProbeGate(): { promise: Promise<void>; settle: () => void } {
+  let settle = (): void => {};
+  const promise = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  return { promise, settle };
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. PUT /api/jobs/sftp
@@ -102,6 +114,7 @@ function stubJobApi(options: StubOptions = {}): {
   const captured: Array<CapturedRequest> = [];
   const realFetch = window.fetch.bind(window);
   let sftp: unknown = options.sftp ?? { configured: false };
+  let probeCount = 0;
 
   const jsonResponse = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
@@ -152,8 +165,9 @@ function stubJobApi(options: StubOptions = {}): {
           probe.body !== undefined
             ? jsonResponse(probe.body, probe.status ?? 200)
             : new Response(null, { status: probe.status ?? 200 });
-        return options.probeGate !== undefined
-          ? options.probeGate.then(respond)
+        const gate = options.probeGates?.[probeCount++];
+        return gate !== undefined
+          ? gate.then(respond)
           : Promise.resolve(respond());
       }
       if (url === "/api/jobs/sftp") {
@@ -281,8 +295,8 @@ function probeResult(): HTMLElement {
   return document.querySelector('[data-testid="probe-result"]') as HTMLElement;
 }
 
-/** The probe's one announcing channel: the stable polite region mounted ahead of
- * the result in every phase. */
+/** The probe's one announcing channel: the stable polite region mounted in every
+ * phase, first in the result. */
 function probeAnnouncement(): HTMLElement {
   return document.querySelector(
     '[data-testid="probe-announcement"]',
@@ -788,6 +802,18 @@ describe("console SFTP connection authoring", () => {
       region,
     ]);
     expect(probeResult().querySelector('[role="alert"]')).toBeNull();
+    // What the override displaces is the default; the presentational role it
+    // names does not itself apply, because ARIA's presentational-role-conflict
+    // resolution ignores it on an element carrying global aria-* attributes --
+    // which Mantine sets on this root. That premise is pinned here so the
+    // reasoning recorded around it cannot outlive it.
+    const alert = probeResult().querySelector('[role="presentation"]');
+    expect(alert).not.toBeNull();
+    expect(
+      Array.from(alert?.attributes ?? [])
+        .map((attribute) => attribute.name)
+        .filter((name) => name.startsWith("aria-")),
+    ).not.toEqual([]);
   });
 
   test("the presented result announces from the same region and is named for the focus it takes", async () => {
@@ -821,13 +847,10 @@ describe("console SFTP connection authoring", () => {
   });
 
   test("an operator who moved on during the probe is not yanked back", async () => {
-    let settleProbe = (): void => {};
-    const probeGate = new Promise<void>((resolve) => {
-      settleProbe = resolve;
-    });
+    const gate = createProbeGate();
     stubJobApi({
       probe: { status: 200, body: { status: "unreachable" } },
-      probeGate,
+      probeGates: [gate.promise],
     });
     app.render(createElement(InviterBench));
     await reachReviewCreate();
@@ -845,7 +868,7 @@ describe("console SFTP connection authoring", () => {
     const fingerprintField = page.getByLabelText("Server identity fingerprint");
     fingerprintField.element().focus();
 
-    settleProbe();
+    gate.settle();
     await expect
       .element(page.getByText("Could not read the fingerprint"))
       .toBeInTheDocument();
@@ -856,6 +879,42 @@ describe("console SFTP connection authoring", () => {
     expect(probeAnnouncement().textContent).toContain(
       "Reading the fingerprint failed.",
     );
+  });
+
+  test("a second identical failure announces again, transiting the in-flight sentence", async () => {
+    const gates = [createProbeGate(), createProbeGate()];
+    stubJobApi({
+      probe: { status: 200, body: { status: "unreachable" } },
+      probeGates: gates.map((gate) => gate.promise),
+    });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await openFormForProbe();
+
+    const region = probeAnnouncement();
+    const announced = page.getByTestId("probe-announcement");
+    const trigger = page.getByRole("button", {
+      name: "Read the fingerprint from the server",
+    });
+
+    // Setting a live region to the text it already holds is not a change, so a
+    // second identical outcome announces only because the region transits a
+    // distinct value in between. Both probes settle the same way; each one is
+    // held open long enough to measure that the in-flight sentence lands in the
+    // region before the failure sentence returns to it.
+    for (const gate of gates) {
+      await trigger.click();
+      await expect
+        .element(announced)
+        .toHaveTextContent("Reading the fingerprint from the server");
+      gate.settle();
+      await expect
+        .element(announced)
+        .toHaveTextContent("Reading the fingerprint failed.");
+    }
+    // Every transit was a change to the node assistive tech is already observing,
+    // not a remount.
+    expect(probeAnnouncement()).toBe(region);
   });
 
   test("a diagnosed peer answer keeps the peer's bytes out of the announced region and last in the result", async () => {
