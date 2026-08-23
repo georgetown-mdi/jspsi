@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import {
   Alert,
@@ -13,10 +13,13 @@ import {
   Text,
   TextInput,
   Textarea,
+  VisuallyHidden,
 } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
 import { sanitizeForDisplay } from "@psilink/core";
+
+import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import { probeSftpHostKey, putSftpConnection } from "@psi/sftpAuthoringClient";
 import { isBareSftpHost } from "@psi/sftpHost";
@@ -638,6 +641,34 @@ type ProbeState =
   | ({ phase: "error" } & ProbeErrorCopy);
 
 /**
+ * What the probe's polite region says in each phase. Fixed sentences that
+ * interpolate nothing, so the announced run is the console's own voice by
+ * construction rather than by an escaping argument -- the peer's own bytes and
+ * the diagnosis they belong to stay on the visible surfaces below. Every phase
+ * change transits a distinct value (the in-flight sentence, or ""), so a second
+ * probe that settles the same way still announces.
+ */
+const PROBE_ANNOUNCEMENT: Record<ProbeState["phase"], string> = {
+  idle: "",
+  probing: "Reading the fingerprint from the server...",
+  presented:
+    "The server presented a fingerprint. Compare it with the value whoever " +
+    "runs the server published.",
+  error: "Reading the fingerprint failed. You can still paste it above.",
+};
+
+/**
+ * Whether a settle destroyed the operator's focus anchor, which is the only
+ * thing a focus move here repairs -- announcing is the polite region's job. The
+ * probe can run for ~15 s, and an operator who moved to another field while it
+ * ran must not be yanked back to the result.
+ */
+function focusAnchorLost(anchor: HTMLElement | null): boolean {
+  const active = document.activeElement;
+  return active === null || active === document.body || active === anchor;
+}
+
+/**
  * The probe-to-fill control BESIDE the fingerprint field: it reads the server's
  * presented host key and offers it for a COMPARISON against the value the server
  * operator published -- never as a trust judgement, and never replacing the paste
@@ -666,7 +697,10 @@ function HostKeyProbe({
   const [state, setState] = useState<ProbeState>({ phase: "idle" });
   const [outOfBandChecked, setOutOfBandChecked] = useState(false);
   const presentedRef = useRef<HTMLDivElement>(null);
-  const errorRef = useRef<HTMLDivElement>(null);
+  // Names the presented panel from its own visible lead line, so the panel that
+  // focus lands on has something to say for itself.
+  const presentedLabelId = useId();
+  const announcement = useDeferredAnnouncement(PROBE_ANNOUNCEMENT[state.phase]);
   // Dismissing the presented result unmounts its focused button, so focus is
   // returned to the probe trigger (mirroring the fill path, which sends focus to
   // the fingerprint field). The flag arms the restoration for the idle render the
@@ -684,18 +718,22 @@ function HostKeyProbe({
     setOutOfBandChecked(false);
   }, [host, port]);
 
-  // Move focus to the outcome when it arrives so a keyboard user can act on it
-  // immediately; aria-live announces it for a screen reader. The failure alert
-  // takes the same move: it is what carries the operator to the peer's bytes,
-  // which sit after it and outside the announced region. On a dismiss back to
-  // idle, return focus to the trigger the result panel replaced.
+  // Focus repair only: the polite region above is what announces. Probing
+  // disables the trigger the operator pressed, so the browser drops focus to
+  // <body> for the duration -- a presented result, whose trigger has unmounted,
+  // takes focus so a keyboard user can act on it, and every other settle hands
+  // focus back to the re-enabled trigger. A dismiss back to idle unmounts its own
+  // focused button and takes the same restoration.
   useEffect(() => {
+    const restoreTrigger = restoreTriggerFocusRef.current;
+    restoreTriggerFocusRef.current = false;
+    if (!focusAnchorLost(triggerRef.current)) return;
     if (state.phase === "presented") presentedRef.current?.focus();
-    else if (state.phase === "error") errorRef.current?.focus();
-    else if (state.phase === "idle" && restoreTriggerFocusRef.current) {
-      restoreTriggerFocusRef.current = false;
+    else if (
+      state.phase === "error" ||
+      (state.phase === "idle" && restoreTrigger)
+    )
       triggerRef.current?.focus();
-    }
   }, [state.phase]);
 
   async function runProbe(): Promise<void> {
@@ -717,123 +755,134 @@ function HostKeyProbe({
     );
   }
 
-  if (state.phase === "presented") {
-    const useDisabled = ceremony === "direct" && !outOfBandChecked;
-    return (
-      <div
-        ref={presentedRef}
-        tabIndex={-1}
-        aria-live="polite"
-        className={styles.callout}
-        style={{ outline: "none" }}
-      >
-        <Stack gap="xs">
-          <div>
-            <Text size="sm" fw={500}>
-              The server presented this fingerprint:
-            </Text>
-            <Text size="sm" className={styles.mono}>
-              {state.fingerprint}
-            </Text>
-            <Text size="sm" c="dimmed">
-              Key type: {sanitizeForDisplay(state.keyType)}
-            </Text>
-          </div>
-          <Text size="sm">
-            Does this match the fingerprint whoever runs the server published?
-            This console read it over the same connection the exchange will use
-            -- it cannot vouch for it.
-          </Text>
-          {ceremony === "direct" ? (
-            <>
-              <Alert
-                color="orange"
-                icon={<IconAlertCircle aria-hidden />}
-                title="This host key is the only thing protecting your records"
-              >
-                On this path the server&apos;s host key is the only thing
-                protecting your records -- there is no shared secret and no
-                separate encryption. Verify this fingerprint against a value
-                published somewhere other than this connection.
-              </Alert>
-              <Checkbox
-                checked={outOfBandChecked}
-                onChange={(event) =>
-                  setOutOfBandChecked(event.currentTarget.checked)
-                }
-                label="I checked this fingerprint against a source other than this connection"
-              />
-            </>
-          ) : (
-            <Text size="xs" c="dimmed">
-              When the exchange runs, both parties&apos; consoles also compare
-              the fingerprint each observed and warn on a mismatch.
-            </Text>
-          )}
-          <Group gap="sm">
-            <Button
-              size="xs"
-              disabled={useDisabled}
-              onClick={() => {
-                onUse(state.fingerprint);
-                setState({ phase: "idle" });
-                setOutOfBandChecked(false);
-              }}
-            >
-              Use this fingerprint
-            </Button>
-            <Button
-              size="xs"
-              variant="default"
-              onClick={() => {
-                restoreTriggerFocusRef.current = true;
-                setState({ phase: "idle" });
-              }}
-            >
-              Dismiss
-            </Button>
-          </Group>
-        </Stack>
-      </div>
-    );
-  }
-
   return (
-    <Stack gap={4}>
-      <div>
-        <Button
-          ref={triggerRef}
-          variant="subtle"
-          size="compact-sm"
-          loading={state.phase === "probing"}
-          disabled={host === undefined || state.phase === "probing"}
-          onClick={() => void runProbe()}
+    <Stack gap={4} data-testid="probe-result">
+      {/* The probe's one announcing channel: a stable polite region, mounted
+          ahead of the result in every phase so a settle reaches assistive tech
+          as an empty -> non-empty transition of a region it is already
+          observing. Nothing below it announces. */}
+      <VisuallyHidden
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="probe-announcement"
+      >
+        {announcement}
+      </VisuallyHidden>
+      {state.phase === "presented" ? (
+        <div
+          ref={presentedRef}
+          tabIndex={-1}
+          role="group"
+          aria-labelledby={presentedLabelId}
+          className={styles.callout}
+          style={{ outline: "none" }}
         >
-          Read the fingerprint from the server
-        </Button>
-        {host === undefined &&
-          disabledReason !== undefined &&
-          state.phase === "idle" && (
-            <Text size="xs" c="dimmed">
-              {disabledReason}
+          <Stack gap="xs">
+            <div>
+              <Text size="sm" fw={500} id={presentedLabelId}>
+                The server presented this fingerprint:
+              </Text>
+              <Text size="sm" className={styles.mono}>
+                {state.fingerprint}
+              </Text>
+              <Text size="sm" c="dimmed">
+                Key type: {sanitizeForDisplay(state.keyType)}
+              </Text>
+            </div>
+            <Text size="sm">
+              Does this match the fingerprint whoever runs the server published?
+              This console read it over the same connection the exchange will
+              use -- it cannot vouch for it.
             </Text>
-          )}
-      </div>
-      {state.phase === "error" && (
+            {ceremony === "direct" ? (
+              <>
+                <Alert
+                  color="orange"
+                  icon={<IconAlertCircle aria-hidden />}
+                  title="This host key is the only thing protecting your records"
+                >
+                  On this path the server&apos;s host key is the only thing
+                  protecting your records -- there is no shared secret and no
+                  separate encryption. Verify this fingerprint against a value
+                  published somewhere other than this connection.
+                </Alert>
+                <Checkbox
+                  checked={outOfBandChecked}
+                  onChange={(event) =>
+                    setOutOfBandChecked(event.currentTarget.checked)
+                  }
+                  label="I checked this fingerprint against a source other than this connection"
+                />
+              </>
+            ) : (
+              <Text size="xs" c="dimmed">
+                When the exchange runs, both parties&apos; consoles also compare
+                the fingerprint each observed and warn on a mismatch.
+              </Text>
+            )}
+            <Group gap="sm">
+              <Button
+                size="xs"
+                disabled={ceremony === "direct" && !outOfBandChecked}
+                onClick={() => {
+                  onUse(state.fingerprint);
+                  setState({ phase: "idle" });
+                  setOutOfBandChecked(false);
+                }}
+              >
+                Use this fingerprint
+              </Button>
+              <Button
+                size="xs"
+                variant="default"
+                onClick={() => {
+                  restoreTriggerFocusRef.current = true;
+                  setState({ phase: "idle" });
+                }}
+              >
+                Dismiss
+              </Button>
+            </Group>
+          </Stack>
+        </div>
+      ) : (
         <>
-          <Alert
-            ref={errorRef}
-            tabIndex={-1}
-            color="red"
-            role="alert"
-            icon={<IconAlertCircle aria-hidden />}
-            title="Could not read the fingerprint"
-            style={{ outline: "none" }}
-          >
-            {state.message} You can still paste the fingerprint above.
-          </Alert>
-          {state.peerExcerpt !== undefined && (
-            <PeerBytesField excerpt={state.peerExcerpt} />
+          <div>
+            <Button
+              ref={triggerRef}
+              variant="subtle"
+              size="compact-sm"
+              loading={state.phase === "probing"}
+              disabled={host === undefined || state.phase === "probing"}
+              onClick={() => void runProbe()}
+            >
+              Read the fingerprint from the server
+            </Button>
+            {host === undefined &&
+              disabledReason !== undefined &&
+              state.phase === "idle" && (
+                <Text size="xs" c="dimmed">
+                  {disabledReason}
+                </Text>
+              )}
+          </div>
+          {state.phase === "error" && (
+            <>
+              {/* Visible only: Mantine's Alert defaults to role="alert", which
+                  would announce this a second time and interrupt. */}
+              <Alert
+                color="red"
+                role="presentation"
+                icon={<IconAlertCircle aria-hidden />}
+                title="Could not read the fingerprint"
+              >
+                {state.message} You can still paste the fingerprint above.
+              </Alert>
+              {state.peerExcerpt !== undefined && (
+                <PeerBytesField excerpt={state.peerExcerpt} />
+              )}
+            </>
           )}
         </>
       )}
@@ -842,14 +891,14 @@ function HostKeyProbe({
 }
 
 /**
- * The peer's own first bytes, rendered OUTSIDE the failure alert's announced
- * region and last in the probe result, as a read-only field the console names.
- * Three properties carry the attribution, none of them resting on what the bytes
- * say:
+ * The peer's own first bytes, rendered OUTSIDE the probe's announcing region and
+ * last in the probe result, as a read-only field the console names. Three
+ * properties carry the attribution, none of them resting on what the bytes say:
  *
- * - Containment: the field is a sibling of the alert, not a descendant, so the
- *   run an assistive technology announces on the failure holds only the
- *   console's own sentences.
+ * - Containment: the field is a sibling of the polite status region, never a
+ *   descendant, and that region interpolates nothing (see
+ *   {@link PROBE_ANNOUNCEMENT}), so the run an assistive technology announces on
+ *   the failure holds only the console's own sentences.
  * - A name the peer cannot write: the field is named by this fixed label, so
  *   what an assistive technology says before reading the bytes is first-party
  *   whatever the bytes are.
