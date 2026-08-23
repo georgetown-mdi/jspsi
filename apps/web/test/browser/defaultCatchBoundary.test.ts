@@ -9,6 +9,7 @@ import { createElement } from "react";
 import { DefaultCatchBoundary } from "@components/DefaultCatchBoundary";
 import { whenDiagnostic } from "@utils/diagnostics";
 
+import { restoreConnectivity, setConnectivity } from "./connectivity";
 import { createAppMount } from "./renderApp";
 
 // The router seams DefaultCatchBoundary touches beyond the shared Link/navigate
@@ -72,6 +73,7 @@ beforeEach(() => {
 
 afterEach(() => {
   app.unmount();
+  restoreConnectivity();
   routerMock.matchedRouteId = "/some-route";
   vi.restoreAllMocks();
   routerMock.invalidate.mockReset();
@@ -220,6 +222,32 @@ describe("DefaultCatchBoundary", () => {
       expect(back).toHaveBeenCalledOnce();
       await expect
         .element(page.getByRole("link", { name: "Home" }))
+        .not.toBeInTheDocument();
+    });
+  });
+
+  // An offline browser is the likeliest reason a route's code failed to load, and
+  // the sanitized error alone does not say so. The boundary names it and names the
+  // recovery -- but only when the browser reports no connection, so an ordinary
+  // failure is not mislabelled.
+  describe("offline", () => {
+    test("names the connection and the recovery", async () => {
+      setConnectivity(false);
+
+      mountBoundary(new Error("Failed to fetch dynamically imported module"));
+
+      await expect
+        .element(page.getByText(/This device is offline/))
+        .toBeInTheDocument();
+    });
+
+    test("says nothing about a connection while there is one", async () => {
+      setConnectivity(true);
+
+      mountBoundary(new Error("boom"));
+
+      await expect
+        .element(page.getByText(/This device is offline/))
         .not.toBeInTheDocument();
     });
   });

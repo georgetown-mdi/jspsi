@@ -99,7 +99,9 @@ The relay operates at the application layer, which has meaningful trust implicat
 
 ## Other applications
 
-It may be beneficial to be able to build the web application as a desktop Electron app, or to distribute it as an installable progressive web app. Only the manifest stub exists today: `site.webmanifest` declares standalone display and the icon set, but its `name` and `short_name` are empty and the application registers no service worker. Both options can behave more like system services, but will likely require additional IT review.
+The hosted web application is an installable progressive web app: it ships a complete web manifest and an app-shell service worker, so an operator can install it and its shell and recurring-exchange list render with no network. Installation is what gives an unattended recurring exchange a runtime to run in -- see [MANAGED_EXCHANGE.md](MANAGED_EXCHANGE.md#installing-the-app).
+
+It may also be beneficial to build the web application as a desktop Electron app. That option can behave more like a system service, but will likely require additional IT review.
 
 # License and disclaimer
 

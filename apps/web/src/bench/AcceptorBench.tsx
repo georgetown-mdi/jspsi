@@ -83,6 +83,7 @@ import {
   webrtcLocatorFromEndpoint,
 } from "./manageOfferModel";
 import { ledgerOutcomeOf, seedRows } from "./inviterModel";
+import { useBeforeUnloadPrompt, useUnloadGuard } from "./useUnloadGuard";
 import { AcceptorCleaningStep } from "./AcceptorCleaningStep";
 import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
 import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
@@ -104,7 +105,6 @@ import { splitRendezvousRetainProblem } from "./filedropRendezvousChoice";
 import styles from "./bench.module.css";
 import { useAcceptorExchange } from "./useAcceptorExchange";
 import { useStepHistory } from "./useStepHistory";
-import { useUnloadGuard } from "./useUnloadGuard";
 
 import type {
   AcceptableInvitation,
@@ -797,6 +797,18 @@ export function AcceptorBench() {
     hasFile: file !== undefined || consoleSource !== undefined,
     finalized: launched !== undefined,
   });
+
+  // The live exchange itself, armed exactly where the guard above disarms and
+  // held until the run settles: this seat dials on launch, an unload ends the
+  // session for BOTH parties, and the app-shell update notice renders its Reload
+  // button above this route throughout the run. A server-job accept stays out for
+  // the same reason it is out above -- the appliance carries that one out.
+  useBeforeUnloadPrompt(
+    !acceptServerJob &&
+      launched !== undefined &&
+      outputs === undefined &&
+      failure === undefined,
+  );
 
   // The coverage input, unified across builds: the browser's parsed rows on the
   // hosted build, the mounted-file reference on the console (whose sweep is a fetch

@@ -20,7 +20,8 @@ It does not re-specify the record's byte-level shape, the KDF labels, or the CSP
 directive syntax; those live in the spec tier.
 
 > **Status.** The record, its rotating secret at rest, the recurring-exchange
-> surfaces, and the attended one-action re-run are built. Schedule entry, the
+> surfaces, the attended one-action re-run, and the installable offline app
+> shell are built. Schedule entry, the
 > scheduled window runner, and the between-visit OS notification are not, so
 > every run is operator-initiated today and the automation described below is
 > the design target rather than shipped behavior. Persisting a rotating secret
@@ -127,6 +128,73 @@ the between-visit notification surface are designed under [The schedule and its
 run windows](#the-schedule-and-its-run-windows) below; the record's closed
 field layout for them is in
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-schedule-object).
+
+## Installing the app
+
+The hosted application is installable: it ships a complete web manifest and an
+app-shell service worker, so a supporting browser offers to install it as an app
+of its own.
+
+### Why install it
+
+Installation is not cosmetic. It is what supplies the runtime an unattended run
+needs:
+
+- **A window context that keeps running.** The exchange executes in the app's
+  own window, not in a service worker (WebRTC is unavailable there).
+- **Launch at sign-in**, where the browser offers it, so the runtime is present
+  without the operator remembering to open it.
+- **A durable home for the input-file pointer**, where the browser preserves an
+  installed app's read permission across restarts rather than re-prompting.
+
+### Enabling launch at sign-in
+
+Chromium-based desktop browsers carry a per-app "start at sign-in" setting for an
+installed app, offered from the installed app's own menu; it is the browser's
+setting, not the application's, so psilink cannot turn it on and does not ask to.
+A browser that does not offer it cannot be made to, and nothing here claims
+otherwise -- that platform's degradation is the operator-initiated run named
+under [The automation goal](#the-automation-goal-and-its-platform-envelope).
+
+### What works with no network
+
+The service worker caches the app shell and the build's static assets, so with no
+connection at all the app still opens and reads the browser's own store:
+
+- The app shell, the recurring-exchange list, and each exchange's detail render.
+- **Running an exchange does not**, and says so rather than failing when pressed:
+  a run is a live two-party session that needs both parties online at once.
+
+How much of the app is offline-ready depends on how it is being used, and this is
+one of the concrete reasons to install it:
+
+- **Installed**, every screen is cached at launch, so all of them open offline
+  whether or not the operator has visited them.
+- **In an ordinary browser tab**, a screen becomes offline-ready once it has been
+  opened with a connection. One that has not says so and names the recovery --
+  open it once online -- rather than failing silently.
+
+The worker is shell-only. It caches the app document and its build assets and
+nothing else -- no exchange traffic passes through it, and no exchange work
+happens in it.
+
+### How a new version reaches an installed app
+
+The application is continuously deployed, and an upgrade can invalidate a stored
+record (whose recovery is [a fast re-invite](#recovery-fast-re-invite)), so an
+installed copy must not pin itself to old code:
+
+- Whenever the network is reachable, the app document comes from the network,
+  so an online launch renders the deployment currently served.
+- A new version installs in the background and takes over at the next launch of
+  the app. When one is ready while the app is open, the app offers a reload
+  rather than swapping code under a run in progress, and the browser asks the
+  operator to confirm a reload pressed while a run is under way.
+- An update replaces the app's cached code, not the browser's own storage: the
+  recurring exchanges, their secrets, and the accounting stay in that storage,
+  which is not the cache the worker manages. What an upgrade can still cost is a
+  stored record the new version can no longer load, whose recovery is
+  [a fast re-invite](#recovery-fast-re-invite).
 
 ## The schedule and its run windows
 

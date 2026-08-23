@@ -41,7 +41,7 @@ Captured in [DESIGN.md#possible-extensions](DESIGN.md#possible-extensions). Thes
 - Threshold and weighted scoring via secure multi-party computation
 - Brute-force protection through input-size controls
 - WebSocket relay as a WebRTC fallback
-- Electron desktop or progressive-web-app distribution of the web application. Only the manifest stub exists today: `site.webmanifest` declares standalone display and the icon set, with empty `name`/`short_name` and no service worker
+- Electron desktop distribution of the web application. The progressive-web-app half is built: the hosted application is installable and its shell renders offline (see [MANAGED_EXCHANGE.md](MANAGED_EXCHANGE.md#installing-the-app))
 
 ## See also
 
