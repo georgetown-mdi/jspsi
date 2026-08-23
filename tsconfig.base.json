@@ -1,6 +1,10 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    // Every workspace runs on Node >= 26 (package.json engines) or an evergreen
+    // browser, so this is the runtime floor rather than a downlevel target: a
+    // workspace inheriting it compiles against what it ships to, with e.g.
+    // Error.cause in scope.
+    "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,

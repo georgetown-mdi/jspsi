@@ -68,7 +68,7 @@ jobs:
         run: npm run test:integration -w apps/cli
         env:
           PSILINK_REQUIRE_WORKER_BUILD: "1"
-      # The WebRTC suite is a vitest project of its own (apps/cli/vitest.config.ts)
+      # The WebRTC suite is a vitest project of its own (apps/cli/vitest.config.mts)
       # so it runs exactly once per pull request, here. It drives two loopback
       # werift peers through the vendored broker it spawns itself, which the SFTP
       # backend has no bearing on, so repeating it on the native leg below and on
@@ -77,7 +77,7 @@ jobs:
       - name: WebRTC integration tests (CLI)
         run: npm run test:integration:webrtc -w apps/cli
       # The integration files no SFTP backend differentiates are a project of
-      # their own for the same reason (apps/cli/vitest.config.ts): each drives a
+      # their own for the same reason (apps/cli/vitest.config.mts): each drives a
       # filedrop directory or a listener of its own, so repeating them on the
       # native leg below and on each hardened-sshd matrix leg would buy nothing.
       - name: Backend-agnostic integration tests (CLI)

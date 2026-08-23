@@ -8,9 +8,9 @@ import { playwright } from "@vitest/browser-playwright";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 
-import { ConfigManager } from "./src/utils/serverConfig";
+import { ConfigManager } from "./src/utils/serverConfig.ts";
 
-import { registerServer } from "./src/httpServer";
+import { registerServer } from "./src/httpServer.ts";
 
 import type { PreviewServer, ViteDevServer } from "vite";
 
@@ -25,13 +25,13 @@ logLibrary.setDefaultLevel(config.LOG_LEVEL);
 // catch-all; `@psi` here stands in for that catch-all, which the unit project
 // needs because its `src/psi` sources pull in `@utils/*`.
 const srcAliases = {
-  "@bench": path.resolve(__dirname, "src/bench"),
-  "@components": path.resolve(__dirname, "src/components"),
-  "@jobs": path.resolve(__dirname, "src/jobs"),
-  "@utils": path.resolve(__dirname, "src/utils"),
-  "@psi": path.resolve(__dirname, "src/psi"),
-  "@theme": path.resolve(__dirname, "src/theme"),
-  "@": path.resolve(__dirname, "src"),
+  "@bench": path.resolve(import.meta.dirname, "src/bench"),
+  "@components": path.resolve(import.meta.dirname, "src/components"),
+  "@jobs": path.resolve(import.meta.dirname, "src/jobs"),
+  "@utils": path.resolve(import.meta.dirname, "src/utils"),
+  "@psi": path.resolve(import.meta.dirname, "src/psi"),
+  "@theme": path.resolve(import.meta.dirname, "src/theme"),
+  "@": path.resolve(import.meta.dirname, "src"),
 };
 
 // The WASM PSI worker engine. It is imported only by src/psi/psiCrypto.worker.ts, a

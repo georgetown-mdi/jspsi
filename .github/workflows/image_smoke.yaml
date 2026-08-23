@@ -101,6 +101,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The capability assertion below runs on the runner's Node, not in the
+      # image, so it needs the version this repository requires (package.json
+      # engines) rather than whatever the runner image happens to ship. The
+      # script is dependency-free, so a plain pinned Node suffices -- no npm ci
+      # or @psilink/core build (the ./.github/actions/setup prologue) needed.
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+
       # The image COPYs the vendored @openmined/psi.js tarball (a file:
       # dependency with no npm integrity hash) and installs it; verify its
       # committed sha256 before the build, mirroring the release job.
@@ -809,6 +819,13 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+
+      # Pinned for the same reason as the smoke job above: the assertion runs on
+      # the runner's Node, and the script it runs is dependency-free.
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
 
       # The pull is separate from the assertion so a registry that could not be
       # reached is not read as a capability the image does not carry. The step

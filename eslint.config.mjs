@@ -149,7 +149,11 @@ export default tseslint.config(
     ],
   },
   {
-    files: ["packages/**/*.{ts,tsx}", "apps/cli/**/*.{ts,tsx}"],
+    // apps/cli carries `mts` beside `ts` for its vitest config, which spells the
+    // ESM extension for the reason its own header gives. A file matching no
+    // block here is skipped by `eslint .` with a warning rather than an error,
+    // so the extension has to be named or the config goes unlinted.
+    files: ["packages/**/*.{ts,tsx}", "apps/cli/**/*.{ts,tsx,mts}"],
     extends: tseslint.configs.recommended,
     rules: {
       "@typescript-eslint/no-unused-vars": [
@@ -178,7 +182,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["apps/cli/**/*.{ts,tsx}"],
+    files: ["apps/cli/**/*.{ts,tsx,mts}"],
     rules: {
       "no-restricted-imports": [
         "error",

@@ -50,9 +50,9 @@ const WEB_CONFIG = "apps/web/vite.config.ts";
 // they carry the dist guard; packages/core builds its own dist in `pretest` and
 // tests its sources, and the root config runs no suite of its own.
 const CONFIGS = [
-  { path: "vitest.config.ts", distGuard: false },
+  { path: "vitest.config.mts", distGuard: false },
   { path: "packages/core/vitest.config.ts", distGuard: false },
-  { path: "apps/cli/vitest.config.ts", distGuard: true },
+  { path: "apps/cli/vitest.config.mts", distGuard: true },
   { path: WEB_CONFIG, distGuard: true },
 ];
 

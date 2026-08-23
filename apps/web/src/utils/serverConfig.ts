@@ -1,4 +1,4 @@
-import { ConfigManager as BaseConfigManager } from "./configManager";
+import { ConfigManager as BaseConfigManager } from "./configManager.ts";
 
 import type { JSONSchemaType } from "env-schema";
 

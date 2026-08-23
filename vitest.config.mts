@@ -1,3 +1,10 @@
+// The `.mts` extension is load-bearing. The repository root carries no
+// `"type": "module"` (each workspace declares its own), so a `.ts` config
+// here resolves as CommonJS. Vite's `configLoader: 'native'`, announced as a
+// future default, hands the config to Node's own loader, which rejects ESM
+// syntax in a file it resolves that way; the explicit ESM extension keeps
+// every root-started vitest invocation (`npx vitest`, `npm run test:scripts`)
+// loading under either loader.
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
