@@ -216,9 +216,9 @@ export type ProbePeerAnswerShape = "http" | "tls-alert" | "unrecognized";
  *
  * `excerpt` is a fragment somebody else chose. It arrives already escaped by the
  * appliance -- the display sink for those bytes is on the server side of this
- * boundary -- so it renders as ordinary React text and is never escaped a second
- * time. Its length is bounded again on the way in, like every other field this
- * body carries.
+ * boundary -- so it is rendered verbatim and never escaped a second time. Its
+ * length is bounded again on the way in, and its characters are checked against
+ * what that escape can emit, like every other field this body carries.
  */
 export type ProbePeerAnswer =
   | { kind: "nonSsh"; shape: ProbePeerAnswerShape; excerpt: string }
@@ -273,6 +273,14 @@ const PROBE_PEER_ANSWER_SHAPES: ReadonlySet<string> = new Set([
 const PROBE_EXCERPT_MAX_LENGTH = 512;
 
 /**
+ * Every character the appliance's display escape can emit: printable ASCII and
+ * nothing else. `sanitizeForDisplay` passes U+0020 through U+007E and rewrites
+ * every other code point as a `\xHH` / `\uHHHH` escape built from those same
+ * characters, and its truncation marker is plain ASCII too.
+ */
+const ESCAPED_EXCERPT_CHARACTERS = /^[\x20-\x7e]*$/;
+
+/**
  * Read the peer-answer diagnosis off an `unreachable` body, or undefined when it
  * carries none or carries one outside the closed vocabulary. A body without one
  * is the state every unreachable probe was in before the appliance grew the
@@ -284,6 +292,13 @@ const PROBE_EXCERPT_MAX_LENGTH = 512;
  * checks cover, not a reason to lose the diagnosis. The bound is applied the way
  * the appliance applies its own -- the kept prefix plus the truncation marker --
  * so an excerpt the appliance already truncated passes through unchanged.
+ *
+ * A character the escape cannot emit is the one excerpt fault answered by
+ * dropping the diagnosis: the alert renders these bytes verbatim, so a value
+ * carrying a line break, a control character, or a bidi override never went
+ * through the appliance's escape, and there is no shortening that makes it
+ * renderable. Escaping it here instead would double every backslash an honest
+ * excerpt already carries, so the bare category is what such a body yields.
  */
 function probePeerAnswerOf(
   body: Record<string, unknown>,
@@ -296,6 +311,7 @@ function probePeerAnswerOf(
   if (typeof shape !== "string" || !PROBE_PEER_ANSWER_SHAPES.has(shape))
     return undefined;
   if (typeof excerpt !== "string") return undefined;
+  if (!ESCAPED_EXCERPT_CHARACTERS.test(excerpt)) return undefined;
   return {
     kind: "nonSsh",
     shape: shape as ProbePeerAnswerShape,

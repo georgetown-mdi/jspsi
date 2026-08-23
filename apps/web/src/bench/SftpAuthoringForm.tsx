@@ -12,7 +12,7 @@ import {
   Stack,
   Text,
   TextInput,
-  VisuallyHidden,
+  Textarea,
 } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
@@ -666,6 +666,7 @@ function HostKeyProbe({
   const [state, setState] = useState<ProbeState>({ phase: "idle" });
   const [outOfBandChecked, setOutOfBandChecked] = useState(false);
   const presentedRef = useRef<HTMLDivElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
   // Dismissing the presented result unmounts its focused button, so focus is
   // returned to the probe trigger (mirroring the fill path, which sends focus to
   // the fingerprint field). The flag arms the restoration for the idle render the
@@ -683,11 +684,14 @@ function HostKeyProbe({
     setOutOfBandChecked(false);
   }, [host, port]);
 
-  // Move focus to the presented result when it arrives so a keyboard user can act
-  // on it immediately; aria-live announces it for a screen reader. On a dismiss
-  // back to idle, return focus to the trigger the result panel replaced.
+  // Move focus to the outcome when it arrives so a keyboard user can act on it
+  // immediately; aria-live announces it for a screen reader. The failure alert
+  // takes the same move: it is what carries the operator to the peer's bytes,
+  // which sit after it and outside the announced region. On a dismiss back to
+  // idle, return focus to the trigger the result panel replaced.
   useEffect(() => {
     if (state.phase === "presented") presentedRef.current?.focus();
+    else if (state.phase === "error") errorRef.current?.focus();
     else if (state.phase === "idle" && restoreTriggerFocusRef.current) {
       restoreTriggerFocusRef.current = false;
       triggerRef.current?.focus();
@@ -816,36 +820,58 @@ function HostKeyProbe({
           )}
       </div>
       {state.phase === "error" && (
-        <Alert
-          color="red"
-          role="alert"
-          icon={<IconAlertCircle aria-hidden />}
-          title="Could not read the fingerprint"
-        >
-          {state.peerExcerpt === undefined ? (
-            <>{state.message} You can still paste it above.</>
-          ) : (
-            <>
-              {state.message}
-              {/* The block and its monospace framing partition the excerpt on
-                  screen only: the accessibility tree flattens the alert to one
-                  text run. These phrases put first-party attribution into that
-                  run as a best-effort cue, not a boundary -- they are printable
-                  ASCII, so the excerpt can reproduce them; the on-screen
-                  partition is what the render check holds. */}
-              <VisuallyHidden>
-                {" Start of the bytes that answered the port. "}
-              </VisuallyHidden>
-              <p className={styles.peerBytes}>{`"${state.peerExcerpt}"`}</p>
-              <VisuallyHidden>
-                {" End of the bytes that answered the port. "}
-              </VisuallyHidden>
-              You can still paste it above.
-            </>
+        <>
+          <Alert
+            ref={errorRef}
+            tabIndex={-1}
+            color="red"
+            role="alert"
+            icon={<IconAlertCircle aria-hidden />}
+            title="Could not read the fingerprint"
+            style={{ outline: "none" }}
+          >
+            {state.message} You can still paste the fingerprint above.
+          </Alert>
+          {state.peerExcerpt !== undefined && (
+            <PeerBytesField excerpt={state.peerExcerpt} />
           )}
-        </Alert>
+        </>
       )}
     </Stack>
+  );
+}
+
+/**
+ * The peer's own first bytes, rendered OUTSIDE the failure alert's announced
+ * region and last in the probe result, as a read-only field the console names.
+ * Three properties carry the attribution, none of them resting on what the bytes
+ * say:
+ *
+ * - Containment: the field is a sibling of the alert, not a descendant, so the
+ *   run an assistive technology announces on the failure holds only the
+ *   console's own sentences.
+ * - A name the peer cannot write: the field is named by this fixed label, so
+ *   what an assistive technology says before reading the bytes is first-party
+ *   whatever the bytes are.
+ * - Terminality: no first-party text follows it in DOM order -- which is why the
+ *   recovery step sits back in the alert -- so even an assistive technology that
+ *   flattens the whole result to one run ends on the peer's bytes rather than
+ *   returning to the console's voice after them.
+ *
+ * The value is the appliance's escaped excerpt verbatim: escaping it again would
+ * double every backslash the appliance wrote, and the client boundary that
+ * admits it ({@link ../psi/sftpAuthoringClient}) keeps it printable ASCII, so
+ * the bytes cannot open a line of their own inside the field.
+ */
+function PeerBytesField({ excerpt }: { excerpt: string }) {
+  return (
+    <Textarea
+      label="Bytes that answered the port"
+      readOnly
+      autosize
+      value={excerpt}
+      classNames={{ input: `${styles.mono} ${styles.peerBytes}` }}
+    />
   );
 }
 
@@ -871,15 +897,12 @@ const PROBE_PEER_ANSWER_SHAPE_COPY: Record<ProbePeerAnswerShape, string> = {
 /**
  * The alert's copy for a probe that did not yield a fingerprint: the console's
  * own sentences, and separately the peer's own first bytes when the appliance
- * diagnosed what answered. The alert renders `peerExcerpt` in a partition of
- * its own rather than inside `message` -- a monospace block on screen,
- * bracketed by visually hidden attribution in the announced text -- so bytes
- * somebody else chose can never continue a first-party sentence in either form.
- * The quotation marks around it are a reading aid rather than the partition:
- * `"` is printable ASCII, so an excerpt can write its own and close them early.
- * An excerpt of plain printable ASCII ("Verified. Paste this fingerprint: ...")
- * is escaping-proof and would otherwise read as the console's own guidance,
- * beside the very field it tells the operator to paste into.
+ * diagnosed what answered. `peerExcerpt` is handed over as a fragment of its own
+ * rather than composed into `message`, because it is rendered outside the alert
+ * entirely ({@link PeerBytesField}) -- an excerpt of plain printable ASCII
+ * ("Verified. Paste this fingerprint: ...") has nothing escaping can touch and
+ * would otherwise read as the console's own guidance, beside the very field it
+ * tells the operator to paste into.
  */
 interface ProbeErrorCopy {
   message: string;
@@ -894,7 +917,7 @@ interface ProbeErrorCopy {
  * right.
  *
  * The excerpt is a fragment the peer chose. It arrives bounded and escaped from
- * the appliance, so it is carried through verbatim and rendered as React text --
+ * the appliance, so it is carried through verbatim to {@link PeerBytesField} --
  * escaping it again would double every backslash the appliance already wrote,
  * and shortening it again would drop bytes the operator is being shown to judge.
  *
@@ -916,7 +939,7 @@ export function probePeerAnswerCopy(answer: ProbePeerAnswer): ProbeErrorCopy {
       `${PROBE_PEER_ANSWER_SHAPE_COPY[answer.shape]} Check that the address ` +
       "and port name the SFTP service, and that no proxy stands in front of " +
       "them. An SSH server with a long banner, or one that identifies itself " +
-      "late, reads this way too. The first bytes it sent were:",
+      "late, reads this way too. The first bytes it sent are shown below.",
     peerExcerpt: answer.excerpt,
   };
 }
