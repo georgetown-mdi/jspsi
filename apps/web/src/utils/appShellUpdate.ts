@@ -9,6 +9,13 @@
  * it so the shell can say so, and applies it -- with a reload -- only when the
  * operator asks. A waiting worker that is never applied still takes over at the
  * next cold start; the prompt shortens that wait, it is not what bounds it.
+ *
+ * Applying is ordered so that the reload leads and the takeover follows it: the
+ * message that ends the wait is posted as the page unloads, which is the first
+ * moment the reload is known to be happening. A reload the operator declines at
+ * the browser's own confirmation therefore costs nothing -- the page keeps its
+ * code, the update keeps waiting, and the banner's Reload applies it whenever
+ * the operator is ready.
  */
 
 /** The worker's URL. It is served from `public/`, so its scope is the origin
@@ -60,7 +67,8 @@ export interface ShellContainer {
 
 let updateReady = false;
 let registration: ShellRegistration | undefined;
-let applyRequested = false;
+let takeoverArmed = false;
+let applyUpdate: (() => void) | undefined;
 const listeners = new Set<() => void>();
 
 function publish(value: boolean): void {
@@ -91,6 +99,10 @@ export interface RegisterAppShellOptions {
    * tab. Defaults to the display-mode media query the manifest's `standalone`
    * display produces. */
   isInstalledRuntime?: () => boolean;
+  /** Call `listener` when this page is going away for good. Defaults to a
+   * `pagehide` listener that ignores a persisted one: that is the back/forward
+   * cache freezing the page, which can be restored still running this code. */
+  onPageUnloading?: (listener: () => void) => void;
 }
 
 /**
@@ -125,20 +137,39 @@ export async function registerAppShell(
     (() =>
       typeof window !== "undefined" &&
       window.matchMedia("(display-mode: standalone)").matches);
+  const onPageUnloading =
+    options.onPageUnloading ??
+    ((listener: () => void) => {
+      window.addEventListener("pagehide", (event) => {
+        if (!event.persisted) listener();
+      });
+    });
   function warmRoutes(): void {
     if (!isInstalledRuntime()) return;
     container.controller?.postMessage(WARM_ROUTES_MESSAGE);
   }
   container.addEventListener("controllerchange", () => {
-    // A controller change also happens on the first install, when the worker
-    // claims this page: reload only the change this module asked for, or every
-    // first visit would reload itself.
-    if (applyRequested) {
-      reload();
-      return;
-    }
+    // A page whose operator has asked for a takeover is on its way out, on this
+    // reload or a later one, so it is the wrong place to start the several
+    // megabytes a warm costs; the page that replaces it warms at its own
+    // registration.
+    if (takeoverArmed) return;
     warmRoutes();
   });
+  applyUpdate = () => {
+    const waiting = registration?.waiting;
+    if (waiting === null || waiting === undefined) return;
+    if (!takeoverArmed) {
+      takeoverArmed = true;
+      // Read the waiting worker again at unload rather than closing over the one
+      // above: an update declined once can be superseded by a newer one before
+      // the page finally goes.
+      onPageUnloading(() => {
+        registration?.waiting?.postMessage(SKIP_WAITING_MESSAGE);
+      });
+    }
+    reload();
+  };
   try {
     registration = await container.register(SERVICE_WORKER_URL, {
       scope: "/",
@@ -169,24 +200,29 @@ export async function registerAppShell(
 }
 
 /**
- * Apply the waiting update: tell it to take over, which fires the controller
- * change that reloads the page onto the new code. Does nothing when no worker is
- * waiting, which is also the state right after this already ran once: posting
- * the message clears `registration.waiting`, so a declined reload leaves the
- * banner's Reload inert and a manual browser reload is the operator's only way
- * to pick the update back up.
+ * Apply the waiting update: reload the page, and tell the waiting worker to take
+ * over as that page unloads. The order is what makes the apply recoverable --
+ * the reload can still be stopped, by the confirmation a live exchange arms
+ * (`apps/web/src/bench/useUnloadGuard.ts`), and a stopped one leaves the update
+ * waiting and this function ready to run again.
+ *
+ * The takeover is armed once and stays armed: an operator who declines the
+ * reload and later closes the page has still asked for the update, and letting
+ * it take over as that page goes is the cold start it would have waited for
+ * anyway.
+ *
+ * Does nothing before `registerAppShell` has a registration, or when no worker
+ * is waiting.
  */
 export function applyAppShellUpdate(): void {
-  const waiting = registration?.waiting;
-  if (waiting === null || waiting === undefined) return;
-  applyRequested = true;
-  waiting.postMessage(SKIP_WAITING_MESSAGE);
+  applyUpdate?.();
 }
 
 /** @internal */
 export function resetAppShellUpdate(): void {
   updateReady = false;
   registration = undefined;
-  applyRequested = false;
+  takeoverArmed = false;
+  applyUpdate = undefined;
   listeners.clear();
 }
