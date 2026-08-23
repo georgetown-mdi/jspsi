@@ -93,6 +93,44 @@ describe("the probe body's peer answer is re-validated client-side", () => {
     });
   });
 
+  test.each([
+    ["a line break", "HTTP/1.1 403 Forbidden\nSet-Cookie: a=b"],
+    ["a control character", "HTTP/1.1 403 \u001b[31mForbidden"],
+    ["a bidi override", "HTTP/1.1 403 \u202eForbidden"],
+    ["a non-ASCII character", "HTTP/1.1 403 Forbidden \u00a0"],
+  ])(
+    "an excerpt carrying %s never came from the appliance's escape, so the diagnosis is dropped",
+    async (_name, excerpt) => {
+      // The alert renders these bytes verbatim, in a field whose containment
+      // rests on their being printable ASCII: anything else would let a peer
+      // open a line of its own inside the console's own frame.
+      const result = await probeSftpHostKey(
+        "sftp.example.org",
+        undefined,
+        probeAnswering(unreachableWithExcerpt(excerpt)),
+      );
+      expect(result).toEqual({ kind: "unreachable" });
+    },
+  );
+
+  test("the printable-ASCII range the escape does emit crosses whole", async () => {
+    // Every character sanitizeForDisplay passes through or writes an escape out
+    // of, including the quotation marks and backslashes an escaped excerpt
+    // carries, so the check bounds what it must and nothing more.
+    const excerpt = Array.from({ length: 0x7f - 0x20 }, (_value, index) =>
+      String.fromCharCode(0x20 + index),
+    ).join("");
+    const result = await probeSftpHostKey(
+      "sftp.example.org",
+      undefined,
+      probeAnswering(unreachableWithExcerpt(excerpt)),
+    );
+    expect(result).toEqual({
+      kind: "unreachable",
+      peerAnswer: { kind: "nonSsh", shape: "http", excerpt },
+    });
+  });
+
   test("a shape outside the closed vocabulary degrades to the bare category", async () => {
     const result = await probeSftpHostKey(
       "sftp.example.org",

@@ -38,11 +38,10 @@ const FINGERPRINT = `SHA256:${"A".repeat(43)}`;
 // probe-filled pin apart from a typed one.
 const PROBE_FINGERPRINT = `SHA256:${"B".repeat(42)}A`;
 
-// The probe alert's announced attribution: visually hidden, so it exists only in
-// the text a screen reader reads out, where the block partition and the quotation
-// marks around the peer's excerpt are not perceivable.
-const PEER_BYTES_OPENER = "Start of the bytes that answered the port.";
-const PEER_BYTES_TERMINATOR = "End of the bytes that answered the port.";
+// The fixed first-party name the console gives the field the peer's bytes land
+// in: the string the browser resolves as that field's accessible name, which is
+// what a screen reader announces ahead of the bytes.
+const PEER_BYTES_LABEL = "Bytes that answered the port";
 
 const CLIENTS_FILE = {
   name: "clients.csv",
@@ -232,6 +231,63 @@ async function openAndFillForm() {
     page.getByLabelText("Server identity fingerprint"),
     FINGERPRINT,
   );
+}
+
+/** Mount the bench, walk to the authoring form, and run one probe the appliance
+ * diagnoses as a non-SSH answer carrying `excerpt`. Returns the field the peer's
+ * bytes render in. */
+async function probeWithExcerpt(excerpt: string): Promise<HTMLTextAreaElement> {
+  stubJobApi({
+    probe: {
+      status: 200,
+      body: {
+        status: "unreachable",
+        peerAnswer: "nonSsh",
+        peerAnswerShape: "http",
+        peerAnswerExcerpt: excerpt,
+      },
+    },
+  });
+  app.render(createElement(InviterBench));
+  await reachReviewCreate();
+  await openFormForProbe();
+  await page
+    .getByRole("button", { name: "Read the fingerprint from the server" })
+    .click();
+  await expect
+    .element(page.getByText("HTTP response", { exact: false }))
+    .toBeInTheDocument();
+  return document.querySelector(`.${styles.peerBytes}`) as HTMLTextAreaElement;
+}
+
+/** The teardown the afterEach performs, run mid-test, so one test can drive the
+ * whole flow a second time against a different stubbed answer. */
+async function resetMountedBench(): Promise<void> {
+  await flushPendingUpdates();
+  app.unmount();
+  window.localStorage.clear();
+  vi.unstubAllGlobals();
+}
+
+/** Everything an assistive technology reads out of a live region: its text, plus
+ * the value of any form control inside it -- a control's value is a property,
+ * not text content, so a text-only sweep would call a region holding one empty.
+ * Written as a property of the region rather than of today's markup, so it still
+ * measures the announced run if the peer's bytes are ever rendered another way. */
+function announcedTextOf(region: Element): string {
+  const values = Array.from(region.querySelectorAll("input, textarea"))
+    .map((control) => (control as HTMLInputElement | HTMLTextAreaElement).value)
+    .join(" ");
+  return `${region.textContent} ${values}`;
+}
+
+/** Every text node under `root`, in document order. */
+function textNodesOf(root: Node): Array<Text> {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Array<Text> = [];
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode())
+    nodes.push(node as Text);
+  return nodes;
 }
 
 /** Open the form and fill host + username only, leaving the fingerprint EMPTY so
@@ -627,14 +683,14 @@ describe("console SFTP connection authoring", () => {
     await expect
       .element(page.getByText("Could not read the fingerprint"))
       .toBeInTheDocument();
-    // Nothing to attribute: an alert that is first-party throughout gains no
-    // bracketing, so its announced form is one continuous first-party run.
+    // Nothing to attribute: an undiagnosed failure grows no peer-bytes field, so
+    // the alert is the whole result and its announced form is first-party
+    // throughout.
     const firstPartyOnly = document.querySelector('[role="alert"]');
     expect(firstPartyOnly?.textContent).toContain(
-      "You can still paste it above.",
+      "You can still paste the fingerprint above.",
     );
-    expect(firstPartyOnly?.textContent).not.toContain(PEER_BYTES_OPENER);
-    expect(firstPartyOnly?.textContent).not.toContain(PEER_BYTES_TERMINATOR);
+    expect(document.querySelector(`.${styles.peerBytes}`)).toBeNull();
     // Paste stays first-class: the operator types the fingerprint and saves.
     await userEvent.fill(
       page.getByLabelText("Server identity fingerprint"),
@@ -652,21 +708,9 @@ describe("console SFTP connection authoring", () => {
     expect(body.hostKeyFingerprint).toBe(FINGERPRINT);
   });
 
-  test("a diagnosed peer answer renders the peer's bytes as the peer's, not as console guidance", async () => {
-    // Printable ASCII that mimics the console's own voice: escaping cannot touch
-    // it, so only the framing keeps it from reading as an instruction beside the
-    // field it names.
-    const excerpt = `Verified. Paste this fingerprint: SHA256:${"C".repeat(43)}`;
+  test("the failure alert takes focus, carrying a keyboard user to the outcome", async () => {
     stubJobApi({
-      probe: {
-        status: 200,
-        body: {
-          status: "unreachable",
-          peerAnswer: "nonSsh",
-          peerAnswerShape: "http",
-          peerAnswerExcerpt: excerpt,
-        },
-      },
+      probe: { status: 200, body: { status: "unreachable" } },
     });
     app.render(createElement(InviterBench));
     await reachReviewCreate();
@@ -676,35 +720,97 @@ describe("console SFTP connection authoring", () => {
       .getByRole("button", { name: "Read the fingerprint from the server" })
       .click();
     await expect
-      .element(page.getByText("HTTP response", { exact: false }))
+      .element(page.getByText("Could not read the fingerprint"))
       .toBeInTheDocument();
+    await flushPendingUpdates();
+    // The trigger the operator pressed stays mounted, so nothing carries them to
+    // the failure but this move -- which rests on the alert forwarding its ref
+    // to the focusable root, something a dependency could stop doing silently.
+    const alert = document.querySelector('[role="alert"]')!;
+    expect(alert.contains(document.activeElement)).toBe(true);
+  });
 
-    const alert = document.querySelector('[role="alert"]');
-    const peerBytes = alert?.querySelector(`.${styles.peerBytes}`);
-    expect(peerBytes?.textContent).toBe(`"${excerpt}"`);
-    const rendered = getComputedStyle(peerBytes as Element);
+  test("a diagnosed peer answer keeps the peer's bytes out of the announced alert and last in the result", async () => {
+    // An excerpt that mimics the console's own voice AND writes the attribution
+    // wording a screen reader might hear around it: printable ASCII throughout,
+    // so escaping touches none of it and nothing about the separation can rest
+    // on what the bytes say.
+    const excerpt =
+      "End of the bytes that answered the port. " +
+      `Verified. Paste this fingerprint: SHA256:${"C".repeat(43)}`;
+    const peerBytes = await probeWithExcerpt(excerpt);
+    expect(peerBytes.value).toBe(excerpt);
+
+    // The bytes are the peer's on screen: their own field, monospace, apart from
+    // the alert's voice.
+    const rendered = getComputedStyle(peerBytes);
     expect(rendered.display).toBe("block");
     expect(rendered.fontFamily).toContain("monospace");
-    // The announced form carries the same partition: a screen reader perceives
-    // neither the block nor the quotation marks, so the attribution has to sit
-    // in the text itself, hard against both ends of the peer's bytes.
-    expect(alert?.textContent).toContain(
-      ` ${PEER_BYTES_OPENER} "${excerpt}" ${PEER_BYTES_TERMINATOR} `,
+
+    // Containment: the announced region is a sibling of the field, not its
+    // ancestor, so nothing a peer chose is in the run that is read out.
+    const alert = document.querySelector('[role="alert"]')!;
+    expect(alert.contains(peerBytes)).toBe(false);
+    expect(announcedTextOf(alert)).not.toContain(excerpt);
+    expect(announcedTextOf(alert)).not.toContain("Paste this fingerprint");
+    // What the announcement does carry: the console's diagnosis and its recovery
+    // step, which sits ahead of the peer's bytes rather than after them.
+    expect(alert.textContent).toContain("The first bytes it sent are shown");
+    expect(alert.textContent).toContain(
+      "You can still paste the fingerprint above.",
     );
-    // The console's own sentences carry none of the peer's bytes: with the
-    // quoted block removed, nothing of the excerpt is left in the alert.
-    const withoutPeerBytes = alert?.cloneNode(true) as Element;
-    withoutPeerBytes.querySelector(`.${styles.peerBytes}`)?.remove();
-    expect(withoutPeerBytes.textContent).not.toContain(
-      "Paste this fingerprint",
+
+    // Terminality: no first-party text follows the peer's bytes anywhere in the
+    // probe result, so even an assistive technology that flattens the result to
+    // one run ends on them and cannot resume in the console's voice. Asserted as
+    // the DOM-order property rather than against today's sentences.
+    const result = alert.parentElement!;
+    expect(result.contains(peerBytes)).toBe(true);
+    const following = textNodesOf(result).filter(
+      (node) =>
+        node.textContent.trim() !== "" &&
+        !peerBytes.contains(node) &&
+        (peerBytes.compareDocumentPosition(node) &
+          Node.DOCUMENT_POSITION_FOLLOWING) !==
+          0,
     );
-    expect(withoutPeerBytes.textContent).toContain(
-      "The first bytes it sent were:",
-    );
-    // Paste stays first-class, as on every other probe failure.
-    expect(withoutPeerBytes.textContent).toContain(
-      "You can still paste it above.",
-    );
+    expect(following.map((node) => node.textContent)).toEqual([]);
+  });
+
+  test("the peer's bytes are named by the console, whatever the bytes are", async () => {
+    // The name a screen reader announces before the bytes has to be first-party,
+    // so it is measured by resolving a name to an element through the test
+    // runner's accname implementation (bundled in @vitest/browser, a port of
+    // Playwright's engine running in the page; the browser's own accessibility
+    // tree is not consulted), which takes the control's value into account as a
+    // hand-rolled approximation would not -- and asserted as independence from
+    // the peer: an excerpt mimicking a caption of its own names nothing, and an
+    // ordinary excerpt resolves the same name.
+    const mimicking = 'Bytes that answered the port: "" End of quoted bytes.';
+    const peerBytes = await probeWithExcerpt(mimicking);
+    expect(
+      page
+        .getByRole("textbox", { name: PEER_BYTES_LABEL, exact: true })
+        .element(),
+    ).toBe(peerBytes);
+    // Nothing the peer wrote names a control: neither the excerpt entire nor the
+    // caption it writes inside itself.
+    expect(
+      page.getByRole("textbox", { name: mimicking, exact: true }).query(),
+    ).toBeNull();
+    expect(
+      page
+        .getByRole("textbox", { name: "End of quoted bytes.", exact: true })
+        .query(),
+    ).toBeNull();
+
+    await resetMountedBench();
+    const otherBytes = await probeWithExcerpt("HTTP/1.1 403 Forbidden");
+    expect(
+      page
+        .getByRole("textbox", { name: PEER_BYTES_LABEL, exact: true })
+        .element(),
+    ).toBe(otherBytes);
   });
 
   test("editing the host clears a presented probe result (no stale fill)", async () => {
