@@ -20,21 +20,22 @@ import {
   type MessageConnection,
 } from "../src/connection/messageConnection";
 import type { AssociationTable } from "../src/types";
+import { singlePassReplyByteCap } from "../src/connection/frameSize";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 import { fanOutFreeBounds } from "./utils/singlePassBounds";
 
-// The cascade's deduplicating half: a "many" party keeps a value several of its
-// own records hold, contributes it to the round once, and re-expands a match on it
-// onto every record holding it, while its partner's within-round uniqueness rule
-// is unchanged (docs/spec/PROTOCOL.md, Deduplicating cardinalities). The two
-// parties hold MIRROR labels for the one procedure -- the declaring party runs
-// many-to-one and its partner one-to-many -- so every run here drives both sides
-// and asserts they reconstruct the same pairing.
+// Deduplicating matching, driven at the strategy seam: a "many" party keeps a
+// value several of its own records hold, contributes it to the round once, and
+// attributes a match on it to every record holding it, while its partner's
+// within-round uniqueness rule is unchanged (docs/spec/PROTOCOL.md, Deduplicating
+// cardinalities). The two parties hold MIRROR labels for the one procedure -- the
+// declaring party runs many-to-one and its partner one-to-many -- so every run
+// here drives both sides and asserts they reconstruct the same pairing.
 //
-// This path is dark in production: exchange.ts still refuses any deduplicate: true
-// at the exchange boundary, so only these tests and a direct linkViaPSI caller
-// reach it. The other strategy reads the same labels differently -- single-pass
-// implements no deduplicating match at all -- which the last section pins.
+// The first sections are the cascade's realization, which derives the table from
+// the exchanged mapped-element lists; the equivalence section then drives the same
+// inputs through single-pass, whose receiver derives it alone from the index
+// table, and requires the two to agree table for table.
 
 const psiLibrary = await PSI();
 
@@ -674,18 +675,19 @@ for (const manySide of ["starter", "joiner"] as const) {
 }
 
 // --- the same labels under single-pass ----------------------------------------
-// Single-pass implements no deduplicating match, and its accept-list admits
-// one-to-one alone. Pinned here for every deduplicating label, so a future change
-// that admits one without teaching the replay the widening trips a test rather
-// than silently matching one-to-one under a consented many-cardinality term. The
-// exchange boundary refuses the same pair before the run; this is the strategy's
-// own fail-closed half, which a direct caller reaches.
+// Single-pass matches the same deduplicating cardinalities, over the frames it
+// already ships: the index table names which of a party's records hold one value
+// whatever the cardinality, so the widening is two clauses of the receiver's local
+// replay. The strategies must therefore agree table for table, which is what the
+// equivalence block below drives; `many-to-many` is refused by both.
 
 const singlePassStarterData = [["E1", "E1", "E2", "E3"]];
 const singlePassJoinerData = [["E1", "E2", "X"]];
 
 async function runSinglePass(
   cardinality: LinkageCardinality,
+  starterKeys: Keys = singlePassStarterData,
+  joinerKeys: Keys = singlePassJoinerData,
 ): Promise<[AssociationTable, AssociationTable]> {
   const [starterConn, joinerConn] = createMessagePipe();
   return await Promise.all([
@@ -693,6 +695,50 @@ async function runSinglePass(
       { cardinality },
       makeParticipant("starter"),
       starterConn,
+      starterKeys,
+      fanOutFreeBounds(starterKeys.length, joinerKeys[0].length),
+      false,
+      -1,
+    ),
+    linkViaSinglePassPSI(
+      { cardinality: mirrorCardinality(cardinality) },
+      makeParticipant("joiner"),
+      joinerConn,
+      joinerKeys,
+      fanOutFreeBounds(joinerKeys.length, starterKeys[0].length),
+      false,
+      -1,
+    ),
+  ]);
+}
+
+function mirrorCardinality(
+  cardinality: LinkageCardinality,
+): LinkageCardinality {
+  if (cardinality === "many-to-one") return "one-to-many";
+  if (cardinality === "one-to-many") return "many-to-one";
+  return cardinality;
+}
+
+test("single-pass runs one-to-one, dropping the value a group would have kept", async () => {
+  const [starter, joiner] = await runSinglePass("one-to-one");
+  // The starter's duplicated "E1" is dropped as ambiguous rather than kept and
+  // expanded onto both of its rows, which is what many-to-one makes of this same
+  // data in the first test of this file and in the equivalence block below.
+  expect(starter).toStrictEqual([[2], [1]]);
+  expect(joiner).toStrictEqual([[1], [2]]);
+});
+
+test("single-pass refuses many-to-many", async () => {
+  // Refused before any frame moves, so the unread other end of the pipe is not a
+  // partner this ever reaches -- and refused for the cascade's own reason, the
+  // closure step rather than the pairing.
+  const [conn] = createMessagePipe();
+  await expect(
+    linkViaSinglePassPSI(
+      { cardinality: "many-to-many" },
+      makeParticipant("starter"),
+      conn,
       singlePassStarterData,
       fanOutFreeBounds(
         singlePassStarterData.length,
@@ -701,57 +747,281 @@ async function runSinglePass(
       false,
       -1,
     ),
+  ).rejects.toThrow("psi for cardinality 'many-to-many' not yet implemented");
+});
+
+test("the cascade and single-pass refuse many-to-many with the same message", async () => {
+  // The two resolvers carry this literal independently rather than through a
+  // shared constant, so nothing but a test would catch the copies drifting apart.
+  const [conn] = createMessagePipe();
+  const settle = (run: Promise<unknown>): Promise<unknown> =>
+    run.then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+  const cascadeError = await settle(
+    linkViaPSI(
+      { cardinality: "many-to-many" },
+      makeParticipant("starter"),
+      conn,
+      singlePassStarterData,
+      singlePassJoinerData[0].length,
+      -1,
+    ),
+  );
+  const singlePassError = await settle(
     linkViaSinglePassPSI(
-      { cardinality },
-      makeParticipant("joiner"),
-      joinerConn,
-      singlePassJoinerData,
+      { cardinality: "many-to-many" },
+      makeParticipant("starter"),
+      conn,
+      singlePassStarterData,
       fanOutFreeBounds(
-        singlePassJoinerData.length,
-        singlePassStarterData[0].length,
+        singlePassStarterData.length,
+        singlePassJoinerData[0].length,
       ),
       false,
       -1,
     ),
-  ]);
-}
-
-test("single-pass runs one-to-one, the one cardinality it admits", async () => {
-  const [starter, joiner] = await runSinglePass("one-to-one");
-  // The starter's duplicated "E1" is dropped as ambiguous rather than kept and
-  // expanded onto both of its rows, which is what the cascade's many-to-one makes
-  // of this same data in the first test of this file.
-  expect(starter).toStrictEqual([[2], [1]]);
-  expect(joiner).toStrictEqual([[1], [2]]);
+  );
+  expect(cascadeError).toBeInstanceOf(Error);
+  expect(singlePassError).toBeInstanceOf(Error);
+  expect((cascadeError as Error).message).toBe(
+    "psi for cardinality 'many-to-many' not yet implemented",
+  );
+  expect((singlePassError as Error).message).toBe(
+    (cascadeError as Error).message,
+  );
 });
 
-for (const cardinality of [
-  "many-to-one",
-  "one-to-many",
-  "many-to-many",
-] as const) {
-  test(`single-pass refuses ${cardinality}`, async () => {
-    // Refused before any frame moves, so the unread other end of the pipe is not a
-    // partner this ever reaches.
-    const [conn] = createMessagePipe();
-    await expect(
-      linkViaSinglePassPSI(
-        { cardinality },
-        makeParticipant("starter"),
-        conn,
-        singlePassStarterData,
-        fanOutFreeBounds(
-          singlePassStarterData.length,
-          singlePassJoinerData[0].length,
-        ),
-        false,
-        -1,
-      ),
-    ).rejects.toThrow(
-      `psi for cardinality '${cardinality}' not yet implemented`,
-    );
-  });
+// --- the two strategies agree, table for table --------------------------------
+// The equivalence property the cascade and single-pass hold under `one-to-one`
+// (psiLink.test.ts), extended to the cardinality where multiplicity governs the
+// outcome. Every case below is a dataset whose table DIFFERS from the one-to-one
+// table for the same inputs, so a replay that quietly matched one-to-one under a
+// deduplicating label would fail here rather than pass vacuously.
+
+async function expectStrategiesAgree(
+  manySide: "starter" | "joiner",
+  starterKeys: Keys,
+  joinerKeys: Keys,
+): Promise<[AssociationTable, AssociationTable]> {
+  const [cascadeStarter, cascadeJoiner] = expectTables(
+    await runCascade(manySide, starterKeys, joinerKeys),
+  );
+  const [singlePassStarter, singlePassJoiner] = await runSinglePass(
+    cardinalityFor("starter", manySide),
+    starterKeys,
+    joinerKeys,
+  );
+  expect(singlePassStarter).toStrictEqual(cascadeStarter);
+  expect(singlePassJoiner).toStrictEqual(cascadeJoiner);
+  expectAgreement(singlePassStarter, singlePassJoiner);
+  // Non-vacuity: the same inputs matched one-to-one produce a different table, so
+  // each case is one the multiplicity decides.
+  const [oneToOneStarter] = await runSinglePass(
+    "one-to-one",
+    starterKeys,
+    joinerKeys,
+  );
+  expect(oneToOneStarter).not.toStrictEqual(singlePassStarter);
+  return [singlePassStarter, singlePassJoiner];
 }
+
+test("single-pass links a kept value to every record of the group holding it", async () => {
+  const [starter, joiner] = await expectStrategiesAgree(
+    "starter",
+    [["E1", "E1", "E2", "E3"]],
+    [["E1", "E2", "X"]],
+  );
+  expect(starter).toStrictEqual([
+    [0, 1, 2],
+    [0, 0, 1],
+  ]);
+  expect(joiner).toStrictEqual([
+    [0, 0, 1],
+    [0, 1, 2],
+  ]);
+});
+
+test("single-pass runs the widening from either side", async () => {
+  // Nothing in the replay is role-derived either: the deduplicating party is the
+  // PSI receiver here rather than the sender, which is the other of the two
+  // arrangements a single-pass exchange can put a "many" side in.
+  const [starter, joiner] = await expectStrategiesAgree(
+    "joiner",
+    [["E1", "E2", "X"]],
+    [["E1", "E1", "E2", "E3"]],
+  );
+  expect(starter).toStrictEqual([
+    [0, 0, 1],
+    [0, 1, 2],
+  ]);
+  expect(joiner).toStrictEqual([
+    [0, 1, 2],
+    [0, 0, 1],
+  ]);
+});
+
+test("single-pass keeps the one side's own uniqueness rule", async () => {
+  // The many side keeping its duplicates does not relax the other side's rule:
+  // the joiner's two "D" rows are ambiguous and leave the round, while both of the
+  // starter's "U" rows link to the joiner's single "U".
+  const [starter] = await expectStrategiesAgree(
+    "starter",
+    [["D", "U", "U"]],
+    [["D", "D", "U"]],
+  );
+  expect(starter).toStrictEqual([
+    [1, 2],
+    [2, 2],
+  ]);
+});
+
+test("single-pass groups on one key, the round the group formed in", async () => {
+  // Multiplicity is within-round on both sides: the starter's row 2 shares the
+  // joiner row 0's name but holds no SSN, and the joiner's row has left candidacy
+  // on the first round, so the second cannot add row 2 to the group.
+  const [starter] = await expectStrategiesAgree(
+    "starter",
+    [
+      ["S1", "S1", undefined],
+      ["N1", "N2", "N1"],
+    ],
+    [["S1"], ["N1"]],
+  );
+  expect(starter).toStrictEqual([
+    [0, 1],
+    [0, 0],
+  ]);
+});
+
+test("single-pass reproduces the expansion ordering across interleaved groups", async () => {
+  // The case that decides the ordering in the cascade, where the two parties'
+  // set orders are reverses of each other. Single-pass reconstructs the pairing
+  // from the index table rather than from an exchanged list, so agreeing here is
+  // what says the two derivations of the same table coincide.
+  const [starter, joiner] = await expectStrategiesAgree(
+    "starter",
+    [["Y", "X", "Y", "X", "Y"]],
+    [["X", "Y"]],
+  );
+  expect(starter).toStrictEqual([
+    [0, 1, 2, 3, 4],
+    [1, 0, 1, 0, 1],
+  ]);
+  expect(joiner).toStrictEqual([
+    [0, 0, 1, 1, 1],
+    [1, 3, 0, 2, 4],
+  ]);
+});
+
+test("single-pass carries the survivor-relative rule into a group", async () => {
+  // Candidacy, not the whole dataset, decides what is ambiguous, and the two
+  // rules meet here. The joiner's "Z" sits on rows 0 and 1, so the whole dataset
+  // makes it ambiguous; row 0 matches on key 0 and leaves, which leaves "Z"
+  // unique among key 1's survivors. Both of the starter's "Z" rows then group
+  // onto the joiner's row 1 -- a match a full-dataset reading of uniqueness
+  // would have dropped on the one side and the one-to-one rule drops on the many.
+  const [starter, joiner] = await expectStrategiesAgree(
+    "starter",
+    [
+      ["A", undefined, undefined],
+      [undefined, "Z", "Z"],
+    ],
+    [
+      ["A", "X", "Y"],
+      ["Z", "Z", "Q"],
+    ],
+  );
+  expect(starter).toStrictEqual([
+    [0, 1, 2],
+    [0, 1, 1],
+  ]);
+  expect(joiner).toStrictEqual([
+    [0, 1, 1],
+    [0, 1, 2],
+  ]);
+});
+
+// --- the single-pass bounds under multiplicity --------------------------------
+// Every single-pass bound rests on the premise that a party's (key, record) cell
+// count upper-bounds its distinct-value count. A deduplicating party contributes
+// each DISTINCT value once, so duplication can only lower that count -- which the
+// note behind the specification claims and this measures, by driving the real
+// strategy and reading the reply frame it actually builds against the cap both
+// parties derive from their declared sizes. Every fixture here fills every cell,
+// so the sender's own slot-bound check (built slots against declared width) is
+// exercised at its limit rather than under it.
+
+async function singlePassReplyBytes(
+  cardinality: LinkageCardinality,
+  starterKeys: Keys,
+  joinerKeys: Keys,
+): Promise<number> {
+  const [starterConn, joinerConn] = createMessagePipe();
+  let replyBytes = 0;
+  const measuringJoinerConn: MessageConnection = {
+    send: (data) => joinerConn.send(data),
+    receive: async (timeoutMs?: number) => {
+      const frame = await joinerConn.receive(timeoutMs);
+      if (frame instanceof Uint8Array) replyBytes = frame.byteLength;
+      return frame;
+    },
+    close: () => joinerConn.close(),
+    setInboundFrameCap: joinerConn.setInboundFrameCap?.bind(joinerConn),
+  };
+  await Promise.all([
+    linkViaSinglePassPSI(
+      { cardinality },
+      makeParticipant("starter"),
+      starterConn,
+      starterKeys,
+      fanOutFreeBounds(starterKeys.length, joinerKeys[0].length),
+      false,
+      -1,
+    ),
+    linkViaSinglePassPSI(
+      { cardinality: mirrorCardinality(cardinality) },
+      makeParticipant("joiner"),
+      measuringJoinerConn,
+      joinerKeys,
+      fanOutFreeBounds(joinerKeys.length, starterKeys[0].length),
+      false,
+      -1,
+    ),
+  ]);
+  return replyBytes;
+}
+
+test("a deduplicating sender's reply stays within the cap its declared size derives", async () => {
+  const joinerKeys: Keys = [["E1", "E2", "X"]];
+  // Same shape either way -- one key over four filled rows -- so the two parties'
+  // declared sizes, and every bound derived from them, are the same pair.
+  const duplicated: Keys = [["E1", "E1", "E1", "E2"]];
+  const distinct: Keys = [["E1", "E2", "E3", "E4"]];
+  const cap = singlePassReplyByteCap(
+    1,
+    { effectiveKeyCount: 1, recordCount: 4 },
+    { effectiveKeyCount: 1, recordCount: 3 },
+  );
+
+  const duplicatedBytes = await singlePassReplyBytes(
+    "many-to-one",
+    duplicated,
+    joinerKeys,
+  );
+  const distinctBytes = await singlePassReplyBytes(
+    "one-to-one",
+    distinct,
+    joinerKeys,
+  );
+  expect(duplicatedBytes).toBeLessThanOrEqual(cap);
+  expect(distinctBytes).toBeLessThanOrEqual(cap);
+  // The deduplicating reply is the SMALLER of the two: its index table is the
+  // same one word per (key, record), and its setup carries two masked values
+  // where the distinct-valued one carries four.
+  expect(duplicatedBytes).toBeLessThan(distinctBytes);
+});
 
 // --- the grouping is snapshotted before the send ------------------------------
 // The grouping the returned list is held to is copied out of the "many" side's own

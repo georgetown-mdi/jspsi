@@ -110,12 +110,11 @@ describe("the count-only shape gate at the Generate boundary", () => {
     expect(result.errors.payload).toMatch(/so they are not sent/);
   });
 
-  test("under psi the identical draft is refused only for its deduplicate settings, which clearing them settles", () => {
+  test("under psi the identical draft generates, so every refusal above was the count-only rules'", () => {
     // Every rule above is the count-only algorithm's: under psi the same draft
-    // keeps its several keys and its marked column. What is left is the one
-    // refusal deduplicate carries at any algorithm -- the pair beside
-    // single-pass, gated in advancedInviteValidation.test.ts -- so clearing the
-    // setting generates and nothing here was the count-only rules'.
+    // keeps its several keys, its single-pass strategy, its deduplicating term
+    // and its marked column, and generates. Nothing here was a rule the
+    // identifier-revealing algorithm carries too.
     const { draft, seed } = countOnlyDraft([...LINKAGE_COLUMNS, "notes"]);
     const asPsi: AdvancedInviteDraft = {
       ...draft,
@@ -127,16 +126,8 @@ describe("the count-only shape gate at the Generate boundary", () => {
         .metadata,
     };
     const result = validateAdvancedInvite(asPsi, seed, NOW);
-    expect(result.canGenerate).toBe(false);
-    expect(result.errors.payload).toBeUndefined();
-    expect(result.errors.keys).toMatch(/cannot run a deduplicating match/);
-
-    const oneToOne = validateAdvancedInvite(
-      { ...asPsi, deduplicate: false },
-      seed,
-      NOW,
-    );
-    expect(oneToOne.errors).toEqual({});
-    expect(oneToOne.canGenerate).toBe(true);
+    expect(result.errors).toEqual({});
+    expect(result.canGenerate).toBe(true);
+    expect(result.terms?.deduplicate).toBe(true);
   });
 });

@@ -15,6 +15,7 @@ import {
 } from "../src/exchange";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import {
+  DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
   deriveAcceptedLinkageTerms,
   parseLinkageTerms,
 } from "../src/config/linkageTerms";
@@ -31,10 +32,10 @@ import type { CSVRow } from "../src/file";
 
 // The cardinality runExchange passes to the linkage strategies is derived from
 // the two parties' agreed `deduplicate` settings by resolveLinkageCardinality.
-// The cascade runs the one-sided cardinalities; the both-sided pair and any
-// deduplicating term under single-pass must be refused BEFORE the PSI rounds with
-// the actionable UsageError, never silently collapsed onto one-to-one and never
-// left to the generic mid-run cardinality throw in link.ts.
+// Both strategies run the one-sided cardinalities; the both-sided pair must be
+// refused BEFORE the PSI rounds with the actionable UsageError, never silently
+// collapsed onto one-to-one and never left to the generic mid-run cardinality
+// throw in link.ts.
 
 // --- resolveLinkageCardinality: the mapping -----------------------------------
 
@@ -92,29 +93,15 @@ test("the both-sided pair is refused, naming many-to-many and the missing closur
   expect(message).not.toMatch(/psi for cardinality/);
 });
 
-for (const [local, partner] of [
-  [true, false],
-  [false, true],
-  [true, true],
-] as const) {
-  test(
-    `a deduplicating term under single-pass (local: ${local}, partner: ` +
-      `${partner}) is refused, naming the strategy`,
-    () => {
-      let thrown: unknown;
-      try {
-        resolveFor(local, partner, "single-pass");
-      } catch (err) {
-        thrown = err;
-      }
-      expect(thrown).toBeInstanceOf(UsageError);
-      const message = (thrown as Error).message;
-      expect(message).toMatch(/single-pass/);
-      expect(message).toMatch(/linkage_strategy to cascade/);
-      expect(message).not.toMatch(/psi for cardinality/);
-    },
-  );
-}
+test("single-pass resolves the same labels the cascade does", () => {
+  // The strategy decides how a cardinality is matched, not which cardinalities
+  // resolve: both parties read one label off the agreed pair whichever strategy
+  // carries it, and only the both-sided pair is refused.
+  expect(resolveFor(false, false, "single-pass")).toBe("one-to-one");
+  expect(resolveFor(true, false, "single-pass")).toBe("many-to-one");
+  expect(resolveFor(false, true, "single-pass")).toBe("one-to-many");
+  expect(() => resolveFor(true, true, "single-pass")).toThrow(/many-to-many/);
+});
 
 test("resolution is symmetric, so both parties derive the same verdict", () => {
   // Party A computes f(a, b) and party B computes f(b, a) from the same agreed
@@ -181,59 +168,84 @@ test("an accept-derived pair resolves the one-sided cardinality (hostile flip cl
   expect(resolveLinkageCardinality(acceptor, flipped)).toBe("one-to-one");
 });
 
-test("assertDeduplicateImplemented refuses only the strategy that cannot match", () => {
-  expect(() =>
-    assertDeduplicateImplemented(cardinalityTerms(false, "cascade")),
-  ).not.toThrow();
-  expect(() =>
-    assertDeduplicateImplemented(cardinalityTerms(true, "cascade")),
-  ).not.toThrow();
-  expect(() =>
-    assertDeduplicateImplemented(cardinalityTerms(false, "single-pass")),
-  ).not.toThrow();
-  expect(() =>
-    assertDeduplicateImplemented(cardinalityTerms(true, "single-pass")),
-  ).toThrow(UsageError);
+test("assertDeduplicateImplemented passes every strategy this build ships", () => {
+  for (const strategy of Object.keys(
+    DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
+  ) as LinkageStrategy[]) {
+    expect(DEDUPLICATE_IMPLEMENTED_BY_STRATEGY[strategy]).toBe(true);
+    expect(() =>
+      assertDeduplicateImplemented(cardinalityTerms(false, strategy)),
+    ).not.toThrow();
+    expect(() =>
+      assertDeduplicateImplemented(cardinalityTerms(true, strategy)),
+    ).not.toThrow();
+  }
 });
 
-test("acceptance refuses the pair the run refuses, with the run's own message", () => {
-  // The derived acceptor value is false whatever the invitation declares, so the
-  // pair the exchange boundary refuses is invisible in the DERIVED document: the
-  // accept path reads the inviter's terms to catch it. The strategy is a
-  // mandatory-consistency term, so the invitation's value is the agreed one and
-  // the verdict is readable from the invitation alone.
-  let thrown: unknown;
+// The guard is what a strategy declaring it cannot match a group is stopped at,
+// and no shipped strategy declares that -- so the verdict is driven to `false`
+// here rather than left as a branch nothing reaches. Synchronous throughout, so
+// no other test observes the flipped table.
+function withDeduplicateUnimplemented<T>(
+  strategy: LinkageStrategy,
+  read: () => T,
+): T {
+  const shipped = DEDUPLICATE_IMPLEMENTED_BY_STRATEGY[strategy];
+  DEDUPLICATE_IMPLEMENTED_BY_STRATEGY[strategy] = false;
   try {
-    deriveAcceptedLinkageTerms(
-      cardinalityTerms(true, "single-pass"),
-      "Acceptor",
-    );
-  } catch (err) {
-    thrown = err;
+    return read();
+  } finally {
+    DEDUPLICATE_IMPLEMENTED_BY_STRATEGY[strategy] = shipped;
   }
-  expect(thrown).toBeInstanceOf(UsageError);
-  // The same refusal the exchange-time path gives, not a second account of it.
-  let atExchange: unknown;
-  try {
-    assertDeduplicateImplemented(cardinalityTerms(true, "single-pass"));
-  } catch (err) {
-    atExchange = err;
-  }
-  expect((thrown as Error).message).toBe((atExchange as Error).message);
+}
 
-  // The other three combinations still derive: a cascade invitation either way,
-  // and a single-pass invitation that declares no deduplication.
-  for (const [deduplicate, strategy] of [
-    [false, "cascade"],
-    [true, "cascade"],
-    [false, "single-pass"],
-  ] as Array<[boolean, LinkageStrategy]>) {
-    expect(
-      deriveAcceptedLinkageTerms(
-        cardinalityTerms(deduplicate, strategy),
-        "Acceptor",
-      ).deduplicate,
-    ).toBe(false);
+test("a strategy declaring no deduplicating match is refused at every boundary", () => {
+  const thrownFrom = (read: () => unknown): Error => {
+    let thrown: unknown;
+    try {
+      read();
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UsageError);
+    return thrown as Error;
+  };
+  const terms = cardinalityTerms(true, "single-pass");
+  const messages = withDeduplicateUnimplemented("single-pass", () => [
+    // The run boundary, over both parties' documents ...
+    thrownFrom(() => resolveFor(true, false, "single-pass")).message,
+    thrownFrom(() => resolveFor(false, true, "single-pass")).message,
+    // ... the local prepare step's own reading of one document ...
+    thrownFrom(() => assertDeduplicateImplemented(terms)).message,
+    // ... and the accept boundary, reading the INVITING party's terms, which the
+    // acceptor's derived `deduplicate: false` would otherwise hide.
+    thrownFrom(() => deriveAcceptedLinkageTerms(terms, "Acceptor")).message,
+  ]);
+  // One account of the refusal wherever it is met, naming the remedy rather than
+  // the offending document's own value.
+  expect(new Set(messages).size).toBe(1);
+  expect(messages[0]).toMatch(/deduplicated matching is not implemented/);
+  expect(messages[0]).toMatch(/set deduplicate to false/);
+  expect(messages[0]).not.toMatch(/psi for cardinality/);
+  // Restored, so the pair the shipped table admits still resolves.
+  expect(resolveFor(true, false, "single-pass")).toBe("many-to-one");
+});
+
+test("acceptance derives every strategy-and-deduplicate pair this build runs", () => {
+  // The derived acceptor value is false whatever the invitation declares, and
+  // every combination the shipped strategies match derives rather than refuses --
+  // the four the two axes give.
+  for (const strategy of Object.keys(
+    DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
+  ) as LinkageStrategy[]) {
+    for (const deduplicate of [false, true]) {
+      expect(
+        deriveAcceptedLinkageTerms(
+          cardinalityTerms(deduplicate, strategy),
+          "Acceptor",
+        ).deduplicate,
+      ).toBe(false);
+    }
   }
 });
 
@@ -425,10 +437,9 @@ const rowsA: Array<CSVRow> = [
 ];
 const rowsB: Array<CSVRow> = [{ first_name: "Carol" }, { first_name: "Henry" }];
 
-// prepareForExchange refuses a deduplicating term under single-pass itself, so
-// build the prepared exchange on the strategy it accepts and overwrite
-// afterwards -- the way a caller that skipped prepareForExchange could --
-// leaving the run-side resolution as the guard under test.
+// The strategy is set after prepareForExchange rather than through it, so the
+// terms it prepares are the same document under both strategies and the only
+// difference between two runs of one pair is which strategy carries it.
 function preparedWithDeduplicate(
   identity: string,
   rows: Array<CSVRow>,
@@ -632,14 +643,67 @@ test("a both-sided deduplicating pair is refused by both parties before the PSI 
   expectRefusedWith(responder, /many-to-many/);
 });
 
-test("a deduplicating term under single-pass is refused by both parties before the PSI rounds", async () => {
+test("a both-sided pair is refused under single-pass too", async () => {
+  const [initiator, responder] = await runBothWithDeduplicate(
+    true,
+    true,
+    "single-pass",
+  );
+  expectRefusedWith(initiator, /many-to-many/);
+  expectRefusedWith(responder, /many-to-many/);
+});
+
+test("the same many-to-one pair under single-pass produces the cascade's table", async () => {
+  // The two-strategy equivalence at the exchange level: one agreed pair, one set
+  // of inputs, two strategies, and the table both parties hold is the same one
+  // the cascade run above pinned -- down to the result rows and the attested pair
+  // count the surfaces downstream read off it.
   const [initiator, responder] = await runBothWithDeduplicate(
     true,
     false,
     "single-pass",
   );
-  expectRefusedWith(initiator, /single-pass/);
-  expectRefusedWith(responder, /single-pass/);
+  const many = fulfilled(initiator);
+  const one = fulfilled(responder);
+  expect(many.associationTable).toStrictEqual([
+    [1, 2, 3],
+    [0, 0, 1],
+  ]);
+  expect(one.associationTable).toStrictEqual([
+    [0, 0, 1],
+    [1, 2, 3],
+  ]);
+  expect(
+    buildOutputTable(
+      one.associationTable!,
+      rowsB,
+      inferMetadata(["first_name"]),
+      one.partnerPayload,
+    ).rows,
+  ).toStrictEqual([
+    ["0", "1"],
+    ["0", "2"],
+    ["1", "3"],
+  ]);
+  expect(many.audit?.record.resultSize).toBe(3);
+  expect(one.audit?.record.resultSize).toBe(3);
+});
+
+test("the mirror orientation runs the same procedure under single-pass", async () => {
+  const [initiator, responder] = await runBothWithDeduplicate(
+    false,
+    true,
+    "single-pass",
+    { initiator: rowsB, responder: rowsA },
+  );
+  expect(fulfilled(initiator).associationTable).toStrictEqual([
+    [0, 0, 1],
+    [1, 2, 3],
+  ]);
+  expect(fulfilled(responder).associationTable).toStrictEqual([
+    [1, 2, 3],
+    [0, 0, 1],
+  ]);
 });
 
 test("a partner presenting a deduplicate its invitation did not declare is refused", async () => {
@@ -908,24 +972,80 @@ test("the same run proceeds when the presented value is the declared one", async
   ]);
 });
 
-test("prepareForExchange refuses a deduplicating term under single-pass", () => {
-  // The local prepare step, before any credential, terms, or data are sent: this
-  // party's own strategy is the agreed one, so it does not need the partner's.
-  expect(() =>
-    prepareForExchange(
-      {
-        linkageTerms: {
-          ...termsBase,
-          identity: "A",
-          deduplicate: true,
-          linkageStrategy: "single-pass",
-        },
-      },
-      "A",
-      rowsA,
-      ["first_name"],
+test("a persisted single-pass acceptance runs the deduplicating pair it bound", async () => {
+  // Everything an accepted single-pass deduplicating exchange has to clear at
+  // once: the strategy verdict at accept, the declaration persisted through a
+  // minted exchange file and re-parsed, the terms-exchange binding of the
+  // partner's presented value against it, and then the run itself. The table is
+  // the one the cascade produces for these files.
+  const declared = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: true,
+    linkageStrategy: "single-pass",
+  });
+  const acceptorTerms = deriveAcceptedLinkageTerms(declared, "B");
+  const persisted = parseExchangeSpec(
+    parseYaml(
+      mintExchangeFile({
+        connection: { channel: "filedrop", path: "/mnt/share/drop" },
+        linkageTerms: acceptorTerms,
+        expectedPartnerDeduplicate: declared.deduplicate,
+      }),
     ),
-  ).toThrow(UsageError);
+  );
+  expect(persisted.linkageTerms.linkageStrategy).toBe("single-pass");
+  expect(persisted.expectedPartnerDeduplicate).toBe(true);
+
+  const acceptorPrepared = prepareForExchange(
+    { linkageTerms: persisted.linkageTerms },
+    "B",
+    rowsB,
+    ["first_name"],
+  );
+  acceptorPrepared.expectedPartnerDeduplicate =
+    persisted.expectedPartnerDeduplicate;
+
+  const [connInviter, connAcceptor] = createMessagePipe();
+  const [inviter, acceptor] = await Promise.all([
+    runExchange(
+      connInviter,
+      "initiator",
+      prepareForExchange({ linkageTerms: declared }, "A", rowsA, [
+        "first_name",
+      ]),
+      { psiLibrary },
+    ),
+    runExchange(connAcceptor, "responder", acceptorPrepared, { psiLibrary }),
+  ]);
+  expect(inviter.associationTable).toStrictEqual([
+    [1, 2, 3],
+    [0, 0, 1],
+  ]);
+  expect(acceptor.associationTable).toStrictEqual([
+    [0, 0, 1],
+    [1, 2, 3],
+  ]);
+});
+
+test("prepareForExchange prepares a deduplicating term under single-pass", () => {
+  // The local prepare step reads this party's own strategy, which is the agreed
+  // one, so a combination it accepts here is one the run boundary accepts too.
+  const prepared = prepareForExchange(
+    {
+      linkageTerms: {
+        ...termsBase,
+        identity: "A",
+        deduplicate: true,
+        linkageStrategy: "single-pass",
+      },
+    },
+    "A",
+    rowsA,
+    ["first_name"],
+  );
+  expect(prepared.linkageTerms.deduplicate).toBe(true);
+  expect(prepared.linkageTerms.linkageStrategy).toBe("single-pass");
 });
 
 // --- the accepted invitation's other output shape -----------------------------

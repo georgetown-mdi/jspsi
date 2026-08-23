@@ -23,7 +23,7 @@ Work required before the 1.0 release.
 
 - SSH channel as a lower-latency alternative to SFTP polling
 - Parallelizing the commutative-encryption step
-- Deduplicating linkages under `linkage_strategy: single-pass`, and many-to-many with transitive-closure resolution. One-sided deduplication (many-to-one and its one-to-many mirror) runs under `cascade`; both parties setting `deduplicate: true`, and a deduplicating term under `single-pass`, are refused before the exchange begins rather than silently matched one-to-one
+- Many-to-many deduplication, with transitive-closure resolution. One-sided deduplication (many-to-one and its one-to-many mirror) runs under both linkage strategies; both parties setting `deduplicate: true` is refused before the exchange begins rather than silently matched one-to-one
 
 ## Version 1.1
 

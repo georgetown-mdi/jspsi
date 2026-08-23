@@ -11,6 +11,7 @@ import {
 import {
   decodeRaggedIndexTable,
   linkViaSinglePassPSI,
+  type LinkageCardinality,
   type SinglePassSessionBounds,
 } from "../src/link";
 import {
@@ -247,7 +248,14 @@ async function runFanOutExchange(
   senderData: Array<Column>,
   receiverData: Array<Column>,
   withhold = false,
+  senderCardinality: LinkageCardinality = "one-to-one",
 ): Promise<{ senderTable: AssociationTable; receiverTable: AssociationTable }> {
+  const receiverCardinality: LinkageCardinality =
+    senderCardinality === "many-to-one"
+      ? "one-to-many"
+      : senderCardinality === "one-to-many"
+        ? "many-to-one"
+        : senderCardinality;
   const keyCount = senderData.length;
   const declaredFor = (data: Array<Column>): number =>
     data.some((column) => column.some((cell) => cell instanceof Set))
@@ -258,7 +266,7 @@ async function runFanOutExchange(
   const [senderConn, receiverConn] = createMessagePipe();
   const [senderTable, receiverTable] = await Promise.all([
     linkViaSinglePassPSI(
-      { cardinality: "one-to-one" },
+      { cardinality: senderCardinality },
       new PSIParticipant(
         "server",
         psiLibrary,
@@ -276,7 +284,7 @@ async function runFanOutExchange(
       -1,
     ),
     linkViaSinglePassPSI(
-      { cardinality: "one-to-one" },
+      { cardinality: receiverCardinality },
       new PSIParticipant(
         "client",
         psiLibrary,
@@ -423,6 +431,59 @@ test("a party that declares a fan-out but never splits a row produces the fan-ou
     ),
   ]);
   expect(raggedReceiverTable).toStrictEqual(fixedWidth.receiverTable);
+});
+
+// --- the two axes composed: a fan-out under a deduplicating cardinality -------
+// The axes are independent and compose (docs/spec/PROTOCOL.md, Matching
+// multiplicity): fan-out gives one record several values for a key, a
+// deduplicating cardinality gives one value several records on the many side, and
+// the round's attribution rule lifts a value-level match through both incidences
+// at once. Nothing new resolves them -- the sweep's own acceptance clause,
+// relaxed on the "one" side, is what the composition comes down to -- so these are
+// the worked cases for the combination an operator can configure.
+
+test("a fanned-out record on the one side links every group its candidates reach", async () => {
+  // The sender fans out and is the "one" side; the receiver deduplicates. Its
+  // rows 0 and 1 hold the sender's first candidate and row 2 holds its second, so
+  // the one sender record takes all three -- the acceptance clause binding the
+  // many side alone, over candidate pairs two different values produced.
+  const { senderTable, receiverTable } = await runFanOutExchange(
+    [[new Set(["P", "Q"])]],
+    [["P", "P", "Q"]],
+    false,
+    "one-to-many",
+  );
+  expect(receiverTable).toStrictEqual([
+    [0, 1, 2],
+    [0, 0, 0],
+  ]);
+  expect(senderTable).toStrictEqual([
+    [0, 0, 0],
+    [0, 1, 2],
+  ]);
+});
+
+test("a fanned-out record on the many side still takes one link, and its group forms around it", async () => {
+  // The mirror: the sender deduplicates and fans out. Its rows 0, 1 and 2 all
+  // hold "P" and row 2 also holds "Q", so the group forming on "P" is what the
+  // receiver's row 0 takes. Row 2's second candidate reaches the receiver's row 1
+  // in the same round, and the clause the many side keeps discards that pair --
+  // leaving the receiver's row 1 having appeared in a candidate pair, so out of
+  // candidacy and unmatched, which is what contradicted evidence costs.
+  const { senderTable, receiverTable } = await runFanOutExchange(
+    [[new Set(["P"]), new Set(["P"]), new Set(["Q", "P"])]],
+    [["P", "Q"]],
+    false,
+    "many-to-one",
+  );
+  expect(senderTable).toStrictEqual([
+    [0, 1, 2],
+    [0, 0, 0],
+  ]);
+  expect(receiverTable).toStrictEqual([
+    [0, 0, 0],
+    [0, 1, 2],
+  ]);
 });
 
 // --- withholding is unaffected by fan-out ------------------------------------

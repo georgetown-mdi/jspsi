@@ -143,35 +143,24 @@ describe("prepareAcceptedInvitation", () => {
     ).rejects.toThrow();
   });
 
-  test("rejects a deduplicating term the strategy cannot match, before the review step", async () => {
-    // single-pass matches strictly one-to-one, so the run refuses the pair. The
-    // refusal has to land HERE rather than at launch: the review step is what
-    // states the terms, and a screen describing what this invitation's grouping
-    // discloses would describe a run that cannot happen.
-    const terms = getDefaultLinkageTerms("Inviter");
-    const encoded = await encode({
-      linkageTerms: {
-        ...terms,
-        deduplicate: true,
-        linkageStrategy: "single-pass",
-      },
-    });
+  // A deduplicating term under a strategy that cannot match one is refused HERE
+  // rather than at launch: the review step is what states the terms, and a screen
+  // describing what this invitation's grouping discloses would describe a run
+  // that cannot happen. The guard reads core's own verdict, and both strategies
+  // this build ships match one, so both are admitted.
+  test.each(["cascade", "single-pass"] as const)(
+    "admits a deduplicating term under %s",
+    async (linkageStrategy) => {
+      const terms = getDefaultLinkageTerms("Inviter");
+      const encoded = await encode({
+        linkageTerms: { ...terms, deduplicate: true, linkageStrategy },
+      });
 
-    await expect(
-      prepareAcceptedInvitation(encoded, { profile: "hosted" }),
-    ).rejects.toThrow(/deduplicated matching is not yet implemented/);
-  });
-
-  test("admits a deduplicating term the cascade does match", async () => {
-    const terms = getDefaultLinkageTerms("Inviter");
-    const encoded = await encode({
-      linkageTerms: { ...terms, deduplicate: true, linkageStrategy: "cascade" },
-    });
-
-    await expect(
-      prepareAcceptedInvitation(encoded, { profile: "hosted" }),
-    ).resolves.toMatchObject({ endpoint: { channel: "webrtc" } });
-  });
+      await expect(
+        prepareAcceptedInvitation(encoded, { profile: "hosted" }),
+      ).resolves.toMatchObject({ endpoint: { channel: "webrtc" } });
+    },
+  );
 
   // The guard's admit decision must AGREE with what selectExchangeDriver would
   // drive: an admitted endpoint's channel (mapped to a Transport) resolves to a

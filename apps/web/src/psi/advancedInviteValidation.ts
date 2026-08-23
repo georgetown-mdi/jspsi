@@ -136,16 +136,18 @@ const COUNT_ONLY_MESSAGES: Record<CountOnlyShapeViolation, string> = {
 };
 
 /** Shown when the draft asks for a deduplicating match under a linkage strategy
- * that matches one value per record. Core refuses that pair on both parties
- * before matching begins ({@link assertDeduplicateImplemented}), so an invitation
- * minted on it is one both sides abort on rather than one the partner can accept.
- * Names the two ways out in the words the controls carrying them are labelled,
- * keeping the same split the count-only messages do: the rule is core's, the
- * wording this editor's. */
+ * that cannot run one. Core refuses that pair on both parties before matching
+ * begins ({@link assertDeduplicateImplemented}), so an invitation minted on it is
+ * one both sides abort on rather than one the partner can accept. Names the two
+ * ways out in the words the controls carrying them are labelled, keeping the same
+ * split the count-only messages do: the rule is core's, the wording this
+ * editor's. It names no strategy, because which one cannot run a deduplicating
+ * match is core's verdict rather than this message's -- every strategy this build
+ * offers can. */
 const DEDUPLICATE_STRATEGY_MESSAGE =
-  "Single-pass matches each of your records to at most one partner record, so " +
-  "it cannot run a deduplicating match. Set Linkage strategy to Cascade, or " +
-  'clear "Allow several of your records to match one partner record".';
+  "The linkage strategy this invitation names cannot run a deduplicating " +
+  'match. Choose another Linkage strategy, or clear "Allow several of your ' +
+  'records to match one partner record".';
 
 /**
  * Validate a draft for the Generate gate. The core schema

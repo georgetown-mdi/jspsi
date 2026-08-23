@@ -694,11 +694,11 @@ export function prepareForExchange(
   assertCountOnlyTransmitsNoColumn(linkageTerms.algorithm, metadata);
 
   // Fail closed on a deduplicating term the agreed strategy cannot match before
-  // any credential, terms, or data are sent: single-pass matches one-to-one, so a
-  // `deduplicate: true` term there would under-deliver the consented cardinality.
-  // Refused again from both parties' agreed terms in runExchange
-  // (resolveLinkageCardinality), which holds for a PreparedExchange built without
-  // going through this function. See assertDeduplicateImplemented.
+  // any credential, terms, or data are sent: a strategy matching one record per
+  // value would under-deliver the consented cardinality. Refused again from both
+  // parties' agreed terms in runExchange (resolveLinkageCardinality), which holds
+  // for a PreparedExchange built without going through this function. See
+  // assertDeduplicateImplemented.
   assertDeduplicateImplemented(linkageTerms);
 
   // Fail closed on a signing mode with no run path before any credential, terms,

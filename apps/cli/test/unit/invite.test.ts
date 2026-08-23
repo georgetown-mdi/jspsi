@@ -1844,57 +1844,39 @@ test("validateInvite: a psi config with the same metadata and shape still mints"
   }
 });
 
-test("validateInvite: offline config-source refuses a deduplicating term under single-pass before minting", async () => {
-  // The mint-boundary counterpart of the run-side refusal (single-pass matches
-  // strictly one-to-one): a config pairing `deduplicate: true` with
-  // `linkage_strategy: single-pass` -- schema-valid when `expects_output: true`
-  // -- must be refused BEFORE the token is disclosed, so `invite` never mints an
-  // invitation the config's own `psilink exchange` would then reject (exit 64).
-  // The sibling of the psi-c mint gate above; no input is passed, so it exercises
-  // the check in isolation.
-  const terms: LinkageTerms = {
-    ...defaultTerms(),
-    deduplicate: true,
-    linkageStrategy: "single-pass",
-  };
-  const { dir, configPath, keyPath } = withConfig(terms);
-  try {
-    const invite = () =>
-      validateInvite({
+test.each(["cascade", "single-pass"] as const)(
+  "validateInvite: offline config-source mints a deduplicating %s term",
+  async (linkageStrategy) => {
+    // Both strategies match a deduplicating cardinality, so both mint. The mint
+    // boundary reads core's own verdict on the pair rather than restating one --
+    // the sibling of the psi-c mint gate above -- so a strategy that stopped
+    // matching would be refused here BEFORE the token is disclosed, never minting
+    // an invitation the config's own `psilink exchange` would then reject (exit
+    // 64). Acceptance derives the accepting party's own deduplicate as false, so
+    // the accepted pair is the one-sided one both strategies run
+    // (linkageCardinality.test.ts runs it end to end from terms core derives).
+    const terms: LinkageTerms = {
+      ...defaultTerms(),
+      deduplicate: true,
+      linkageStrategy,
+    };
+    const { dir, configPath, keyPath } = withConfig(terms);
+    try {
+      const ready = await validateInvite({
         resolved: { mode: "offline" },
         options: testOptions({ configFile: configPath, keyFile: keyPath }),
         acceptTimeout: 900,
         log: silentLog,
       });
-    await expect(invite()).rejects.toBeInstanceOf(UsageError);
-    await expect(invite()).rejects.toThrow(/single-pass/);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("validateInvite: offline config-source mints a deduplicating cascade term", async () => {
-  // The strategy that DOES match a deduplicating cardinality mints, so the gate
-  // above is the strategy's rather than the invitation path's: acceptance derives
-  // the accepting party's own deduplicate as false, so the accepted pair is the
-  // one-sided one the cascade runs (linkageCardinality.test.ts runs it end to end
-  // from terms core derives).
-  const terms: LinkageTerms = { ...defaultTerms(), deduplicate: true };
-  const { dir, configPath, keyPath } = withConfig(terms);
-  try {
-    const ready = await validateInvite({
-      resolved: { mode: "offline" },
-      options: testOptions({ configFile: configPath, keyFile: keyPath }),
-      acceptTimeout: 900,
-      log: silentLog,
-    });
-    expect(ready.mode).toBe("offlineFromConfig");
-    if (ready.mode !== "offlineFromConfig") throw new Error("unreachable");
-    expect(ready.linkageTerms.deduplicate).toBe(true);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
+      expect(ready.mode).toBe("offlineFromConfig");
+      if (ready.mode !== "offlineFromConfig") throw new Error("unreachable");
+      expect(ready.linkageTerms.deduplicate).toBe(true);
+      expect(ready.linkageTerms.linkageStrategy).toBe(linkageStrategy);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
 
 test("validateInvite: offline config-source refuses a fan-out standardization before minting", async () => {
   // The mint-boundary counterpart of the run-side fan-out refusal (these default
