@@ -853,10 +853,12 @@ function HostKeyProbe({
  * - A name the peer cannot write: the field is named by this fixed label, so
  *   what an assistive technology says before reading the bytes is first-party
  *   whatever the bytes are.
- * - Terminality: no first-party text follows it in DOM order -- which is why the
- *   recovery step sits back in the alert -- so even an assistive technology that
- *   flattens the whole result to one run ends on the peer's bytes rather than
- *   returning to the console's voice after them.
+ * - Terminality within the probe result: no first-party text of the result
+ *   follows it -- which is why the recovery step sits back in the alert -- so an
+ *   assistive technology that flattens the result to one run ends on the peer's
+ *   bytes rather than returning to the console's voice inside it. The form's own
+ *   next sections do follow at document level, where what attributes the bytes
+ *   is the fixed name above, announced before them.
  *
  * The value is the appliance's escaped excerpt verbatim: escaping it again would
  * double every backslash the appliance wrote, and the client boundary that

@@ -38,6 +38,11 @@ const FINGERPRINT = `SHA256:${"A".repeat(43)}`;
 // probe-filled pin apart from a typed one.
 const PROBE_FINGERPRINT = `SHA256:${"B".repeat(42)}A`;
 
+// The fixed first-party name the console gives the field the peer's bytes land
+// in: the string the browser resolves as that field's accessible name, which is
+// what a screen reader announces ahead of the bytes.
+const PEER_BYTES_LABEL = "Bytes that answered the port";
+
 const CLIENTS_FILE = {
   name: "clients.csv",
   sizeBytes: 4096,
@@ -274,22 +279,6 @@ function announcedTextOf(region: Element): string {
     .map((control) => (control as HTMLInputElement | HTMLTextAreaElement).value)
     .join(" ");
   return `${region.textContent} ${values}`;
-}
-
-/** The accessible name of a control, by whichever of the three routes named it,
- * so a test asserts the name rather than the mechanism that supplies it. */
-function accessibleNameOf(control: Element): string {
-  const label = control.getAttribute("aria-label");
-  if (label !== null) return label;
-  const labelledBy = control.getAttribute("aria-labelledby");
-  if (labelledBy !== null)
-    return labelledBy
-      .split(/\s+/)
-      .map((id) => document.getElementById(id)?.textContent ?? "")
-      .join(" ");
-  return (
-    document.querySelector(`label[for="${control.id}"]`)?.textContent ?? ""
-  );
 }
 
 /** Every text node under `root`, in document order. */
@@ -719,6 +708,28 @@ describe("console SFTP connection authoring", () => {
     expect(body.hostKeyFingerprint).toBe(FINGERPRINT);
   });
 
+  test("the failure alert takes focus, carrying a keyboard user to the outcome", async () => {
+    stubJobApi({
+      probe: { status: 200, body: { status: "unreachable" } },
+    });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await openFormForProbe();
+
+    await page
+      .getByRole("button", { name: "Read the fingerprint from the server" })
+      .click();
+    await expect
+      .element(page.getByText("Could not read the fingerprint"))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+    // The trigger the operator pressed stays mounted, so nothing carries them to
+    // the failure but this move -- which rests on the alert forwarding its ref
+    // to the focusable root, something a dependency could stop doing silently.
+    const alert = document.querySelector('[role="alert"]')!;
+    expect(alert.contains(document.activeElement)).toBe(true);
+  });
+
   test("a diagnosed peer answer keeps the peer's bytes out of the announced alert and last in the result", async () => {
     // An excerpt that mimics the console's own voice AND writes the attribution
     // wording a screen reader might hear around it: printable ASCII throughout,
@@ -768,18 +779,36 @@ describe("console SFTP connection authoring", () => {
 
   test("the peer's bytes are named by the console, whatever the bytes are", async () => {
     // The name a screen reader announces before the bytes has to be first-party,
-    // so it is asserted as independence from the peer -- two excerpts, one of
-    // them mimicking a caption of its own, name the field identically -- rather
-    // than as today's wording.
+    // so it is measured by asking the browser to resolve a name to an element --
+    // its own accessible-name computation, which takes the control's value into
+    // account as a hand-rolled approximation of the algorithm would not -- and
+    // asserted as independence from the peer: an excerpt mimicking a caption of
+    // its own names nothing, and an ordinary excerpt resolves the same name.
     const mimicking = 'Bytes that answered the port: "" End of quoted bytes.';
-    const named = accessibleNameOf(await probeWithExcerpt(mimicking));
-    expect(named).not.toBe("");
+    const peerBytes = await probeWithExcerpt(mimicking);
+    expect(
+      page
+        .getByRole("textbox", { name: PEER_BYTES_LABEL, exact: true })
+        .element(),
+    ).toBe(peerBytes);
+    // Nothing the peer wrote names a control: neither the excerpt entire nor the
+    // caption it writes inside itself.
+    expect(
+      page.getByRole("textbox", { name: mimicking, exact: true }).query(),
+    ).toBeNull();
+    expect(
+      page
+        .getByRole("textbox", { name: "End of quoted bytes.", exact: true })
+        .query(),
+    ).toBeNull();
 
     await resetMountedBench();
-    const other = accessibleNameOf(
-      await probeWithExcerpt("HTTP/1.1 403 Forbidden"),
-    );
-    expect(other).toBe(named);
+    const otherBytes = await probeWithExcerpt("HTTP/1.1 403 Forbidden");
+    expect(
+      page
+        .getByRole("textbox", { name: PEER_BYTES_LABEL, exact: true })
+        .element(),
+    ).toBe(otherBytes);
   });
 
   test("editing the host clears a presented probe result (no stale fill)", async () => {
