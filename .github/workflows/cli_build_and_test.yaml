@@ -45,6 +45,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       # Pins Node, installs from the lockfile, and builds @psilink/core.
@@ -105,6 +106,7 @@ jobs:
   hardened-native:
     name: Hardened native sshd (${{ matrix.profile }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -137,6 +139,7 @@ jobs:
   chroot-native:
     name: Hardened native sshd (chroot)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v7
@@ -168,6 +171,7 @@ jobs:
   smb-doctor:
     name: Doctor against a real Samba server
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Rewrites the runner's smb.conf, adds an account, restarts smbd, and
     # kernel-mounts CIFS under passwordless sudo -- the same class of host
     # control as chroot-native, so like it, not exposed to fork PRs.
@@ -190,8 +194,8 @@ jobs:
           echo 'Acquire::https::Timeout "15";' | sudo tee -a /etc/apt/apt.conf.d/99-ci-retry
 
       # A mirror that trickles rather than falls silent keeps the timeouts above
-      # from ever firing, so bound the step itself; this job sets no job-level
-      # timeout, leaving the 6h default as its only other backstop.
+      # from ever firing, so bound the step itself rather than relying on the
+      # job-level ceiling alone.
       - name: Start a Samba server with a writable and a read-only share
         timeout-minutes: 10
         run: |
