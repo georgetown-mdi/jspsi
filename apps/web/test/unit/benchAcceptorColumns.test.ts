@@ -37,6 +37,8 @@ import {
   splitRendezvousRetainProblem,
 } from "@bench/filedropRendezvousChoice";
 
+import { OFFLINE_EXCHANGE_REASON } from "@bench/offlineExchangeGate";
+
 import {
   setColumnDisclosure,
   setColumnTypeForMatching,
@@ -351,6 +353,52 @@ describe("acceptor launch gates", () => {
     satisfiable.editorState,
   );
 
+  test("a device reporting offline disables launch and names the shared reason", () => {
+    const blocks = {
+      connectionBlocked: false,
+      exchangeFilesBlocked: false,
+      connectionTuningBlocked: false,
+      runDiagnosticsBlocked: false,
+    };
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        { ...blocks, offline: true },
+      ),
+    ).toBe(OFFLINE_EXCHANGE_REASON);
+    // Only the offline direction gates: a device reporting a connection is not
+    // read as a promise that the partner is reachable, so it blocks nothing.
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        { ...blocks, offline: false },
+      ),
+    ).toBeUndefined();
+  });
+
+  test("offline speaks ahead of the screen's own problems, which no edit here can outrun", () => {
+    // A file that can match nothing is a fix the operator makes on this screen;
+    // no network is not, so it is the sentence they meet first rather than the
+    // one waiting after every column is set.
+    const columns = ["id", "identifier", "notes"];
+    const { editorState } = editorFor(columns, nameTerms);
+    const verdict = acceptorVerdict(columns, nameTerms, editorState);
+    expect(verdict.satisfiableKeyCount).toBe(0);
+    expect(
+      acceptorLaunchBlockedReason(verdict, editorState, nameTerms, {
+        offline: true,
+        connectionBlocked: false,
+        exchangeFilesBlocked: false,
+        connectionTuningBlocked: false,
+        runDiagnosticsBlocked: false,
+      }),
+    ).toBe(OFFLINE_EXCHANGE_REASON);
+  });
+
   test("an unauthored transport connection disables launch and names the connection card", () => {
     expect(
       acceptorLaunchBlockedReason(
@@ -358,6 +406,7 @@ describe("acceptor launch gates", () => {
         satisfiable.editorState,
         nameTerms,
         {
+          offline: false,
           connectionBlocked: true,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
@@ -378,6 +427,7 @@ describe("acceptor launch gates", () => {
         satisfiable.editorState,
         nameTerms,
         {
+          offline: false,
           connectionBlocked: false,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
@@ -398,6 +448,7 @@ describe("acceptor launch gates", () => {
         satisfiable.editorState,
         nameTerms,
         {
+          offline: false,
           connectionBlocked: false,
           exchangeFilesBlocked: true,
           connectionTuningBlocked: false,
@@ -414,6 +465,7 @@ describe("acceptor launch gates", () => {
     // both cards' models exactly as the bench drives them, rather than by setting
     // the flags by hand.
     const stepBlocks = {
+      offline: false,
       connectionBlocked: false,
       exchangeFilesBlocked:
         exchangeFilesProblems(EXCHANGE_FILES_DEFAULT, CONFIG_EXCHANGE_FILES)
@@ -454,6 +506,7 @@ describe("acceptor launch gates", () => {
         satisfiable.editorState,
         nameTerms,
         {
+          offline: false,
           connectionBlocked: false,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
@@ -474,6 +527,7 @@ describe("acceptor launch gates", () => {
     expect(acceptorHasIdentifierConflict(editorState.metadata)).toBe(true);
     expect(
       acceptorLaunchBlockedReason(verdict, editorState, nameTerms, {
+        offline: false,
         connectionBlocked: true,
         exchangeFilesBlocked: true,
         connectionTuningBlocked: true,

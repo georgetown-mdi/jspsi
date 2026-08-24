@@ -1,0 +1,222 @@
+/// <reference types="@vitest/browser-playwright/context" />
+
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+import { page, userEvent } from "vitest/browser";
+
+import { createElement } from "react";
+
+import "@mantine/core/styles.css";
+
+import {
+  acceptorColumnsEditorState,
+  acceptorInitialColumnsState,
+  acceptorVerdict,
+} from "@bench/acceptorColumnsModel";
+import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
+import { BenchLobby } from "@bench/BenchLobby";
+import { InviterBench } from "@bench/InviterBench";
+import { OFFLINE_EXCHANGE_REASON } from "@bench/offlineExchangeGate";
+import styles from "@bench/bench.module.css";
+
+import { restoreConnectivity, setConnectivity } from "./connectivity";
+import { createAppMount } from "./renderApp";
+
+import type { LinkageTerms } from "@psilink/core";
+
+// The ways into an exchange with no network: the lobby's two entries, the
+// inviter's create, and the acceptor's launch. Each is held with the one named
+// reason while the browser reports offline and live again once it does not, so
+// an operator is told what cannot happen instead of walking the authoring flow
+// into a connection failure. The managed re-run's own gate -- the pattern these
+// follow -- is covered in offlineShell.test.ts.
+//
+// Chromium is where this belongs because `navigator.onLine` and its events are
+// the platform signal under test, and because a disabled state is a rendering
+// fact rather than a model one.
+
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
+
+// The inviter bench transitively imports the rendezvous module, whose top-level
+// config load reads `process`; nothing here opens a transport.
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
+
+const app = createAppMount();
+
+afterEach(() => {
+  app.unmount();
+  restoreConnectivity();
+});
+
+/** Walk the inviter spine to Review & create, where the create action lives. */
+async function reachReviewCreate() {
+  app.render(createElement(InviterBench));
+  await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+  await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+  const fileInput = document.querySelector('input[type="file"]');
+  await userEvent.upload(
+    page.elementLocator(fileInput as HTMLElement),
+    new File(
+      [
+        "client_id,first_name,last_name,dob,program_code\n" +
+          "1,Ann,Lee,01/02/1990,A\n2,Bo,Ray,03/04/1985,B\n",
+      ],
+      "clients.csv",
+      { type: "text/csv" },
+    ),
+  );
+  await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+  await page
+    .getByRole("button", { name: "Continue to matching & sharing" })
+    .click();
+  await page
+    .getByRole("button", { name: "Continue to review & create" })
+    .click();
+  await expect
+    .element(page.getByRole("heading", { level: 1 }))
+    .toHaveTextContent("Review & create");
+}
+
+/** The create step's blocked-reason line, or the empty string once it is clear. */
+function createStatusLine(): string {
+  return (
+    app.container.querySelector(`.${styles.statusLine}`)?.textContent ?? ""
+  );
+}
+
+/** The acceptor step's blocked-reason line, empty exactly when nothing blocks. */
+function launchBlockedReason(): string {
+  return (
+    app.container.querySelector('[data-testid="launch-blocked-reason"]')
+      ?.textContent ?? ""
+  );
+}
+
+// Two single-element keys, one per name field, so the file below satisfies both
+// and connectivity is the only thing that can close the launch.
+const acceptorTerms: LinkageTerms = {
+  version: "1.0.0",
+  identity: "County Health Department",
+  date: "2026-01-01",
+  algorithm: "psi",
+  linkageStrategy: "cascade",
+  output: { expectsOutput: true, shareWithPartner: true },
+  deduplicate: false,
+  linkageFields: [
+    { name: "firstName", type: "first_name" },
+    { name: "lastName", type: "last_name" },
+  ],
+  linkageKeys: [
+    { name: "first", elements: [{ field: "firstName" }] },
+    { name: "last", elements: [{ field: "lastName" }] },
+  ],
+};
+
+function mountAcceptorColumnsStep() {
+  const columns = ["first_name", "last_name"];
+  const rows = [Object.fromEntries(columns.map((column) => [column, "x"]))];
+  const columnsState = acceptorInitialColumnsState(columns);
+  const editorState = acceptorColumnsEditorState(
+    columnsState,
+    acceptorTerms,
+    rows,
+  );
+  const noop = () => undefined;
+  app.render(
+    createElement(AcceptorColumnsStep, {
+      linkageTerms: acceptorTerms,
+      columns,
+      columnsState,
+      editorState,
+      verdict: acceptorVerdict(columns, acceptorTerms, editorState),
+      onMetadataChange: noop,
+      onRemap: noop,
+      onReset: noop,
+      onLaunch: noop,
+      onBack: noop,
+    }),
+  );
+}
+
+describe("the lobby's two ways into an exchange", () => {
+  test("are held with the named reason offline, and open with the connection", async () => {
+    setConnectivity(false);
+
+    app.render(createElement(BenchLobby));
+    await userEvent.fill(page.getByLabelText("Invitation"), "an-invitation");
+
+    // The invite entry is a real disabled button while it is held: an anchor
+    // wearing a disabled attribute would still navigate.
+    await expect
+      .element(page.getByRole("button", { name: "Create an invitation" }))
+      .toBeDisabled();
+    const review = page.getByRole("button", { name: "Review invitation" });
+    await expect.element(review).toBeDisabled();
+    await expect
+      .element(page.getByText(OFFLINE_EXCHANGE_REASON))
+      .toBeInTheDocument();
+
+    setConnectivity(true);
+
+    await expect
+      .element(page.getByRole("link", { name: "Create an invitation" }))
+      .toBeInTheDocument();
+    await expect.element(review).toBeEnabled();
+    await expect
+      .element(page.getByText(OFFLINE_EXCHANGE_REASON))
+      .not.toBeInTheDocument();
+  });
+});
+
+describe("the inviter's create action", () => {
+  test("is held with the named reason offline, and comes back with the connection", async () => {
+    setConnectivity(false);
+    await reachReviewCreate();
+
+    const create = page.getByRole("button", { name: "Create the invitation" });
+    await expect.element(create).toBeDisabled();
+    expect(createStatusLine()).toBe(OFFLINE_EXCHANGE_REASON);
+
+    setConnectivity(true);
+
+    await expect.element(create).toBeEnabled();
+    expect(createStatusLine()).toBe("Ready to create.");
+  });
+
+  test("stays open offline for a transport that saves a file, which connects to nothing", async () => {
+    setConnectivity(false);
+    await reachReviewCreate();
+
+    // The command-line transports seal the terms and hand an exchange file to
+    // the operator's own tool: no listener, no dial, nothing this device's
+    // connectivity decides.
+    await page
+      .getByLabelText("Over SFTP, run by the psilink command-line tool")
+      .click();
+
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeEnabled();
+    expect(createStatusLine()).toBe("Ready to create.");
+  });
+});
+
+describe("the acceptor's launch", () => {
+  test("is held with the named reason offline, and comes back with the connection", async () => {
+    setConnectivity(false);
+    mountAcceptorColumnsStep();
+
+    const launch = page.getByRole("button", { name: "Start the exchange" });
+    await expect.element(launch).toBeDisabled();
+    expect(launchBlockedReason()).toBe(OFFLINE_EXCHANGE_REASON);
+
+    setConnectivity(true);
+
+    await expect.element(launch).toBeEnabled();
+    expect(launchBlockedReason()).toBe("");
+  });
+});

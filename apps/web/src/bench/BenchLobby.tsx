@@ -11,9 +11,11 @@ import { listManagedLocalState } from "@psi/managedLocalState";
 import { tokenFromInput } from "@psi/invitation";
 
 import { isConsoleBuild } from "@utils/clientConfig";
+import { useOnlineStatus } from "@components/useOnlineStatus";
 
 import { BenchPage } from "./BenchPage";
 import { FILE_ASSURANCE_LINE } from "./fileAssurance";
+import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import { downloadSampleCsvs } from "./sampleData";
 import { loadSavedExchanges } from "./savedExchangesLoad";
 import styles from "./bench.module.css";
@@ -31,6 +33,13 @@ export function BenchLobby() {
   const navigate = useNavigate();
   const [invitation, setInvitation] = useState("");
   const [invitationError, setInvitationError] = useState<string>();
+
+  // Both ways into an exchange from this screen end in a live two-party session,
+  // so both are held while the browser reports no network -- named here rather
+  // than met after the operator has chosen a file and authored the terms. Only
+  // the offline direction is gated: being online is no promise the partner is
+  // there (see @utils/networkStatus).
+  const online = useOnlineStatus();
 
   // Whether this browser already holds a saved recurring exchange, read once on
   // mount. The "run it again" pointer below is gated on it, so a first-run visitor
@@ -111,9 +120,16 @@ export function BenchLobby() {
               if needed.
             </p>
             <p>
-              <Button component={Link} to="/exchange">
-                Create an invitation
-              </Button>
+              {online ? (
+                <Button component={Link} to="/exchange">
+                  Create an invitation
+                </Button>
+              ) : (
+                // A held entry is a real disabled button, not the link wearing a
+                // disabled attribute: the router renders an anchor, which no
+                // disabled attribute holds back.
+                <Button disabled>Create an invitation</Button>
+              )}
             </p>
           </div>
           <div className={styles.actionCard}>
@@ -137,7 +153,7 @@ export function BenchLobby() {
               <Button
                 variant="outline"
                 mt="sm"
-                disabled={invitationToken === ""}
+                disabled={invitationToken === "" || !online}
                 onClick={reviewInvitation}
               >
                 Review invitation
@@ -163,6 +179,11 @@ export function BenchLobby() {
             </div>
           )}
         </div>
+        {!online && (
+          <p className={`${styles.sub} ${styles.small}`}>
+            {OFFLINE_EXCHANGE_REASON}
+          </p>
+        )}
         <p className={`${styles.sub} ${styles.small}`}>
           First time here?{" "}
           <Anchor

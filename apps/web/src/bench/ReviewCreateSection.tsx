@@ -2,6 +2,7 @@ import { Button, NativeSelect, Radio, VisuallyHidden } from "@mantine/core";
 
 import { isConsoleBuild } from "@utils/clientConfig";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
+import { useOnlineStatus } from "@components/useOnlineStatus";
 
 import {
   CONFIG_EXCHANGE_FILES,
@@ -19,9 +20,11 @@ import {
   availableTransports,
   expiryLabel,
   transportChooserCopy,
+  transportRunMode,
 } from "./inviterModel";
 import { ConnectionTuningCard } from "./ConnectionTuningCard";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
+import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import { RunDiagnosticsCard } from "./RunDiagnosticsCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
 import { runDiagnosticsProblems } from "./runDiagnosticsModel";
@@ -152,6 +155,7 @@ export function ReviewCreateSection({
   onNavigate: (target: SpineTarget) => void;
 }) {
   const consoleBuild = isConsoleBuild();
+  const online = useOnlineStatus();
   const sftpConfigured = sftpConnection != null;
   const rendezvousConfigured = rendezvous?.configured === true;
   const available = availableTransports(
@@ -228,9 +232,18 @@ export function ReviewCreateSection({
     : transport === "sftp"
       ? splitDirectoryRetainProblem(sftpConnection, exchangeFiles.retainFiles)
       : splitRendezvousRetainProblem(rendezvous, exchangeFiles.retainFiles);
+  // A create that begins a live run cannot succeed with no network: this browser
+  // listens for the partner from the mint onward, and a console server-job run
+  // dials from the appliance. A save-a-file create connects to nothing -- it
+  // seals the terms and hands an exchange file to the command line -- so it
+  // stays available offline. Only the offline direction is gated: being online
+  // is no promise the partner is there (see @utils/networkStatus).
+  const offlineBlocked =
+    !online && transportRunMode(available, transport) !== "save-file";
   const canCreate =
     problems.length === 0 &&
     !minting &&
+    !offlineBlocked &&
     !connectionIncomplete &&
     splitDirectoryProblem === undefined &&
     !exchangeFilesBlocked &&
@@ -239,19 +252,21 @@ export function ReviewCreateSection({
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
   const readiness = useDeferredAnnouncement(
-    connectionIncomplete
-      ? "Set up the SFTP connection above before you can create."
-      : splitDirectoryProblem !== undefined
-        ? splitDirectoryProblem
-        : exchangeFilesBlocked
-          ? "Resolve the file-handling settings above before you can create."
-          : connectionTuningBlocked
-            ? "Resolve the connection-tuning settings above before you can create."
-            : runDiagnosticsBlocked
-              ? "Resolve the diagnostics-and-recovery settings above before you can create."
-              : problems.length === 0
-                ? "Ready to create the invitation."
-                : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
+    offlineBlocked
+      ? OFFLINE_EXCHANGE_REASON
+      : connectionIncomplete
+        ? "Set up the SFTP connection above before you can create."
+        : splitDirectoryProblem !== undefined
+          ? splitDirectoryProblem
+          : exchangeFilesBlocked
+            ? "Resolve the file-handling settings above before you can create."
+            : connectionTuningBlocked
+              ? "Resolve the connection-tuning settings above before you can create."
+              : runDiagnosticsBlocked
+                ? "Resolve the diagnostics-and-recovery settings above before you can create."
+                : problems.length === 0
+                  ? "Ready to create the invitation."
+                  : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
   );
   return (
     <>
@@ -436,17 +451,19 @@ export function ReviewCreateSection({
               : `${styles.statusLine} ${styles.statusLineDanger}`
           }
         >
-          {connectionIncomplete
-            ? "Set up the SFTP connection above to continue."
-            : splitDirectoryProblem !== undefined
-              ? splitDirectoryProblem
-              : exchangeFilesBlocked
-                ? "Resolve the file-handling settings above to continue."
-                : connectionTuningBlocked
-                  ? "Resolve the connection-tuning settings above to continue."
-                  : problems.length === 0
-                    ? "Ready to create."
-                    : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
+          {offlineBlocked
+            ? OFFLINE_EXCHANGE_REASON
+            : connectionIncomplete
+              ? "Set up the SFTP connection above to continue."
+              : splitDirectoryProblem !== undefined
+                ? splitDirectoryProblem
+                : exchangeFilesBlocked
+                  ? "Resolve the file-handling settings above to continue."
+                  : connectionTuningBlocked
+                    ? "Resolve the connection-tuning settings above to continue."
+                    : problems.length === 0
+                      ? "Ready to create."
+                      : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
         </p>
       </div>
     </>

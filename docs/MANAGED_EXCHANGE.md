@@ -164,6 +164,10 @@ connection at all the app still opens and reads the browser's own store:
 - The app shell, the recurring-exchange list, and each exchange's detail render.
 - **Running an exchange does not**, and says so rather than failing when pressed:
   a run is a live two-party session that needs both parties online at once.
+- **Starting one does not either**, and is held with that same reason wherever an
+  exchange begins: the quick path's invite and accept entries, and every create
+  or launch that opens a live run. Authoring an exchange file for the
+  command-line tool reaches no partner from here, so it stays available.
 
 How much of the app is offline-ready depends on how it is being used, and this is
 one of the concrete reasons to install it:
