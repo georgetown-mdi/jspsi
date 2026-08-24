@@ -58,7 +58,16 @@ const PREDICATE_TYPE = "https://slsa.dev/provenance/v1";
 const HEX_64 = /^[0-9a-f]{64}$/;
 const HEX_40 = /^[0-9a-f]{40}$/;
 const OWNER_REPO = /^[\w.-]+\/[\w.-]+$/;
-const SIGNER_WORKFLOW = /^[\w.-]+\/[\w.-]+\/.+\.ya?ml$/;
+const SIGNER_WORKFLOW = /^[\w.-]+\/[\w.-]+\/[\w./-]+\.ya?ml$/;
+const GIT_REF = /^[\w./-]+$/;
+
+/**
+ * How much of the verifier's stderr `spawnSync` will hold. Above its ceiling
+ * spawnSync kills the run, so this sits far above the few hundred bytes the
+ * measured failures write: a verbose diagnostic stream is worth reading, not
+ * worth turning a completed lookup into a killed one.
+ */
+export const VERIFIER_STDERR_LIMIT = 16 * 1024 * 1024;
 
 /**
  * The single vendored tarball's filename, or a problem describing why there is
@@ -111,11 +120,26 @@ export function markerProblems(marker) {
     );
   }
 
+  // `source_ref` reaches the verifier's argv, and `gh` echoes it back into the
+  // policy-mismatch error that the failure-cause recognizer then reads, so it
+  // is held to git-ref characters rather than to any non-empty string: a ref
+  // carrying a recognizer marker (`refs/heads/no route to host`) would
+  // otherwise let the marker file rename an identity mismatch as an outage.
+  // Its syntax is checked wherever the field appears; only arming requires it.
+  if (
+    marker.source_ref !== undefined &&
+    (typeof marker.source_ref !== "string" || !GIT_REF.test(marker.source_ref))
+  ) {
+    problems.push(
+      "`source_ref` must be a git ref written in `[A-Za-z0-9_./-]` characters, with no whitespace",
+    );
+  }
+
   // The source commit is what binds the attested build to reviewable fork
   // source, so arming without it is refused rather than silently verifying a
   // weaker identity than the docs claim.
   if (marker.attestation_expected === true) {
-    if (typeof marker.source_ref !== "string" || marker.source_ref === "") {
+    if (marker.source_ref === undefined) {
       problems.push(
         "`source_ref` is required once `attestation_expected` is true (the fork ref the prebuild run built from)",
       );
@@ -181,7 +205,9 @@ const NON_LOOKUP_FAILURES = [
   {
     markers: [
       // The trust root is fetched from the TUF CDN before any lookup runs, and
-      // a host fenced from it gets this line and no network wording at all.
+      // a host fenced from it gets no network wording at all. This is the
+      // measured rendering of that failure and not its only one: `gh` renders
+      // it more than one way, and the others fall through to the fallback.
       "no valid Sigstore verifiers could be initialized",
       // The Sigstore bundle is fetched from a blob host that is neither
       // api.github.com nor the TUF CDN.
@@ -231,13 +257,36 @@ export function readMarkerSource(markerPath, readFile = readFileSync) {
 }
 
 /**
+ * A `spawnSync` result read as a verifier outcome, and the captured stderr
+ * written back out so the operator still reads the verifier's own words.
+ *
+ * A `spawnSync` error is only a spawn failure when the process never ran, which
+ * is an error carrying neither an exit status nor a termination signal. An
+ * error alongside either of those describes how a run that DID happen ended --
+ * `ENOBUFS` for output past `maxBuffer`, `ETIMEDOUT` for a killed one, each
+ * with a signal and with captured bytes -- and reporting it as an absent `gh`
+ * would name the wrong cause and discard what the run said. `writeStderr` is
+ * the test seam.
+ */
+export function verifierOutcome(run, writeStderr) {
+  const stderr = typeof run.stderr === "string" ? run.stderr : "";
+  if (stderr !== "") writeStderr(stderr);
+
+  const ran = typeof run.status === "number" || typeof run.signal === "string";
+  if (run.error !== undefined && !ran) {
+    return { spawnError: run.error.message };
+  }
+  return { status: run.status, signal: run.signal, stderr };
+}
+
+/**
  * The whole decision, with the bytes and the verifier handed in so a test can
  * drive every branch without a 16 MB fixture or a live GitHub lookup.
  *
- * `runVerifier(argv)` returns `{ status, stderr }` -- the verifier's exit
- * status, falsy for success, and whatever it wrote to stderr -- or
- * `{ spawnError }` when the verifier could not be started at all. It is only
- * called once the offline checks have all passed.
+ * `runVerifier(argv)` returns `{ status, signal, stderr }` -- the verifier's
+ * exit status, falsy for success, the signal that terminated it if one did, and
+ * whatever it wrote to stderr -- or `{ spawnError }` when the verifier could not
+ * be started at all. It is only called once the offline checks have all passed.
  *
  * Returns `{ ok, armed, problems, notes }`.
  */
@@ -311,47 +360,53 @@ export function checkProvenance({
 
   const argv = verifyArgv(tarballPath, marker);
   const invocation = `\`gh ${argv.join(" ")}\``;
-  const { status, stderr = "", spawnError } = runVerifier(argv) ?? {};
+  const outcome = runVerifier(argv) ?? {};
+  const { status, signal, spawnError } = outcome;
+  const stderr = typeof outcome.stderr === "string" ? outcome.stderr : "";
+  const unverified = (problem) => ({
+    ok: false,
+    armed: true,
+    problems: [problem],
+    notes: [],
+  });
 
   // Success is a reported zero, never an unreported anything: a verifier
   // handing back a bare status leaves `status` undefined here, which would
   // otherwise be indistinguishable from a clean exit.
-  if (spawnError === undefined && typeof status !== "number") {
-    return {
-      ok: false,
-      armed: true,
-      problems: [
-        `${invocation} reported neither an exit status nor a spawn failure, so nothing was verified about ${artifact}.`,
-      ],
-      notes: [],
-    };
+  if (
+    spawnError === undefined &&
+    typeof status !== "number" &&
+    typeof signal !== "string"
+  ) {
+    return unverified(
+      `${invocation} reported no exit status, no termination signal, and no spawn failure, so nothing was verified about ${artifact}.`,
+    );
   }
 
   // A cause that is not the lookup's own answer is named as itself. The
   // no-attestation conclusion below is a claim about the bytes, and reporting
-  // it for an unrunnable `gh` or a fenced host reads an outage as tampering.
+  // it for an unrunnable `gh`, a killed run, or a fenced host reads an outage
+  // as tampering.
   if (spawnError !== undefined) {
-    return {
-      ok: false,
-      armed: true,
-      problems: [
-        `${invocation} could not be run: ${spawnError}. The attestation lookup never happened, so this is an absent or unrunnable \`gh\` rather than anything about ${artifact}. Install \`gh\` and re-run, or read CI's own run of this check (docs/PREBUILD_REVENDOR.md).`,
-      ],
-      notes: [],
-    };
+    return unverified(
+      `${invocation} could not be run: ${spawnError}. The attestation lookup never happened, so this is an absent or unrunnable \`gh\` rather than anything about ${artifact}. Install \`gh\` and re-run, or read CI's own run of this check (docs/PREBUILD_REVENDOR.md).`,
+    );
+  }
+  // Ahead of the status branch, and reached whatever the exit status says: a
+  // run that a signal ended never reached a conclusion to report, so its
+  // status is not the lookup's answer.
+  if (typeof signal === "string") {
+    return unverified(
+      `${invocation} was terminated by ${signal} before it could complete the attestation lookup, so nothing was verified about ${artifact}. Whatever the run wrote before it died is above. Re-run where it can finish, or read CI's own run of this check (docs/PREBUILD_REVENDOR.md).`,
+    );
   }
   if (status) {
     const nonLookup = nonLookupFailure(stderr);
-    return {
-      ok: false,
-      armed: true,
-      problems: [
-        nonLookup === undefined
-          ? `${invocation} exited ${status}. The vendored bytes carry no attestation from ${marker.producer_repository} at ${marker.source_digest}, or the attestation does not match the recorded identity.`
-          : `${invocation} exited ${status} ${nonLookup}`,
-      ],
-      notes: [],
-    };
+    return unverified(
+      nonLookup === undefined
+        ? `${invocation} exited ${status}. The vendored bytes carry no attestation from ${marker.producer_repository} at ${marker.source_digest}, or the attestation does not match the recorded identity.`
+        : `${invocation} exited ${status} ${nonLookup}`,
+    );
   }
 
   return {
@@ -395,19 +450,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // An absent or failing `gh` is a failed verification, not a skipped one:
     // reaching here means the marker asked for enforcement. stderr is piped
     // rather than inherited so the failure cause can be named from what the
-    // run said, and is written straight back out so the operator still reads
-    // the verifier's own words.
-    runVerifier: (argv) => {
-      const run = spawnSync("gh", argv, {
-        cwd: root,
-        encoding: "utf8",
-        stdio: ["inherit", "inherit", "pipe"],
-      });
-      if (run.error !== undefined) return { spawnError: run.error.message };
-      const stderr = run.stderr ?? "";
-      process.stderr.write(stderr);
-      return { status: run.status ?? 1, stderr };
-    },
+    // run said; `verifierOutcome` writes it back out.
+    runVerifier: (argv) =>
+      verifierOutcome(
+        spawnSync("gh", argv, {
+          cwd: root,
+          encoding: "utf8",
+          stdio: ["inherit", "inherit", "pipe"],
+          maxBuffer: VERIFIER_STDERR_LIMIT,
+        }),
+        (text) => process.stderr.write(text),
+      ),
   });
 
   if (!result.ok) {

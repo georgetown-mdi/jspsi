@@ -172,9 +172,9 @@ procedure. Against the branch:
    the no-attestation conclusion, wherever the verifier's own output shows one;
    that recognition is best effort, so an unrecognized failure is reported as
    the lookup's answer, and the verifier's own output, printed above the
-   check's line, stays the authority on the cause. Do not read the CI result as a substitute while
-   the marker is disarmed: a disarmed check reports rather than verifies, and
-   says so in its annotation.
+   check's line, stays the authority on the cause. Do not read the CI result
+   as a substitute while the marker is disarmed: a disarmed check reports
+   rather than verifies, and says so in its annotation.
 
 4. **Check the identity the marker pins**, not just that verification passed.
    `producer_repository` and `signer_workflow` must name the fork and its

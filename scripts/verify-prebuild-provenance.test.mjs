@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   mkdirSync,
@@ -14,11 +15,13 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
 import {
+  VERIFIER_STDERR_LIMIT,
   checkProvenance,
   markerProblems,
   nonLookupFailure,
   readMarkerSource,
   resolveTarballName,
+  verifierOutcome,
   verifyArgv,
 } from "./verify-prebuild-provenance.mjs";
 
@@ -150,6 +153,10 @@ describe("marker shape", () => {
     ["sha256", "abc"],
     ["producer_repository", "OpenMinedPSI"],
     ["signer_workflow", "georgetown-mdi/OpenMinedPSI"],
+    [
+      "signer_workflow",
+      "georgetown-mdi/OpenMinedPSI/.github/workflows/no route to host.yml",
+    ],
     ["source_digest", "not-a-commit"],
     ["artifact", ""],
   ])("rejects a bad %s", (field, value) => {
@@ -159,6 +166,39 @@ describe("marker shape", () => {
   it("rejects a marker that is not an object", () => {
     expect(markerProblems([])).toEqual(["the marker is not a JSON object"]);
     expect(markerProblems(null)).toEqual(["the marker is not a JSON object"]);
+  });
+
+  // `source_ref` and `signer_workflow` are the marker fields that reach `gh`'s
+  // argv and come back echoed in its policy-mismatch output, which the
+  // failure-cause recognizer reads by substring. Constraining their syntax is
+  // what keeps the marker file from choosing which cause the operator is told.
+  it.each([["refs/heads/master"], ["refs/tags/v2.0.6"], ["master"], ["v1.0"]])(
+    "accepts %s as a source ref",
+    (source_ref) => {
+      expect(markerProblems({ ...ARMED, source_ref })).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["a recognizer marker", "refs/heads/no route to host"],
+    ["a leading space", " refs/heads/master"],
+    ["a newline", "refs/heads/master\ndial tcp"],
+    ["a tab", "refs/heads/master\tHTTP 401"],
+    ["nothing", ""],
+    ["a non-string", 7],
+  ])("refuses a source ref carrying %s", (_, source_ref) => {
+    expect(markerProblems({ ...ARMED, source_ref }).join("\n")).toMatch(
+      /source_ref/,
+    );
+  });
+
+  it("refuses a marker-bearing source ref before the verifier is reached", () => {
+    const result = check({
+      marker: { ...ARMED, source_ref: "refs/heads/no route to host" },
+      runVerifier: unreachableVerifier,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.problems.join("\n")).toMatch(/source_ref/);
   });
 });
 
@@ -210,6 +250,35 @@ describe("what a verifier failure is reported as", () => {
     expect(problem).toMatch(/could not be run: spawnSync gh ENOENT/);
     expect(problem).toMatch(/lookup never happened/);
     expect(problem).not.toMatch(TAMPERING_SHAPED);
+  });
+
+  it("names the signal a killed verifier died of", () => {
+    const problem = failure({ status: null, signal: "SIGKILL", stderr: "" });
+    expect(problem).toMatch(/terminated by SIGKILL/);
+    expect(problem).toMatch(/nothing was verified/);
+    expect(problem).not.toMatch(TAMPERING_SHAPED);
+  });
+
+  it("names the signal even when the killed run had written a completed lookup's output", () => {
+    // A signal ends a run before it reaches a conclusion, whatever it wrote on
+    // the way, so its output is not the lookup's answer and neither is the
+    // exit status a killed run does not have.
+    const problem = failure({
+      status: null,
+      signal: "SIGKILL",
+      stderr: VERIFIER_STDERR.noAttestation,
+    });
+    expect(problem).toMatch(/terminated by SIGKILL/);
+    expect(problem).not.toMatch(TAMPERING_SHAPED);
+  });
+
+  it("refuses a zero exit that arrived alongside a termination signal", () => {
+    const result = check({
+      marker: ARMED,
+      runVerifier: () => ({ status: 0, signal: "SIGTERM", stderr: "" }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.problems.join("\n")).toMatch(/terminated by SIGTERM/);
   });
 
   it("names an unreachable Sigstore blob host as a network failure", () => {
@@ -270,6 +339,13 @@ describe("what a verifier failure is reported as", () => {
       })),
       { status: 1, stderr: "Error: something new\n" },
       { status: 1 },
+      { status: null, signal: "SIGKILL", stderr: "" },
+      {
+        status: null,
+        signal: "SIGTERM",
+        stderr: VERIFIER_STDERR.noAttestation,
+      },
+      { status: 0, signal: "SIGTERM", stderr: "" },
     ];
     for (const outcome of outcomes) {
       const result = check({ marker: ARMED, runVerifier: () => outcome });
@@ -283,7 +359,8 @@ describe("what a verifier failure is reported as", () => {
     ["a bare exit status", 0],
     ["a bare non-zero status", 1],
     ["nothing at all", undefined],
-    ["an outcome carrying neither field", {}],
+    ["an outcome carrying none of the fields", {}],
+    ["an outcome whose fields are all null", { status: null, signal: null }],
   ])("refuses to read %s as a verified artifact", (_, outcome) => {
     // The verifier contract is an object; a caller still returning the older
     // bare status would destructure to `status: undefined`, which reads as a
@@ -292,7 +369,7 @@ describe("what a verifier failure is reported as", () => {
     expect(result.ok).toBe(false);
     expect(result.armed).toBe(true);
     expect(result.problems.join("\n")).toMatch(
-      /neither an exit status nor a spawn failure/,
+      /no exit status, no termination signal, and no spawn failure/,
     );
   });
 
@@ -304,6 +381,105 @@ describe("what a verifier failure is reported as", () => {
       "`HTTP 401`",
     );
     expect(nonLookupFailure(VERIFIER_STDERR.noAttestation)).toBeUndefined();
+  });
+});
+
+describe("reading a spawnSync result as a verifier outcome", () => {
+  // Driven against real `spawnSync` results, not hand-built ones: what the
+  // runtime reports for a killed run or one that overran `maxBuffer` is its
+  // behavior to state, and a fixture of it would assert a prediction. `gh`
+  // itself is still out of scope here -- these stand in for any child.
+  const runChild = (source, options = {}) =>
+    spawnSync(process.execPath, ["-e", source], {
+      encoding: "utf8",
+      stdio: ["inherit", "inherit", "pipe"],
+      ...options,
+    });
+
+  // Writes through fd 2 rather than `process.stderr`, whose buffered writes an
+  // immediate exit would drop before the parent captures anything.
+  const floodStderr = (chunks) =>
+    `const { writeSync } = require("fs"); for (let i = 0; i < ${chunks}; i++) writeSync(2, "x".repeat(65536));`;
+
+  const outcomeOf = (run) => {
+    const written = [];
+    const outcome = verifierOutcome(run, (text) => written.push(text));
+    return { outcome, written: written.join("") };
+  };
+
+  it("reads an absent binary as a spawn failure, with nothing to write", () => {
+    const { outcome, written } = outcomeOf(
+      spawnSync("gh-this-binary-is-not-installed", ["attestation", "verify"], {
+        encoding: "utf8",
+        stdio: ["inherit", "inherit", "pipe"],
+      }),
+    );
+    expect(outcome.spawnError).toMatch(/ENOENT/);
+    expect(written).toBe("");
+  });
+
+  it("reads a non-zero exit as that status, and writes what the run said", () => {
+    const { outcome, written } = outcomeOf(
+      runChild(
+        'process.stderr.write("Error: HTTP 404\\n"); process.exitCode = 1',
+      ),
+    );
+    expect(outcome.spawnError).toBeUndefined();
+    expect(outcome.status).toBe(1);
+    expect(outcome.stderr).toBe("Error: HTTP 404\n");
+    expect(written).toBe("Error: HTTP 404\n");
+  });
+
+  it("reads a signal-killed run as its signal rather than a spawn failure", () => {
+    const { outcome } = outcomeOf(
+      runChild(
+        'const { writeSync } = require("fs"); writeSync(2, "dying\\n"); process.kill(process.pid, "SIGKILL");',
+      ),
+    );
+    expect(outcome.spawnError).toBeUndefined();
+    expect(outcome.status).toBeNull();
+    expect(outcome.signal).toBe("SIGKILL");
+    expect(outcome.stderr).toBe("dying\n");
+  });
+
+  it("keeps the captured stderr of a run that overran maxBuffer", () => {
+    // spawnSync reports an overrun by killing the child, so its error arrives
+    // alongside a signal and with bytes already captured. Reading that error
+    // as an unrunnable binary would discard every one of them and name a
+    // cause -- an absent `gh` -- that is not what happened.
+    const { outcome, written } = outcomeOf(
+      runChild(floodStderr(8), { maxBuffer: 64 * 1024 }),
+    );
+    expect(outcome.spawnError).toBeUndefined();
+    expect(outcome.signal).toBe("SIGTERM");
+    expect(outcome.stderr.length).toBeGreaterThan(0);
+    expect(written).toBe(outcome.stderr);
+  });
+
+  it("holds a multi-megabyte diagnostic stream at the configured ceiling", () => {
+    // The ceiling is what keeps a verbose but complete run from arriving as
+    // the killed shape above: at spawnSync's own 1 MB default this stream is
+    // an ENOBUFS kill.
+    const { outcome } = outcomeOf(
+      runChild(floodStderr(32), { maxBuffer: VERIFIER_STDERR_LIMIT }),
+    );
+    expect(outcome.spawnError).toBeUndefined();
+    expect(outcome.signal).toBeNull();
+    expect(outcome.status).toBe(0);
+    expect(outcome.stderr).toHaveLength(32 * 65536);
+  });
+
+  it("hands a killed run to the decision as a named signal, not a verdict", () => {
+    const outcome = verifierOutcome(
+      runChild(
+        'const { writeSync } = require("fs"); writeSync(2, "dying\\n"); process.kill(process.pid, "SIGKILL");',
+      ),
+      () => {},
+    );
+    const result = check({ marker: ARMED, runVerifier: () => outcome });
+    expect(result.ok).toBe(false);
+    expect(result.problems.join("\n")).toMatch(/terminated by SIGKILL/);
+    expect(result.problems.join("\n")).not.toMatch(TAMPERING_SHAPED);
   });
 });
 
