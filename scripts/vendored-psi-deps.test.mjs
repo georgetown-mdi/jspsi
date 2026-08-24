@@ -71,6 +71,10 @@ describe("vendored @openmined/psi.js dependency surface", () => {
 
   it("records the integrity the committed tarball's bytes hash to", () => {
     const entry = lock.packages[VENDORED];
+    expect(
+      entry,
+      `package-lock.json holds no entry for ${VENDORED}`,
+    ).toBeDefined();
     const root = resolve(here, "..");
     const tarball = resolve(root, entry.resolved.slice("file:".length));
     const computed = tarballIntegrity(tarball);
