@@ -4,7 +4,8 @@ title: "Signed Provenance for the Vendored PSI Prebuild"
 
 # Prebuild provenance: binding vendored bytes to the build that made them
 
-_Status: decided, and built in its disarmed state. This note records why the
+_Status: decided, built, and armed against a fork that attests. This note
+records why the
 vendored `@openmined/psi.js` tarball is verified with a GitHub artifact
 attestation rather than npm provenance or a cosign blob signature, what the
 `.sha256` sidecar is re-scoped to, and why the check ships armed by a committed

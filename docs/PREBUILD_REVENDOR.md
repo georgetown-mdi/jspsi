@@ -43,10 +43,12 @@ malformed, and it holds the recorded digest against the tarball's real bytes
 whichever way the switch is set. Turning verification off is therefore a visible
 `true` -> `false` edit in a tracked file, not a deletion that looks like nothing.
 
-Arming requires the producing workflow to attest the artifact. Until the fork's
-`native-prebuilds.yml` runs `actions/attest-build-provenance` with `id-token:
-write` and `attestations: write`, there is nothing to verify and the marker
-stays disarmed.
+Arming requires the producing workflow to attest the artifact. The fork's
+`native-prebuilds.yml` does: its `package` job runs
+`actions/attest-build-provenance` under `id-token: write` and
+`attestations: write`, ahead of the artifact upload, so a tarball is published
+only once its provenance was signed. A tarball packed by a run older than that
+step carries nothing to verify, and its marker stays disarmed.
 
 ## Procedure
 
@@ -88,13 +90,37 @@ run's commit. Then, from a branch in this repository:
    Write it with the path in the form `sha256sum -c` is run against, so the
    committed line matches the CI invocation's working directory.
 
-5. **Force a reinstall if the version string did not change.** npm caches a
-   `file:` dependency by version, so same-version bytes are otherwise ignored:
+5. **Update the lockfile's integrity for the tarball.** `package-lock.json`
+   pins the vendored tarball by sha512 under `node_modules/@openmined/psi.js`,
+   and npm resolves a `file:` dependency out of its content-addressed cache by
+   that value rather than by re-reading `lib/`. Left stale, a warm cache
+   installs the bytes being replaced while every other control passes, so this
+   is the step that decides which addon actually loads. Compute the new value
+   and edit that one field:
+
+   ```sh
+   echo "sha512-$(openssl dgst -sha512 -binary lib/openmined-psi.js-<version>.tgz | base64)"
+   ```
+
+   Then force the reinstall, which npm otherwise skips when the version string
+   did not change:
 
    ```sh
    rm -rf node_modules/@openmined/psi.js
    npm install
    ```
+
+   Confirm the installed addon is the new bytes rather than assuming it, since
+   this is the failure the ordering above cannot catch:
+
+   ```sh
+   ref="$(mktemp -d)"
+   tar -xzf lib/openmined-psi.js-<version>.tgz -C "$ref"
+   diff -r "$ref/package/prebuilds" node_modules/@openmined/psi.js/prebuilds
+   ```
+
+   A cold cache fails loudly instead -- `npm error code EINTEGRITY`, naming the
+   wanted and got sha512 -- which is what CI sees if this step is skipped.
 
 6. **Run the checks locally.**
 
@@ -121,41 +147,51 @@ procedure. Against the branch:
    lib/openmined-psi.js-*.tgz.sha256`, and check that the digest in the diff's
    `.sha256` and `.provenance.json` are the same value.
 
-2. **Verify provenance yourself**, by running `npm run
+2. **Confirm the lockfile pins the same bytes.** `package-lock.json`'s
+   `integrity` for `node_modules/@openmined/psi.js` must be the sha512 of the
+   tarball in the diff. It is what npm installs from, so a stale value leaves
+   the sidecar and the attestation describing bytes that never load.
+
+3. **Verify provenance yourself**, by running `npm run
    check:prebuild-provenance` or the `gh attestation verify` invocation above.
    Do not read the CI result as a substitute while the marker is disarmed: a
    disarmed check reports rather than verifies, and says so in its annotation.
 
-3. **Check the identity the marker pins**, not just that verification passed.
+4. **Check the identity the marker pins**, not just that verification passed.
    `producer_repository` and `signer_workflow` must name the fork and its
    `native-prebuilds.yml`; a marker pointing at any other repository or
    workflow is a finding regardless of whether the attestation validates
    against it.
 
-4. **Tie the source commit to reviewable source.** `source_digest` must be a
+5. **Tie the source commit to reviewable source.** `source_digest` must be a
    commit that exists in the fork and whose tree is the source the addon is
    meant to be built from. This is the step that connects an attested build to
    code someone read; the attestation itself claims only that the run happened.
 
-5. **Read an arming change as a change.** A diff that flips
+6. **Read an arming change as a change.** A diff that flips
    `attestation_expected` from `true` to `false` removes the provenance control
    for that artifact, and needs the same explanation as removing any other
    security check.
 
 ## First armed run
 
-Nothing has exercised the positive path end to end: the fork has published no
-attestation, so `gh attestation verify` has only ever been run here in its
-failing direction. The first re-vendor that arms the marker is the acceptance
-test, and these are the two things to confirm while watching that pull request's
-CI rather than assuming them:
+The positive path has run end to end: the fork attests, and
+`npm run check:prebuild-provenance` passes against a real attestation rather
+than only in its failing direction. One thing is still worth watching on the
+pull request that arms a marker, because it is the one credential the procedure
+above cannot exercise:
 
 - **The verifier passes in CI, not only locally.** CI authenticates with the
   workflow's `GITHUB_TOKEN` against the fork's attestations, which is a
-  different credential from a maintainer's `gh` login.
-- **The `--source-ref` recorded matches what the fork's default branch is
-  called.** A ref that does not match fails a verification that would otherwise
-  succeed, and the failure looks like tampering.
+  different credential from a maintainer's `gh` login. The fork's attestation
+  endpoint answers an unauthenticated request while both repositories are
+  public, so any token carrying public read suffices; a fork turned private
+  would be where this breaks.
+
+The `--source-ref` recorded must also match what the fork's default branch is
+called. It is checked independently of `--source-digest`: an attestation minted
+on a branch fails a `refs/heads/master` verification even when the two refs
+point at the same commit, and the failure looks like tampering.
 
 If either surprises, the correct response is to leave the marker disarmed and
 fix the mismatch rather than to weaken the invocation.
