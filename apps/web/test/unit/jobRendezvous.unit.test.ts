@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   DEFAULT_MAX_DISPLAY_LENGTH,
@@ -22,7 +22,7 @@ import {
   RENDEZVOUS_NOTICE_BUDGET,
   jobRendezvousDirs,
   notEmptyLead,
-  rendezvousSplitProblem,
+  rendezvousSplitFaults,
   rendezvousStartupWarnings,
   resolveJobRendezvousFolderName,
   resolveJobRendezvousOutboundDir,
@@ -125,6 +125,44 @@ function subDir(parent: string, name: string): string {
   fs.mkdirSync(dir);
   dirs.push(dir);
   return dir;
+}
+
+/** The split pair's refusal for an environment, as every gate that consumes the
+ * provisioning reads it. */
+function splitProblem(env: NodeJS.ProcessEnv): string | undefined {
+  return resolveJobRendezvousProvisioning(env).problem;
+}
+
+/**
+ * Run `body` with `fs.realpathSync` failing `EACCES` for `unreadable` and every
+ * path under it, the shape a mount with an unreadable component on the way to it
+ * takes.
+ *
+ * Injected rather than driven off a real directory mode: a suite running as root
+ * traverses a `0000` directory anyway, so the case would silently stop being
+ * exercised on exactly the hosts (containers) the console runs in.
+ */
+function withUnreadableRealpath<T>(unreadable: string, body: () => T): T {
+  const realpathSync = fs.realpathSync;
+  const blocked = path.resolve(unreadable);
+  const spy = vi
+    .spyOn(fs, "realpathSync")
+    .mockImplementation((target, options) => {
+      const resolved = path.resolve(String(target));
+      if (resolved === blocked || resolved.startsWith(blocked + path.sep)) {
+        const error: NodeJS.ErrnoException = new Error(
+          "EACCES: permission denied",
+        );
+        error.code = "EACCES";
+        throw error;
+      }
+      return realpathSync(target, options);
+    });
+  try {
+    return body();
+  } finally {
+    spy.mockRestore();
+  }
 }
 
 afterEach(() => {
@@ -386,6 +424,112 @@ describe("the split rendezvous a second mount provisions", () => {
     ).toContain("one is inside the other");
   });
 
+  test("an outbound leg symlinked ONTO the inbound one meets the same refusal", () => {
+    // The refusal exists because the inbound leg is partner-written, and a symlink
+    // reorients the partner's folder onto the operator's just as an authored path
+    // does. Held to the LEXICAL pair's own message, so the two cases cannot drift
+    // into different outcomes.
+    const mounts = tempDir("mounts");
+    const inbound = subDir(mounts, "from-partner");
+    const outbound = path.join(mounts, "to-partner");
+    fs.symlinkSync(inbound, outbound, "dir");
+    const lexical = splitProblem({
+      JOB_RENDEZVOUS_DIR: "/mnt/share",
+      JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/share",
+    });
+    expect(lexical).toContain("read its own writes");
+    expect(
+      splitProblem({
+        JOB_RENDEZVOUS_DIR: inbound,
+        JOB_RENDEZVOUS_OUTBOUND_DIR: outbound,
+      }),
+    ).toBe(lexical);
+  });
+
+  test("an outbound leg symlinked INSIDE the inbound one meets it too", () => {
+    const mounts = tempDir("mounts");
+    const inbound = subDir(mounts, "from-partner");
+    const nested = subDir(inbound, "outgoing");
+    const outbound = path.join(mounts, "to-partner");
+    fs.symlinkSync(nested, outbound, "dir");
+    expect(
+      splitProblem({
+        JOB_RENDEZVOUS_DIR: inbound,
+        JOB_RENDEZVOUS_OUTBOUND_DIR: outbound,
+      }),
+    ).toContain("one is inside the other");
+  });
+
+  test("a leg not created yet is still read through its symlinked parent", () => {
+    // A component that does not exist cannot be the symlink joining the two legs,
+    // but its parent can, so resolution anchors on the nearest existing ancestor
+    // rather than giving up on a mount the operator has not created yet.
+    const mounts = tempDir("mounts");
+    const inbound = subDir(mounts, "from-partner");
+    const linkedParent = path.join(mounts, "sync");
+    fs.symlinkSync(inbound, linkedParent, "dir");
+    expect(
+      splitProblem({
+        JOB_RENDEZVOUS_DIR: inbound,
+        JOB_RENDEZVOUS_OUTBOUND_DIR: path.join(linkedParent, "to-partner"),
+      }),
+    ).toContain("read its own writes");
+  });
+
+  test("two distinct legs reached through a symlinked parent still run", () => {
+    const mounts = tempDir("mounts");
+    const real = subDir(mounts, "volume");
+    subDir(real, "from-partner");
+    subDir(real, "to-partner");
+    const link = path.join(mounts, "sync");
+    fs.symlinkSync(real, link, "dir");
+    const provisioning = resolveJobRendezvousProvisioning({
+      JOB_RENDEZVOUS_DIR: path.join(link, "from-partner"),
+      JOB_RENDEZVOUS_OUTBOUND_DIR: path.join(link, "to-partner"),
+    });
+    expect(provisioning.problem).toBeUndefined();
+    expect(provisioning.unresolvedLegWarning).toBeUndefined();
+  });
+
+  test("a leg whose real path cannot be read warns instead of refusing", () => {
+    // The symlinked pair of the case above, with the outbound mount unreadable: the
+    // resolution that would catch it cannot run, and a filesystem that cannot answer
+    // must not become a refusal of its own. What the operator gets is the warning.
+    const mounts = tempDir("mounts");
+    const inbound = subDir(mounts, "from-partner");
+    const outbound = path.join(mounts, "to-partner");
+    fs.symlinkSync(inbound, outbound, "dir");
+    const provisioning = withUnreadableRealpath(outbound, () =>
+      resolveJobRendezvousProvisioning({
+        JOB_RENDEZVOUS_DIR: inbound,
+        JOB_RENDEZVOUS_OUTBOUND_DIR: outbound,
+      }),
+    );
+    expect(provisioning.problem).toBeUndefined();
+    expect(provisioning.unresolvedLegWarning).toContain(
+      "JOB_RENDEZVOUS_OUTBOUND_DIR",
+    );
+    expect(provisioning.unresolvedLegWarning).not.toContain(
+      "JOB_RENDEZVOUS_DIR",
+    );
+  });
+
+  test("an unreadable leg is still held to the configured-path comparison", () => {
+    // The lexical verdict does not depend on the resolution having run, so a pair
+    // that is nested as configured is refused whether or not either leg resolves --
+    // and the warning names both legs when neither did.
+    const provisioning = withUnreadableRealpath(path.resolve("/mnt"), () =>
+      resolveJobRendezvousProvisioning({
+        JOB_RENDEZVOUS_DIR: "/mnt/share",
+        JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/share/out",
+      }),
+    );
+    expect(provisioning.problem).toContain("one is inside the other");
+    expect(provisioning.unresolvedLegWarning).toContain(
+      "JOB_RENDEZVOUS_DIR and JOB_RENDEZVOUS_OUTBOUND_DIR",
+    );
+  });
+
   test("two mounts ending in the same segment are refused at boot, not at mint", () => {
     // Core refuses a filedrop endpoint whose halves resolve alike, and the console
     // mints single-segment locators; without this the operator would meet core's
@@ -427,7 +571,7 @@ describe("the split rendezvous a second mount provisions", () => {
     // reduces to no last segment is a filesystem root, which contains any other
     // mount and so trips the containment refusal first. The guard is what makes a
     // split with an unnameable leg unrepresentable rather than minted half-formed.
-    const problem = rendezvousSplitProblem(
+    const { problem } = rendezvousSplitFaults(
       { dir: "/mnt/in", outboundDir: "/mnt/out", locator: "in" },
       true,
     );
