@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -30,9 +31,8 @@ import {
 // a failure propagates and is named -- across an injected verifier boundary.
 // They do NOT model what `gh attestation verify` decides: reimplementing the
 // verifier's semantics here would assert a prediction rather than an outcome.
-// The live
-// half is `npm run check:prebuild-provenance`, which drives the real tool
-// against the vendored bytes in CI and locally.
+// The live half is `npm run check:prebuild-provenance`, which drives the real
+// tool against the vendored bytes in CI and locally.
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -169,9 +169,10 @@ describe("marker shape", () => {
   });
 
   // `source_ref` and `signer_workflow` are the marker fields that reach `gh`'s
-  // argv and come back echoed in its policy-mismatch output, which the
-  // failure-cause recognizer reads by substring. Constraining their syntax is
-  // what keeps the marker file from choosing which cause the operator is told.
+  // argv as free text, and the failure-cause recognizer reads the verifier's
+  // stderr by substring -- a stream `gh`'s measured 401 and 404 renderings echo
+  // argv-derived values into. Constraining their syntax is what keeps the
+  // marker file from choosing which cause the operator is told.
   it.each([["refs/heads/master"], ["refs/tags/v2.0.6"], ["master"], ["v1.0"]])(
     "accepts %s as a source ref",
     (source_ref) => {
@@ -480,6 +481,93 @@ describe("reading a spawnSync result as a verifier outcome", () => {
     expect(result.ok).toBe(false);
     expect(result.problems.join("\n")).toMatch(/terminated by SIGKILL/);
     expect(result.problems.join("\n")).not.toMatch(TAMPERING_SHAPED);
+  });
+});
+
+describe("what a failing check delivers through a pipe", () => {
+  // Driven as the real script against a stub `gh`, because what survives a
+  // failure is a property of how the process ends and no import reaches that.
+  // A CI step's stderr is a pipe, whose writer queues in the process once the
+  // kernel buffer is full, so a check that exits the instant it has written
+  // its report delivers part of the verifier's flood and drops the report --
+  // the one part of the stream an unattended log needed.
+  const CHECK = join(root, "scripts", "verify-prebuild-provenance.mjs");
+
+  // A repeated distinctive line rather than filler bytes: the check's own
+  // report contains letters filler would collide with, and the count has to be
+  // exact to say how much of the verifier's stream arrived.
+  const FLOOD_LINE = "psilink-verifier-flood\n";
+  const FLOOD_LINES = 12_000;
+
+  const stubDirs = [];
+  afterAll(() => {
+    for (const dir of stubDirs) rmSync(dir, { recursive: true, force: true });
+  });
+
+  // The stub writes fd 2 to completion and sets `process.exitCode` rather than
+  // exiting, so nothing is lost on its own way out and the only delivery under
+  // test is the check's.
+  const runCheckAgainstStubGh = (floodLines) => {
+    const dir = mkdtempSync(join(tmpdir(), "psilink-provenance-gh-"));
+    stubDirs.push(dir);
+
+    const stubSource = join(dir, "gh-stub.cjs");
+    writeFileSync(
+      stubSource,
+      `const { writeSync } = require("node:fs");
+const payload = Buffer.from(
+  ${JSON.stringify(FLOOD_LINE)}.repeat(${floodLines}) +
+    ${JSON.stringify(VERIFIER_STDERR.unreachableBundleHost)},
+);
+let written = 0;
+while (written < payload.length) written += writeSync(2, payload, written);
+process.exitCode = 1;
+`,
+    );
+
+    const stub = join(dir, "gh");
+    writeFileSync(
+      stub,
+      `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(stubSource)}\n`,
+    );
+    chmodSync(stub, 0o755);
+
+    return spawnSync(process.execPath, [CHECK], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["inherit", "inherit", "pipe"],
+      maxBuffer: VERIFIER_STDERR_LIMIT,
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+    });
+  };
+
+  const floodLinesIn = (stderr) => stderr.split(FLOOD_LINE).length - 1;
+
+  it("delivers its report behind a verifier stream far past the pipe buffer", () => {
+    const run = runCheckAgainstStubGh(FLOOD_LINES);
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("Prebuild provenance check failed");
+    expect(run.stderr).toContain("`failed to fetch bundle`");
+    expect(run.stderr).toMatch(/network failure/);
+    // Counted, not sampled: truncation keeps the head of the stream, so a
+    // substring assertion on the verifier's words passes on a stream that lost
+    // everything the check itself wrote.
+    expect(floodLinesIn(run.stderr)).toBe(FLOOD_LINES);
+    // The verifier's own words above, the check's report below -- the order
+    // the runbook and the spec state, and the direction truncation eats.
+    expect(run.stderr.indexOf("failed to fetch bundle with URL")).toBeLessThan(
+      run.stderr.indexOf("Prebuild provenance check failed"),
+    );
+  });
+
+  it("delivers the same report for a stream that fits the pipe buffer", () => {
+    const run = runCheckAgainstStubGh(4);
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("Prebuild provenance check failed");
+    expect(run.stderr).toMatch(/network failure/);
+    expect(floodLinesIn(run.stderr)).toBe(4);
   });
 });
 

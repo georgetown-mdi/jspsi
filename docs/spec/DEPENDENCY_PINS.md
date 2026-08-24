@@ -105,7 +105,7 @@ Each vendored tarball carries a marker beside it, `lib/<tarball>.provenance.json
 | `source_ref` | The producing repository's git ref. Required once armed |
 | `source_digest` | The producing repository's commit, 40 hex characters. Required once armed |
 
-The two fields that reach the verifier's argv as free text -- `signer_workflow` and `source_ref` -- are held to `[A-Za-z0-9_./-]`, whitespace excluded, wherever they appear rather than only once armed: `gh` echoes those values back into its own policy-mismatch output, which the failure-cause recognizer below reads by substring, so an unconstrained value would let the marker file choose which cause the check names.
+The two fields that reach the verifier's argv as free text -- `signer_workflow` and `source_ref` -- are held to `[A-Za-z0-9_./-]`, whitespace excluded, wherever they appear rather than only once armed. The failure-cause recognizer below reads the verifier's stderr by substring, and `gh`'s measured 401 and 404 renderings echo argv-derived values into that stream, so an unconstrained value would let the marker file choose which cause the check names. Whether the policy-mismatch output echoes them in particular is not claimed here: reaching a policy evaluation needs egress this repository's fenced measurements did not have.
 
 Armed, the check runs exactly:
 

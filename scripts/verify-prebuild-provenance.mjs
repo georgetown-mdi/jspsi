@@ -120,12 +120,14 @@ export function markerProblems(marker) {
     );
   }
 
-  // `source_ref` reaches the verifier's argv, and `gh` echoes it back into the
-  // policy-mismatch error that the failure-cause recognizer then reads, so it
-  // is held to git-ref characters rather than to any non-empty string: a ref
-  // carrying a recognizer marker (`refs/heads/no route to host`) would
-  // otherwise let the marker file rename an identity mismatch as an outage.
-  // Its syntax is checked wherever the field appears; only arming requires it.
+  // `source_ref` reaches the verifier's argv as free text, and the
+  // failure-cause recognizer reads the verifier's stderr by substring -- a
+  // stream `gh`'s measured 401 and 404 renderings echo argv-derived values
+  // into. So the field is held to git-ref characters rather than to any
+  // non-empty string: a ref carrying a recognizer marker (`refs/heads/no route
+  // to host`) would otherwise let the marker file rename an identity mismatch
+  // as an outage. Its syntax is checked wherever the field appears; only
+  // arming requires it.
   if (
     marker.source_ref !== undefined &&
     (typeof marker.source_ref !== "string" || !GIT_REF.test(marker.source_ref))
@@ -419,16 +421,21 @@ export function checkProvenance({
   };
 }
 
-// CLI entry: only when invoked directly, so the test imports the decision
-// functions without the process.exit and without touching the network.
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// The check as the CLI runs it. Every failure sets `process.exitCode` and
+// returns rather than calling `process.exit`, which abandons whatever stderr
+// has not drained yet: past a pipe's buffer -- and a CI step is a pipe -- what
+// it abandons is the verifier's stderr AND the report below it, leaving an
+// unattended run with a red status and none of the cause this check exists to
+// name. The piped-delivery test beside this file is what holds it.
+function runCheck() {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const libDir = join(root, LIB_DIR);
 
   const resolved = resolveTarballName(readdirSync(libDir));
   if (resolved.problem !== undefined) {
     console.error(`Prebuild provenance check failed:\n\n  ${resolved.problem}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const tarballPath = join(LIB_DIR, resolved.name);
@@ -440,7 +447,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const marker = readMarkerSource(absolute + MARKER_SUFFIX);
   if (marker.problem !== undefined) {
     console.error(`Prebuild provenance check failed:\n\n  ${marker.problem}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const result = checkProvenance({
@@ -466,7 +474,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!result.ok) {
     console.error("Prebuild provenance check failed:\n");
     for (const problem of result.problems) console.error(`  ${problem}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   for (const note of result.notes) {
@@ -479,4 +488,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.log(note);
     }
   }
+}
+
+// Only when invoked directly, so the test imports the decision functions
+// without running the check and without touching the network.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  runCheck();
 }
