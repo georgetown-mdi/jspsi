@@ -138,6 +138,8 @@ Set the release version, following the policy in [Versioning](#versioning):
 - `packages/core/package.json` -- only if the core library changed in this release, bumped to its own next version (it versions independently of the CLI, so this need not equal `X.Y.Z`).
 - `apps/web/package.json` and the root `package.json` -- leave unchanged; neither carries a release version.
 
+The canonical release version is also what arms the wire-format pin. `npm run check:protocol-version-bump` is inert while it names `0.1.0` or below; the first release above that publishes deployed peers, so the check asks for the pin covering what the linkage rounds put on the wire and prints the block to record in `scripts/protocol-version-pins.json`. From that release onward, a change to that wire format takes a `PROTOCOL_VERSION` bump with its own pin recorded beside the earlier ones -- see [PROTOCOL.md](spec/PROTOCOL.md#wire-format-deltas-existing-frames-only-and-no-version-bump).
+
 ### 3. Update CHANGELOG.md
 
 Rename the `[Unreleased]` section to `[X.Y.Z] - YYYY-MM-DD`. Open a new empty `[Unreleased]` section above it. Security fixes must be called out in a `### Security` subsection. The `[Unreleased]` entries should already be reader-facing one-liners (see [CONTRIBUTING.md](../CONTRIBUTING.md), Changelog); tighten or drop any that drifted before cutting the release.

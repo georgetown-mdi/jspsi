@@ -39,7 +39,9 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const MANIFEST = "apps/cli/package.json";
+import { RELEASE_MANIFEST, manifestVersion } from "./lib/releaseManifest.mjs";
+
+export { manifestVersion };
 
 // The release-tag shape .github/workflows/release.yaml triggers on, as a
 // capture of the version it names.
@@ -55,16 +57,6 @@ export function taggedVersion(tag) {
 }
 
 /**
- * The release version a package manifest's source carries, or undefined when it
- * carries none -- an absent `version` key and an empty one alike, since the
- * image build bakes either as nothing.
- */
-export function manifestVersion(manifestSource) {
-  const { version } = JSON.parse(manifestSource);
-  return typeof version === "string" && version !== "" ? version : undefined;
-}
-
-/**
  * The reasons a pushed tag and a manifest version do not name one release;
  * empty when they do.
  */
@@ -72,17 +64,17 @@ export function agreementViolations(tag, version) {
   const tagged = taggedVersion(tag);
   if (tagged === undefined) {
     return [
-      `the pushed tag "${tag}" is not a release tag (vX.Y.Z), so it names no version to check against ${MANIFEST}, which carries ${version === undefined ? "none" : version}`,
+      `the pushed tag "${tag}" is not a release tag (vX.Y.Z), so it names no version to check against ${RELEASE_MANIFEST}, which carries ${version === undefined ? "none" : version}`,
     ];
   }
   if (version === undefined) {
     return [
-      `the pushed tag "${tag}" names release ${tagged}, but ${MANIFEST} carries no version: the image build would bake none, and the accept kit would name the floating tag instead of ${tagged}`,
+      `the pushed tag "${tag}" names release ${tagged}, but ${RELEASE_MANIFEST} carries no version: the image build would bake none, and the accept kit would name the floating tag instead of ${tagged}`,
     ];
   }
   if (version !== tagged) {
     return [
-      `the pushed tag "${tag}" names release ${tagged}, but ${MANIFEST} carries ${version}: the published image would be tagged ${tagged} while its accept kit tells the partner to run ${version}`,
+      `the pushed tag "${tag}" names release ${tagged}, but ${RELEASE_MANIFEST} carries ${version}: the published image would be tagged ${tagged} while its accept kit tells the partner to run ${version}`,
     ];
   }
   return [];
@@ -102,18 +94,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(2);
   }
   const version = manifestVersion(
-    readFileSync(resolve(root, MANIFEST), "utf8"),
+    readFileSync(resolve(root, RELEASE_MANIFEST), "utf8"),
   );
   const violations = agreementViolations(tag, version);
   if (violations.length > 0) {
     console.error("Release version check failed:\n");
     for (const violation of violations) console.error("  " + violation);
     console.error(
-      `\n${MANIFEST} is the canonical release version (docs/RELEASES.md): bump it in the release pull request, then push the tag that names it.`,
+      `\n${RELEASE_MANIFEST} is the canonical release version (docs/RELEASES.md): bump it in the release pull request, then push the tag that names it.`,
     );
     process.exit(1);
   }
   console.log(
-    `Release version check passed: tag ${tag} and ${MANIFEST} both name release ${version}.`,
+    `Release version check passed: tag ${tag} and ${RELEASE_MANIFEST} both name release ${version}.`,
   );
 }

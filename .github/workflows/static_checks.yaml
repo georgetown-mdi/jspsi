@@ -180,6 +180,18 @@ jobs:
       # randomized ECDSA signatures and the recorded openssl version -- by name.
       - name: Vectors against their generators
         run: npm run check:vectors
+      # docs/spec/PROTOCOL.md states in prose that a wire-format delta ships
+      # within PROTOCOL_VERSION 1 while psilink is pre-publication and takes a
+      # bump from the first published deployment onward -- an obligation that
+      # falls due long after the sentence was written and that nothing would
+      # otherwise fail on. This encodes it: inert while apps/cli/package.json
+      # names no release above the pre-publication one, and from then on a moved
+      # wire-format pin (the covered vectors under packages/core/test/vectors/,
+      # digested into scripts/protocol-version-pins.json) with no bump fails,
+      # naming the paragraph. The marker is read from the tree because this
+      # checkout has no tags to read one from.
+      - name: Protocol version bump
+        run: npm run check:protocol-version-bump
       # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
       # .mjs with no server or Docker dependency, so a stock runner suffices. This
       # is the repo-wide non-path-filtered gate that guarantees the suite is always
