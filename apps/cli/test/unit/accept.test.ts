@@ -1192,31 +1192,26 @@ test("validateAccept: offline stamps role: acceptor onto a seeded webrtc connect
   // The accepting side derives its WebRTC rendezvous peer id from the `acceptor`
   // label, and the persisted connection block is the only place a later
   // `psilink exchange` can learn which side it is on -- the operator never
-  // authors it.
-  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  // authors it. Given no input file this acceptance writes that block and stops,
+  // so the stamp is asserted on the connection it writes.
   const endpoint: ConnectionEndpoint = {
     channel: "webrtc",
     host: "peer.example.org",
     path: "/psi",
   };
-  try {
-    const encoded = await encodeInvitation(sampleToken(FUTURE(), endpoint));
-    const ready = await validateAccept({
-      resolved: { mode: "offline", invitation: encoded, input },
-      options: testOptions(),
-      log: silentLog,
-    });
-    expect(ready.mode).toBe("offline");
-    if (ready.mode !== "offline") return;
-    if (ready.connection.channel !== "webrtc")
-      throw new Error("expected webrtc");
-    expect(ready.connection.role).toBe("acceptor");
-    // The stamp rides along with the seeded locator rather than replacing it.
-    expect(ready.connection.server.host).toBe("peer.example.org");
-    expect(ready.connection.server.path).toBe("/psi");
-  } finally {
-    fs.rmSync(input, { force: true });
-  }
+  const encoded = await encodeInvitation(sampleToken(FUTURE(), endpoint));
+  const ready = await validateAccept({
+    resolved: { mode: "offline", invitation: encoded },
+    options: testOptions(),
+    log: silentLog,
+  });
+  expect(ready.mode).toBe("offline");
+  if (ready.mode !== "offline") return;
+  if (ready.connection.channel !== "webrtc") throw new Error("expected webrtc");
+  expect(ready.connection.role).toBe("acceptor");
+  // The stamp rides along with the seeded locator rather than replacing it.
+  expect(ready.connection.server.host).toBe("peer.example.org");
+  expect(ready.connection.server.path).toBe("/psi");
 });
 
 test("validateAccept: offline leaves a non-webrtc connection without a role", async () => {
@@ -1234,6 +1229,219 @@ test("validateAccept: offline leaves a non-webrtc connection without a role", as
     if (ready.mode !== "offline") return;
     expect(ready.connection.channel).toBe("sftp");
     expect(Object.keys(ready.connection)).not.toContain("role");
+  } finally {
+    fs.rmSync(input, { force: true });
+  }
+});
+
+// --- accepting and running a webrtc exchange in one command ------------------
+// An invitation naming a webrtc coordination server carries everything the
+// exchange needs, so an acceptance given an input file runs it rather than
+// printing a second command for the operator to type while the inviter sits
+// inside its accept timeout. Everything else -- another channel's endpoint, no
+// endpoint, no input file, a kept configuration -- keeps the two-command shape.
+
+/** A webrtc endpoint pointing at a coordination server, host and mount both. */
+const WEBRTC_ENDPOINT: ConnectionEndpoint = {
+  channel: "webrtc",
+  host: "peer.example.org",
+  path: "/psi",
+};
+
+/**
+ * A silent logger whose `info` and `warn` lines land in `messages`, for the
+ * diagnostics an acceptance reports rather than throws. Each call takes a fresh
+ * logger name, so no two tests share a spy through loglevel's own registry.
+ */
+function recordingLog(messages: string[]): ReturnType<typeof getLogger> {
+  const log = getLogger(`accept-recording-${optionsCounter++}`);
+  log.setLevel("silent");
+  for (const level of ["info", "warn"] as const)
+    vi.spyOn(log, level).mockImplementation((...args: unknown[]) => {
+      messages.push(args.map(String).join(" "));
+    });
+  return log;
+}
+
+test("validateAccept: a webrtc invitation with an input file prepares the exchange it accepts", async () => {
+  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  try {
+    const token = sampleToken(FUTURE(), WEBRTC_ENDPOINT);
+    const encoded = await encodeInvitation({
+      ...token,
+      disclosedPayloadColumns: ["diagnosis"],
+    });
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded, input },
+      options: testOptions(),
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("endpointRun");
+    if (ready.mode !== "endpointRun") return;
+    // The connection this run dials is the invitation's own locator, stamped
+    // with the end this command takes; nothing else supplies either.
+    expect(ready.connection.channel).toBe("webrtc");
+    expect(ready.connection.role).toBe("acceptor");
+    expect(ready.connection.server).toMatchObject({
+      host: "peer.example.org",
+      path: "/psi",
+    });
+    // The prepared exchange carries the same two bindings the URL-driven mode
+    // sets, so this single run enforces what the acceptance consented to.
+    expect(ready.prepared.expectedPayloadColumns).toEqual(["diagnosis"]);
+    expect(ready.prepared.expectedPartnerDeduplicate).toBe(
+      token.linkageTerms.deduplicate,
+    );
+  } finally {
+    fs.rmSync(input, { force: true });
+  }
+});
+
+test("validateAccept: a webrtc invitation with no input file keeps the two-command shape", async () => {
+  // No dataset, so there is no exchange to run: the acceptance writes the
+  // configuration and key file, and `psilink exchange` conducts it later.
+  const encoded = await encodeInvitation(
+    sampleToken(FUTURE(), WEBRTC_ENDPOINT),
+  );
+  const ready = await validateAccept({
+    resolved: { mode: "offline", invitation: encoded },
+    options: testOptions(),
+    log: silentLog,
+  });
+  expect(ready.mode).toBe("offline");
+});
+
+test("validateAccept: an invitation carrying no webrtc endpoint keeps the two-command shape", async () => {
+  // The fallback the acceptance criteria name: no endpoint at all, and an
+  // endpoint on a channel whose credentials the operator still supplies by hand.
+  // Neither fails; each writes a connection block to complete.
+  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  try {
+    for (const endpoint of [
+      undefined,
+      {
+        channel: "sftp" as const,
+        host: "sftp.example.org",
+        path: "/exchange",
+      },
+    ]) {
+      const encoded = await encodeInvitation(sampleToken(FUTURE(), endpoint));
+      const ready = await validateAccept({
+        resolved: { mode: "offline", invitation: encoded, input },
+        options: testOptions(),
+        log: silentLog,
+      });
+      expect(ready.mode).toBe("offline");
+    }
+  } finally {
+    fs.rmSync(input, { force: true });
+  }
+});
+
+test("validateAccept: a webrtc acceptance over a kept configuration keeps the two-command shape", async () => {
+  // The kept configuration governs its own exchange -- `psilink exchange` loads
+  // it, resolves its @path references and its own server.key/secure, and dials
+  // what it says -- so running the endpoint-built connection here would dial a
+  // coordination server that configuration does not name.
+  const options = testOptions();
+  writeExistingConfig(options.configFile);
+  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  const messages: string[] = [];
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(FUTURE(), WEBRTC_ENDPOINT),
+    );
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded, input },
+      options,
+      log: recordingLog(messages),
+    });
+    expect(ready.reuseExistingConfig).toBe(true);
+    expect(ready.mode).toBe("offline");
+    // Reported rather than silent: an operator who passed an input file expecting
+    // a run reads why one did not happen, and what to run instead.
+    expect(
+      messages.some(
+        (m) =>
+          m.includes("keeps the existing configuration") &&
+          m.includes("psilink exchange"),
+      ),
+    ).toBe(true);
+  } finally {
+    fs.rmSync(options.configFile, { force: true });
+    fs.rmSync(input, { force: true });
+  }
+});
+
+test("validateAccept: a partner endpoint the dial would refuse is refused before the prompt", async () => {
+  // The security invariant: a partner-supplied locator reaches the dial through
+  // the same refusals a CLI-authored connection does. The endpoint schema bounds
+  // host and path by length only, so a delimiter that could move the signaling
+  // authority is caught by the shared broker-location resolver -- here, before
+  // the terms are displayed and before anything is written.
+  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  try {
+    for (const endpoint of [
+      { ...WEBRTC_ENDPOINT, host: "peer.example.org@evil.example" },
+      { ...WEBRTC_ENDPOINT, path: "psi" },
+      { ...WEBRTC_ENDPOINT, path: "/psi?to=elsewhere" },
+    ]) {
+      const encoded = await encodeInvitation(sampleToken(FUTURE(), endpoint));
+      const options = testOptions();
+      await expect(
+        validateAccept({
+          resolved: { mode: "offline", invitation: encoded, input },
+          options,
+          log: silentLog,
+        }),
+      ).rejects.toBeInstanceOf(UsageError);
+      expect(fs.existsSync(options.configFile)).toBe(false);
+      expect(fs.existsSync(options.keyFile)).toBe(false);
+    }
+  } finally {
+    fs.rmSync(input, { force: true });
+  }
+});
+
+test("validateAccept: an OUTPUT_FILE an acceptance cannot honor is reported, not dropped", async () => {
+  // The result destination belongs to a run. An acceptance that writes only a
+  // configuration and key file has no result to send there, so the positional is
+  // named rather than silently ignored -- and a running acceptance carries it
+  // through to the bootstrap instead.
+  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  const stops: string[] = [];
+  const runs: string[] = [];
+  try {
+    const noEndpoint = await encodeInvitation(sampleToken(FUTURE()));
+    await validateAccept({
+      resolved: {
+        mode: "offline",
+        invitation: noEndpoint,
+        input,
+        output: "results.csv",
+      },
+      options: testOptions(),
+      log: recordingLog(stops),
+    });
+    expect(stops.some((m) => m.includes("OUTPUT_FILE"))).toBe(true);
+
+    const webrtc = await encodeInvitation(
+      sampleToken(FUTURE(), WEBRTC_ENDPOINT),
+    );
+    const ready = await validateAccept({
+      resolved: {
+        mode: "offline",
+        invitation: webrtc,
+        input,
+        output: "results.csv",
+      },
+      options: testOptions(),
+      log: recordingLog(runs),
+    });
+    expect(runs.some((m) => m.includes("OUTPUT_FILE"))).toBe(false);
+    expect(ready.mode).toBe("endpointRun");
+    if (ready.mode !== "endpointRun") return;
+    expect(ready.output).toBe("results.csv");
   } finally {
     fs.rmSync(input, { force: true });
   }
@@ -3156,8 +3364,10 @@ test("handler: --consent-to-terms skips the confirmation prompt and writes the c
 test("handler: an accepted webrtc invitation writes role: acceptor into the config", async () => {
   // What reaches disk is what the later `psilink exchange` reads, so assert the
   // written file rather than the in-memory connection: the field has to survive
-  // the spec's snake_case serialization and parse back off the schema.
-  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  // the spec's snake_case serialization and parse back off the schema. Given no
+  // input file this acceptance writes that configuration and stops, which is the
+  // path that has a file to assert.
+  const { dir, configFile, keyFile } = offlineAcceptFixture();
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
@@ -3172,7 +3382,7 @@ test("handler: an accepted webrtc invitation writes role: acceptor into the conf
     await acceptHandler({
       _: [],
       $0: "psilink",
-      args: [encoded, input],
+      args: [encoded],
       "consent-to-terms": true,
       "config-file": configFile,
       "key-file": keyFile,
@@ -3189,6 +3399,111 @@ test("handler: an accepted webrtc invitation writes role: acceptor into the conf
     expect(raw).toContain("role: acceptor");
   } finally {
     exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: a webrtc acceptance given an input file accepts and runs the exchange", async () => {
+  // The one-command acceptance: the same bootstrap the URL-driven mode reaches,
+  // handed the invitation's own coordination server, this party's end of the
+  // rendezvous, the token's secret, and the acceptance's two consent records --
+  // so the configuration, key file, record, and result are the ones a
+  // two-command acceptance would have written.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const output = path.join(dir, "results.csv");
+  try {
+    const token = sampleToken(FUTURE(), {
+      channel: "webrtc",
+      host: "peer.example.org",
+      path: "/psi",
+    });
+    const encoded = await encodeInvitation({
+      ...token,
+      disclosedPayloadColumns: ["diagnosis"],
+    });
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: [encoded, input, output],
+      "consent-to-terms": true,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+    expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
+    const passed = runOnlineBootstrapMock.mock.calls[0][0];
+    expect(passed.connection).toMatchObject({
+      channel: "webrtc",
+      role: "acceptor",
+      server: { host: "peer.example.org", path: "/psi" },
+    });
+    expect(passed.sharedSecret).toBe(token.sharedSecret);
+    expect(passed.configPath).toBe(configFile);
+    expect(passed.keyPath).toBe(keyFile);
+    expect(passed.output).toBe(output);
+    // The acceptance's own records ride the same write the URL-driven mode makes.
+    expect(passed.receivedPayloadLockIn).toEqual({
+      consentedColumns: ["diagnosis"],
+    });
+    expect(passed.expectedPartnerDeduplicate).toBe(
+      token.linkageTerms.deduplicate,
+    );
+    expect(passed.reuseExistingConfig).toBe(false);
+    // The acceptor observes nothing it must crystallize: its received set is the
+    // one the invitation declared, which it already carries.
+    expect(passed.persistObservedReceivedPayload).toBeUndefined();
+  } finally {
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: the consent gate stands on the one-command path", async () => {
+  // Unchanged by the run: the terms are displayed and the prompt asked before
+  // anything is written or dialed, and a decline leaves both files unwritten and
+  // opens no connection.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
+  promptConfirmMock.mockResolvedValue(false);
+  const stdio = captureStdio();
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(FUTURE(), {
+        channel: "webrtc",
+        host: "peer.example.org",
+        path: "/psi",
+      }),
+    );
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: [encoded, input],
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+    expect(promptConfirmMock).toHaveBeenCalledTimes(1);
+    expect(runOnlineBootstrapMock).not.toHaveBeenCalled();
+    expect(fs.existsSync(configFile)).toBe(false);
+    expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

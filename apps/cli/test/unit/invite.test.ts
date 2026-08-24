@@ -3128,11 +3128,12 @@ test("handler: a failed config write leaves --peer-timeout's warning unfalsified
   }
 });
 
-test("handler: a webrtc online invite tells the partner to accept and then exchange, with no URL", async () => {
+test("handler: a webrtc online invite tells the partner to accept, with no URL and no second command", async () => {
   // The partner types no coordination server: the invitation's endpoint carries
-  // it, so the template is the plain accept plus the exchange that dials it
-  // while this command waits. Echoing the inviter's URL here would invite the
-  // partner to retype a locator they already hold, on a command that refuses it.
+  // it, so their accept writes the connection block and dials it in that one
+  // command, while this one waits. Echoing the inviter's URL here would invite
+  // the partner to retype a locator they already hold, on a command that
+  // refuses it.
   const { input, options } = onlineFixture();
   const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
   runOnlineBootstrapMock.mockImplementation(async () => ({}));
@@ -3152,8 +3153,13 @@ test("handler: a webrtc online invite tells the partner to accept and then excha
     } as unknown as Arguments);
     const stderr = stdio.stderrWrites.join("");
     expect(exit).not.toHaveBeenCalled();
+    expect(stderr).toContain("accepts and runs the exchange with:");
     expect(stderr).toContain("psilink accept <INVITATION> <INPUT_FILE>");
-    expect(stderr).toContain("psilink exchange");
+    // The one command is the whole template: a second command for the partner to
+    // type while this one waits is exactly what the acceptance no longer needs.
+    // Matched on the template's own indented command line, so the peer-budget
+    // notice's prose mention of the command does not stand in for it.
+    expect(stderr).not.toContain("\n  psilink exchange");
     expect(stderr).not.toContain("wss://peers.example.org");
   } finally {
     stdio.restore();
