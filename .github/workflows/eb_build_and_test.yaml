@@ -36,6 +36,11 @@ on:
       - "packages/testkit/**"
       - ".github/actions/setup/**"
       - ".github/workflows/eb_build_and_test.yaml"
+      # The deploy-trigger coverage check below reads eb_deploy.yaml's push
+      # filter, so a pull request that edits only that filter has to reach this
+      # workflow -- narrowing the filter is exactly the change the check exists
+      # to catch, and it touches nothing else here.
+      - ".github/workflows/eb_deploy.yaml"
 
   workflow_call:
     outputs:
@@ -88,6 +93,20 @@ jobs:
         uses: ./.github/actions/setup
       - name: Build server
         run: npm run -w apps/web build
+      # eb_deploy.yaml's push filter is narrower than the trees it names, on the
+      # premise that what it leaves out is in no deployed import graph. This
+      # holds that premise against a real build: every repository source the
+      # deployed server reads has to match a filter that redeploys it, or an
+      # edit to it ships nothing and production goes stale with nothing red.
+      # Here rather than in the repo-wide static checks because that gate is
+      # deliberately unfiltered and this needs a web build, while this workflow
+      # is already scoped to the trees that can break the premise and has the
+      # dependencies installed. It runs its own instrumented build (the recorder
+      # in apps/web/vite.config.ts adds no hook that can change a chunk), and
+      # runs before the tests so the artifact packaged below is the build whose
+      # graph was read.
+      - name: Deploy trigger coverage
+        run: npm run check:deploy-trigger-graph
       - name: Run tests
         run: |
           npm run -w packages/core test

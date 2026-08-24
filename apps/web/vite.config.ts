@@ -1,4 +1,5 @@
 /// <reference types="vitest/config" />
+import fs from "node:fs";
 import path from "node:path";
 
 import { defineConfig } from "vite";
@@ -12,7 +13,7 @@ import { ConfigManager } from "./src/utils/serverConfig.ts";
 
 import { registerServer } from "./src/httpServer.ts";
 
-import type { PreviewServer, ViteDevServer } from "vite";
+import type { Plugin, PreviewServer, ViteDevServer } from "vite";
 
 const configManager = new ConfigManager();
 const config = await configManager.load({ dotenv: true });
@@ -45,6 +46,43 @@ const srcAliases = {
 // duplicated. Dev/test only; the production build code-splits the worker and inlines
 // its WASM, so `optimizeDeps` never affects `vite build`.
 const psiWorkerWasmEngine = "@openmined/psi.js/psi_wasm_worker";
+
+// The Elastic Beanstalk deploy trigger (.github/workflows/eb_deploy.yaml) is a
+// hand-written path filter over the sources this build reads, and the bundler is
+// the only thing that knows what that set actually is. When
+// scripts/check-deploy-trigger-graph.mjs sets this variable, the build records
+// every module id it resolves so the check can hold the filter against the real
+// graph instead of predicting it. Unset -- every developer build, every CI build
+// that is not that check -- no plugin is added at all.
+const deployGraphRecordPath = process.env.PSILINK_DEPLOY_GRAPH_RECORD;
+
+// Records the module ids of one build into recordPath. It contributes no hook
+// that can resolve, load, or rewrite a module (`transform` returns null), so the
+// artifact a recorded build produces is the artifact a plain build produces --
+// which is what makes the recording evidence about the deployed server rather
+// than about a build shaped to be measured. Each environment closes its own
+// bundle, so the write merges with what is already there; the check names a path
+// in a scratch directory of its own, so no earlier run carries into it.
+function deployGraphRecorder(recordPath: string): Plugin {
+  const moduleIds = new Set<string>();
+  return {
+    name: "psilink-deploy-graph-recorder",
+    apply: "build",
+    transform(_code, id) {
+      moduleIds.add(id);
+      return null;
+    },
+    closeBundle() {
+      const recorded: Array<string> = fs.existsSync(recordPath)
+        ? JSON.parse(fs.readFileSync(recordPath, "utf8"))
+        : [];
+      fs.writeFileSync(
+        recordPath,
+        JSON.stringify([...new Set([...recorded, ...moduleIds])].sort()),
+      );
+    },
+  };
+}
 
 // The PeerJS signaling server attaches its WebSocket `upgrade` handler only when
 // the /api/peerjs route module first runs usePeerServer() -- triggered by an HTTP
@@ -233,6 +271,9 @@ export default defineConfig((_configEnv) => {
       ],
     },
     plugins: [
+      ...(deployGraphRecordPath
+        ? [deployGraphRecorder(deployGraphRecordPath)]
+        : []),
       tanstackStart({
         srcDirectory: "src",
       }),
