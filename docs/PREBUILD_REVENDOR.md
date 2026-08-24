@@ -171,8 +171,8 @@ procedure. Against the branch:
    The check names an egress or credential failure as itself, rather than as
    the no-attestation conclusion, wherever the verifier's own output shows one;
    that recognition is best effort, so an unrecognized failure is reported as
-   the lookup's answer and the verifier's output printed above the check's
-   stays the authority on the cause. Do not read the CI result as a substitute while
+   the lookup's answer, and the verifier's own output, printed above the
+   check's line, stays the authority on the cause. Do not read the CI result as a substitute while
    the marker is disarmed: a disarmed check reports rather than verifies, and
    says so in its annotation.
 

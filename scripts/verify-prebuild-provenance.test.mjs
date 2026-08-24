@@ -25,9 +25,9 @@ import {
 // What these cover, and what they deliberately do not. They drive this repo's
 // own wiring -- arming, the offline digest binding, argv construction, and how
 // a failure propagates and is named -- across an injected verifier boundary.
-// They do NOT
-// model what `gh attestation verify` decides: reimplementing the verifier's
-// semantics here would assert a prediction rather than an outcome. The live
+// They do NOT model what `gh attestation verify` decides: reimplementing the
+// verifier's semantics here would assert a prediction rather than an outcome.
+// The live
 // half is `npm run check:prebuild-provenance`, which drives the real tool
 // against the vendored bytes in CI and locally.
 
