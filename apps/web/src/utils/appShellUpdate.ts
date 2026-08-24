@@ -158,7 +158,10 @@ export async function registerAppShell(
   });
   applyUpdate = () => {
     const waiting = registration?.waiting;
-    if (waiting === null || waiting === undefined) return;
+    if (waiting === null || waiting === undefined) {
+      if (updateReady) reload();
+      return;
+    }
     if (!takeoverArmed) {
       takeoverArmed = true;
       // Read the waiting worker again at unload rather than closing over the one
@@ -211,8 +214,14 @@ export async function registerAppShell(
  * it take over as that page goes is the cold start it would have waited for
  * anyway.
  *
- * Does nothing before `registerAppShell` has a registration, or when no worker
- * is waiting.
+ * When an update was announced but no worker is waiting -- another tab applied
+ * it, and its takeover claimed this page -- there is nothing to post and the
+ * apply is a plain reload onto the activated code. A worker waiting at the press
+ * takes the message path ahead of that fallback, so a newer update supersedes
+ * rather than being skipped past.
+ *
+ * Does nothing before `registerAppShell` has a registration, or when no update
+ * has been announced and no worker is waiting.
  */
 export function applyAppShellUpdate(): void {
   applyUpdate?.();
