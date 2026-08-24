@@ -55,12 +55,21 @@ import { describe, expect, it } from "vitest";
 // the outcome union carrying exactly two kinds; the rot guard below fails if it
 // grows a third.
 //
+// The success-first guard clause is that shape with its refusing side left
+// implicit: the test's own branch takes the passing kind and exits, and the
+// refusal is whatever the handler falls through to. It reads as acting when BOTH
+// exit -- the branch, which is what makes the rest of the body the refusing path
+// alone, and that rest, read as an `else` block would be.
+//
 // A handler is DECIDED to ignore the refusal when it discards the call's value,
 // when nothing follows the call, when the statement that follows does not test
-// the outcome's discriminant, or when the refusing branch falls through into the
-// rest of the body. Anything between that and the readable shape -- a
-// destructured binding, a guard behind a helper predicate, a `switch`, a ternary
-// -- is reported as a shape this check cannot read.
+// the outcome's discriminant, when an explicit refusing branch falls through
+// into the rest of the body, or when the test is the last statement there and so
+// the refusing side runs off the end of the handler. Anything between that and
+// the readable shapes -- a destructured binding, a guard behind a helper
+// predicate, a `switch`, a ternary, a fall-through refusal this check does not
+// read as leaving the handler, a test whose own branch falls through as well --
+// is reported as a shape this check cannot read.
 //
 // What it still does NOT decide: that the refusing branch returns the gate's own
 // response rather than some other refusal, that nothing after the guard uses the
@@ -422,14 +431,34 @@ function readOutcome(body, bindings) {
             `cannot read as a \`${DISCRIMINANT}\` comparison`,
         }
       : untested;
-  if (
-    !exitsHandler(branch === "then" ? next.thenStatement : next.elseStatement)
-  )
+  const refusingSide =
+    branch === "then" ? next.thenStatement : next.elseStatement;
+  const fallsThrough = {
+    acted: false,
+    reason:
+      `the branch taken when \`${name}.${DISCRIMINANT}\` is ` +
+      `"${REFUSING_KIND}" does not return or throw`,
+  };
+  if (refusingSide !== undefined)
+    return exitsHandler(refusingSide) ? { acted: true } : fallsThrough;
+  // The refusing side is the `else` the guard clause leaves implicit, so the
+  // refusal is what the handler falls through to. Reading the rest of the body
+  // as that branch's block holds only while the test's own branch exits: a
+  // branch that falls through too leaves the remainder serving both kinds.
+  const afterTest = body.statements.slice(2).at(-1);
+  if (afterTest === undefined) return fallsThrough;
+  if (!exitsHandler(next.thenStatement))
     return {
-      acted: false,
-      reason:
-        `the branch taken when \`${name}.${DISCRIMINANT}\` is ` +
-        `"${REFUSING_KIND}" does not return or throw`,
+      unreadable:
+        `an outcome test whose own branch falls through as well, so what ` +
+        `follows it runs on a refusal and on a pass alike`,
+    };
+  if (!exitsHandler(afterTest))
+    return {
+      unreadable:
+        `a refusing side that falls through the outcome test into a trailing ` +
+        `${ts.SyntaxKind[afterTest.kind]}, which this check does not read as ` +
+        `returning or throwing`,
     };
   return { acted: true };
 }
@@ -722,6 +751,72 @@ describe("every job-API route handler is gated", () => {
       "PATCH: `gate.kind` is tested only after other statements have run",
       "DELETE: the gate's outcome is discarded rather than bound to a name",
       "HEAD: the gate call is the handler's only statement, so its refusal is never returned",
+    ]);
+  });
+
+  it("reads a guard clause whose refusal is the fall-through", () => {
+    // The same idiom written success-first, in both polarities: the handler's
+    // own branch takes the passing kind and returns, and the refusal is the
+    // statement it falls through to. That gates as completely as the explicit
+    // form, so it is read as acting rather than reported as a branch that does
+    // not return -- but only while the passing branch exits, since a test both
+    // of whose sides fall through leaves what follows serving a refused request
+    // too.
+    const sources = {
+      "guarding/route.ts": `import { gateJobRoute } from "@jobs/routeSupport";
+         export const Route = createFileRoute("/api/jobs/guarding/")({
+           server: {
+             handlers: {
+               GET: ({ request }) => {
+                 const gate = gateJobRoute(request);
+                 if (gate.kind === "manager") {
+                   return jobJsonResponse(gate.manager.added());
+                 }
+                 return gate.response;
+               },
+               PUT: ({ request }) => {
+                 const gate = gateJobRoute(request);
+                 if (gate.kind !== "response") {
+                   return jobEmptyResponse(204);
+                 }
+                 return gate.response;
+               },
+               POST: ({ request }) => {
+                 const gate = gateJobRoute(request);
+                 if (gate.kind === "manager") {
+                   return jobJsonResponse(gate.manager.added());
+                 }
+                 log.warn("refused");
+               },
+               PATCH: ({ request }) => {
+                 const gate = gateJobRoute(request);
+                 if (gate.kind === "manager") {
+                   log.info("served");
+                 }
+                 return jobEmptyResponse(204);
+               },
+             },
+           },
+         });`,
+    };
+    const read = readRoutes(Object.keys(sources), (file) =>
+      parseSource(file, sources[file]),
+    );
+    expect(
+      allHandlers(read).map(
+        (handler) => `${handler.method}: ${describeOutcome(handler.outcome)}`,
+      ),
+    ).toEqual([
+      "GET: acts",
+      "PUT: acts",
+      "POST: unreadable: a refusing side that falls through the outcome test into a trailing ExpressionStatement, which this check does not read as returning or throwing",
+      "PATCH: unreadable: an outcome test whose own branch falls through as well, so what follows it runs on a refusal and on a pass alike",
+    ]);
+    // The unread remainder is a shape the check cannot read, never a violation
+    // it did not establish: both land in the reading's unreadable list.
+    expect(unreadableIn(read)).toEqual([
+      "guarding/route.ts POST: a refusing side that falls through the outcome test into a trailing ExpressionStatement, which this check does not read as returning or throwing",
+      "guarding/route.ts PATCH: an outcome test whose own branch falls through as well, so what follows it runs on a refusal and on a pass alike",
     ]);
   });
 
