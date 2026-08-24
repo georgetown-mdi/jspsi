@@ -37,8 +37,9 @@ export interface RelayEvent {
  * write did not -- an audit artifact, a configuration or consent record, or the
  * result file (docs/spec/CLI_EVENTS.md, Persistence loss). Mirrored here rather
  * than imported, exactly as the fd-3 vocabulary above is: the CLI is a separate
- * workspace this server drives as a subprocess. The pair is therefore aligned by
- * review, not by the module graph.
+ * workspace this server drives as a subprocess. What holds the pair together in
+ * place of the module graph is `scripts/persistence-loss-exit-code.test.mjs`,
+ * which reads both declarations out of source and fails when they diverge.
  */
 export const PERSISTENCE_LOSS_EXIT_CODE = 73;
 
