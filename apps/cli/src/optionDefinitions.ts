@@ -516,11 +516,11 @@ export function connectionOverridesFrom(
  * file-sync channel warns for none of them. Shared so the wording cannot drift
  * between the commands.
  *
- * Each caller passes only the flags it is wired to warn for, not the whole
- * set: `invite`'s webrtc route (the ws://wss:// URL) passes `peerId` and the
- * rest through, but `exchange` -- which also registers `--peer-id` and the
- * `--server-*` set -- is not yet wired to warn for its own webrtc drops, so
- * those go unreported on that command today.
+ * Each caller passes the flags whose drop its own channel can reach: `invite`
+ * (from a ws://wss:// URL) and `exchange` (from a `channel: webrtc` config) can
+ * resolve webrtc and pass the whole set, while the online accept path reaches
+ * only `--connection-per-poll`, since `connectionFromURL` has already refused a
+ * webrtc URL there and a filedrop URL can drop nothing else.
  *
  * `--connection-per-poll` is the exception to "file-sync": it is SFTP-only (the
  * ephemeral-session mode dials a real SFTP socket, which filedrop's

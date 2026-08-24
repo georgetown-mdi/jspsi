@@ -58,6 +58,7 @@ import {
   warnConnectionPerPollShortInterval,
   warnLowPollingFrequency,
   warnUnsupportedFileSyncFlags,
+  warnUnsupportedWebRTCServerFlags,
   type CommonBootstrapOptions,
 } from "../optionDefinitions";
 import { checkLinkageSatisfiability } from "./linkagePreflight";
@@ -411,7 +412,7 @@ export function loadConfig(options: ExchangeOptions): {
   // CLI --connection-per-poll against a filedrop config never reaches
   // connection.options -- only the raw flag carries that intent. Either source
   // being on means the operator asked for a mode this channel ignores. The other
-  // three flags stay raw-CLI-only: they warn solely on a non-file-sync channel
+  // flags stay raw-CLI-only: they warn solely on a non-file-sync channel
   // (webrtc), whose SharedOptions cannot express them, so no merged value exists.
   warnUnsupportedFileSyncFlags(
     connection.channel,
@@ -428,6 +429,26 @@ export function loadConfig(options: ExchangeOptions): {
         options.connectionPerPoll === true ||
         (connection.options as FileSyncOptions | undefined)
           ?.connectionPerPoll === true,
+      peerId: options.peerId,
+      timestampInFilename: options.timestampInFilename,
+    },
+    log,
+  );
+  // The server-block half of the same report: applyConnectionOverrides merges
+  // that sub-group on sftp alone, so every --server-* flag typed at a webrtc
+  // config is dropped, credentials included -- and a credential typed at a
+  // channel that discards it looks, from the terminal, exactly like one that was
+  // used.
+  warnUnsupportedWebRTCServerFlags(
+    connection.channel,
+    {
+      serverPort: options.serverPort,
+      serverUsername: options.serverUsername,
+      serverPassword: options.serverPassword,
+      serverPrivateKey: options.serverPrivateKey,
+      serverPrivateKeyPassphrase: options.serverPrivateKeyPassphrase,
+      serverKeyboardInteractive: options.serverKeyboardInteractive,
+      serverHostKeyFingerprint: options.serverHostKeyFingerprint,
     },
     log,
   );
