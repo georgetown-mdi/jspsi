@@ -2082,6 +2082,67 @@ test("runOnlineBootstrap carries a webrtc connection through to the exchange and
   }
 });
 
+test("runOnlineBootstrap spends a run-only peer budget on the run and writes none of it", async () => {
+  // The online inviter's --accept-timeout: a window for one operator waiting at
+  // a rendezvous, which must bound the run it was typed for and nothing after
+  // it. The config this same call writes is what every later unattended
+  // `psilink exchange` reads, so carrying the budget into it would hand those
+  // runs a peer timeout nobody chose for them.
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    await soleFunctionArg(callArgs)();
+    return {};
+  }) as never);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      runOnlyPeerTimeoutSeconds: 900,
+    });
+    const ran = vi.mocked(runProtocol).mock.lastCall?.[0] as ConnectionConfig;
+    expect(ran.options?.peerTimeoutMs).toBe(900_000);
+    // Read raw rather than through parseExchangeSpec, which materializes the
+    // schema's own defaults and so cannot tell an absent field from a written
+    // one.
+    const saved = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+      connection: { options?: Record<string, unknown> };
+    };
+    expect(saved.connection.options?.["peer_timeout_ms"]).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap leaves a connection's own peer budget on both the run and the config", async () => {
+  // The budget the operator put on the connection is not the run-only one: it is
+  // theirs to keep, so it reaches the exchange and the saved config alike, and
+  // the run-only value layered over it changes only what this run waits on.
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    await soleFunctionArg(callArgs)();
+    return {};
+  }) as never);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  const params = onlineBootstrapParams(configPath);
+  try {
+    await runOnlineBootstrap({
+      ...params,
+      connection: { ...params.connection, options: { peerTimeoutMs: 60_000 } },
+      runOnlyPeerTimeoutSeconds: 900,
+    });
+    const ran = vi.mocked(runProtocol).mock.lastCall?.[0] as ConnectionConfig;
+    expect(ran.options?.peerTimeoutMs).toBe(900_000);
+    const saved = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+      connection: { options?: Record<string, unknown> };
+    };
+    expect(saved.connection.options?.["peer_timeout_ms"]).toBe(60_000);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runOnlineBootstrap returns the config-write error when the hook fails but the exchange succeeds", async () => {
   // The hook (saveConfig) failed at acceptance, but the exchange still
   // succeeded, so runProtocol resolves with onAuthenticatedError set.

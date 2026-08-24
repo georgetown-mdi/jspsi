@@ -11,6 +11,7 @@ import {
   assertFanOutImplemented,
   assertPayloadSendDisclosed,
   assertStandardizationMatchesTerms,
+  DEFAULT_PEER_TIMEOUT_MS,
   disclosedColumnNames,
   inferMetadata,
   INVITATION_LIFETIME_SECONDS,
@@ -336,11 +337,14 @@ export async function validateInvite(params: {
     // with no host) fails before the caller can disclose the token. The role is
     // stamped here because this command IS the inviting end; on a ws:/wss: URL
     // that is what makes the connection dialable, since a URL carries no role.
+    //
+    // --accept-timeout is deliberately NOT merged in: this connection is what the
+    // bootstrap persists, and an accept-only wait written as the config's
+    // peer_timeout_ms would silently become the budget of every later recurring
+    // run. It reaches this run alone, through runOnlineBootstrap's
+    // runOnlyPeerTimeoutSeconds.
     const connection = withWebRTCPeerRole(
-      inviterConnectionFromURL(
-        url,
-        connectionOverridesFrom(options, { peerTimeout: acceptTimeout }),
-      ),
+      inviterConnectionFromURL(url, connectionOverridesFrom(options)),
       "inviter",
     );
     // The file-sync half of this connection's options, absent on webrtc (whose
@@ -417,20 +421,21 @@ export async function validateInvite(params: {
       log,
     );
 
-    // --accept-timeout is bound to this connection's peer budget above and takes
-    // precedence unconditionally -- it is always set, by the flag or its default
-    // -- so a --peer-timeout typed here is parsed and dropped. Name the timeout
-    // that governs the phase instead of leaving the operator to read silence as
-    // the budget they asked for.
+    // --accept-timeout is this run's peer budget unconditionally -- it is always
+    // set, by the flag or its default -- so a --peer-timeout typed here does not
+    // bound the wait it reads as bounding. It is not discarded either: it is the
+    // budget the saved configuration keeps for the runs that follow. Name both
+    // halves rather than leaving the operator to read silence as the budget they
+    // asked for.
     if (options.peerTimeout !== undefined)
       log.warn(
-        "--peer-timeout has no effect on an online invitation: " +
-          `--accept-timeout (${acceptTimeout}s) is bound to this run's peer ` +
-          "budget instead, bounding both the wait for the partner to accept " +
-          "and the peer waits of the exchange that follows. Pass " +
-          "--accept-timeout to set that budget, or edit " +
+        "--peer-timeout does not bound this online invitation: " +
+          `--accept-timeout (${acceptTimeout}s) is this run's peer budget, ` +
+          "bounding both the wait for the partner to accept and the peer waits " +
+          "of the exchange that follows. --peer-timeout " +
+          `(${options.peerTimeout}s) is written as ` +
           "connection.options.peer_timeout_ms in the saved configuration " +
-          "before a later 'psilink exchange'.",
+          "instead, as the budget a later 'psilink exchange' runs on.",
       );
 
     // An accept-timeout longer than the token's lifetime would keep waiting at
@@ -885,6 +890,11 @@ export async function handler(argv: Arguments): Promise<void> {
             recordFile: options.recordFile,
           }),
           eventStream: options.eventStream,
+          // The wait this invitation was printed for, and the peer waits of the
+          // exchange that follows it, run on --accept-timeout; the configuration
+          // saved at acceptance does not, so an unattended recurring run is never
+          // handed a budget sized for one operator sitting at a terminal.
+          runOnlyPeerTimeoutSeconds: acceptTimeout,
           // The inviter's received-payload set is unknown until the acceptor
           // transmits it, so crystallize the observed set into the saved config
           // after this first exchange -- a later `psilink exchange` then fails
@@ -899,6 +909,14 @@ export async function handler(argv: Arguments): Promise<void> {
           keyFile: options.keyFile,
           configWriteError,
         });
+        // State the peer budget that configuration carries, only once it is
+        // actually on disk: the accept timeout this run waited on is not it, and
+        // an operator who never reads the file would otherwise have to infer
+        // what a later recurring run is bounded by.
+        if (configWriteError === undefined)
+          log.info(
+            persistedPeerBudgetNotice(options.peerTimeout, acceptTimeout),
+          );
         return;
       }
 
@@ -1002,6 +1020,42 @@ function noteSinglePassSelection(
   log: ReturnType<typeof getLogger>,
 ): void {
   if (strategy === "single-pass") log.info(singlePassDisclosureNotice());
+}
+
+/**
+ * The line reporting which peer budget the configuration an online invite just
+ * saved carries, logged once that configuration is on disk.
+ *
+ * `--accept-timeout` bounds the invite's own run and is not written: the two
+ * timeouts bound different lifetimes -- one operator waiting at a rendezvous,
+ * versus every later unattended `psilink exchange` -- so persisting the first as
+ * the second would hand a recurring run a budget nobody chose for it. What the
+ * configuration records is therefore `--peer-timeout` when the operator set one,
+ * and nothing otherwise, in which case those runs take the documented
+ * `peer_timeout_ms` default. Either way the value is named here rather than left
+ * to be read out of the file.
+ *
+ * @internal exported for testing
+ */
+export function persistedPeerBudgetNotice(
+  persistedPeerTimeoutSeconds: number | undefined,
+  acceptTimeoutSeconds: number,
+): string {
+  if (persistedPeerTimeoutSeconds !== undefined)
+    return (
+      "the saved configuration records connection.options.peer_timeout_ms as " +
+      `${persistedPeerTimeoutSeconds}s, from --peer-timeout: that is the peer ` +
+      "budget a later 'psilink exchange' runs on. --accept-timeout " +
+      `(${acceptTimeoutSeconds}s) bounded this run alone.`
+    );
+  return (
+    "the saved configuration records no connection.options.peer_timeout_ms: " +
+    `--accept-timeout (${acceptTimeoutSeconds}s) bounded this run alone, so a ` +
+    "later 'psilink exchange' runs on the default peer budget " +
+    `(${DEFAULT_PEER_TIMEOUT_MS / 1000}s). Pass --peer-timeout at invite time, ` +
+    "or set connection.options.peer_timeout_ms in that configuration, to give " +
+    "those runs a budget of your own."
+  );
 }
 
 /**
