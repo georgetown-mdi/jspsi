@@ -1147,7 +1147,9 @@ function overlongMount(segment: string): string {
 function ordinaryMount(root: string = TEST_TEMP_ROOT): string {
   const parent = tempDir("rendezvous", root);
   const nameCost =
-    ORDINARY_MOUNT_COST - renderedDisplayCost(parent) - path.sep.length;
+    ORDINARY_MOUNT_COST -
+    renderedDisplayCost(parent) -
+    renderedDisplayCost(path.sep);
   if (nameCost < 1)
     throw new Error(
       `a mount pinned to ${ORDINARY_MOUNT_COST} rendered characters has no room ` +
