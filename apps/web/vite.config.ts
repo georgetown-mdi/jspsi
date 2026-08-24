@@ -73,9 +73,12 @@ function deployGraphRecorder(recordPath: string): Plugin {
       return null;
     },
     closeBundle() {
-      const recorded: Array<string> = fs.existsSync(recordPath)
-        ? JSON.parse(fs.readFileSync(recordPath, "utf8"))
-        : [];
+      let recorded: Array<string> = [];
+      try {
+        recorded = JSON.parse(fs.readFileSync(recordPath, "utf8"));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
       fs.writeFileSync(
         recordPath,
         JSON.stringify([...new Set([...recorded, ...moduleIds])].sort()),
