@@ -38,9 +38,12 @@ import {
 
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
 import type { CliDriverHandlers, RelayEvent } from "@jobs/cliDriver";
+import type {
+  JobFiledropExchangeIntent,
+  JobInputFileReference,
+} from "@jobs/intent";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { JobApiClient } from "@psi/serverJobExchangeDriver";
-import type { JobInputFileReference } from "@jobs/intent";
 
 vi.mock("@jobs/workdir", { spy: true });
 
@@ -1227,6 +1230,50 @@ describe("filedrop rendezvous facilitation", () => {
       (entry) => entry.event.type === "warning",
     );
     expect(warnings.length).toBeGreaterThan(0);
+  });
+
+  /** The not-empty lead a job created over a mount holding leftovers put on its
+   * own event stream. The relay event's payload is an open record, so the message
+   * reads as unknown and is narrowed rather than cast. */
+  async function notEmptyLeadFor(
+    intent: JobFiledropExchangeIntent,
+  ): Promise<string | undefined> {
+    const rvz = rendezvousRoot();
+    fs.writeFileSync(path.join(rvz, "console-hello.json"), "");
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      jobRendezvousDir: rvz,
+    });
+    const id = await manager.createJob(intent);
+    return manager
+      .getJob(id)!
+      .events.map((entry) => entry.event)
+      .filter((event) => event.type === "warning")
+      .map((event) => event.message)
+      .find(
+        (message): message is string =>
+          typeof message === "string" && message.includes("is not empty"),
+      );
+  }
+
+  test("the not-empty lead follows this launch's own sweep intent", async () => {
+    // The lead is composed moments before the same intent reaches the child as
+    // --sweep-exchange-files, so a launch already carrying the sweep is told the
+    // control's state rather than told to turn it on -- and one that is not still
+    // gets the instruction, which is the only recovery it has.
+    const sweeping = await notEmptyLeadFor(
+      validIntent({ sweepExchangeFiles: true }),
+    );
+    expect(sweeping).toContain(
+      '"Clear leftover exchange files" is on and runs first; your own ' +
+        "input and results are not what it sweeps.",
+    );
+    expect(sweeping).not.toContain("Turn on");
+
+    expect(await notEmptyLeadFor(validIntent())).toContain(
+      'Turn on "Clear leftover exchange files"',
+    );
   });
 });
 
