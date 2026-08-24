@@ -11,6 +11,44 @@ import type {
 } from "../config/standardization";
 import type { SemanticType } from "../types";
 
+/**
+ * Neutral, stable identifier of the built-in linkage rule set: the linkage
+ * fields ({@link DEFAULT_LINKAGE_FIELDS}) and key combinations
+ * ({@link DEFAULT_LINKAGE_KEYS}) that {@link getDefaultLinkageTerms} emits when
+ * a party does not author its own. An exchange that runs the built-in rules runs
+ * THIS set, so the question "which rules did this linkage match on" has a name
+ * as its answer rather than "the defaults", and the set can be cited in a
+ * data-sharing agreement or a governance review without quoting the whole key
+ * list.
+ *
+ * Deliberately says nothing about who validated the set or where: the set is
+ * general-purpose, and its provenance -- what was validated, against what, and
+ * the criticisms on record -- belongs in
+ * `docs/notes/default-linkage-rule-set.md`, not in the identifier.
+ */
+export const DEFAULT_LINKAGE_RULE_SET_NAME = "baseline-pii";
+
+/**
+ * Version of the rule set named by {@link DEFAULT_LINKAGE_RULE_SET_NAME}.
+ *
+ * Distinct from `LinkageTerms.version`, which versions the terms SCHEMA and is
+ * cross-checked between the parties at exchange time. This one versions the
+ * CONTENT of the built-in set -- which fields it declares, which constraints
+ * they carry, and which key combinations are built from them -- and is not on
+ * the wire. Never assign it to a terms document's `version`.
+ *
+ * Bump it in the same change that edits {@link DEFAULT_LINKAGE_FIELDS} or
+ * {@link DEFAULT_LINKAGE_KEYS}: the recorded validation attaches to the name and
+ * version together, so an edited set carrying the old version makes that record
+ * describe rules nobody ran.
+ */
+export const DEFAULT_LINKAGE_RULE_SET_VERSION = "1.0.0";
+
+/**
+ * The linkage fields of the {@link DEFAULT_LINKAGE_RULE_SET_NAME} rule set: the
+ * standardized form of each PII element its keys are built from, with the
+ * constraints each field commits both parties to.
+ */
 const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [
   {
     name: "ssn",
@@ -39,10 +77,10 @@ const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [
 ];
 
 /**
- * Template linkage key combinations for the default agreement. Keys are listed
- * from most precise (all PII) to least precise (name only). The filtering
- * logic below removes any key whose elements cannot be satisfied by the
- * columns present in the input.
+ * The linkage key combinations of the {@link DEFAULT_LINKAGE_RULE_SET_NAME} rule
+ * set. Keys are listed from most precise (all PII) to least precise (name only).
+ * The filtering logic below removes any key whose elements cannot be satisfied
+ * by the columns present in the input.
  */
 const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
   {
@@ -201,11 +239,15 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
 
 /**
  * Returns a default {@link LinkageTerms} suitable for quick exchanges when no
- * linkage terms are specified explicitly.
+ * linkage terms are specified explicitly, drawn from the
+ * {@link DEFAULT_LINKAGE_RULE_SET_NAME} rule set at
+ * {@link DEFAULT_LINKAGE_RULE_SET_VERSION}.
  *
  * When metadata are provided, only linkage key templates whose elements can be
  * satisfied by the present columns are included. If no metadata is provided,
- * all templates are included as a fallback.
+ * all templates are included as a fallback. Either way the emitted keys are a
+ * SUBSET of the named set, never an addition to it: what the input supports
+ * narrows the set, and nothing widens it.
  */
 export function getDefaultLinkageTerms(
   identity: string,
