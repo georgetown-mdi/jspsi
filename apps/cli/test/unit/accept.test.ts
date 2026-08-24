@@ -3403,6 +3403,51 @@ test("handler: an accepted webrtc invitation writes role: acceptor into the conf
   }
 });
 
+test("handler: a no-input webrtc acceptance points the operator at psilink exchange, not a second accept", async () => {
+  // A second `psilink accept` on the key file this run just wrote would hit
+  // assertNoProvisionConflicts's unconditional key-conflict gate in
+  // validateAccept and refuse, so the guidance must name the command that
+  // actually works -- matching docs/CLI.md's "No INPUT_FILE" guidance.
+  const { dir, configFile, keyFile } = offlineAcceptFixture();
+  const acceptLog = getLogger("accept");
+  const priorLevel = acceptLog.getLevel();
+  acceptLog.setLevel("info", false);
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(new Date(Date.now() + 3_600_000).toISOString(), {
+        channel: "webrtc",
+        host: "peer.example.org",
+        path: "/psi",
+      }),
+    );
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: [encoded],
+      "consent-to-terms": true,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "info",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+    const stderr = stdio.stderrWrites.join("");
+    expect(stderr).toContain(
+      "Run 'psilink exchange' with your input file to conduct the exchange.",
+    );
+    expect(stderr).not.toContain("accept' to accept and run it in one");
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
+    acceptLog.setLevel(priorLevel, false);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("handler: a webrtc acceptance given an input file accepts and runs the exchange", async () => {
   // The one-command acceptance: the same bootstrap the URL-driven mode reaches,
   // handed the invitation's own coordination server, this party's end of the

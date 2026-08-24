@@ -3155,8 +3155,6 @@ test("handler: a webrtc online invite tells the partner to accept, with no URL a
     expect(exit).not.toHaveBeenCalled();
     expect(stderr).toContain("accepts and runs the exchange with:");
     expect(stderr).toContain("psilink accept <INVITATION> <INPUT_FILE>");
-    // The one command is the whole template: a second command for the partner to
-    // type while this one waits is exactly what the acceptance no longer needs.
     // Matched on the template's own indented command line, so the peer-budget
     // notice's prose mention of the command does not stand in for it.
     expect(stderr).not.toContain("\n  psilink exchange");

@@ -162,7 +162,7 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
   if (arg0 === undefined)
     throw new UsageError(
       "an invitation is required; usage: psilink accept INVITATION " +
-        "[INPUT_FILE]",
+        "[INPUT_FILE] [OUTPUT_FILE]",
     );
 
   if (looksLikeUrl(arg0)) {
@@ -1024,9 +1024,7 @@ export async function handler(argv: Arguments): Promise<void> {
         log.info(
           `wrote config to ${configPath}, seeding the connection block from the ` +
             "invitation's endpoint; it needs no credentials of your own. Run " +
-            "'psilink exchange' with your input file to conduct the exchange, " +
-            "or pass that file to 'psilink accept' to accept and run it in one " +
-            "command.",
+            "'psilink exchange' with your input file to conduct the exchange.",
         );
       else if (ready.seeded)
         log.info(
