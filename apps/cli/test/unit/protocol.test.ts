@@ -340,15 +340,21 @@ const TWO_PARTY_OPTIONS = {
 };
 
 // The peer budget for the lone-party cases that wait for a partner who never
-// arrives: each spends it in full, so it is that case's whole cost, and core
+// arrives: each spends it in full, so it is what that case costs, and core
 // races every single transport op against a fresh copy of it as well. That
 // second role is what sizes it. A budget near the cost of one loaded transport
 // op is spent by that op instead, and the run then reports a stalled-transport
-// error rather than the peer-wait timeout these cases read their advice off --
-// a misreport, not a failure of the thing under test. On a container whose cores
-// are contended a single local-FS op has been measured at 196 ms, so this stands
-// an order of magnitude above it, and short enough that a case spending it in
-// full still costs about two seconds.
+// error rather than the peer-silence timeout these cases read their advice off
+// -- a misreport, not a failure of the thing under test. On a container whose
+// cores are contended a single local-FS op has been measured at 196 ms, so this
+// stands an order of magnitude above it, and short enough that a case spending
+// it once still costs about two seconds.
+//
+// A case whose party reaches teardown holding a frame no peer ever consumed
+// spends it a second time, the terminal-frame drain capping itself at min(its
+// own bound, this): the entry-hello residue cases below measure about four
+// seconds apiece and so spell a 20 s bound of their own, vitest's 5 s default
+// leaving a budget spent twice under a second.
 const LONE_PARTY_PEER_BUDGET_MS = 2_000;
 
 let tmpDir: string;
@@ -1447,7 +1453,10 @@ async function runIntoLeftoverPeerHello(
       {
         channel: "filedrop",
         path: dropDir,
-        options: { pollIntervalMs: 1, peerTimeoutMs: 300 },
+        options: {
+          pollIntervalMs: 1,
+          peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
+        },
       },
       { sharedSecret: TOKEN_A, keyFilePath: path.join(tmpDir, "a.key") },
       minimalPrepared,
@@ -1481,7 +1490,7 @@ test("a run against an unconfirmed entry-present hello blames the leftover, not 
   expect(rendered).toContain("Re-run");
   expect(rendered).toContain("remove only if it persists");
   expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
-});
+}, 20_000);
 
 test("a run whose partner completed the rendezvous keeps the peer-side guidance", async () => {
   // The partner's hello appears AFTER this party's entry scan and it acks this
@@ -1522,7 +1531,7 @@ test("the residue guidance renders in full for a configured peer_id longer than 
     "acme-health-2026-partner-exchange-north-region-01-hello.json",
   );
   expect(rendered).toContain("remove only if it persists");
-});
+}, 20_000);
 
 // The residue filename is partner-chosen text that reaches the operator only
 // through this guidance, and the escaping happens at ONE altitude: the fragment
@@ -1551,6 +1560,7 @@ test.each([
     expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
     expect(rendered).toContain("remove only if it persists");
   },
+  20_000,
 );
 
 // --- Both-parties-swept retry advice -----------------------------------------
