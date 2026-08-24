@@ -48,7 +48,10 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LIB_DIR = "lib";
-const TARBALL = /^openmined-psi\.js-.+\.tgz$/;
+// The vendored tarball's name reaches the verifier's argv as the path it
+// verifies, so it is held to the same whitespace-free class as the free-text
+// marker fields, for the reason `markerProblems` records.
+const TARBALL = /^openmined-psi\.js-[\w.-]+\.tgz$/;
 const MARKER_SUFFIX = ".provenance.json";
 
 // Pinned rather than left to `gh`'s default so a change to that default cannot
@@ -58,7 +61,16 @@ const PREDICATE_TYPE = "https://slsa.dev/provenance/v1";
 const HEX_64 = /^[0-9a-f]{64}$/;
 const HEX_40 = /^[0-9a-f]{40}$/;
 const OWNER_REPO = /^[\w.-]+\/[\w.-]+$/;
-const SIGNER_WORKFLOW = /^[\w.-]+\/[\w.-]+\/.+\.ya?ml$/;
+const SIGNER_WORKFLOW = /^[\w.-]+\/[\w.-]+\/[\w./-]+\.ya?ml$/;
+const GIT_REF = /^[\w./-]+$/;
+
+/**
+ * How much of the verifier's stderr `spawnSync` will hold. Above its ceiling
+ * spawnSync kills the run, so this sits far above the few hundred bytes the
+ * measured failures write: a verbose diagnostic stream is worth reading, not
+ * worth turning a completed lookup into a killed one.
+ */
+export const VERIFIER_STDERR_LIMIT = 16 * 1024 * 1024;
 
 /**
  * The single vendored tarball's filename, or a problem describing why there is
@@ -111,11 +123,31 @@ export function markerProblems(marker) {
     );
   }
 
+  // `source_ref` reaches the verifier's argv as free text, and the
+  // failure-cause recognizer reads the verifier's stderr by substring, so a
+  // ref carrying a recognizer marker (`refs/heads/no route to host`) would
+  // rename an identity mismatch as an outage on any failure path that echoes
+  // the ref back. Whether `gh` echoes this field on any such path is
+  // unmeasured from here: driven with sentinel values, 2.98.0's 401 and 404
+  // renderings echo the repository, the artifact digest, and the predicate
+  // type, and none of the free-text fields. Holding the field to git-ref
+  // characters is cheap fail-closed hygiene over a value `lib/` supplies,
+  // not a measured exploit closure. Its syntax is checked wherever the field
+  // appears; only arming requires it.
+  if (
+    marker.source_ref !== undefined &&
+    (typeof marker.source_ref !== "string" || !GIT_REF.test(marker.source_ref))
+  ) {
+    problems.push(
+      "`source_ref` must be a git ref written in `[A-Za-z0-9_./-]` characters, with no whitespace",
+    );
+  }
+
   // The source commit is what binds the attested build to reviewable fork
   // source, so arming without it is refused rather than silently verifying a
   // weaker identity than the docs claim.
   if (marker.attestation_expected === true) {
-    if (typeof marker.source_ref !== "string" || marker.source_ref === "") {
+    if (marker.source_ref === undefined) {
       problems.push(
         "`source_ref` is required once `attestation_expected` is true (the fork ref the prebuild run built from)",
       );
@@ -159,6 +191,61 @@ export function verifyArgv(tarballPath, marker) {
   ];
 }
 
+// Verifier failures that are not the lookup's own answer, recognized by what
+// the run wrote to stderr. Substrings rather than a parse: the point is to stop
+// naming a tampering-shaped conclusion for an outage, not to reproduce `gh`'s
+// error taxonomy.
+//
+// Each marker below was produced by driving `gh attestation verify` 2.98.0 and
+// reading its stderr, except the four Go transport strings noted inline, which
+// are the sibling errno and timeout renderings of the same `net/http` path the
+// measured `dial tcp` line comes from. The list is a best-effort recognizer,
+// not a partition: a shape it does not carry falls through to the wording
+// below, and every one of these branches fails the check either way.
+const NON_LOOKUP_FAILURES = [
+  {
+    // A missing credential exits 4 with the login prompt; a rejected one comes
+    // back as the API's own 401.
+    markers: ["gh auth login", "HTTP 401"],
+    describe: (marker) =>
+      `before it could complete the attestation lookup: its output names a missing or rejected GitHub credential (\`${marker}\`). Authenticate \`gh\` or set \`GH_TOKEN\`, then re-run.`,
+  },
+  {
+    markers: [
+      // The trust root is fetched from the TUF CDN before any lookup runs, and
+      // a host fenced from it gets no network wording at all. This is the
+      // measured rendering of that failure and not its only one: `gh` renders
+      // it more than one way, and the others fall through to the fallback.
+      "no valid Sigstore verifiers could be initialized",
+      // The Sigstore bundle is fetched from a blob host that is neither
+      // api.github.com nor the TUF CDN.
+      "failed to fetch bundle",
+      "dial tcp",
+      "no route to host",
+      // Go transport renderings the measured `dial tcp` line does not carry.
+      "no such host",
+      "i/o timeout",
+      "TLS handshake timeout",
+      "context deadline exceeded",
+    ],
+    describe: (marker) =>
+      `before it could complete the attestation lookup: its output names a network failure (\`${marker}\`). Verification reaches api.github.com, the Sigstore bundle's blob host, and the TUF CDN, so a host fenced from any of them fails here whatever the attestation says. Re-run where that egress exists, or read CI's own run of this check (docs/PREBUILD_REVENDOR.md).`,
+  },
+];
+
+/**
+ * How a failing verifier run says the attestation lookup never completed, or
+ * `undefined` when nothing in its output says so and the exit is read as the
+ * lookup's own answer. Recognition is best effort: see `NON_LOOKUP_FAILURES`.
+ */
+export function nonLookupFailure(stderr) {
+  for (const { markers, describe } of NON_LOOKUP_FAILURES) {
+    const marker = markers.find((candidate) => stderr.includes(candidate));
+    if (marker !== undefined) return describe(marker);
+  }
+  return undefined;
+}
+
 /**
  * The marker's bytes when it is there, `{ markerSource: undefined }` when it is
  * absent, and a problem when it exists but cannot be read. An unreadable marker
@@ -178,11 +265,48 @@ export function readMarkerSource(markerPath, readFile = readFileSync) {
 }
 
 /**
+ * A `spawnSync` result read as a verifier outcome, and the captured stderr
+ * written back out so the operator still reads the verifier's own words.
+ *
+ * A `spawnSync` error is only a spawn failure when the process never ran, which
+ * is an error carrying neither an exit status nor a termination signal.
+ * Reporting any other error as an absent `gh` would name the wrong cause and
+ * discard what the run said. An error alongside a status or a signal describes
+ * a run that DID happen and was cut short, so it is carried out as `runError`
+ * for the decision to refuse rather than dropped: an overrun of `maxBuffer`
+ * comes back as `ENOBUFS`, under the `SIGTERM` `spawnSync` sends for it, or --
+ * measured against a child that survives that signal and swallows the `EPIPE`
+ * behind it -- under an exit status of the child's own, zero included.
+ * `writeStderr` is the test seam.
+ */
+export function verifierOutcome(run, writeStderr) {
+  const stderr = typeof run.stderr === "string" ? run.stderr : "";
+  if (stderr !== "") writeStderr(stderr);
+
+  const ran = typeof run.status === "number" || typeof run.signal === "string";
+  if (run.error !== undefined && !ran) {
+    return { spawnError: run.error.message };
+  }
+  return {
+    status: run.status,
+    signal: run.signal,
+    stderr,
+    runError:
+      run.error === undefined
+        ? undefined
+        : (run.error.code ?? run.error.message),
+  };
+}
+
+/**
  * The whole decision, with the bytes and the verifier handed in so a test can
  * drive every branch without a 16 MB fixture or a live GitHub lookup.
  *
- * `runVerifier(argv)` returns the verifier's exit status, or a falsy status for
- * success; it is only called once the offline checks have all passed.
+ * `runVerifier(argv)` returns `{ status, signal, stderr, runError }` -- the
+ * verifier's exit status, falsy for success, the signal that terminated it if
+ * one did, whatever it wrote to stderr, and the error a run cut short ended in
+ * -- or `{ spawnError }` when the verifier could not be started at all. It is
+ * only called once the offline checks have all passed.
  *
  * Returns `{ ok, armed, problems, notes }`.
  */
@@ -255,16 +379,63 @@ export function checkProvenance({
   }
 
   const argv = verifyArgv(tarballPath, marker);
-  const status = runVerifier(argv);
+  const invocation = `\`gh ${argv.join(" ")}\``;
+  const outcome = runVerifier(argv) ?? {};
+  const { status, signal, spawnError, runError } = outcome;
+  const stderr = typeof outcome.stderr === "string" ? outcome.stderr : "";
+  const unverified = (problem) => ({
+    ok: false,
+    armed: true,
+    problems: [problem],
+    notes: [],
+  });
+
+  // Ahead of every branch that reads a status, a signal, or the run's output:
+  // an error is the run being cut short, so what it exited with and what it
+  // wrote are both fragments of a lookup that never reached its verdict.
+  if (runError !== undefined) {
+    return unverified(
+      `${invocation} ended in ${runError} before its verdict could be read, so nothing was verified about ${artifact}. Neither its exit nor its output is the lookup's answer; \`ENOBUFS\` in particular is its output overrunning this check's stderr capture limit. Whatever it wrote before it ended is above. Re-run where it can finish, or read CI's own run of this check (docs/PREBUILD_REVENDOR.md).`,
+    );
+  }
+
+  // Success is a reported zero, never an unreported anything: a verifier
+  // handing back a bare status leaves `status` undefined here, which would
+  // otherwise be indistinguishable from a clean exit.
+  if (
+    spawnError === undefined &&
+    typeof status !== "number" &&
+    typeof signal !== "string"
+  ) {
+    return unverified(
+      `${invocation} reported no exit status, no termination signal, and no spawn failure, so nothing was verified about ${artifact}.`,
+    );
+  }
+
+  // A cause that is not the lookup's own answer is named as itself. The
+  // no-attestation conclusion below is a claim about the bytes, and reporting
+  // it for an unrunnable `gh`, a killed run, a run cut short, or a fenced host
+  // reads an outage as tampering.
+  if (spawnError !== undefined) {
+    return unverified(
+      `${invocation} could not be run: ${spawnError}. The attestation lookup never happened, so this is an absent or unrunnable \`gh\` rather than anything about ${artifact}. Install \`gh\` and re-run, or read CI's own run of this check (docs/PREBUILD_REVENDOR.md).`,
+    );
+  }
+  // Ahead of the status branch, and reached whatever the exit status says: a
+  // run that a signal ended never reached a conclusion to report, so its
+  // status is not the lookup's answer.
+  if (typeof signal === "string") {
+    return unverified(
+      `${invocation} was terminated by ${signal} before it could complete the attestation lookup, so nothing was verified about ${artifact}. Whatever the run wrote before it died is above. Re-run where it can finish, or read CI's own run of this check (docs/PREBUILD_REVENDOR.md).`,
+    );
+  }
   if (status) {
-    return {
-      ok: false,
-      armed: true,
-      problems: [
-        `\`gh ${argv.join(" ")}\` exited ${status}. The vendored bytes carry no attestation from ${marker.producer_repository} at ${marker.source_digest}, or the attestation does not match the recorded identity.`,
-      ],
-      notes: [],
-    };
+    const nonLookup = nonLookupFailure(stderr);
+    return unverified(
+      nonLookup === undefined
+        ? `${invocation} exited ${status}. The vendored bytes carry no attestation from ${marker.producer_repository} at ${marker.source_digest}, or the attestation does not match the recorded identity.`
+        : `${invocation} exited ${status} ${nonLookup}`,
+    );
   }
 
   return {
@@ -277,16 +448,21 @@ export function checkProvenance({
   };
 }
 
-// CLI entry: only when invoked directly, so the test imports the decision
-// functions without the process.exit and without touching the network.
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// The check as the CLI runs it. Every failure sets `process.exitCode` and
+// returns rather than calling `process.exit`, which abandons whatever stderr
+// has not drained yet: past a pipe's buffer -- and a CI step is a pipe -- what
+// it abandons is the verifier's stderr AND the report below it, leaving an
+// unattended run with a red status and none of the cause this check exists to
+// name. The piped-delivery test beside this file is what holds it.
+function runCheck() {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const libDir = join(root, LIB_DIR);
 
   const resolved = resolveTarballName(readdirSync(libDir));
   if (resolved.problem !== undefined) {
     console.error(`Prebuild provenance check failed:\n\n  ${resolved.problem}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const tarballPath = join(LIB_DIR, resolved.name);
@@ -298,7 +474,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const marker = readMarkerSource(absolute + MARKER_SUFFIX);
   if (marker.problem !== undefined) {
     console.error(`Prebuild provenance check failed:\n\n  ${marker.problem}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const result = checkProvenance({
@@ -306,21 +483,26 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     digest,
     markerSource: marker.markerSource,
     // An absent or failing `gh` is a failed verification, not a skipped one:
-    // reaching here means the marker asked for enforcement.
-    runVerifier: (argv) => {
-      const run = spawnSync("gh", argv, { cwd: root, stdio: "inherit" });
-      if (run.error !== undefined) {
-        console.error(`  could not run \`gh\`: ${run.error.message}`);
-        return 127;
-      }
-      return run.status ?? 1;
-    },
+    // reaching here means the marker asked for enforcement. stderr is piped
+    // rather than inherited so the failure cause can be named from what the
+    // run said; `verifierOutcome` writes it back out.
+    runVerifier: (argv) =>
+      verifierOutcome(
+        spawnSync("gh", argv, {
+          cwd: root,
+          encoding: "utf8",
+          stdio: ["inherit", "inherit", "pipe"],
+          maxBuffer: VERIFIER_STDERR_LIMIT,
+        }),
+        (text) => process.stderr.write(text),
+      ),
   });
 
   if (!result.ok) {
     console.error("Prebuild provenance check failed:\n");
     for (const problem of result.problems) console.error(`  ${problem}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   for (const note of result.notes) {
@@ -333,4 +515,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.log(note);
     }
   }
+}
+
+// Only when invoked directly, so the test imports the decision functions
+// without running the check and without touching the network.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  runCheck();
 }

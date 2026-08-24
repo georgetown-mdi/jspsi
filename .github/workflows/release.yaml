@@ -81,7 +81,9 @@ jobs:
       # The provenance half of the same pairing, for the same reason: this job
       # bakes these bytes into the published image, so the fork build they came
       # from is verified here and not only in the test job's setup prologue.
-      # Warns and passes while the marker beside the tarball is disarmed.
+      # The marker committed beside the tarball arms it: armed, a non-zero
+      # verifier exit fails the release ahead of every build and registry step
+      # below; disarmed, it warns and the sidecar baseline stands.
       - name: Verify vendored native tarball provenance
         env:
           GH_TOKEN: ${{ github.token }}
