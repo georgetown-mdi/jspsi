@@ -2188,10 +2188,11 @@ describe("InvitationTerms: matching on several values per record", () => {
   test("states what a splitting key does where the strategy matches candidates", async () => {
     renderTerms(fanOutTerms("single-pass"));
     await expect.element(toggle("Other details")).toBeInTheDocument();
+    const panel = await readyPanel("Other details");
     expect(app.container.textContent).toContain(
       CONSENT_FACTS.fanOutCandidates.note,
     );
-    expect((await readyPanel("Other details")).textContent).not.toContain(
+    expect(panel.textContent).not.toContain(
       CONSENT_FACTS.fanOutCandidates.note,
     );
   });
@@ -2199,6 +2200,7 @@ describe("InvitationTerms: matching on several values per record", () => {
   test("states the refusal where the strategy matches one value per record", async () => {
     renderTerms(fanOutTerms("cascade"));
     await expect.element(toggle("Other details")).toBeInTheDocument();
+    await readyPanel("Other details");
     expect(app.container.textContent).toContain(
       CONSENT_FACTS.fanOutRefused.note,
     );
@@ -2210,6 +2212,7 @@ describe("InvitationTerms: matching on several values per record", () => {
   test("says nothing about candidates for terms that declare no split", async () => {
     renderTerms(terms);
     await expect.element(toggle("Other details")).toBeInTheDocument();
+    await readyPanel("Other details");
     expect(app.container.textContent).not.toContain(
       CONSENT_FACTS.fanOutCandidates.note,
     );
