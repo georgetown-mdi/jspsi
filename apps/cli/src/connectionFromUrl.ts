@@ -235,10 +235,11 @@ export function inviterConnectionFromURL(
       ...(url.protocol === "ws:" ? { secure: false } : {}),
     },
   };
-  // applyConnectionOverrides applies the shared timeouts (the invite's
-  // --accept-timeout arrives as peerTimeout) on every channel and ignores the
-  // file-sync-only ones here; --outbound-path, which has no meaning without a
-  // directory, is refused there rather than dropped.
+  // applyConnectionOverrides applies the shared timeouts on every channel and
+  // ignores the file-sync-only ones here; --outbound-path, which has no
+  // meaning without a directory, is refused there rather than dropped. The
+  // invite's --accept-timeout never arrives here: it bounds only the live
+  // run, applied in runOnlineBootstrap.
   const connection = applyConnectionOverrides(
     base,
     overrides,

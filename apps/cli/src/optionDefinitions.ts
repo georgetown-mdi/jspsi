@@ -470,14 +470,14 @@ export type ConnectionOverrideOptions = Pick<
 /**
  * Map the parsed (flat) common options to the structured connection-override
  * shape, fanning the `server-*`/`--outbound-path` flags into the server
- * sub-group and the timeout/toggle flags into the options sub-group. The
- * synthesized `extra.peerTimeout` (from `--accept-timeout` on the online invite
- * path) belongs to the options sub-group and takes precedence over the parsed
- * `--peer-timeout`.
+ * sub-group and the timeout/toggle flags into the options sub-group. Every
+ * override here is one the operator asked to keep, so a connection built from it
+ * is the one a command both runs and persists; a budget that bounds a single run
+ * (the online invite's `--accept-timeout`) is applied to that run's own
+ * connection instead, and never reaches this bag.
  */
 export function connectionOverridesFrom(
   options: ConnectionOverrideOptions,
-  extra: { peerTimeout?: number } = {},
 ): ConnectionOverrides {
   return {
     server: {
@@ -492,7 +492,7 @@ export function connectionOverridesFrom(
     },
     options: {
       connectionTimeout: options.connectionTimeout,
-      peerTimeout: extra.peerTimeout ?? options.peerTimeout,
+      peerTimeout: options.peerTimeout,
       // Already in milliseconds -- fed straight into the connection's
       // pollIntervalMs by applyConnectionOverrides, with no seconds scaling.
       pollIntervalMs: options.pollingFrequencyMs,
@@ -878,11 +878,11 @@ export function warnServerOverridesIgnoredOffline(
  * connection.options") rather than folded into the server warning's "set the
  * connection details in that block" remedy.
  *
- * Note the synthesized `--accept-timeout` is NOT here: it feeds the override
- * bag's `peerTimeout` only through {@link connectionOverridesFrom}'s `extra` arg
- * on the ONLINE invite path. This read is of the parsed `peerTimeout` field
- * (`--peer-timeout`) directly, so an offline invite with `--accept-timeout` but
- * no `--peer-timeout` does not warn spuriously.
+ * Note `--accept-timeout` is NOT here: it bounds an ONLINE invite's own run and
+ * reaches that run's connection alone, never an override bag. This read is of
+ * the parsed `peerTimeout` field (`--peer-timeout`) directly, so an offline
+ * invite with `--accept-timeout` but no `--peer-timeout` does not warn
+ * spuriously.
  */
 export type OfflineIgnoredOptionsOverrides = Pick<
   CommonBootstrapOptions,

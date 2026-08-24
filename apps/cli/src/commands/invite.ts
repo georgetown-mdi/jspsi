@@ -11,6 +11,7 @@ import {
   assertFanOutImplemented,
   assertPayloadSendDisclosed,
   assertStandardizationMatchesTerms,
+  DEFAULT_PEER_TIMEOUT_MS,
   disclosedColumnNames,
   inferMetadata,
   INVITATION_LIFETIME_SECONDS,
@@ -49,6 +50,8 @@ import {
   type InviterConnectionConfig,
 } from "../connectionFromUrl";
 import { withWebRTCPeerRole } from "../webrtcPeerRole";
+import { DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS } from "../connection/webrtc/webrtcMessageConnection";
+import { DEFAULT_RENDEZVOUS_TIMEOUT_MS } from "../connection/webrtc/weriftPeer";
 import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
@@ -305,11 +308,11 @@ export async function validateInvite(params: {
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;
     // A non-positive accept-timeout is a pure usage error; reject it before any
-    // filesystem probe or connection construction (it feeds peerTimeout below).
-    // The CLI handler already rejects a non-positive or malformed value when it
-    // parses the flag (durationFlagSeconds -> parseDurationFlag -> parseDuration),
-    // so this is unreachable from the command line; it is kept as an independent
-    // guard because validateInvite is exported and unit-tested with a raw numeric
+    // filesystem probe or connection construction. The CLI handler already
+    // rejects a non-positive or malformed value when it parses the flag
+    // (durationFlagSeconds -> parseDurationFlag -> parseDuration), so this is
+    // unreachable from the command line; it is kept as an independent guard
+    // because validateInvite is exported and unit-tested with a raw numeric
     // acceptTimeout that does not pass through that parse.
     if (acceptTimeout <= 0)
       throw new UsageError(
@@ -336,11 +339,14 @@ export async function validateInvite(params: {
     // with no host) fails before the caller can disclose the token. The role is
     // stamped here because this command IS the inviting end; on a ws:/wss: URL
     // that is what makes the connection dialable, since a URL carries no role.
+    //
+    // --accept-timeout is deliberately NOT merged in: this connection is what the
+    // bootstrap persists, and an accept-only wait written as the config's
+    // peer_timeout_ms would silently become the budget of every later recurring
+    // run. It reaches this run alone, through runOnlineBootstrap's
+    // runOnlyPeerTimeoutSeconds.
     const connection = withWebRTCPeerRole(
-      inviterConnectionFromURL(
-        url,
-        connectionOverridesFrom(options, { peerTimeout: acceptTimeout }),
-      ),
+      inviterConnectionFromURL(url, connectionOverridesFrom(options)),
       "inviter",
     );
     // The file-sync half of this connection's options, absent on webrtc (whose
@@ -417,20 +423,24 @@ export async function validateInvite(params: {
       log,
     );
 
-    // --accept-timeout is bound to this connection's peer budget above and takes
-    // precedence unconditionally -- it is always set, by the flag or its default
-    // -- so a --peer-timeout typed here is parsed and dropped. Name the timeout
-    // that governs the phase instead of leaving the operator to read silence as
-    // the budget they asked for.
+    // --accept-timeout is this run's peer budget unconditionally -- it is always
+    // set, by the flag or its default -- so a --peer-timeout typed here does not
+    // bound the wait it reads as bounding. It is not discarded either: it is the
+    // budget the configuration keeps for the runs that follow, if that
+    // configuration is written at all -- this warning is raised before the
+    // partner has accepted, so it states the destination conditionally rather
+    // than promising a write a failed save would falsify. Name both halves
+    // rather than leaving the operator to read silence as the budget they asked
+    // for.
     if (options.peerTimeout !== undefined)
       log.warn(
-        "--peer-timeout has no effect on an online invitation: " +
-          `--accept-timeout (${acceptTimeout}s) is bound to this run's peer ` +
-          "budget instead, bounding both the wait for the partner to accept " +
-          "and the peer waits of the exchange that follows. Pass " +
-          "--accept-timeout to set that budget, or edit " +
-          "connection.options.peer_timeout_ms in the saved configuration " +
-          "before a later 'psilink exchange'.",
+        "--peer-timeout does not bound this online invitation: " +
+          `--accept-timeout (${acceptTimeout}s) is this run's peer budget, ` +
+          "bounding both the wait for the partner to accept and the peer waits " +
+          "of the exchange that follows. When the configuration is saved, " +
+          `--peer-timeout (${options.peerTimeout}s) is recorded in it as ` +
+          "connection.options.peer_timeout_ms, the budget a later " +
+          "'psilink exchange' runs on.",
       );
 
     // An accept-timeout longer than the token's lifetime would keep waiting at
@@ -885,6 +895,11 @@ export async function handler(argv: Arguments): Promise<void> {
             recordFile: options.recordFile,
           }),
           eventStream: options.eventStream,
+          // The wait this invitation was printed for, and the peer waits of the
+          // exchange that follows it, run on --accept-timeout; the configuration
+          // saved at acceptance does not, so an unattended recurring run is never
+          // handed a budget sized for one operator sitting at a terminal.
+          runOnlyPeerTimeoutSeconds: acceptTimeout,
           // The inviter's received-payload set is unknown until the acceptor
           // transmits it, so crystallize the observed set into the saved config
           // after this first exchange -- a later `psilink exchange` then fails
@@ -899,6 +914,18 @@ export async function handler(argv: Arguments): Promise<void> {
           keyFile: options.keyFile,
           configWriteError,
         });
+        // State the peer budget that configuration carries, only once it is
+        // actually on disk: the accept timeout this run waited on is not it, and
+        // an operator who never reads the file would otherwise have to infer
+        // what a later recurring run is bounded by.
+        if (configWriteError === undefined)
+          log.info(
+            persistedPeerBudgetNotice(
+              options.peerTimeout,
+              acceptTimeout,
+              ready.connection.channel,
+            ),
+          );
         return;
       }
 
@@ -1002,6 +1029,83 @@ function noteSinglePassSelection(
   log: ReturnType<typeof getLogger>,
 ): void {
   if (strategy === "single-pass") log.info(singlePassDisclosureNotice());
+}
+
+/**
+ * What bounds a later `psilink exchange` run from a configuration recording no
+ * `peer_timeout_ms`, phrased for the channel that run will use.
+ *
+ * Each figure is read from the constant the channel's OWN transport falls back
+ * to: the file-sync pair from core's file-sync budget, webrtc from the two
+ * budgets `webRtcDialFrom` leaves unset. Those constants only coincide in value
+ * (see `connection/webrtc/webrtcMessageConnection.ts`), and the rendezvous half
+ * does not coincide at all, so quoting one transport's number on another's
+ * channel would misreport the wait. A channel with no default named here gets
+ * the reference row rather than a figure belonging to a transport that is not
+ * its own.
+ */
+function absentPeerBudgetDefaults(
+  channel: ConnectionConfig["channel"],
+): string {
+  switch (channel) {
+    case "sftp":
+    case "filedrop":
+      return (
+        "the file-sync transport's default peer budget " +
+        `(${DEFAULT_PEER_TIMEOUT_MS / 1000}s)`
+      );
+    case "webrtc":
+      return (
+        "the webrtc transport's own defaults: " +
+        `${DEFAULT_RENDEZVOUS_TIMEOUT_MS / 1000}s to meet the partner at the ` +
+        `rendezvous, then ${DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS / 1000}s of ` +
+        "peer silence on the open channel"
+      );
+    default:
+      return (
+        "that channel's own transport defaults (the peer_timeout_ms row of " +
+        "docs/EXCHANGE_REFERENCE.md)"
+      );
+  }
+}
+
+/**
+ * The line reporting which peer budget the configuration an online invite just
+ * saved carries, logged once that configuration is on disk.
+ *
+ * `--accept-timeout` bounds the invite's own run and is not written: the two
+ * timeouts bound different lifetimes -- one operator waiting at a rendezvous,
+ * versus every later unattended `psilink exchange` -- so persisting the first as
+ * the second would hand a recurring run a budget nobody chose for it. What the
+ * configuration records is therefore `--peer-timeout` when the operator set one,
+ * and nothing otherwise, in which case those runs fall to the defaults of the
+ * channel they run on -- which differ by transport, so the absent-field line
+ * names the ones belonging to `channel` (see {@link absentPeerBudgetDefaults}).
+ * Either way the value is named here rather than left to be read out of the
+ * file.
+ *
+ * @internal exported for testing
+ */
+export function persistedPeerBudgetNotice(
+  persistedPeerTimeoutSeconds: number | undefined,
+  acceptTimeoutSeconds: number,
+  channel: ConnectionConfig["channel"],
+): string {
+  if (persistedPeerTimeoutSeconds !== undefined)
+    return (
+      "the saved configuration records connection.options.peer_timeout_ms as " +
+      `${persistedPeerTimeoutSeconds}s, from --peer-timeout: that is the peer ` +
+      "budget a later 'psilink exchange' runs on. --accept-timeout " +
+      `(${acceptTimeoutSeconds}s) bounded this run alone.`
+    );
+  return (
+    "the saved configuration records no connection.options.peer_timeout_ms: " +
+    `--accept-timeout (${acceptTimeoutSeconds}s) bounded this run alone, so a ` +
+    `later 'psilink exchange' runs on ${absentPeerBudgetDefaults(channel)}. ` +
+    "Pass --peer-timeout at invite time, or set " +
+    "connection.options.peer_timeout_ms in that configuration, to give those " +
+    "runs a budget of your own."
+  );
 }
 
 /**

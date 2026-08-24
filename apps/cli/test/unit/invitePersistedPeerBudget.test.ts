@@ -1,0 +1,181 @@
+import fs from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { afterEach, expect, test, vi } from "vitest";
+import type { Arguments } from "yargs";
+import YAML from "yaml";
+import type { ConnectionConfig } from "@psilink/core";
+
+// The exchange is the only thing standing in here: runProtocol is mocked so the
+// handshake "succeeds" and the exchange completes -- its post-handshake hook
+// writes the config and its post-exchange hook rewrites it -- with no
+// connection opened. Everything between the argv and the file on disk is real,
+// which is the point: the accept budget reaches that file, if it reaches it at
+// all, through the connection the command builds and the bootstrap persists
+// (twice), so an assertion on either one alone could pass while the file still
+// carried it.
+vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
+
+import { handler as inviteHandler } from "../../src/commands/invite";
+import { runProtocol } from "../../src/protocol";
+import { DEFAULT_ACCEPT_TIMEOUT_SECONDS } from "../../src/onlineBootstrap";
+import { captureStdio } from "../loggingTestSupport";
+
+const tmpDirs: string[] = [];
+afterEach(() => {
+  vi.mocked(runProtocol).mockReset();
+  for (const d of tmpDirs.splice(0))
+    fs.rmSync(d, { recursive: true, force: true });
+});
+
+/** Locate runProtocol's onAuthenticated hook by type rather than position, so a
+ *  later signature change fails loudly instead of invoking the wrong argument. */
+function soleFunctionArg(callArgs: unknown[]): () => void | Promise<void> {
+  const fnArgs = callArgs.filter((a) => typeof a === "function");
+  expect(fnArgs).toHaveLength(1);
+  return fnArgs[0] as () => void | Promise<void>;
+}
+
+/** The runtime object's onOutputComplete hook, located by shape for the same
+ *  reason. It drives the bootstrap's SECOND config write -- the post-exchange
+ *  rewrite that re-serializes the whole connection block -- which is where a
+ *  mutation of the persisted connection would surface. */
+function outputCompleteHook(
+  callArgs: unknown[],
+): (result: {
+  observedReceivedPayloadColumns: string[];
+}) => void | Promise<void> {
+  const hooks = callArgs
+    .filter(
+      (a): a is Record<string, unknown> => typeof a === "object" && a !== null,
+    )
+    .map((a) => a["onOutputComplete"])
+    .filter((h) => typeof h === "function");
+  expect(hooks).toHaveLength(1);
+  return hooks[0] as (result: {
+    observedReceivedPayloadColumns: string[];
+  }) => void | Promise<void>;
+}
+
+/** A received-payload set for the mocked exchange to have observed, so the
+ *  post-exchange rewrite is reached: it is skipped on an empty observation. */
+const OBSERVED_RECEIVED_COLUMNS = ["notes"];
+
+/**
+ * Drive one online `psilink invite` to completion against the mocked exchange,
+ * returning the FINAL configuration on disk (raw, as YAML.parse yields it -- NOT
+ * through the schema, which materializes its own option defaults and would
+ * report a field the command never wrote) and the connection the run itself was
+ * conducted over.
+ *
+ * Both of the bootstrap's writes are driven: the acceptance hook's, and the
+ * post-exchange rewrite that re-serializes the connection block once the
+ * received-payload set is known. The second is the one a later mutation of the
+ * persisted connection would ride, so a file read after only the first would
+ * assert nothing about what the operator is left holding.
+ */
+async function inviteOnline(
+  url: string,
+  extraArgv: Record<string, unknown> = {},
+): Promise<{ saved: Record<string, unknown>; ran: ConnectionConfig }> {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-budget-"));
+  tmpDirs.push(dir);
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
+  );
+  const configFile = path.join(dir, "psilink.yaml");
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    await soleFunctionArg(callArgs)();
+    await outputCompleteHook(callArgs)({
+      observedReceivedPayloadColumns: OBSERVED_RECEIVED_COLUMNS,
+    });
+    return {};
+  }) as never);
+
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: [url, input],
+      "config-file": configFile,
+      "key-file": path.join(dir, ".psilink.key"),
+      "log-level": "silent",
+      record: false,
+      ...extraArgv,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
+  }
+
+  const saved = YAML.parse(fs.readFileSync(configFile, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  // The observed set the rewrite exists to record, which only the second write
+  // could have put there: what every assertion below reads is therefore the
+  // re-serialized configuration, not the acceptance hook's first draft.
+  expect(saved["expected_payload_columns"]).toEqual(OBSERVED_RECEIVED_COLUMNS);
+  return {
+    saved,
+    ran: vi.mocked(runProtocol).mock.lastCall?.[0] as ConnectionConfig,
+  };
+}
+
+/** The `connection.options` block of a written configuration, as written. */
+function savedConnectionOptions(
+  saved: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const connection = saved["connection"] as Record<string, unknown>;
+  return connection["options"] as Record<string, unknown> | undefined;
+}
+
+test("an online file-sync invite writes no peer_timeout_ms from its accept wait", async () => {
+  // The accept timeout is a window for one operator waiting at a terminal; the
+  // configuration this invite leaves behind is what every later unattended
+  // `psilink exchange` runs on. Written as that config's peer budget, the
+  // 15-minute default would silently become the peer budget of runs nobody
+  // chose it for, so the field is absent and those runs take the documented
+  // default instead.
+  const { saved, ran } = await inviteOnline(
+    `file://${path.join(tmpdir(), "psilink-invite-budget-drop")}`,
+  );
+  expect(savedConnectionOptions(saved)?.["peer_timeout_ms"]).toBeUndefined();
+  // The run's own budget is unchanged: the same default accept timeout still
+  // bounds the wait this invitation was printed for.
+  expect(ran.options?.peerTimeoutMs).toBe(
+    DEFAULT_ACCEPT_TIMEOUT_SECONDS * 1000,
+  );
+});
+
+test("an online webrtc invite writes no peer_timeout_ms from its accept wait", async () => {
+  // Same claim on the channel whose connection block carries nothing but the
+  // shared timeouts: the accept budget was the whole of its options block, so
+  // stripping it must leave no block at all rather than an empty one.
+  const { saved, ran } = await inviteOnline("wss://peers.example.org/psi");
+  expect(savedConnectionOptions(saved)?.["peer_timeout_ms"]).toBeUndefined();
+  expect(ran.options?.peerTimeoutMs).toBe(
+    DEFAULT_ACCEPT_TIMEOUT_SECONDS * 1000,
+  );
+});
+
+test("an online invite writes the operator's own --peer-timeout as the later budget", async () => {
+  // The flag the operator DID choose for the recurring runs is written, and is
+  // not what this run waited on -- the two timeouts bound different lifetimes,
+  // and each reaches exactly one of them.
+  const { saved, ran } = await inviteOnline("wss://peers.example.org/psi", {
+    "peer-timeout": "60s",
+  });
+  expect(savedConnectionOptions(saved)?.["peer_timeout_ms"]).toBe(60_000);
+  expect(ran.options?.peerTimeoutMs).toBe(
+    DEFAULT_ACCEPT_TIMEOUT_SECONDS * 1000,
+  );
+});

@@ -8,6 +8,7 @@ import logLibrary from "loglevel";
 import YAML from "yaml";
 import {
   decodeInvitation,
+  DEFAULT_PEER_TIMEOUT_MS,
   disclosedColumnNames,
   getDefaultLinkageTerms,
   getLogger,
@@ -19,6 +20,7 @@ import {
 } from "@psilink/core";
 import type {
   Algorithm,
+  ConnectionConfig,
   LinkageTerms,
   Metadata,
   Standardization,
@@ -58,10 +60,13 @@ import {
   handler as inviteHandler,
   offlineAbandonNotice,
   onlineWaitInvalidationNotice,
+  persistedPeerBudgetNotice,
   resolveInvitePositionals,
   validateInvite,
 } from "../../src/commands/invite";
 import { loadConfigLinkageSource, saveConfig } from "../../src/config";
+import { DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS } from "../../src/connection/webrtc/webrtcMessageConnection";
+import { DEFAULT_RENDEZVOUS_TIMEOUT_MS } from "../../src/connection/webrtc/weriftPeer";
 import { MAX_TIMEOUT_SECONDS } from "../../src/util/cli";
 import {
   connectionFromEndpoint,
@@ -457,9 +462,10 @@ test("validateInvite: the online webrtc connection takes the inviter end of the 
   if (ready.mode !== "online") throw new Error("expected online mode");
   if (ready.connection.channel !== "webrtc") throw new Error("expected webrtc");
   expect(ready.connection.role).toBe("inviter");
-  // --accept-timeout bounds the rendezvous wait on this channel as it bounds
-  // the file-sync one.
-  expect(ready.connection.options?.peerTimeoutMs).toBe(900_000);
+  // --accept-timeout bounds this run's rendezvous wait, but not through the
+  // connection the bootstrap persists: that budget is applied to the live
+  // connection alone, so nothing here carries it into the saved config.
+  expect(ready.connection.options?.peerTimeoutMs).toBeUndefined();
   // A default-scheme port is normalized away by the URL parser, and `secure`
   // stays unset so the connection's TLS default stands.
   expect(ready.connection.server.port).toBeUndefined();
@@ -685,7 +691,9 @@ test("validateInvite: a webrtc invite reports the dropped filename toggles", asy
   );
   expect(warnings.join("")).not.toContain("party-a");
   if (ready.mode !== "online") throw new Error("expected online mode");
-  expect(ready.connection.options).toEqual({ peerTimeoutMs: 900_000 });
+  // Both toggles dropped and no accept-only budget merged in, so this webrtc
+  // connection reaches the saved config with no options block at all.
+  expect(ready.connection.options).toBeUndefined();
 });
 
 test("validateInvite: a webrtc invite reports --server-port/--server-username ignored", async () => {
@@ -729,12 +737,13 @@ test("validateInvite: a webrtc invite reports --server-port/--server-username ig
 
 // --- --peer-timeout on the online path ---------------------------------------
 
-// --accept-timeout is bound to the connection's peer budget on this path and
-// takes precedence unconditionally, so a --peer-timeout typed alongside it is
-// parsed and dropped. Reported rather than silent: the operator who set it
-// otherwise reads the accept-timeout's silence as the budget they asked for.
+// --accept-timeout is this run's peer budget on this path unconditionally, so a
+// --peer-timeout typed alongside it does not bound this invitation's wait. It is
+// not discarded: it is what the saved configuration keeps for the runs that
+// follow. Reported rather than silent, since the two timeouts bound different
+// lifetimes and neither is guessable from the other's silence.
 
-test("validateInvite: online reports --peer-timeout superseded by --accept-timeout", async () => {
+test("validateInvite: online reports which lifetime each timeout bounds", async () => {
   const { input, options } = onlineFixture();
   const log = getLogger("invite-peer-timeout-superseded-test");
   log.setLevel("silent");
@@ -748,13 +757,15 @@ test("validateInvite: online reports --peer-timeout superseded by --accept-timeo
   const warnings = warnSpy.mock.calls.map((c) => String(c[0]));
   const superseded = warnings.filter((m) => m.startsWith("--peer-timeout "));
   expect(superseded).toHaveLength(1);
-  // The flag that was dropped, and the one that governs the phase instead.
-  expect(superseded[0]).toContain("no effect on an online invitation");
+  // The flag that does not bound this wait, the one that does, and where the
+  // typed value lands instead.
+  expect(superseded[0]).toContain("does not bound this online invitation");
   expect(superseded[0]).toContain("--accept-timeout (900s)");
+  expect(superseded[0]).toContain("connection.options.peer_timeout_ms");
   // The claim the warning makes, asserted against the connection this invite
-  // runs: the budget is the accept-timeout, not the 60s that was typed.
+  // persists: the operator's own 60s, never the 900s accept window.
   if (ready.mode !== "online") throw new Error("expected online mode");
-  expect(ready.connection.options?.peerTimeoutMs).toBe(900_000);
+  expect(ready.connection.options?.peerTimeoutMs).toBe(60_000);
   warnSpy.mockRestore();
 });
 
@@ -794,6 +805,62 @@ test("validateInvite: offline --peer-timeout keeps its own ignored-offline warni
   ).toBe(true);
   expect(warnings.some((m) => m.includes("online invitation"))).toBe(false);
   warnSpy.mockRestore();
+});
+
+/** A millisecond constant as the whole-seconds figure a notice prints it as,
+ *  anchored at its leading digit so one figure cannot be matched inside a
+ *  longer one. */
+function secondsFigure(milliseconds: number): RegExp {
+  return new RegExp(`\\b${milliseconds / 1000}s`);
+}
+
+test("persistedPeerBudgetNotice: names the file-sync default when no budget was written", () => {
+  // The absent-field case is the one an operator cannot read off the saved file,
+  // so the notice names both what bounded this run and what bounds the next one.
+  for (const channel of ["sftp", "filedrop"] as const) {
+    const notice = persistedPeerBudgetNotice(undefined, 900, channel);
+    expect(notice).toContain("no connection.options.peer_timeout_ms");
+    expect(notice).toContain("--accept-timeout (900s)");
+    expect(notice).toContain(`(${DEFAULT_PEER_TIMEOUT_MS / 1000}s)`);
+    expect(notice).toContain("--peer-timeout");
+  }
+});
+
+test("persistedPeerBudgetNotice: names the webrtc transport's own two defaults", () => {
+  // The webrtc channel does not fall to the file-sync hour: an unset
+  // peer_timeout_ms leaves the transport's rendezvous and parked-receive
+  // budgets in place, and the rendezvous half is a different number. Naming the
+  // file-sync figure here would tell the operator to expect an hour at a
+  // rendezvous that gives up after ten minutes.
+  const notice = persistedPeerBudgetNotice(undefined, 900, "webrtc");
+  expect(notice).toContain("no connection.options.peer_timeout_ms");
+  // Matched on a leading word boundary so the rendezvous figure cannot be read
+  // out of the tail of the inactivity one (600 sits inside 3600).
+  expect(notice).toMatch(secondsFigure(DEFAULT_RENDEZVOUS_TIMEOUT_MS));
+  expect(notice).toMatch(secondsFigure(DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS));
+  expect(notice).not.toContain("file-sync");
+});
+
+test("persistedPeerBudgetNotice: cites the reference for a channel with no named default", () => {
+  // A channel added to the union without a default named here must not inherit
+  // another transport's figure: the fallback states where the answer is written
+  // down rather than quoting a number that would be wrong.
+  const notice = persistedPeerBudgetNotice(
+    undefined,
+    900,
+    "quic" as ConnectionConfig["channel"],
+  );
+  expect(notice).toContain("docs/EXCHANGE_REFERENCE.md");
+  expect(notice).not.toMatch(secondsFigure(DEFAULT_PEER_TIMEOUT_MS));
+  expect(notice).not.toMatch(secondsFigure(DEFAULT_RENDEZVOUS_TIMEOUT_MS));
+});
+
+test("persistedPeerBudgetNotice: names the recorded budget when one was written", () => {
+  const notice = persistedPeerBudgetNotice(60, 900, "sftp");
+  expect(notice).toContain("connection.options.peer_timeout_ms as 60s");
+  expect(notice).toContain("--accept-timeout (900s) bounded this run alone");
+  // The value that was written, not the accept window, is what a later run gets.
+  expect(notice).not.toContain(`${DEFAULT_PEER_TIMEOUT_MS / 1000}s`);
 });
 
 test("validateInvite: online carries the disclosed-columns subset from the inferred metadata", async () => {
@@ -2909,6 +2976,152 @@ test("handler: a clean config write leaves the exchange's own exit 73 in place",
     expect(stderr).toContain(`saved config to ${options.configFile}`);
   } finally {
     process.exitCode = previousExitCode;
+    stdio.restore();
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
+  }
+});
+
+test("handler: online hands the accept budget to the run and reports what was saved", async () => {
+  // The two ends of the split, at the seam where they part: the accept timeout
+  // reaches the bootstrap as this run's budget alone, and the summary states the
+  // budget the configuration on disk carries so the operator learns it without
+  // opening the file.
+  const { input, options } = onlineFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockImplementation(async () => ({}));
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: ["sftp://host/drop", input],
+      "config-file": options.configFile,
+      "key-file": options.keyFile,
+      "accept-timeout": "300s",
+      "log-level": "info",
+      record: false,
+    } as unknown as Arguments);
+    const stderr = stdio.stderrWrites.join("");
+    expect(exit).not.toHaveBeenCalled();
+    const params = runOnlineBootstrapMock.mock.lastCall?.[0];
+    expect(params?.runOnlyPeerTimeoutSeconds).toBe(300);
+    // Nothing carried the same budget into the connection that bootstrap
+    // persists.
+    expect(params?.connection.options?.peerTimeoutMs).toBeUndefined();
+    expect(stderr).toContain(persistedPeerBudgetNotice(undefined, 300, "sftp"));
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
+  }
+});
+
+test("handler: a webrtc online invite reports the webrtc peer-budget defaults, not the file-sync ones", async () => {
+  // The call site that picks the notice's channel reads
+  // ready.connection.channel; the sibling test above exercises it only over
+  // sftp://, so a regression hard-coding that channel there would still pass
+  // the suite while telling a webrtc operator to expect the file-sync hour at
+  // a rendezvous that gives up after ten minutes.
+  const { input, options } = onlineFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockImplementation(async () => ({}));
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: ["wss://peers.example.org/psi", input],
+      "config-file": options.configFile,
+      "key-file": options.keyFile,
+      "log-level": "info",
+      record: false,
+    } as unknown as Arguments);
+    const stderr = stdio.stderrWrites.join("");
+    expect(exit).not.toHaveBeenCalled();
+    expect(stderr).toMatch(secondsFigure(DEFAULT_RENDEZVOUS_TIMEOUT_MS));
+    expect(stderr).toMatch(secondsFigure(DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS));
+    expect(stderr).not.toContain("file-sync");
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
+  }
+});
+
+test("handler: a failed config write reports no saved peer budget", async () => {
+  // Nothing was written, so the summary that names what the file carries must
+  // not run at all: the honest report is the write failure the outcome line
+  // already carries.
+  const { input, options } = onlineFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockImplementation(async () => ({
+    configWriteError: new Error("permission denied"),
+  }));
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: ["sftp://host/drop", input],
+      "config-file": options.configFile,
+      "key-file": options.keyFile,
+      "log-level": "info",
+      record: false,
+    } as unknown as Arguments);
+    const stderr = stdio.stderrWrites.join("");
+    expect(exit).not.toHaveBeenCalled();
+    expect(stderr).not.toContain("connection.options.peer_timeout_ms");
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
+  }
+});
+
+test("handler: a failed config write leaves --peer-timeout's warning unfalsified", async () => {
+  // The one combination where the flag's warning could become a lie: it is
+  // raised while the invitation is printed, long before the write it names can
+  // fail. Non-promissory, it survives the failure -- and the summary that would
+  // assert the file carries the value does not run, so nothing claims a write
+  // that never happened.
+  const { input, options } = onlineFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockImplementation(async () => ({
+    configWriteError: new Error("permission denied"),
+  }));
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: ["sftp://host/drop", input],
+      "config-file": options.configFile,
+      "key-file": options.keyFile,
+      "peer-timeout": "60s",
+      "log-level": "info",
+      record: false,
+    } as unknown as Arguments);
+    const stderr = stdio.stderrWrites.join("");
+    expect(exit).not.toHaveBeenCalled();
+    // The warning names the field conditionally on the save, so the run's own
+    // mention of peer_timeout_ms is that warning and nothing else.
+    expect(stderr).toContain("When the configuration is saved");
+    expect(stderr).not.toContain("the saved configuration records");
+    expect(fs.existsSync(options.configFile)).toBe(false);
+  } finally {
     stdio.restore();
     exit.mockRestore();
     runOnlineBootstrapMock.mockReset();

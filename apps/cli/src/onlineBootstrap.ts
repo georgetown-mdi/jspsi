@@ -35,6 +35,7 @@ import type {
 } from "@psilink/core";
 
 import {
+  applyConnectionOverrides,
   persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
   persistOutboundPayloadConsent,
@@ -665,6 +666,8 @@ export function observedReceivedColumnsForSave(
  * The persisted config carries the plain `connection` (no `authentication`);
  * `saveConfig` strips any shared-secret material regardless, so moving the write
  * into the hook changes only when the config is persisted, not what is persisted.
+ * A budget that bounds this run alone (`runOnlyPeerTimeoutSeconds`) is applied to
+ * the live connection below and to nothing else, so it reaches neither write.
  *
  * With `reuseExistingConfig`, the config write is skipped: the accept path has
  * already reconciled a pre-existing config against the invitation and the URL, so
@@ -772,6 +775,18 @@ export async function runOnlineBootstrap(params: {
    * acceptance always passes a boolean and never lands the config unbound.
    */
   expectedPartnerDeduplicate?: boolean;
+  /**
+   * The peer budget THIS run alone is bounded by, in seconds: the online
+   * inviter's `--accept-timeout`, which bounds its wait at the rendezvous and the
+   * peer waits of the exchange that follows. Applied to the live connection here
+   * and to nothing that is written, so the configuration this bootstrap saves
+   * carries only the budget its `connection` already holds -- the operator's own
+   * `--peer-timeout`, or none, in which case a later recurring `psilink exchange`
+   * takes the documented `peer_timeout_ms` default rather than a wait sized for
+   * one interactive setup. Absent for a caller whose run budget and persisted
+   * budget are the same value (the online acceptor), which needs no override.
+   */
+  runOnlyPeerTimeoutSeconds?: number;
 }): Promise<{ configWriteError?: unknown }> {
   // The two received-payload persistence inputs are mutually exclusive by design:
   // the online ACCEPTOR passes receivedPayloadLockIn (its set is known up front from
@@ -826,16 +841,22 @@ export async function runOnlineBootstrap(params: {
     persistence: hostKeyPersistence,
   });
 
-  // Resolve `@path` credential refs for the live connection only. params.connection
-  // keeps the `@path` so the saveConfig in the hook below persists the reference,
-  // not the secret -- the @path is re-resolved at the next `psilink exchange`'s
-  // config load. A missing or unreadable referenced file is a UsageError (exit
-  // 64) surfaced here, before any credential is sent. The cast restores the
-  // ProtocolConnectionConfig narrowing the resolver widens to ConnectionConfig;
-  // it is safe because the resolver preserves the channel (it only reads the SFTP
-  // credential fields).
-  const liveConnection = resolveConnectionCredentials(
-    params.connection,
+  // The connection this run dials: params.connection with its `@path` credential
+  // refs resolved and this run's own peer budget applied. params.connection keeps
+  // neither, so the saveConfig in the hook below persists the `@path` reference
+  // rather than the secret (re-resolved at the next `psilink exchange`'s config
+  // load) and no wait sized for one interactive setup. A missing or unreadable
+  // referenced file is a UsageError (exit 64) surfaced here, before any
+  // credential is sent. The budget goes through applyConnectionOverrides like
+  // every other timeout override, which keeps the schema the sole source of truth
+  // for its floor and clones -- load-bearing, since the credential resolver
+  // returns a non-sftp connection as-is, and mutating that would put the budget
+  // straight back into what is written. The cast restores the
+  // ProtocolConnectionConfig narrowing both widen to ConnectionConfig; it is safe
+  // because neither changes the channel.
+  const liveConnection = applyConnectionOverrides(
+    resolveConnectionCredentials(params.connection),
+    { options: { peerTimeout: params.runOnlyPeerTimeoutSeconds } },
   ) as ProtocolConnectionConfig;
 
   // Set inside the hook once saveConfig returns, so the catch below can tell a
