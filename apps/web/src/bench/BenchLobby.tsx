@@ -34,11 +34,12 @@ export function BenchLobby() {
   const [invitation, setInvitation] = useState("");
   const [invitationError, setInvitationError] = useState<string>();
 
-  // Both ways into an exchange from this screen end in a live two-party session,
-  // so both are held while the browser reports no network -- named here rather
-  // than met after the operator has chosen a file and authored the terms. Only
-  // the offline direction is gated: being online is no promise the partner is
-  // there (see @utils/networkStatus).
+  // Advisory only. Every entry below navigates or reads -- authoring an exchange
+  // file for the command-line tool reaches no partner, and neither does reading
+  // an invitation -- so the block belongs to the create or run each flow ends in,
+  // which carries it. Saying so here spares an operator the walk to a gate they
+  // will meet after choosing a file. Only the offline direction is read: being
+  // online is no promise the partner is there (see @utils/networkStatus).
   const online = useOnlineStatus();
 
   // Whether this browser already holds a saved recurring exchange, read once on
@@ -120,16 +121,9 @@ export function BenchLobby() {
               if needed.
             </p>
             <p>
-              {online ? (
-                <Button component={Link} to="/exchange">
-                  Create an invitation
-                </Button>
-              ) : (
-                // A held entry is a real disabled button, not the link wearing a
-                // disabled attribute: the router renders an anchor, which no
-                // disabled attribute holds back.
-                <Button disabled>Create an invitation</Button>
-              )}
+              <Button component={Link} to="/exchange">
+                Create an invitation
+              </Button>
             </p>
           </div>
           <div className={styles.actionCard}>
@@ -153,7 +147,7 @@ export function BenchLobby() {
               <Button
                 variant="outline"
                 mt="sm"
-                disabled={invitationToken === "" || !online}
+                disabled={invitationToken === ""}
                 onClick={reviewInvitation}
               >
                 Review invitation
@@ -181,7 +175,10 @@ export function BenchLobby() {
         </div>
         {!online && (
           <p className={`${styles.sub} ${styles.small}`}>
-            {OFFLINE_EXCHANGE_REASON}
+            {OFFLINE_EXCHANGE_REASON} Reading an invitation and authoring an
+            exchange file for the command-line tool reach no partner, so those
+            stay open; each flow states this again at the create or run that
+            would start the exchange.
           </p>
         )}
         <p className={`${styles.sub} ${styles.small}`}>

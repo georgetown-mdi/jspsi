@@ -15,6 +15,7 @@ import {
 } from "@bench/acceptorColumnsModel";
 import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
 import { BenchLobby } from "@bench/BenchLobby";
+import { DirectConfirmSection } from "@bench/DirectConfirmSection";
 import { InviterBench } from "@bench/InviterBench";
 import { OFFLINE_EXCHANGE_REASON } from "@bench/offlineExchangeGate";
 import styles from "@bench/bench.module.css";
@@ -23,13 +24,16 @@ import { restoreConnectivity, setConnectivity } from "./connectivity";
 import { createAppMount } from "./renderApp";
 
 import type { LinkageTerms } from "@psilink/core";
+import type { ProfiledJobInput } from "@psi/workInputClient";
 
-// The ways into an exchange with no network: the lobby's two entries, the
-// inviter's create, and the acceptor's launch. Each is held with the one named
-// reason while the browser reports offline and live again once it does not, so
-// an operator is told what cannot happen instead of walking the authoring flow
-// into a connection failure. The managed re-run's own gate -- the pattern these
-// follow -- is covered in offlineShell.test.ts.
+// What starts an exchange with no network, and what only looks like it does. The
+// block sits on the control that begins a live run -- the inviter's create, the
+// acceptor's launch, the console's direct run -- each held with the one named
+// reason while the browser reports offline and live again once it does not. The
+// lobby's entries navigate and read, so they stay open under an advisory instead
+// of being held; a create that only saves a file to hand to the command-line tool
+// stays open for the same reason. The managed re-run's own gate -- the pattern
+// these follow -- is covered in offlineShell.test.ts.
 //
 // Chromium is where this belongs because `navigator.onLine` and its events are
 // the platform signal under test, and because a disabled state is a rendering
@@ -142,32 +146,69 @@ function mountAcceptorColumnsStep() {
   );
 }
 
+// A mounted file the appliance already profiled, whose columns infer a linkable
+// set of terms, so connectivity is the only thing that can close the direct run.
+const directProfile: ProfiledJobInput = {
+  name: "clients.csv",
+  sizeBytes: 4096,
+  modifiedAt: 1_700_000_000_000,
+  rowCount: 2,
+  columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
+  columnSamples: new Map([
+    ["client_id", ["1", "2"]],
+    ["first_name", ["Ann", "Bo"]],
+    ["last_name", ["Lee", "Ray"]],
+    ["dob", ["01/02/1990", "03/04/1985"]],
+    ["program_code", ["A", "B"]],
+  ]),
+};
+
+/** The direct-exchange confirm step with the trust affirmation already given, so
+ * nothing but connectivity stands between the operator and the run. */
+function mountDirectConfirmSection() {
+  const noop = () => undefined;
+  app.render(
+    createElement(DirectConfirmSection, {
+      profile: directProfile,
+      identity: "",
+      onIdentity: noop,
+      affirmed: true,
+      onAffirm: noop,
+      onRun: noop,
+      onBack: noop,
+      running: false,
+    }),
+  );
+}
+
 describe("the lobby's two ways into an exchange", () => {
-  test("are held with the named reason offline, and open with the connection", async () => {
+  test("stay open offline under an advisory the connection clears", async () => {
     setConnectivity(false);
 
     app.render(createElement(BenchLobby));
     await userEvent.fill(page.getByLabelText("Invitation"), "an-invitation");
 
-    // The invite entry is a real disabled button while it is held: an anchor
-    // wearing a disabled attribute would still navigate.
+    // Neither entry runs anything: one navigates to the authoring spine, whose
+    // save-a-file transports connect to nothing, and the other reads an
+    // invitation this browser already holds. Holding them here would refuse the
+    // offline-safe work as well.
     await expect
-      .element(page.getByRole("button", { name: "Create an invitation" }))
-      .toBeDisabled();
+      .element(page.getByRole("link", { name: "Create an invitation" }))
+      .toBeInTheDocument();
     const review = page.getByRole("button", { name: "Review invitation" });
-    await expect.element(review).toBeDisabled();
+    await expect.element(review).toBeEnabled();
+
+    // The screen still says what cannot happen, so the operator is not walked to
+    // a gate they meet only after choosing a file.
     await expect
-      .element(page.getByText(OFFLINE_EXCHANGE_REASON))
+      .element(page.getByText(OFFLINE_EXCHANGE_REASON, { exact: false }))
       .toBeInTheDocument();
 
     setConnectivity(true);
 
-    await expect
-      .element(page.getByRole("link", { name: "Create an invitation" }))
-      .toBeInTheDocument();
     await expect.element(review).toBeEnabled();
     await expect
-      .element(page.getByText(OFFLINE_EXCHANGE_REASON))
+      .element(page.getByText(OFFLINE_EXCHANGE_REASON, { exact: false }))
       .not.toBeInTheDocument();
   });
 });
@@ -218,5 +259,25 @@ describe("the acceptor's launch", () => {
 
     await expect.element(launch).toBeEnabled();
     expect(launchBlockedReason()).toBe("");
+  });
+});
+
+describe("the console's direct run", () => {
+  test("is held with the named reason offline, and comes back with the connection", async () => {
+    setConnectivity(false);
+    mountDirectConfirmSection();
+
+    const run = page.getByRole("button", { name: "Run the exchange" });
+    await expect.element(run).toBeDisabled();
+    await expect
+      .element(page.getByText(OFFLINE_EXCHANGE_REASON, { exact: false }))
+      .toBeInTheDocument();
+
+    setConnectivity(true);
+
+    await expect.element(run).toBeEnabled();
+    await expect
+      .element(page.getByText(OFFLINE_EXCHANGE_REASON, { exact: false }))
+      .not.toBeInTheDocument();
   });
 });

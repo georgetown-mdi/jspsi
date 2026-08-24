@@ -353,9 +353,6 @@ export function acceptorLaunchBlockedReason(
   invitationTerms: LinkageTerms,
   stepBlocks: AcceptorLaunchStepBlocks = NO_STEP_BLOCKS,
 ): string | undefined {
-  // Ahead of the screen's own problems, which are all edits the operator makes
-  // here: a device with no network is the one blocker this screen cannot clear,
-  // so it is named before the work rather than after every column is set.
   if (stepBlocks.offline) return OFFLINE_EXCHANGE_REASON;
   if (verdict.satisfiableKeyCount === 0)
     return "Set your columns to the missing field types above before you can start.";
