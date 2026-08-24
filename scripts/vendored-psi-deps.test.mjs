@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -34,6 +35,16 @@ const CODEGEN_AND_RPC = [
   "ts-protoc-gen",
 ];
 
+// The Subresource-Integrity value npm records for a `file:` tarball is the
+// sha512 of that file's own bytes, base64. Measured against real npm 11.19.0
+// rather than read off its packing code: regenerating this repository's entry
+// with `npm install --package-lock-only` in a throwaway tree reproduces the
+// committed value exactly, and repeating that over a tarball with one byte
+// changed moves it. A future npm that repacked a `file:` dependency before
+// hashing would redden this check rather than pass it silently.
+const tarballIntegrity = (path) =>
+  `sha512-${createHash("sha512").update(readFileSync(path)).digest("base64")}`;
+
 // Read the name after the LAST "node_modules/" segment: npm nests a package
 // whose version conflicts with another consumer's at
 // node_modules/<parent>/node_modules/<name>, and this lockfile already installs
@@ -50,11 +61,28 @@ const installedNames = new Set(
 describe("vendored @openmined/psi.js dependency surface", () => {
   it("resolves to the committed local tarball, not a registry package", () => {
     // The pinning premise in DEPENDENCY_PINS.md: a file: path resolves to
-    // exactly the committed bytes, which the sha256 sidecar covers in the tree
-    // and the lockfile's own recorded sha512 integrity covers on install.
+    // exactly the committed bytes. The sha256 sidecar covers those bytes in the
+    // tree; the install-time half is the recorded sha512 integrity, held
+    // against the tarball by the assertion below rather than claimed here.
     expect(lock.packages[VENDORED]?.resolved).toMatch(
       /^file:lib\/openmined-psi\.js-.+\.tgz$/,
     );
+  });
+
+  it("records the integrity the committed tarball's bytes hash to", () => {
+    const entry = lock.packages[VENDORED];
+    const root = resolve(here, "..");
+    const tarball = resolve(root, entry.resolved.slice("file:".length));
+    const computed = tarballIntegrity(tarball);
+    expect(
+      computed,
+      `${relative(root, tarball)} hashes to ${computed}, but package-lock.json ` +
+        `records ${entry.integrity} for ${VENDORED}. npm installs a file: ` +
+        `dependency out of its content-addressed cache by the recorded value, ` +
+        `so a stale one reinstalls the bytes being replaced while the sha256 ` +
+        `sidecar, the provenance marker, and the attestation all pass over the ` +
+        `new ones. Recompute it: docs/PREBUILD_REVENDOR.md, step 5.`,
+    ).toBe(entry.integrity);
   });
 
   it("declares only the runtime dependencies its entry points load", () => {
