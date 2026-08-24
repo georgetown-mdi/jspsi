@@ -50,8 +50,8 @@ const installedNames = new Set(
 describe("vendored @openmined/psi.js dependency surface", () => {
   it("resolves to the committed local tarball, not a registry package", () => {
     // The pinning premise in DEPENDENCY_PINS.md: a file: path resolves to
-    // exactly the committed bytes, which is what makes the sha256 sidecar the
-    // integrity check npm records no lockfile hash for.
+    // exactly the committed bytes, which the sha256 sidecar covers in the tree
+    // and the lockfile's own recorded sha512 integrity covers on install.
     expect(lock.packages[VENDORED]?.resolved).toMatch(
       /^file:lib\/openmined-psi\.js-.+\.tgz$/,
     );

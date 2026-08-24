@@ -99,7 +99,7 @@ run's commit. Then, from a branch in this repository:
    and edit that one field:
 
    ```sh
-   echo "sha512-$(openssl dgst -sha512 -binary lib/openmined-psi.js-<version>.tgz | base64 -w0)"
+   echo "sha512-$(openssl dgst -sha512 -binary lib/openmined-psi.js-<version>.tgz | openssl base64 -A)"
    ```
 
    Then force the reinstall, which npm otherwise skips when the version string
@@ -120,7 +120,11 @@ run's commit. Then, from a branch in this repository:
    ```
 
    A cold cache fails loudly instead -- `npm error code EINTEGRITY`, naming the
-   wanted and got sha512 -- which is what CI sees if this step is skipped.
+   wanted and got sha512 -- but that is the cold-cache case only. CI's
+   `setup-node` keys its npm cache on `package-lock.json`, and a skipped edit
+   leaves that key unchanged, so the restored cache hits and the old bytes
+   install with no error at all. The `diff -r` above is the confirmation that
+   does not depend on cache state.
 
 6. **Run the checks locally.**
 
@@ -154,8 +158,14 @@ procedure. Against the branch:
 
 3. **Verify provenance yourself**, by running `npm run
    check:prebuild-provenance` or the `gh attestation verify` invocation above.
-   Do not read the CI result as a substitute while the marker is disarmed: a
-   disarmed check reports rather than verifies, and says so in its annotation.
+   The verifier reaches past `api.github.com`, fetching the Sigstore bundle from
+   its blob host and the trust root from the TUF CDN, so a host fenced from
+   either -- a locked-down dev container among them -- fails closed with the
+   same message a missing attestation produces. Run it where that egress exists,
+   or read CI's own run of the check on the pull request; a red result from a
+   fenced host says nothing about the attestation. Do not read the CI result as
+   a substitute while the marker is disarmed: a disarmed check reports rather
+   than verifies, and says so in its annotation.
 
 4. **Check the identity the marker pins**, not just that verification passed.
    `producer_repository` and `signer_workflow` must name the fork and its

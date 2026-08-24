@@ -112,8 +112,10 @@ jobs:
           node-version: "26"
 
       # The image COPYs the vendored @openmined/psi.js tarball (a file:
-      # dependency with no npm integrity hash) and installs it; verify its
-      # committed sha256 before the build, mirroring the release job.
+      # dependency, whose lockfile sha512 integrity covers what npm installs
+      # from cache rather than the file copied in) and installs it; verify the
+      # committed sha256 of the bytes in the tree before the build, mirroring
+      # the release job.
       - name: Verify vendored native tarball integrity
         run: sha256sum -c lib/openmined-psi.js-*.tgz.sha256
 

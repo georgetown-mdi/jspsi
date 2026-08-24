@@ -15,12 +15,14 @@
 // is what a GitHub artifact attestation stored against the PRODUCING repository
 // is; `gh attestation verify` is how this reads it.
 //
-// ARMING. The fork does not attest the tarball yet, so a check that always
-// demanded an attestation would redden CI the moment it landed. The marker file
-// beside the tarball (`<tarball>.provenance.json`) carries the switch:
+// ARMING. Enforcement arms per artifact, because attestation coverage is a
+// property of the run that packed a given tarball rather than of the fork: one
+// packed by a run predating the producing workflow's attest step carries
+// nothing to verify. The marker file beside the tarball
+// (`<tarball>.provenance.json`) carries the switch:
 //
-//   attestation_expected: false -> report, warn, and pass. The sidecar remains
-//     the whole control, exactly as before this check existed.
+//   attestation_expected: false -> report, warn, and pass. The sidecar is then
+//     the whole control.
 //   attestation_expected: true  -> run `gh attestation verify` against the
 //     recorded producer identity and source commit, and fail on any non-zero
 //     exit.
