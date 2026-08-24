@@ -4,7 +4,8 @@ title: "Signed Provenance for the Vendored PSI Prebuild"
 
 # Prebuild provenance: binding vendored bytes to the build that made them
 
-_Status: decided, and built in its disarmed state. This note records why the
+_Status: decided, built, and armed against a fork that attests. This note
+records why the
 vendored `@openmined/psi.js` tarball is verified with a GitHub artifact
 attestation rather than npm provenance or a cosign blob signature, what the
 `.sha256` sidecar is re-scoped to, and why the check ships armed by a committed
@@ -20,9 +21,10 @@ the procedure and the reviewer's steps are in
 `@openmined/psi.js` is a psilink fork, built by that repository's
 `native-prebuilds.yml` and copied here by hand as
 `lib/openmined-psi.js-<version>.tgz`. It ships native N-API addons that are
-`dlopen`'d with full process privilege and run the PSI crypto, and npm records
-no `integrity` hash for a `file:` dependency, so the only thing standing between
-the tree and those bytes was the committed `.sha256` sidecar.
+`dlopen`'d with full process privilege and run the PSI crypto. The digests that
+stand between the tree and those bytes -- the committed `.sha256` sidecar, and
+the lockfile's own `integrity` for the `file:` dependency -- are both recorded
+in this repository.
 
 The sidecar is written in the same commit as the tarball it describes. Against
 accident it works and is the only control that works with no network and no
@@ -76,12 +78,14 @@ rather than leaving a reader to infer that a committed hash proves origin.
 
 ## Why the check is armed, not unconditional
 
-The fork attests nothing today. A check that unconditionally demanded an
-attestation would redden CI the moment it landed, and the pressure would then be
-to weaken or revert it -- the wrong direction for a control that is meant to
-tighten. So the enforcement is armed per artifact by `attestation_expected` in a
-marker committed beside the tarball: disarmed, CI stays on the sidecar baseline
-and warns; armed, verification is enforcing.
+Attestation coverage is a property of the run that packed a given tarball, not
+of the fork: one packed before the producing workflow attested carries nothing
+to verify. A check that unconditionally demanded an attestation would redden CI
+over such an artifact, and the pressure would then be to weaken or revert it --
+the wrong direction for a control that is meant to tighten. So the enforcement
+is armed per artifact by `attestation_expected` in a marker committed beside the
+tarball: disarmed, CI stays on the sidecar baseline and warns; armed,
+verification is enforcing.
 
 The obvious weakness in a marker-armed design is the downgrade: disarm the
 check, then substitute the bytes. Three properties are what make that a poor
@@ -120,16 +124,21 @@ sidecar, which is what they had.
 
 ## What is not settled
 
-The positive path has never run. No attestation exists for the vendored digest,
-so `gh attestation verify` has only ever been exercised here in its failing
-direction -- which does establish that the invocation's flags are accepted by
-the real verifier and that a failure propagates, and does not establish that a
-real attestation verifies. Two specific things the first armed re-vendor has to
-confirm rather than assume are in
-[PREBUILD_REVENDOR.md](../PREBUILD_REVENDOR.md#first-armed-run): that CI's
-`GITHUB_TOKEN` can read the fork's attestations, and that the recorded
-`--source-ref` matches the fork's actual default branch.
+An attestation binds bytes to a workflow run; it does not establish that the run
+built honest source. Tying `source_digest` to reviewable fork source stays a
+step the reviewer performs, not one the tool performs -- the one part of this
+chain no tool closes.
 
-Beyond that, an attestation binds bytes to a workflow run; it does not establish
-that the run built honest source. Tying `source_digest` to reviewable fork
-source stays a step the reviewer performs, not one the tool performs.
+The rest is settled and recorded rather than assumed. The positive path runs:
+the fork attests and the armed check verifies a real attestation, so the
+invocation is exercised in both directions and not only in its failing one. The
+two questions the first armed re-vendor was left to answer are answered in
+[PREBUILD_REVENDOR.md](../PREBUILD_REVENDOR.md#first-armed-run) -- a public
+fork's attestations are readable unauthenticated, so CI's `GITHUB_TOKEN` reaches
+them, and `--source-ref` is matched exactly rather than by commit reachability,
+so a run minted on a branch fails a `refs/heads/master` verification even once
+that branch has fast-forwarded onto it. Where that pass can be observed is
+bounded by egress the verifier needs beyond `api.github.com`: an environment
+fenced from the Sigstore bundle host or the TUF CDN fails closed and cannot
+re-establish it, which is why CI's own run is where it stands. The spec carries
+that limit.

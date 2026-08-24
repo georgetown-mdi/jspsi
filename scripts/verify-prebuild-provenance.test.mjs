@@ -24,10 +24,10 @@ import {
 // What these cover, and what they deliberately do not. They drive this repo's
 // own wiring -- arming, the offline digest binding, argv construction, and
 // failure propagation -- across an injected verifier boundary. They do NOT
-// model what `gh attestation verify` decides: no attestation for the vendored
-// tarball exists yet, and reimplementing the verifier's semantics here would
-// assert a prediction rather than an outcome. The live half runs once at the
-// first armed re-vendor, against the real tool, per docs/PREBUILD_REVENDOR.md.
+// model what `gh attestation verify` decides: reimplementing the verifier's
+// semantics here would assert a prediction rather than an outcome. The live
+// half is `npm run check:prebuild-provenance`, which drives the real tool
+// against the vendored bytes in CI and locally.
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -286,8 +286,8 @@ describe("the verify argument vector", () => {
     // The defined set below is a second hand-written literal, not a read of
     // `gh attestation verify --help`: it catches a typo or an invented flag in
     // verifyArgv, but cannot notice gh renaming or removing a flag out from
-    // under it. The real tool is what decides that, at the first armed run
-    // (docs/PREBUILD_REVENDOR.md, "First armed run").
+    // under it. The real tool is what decides that, at each armed run or
+    // re-vendor (docs/PREBUILD_REVENDOR.md, "First armed run").
     const defined = new Set([
       "--repo",
       "--signer-workflow",
@@ -310,6 +310,11 @@ describe("the committed marker", () => {
     const digest = createHash("sha256")
       .update(readFileSync(join(libDir, name)))
       .digest("hex");
+    // The committed marker is armed, so the decision reaches the verifier. It
+    // is stubbed to a success exit rather than run: what belongs here is that
+    // the marker's own fields build the invocation that names the fork, not a
+    // second opinion on what `gh attestation verify` decides about them.
+    const invocations = [];
     const result = checkProvenance({
       tarballPath: join("lib", name),
       digest,
@@ -317,10 +322,19 @@ describe("the committed marker", () => {
         join(libDir, name + ".provenance.json"),
         "utf8",
       ),
-      runVerifier: unreachableVerifier,
+      runVerifier: (argv) => {
+        invocations.push(argv);
+        return 0;
+      },
     });
     expect(result.problems).toEqual([]);
     expect(result.ok).toBe(true);
+    expect(result.armed).toBe(true);
+    expect(invocations).toHaveLength(1);
+    const marker = JSON.parse(
+      readFileSync(join(libDir, name + ".provenance.json"), "utf8"),
+    );
+    expect(invocations[0]).toEqual(verifyArgv(join("lib", name), marker));
   });
 
   it("agrees with the sha256 sidecar, which is the offline check", () => {
