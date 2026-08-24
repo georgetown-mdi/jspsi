@@ -39,6 +39,24 @@ Only the fields marked "`@`-file recommended" in their descriptions, together wi
 
 Linkage terms are verified by both parties at the start of every exchange. After authentication, both parties swap their terms; if any fields are inconsistent, the exchange is cancelled. Fields marked as "soft" produce a warning and an updated set of terms are written out rather than an error.
 
+### The built-in rule set
+
+Not every exchange authors its own linkage fields and keys. A zero-setup exchange, an invitation minted on the web app's quick path, and the template `psilink init` writes all fill them in for you, from the product's built-in rule set: **`baseline-pii`, version `1.0.0`**. It is also where the web app's Advanced invite path starts, before you edit the keys.
+
+The set declares five linkage fields -- `ssn`, `ssn4`, `first_name`, `last_name`, and `date_of_birth` -- and fourteen linkage keys built from them, applied in the order the set lists them. For an exchange that did not author its own, the set is an upper bound on the rules that could have run, not the account of which did -- that account is the terms document's, below.
+
+What the name does and does not cover:
+
+- It covers the linkage **fields** (with their constraints) and the linkage **keys**. Those are what the version versions: an edit to either is a new version of the set.
+- It does not cover the rest of the terms document. `identity`, `date`, `algorithm`, `linkage_strategy`, `output`, and `deduplicate` are each party's own choice on the day, and two parties can run the same rule set while differing on them.
+- A run matches on a **subset** of the set, never on an addition to it: when the terms are derived from your input file, a key whose fields no column can supply is left out of them. The terms document that travels with the exchange still records exactly which keys ran, so it -- not the set's name -- is the authoritative account of any one exchange.
+
+The name and version are in-product identifiers for citing the rules in an agreement or a governance review. Neither is sent to your partner, carried in an invitation, or written into an exchange record.
+
+To match on `phone_number`, `email_address`, or `zip_code`, author a key yourself: they are matchable semantic types (see [Semantic types](#semantic-types)) that this set does not use.
+
+What the set's validation rests on, the criticisms recorded against it, and the rule for bumping its version are in [default-linkage-rule-set.md](notes/default-linkage-rule-set.md).
+
 ### `linkage_terms.version`
 
 *Type:* string  
