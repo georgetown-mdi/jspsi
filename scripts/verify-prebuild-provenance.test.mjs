@@ -125,6 +125,27 @@ describe("resolveTarballName", () => {
     ]);
     expect(problem).toMatch(/found 2/);
   });
+
+  // The name reaches the verifier's argv as the path being verified, so it is
+  // held to the whitespace-free class the free-text marker fields are, for the
+  // same reason: every marker the failure-cause recognizer carries contains a
+  // space.
+  it.each([
+    ["openmined-psi.js-2.0.6-seclink.3.tgz"],
+    ["openmined-psi.js-9.9.9.tgz"],
+    ["openmined-psi.js-2.0.6_rc1.tgz"],
+  ])("accepts %s as the vendored name", (name) => {
+    expect(resolveTarballName([name])).toEqual({ name });
+  });
+
+  it.each([
+    ["a recognizer marker", "openmined-psi.js-no route to host.tgz"],
+    ["a space", "openmined-psi.js-2.0.6 seclink.3.tgz"],
+    ["a tab", "openmined-psi.js-2.0.6\tHTTP 401.tgz"],
+    ["a newline", "openmined-psi.js-2.0.6\ndial tcp.tgz"],
+  ])("refuses a tarball name carrying %s", (_, name) => {
+    expect(resolveTarballName([name]).problem).toMatch(/no vendored prebuild/);
+  });
 });
 
 describe("marker shape", () => {
@@ -347,6 +368,12 @@ describe("what a verifier failure is reported as", () => {
         stderr: VERIFIER_STDERR.noAttestation,
       },
       { status: 0, signal: "SIGTERM", stderr: "" },
+      { status: 0, signal: null, stderr: "", runError: "ENOBUFS" },
+      {
+        status: 1,
+        stderr: VERIFIER_STDERR.noAttestation,
+        runError: "ENOBUFS",
+      },
     ];
     for (const outcome of outcomes) {
       const result = check({ marker: ARMED, runVerifier: () => outcome });
@@ -402,6 +429,14 @@ describe("reading a spawnSync result as a verifier outcome", () => {
   const floodStderr = (chunks) =>
     `const { writeSync } = require("fs"); for (let i = 0; i < ${chunks}; i++) writeSync(2, "x".repeat(65536));`;
 
+  // The same flood from a child that survives the SIGTERM spawnSync sends on an
+  // overrun and swallows the EPIPE behind it, so it reaches its own exit. What
+  // spawnSync reports for that is the runtime's behavior to measure, not to
+  // predict: the two cases below are what it gives, over an ordinary child
+  // rather than `gh`.
+  const floodPastKill = (chunks, exitCode) =>
+    `const { writeSync } = require("fs"); process.on("SIGTERM", () => {}); for (let i = 0; i < ${chunks}; i++) { try { writeSync(2, "x".repeat(65536)); } catch {} } process.exit(${exitCode});`;
+
   const outcomeOf = (run) => {
     const written = [];
     const outcome = verifierOutcome(run, (text) => written.push(text));
@@ -453,8 +488,51 @@ describe("reading a spawnSync result as a verifier outcome", () => {
     );
     expect(outcome.spawnError).toBeUndefined();
     expect(outcome.signal).toBe("SIGTERM");
+    expect(outcome.runError).toBe("ENOBUFS");
     expect(outcome.stderr.length).toBeGreaterThan(0);
     expect(written).toBe(outcome.stderr);
+
+    const problem = check({
+      marker: ARMED,
+      runVerifier: () => outcome,
+    }).problems.join("\n");
+    expect(problem).toMatch(/ended in ENOBUFS/);
+    expect(problem).not.toMatch(TAMPERING_SHAPED);
+  });
+
+  it("refuses an overrun that reached a zero exit of its own", () => {
+    // The shape that makes dropping the error a hole rather than a misnaming:
+    // a status of 0, no signal, and a verdict nothing read. An armed gate
+    // taking this for a clean exit reports the artifact verified.
+    const { outcome } = outcomeOf(
+      runChild(floodPastKill(8, 0), { maxBuffer: 64 * 1024 }),
+    );
+    expect(outcome.spawnError).toBeUndefined();
+    expect(outcome.status).toBe(0);
+    expect(outcome.signal).toBeNull();
+    expect(outcome.runError).toBe("ENOBUFS");
+
+    const result = check({ marker: ARMED, runVerifier: () => outcome });
+    expect(result.ok).toBe(false);
+    expect(result.armed).toBe(true);
+    expect(result.problems.join("\n")).toMatch(/ended in ENOBUFS/);
+    expect(result.problems.join("\n")).not.toMatch(TAMPERING_SHAPED);
+  });
+
+  it("names the truncation rather than tampering for an overrun that exited non-zero", () => {
+    const { outcome } = outcomeOf(
+      runChild(floodPastKill(8, 1), { maxBuffer: 64 * 1024 }),
+    );
+    expect(outcome.status).toBe(1);
+    expect(outcome.runError).toBe("ENOBUFS");
+
+    const problem = check({
+      marker: ARMED,
+      runVerifier: () => outcome,
+    }).problems.join("\n");
+    expect(problem).toMatch(/ended in ENOBUFS/);
+    expect(problem).toMatch(/stderr capture limit/);
+    expect(problem).not.toMatch(TAMPERING_SHAPED);
   });
 
   it("holds a multi-megabyte diagnostic stream at the configured ceiling", () => {
@@ -467,6 +545,7 @@ describe("reading a spawnSync result as a verifier outcome", () => {
     expect(outcome.spawnError).toBeUndefined();
     expect(outcome.signal).toBeNull();
     expect(outcome.status).toBe(0);
+    expect(outcome.runError).toBeUndefined();
     expect(outcome.stderr).toHaveLength(32 * 65536);
   });
 

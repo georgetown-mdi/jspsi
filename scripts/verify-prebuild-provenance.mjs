@@ -48,7 +48,10 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LIB_DIR = "lib";
-const TARBALL = /^openmined-psi\.js-.+\.tgz$/;
+// The vendored tarball's name reaches the verifier's argv as the path it
+// verifies, so it is held to the same whitespace-free class as the free-text
+// marker fields, for the reason `markerProblems` records.
+const TARBALL = /^openmined-psi\.js-[\w.-]+\.tgz$/;
 const MARKER_SUFFIX = ".provenance.json";
 
 // Pinned rather than left to `gh`'s default so a change to that default cannot
@@ -121,13 +124,16 @@ export function markerProblems(marker) {
   }
 
   // `source_ref` reaches the verifier's argv as free text, and the
-  // failure-cause recognizer reads the verifier's stderr by substring -- a
-  // stream `gh`'s measured 401 and 404 renderings echo argv-derived values
-  // into. So the field is held to git-ref characters rather than to any
-  // non-empty string: a ref carrying a recognizer marker (`refs/heads/no route
-  // to host`) would otherwise let the marker file rename an identity mismatch
-  // as an outage. Its syntax is checked wherever the field appears; only
-  // arming requires it.
+  // failure-cause recognizer reads the verifier's stderr by substring, so a
+  // ref carrying a recognizer marker (`refs/heads/no route to host`) would
+  // rename an identity mismatch as an outage on any failure path that echoes
+  // the ref back. Whether `gh` echoes this field on any such path is
+  // unmeasured from here: driven with sentinel values, 2.98.0's 401 and 404
+  // renderings echo the repository, the artifact digest, and the predicate
+  // type, and none of the free-text fields. Holding the field to git-ref
+  // characters is cheap fail-closed hygiene over a value `lib/` supplies,
+  // not a measured exploit closure. Its syntax is checked wherever the field
+  // appears; only arming requires it.
   if (
     marker.source_ref !== undefined &&
     (typeof marker.source_ref !== "string" || !GIT_REF.test(marker.source_ref))
@@ -263,12 +269,15 @@ export function readMarkerSource(markerPath, readFile = readFileSync) {
  * written back out so the operator still reads the verifier's own words.
  *
  * A `spawnSync` error is only a spawn failure when the process never ran, which
- * is an error carrying neither an exit status nor a termination signal. An
- * error alongside either of those describes how a run that DID happen ended --
- * `ENOBUFS` for output past `maxBuffer`, `ETIMEDOUT` for a killed one, each
- * with a signal and with captured bytes -- and reporting it as an absent `gh`
- * would name the wrong cause and discard what the run said. `writeStderr` is
- * the test seam.
+ * is an error carrying neither an exit status nor a termination signal.
+ * Reporting any other error as an absent `gh` would name the wrong cause and
+ * discard what the run said. An error alongside a status or a signal describes
+ * a run that DID happen and was cut short, so it is carried out as `runError`
+ * for the decision to refuse rather than dropped: an overrun of `maxBuffer`
+ * comes back as `ENOBUFS`, under the `SIGTERM` `spawnSync` sends for it, or --
+ * measured against a child that survives that signal and swallows the `EPIPE`
+ * behind it -- under an exit status of the child's own, zero included.
+ * `writeStderr` is the test seam.
  */
 export function verifierOutcome(run, writeStderr) {
   const stderr = typeof run.stderr === "string" ? run.stderr : "";
@@ -278,17 +287,26 @@ export function verifierOutcome(run, writeStderr) {
   if (run.error !== undefined && !ran) {
     return { spawnError: run.error.message };
   }
-  return { status: run.status, signal: run.signal, stderr };
+  return {
+    status: run.status,
+    signal: run.signal,
+    stderr,
+    runError:
+      run.error === undefined
+        ? undefined
+        : (run.error.code ?? run.error.message),
+  };
 }
 
 /**
  * The whole decision, with the bytes and the verifier handed in so a test can
  * drive every branch without a 16 MB fixture or a live GitHub lookup.
  *
- * `runVerifier(argv)` returns `{ status, signal, stderr }` -- the verifier's
- * exit status, falsy for success, the signal that terminated it if one did, and
- * whatever it wrote to stderr -- or `{ spawnError }` when the verifier could not
- * be started at all. It is only called once the offline checks have all passed.
+ * `runVerifier(argv)` returns `{ status, signal, stderr, runError }` -- the
+ * verifier's exit status, falsy for success, the signal that terminated it if
+ * one did, whatever it wrote to stderr, and the error a run cut short ended in
+ * -- or `{ spawnError }` when the verifier could not be started at all. It is
+ * only called once the offline checks have all passed.
  *
  * Returns `{ ok, armed, problems, notes }`.
  */
@@ -363,7 +381,7 @@ export function checkProvenance({
   const argv = verifyArgv(tarballPath, marker);
   const invocation = `\`gh ${argv.join(" ")}\``;
   const outcome = runVerifier(argv) ?? {};
-  const { status, signal, spawnError } = outcome;
+  const { status, signal, spawnError, runError } = outcome;
   const stderr = typeof outcome.stderr === "string" ? outcome.stderr : "";
   const unverified = (problem) => ({
     ok: false,
@@ -371,6 +389,15 @@ export function checkProvenance({
     problems: [problem],
     notes: [],
   });
+
+  // Ahead of every branch that reads a status, a signal, or the run's output:
+  // an error is the run being cut short, so what it exited with and what it
+  // wrote are both fragments of a lookup that never reached its verdict.
+  if (runError !== undefined) {
+    return unverified(
+      `${invocation} ended in ${runError} before its verdict could be read, so nothing was verified about ${artifact}. Neither its exit nor its output is the lookup's answer; \`ENOBUFS\` in particular is its output overrunning this check's stderr capture limit. Whatever it wrote before it ended is above. Re-run where it can finish, or read CI's own run of this check (docs/PREBUILD_REVENDOR.md).`,
+    );
+  }
 
   // Success is a reported zero, never an unreported anything: a verifier
   // handing back a bare status leaves `status` undefined here, which would
@@ -387,8 +414,8 @@ export function checkProvenance({
 
   // A cause that is not the lookup's own answer is named as itself. The
   // no-attestation conclusion below is a claim about the bytes, and reporting
-  // it for an unrunnable `gh`, a killed run, or a fenced host reads an outage
-  // as tampering.
+  // it for an unrunnable `gh`, a killed run, a run cut short, or a fenced host
+  // reads an outage as tampering.
   if (spawnError !== undefined) {
     return unverified(
       `${invocation} could not be run: ${spawnError}. The attestation lookup never happened, so this is an absent or unrunnable \`gh\` rather than anything about ${artifact}. Install \`gh\` and re-run, or read CI's own run of this check (docs/PREBUILD_REVENDOR.md).`,
