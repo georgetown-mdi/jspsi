@@ -33,17 +33,17 @@
 // Properties the implementation is built around:
 //
 //   1. NON-MUTATING. The bytes and timestamps of every file touched are read
-//      before the run and put back in a `finally` on ordinary return or throw
-//      (a `finally` does not run on a signal). SIGINT/SIGTERM handlers restore
-//      the same way in the gaps between per-file runs, and after a run returns
-//      -- but each generator runs synchronously via execFileSync, so a signal
-//      that arrives while it is running is not dispatched to this process's JS
-//      handler until the child exits; a process-group kill that takes the
-//      parent mid-run leaves that file's probe mtime, and any in-place write
-//      the generator already made, exactly as the run left them, for git to
-//      restore. A check that left a regenerated vectors file behind on an
-//      ordinary exit would be indistinguishable from the edit it exists to
-//      catch.
+//      before the run and put back on ordinary return or throw, by the teardown
+//      scripts/lib/regenerationChecks.mjs runs. That teardown does not run on a
+//      signal, so the same module arms SIGINT/SIGTERM handlers that restore in
+//      the gaps between per-file runs, and after a run returns -- but each
+//      generator runs synchronously via execFileSync, so a signal that arrives
+//      while it is running is not dispatched to this process's JS handler until
+//      the child exits; a process-group kill that takes the parent mid-run
+//      leaves that file's probe mtime, and any in-place write the generator
+//      already made, exactly as the run left them, for git to restore. A check
+//      that left a regenerated vectors file behind on an ordinary exit would be
+//      indistinguishable from the edit it exists to catch.
 //   2. FAILS CLOSED on a comparison it did not really make. Three probes:
 //      - The WRITE probe. Each target's mtime is set to a fixed past instant
 //        before its generator runs, so whether the generator wrote the file is a
@@ -123,6 +123,10 @@ import {
   CORE_BUILD_COMMAND,
   describeCoreDistStaleness,
 } from "./lib/coreDistFreshness.mjs";
+import {
+  firstDifference,
+  withRestoreOnSignal,
+} from "./lib/regenerationChecks.mjs";
 
 /** The vectors directory this check covers, relative to the repository root. */
 export const VECTORS_DIRECTORY = "packages/core/test/vectors";
@@ -270,25 +274,6 @@ export function maskExcusedValues(text, keys = []) {
     count: byKey.reduce((total, entry) => total + entry.count, 0),
     byKey,
   };
-}
-
-/**
- * The 1-based number of the first line at which `a` and `b` differ, with both
- * sides of it, or null when they are identical.
- */
-export function firstDifference(a, b) {
-  const left = a.split("\n");
-  const right = b.split("\n");
-  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
-    if (left[i] !== right[i]) {
-      return {
-        line: i + 1,
-        committed: left[i] ?? "<end of file>",
-        produced: right[i] ?? "<end of file>",
-      };
-    }
-  }
-  return null;
 }
 
 /**
@@ -444,32 +429,14 @@ async function compareOne({
 
   const original = readFileSync(target);
   const originalStat = statSync(target);
-  let restored = false;
   const restore = () => {
-    if (restored) return;
-    restored = true;
     if (!existsSync(target) || !readFileSync(target).equals(original)) {
       writeFileSync(target, original);
     }
     utimesSync(target, originalStat.atime, originalStat.mtime);
   };
-  // Covers the gaps between per-file runs and the window after runGenerator
-  // returns. It does NOT cover the run itself: runGenerator blocks
-  // synchronously (execFileSync), and Node does not dispatch a signal to this
-  // handler until that call returns, so a kill that takes the whole process
-  // group mid-run leaves this file's probe mtime, and any in-place write the
-  // generator already made, as the run left them, for git to restore.
-  const onSignal = (signal) => {
-    restore();
-    process.kill(process.pid, signal);
-  };
-  const handlers = ["SIGINT", "SIGTERM"].map((signal) => {
-    const handler = () => onSignal(signal);
-    process.once(signal, handler);
-    return [signal, handler];
-  });
 
-  try {
+  return withRestoreOnSignal(restore, async () => {
     utimesSync(target, PROBE_MTIME, PROBE_MTIME);
     let stdout;
     try {
@@ -555,10 +522,7 @@ async function compareOne({
         `  node ${directory}/${entry.generator}${entry.writes === "stdout" ? ` > ${directory}/${entry.vectors}` : ""}\n` +
         `  npm run format`,
     };
-  } finally {
-    for (const [signal, handler] of handlers) process.off(signal, handler);
-    restore();
-  }
+  });
 }
 
 function formatReport({

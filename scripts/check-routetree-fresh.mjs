@@ -16,10 +16,11 @@
 // Two properties the implementation is built around:
 //
 //   1. NON-MUTATING. The working-tree bytes are read before the run and written
-//      back in a `finally` whatever the outcome -- a check that left a
-//      regenerated file behind would recreate the exact hazard it exists to
-//      remove. SIGINT/SIGTERM restore too, since a `finally` does not run on a
-//      signal; a backup outside the repo covers the restore itself failing.
+//      back whatever the outcome -- a check that left a regenerated file behind
+//      would recreate the exact hazard it exists to remove. SIGINT/SIGTERM
+//      restore too, since an ordinary teardown does not run on a signal; a
+//      backup outside the repo covers the restore itself failing. The teardown
+//      and the handlers alike are armed by scripts/lib/regenerationChecks.mjs.
 //   2. FAILS CLOSED when the codegen did not run. The trigger is a real
 //      web-tooling invocation (`vitest list` loads apps/web/vite.config.ts,
 //      which runs the tanstackStart plugin's codegen -- the cheapest such
@@ -69,6 +70,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  firstDifferingLine,
+  withRestoreOnSignal,
+} from "./lib/regenerationChecks.mjs";
+
 /** The generated file this check guards, relative to the repository root. */
 export const ROUTE_TREE = "apps/web/src/routeTree.gen.ts";
 
@@ -111,16 +117,6 @@ export function runCodegen(root) {
   });
 }
 
-/** The 1-based number of the first line at which `a` and `b` differ, or null. */
-export function firstDifferingLine(a, b) {
-  const left = a.split("\n");
-  const right = b.split("\n");
-  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
-    if (left[i] !== right[i]) return i + 1;
-  }
-  return null;
-}
-
 /**
  * Regenerate the route tree over a probe-marked copy and report whether the
  * generator reproduces the working-tree bytes, as `{ok, status, message}`. The
@@ -149,10 +145,7 @@ export function checkRouteTreeFreshness({
   const backup = join(backupDirectory, "routeTree.gen.ts");
   writeFileSync(backup, original);
 
-  let restored = false;
   const restore = () => {
-    if (restored) return;
-    restored = true;
     try {
       writeFileSync(file, original);
     } catch (cause) {
@@ -163,20 +156,8 @@ export function checkRouteTreeFreshness({
     }
     rmSync(backupDirectory, { recursive: true, force: true });
   };
-  // A `finally` does not run when a signal terminates the process, which would
-  // leave the probe line, or a regenerated copy, in the working tree this check
-  // promises not to touch.
-  const onSignal = (signal) => {
-    restore();
-    process.kill(process.pid, signal);
-  };
-  const handlers = ["SIGINT", "SIGTERM"].map((signal) => {
-    const handler = () => onSignal(signal);
-    process.once(signal, handler);
-    return [signal, handler];
-  });
 
-  try {
+  return withRestoreOnSignal(restore, () => {
     writeFileSync(file, Buffer.concat([original, Buffer.from(PROBE_LINE)]));
     try {
       regenerate(root);
@@ -222,10 +203,7 @@ export function checkRouteTreeFreshness({
       status: "stale",
       message: `${ROUTE_TREE} is not what the pinned TanStack Router generator produces (first difference at line ${line}). Left stale, it rewrites itself under the next web-tooling run and lands as an unrelated modification in whatever branch is checked out. Refresh it in its own commit:\n\n  ${REGENERATE_COMMAND}\n  git add ${ROUTE_TREE}`,
     };
-  } finally {
-    for (const [signal, handler] of handlers) process.off(signal, handler);
-    restore();
-  }
+  });
 }
 
 // CLI entry: only runs when invoked directly, so the test can import the
