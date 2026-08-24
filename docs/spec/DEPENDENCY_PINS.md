@@ -89,11 +89,45 @@ asking for an npm exclude entry that would be false.
 
 **Integrity.** npm records no `integrity` hash for a `file:` tarball in the lockfile, so the committed sidecar `lib/<tarball>.sha256` is the integrity check in its place: the setup action (`.github/actions/setup/action.yml`) runs `sha256sum -c` against it before install, the Alpine leg re-checks it before a native wire-vector verify (`.github/workflows/native_alpine.yaml`), and the release publish job re-checks it before building the shipped Docker image (`.github/workflows/release.yaml`, the "Verify vendored native tarball integrity" step, since that job builds from its own checkout rather than the test job's artifact), so a swapped or corrupted tarball fails the build. Because npm caches a `file:` dependency by its version string, a rebuild that keeps the same version (below) MUST regenerate the sidecar AND force a reinstall, or both the check and the installed bytes would keep the stale content.
 
+What that sidecar does and does not establish is the reason for the second control below. It is written in the same psilink commit as the bytes it describes, so it detects a truncated checkout, a corrupt download, or a stale re-vendor, and it is the only check here that needs no network, no token, and no tooling beyond `sha256sum`. It cannot bind those bytes to the build that produced them: a writer who can edit `lib/` edits both files. It is an availability and accident control, not a tamper control across the fork boundary.
+
+**Provenance.** The bytes are built by another repository -- the fork's `native-prebuilds.yml` -- and carry native `.node` addons `dlopen`'d with full process privilege into the PSI pipeline, so the claim that has to hold is one no psilink commit can forge. That claim is a GitHub artifact attestation, minted by `actions/attest-build-provenance` in the producing workflow and stored against the **producing repository**. `npm run check:prebuild-provenance` (`scripts/verify-prebuild-provenance.mjs`) reads it, running in the setup action ahead of `npm ci` and in the release publish job ahead of the image build. Rationale and the mechanisms weighed against it: [prebuild-provenance.md](../notes/prebuild-provenance.md).
+
+Each vendored tarball carries a marker beside it, `lib/<tarball>.provenance.json`, which records the identity to verify against and arms the check:
+
+| Field | Meaning |
+| --- | --- |
+| `attestation_expected` | `false` -> report and pass, leaving the sidecar as the whole control; `true` -> verify, and fail on any non-zero verifier exit |
+| `artifact` | The tarball's filename, which must be the one vendored in `lib/` |
+| `sha256` | The tarball's digest, held against the real bytes in **both** arming states, offline |
+| `producer_repository` | `<owner>/<repo>` the attestation is stored against |
+| `signer_workflow` | `<owner>/<repo>/<path>/<to>/<workflow>` of the workflow whose identity signed it |
+| `source_ref` | The producing repository's git ref. Required once armed |
+| `source_digest` | The producing repository's commit, 40 hex characters. Required once armed |
+
+Armed, the check runs exactly:
+
+```sh
+gh attestation verify lib/<tarball> \
+  --repo <producer_repository> \
+  --signer-workflow <signer_workflow> \
+  --source-ref <source_ref> \
+  --source-digest <source_digest> \
+  --predicate-type https://slsa.dev/provenance/v1 \
+  --deny-self-hosted-runners
+```
+
+`--predicate-type` is stated rather than left to the verifier's default so a change to that default cannot widen what counts as a provenance claim, and `--deny-self-hosted-runners` holds the fork to the GitHub-hosted runners every leg of `native-prebuilds.yml` declares. `gh attestation verify` queries `api.github.com` at verification time, so both call sites pass `GH_TOKEN`; the offline sidecar is what stands when that API does not answer.
+
+The marker is required in both arming states, and a missing, malformed, or digest-mismatched marker fails the check. So disarming is not an absence: it is `attestation_expected` flipped to `false` in a tracked file under `lib/`, which a reviewer reads in the diff. Re-pointing the marker at substituted bytes passes the offline digest binding and is exactly what makes the armed attestation lookup fail, since no attestation exists for those bytes. What neither control establishes is that an attested build is honest -- an attestation binds bytes to a run in the producer repository, and whether that run built the source it names is the fork's property, not this repository's.
+
+The `native_alpine.yaml` and `image_smoke.yaml` legs re-check the sidecar only. They consume the tarball a psilink CI run already verified rather than introducing it, so they carry the offline check for the stale- or corrupt-checkout case and do not repeat the network one.
+
 **The worker-teardown fix.** The fork carries a fix, in every artifact from `2.0.6-seclink.2` onward, for a `worker_threads` teardown segfault: running any masking op inside a worker and then tearing the worker down crashed the whole process (exit 139, which a worker-thread segfault is not contained below), because BoringSSL lazily initializes per-thread state whose `__cxa_thread_atexit` destructor fired AFTER the N-API environment was already torn down. The fork's fix is a `napi_add_env_cleanup_hook` (in the fork's `private_set_intersection/napi/psi_napi.cpp`) that calls `OPENSSL_thread_stop()` to release that per-thread state while the environment is still alive. Without it, running the PSI crypto off the event-loop-owning thread -- the CLI's worker offload -- would segfault at the end of every native-backend exchange; with it the worker tears down cleanly, which is what lets the offload use the native backend at all rather than pinning the worker to WASM. The `apps/cli` real-worker integration test (`test/integration/psiWorkerRealWorker.test.ts`) is the regression guard: a reintroduced segfault crashes the test process rather than letting it assert.
 
 **Runtime dependency surface.** The fork declares exactly two runtime dependencies: `google-protobuf`, whose jspb runtime backs the `psi_pb` wire types and whose package the shipped type declarations import, and `node-gyp-build`, which `psi_native_node.js` requires to resolve a prebuild. Upstream additionally declares a gRPC / protoc codegen set (`@grpc/grpc-js`, `protoc-gen-js`, `protoc-gen-ts`, `ts-protoc-gen`) as runtime `dependencies`, and nothing the tarball ships loads any of it -- the published entry points require only `crypto`/`fs` (`psi_wasm_node.js`), `url` (`psi_wasm_web.js`, `psi_wasm_worker.js`) and `node-gyp-build`. Declared as runtime dependencies they pulled `@grpc/proto-loader` and `protobufjs` into every psilink install, and ran `protoc-gen-js`'s postinstall, which downloads a protoc plugin binary and unpacks it with `adm-zip` -- an advisory with no available fix, reaching psilink by no other path. The fork carries the three protoc packages as `devDependencies` instead, so they serve its own bundle build and reach no consumer, and declares `@grpc/grpc-js` nowhere in its manifest at all. Note `google-protobuf` and `protobufjs` are distinct libraries; the PSI path uses jspb from the former, so removing the latter does not perturb it. `scripts/vendored-psi-deps.test.mjs` holds this line as a CI check rather than as prose: it asserts against the committed lockfile that the vendored package declares only those two packages and that no gRPC or proto-codegen package appears anywhere in the tree, so a re-roll that regresses the fork's manifest fails red instead of silently restoring the surface.
 
-**Rebuilding or bumping.** The addon is built from the fork's own Docker build image, not from this repo. On any rebuild -- a fork change, an upstream merge, or a version bump -- regenerate the sidecar (`sha256sum <tarball> > <tarball>.sha256`), and if the version string did not change, remove `node_modules/@openmined/psi.js` and reinstall so npm re-fetches the new bytes past its version cache. A rebuild that touches the native crypto is crypto-code review scope (see [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy)).
+**Rebuilding or bumping.** The addon is built from the fork's own Docker build image, not from this repo. On any rebuild -- a fork change, an upstream merge, or a version bump -- regenerate the sidecar (`sha256sum <tarball> > <tarball>.sha256`) and rewrite the provenance marker for the new bytes, and if the version string did not change, remove `node_modules/@openmined/psi.js` and reinstall so npm re-fetches the new bytes past its version cache. Verify provenance BEFORE regenerating the sidecar, so a digest is only ever written over bytes whose origin was checked. The ordered procedure and the reviewer's own steps are the runbook, [PREBUILD_REVENDOR.md](../PREBUILD_REVENDOR.md). A rebuild that touches the native crypto is crypto-code review scope (see [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy)).
 
 ## Inlined dependencies and their remediation path
 

@@ -78,6 +78,15 @@ jobs:
         with:
           node-version: "26"
 
+      # The provenance half of the same pairing, for the same reason: this job
+      # bakes these bytes into the published image, so the fork build they came
+      # from is verified here and not only in the test job's setup prologue.
+      # Warns and passes while the marker beside the tarball is disarmed.
+      - name: Verify vendored native tarball provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npm run check:prebuild-provenance
+
       # Ahead of every build and push step below, because what it holds is a
       # property of the image those steps publish: the tag they publish it under
       # comes from the pushed git tag, while the accept kit inside it names the

@@ -65,6 +65,12 @@ describe("vendored PSI prebuild tarball manifest", () => {
     expect(libFiles.filter((f) => f.endsWith(".tgz.sha256"))).toEqual([
       `${tarballName}.sha256`,
     ]);
+    // Same reason for the provenance marker: a stale one left behind by a
+    // re-vendor describes bytes lib/ no longer holds, and the provenance check
+    // reads only the current tarball's marker, so nothing else would notice it.
+    expect(libFiles.filter((f) => f.endsWith(".tgz.provenance.json"))).toEqual([
+      `${tarballName}.provenance.json`,
+    ]);
     expect(
       readFileSync(`${repoRoot}lib/${tarballName}.sha256`, "utf8"),
     ).toContain(tarballName);

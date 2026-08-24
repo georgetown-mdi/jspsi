@@ -1,0 +1,7 @@
+{
+  "attestation_expected": false,
+  "artifact": "openmined-psi.js-2.0.6-seclink.3.tgz",
+  "sha256": "3d534a67019659914358b1f78d7726fedc31004a4149e91b3c326ff0823dfb05",
+  "producer_repository": "georgetown-mdi/OpenMinedPSI",
+  "signer_workflow": "georgetown-mdi/OpenMinedPSI/.github/workflows/native-prebuilds.yml"
+}
