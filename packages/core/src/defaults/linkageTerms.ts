@@ -12,42 +12,48 @@ import type {
 import type { SemanticType } from "../types";
 
 /**
- * Neutral, stable identifier of the built-in linkage rule set: the linkage
- * fields ({@link DEFAULT_LINKAGE_FIELDS}) and key combinations
- * ({@link DEFAULT_LINKAGE_KEYS}) that {@link getDefaultLinkageTerms} emits when
- * a party does not author its own. An exchange that runs the built-in rules runs
- * THIS set, so the question "which rules did this linkage match on" has a name
- * as its answer rather than "the defaults", and the set can be cited in a
- * data-sharing agreement or a governance review without quoting the whole key
- * list.
+ * Neutral, stable identifier of the built-in linkage FIELD set: the PII
+ * substrate ({@link DEFAULT_LINKAGE_FIELDS}) that
+ * {@link getDefaultLinkageTerms} emits when a party does not author its own. It
+ * names which PII elements the built-in rules work from and how each is cleaned
+ * and bounded -- not which combinations of them constitute a match, which is
+ * what the key set ({@link DEFAULT_LINKAGE_KEY_SET_NAME}) names. The two are
+ * separate artifacts because the substrate is generic where the keys are
+ * specific: every built-in key is built from these fields, but the same fields
+ * support key sets settled for other uses.
  *
- * Deliberately says nothing about who validated the set or where: the set is
- * general-purpose, and its provenance -- what was validated, against what, and
- * the criticisms on record -- belongs in
- * `docs/notes/default-linkage-rule-set.md`, not in the identifier.
+ * Naming it is what lets "which rules did this linkage match on" be answered by
+ * a name rather than by "the defaults", and lets the set be cited in a
+ * data-sharing agreement or a governance review without quoting the field list.
+ *
+ * Deliberately says nothing about who validated anything: these fields carry no
+ * validation lineage of their own -- what was validated, against what, and the
+ * criticisms on record all attach to the key set, and belong in
+ * `docs/notes/default-linkage-rule-set.md` rather than in either identifier.
  */
-export const DEFAULT_LINKAGE_RULE_SET_NAME = "baseline-pii";
+export const DEFAULT_LINKAGE_FIELD_SET_NAME = "baseline-pii";
 
 /**
- * Version of the rule set named by {@link DEFAULT_LINKAGE_RULE_SET_NAME}.
+ * Version of the field set named by {@link DEFAULT_LINKAGE_FIELD_SET_NAME}.
  *
  * Distinct from `LinkageTerms.version`, which versions the terms SCHEMA and is
  * cross-checked between the parties at exchange time. This one versions the
- * CONTENT of the built-in set -- which fields it declares, which constraints
- * they carry, and which key combinations are built from them -- and is not on
- * the wire. Never assign it to a terms document's `version`.
+ * CONTENT of the built-in field set -- which fields it declares and which
+ * constraints they carry -- and is not on the wire. Neither it nor
+ * {@link DEFAULT_LINKAGE_KEY_SET_VERSION} may ever be assigned to a terms
+ * document's `version`.
  *
- * Bump it in the same change that edits {@link DEFAULT_LINKAGE_FIELDS} or
- * {@link DEFAULT_LINKAGE_KEYS}: the recorded validation attaches to the name and
- * version together, so an edited set carrying the old version makes that record
- * describe rules nobody ran.
+ * Bump it in the same change that edits {@link DEFAULT_LINKAGE_FIELDS}: a field
+ * added or dropped, or a constraint loosened or tightened. The two sets version
+ * independently, so an edit to the keys bumps
+ * {@link DEFAULT_LINKAGE_KEY_SET_VERSION} and leaves this one alone.
  */
-export const DEFAULT_LINKAGE_RULE_SET_VERSION = "1.0.0";
+export const DEFAULT_LINKAGE_FIELD_SET_VERSION = "1.0.0";
 
 /**
- * The linkage fields of the {@link DEFAULT_LINKAGE_RULE_SET_NAME} rule set: the
- * standardized form of each PII element its keys are built from, with the
- * constraints each field commits both parties to.
+ * The linkage fields of the {@link DEFAULT_LINKAGE_FIELD_SET_NAME} field set:
+ * the standardized form of each PII element the built-in keys are built from,
+ * with the constraints each field commits both parties to.
  */
 const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [
   {
@@ -77,7 +83,43 @@ const DEFAULT_LINKAGE_FIELDS: ReadonlyArray<LinkageField> = [
 ];
 
 /**
- * The linkage key combinations of the {@link DEFAULT_LINKAGE_RULE_SET_NAME} rule
+ * Neutral, stable identifier of the built-in linkage KEY set: the key
+ * combinations ({@link DEFAULT_LINKAGE_KEYS}) that
+ * {@link getDefaultLinkageTerms} emits when a party does not author its own.
+ * Every key is built from the fields of
+ * {@link DEFAULT_LINKAGE_FIELD_SET_NAME}, so a citation of this set is a
+ * citation of that one too; what this name adds is the specific part -- which
+ * combinations of that substrate count as a match, and in what cascade order.
+ *
+ * Names the class of system the keys were settled for rather than the
+ * engagement that settled them: the repository is public, and an attribution is
+ * not the product's to publish. The validation lineage and the criticisms on
+ * record attach to THIS set, not to the fields, and are recorded in
+ * `docs/notes/default-linkage-rule-set.md` rather than in the identifier.
+ */
+export const DEFAULT_LINKAGE_KEY_SET_NAME = "hmis-keys";
+
+/**
+ * Version of the key set named by {@link DEFAULT_LINKAGE_KEY_SET_NAME}.
+ *
+ * Distinct from `LinkageTerms.version`, which versions the terms SCHEMA and is
+ * cross-checked between the parties at exchange time. This one versions the
+ * CONTENT of the built-in key set -- which key combinations it declares and in
+ * what order -- and is not on the wire. Neither it nor
+ * {@link DEFAULT_LINKAGE_FIELD_SET_VERSION} may ever be assigned to a terms
+ * document's `version`.
+ *
+ * Bump it in the same change that edits {@link DEFAULT_LINKAGE_KEYS}: a key
+ * added or removed, an element or transform changed, or the keys REORDERED --
+ * order is cascade order, so a reorder changes which key claims a record that
+ * more than one would match. The recorded validation attaches to the name and
+ * version together, so an edited set carrying the old version makes that record
+ * describe rules nobody ran.
+ */
+export const DEFAULT_LINKAGE_KEY_SET_VERSION = "1.0.0";
+
+/**
+ * The linkage key combinations of the {@link DEFAULT_LINKAGE_KEY_SET_NAME} key
  * set. Keys are listed from most precise (all PII) to least precise (name only).
  * The filtering logic below removes any key whose elements cannot be satisfied
  * by the columns present in the input.
@@ -240,13 +282,15 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
 /**
  * Returns a default {@link LinkageTerms} suitable for quick exchanges when no
  * linkage terms are specified explicitly, drawn from the
- * {@link DEFAULT_LINKAGE_RULE_SET_NAME} rule set at
- * {@link DEFAULT_LINKAGE_RULE_SET_VERSION}.
+ * {@link DEFAULT_LINKAGE_KEY_SET_NAME} key set at
+ * {@link DEFAULT_LINKAGE_KEY_SET_VERSION}, over the
+ * {@link DEFAULT_LINKAGE_FIELD_SET_NAME} field set at
+ * {@link DEFAULT_LINKAGE_FIELD_SET_VERSION}.
  *
  * When metadata are provided, only linkage key templates whose elements can be
  * satisfied by the present columns are included. If no metadata is provided,
  * all templates are included as a fallback. Either way the emitted keys are a
- * SUBSET of the named set, never an addition to it: what the input supports
+ * SUBSET of the named key set, never an addition to it: what the input supports
  * narrows the set, and nothing widens it.
  */
 export function getDefaultLinkageTerms(
