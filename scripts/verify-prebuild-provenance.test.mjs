@@ -286,8 +286,8 @@ describe("the verify argument vector", () => {
     // The defined set below is a second hand-written literal, not a read of
     // `gh attestation verify --help`: it catches a typo or an invented flag in
     // verifyArgv, but cannot notice gh renaming or removing a flag out from
-    // under it. The real tool is what decides that, at the first armed run
-    // (docs/PREBUILD_REVENDOR.md, "First armed run").
+    // under it. The real tool is what decides that, at each armed run or
+    // re-vendor (docs/PREBUILD_REVENDOR.md, "First armed run").
     const defined = new Set([
       "--repo",
       "--signer-workflow",

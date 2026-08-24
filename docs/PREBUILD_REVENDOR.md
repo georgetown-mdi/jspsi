@@ -99,7 +99,7 @@ run's commit. Then, from a branch in this repository:
    and edit that one field:
 
    ```sh
-   echo "sha512-$(openssl dgst -sha512 -binary lib/openmined-psi.js-<version>.tgz | base64)"
+   echo "sha512-$(openssl dgst -sha512 -binary lib/openmined-psi.js-<version>.tgz | base64 -w0)"
    ```
 
    Then force the reinstall, which npm otherwise skips when the version string
@@ -177,21 +177,22 @@ procedure. Against the branch:
 
 The positive path has run end to end: the fork attests, and
 `npm run check:prebuild-provenance` passes against a real attestation rather
-than only in its failing direction. One thing is still worth watching on the
-pull request that arms a marker, because it is the one credential the procedure
-above cannot exercise:
+than only in its failing direction. Two things are still worth watching on the
+pull request that arms a marker:
 
-- **The verifier passes in CI, not only locally.** CI authenticates with the
-  workflow's `GITHUB_TOKEN` against the fork's attestations, which is a
-  different credential from a maintainer's `gh` login. The fork's attestation
-  endpoint answers an unauthenticated request while both repositories are
-  public, so any token carrying public read suffices; a fork turned private
-  would be where this breaks.
+- **The verifier passes in CI, not only locally**, which only CI's own run can
+  exercise. CI authenticates with the workflow's `GITHUB_TOKEN` against the
+  fork's attestations, which is a different credential from a maintainer's
+  `gh` login. The fork's attestation endpoint answers an unauthenticated
+  request while both repositories are public, so any token carrying public
+  read suffices; a fork turned private would be where this breaks.
 
-The `--source-ref` recorded must also match what the fork's default branch is
-called. It is checked independently of `--source-digest`: an attestation minted
-on a branch fails a `refs/heads/master` verification even when the two refs
-point at the same commit, and the failure looks like tampering.
+- **The `--source-ref` recorded matches what the fork's default branch is
+  called.** It is checked independently of `--source-digest`: an attestation
+  minted on a branch fails a `refs/heads/master` verification even when the
+  two refs point at the same commit -- a fast-forwarded branch run still
+  fails this way even though its commit already sits on `master` -- and the
+  failure looks like tampering.
 
 If either surprises, the correct response is to leave the marker disarmed and
 fix the mismatch rather than to weaken the invocation.
