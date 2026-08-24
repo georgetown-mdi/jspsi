@@ -207,6 +207,19 @@ describe("the offline binding between the marker and the bytes", () => {
     expect(result.ok).toBe(false);
     expect(result.problems.join("\n")).toMatch(/not valid JSON/);
   });
+
+  it("fails on a disarmed marker with a malformed shape", () => {
+    // The shape gate runs ahead of the arming branch: a disarmed marker still
+    // fails on a bad field, rather than passing because attestation_expected
+    // is false. Pins that ordering so a refactor moving the shape check inside
+    // the armed branch goes red.
+    const result = check({
+      marker: { ...DISARMED, producer_repository: "OpenMinedPSI" },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.armed).toBe(false);
+    expect(result.problems.join("\n")).toMatch(/producer_repository/);
+  });
 });
 
 describe("reading the marker", () => {
@@ -270,8 +283,11 @@ describe("the verify argument vector", () => {
   });
 
   it("names no flag `gh attestation verify` does not define", () => {
-    // Pinned against the flag list `gh attestation verify --help` prints, so a
-    // typo or an invented flag fails here instead of at the first armed run.
+    // The defined set below is a second hand-written literal, not a read of
+    // `gh attestation verify --help`: it catches a typo or an invented flag in
+    // verifyArgv, but cannot notice gh renaming or removing a flag out from
+    // under it. The real tool is what decides that, at the first armed run
+    // (docs/PREBUILD_REVENDOR.md, "First armed run").
     const defined = new Set([
       "--repo",
       "--signer-workflow",
@@ -313,5 +329,15 @@ describe("the committed marker", () => {
     );
     const sidecar = readFileSync(join(libDir, name + ".sha256"), "utf8");
     expect(sidecar.split(/\s+/)[0]).toBe(marker.sha256);
+  });
+
+  it("names the fork as producer, under the fork's native-prebuilds workflow", () => {
+    const marker = JSON.parse(
+      readFileSync(join(libDir, name + ".provenance.json"), "utf8"),
+    );
+    expect(marker.producer_repository).toBe("georgetown-mdi/OpenMinedPSI");
+    expect(marker.signer_workflow).toBe(
+      "georgetown-mdi/OpenMinedPSI/.github/workflows/native-prebuilds.yml",
+    );
   });
 });
