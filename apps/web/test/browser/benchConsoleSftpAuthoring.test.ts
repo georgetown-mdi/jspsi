@@ -296,33 +296,20 @@ async function resetMountedBench(): Promise<void> {
 const PROBE_RESULT_MARKER = "probe-result";
 const PROBE_ANNOUNCEMENT_MARKER = "probe-announcement";
 
-/** The one element carrying `data-testid="<testId>"`, or a failure naming the
- * marker: a region resolved from an absent or duplicated marker is not the
- * region the assertion over it means, so it stops rather than scanning
- * whatever else the document offers. */
-function markedElement(testId: string): HTMLElement {
-  const marked = document.querySelectorAll<HTMLElement>(
-    `[data-testid="${testId}"]`,
-  );
-  if (marked.length !== 1)
-    throw new Error(
-      `Expected exactly one element marked data-testid="${testId}", found ` +
-        `${marked.length}; the assertions scoped to that region resolve it ` +
-        "from this marker.",
-    );
-  return marked[0];
-}
-
 /** The probe's whole visible result: the trigger, the outcome surface, and the
- * peer-bytes field when there is one. */
+ * peer-bytes field when there is one. Resolved through the page locator, which
+ * throws on an absent or duplicated marker: a region resolved that way is not
+ * the region the assertion over it means, so it stops rather than scanning
+ * whatever else the document offers. */
 function probeResult(): HTMLElement {
-  return markedElement(PROBE_RESULT_MARKER);
+  return page.getByTestId(PROBE_RESULT_MARKER).element() as HTMLElement;
 }
 
 /** The probe's one announcing channel: the stable polite region mounted in every
- * phase, first in the result. */
+ * phase, first in the result. Resolved through the page locator (see
+ * {@link probeResult}). */
 function probeAnnouncement(): HTMLElement {
-  return markedElement(PROBE_ANNOUNCEMENT_MARKER);
+  return page.getByTestId(PROBE_ANNOUNCEMENT_MARKER).element() as HTMLElement;
 }
 
 /** Everything an assistive technology reads out of a live region: its text, plus
@@ -1051,9 +1038,10 @@ describe("console SFTP connection authoring", () => {
     result.removeAttribute("data-testid");
     try {
       // With the anchor gone there is no quieter region to fall back to: the
-      // scan stops and names the marker it could not resolve.
+      // scan stops on the Locator's own zero-match error, which names the
+      // marker it could not resolve.
       expect(() => firstPartyTextAfterPeerBytes(peerBytes)).toThrow(
-        'data-testid="probe-result"',
+        "getByTestId('probe-result')",
       );
     } finally {
       result.setAttribute("data-testid", PROBE_RESULT_MARKER);
