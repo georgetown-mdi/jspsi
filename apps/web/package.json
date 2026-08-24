@@ -38,7 +38,7 @@
     "@tanstack/react-router-devtools": "^1.167.1",
     "@tanstack/react-start": "^1.168.45",
     "cors": "^2.8.5",
-    "env-schema": "^7.0.0",
+    "env-schema": "^8.0.0",
     "loglevel": "^1.9.2",
     "peerjs": "1.5.5",
     "peerjs-js-binarypack": "2.1.0",
