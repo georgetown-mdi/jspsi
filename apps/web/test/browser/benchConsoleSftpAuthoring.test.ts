@@ -89,6 +89,21 @@ interface StubOptions {
    * carrying {@link PROBE_FINGERPRINT}; a `{status, body}` lets a test drive an
    * unreachable/error outcome. */
   probe?: { status?: number; body?: unknown };
+  /** Gates the probe responses wait on, taken in order: the nth probe's response
+   * settles when the nth promise does, so a test can act on the form while a
+   * probe is genuinely in flight (the real one runs for as long as ~15s). A
+   * probe past the end of the list settles immediately. */
+  probeGates?: Array<Promise<void>>;
+}
+
+/** One held-open probe response, standing in for the seconds the real probe
+ * spends reading the server. */
+function createProbeGate(): { promise: Promise<void>; settle: () => void } {
+  let settle = (): void => {};
+  const promise = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  return { promise, settle };
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. PUT /api/jobs/sftp
@@ -99,6 +114,7 @@ function stubJobApi(options: StubOptions = {}): {
   const captured: Array<CapturedRequest> = [];
   const realFetch = window.fetch.bind(window);
   let sftp: unknown = options.sftp ?? { configured: false };
+  let probeCount = 0;
 
   const jsonResponse = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
@@ -145,11 +161,14 @@ function stubJobApi(options: StubOptions = {}): {
             keyType: "ssh-ed25519",
           },
         };
-        return Promise.resolve(
+        const respond = () =>
           probe.body !== undefined
             ? jsonResponse(probe.body, probe.status ?? 200)
-            : new Response(null, { status: probe.status ?? 200 }),
-        );
+            : new Response(null, { status: probe.status ?? 200 });
+        const gate = options.probeGates?.[probeCount++];
+        return gate !== undefined
+          ? gate.then(respond)
+          : Promise.resolve(respond());
       }
       if (url === "/api/jobs/sftp") {
         if (method === "PUT") {
@@ -257,6 +276,7 @@ async function probeWithExcerpt(excerpt: string): Promise<HTMLTextAreaElement> {
   await expect
     .element(page.getByText("HTTP response", { exact: false }))
     .toBeInTheDocument();
+  await flushPendingUpdates();
   return document.querySelector(`.${styles.peerBytes}`) as HTMLTextAreaElement;
 }
 
@@ -267,6 +287,20 @@ async function resetMountedBench(): Promise<void> {
   app.unmount();
   window.localStorage.clear();
   vi.unstubAllGlobals();
+}
+
+/** The probe's whole visible result: the trigger, the outcome surface, and the
+ * peer-bytes field when there is one. */
+function probeResult(): HTMLElement {
+  return document.querySelector('[data-testid="probe-result"]') as HTMLElement;
+}
+
+/** The probe's one announcing channel: the stable polite region mounted in every
+ * phase, first in the result. */
+function probeAnnouncement(): HTMLElement {
+  return document.querySelector(
+    '[data-testid="probe-announcement"]',
+  ) as HTMLElement;
 }
 
 /** Everything an assistive technology reads out of a live region: its text, plus
@@ -684,10 +718,9 @@ describe("console SFTP connection authoring", () => {
       .element(page.getByText("Could not read the fingerprint"))
       .toBeInTheDocument();
     // Nothing to attribute: an undiagnosed failure grows no peer-bytes field, so
-    // the alert is the whole result and its announced form is first-party
-    // throughout.
-    const firstPartyOnly = document.querySelector('[role="alert"]');
-    expect(firstPartyOnly?.textContent).toContain(
+    // the whole result is first-party and the recovery step is in it.
+    const firstPartyOnly = probeResult();
+    expect(firstPartyOnly.textContent).toContain(
       "You can still paste the fingerprint above.",
     );
     expect(document.querySelector(`.${styles.peerBytes}`)).toBeNull();
@@ -708,13 +741,48 @@ describe("console SFTP connection authoring", () => {
     expect(body.hostKeyFingerprint).toBe(FINGERPRINT);
   });
 
-  test("the failure alert takes focus, carrying a keyboard user to the outcome", async () => {
+  test("the failure settle repairs focus back to the trigger it disabled", async () => {
     stubJobApi({
       probe: { status: 200, body: { status: "unreachable" } },
     });
     app.render(createElement(InviterBench));
     await reachReviewCreate();
     await openFormForProbe();
+
+    const trigger = page.getByRole("button", {
+      name: "Read the fingerprint from the server",
+    });
+    await trigger.click();
+    await expect
+      .element(page.getByText("Could not read the fingerprint"))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+    // The probe disables the trigger while it runs, so the operator's focus
+    // anchor is destroyed for the duration; the settle repairs it rather than
+    // moving focus to announce (the polite region does that, below).
+    expect(document.activeElement).toBe(trigger.element());
+    expect(probeAnnouncement().textContent).toContain(
+      "Reading the fingerprint failed.",
+    );
+  });
+
+  test("the probe announces from one stable region, and nothing else announces", async () => {
+    stubJobApi({
+      probe: { status: 200, body: { status: "unreachable" } },
+    });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await openFormForProbe();
+
+    // Mounted ahead of the outcome and empty before it: a settle reaches
+    // assistive tech as a change to a region already being observed, never as a
+    // freshly inserted node.
+    const region = probeAnnouncement();
+    expect(region.getAttribute("role")).toBe("status");
+    expect(region.getAttribute("aria-live")).toBe("polite");
+    expect(region.getAttribute("aria-atomic")).toBe("true");
+    expect(region.textContent).toBe("");
+    expect(probeResult().firstElementChild).toBe(region);
 
     await page
       .getByRole("button", { name: "Read the fingerprint from the server" })
@@ -723,14 +791,133 @@ describe("console SFTP connection authoring", () => {
       .element(page.getByText("Could not read the fingerprint"))
       .toBeInTheDocument();
     await flushPendingUpdates();
-    // The trigger the operator pressed stays mounted, so nothing carries them to
-    // the failure but this move -- which rests on the alert forwarding its ref
-    // to the focusable root, something a dependency could stop doing silently.
-    const alert = document.querySelector('[role="alert"]')!;
-    expect(alert.contains(document.activeElement)).toBe(true);
+
+    // The same node, never remounted, carries the console's own sentence.
+    expect(probeAnnouncement()).toBe(region);
+    expect(region.textContent).toContain("Reading the fingerprint failed.");
+    // One channel announces: within the probe result nothing else carries live
+    // semantics, and the visible alert is not one (Mantine's Alert defaults to
+    // role="alert", so this also holds the explicit override in place).
+    expect(Array.from(probeResult().querySelectorAll("[aria-live]"))).toEqual([
+      region,
+    ]);
+    expect(probeResult().querySelector('[role="alert"]')).toBeNull();
+    // What the override displaces is the default; the presentational role it
+    // names does not itself apply, because ARIA's presentational-role-conflict
+    // resolution ignores it on an element carrying global aria-* attributes --
+    // which Mantine sets on this root. That premise is pinned here so the
+    // reasoning recorded around it cannot outlive it.
+    const alert = probeResult().querySelector('[role="presentation"]');
+    expect(alert).not.toBeNull();
+    expect(
+      Array.from(alert?.attributes ?? [])
+        .map((attribute) => attribute.name)
+        .filter((name) => name.startsWith("aria-")),
+    ).not.toEqual([]);
   });
 
-  test("a diagnosed peer answer keeps the peer's bytes out of the announced alert and last in the result", async () => {
+  test("the presented result announces from the same region and is named for the focus it takes", async () => {
+    stubJobApi();
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await openFormForProbe();
+
+    const region = probeAnnouncement();
+    await page
+      .getByRole("button", { name: "Read the fingerprint from the server" })
+      .click();
+    await expect
+      .element(page.getByText("The server presented this fingerprint"))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+
+    expect(probeAnnouncement()).toBe(region);
+    expect(region.textContent).toContain("The server presented a fingerprint.");
+    // The presented panel replaces the trigger the operator pressed, so its focus
+    // move is repair -- and what focus lands on names itself from its own visible
+    // lead line rather than being an anonymous div.
+    const panel = page
+      .getByRole("group", { name: "The server presented this fingerprint:" })
+      .element();
+    expect(document.activeElement).toBe(panel);
+    expect(panel.getAttribute("aria-live")).toBeNull();
+    expect(Array.from(probeResult().querySelectorAll("[aria-live]"))).toEqual([
+      region,
+    ]);
+  });
+
+  test("an operator who moved on during the probe is not yanked back", async () => {
+    const gate = createProbeGate();
+    stubJobApi({
+      probe: { status: 200, body: { status: "unreachable" } },
+      probeGates: [gate.promise],
+    });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await openFormForProbe();
+
+    const trigger = page.getByRole("button", {
+      name: "Read the fingerprint from the server",
+    });
+    await trigger.click();
+    // The premise the focus repair rests on: the trigger is disabled while the
+    // probe is in flight, so the operator's anchor is gone for the duration.
+    await expect.element(trigger).toBeDisabled();
+    // The probe runs for as long as ~15s; the operator carries on filling the
+    // form in the meantime.
+    const fingerprintField = page.getByLabelText("Server identity fingerprint");
+    fingerprintField.element().focus();
+
+    gate.settle();
+    await expect
+      .element(page.getByText("Could not read the fingerprint"))
+      .toBeInTheDocument();
+    await flushPendingUpdates();
+    // Their place is kept; the polite region is what tells them the probe
+    // settled.
+    expect(document.activeElement).toBe(fingerprintField.element());
+    expect(probeAnnouncement().textContent).toContain(
+      "Reading the fingerprint failed.",
+    );
+  });
+
+  test("a second identical failure announces again, transiting the in-flight sentence", async () => {
+    const gates = [createProbeGate(), createProbeGate()];
+    stubJobApi({
+      probe: { status: 200, body: { status: "unreachable" } },
+      probeGates: gates.map((gate) => gate.promise),
+    });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await openFormForProbe();
+
+    const region = probeAnnouncement();
+    const announced = page.getByTestId("probe-announcement");
+    const trigger = page.getByRole("button", {
+      name: "Read the fingerprint from the server",
+    });
+
+    // Setting a live region to the text it already holds is not a change, so a
+    // second identical outcome announces only because the region transits a
+    // distinct value in between. Both probes settle the same way; each one is
+    // held open long enough to measure that the in-flight sentence lands in the
+    // region before the failure sentence returns to it.
+    for (const gate of gates) {
+      await trigger.click();
+      await expect
+        .element(announced)
+        .toHaveTextContent("Reading the fingerprint from the server");
+      gate.settle();
+      await expect
+        .element(announced)
+        .toHaveTextContent("Reading the fingerprint failed.");
+    }
+    // Every transit was a change to the node assistive tech is already observing,
+    // not a remount.
+    expect(probeAnnouncement()).toBe(region);
+  });
+
+  test("a diagnosed peer answer keeps the peer's bytes out of the announced region and last in the result", async () => {
     // An excerpt that mimics the console's own voice AND writes the attribution
     // wording a screen reader might hear around it: printable ASCII throughout,
     // so escaping touches none of it and nothing about the separation can rest
@@ -749,14 +936,17 @@ describe("console SFTP connection authoring", () => {
 
     // Containment: the announced region is a sibling of the field, not its
     // ancestor, so nothing a peer chose is in the run that is read out.
-    const alert = document.querySelector('[role="alert"]')!;
-    expect(alert.contains(peerBytes)).toBe(false);
-    expect(announcedTextOf(alert)).not.toContain(excerpt);
-    expect(announcedTextOf(alert)).not.toContain("Paste this fingerprint");
-    // What the announcement does carry: the console's diagnosis and its recovery
-    // step, which sits ahead of the peer's bytes rather than after them.
-    expect(alert.textContent).toContain("The first bytes it sent are shown");
-    expect(alert.textContent).toContain(
+    const region = probeAnnouncement();
+    expect(region.contains(peerBytes)).toBe(false);
+    expect(announcedTextOf(region)).not.toContain(excerpt);
+    expect(announcedTextOf(region)).not.toContain("Paste this fingerprint");
+    // What the announcement carries instead is the console's own settle
+    // sentence, and the diagnosis plus the recovery step stay on the visible
+    // result, ahead of the peer's bytes (terminality, below).
+    expect(region.textContent).toContain("Reading the fingerprint failed.");
+    const result = probeResult();
+    expect(result.textContent).toContain("The first bytes it sent are shown");
+    expect(result.textContent).toContain(
       "You can still paste the fingerprint above.",
     );
 
@@ -764,7 +954,6 @@ describe("console SFTP connection authoring", () => {
     // probe result, so even an assistive technology that flattens the result to
     // one run ends on them and cannot resume in the console's voice. Asserted as
     // the DOM-order property rather than against today's sentences.
-    const result = alert.parentElement!;
     expect(result.contains(peerBytes)).toBe(true);
     const following = textNodesOf(result).filter(
       (node) =>
