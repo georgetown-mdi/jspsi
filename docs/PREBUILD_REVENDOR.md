@@ -102,6 +102,10 @@ run's commit. Then, from a branch in this repository:
    echo "sha512-$(openssl dgst -sha512 -binary lib/openmined-psi.js-<version>.tgz | openssl base64 -A)"
    ```
 
+   `npm run test:scripts` fails while that field and the committed tarball
+   disagree, naming both values, so a skipped or mistyped edit is caught here
+   rather than in whatever the next warm-cache install loads.
+
    Then force the reinstall, which npm otherwise skips when the version string
    did not change:
 
@@ -154,7 +158,9 @@ procedure. Against the branch:
 2. **Confirm the lockfile pins the same bytes.** `package-lock.json`'s
    `integrity` for `node_modules/@openmined/psi.js` must be the sha512 of the
    tarball in the diff. It is what npm installs from, so a stale value leaves
-   the sidecar and the attestation describing bytes that never load.
+   the sidecar and the attestation describing bytes that never load. CI's `npm
+   run test:scripts` holds that pair against each other offline, so this step is
+   reading a green check rather than hashing the tarball by hand.
 
 3. **Verify provenance yourself**, by running `npm run
    check:prebuild-provenance` or the `gh attestation verify` invocation above.
