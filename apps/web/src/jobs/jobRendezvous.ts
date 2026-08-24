@@ -334,25 +334,37 @@ function legsShareADirectory(
 
 /**
  * The warning for a pair compared without one or both legs' real paths, naming the
- * variables whose mounts could not be resolved, or undefined when both resolved.
+ * variable(s) whose mounts could not be resolved, or undefined when both resolved.
  * It reports a check that ran narrower than it means to rather than a fault in the
  * operator's layout, so it names the recovery for the resolution itself.
+ *
+ * A single unresolved leg is worded narrower than a pair of them: the other leg's
+ * real path still took part in the comparison, so only a symlink sitting on the
+ * unresolved side would go uncaught, not a symlink anywhere in the pair.
  */
 function describeUnresolvedLegs(
   inbound: RendezvousLegPaths,
   outbound: RendezvousLegPaths,
 ): string | undefined {
-  const unresolved = [
-    ...(inbound.canonicalized ? [] : [JOB_RENDEZVOUS_DIR_ENV]),
-    ...(outbound.canonicalized ? [] : [JOB_RENDEZVOUS_OUTBOUND_DIR_ENV]),
-  ];
-  if (unresolved.length === 0) return undefined;
+  if (inbound.canonicalized && outbound.canonicalized) return undefined;
+  const recovery =
+    "Give the console read access to every folder on the way to the mount " +
+    "and restart the appliance.";
+  if (!inbound.canonicalized && !outbound.canonicalized)
+    return (
+      `The real path of ${JOB_RENDEZVOUS_DIR_ENV} and ${JOB_RENDEZVOUS_OUTBOUND_DIR_ENV} ` +
+      "could not be read, so the inbound and outbound rendezvous directories " +
+      "were compared as configured and a symlink making them one directory " +
+      `would not be caught. ${recovery}`
+    );
+  const [unresolvedVar, unresolvedLeg, resolvedLeg] = inbound.canonicalized
+    ? [JOB_RENDEZVOUS_OUTBOUND_DIR_ENV, "outbound", "inbound"]
+    : [JOB_RENDEZVOUS_DIR_ENV, "inbound", "outbound"];
   return (
-    `The real path of ${unresolved.join(" and ")} could not be read, so the ` +
-    "inbound and outbound rendezvous directories were compared as configured " +
-    "and a symlink making them one directory would not be caught. Give the " +
-    "console read access to every folder on the way to the mount and restart " +
-    "the appliance."
+    `The real path of ${unresolvedVar} could not be read, so the ` +
+    `${unresolvedLeg} rendezvous directory was compared only as configured; ` +
+    `the ${resolvedLeg} leg's real path still applied, so only a symlink on ` +
+    `the ${unresolvedLeg} side would go uncaught. ${recovery}`
   );
 }
 

@@ -512,6 +512,15 @@ describe("the split rendezvous a second mount provisions", () => {
     expect(provisioning.unresolvedLegWarning).not.toContain(
       "JOB_RENDEZVOUS_DIR",
     );
+    expect(provisioning.unresolvedLegWarning).toContain(
+      "outbound rendezvous directory was compared only as configured",
+    );
+    expect(provisioning.unresolvedLegWarning).toContain(
+      "the inbound leg's real path still applied",
+    );
+    expect(provisioning.unresolvedLegWarning).toContain(
+      "only a symlink on the outbound side would go uncaught",
+    );
   });
 
   test("an unreadable leg is still held to the configured-path comparison", () => {
@@ -527,6 +536,9 @@ describe("the split rendezvous a second mount provisions", () => {
     expect(provisioning.problem).toContain("one is inside the other");
     expect(provisioning.unresolvedLegWarning).toContain(
       "JOB_RENDEZVOUS_DIR and JOB_RENDEZVOUS_OUTBOUND_DIR",
+    );
+    expect(provisioning.unresolvedLegWarning).toContain(
+      "inbound and outbound rendezvous directories were compared as configured",
     );
   });
 
