@@ -211,7 +211,9 @@ export function inspect(root) {
   const { fieldSet, keySet, unreadable } = readRuleSetsFrom(root);
   for (const { declaration, reason } of unreadable) {
     blocked.push(
-      `${RULE_SET_SOURCE}'s \`${declaration}\` could not be read: ${reason}. A set this check cannot read is one it cannot pin.`,
+      declaration === RULE_SET_SOURCE
+        ? `${RULE_SET_SOURCE} could not be read: ${reason}. A set this check cannot read is one it cannot pin.`
+        : `${RULE_SET_SOURCE}'s \`${declaration}\` could not be read: ${reason}. A set this check cannot read is one it cannot pin.`,
     );
   }
 

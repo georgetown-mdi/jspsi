@@ -181,9 +181,26 @@ export function readRuleSets(source) {
   };
 }
 
-/** {@link readRuleSets} over the tree at `root`. */
+/**
+ * {@link readRuleSets} over the tree at `root`. A source file the tree does not
+ * carry at all -- reachable through a caller's `--root` pointed at a tree
+ * missing it -- is unreadable the same way a bad declaration is, under
+ * {@link RULE_SET_SOURCE} rather than a declaration name, so a caller's
+ * `unreadable`-to-`blocked` mapping covers this failure with no separate catch
+ * of its own.
+ */
 export function readRuleSetsFrom(root) {
-  return readRuleSets(readFileSync(resolve(root, RULE_SET_SOURCE), "utf8"));
+  let source;
+  try {
+    source = readFileSync(resolve(root, RULE_SET_SOURCE), "utf8");
+  } catch (error) {
+    return {
+      fieldSet: undefined,
+      keySet: undefined,
+      unreadable: [{ declaration: RULE_SET_SOURCE, reason: error.message }],
+    };
+  }
+  return readRuleSets(source);
 }
 
 /**

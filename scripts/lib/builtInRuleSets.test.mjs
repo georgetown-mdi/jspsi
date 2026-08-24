@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import {
   FIELD_SET_DECLARATIONS,
@@ -11,6 +11,8 @@ import {
   readRuleSetsFrom,
 } from "./builtInRuleSets.mjs";
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -153,6 +155,23 @@ function build() {
     expect(fieldSet.name).toBe("baseline-pii");
     expect(keySet.name).toBe("hmis-keys");
     expect(keySet.content.length).toBeGreaterThan(0);
+  });
+
+  it("fails a tree that does not carry the source at all, naming the file", () => {
+    const root = mkdtempSync(resolve(tmpdir(), "psilink-rule-set-source-"));
+    try {
+      const { fieldSet, keySet, unreadable } = readRuleSetsFrom(root);
+      expect(fieldSet).toBeUndefined();
+      expect(keySet).toBeUndefined();
+      expect(unreadable).toEqual([
+        {
+          declaration: RULE_SET_SOURCE,
+          reason: expect.stringContaining("ENOENT"),
+        },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

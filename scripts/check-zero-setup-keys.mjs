@@ -96,9 +96,10 @@ export function keyFieldViolations({ fieldSet, keySet }) {
  */
 export function inspect(root) {
   const { fieldSet, keySet, unreadable } = readRuleSetsFrom(root);
-  const blocked = unreadable.map(
-    ({ declaration, reason }) =>
-      `${RULE_SET_SOURCE}'s \`${declaration}\` could not be read: ${reason}. A set this check cannot read is one it cannot hold anything to.`,
+  const blocked = unreadable.map(({ declaration, reason }) =>
+    declaration === RULE_SET_SOURCE
+      ? `${RULE_SET_SOURCE} could not be read: ${reason}. A set this check cannot read is one it cannot hold anything to.`
+      : `${RULE_SET_SOURCE}'s \`${declaration}\` could not be read: ${reason}. A set this check cannot read is one it cannot hold anything to.`,
   );
   return {
     fieldSet,

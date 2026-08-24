@@ -352,6 +352,17 @@ describe("the check driven end to end", () => {
     expect(stderr).toContain(KEY_SET_DECLARATIONS.version);
   });
 
+  it("fails a --root missing the source file rather than crashing", () => {
+    const root = mkdtempSync(resolve(tmpdir(), "psilink-set-versions-"));
+    temporaryRoots.push(root);
+    const { status, stderr } = runCheck(root);
+    expect(status).toBe(1);
+    expect(stderr).toContain("Built-in rule set version check could not run");
+    expect(stderr).toContain(RULE_SET_SOURCE);
+    expect(stderr).toContain("could not be read");
+    expect(stderr).not.toMatch(/\n\s+at /);
+  });
+
   it("refuses a --root it was handed no value for", () => {
     const { status } = (() => {
       try {

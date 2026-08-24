@@ -209,6 +209,17 @@ const ${KEY_SET_DECLARATIONS.content} = buildDefaultKeys();
     expect(inspect(root).violations).toEqual([]);
   });
 
+  it("fails a --root missing the source file rather than crashing", () => {
+    const root = mkdtempSync(resolve(tmpdir(), "psilink-zero-setup-keys-"));
+    temporaryRoots.push(root);
+    const { status, stderr } = runCheck(root);
+    expect(status).toBe(1);
+    expect(stderr).toContain("Zero-setup key-field check could not run");
+    expect(stderr).toContain(RULE_SET_SOURCE);
+    expect(stderr).toContain("could not be read");
+    expect(stderr).not.toMatch(/\n\s+at /);
+  });
+
   it("refuses a --root it was handed no value for", () => {
     const { status } = (() => {
       try {
