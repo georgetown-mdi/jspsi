@@ -205,6 +205,24 @@ jobs:
       # checkout has no tags to read one from.
       - name: Protocol version bump
         run: npm run check:protocol-version-bump
+      # A zero-setup exchange authors no linkage terms: each party derives them
+      # from its own file, and the built-in keys work with no authoring only
+      # because every one of them is built from the guaranteed-minimum PII both
+      # parties are sure to bring -- the built-in field set. This holds the keys
+      # to that set, so a default key over a field outside it fails here instead
+      # of stranding the party whose file does not carry the field, at run time,
+      # with nothing naming the cause.
+      - name: Zero-setup key fields
+        run: npm run check:zero-setup-keys
+      # The built-in field set and key set each carry a version, and the recorded
+      # validation attaches to a name and a version together -- so an edited set
+      # carrying the old version leaves the design note describing rules nobody
+      # ran. That obligation was prose, which nothing fails on when it is
+      # forgotten. This digests each set's declared content and holds it to the
+      # pin scripts/built-in-set-pins.json records for the declared version,
+      # cascade order included: the order is the order the keys are applied in.
+      - name: Built-in rule set versions
+        run: npm run check:built-in-set-versions
       # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
       # .mjs with no server or Docker dependency, so a stock runner suffices. This
       # is the repo-wide non-path-filtered gate that guarantees the suite is always
