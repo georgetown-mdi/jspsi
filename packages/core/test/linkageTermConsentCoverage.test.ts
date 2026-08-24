@@ -175,9 +175,6 @@ describe("the linkage-term consent classification", () => {
       consentRepresentationProbes({ identity: shapedOnly }),
     ).not.toThrow();
 
-    // The builder resolves a pair's copy as the shape's or the entry's, so the
-    // entry-level list of an entry carrying both would reach no surface -- copy
-    // the probe claims to pin, measured nowhere.
     const buildFromBothLevels = () =>
       consentRepresentationProbes({ identity: pinnedAtBothLevels });
     expect(buildFromBothLevels).toThrow("identity declares shapes");
