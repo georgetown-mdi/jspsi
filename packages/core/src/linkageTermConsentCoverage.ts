@@ -84,7 +84,9 @@ export interface ConsentRelevantTerm {
    * absent-for-base rule.
    *
    * Left unset by a field measured under {@link shapes}, which carries its copy
-   * per shape instead.
+   * per shape instead. Declaring both is refused rather than merged: the pair
+   * builder resolves one level or the other, so the entry-level list would be
+   * dropped from measurement.
    */
   requiredVariantCopy?: ReadonlyArray<string>;
   /**
@@ -720,13 +722,27 @@ export interface ConsentRepresentationProbe {
  * terms document -- a renamed field with no element updated to reference it, a
  * setting the schema forbids alongside another -- throws here instead of
  * rendering into a difference that would prove nothing about the field.
+ *
+ * `classification` is the table to build from, the live one unless a caller names
+ * another: the structural guards here are what every suite reading the probes
+ * runs, so exercising one takes a table that breaks it.
  */
-export function consentRepresentationProbes(): Array<ConsentRepresentationProbe> {
+export function consentRepresentationProbes(
+  classification: Record<
+    string,
+    LinkageTermClassification
+  > = LINKAGE_TERM_CONSENT_CLASSIFICATION,
+): Array<ConsentRepresentationProbe> {
   const probes: Array<ConsentRepresentationProbe> = [];
-  for (const [path, entry] of Object.entries(
-    LINKAGE_TERM_CONSENT_CLASSIFICATION,
-  )) {
+  for (const [path, entry] of Object.entries(classification)) {
     if (entry.classification !== "consent-relevant") continue;
+    if (entry.shapes !== undefined && entry.requiredVariantCopy !== undefined)
+      throw new Error(
+        `${path} declares shapes and an entry-level requiredVariantCopy: a ` +
+          `field measured under shapes pins its copy per shape, so the ` +
+          `entry-level list would go unmeasured. Move each sentence onto the ` +
+          `shape whose variant owes it.`,
+      );
     const prepared =
       entry.prepare?.(CONSENT_PROBE_TERMS) ?? CONSENT_PROBE_TERMS;
     const shapes: ReadonlyArray<ConsentProbeShape | undefined> =

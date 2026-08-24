@@ -8,6 +8,7 @@ import {
 import { declaredPositions } from "./utils/declaredPositions.js";
 
 import type { LinkageTerms } from "../src/config/linkageTerms.js";
+import type { ConsentRelevantTerm } from "../src/linkageTermConsentCoverage.js";
 
 /**
  * Every property path {@link LinkageTerms} and the structs nested under it
@@ -150,6 +151,37 @@ describe("the linkage-term consent classification", () => {
         differingPositions(probe.base, probe.variant, declared),
         probe.label,
       ).toEqual([probe.path]);
+  });
+
+  test("refuses an entry pinning required copy at both levels", () => {
+    const shapedOnly: ConsentRelevantTerm = {
+      classification: "consent-relevant",
+      reason: "A fixture entry, classified to exercise the guard alone.",
+      shapes: [
+        {
+          name: "one shape",
+          requiredVariantCopy: ["The sentence this shape's variant owes."],
+          forbiddenVariantCopy: [],
+        },
+      ],
+      vary: (terms) => ({ ...terms, identity: "Probe State Education Agency" }),
+    };
+    const pinnedAtBothLevels: ConsentRelevantTerm = {
+      ...shapedOnly,
+      requiredVariantCopy: ["A sentence no shape carries."],
+    };
+
+    expect(() =>
+      consentRepresentationProbes({ identity: shapedOnly }),
+    ).not.toThrow();
+
+    // The builder resolves a pair's copy as the shape's or the entry's, so the
+    // entry-level list of an entry carrying both would reach no surface -- copy
+    // the probe claims to pin, measured nowhere.
+    const buildFromBothLevels = () =>
+      consentRepresentationProbes({ identity: pinnedAtBothLevels });
+    expect(buildFromBothLevels).toThrow("identity declares shapes");
+    expect(buildFromBothLevels).toThrow("pins its copy per shape");
   });
 
   test("pins a field measured under several shapes to a distinct label each", () => {
