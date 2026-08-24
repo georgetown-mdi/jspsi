@@ -308,11 +308,11 @@ export async function validateInvite(params: {
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;
     // A non-positive accept-timeout is a pure usage error; reject it before any
-    // filesystem probe or connection construction (it feeds peerTimeout below).
-    // The CLI handler already rejects a non-positive or malformed value when it
-    // parses the flag (durationFlagSeconds -> parseDurationFlag -> parseDuration),
-    // so this is unreachable from the command line; it is kept as an independent
-    // guard because validateInvite is exported and unit-tested with a raw numeric
+    // filesystem probe or connection construction. The CLI handler already
+    // rejects a non-positive or malformed value when it parses the flag
+    // (durationFlagSeconds -> parseDurationFlag -> parseDuration), so this is
+    // unreachable from the command line; it is kept as an independent guard
+    // because validateInvite is exported and unit-tested with a raw numeric
     // acceptTimeout that does not pass through that parse.
     if (acceptTimeout <= 0)
       throw new UsageError(

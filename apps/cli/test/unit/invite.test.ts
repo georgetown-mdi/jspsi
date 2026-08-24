@@ -3020,6 +3020,41 @@ test("handler: online hands the accept budget to the run and reports what was sa
   }
 });
 
+test("handler: a webrtc online invite reports the webrtc peer-budget defaults, not the file-sync ones", async () => {
+  // The call site that picks the notice's channel reads
+  // ready.connection.channel; the sibling test above exercises it only over
+  // sftp://, so a regression hard-coding that channel there would still pass
+  // the suite while telling a webrtc operator to expect the file-sync hour at
+  // a rendezvous that gives up after ten minutes.
+  const { input, options } = onlineFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockImplementation(async () => ({}));
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: ["wss://peers.example.org/psi", input],
+      "config-file": options.configFile,
+      "key-file": options.keyFile,
+      "log-level": "info",
+      record: false,
+    } as unknown as Arguments);
+    const stderr = stdio.stderrWrites.join("");
+    expect(exit).not.toHaveBeenCalled();
+    expect(stderr).toMatch(secondsFigure(DEFAULT_RENDEZVOUS_TIMEOUT_MS));
+    expect(stderr).toMatch(secondsFigure(DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS));
+    expect(stderr).not.toContain("file-sync");
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
+  }
+});
+
 test("handler: a failed config write reports no saved peer budget", async () => {
   // Nothing was written, so the summary that names what the file carries must
   // not run at all: the honest report is the write failure the outcome line
