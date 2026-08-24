@@ -43,7 +43,7 @@ Linkage terms are verified by both parties at the start of every exchange. After
 
 Not every exchange authors its own linkage fields and keys. A zero-setup exchange, an invitation minted on the web app's quick path, and the template `psilink init` writes all fill them in for you, from the product's built-in rule set: **`baseline-pii`, version `1.0.0`**. It is also where the web app's Advanced invite path starts, before you edit the keys.
 
-The set declares five linkage fields -- `ssn`, `ssn4`, `first_name`, `last_name`, and `date_of_birth` -- and fourteen linkage keys built from them, applied in the order the set lists them. It is the answer to "which rules did this linkage match on" for any exchange that did not author its own.
+The set declares five linkage fields -- `ssn`, `ssn4`, `first_name`, `last_name`, and `date_of_birth` -- and fourteen linkage keys built from them, applied in the order the set lists them. For an exchange that did not author its own, the set is an upper bound on the rules that could have run, not the account of which did -- that account is the terms document's, below.
 
 What the name does and does not cover:
 
