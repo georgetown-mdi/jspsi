@@ -50,6 +50,8 @@ import {
   type InviterConnectionConfig,
 } from "../connectionFromUrl";
 import { withWebRTCPeerRole } from "../webrtcPeerRole";
+import { DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS } from "../connection/webrtc/webrtcMessageConnection";
+import { DEFAULT_RENDEZVOUS_TIMEOUT_MS } from "../connection/webrtc/weriftPeer";
 import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
@@ -424,18 +426,21 @@ export async function validateInvite(params: {
     // --accept-timeout is this run's peer budget unconditionally -- it is always
     // set, by the flag or its default -- so a --peer-timeout typed here does not
     // bound the wait it reads as bounding. It is not discarded either: it is the
-    // budget the saved configuration keeps for the runs that follow. Name both
-    // halves rather than leaving the operator to read silence as the budget they
-    // asked for.
+    // budget the configuration keeps for the runs that follow, if that
+    // configuration is written at all -- this warning is raised before the
+    // partner has accepted, so it states the destination conditionally rather
+    // than promising a write a failed save would falsify. Name both halves
+    // rather than leaving the operator to read silence as the budget they asked
+    // for.
     if (options.peerTimeout !== undefined)
       log.warn(
         "--peer-timeout does not bound this online invitation: " +
           `--accept-timeout (${acceptTimeout}s) is this run's peer budget, ` +
           "bounding both the wait for the partner to accept and the peer waits " +
-          "of the exchange that follows. --peer-timeout " +
-          `(${options.peerTimeout}s) is written as ` +
-          "connection.options.peer_timeout_ms in the saved configuration " +
-          "instead, as the budget a later 'psilink exchange' runs on.",
+          "of the exchange that follows. When the configuration is saved, " +
+          `--peer-timeout (${options.peerTimeout}s) is recorded in it as ` +
+          "connection.options.peer_timeout_ms, the budget a later " +
+          "'psilink exchange' runs on.",
       );
 
     // An accept-timeout longer than the token's lifetime would keep waiting at
@@ -915,7 +920,11 @@ export async function handler(argv: Arguments): Promise<void> {
         // what a later recurring run is bounded by.
         if (configWriteError === undefined)
           log.info(
-            persistedPeerBudgetNotice(options.peerTimeout, acceptTimeout),
+            persistedPeerBudgetNotice(
+              options.peerTimeout,
+              acceptTimeout,
+              ready.connection.channel,
+            ),
           );
         return;
       }
@@ -1023,6 +1032,44 @@ function noteSinglePassSelection(
 }
 
 /**
+ * What bounds a later `psilink exchange` run from a configuration recording no
+ * `peer_timeout_ms`, phrased for the channel that run will use.
+ *
+ * Each figure is read from the constant the channel's OWN transport falls back
+ * to: the file-sync pair from core's file-sync budget, webrtc from the two
+ * budgets `webRtcDialFrom` leaves unset. Those constants only coincide in value
+ * (see `connection/webrtc/webrtcMessageConnection.ts`), and the rendezvous half
+ * does not coincide at all, so quoting one transport's number on another's
+ * channel would misreport the wait. A channel with no default named here gets
+ * the reference row rather than a figure belonging to a transport that is not
+ * its own.
+ */
+function absentPeerBudgetDefaults(
+  channel: ConnectionConfig["channel"],
+): string {
+  switch (channel) {
+    case "sftp":
+    case "filedrop":
+      return (
+        "the file-sync transport's default peer budget " +
+        `(${DEFAULT_PEER_TIMEOUT_MS / 1000}s)`
+      );
+    case "webrtc":
+      return (
+        "the webrtc transport's own defaults: " +
+        `${DEFAULT_RENDEZVOUS_TIMEOUT_MS / 1000}s to meet the partner at the ` +
+        `rendezvous, then ${DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS / 1000}s of ` +
+        "peer silence on the open channel"
+      );
+    default:
+      return (
+        "that channel's own transport defaults (the peer_timeout_ms row of " +
+        "docs/EXCHANGE_REFERENCE.md)"
+      );
+  }
+}
+
+/**
  * The line reporting which peer budget the configuration an online invite just
  * saved carries, logged once that configuration is on disk.
  *
@@ -1031,15 +1078,18 @@ function noteSinglePassSelection(
  * versus every later unattended `psilink exchange` -- so persisting the first as
  * the second would hand a recurring run a budget nobody chose for it. What the
  * configuration records is therefore `--peer-timeout` when the operator set one,
- * and nothing otherwise, in which case those runs take the documented
- * `peer_timeout_ms` default. Either way the value is named here rather than left
- * to be read out of the file.
+ * and nothing otherwise, in which case those runs fall to the defaults of the
+ * channel they run on -- which differ by transport, so the absent-field line
+ * names the ones belonging to `channel` (see {@link absentPeerBudgetDefaults}).
+ * Either way the value is named here rather than left to be read out of the
+ * file.
  *
  * @internal exported for testing
  */
 export function persistedPeerBudgetNotice(
   persistedPeerTimeoutSeconds: number | undefined,
   acceptTimeoutSeconds: number,
+  channel: ConnectionConfig["channel"],
 ): string {
   if (persistedPeerTimeoutSeconds !== undefined)
     return (
@@ -1051,10 +1101,10 @@ export function persistedPeerBudgetNotice(
   return (
     "the saved configuration records no connection.options.peer_timeout_ms: " +
     `--accept-timeout (${acceptTimeoutSeconds}s) bounded this run alone, so a ` +
-    "later 'psilink exchange' runs on the default peer budget " +
-    `(${DEFAULT_PEER_TIMEOUT_MS / 1000}s). Pass --peer-timeout at invite time, ` +
-    "or set connection.options.peer_timeout_ms in that configuration, to give " +
-    "those runs a budget of your own."
+    `later 'psilink exchange' runs on ${absentPeerBudgetDefaults(channel)}. ` +
+    "Pass --peer-timeout at invite time, or set " +
+    "connection.options.peer_timeout_ms in that configuration, to give those " +
+    "runs a budget of your own."
   );
 }
 

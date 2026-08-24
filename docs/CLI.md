@@ -260,11 +260,14 @@ A `ws://` or `wss://` URL invites over the [`webrtc` channel](#webrtc-exchanges)
 
 `--expires-in DURATION` overrides the one-hour invitation lifetime exactly as in the [offline invitation](#offline-invitation). When the resulting lifetime is shorter than `--accept-timeout`, the command warns that the token will expire before the wait ends and a later acceptance will be rejected.
 
-`--accept-timeout` is this run's peer budget, bounding both the wait for the partner to accept and the peer waits of the exchange that follows. It bounds that run only: it is not written to the saved configuration, so a later `psilink exchange` from that configuration takes the documented [`peer_timeout_ms`](EXCHANGE_REFERENCE.md#shared-options) default rather than a window sized for one operator waiting at a terminal.
+`--accept-timeout` is this run's peer budget, bounding both the wait for the partner to accept and the peer waits of the exchange that follows. It bounds that run only: it is not written to the saved configuration, so a later `psilink exchange` from that configuration runs on its channel's own defaults rather than a window sized for one operator waiting at a terminal. Which defaults those are depends on the channel:
 
-`--peer-timeout` is how those later runs get a budget other than the default. It does not bound this invitation's wait -- the command reports that when the flag is set, naming the timeout that governs the phase instead -- and is recorded as `connection.options.peer_timeout_ms` in the saved configuration. Editing that field in the file before a later `psilink exchange` does the same thing by hand.
+- On `sftp` and `filedrop`, the one-hour [`peer_timeout_ms`](EXCHANGE_REFERENCE.md#shared-options) default.
+- On `webrtc`, the transport's own pair: ten minutes to meet the partner at the rendezvous, then one hour of peer silence on the open channel.
 
-Once the configuration is written the command reports which of the two it carries: the `--peer-timeout` value, or no field at all and the default that leaves later runs on.
+`--peer-timeout` is how those later runs get a budget other than their channel's defaults. It does not bound this invitation's wait -- the command reports that when the flag is set, naming the timeout that governs the phase instead -- and is recorded as `connection.options.peer_timeout_ms` when the configuration is saved. Editing that field in the file before a later `psilink exchange` does the same thing by hand.
+
+Once the configuration is written the command reports which of the two it carries: the `--peer-timeout` value, or no field at all, in which case it names the channel defaults that leaves later runs on.
 
 `--linkage-strategy STRATEGY` selects the linkage strategy (`cascade` or `single-pass`) exactly as in the [offline invitation](#offline-invitation), and the same disclosure tradeoff applies to `single-pass`.
 

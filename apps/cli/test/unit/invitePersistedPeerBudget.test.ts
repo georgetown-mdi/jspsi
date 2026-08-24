@@ -8,11 +8,12 @@ import YAML from "yaml";
 import type { ConnectionConfig } from "@psilink/core";
 
 // The exchange is the only thing standing in here: runProtocol is mocked so the
-// handshake "succeeds" -- its post-handshake hook is what writes the config --
-// with no connection opened. Everything between the argv and the file on disk is
-// real, which is the point: the accept budget reaches that file, if it reaches
-// it at all, through the connection the command builds and the bootstrap
-// persists, so an assertion on either one alone could pass while the file still
+// handshake "succeeds" and the exchange completes -- its post-handshake hook
+// writes the config and its post-exchange hook rewrites it -- with no
+// connection opened. Everything between the argv and the file on disk is real,
+// which is the point: the accept budget reaches that file, if it reaches it at
+// all, through the connection the command builds and the bootstrap persists
+// (twice), so an assertion on either one alone could pass while the file still
 // carried it.
 vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
 
@@ -36,12 +37,43 @@ function soleFunctionArg(callArgs: unknown[]): () => void | Promise<void> {
   return fnArgs[0] as () => void | Promise<void>;
 }
 
+/** The runtime object's onOutputComplete hook, located by shape for the same
+ *  reason. It drives the bootstrap's SECOND config write -- the post-exchange
+ *  rewrite that re-serializes the whole connection block -- which is where a
+ *  mutation of the persisted connection would surface. */
+function outputCompleteHook(
+  callArgs: unknown[],
+): (result: {
+  observedReceivedPayloadColumns: string[];
+}) => void | Promise<void> {
+  const hooks = callArgs
+    .filter(
+      (a): a is Record<string, unknown> => typeof a === "object" && a !== null,
+    )
+    .map((a) => a["onOutputComplete"])
+    .filter((h) => typeof h === "function");
+  expect(hooks).toHaveLength(1);
+  return hooks[0] as (result: {
+    observedReceivedPayloadColumns: string[];
+  }) => void | Promise<void>;
+}
+
+/** A received-payload set for the mocked exchange to have observed, so the
+ *  post-exchange rewrite is reached: it is skipped on an empty observation. */
+const OBSERVED_RECEIVED_COLUMNS = ["notes"];
+
 /**
  * Drive one online `psilink invite` to completion against the mocked exchange,
- * returning the configuration it wrote (raw, as YAML.parse yields it -- NOT
+ * returning the FINAL configuration on disk (raw, as YAML.parse yields it -- NOT
  * through the schema, which materializes its own option defaults and would
  * report a field the command never wrote) and the connection the run itself was
  * conducted over.
+ *
+ * Both of the bootstrap's writes are driven: the acceptance hook's, and the
+ * post-exchange rewrite that re-serializes the connection block once the
+ * received-payload set is known. The second is the one a later mutation of the
+ * persisted connection would ride, so a file read after only the first would
+ * assert nothing about what the operator is left holding.
  */
 async function inviteOnline(
   url: string,
@@ -57,6 +89,9 @@ async function inviteOnline(
   const configFile = path.join(dir, "psilink.yaml");
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     await soleFunctionArg(callArgs)();
+    await outputCompleteHook(callArgs)({
+      observedReceivedPayloadColumns: OBSERVED_RECEIVED_COLUMNS,
+    });
     return {};
   }) as never);
 
@@ -81,11 +116,16 @@ async function inviteOnline(
     exit.mockRestore();
   }
 
+  const saved = YAML.parse(fs.readFileSync(configFile, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  // The observed set the rewrite exists to record, which only the second write
+  // could have put there: what every assertion below reads is therefore the
+  // re-serialized configuration, not the acceptance hook's first draft.
+  expect(saved["expected_payload_columns"]).toEqual(OBSERVED_RECEIVED_COLUMNS);
   return {
-    saved: YAML.parse(fs.readFileSync(configFile, "utf8")) as Record<
-      string,
-      unknown
-    >,
+    saved,
     ran: vi.mocked(runProtocol).mock.lastCall?.[0] as ConnectionConfig,
   };
 }
