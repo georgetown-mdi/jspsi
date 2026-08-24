@@ -67,8 +67,9 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** The manifest carrying the canonical release version (docs/RELEASES.md). */
-export const RELEASE_MANIFEST = "apps/cli/package.json";
+import { RELEASE_MANIFEST, manifestVersion } from "./lib/releaseManifest.mjs";
+
+export { RELEASE_MANIFEST, manifestVersion };
 
 /** The source the build's PROTOCOL_VERSION literal is read from. */
 export const PROTOCOL_VERSION_SOURCE = "packages/core/src/protocolSetup.ts";
@@ -200,12 +201,6 @@ export function isPublishedRelease(version) {
   return false;
 }
 
-/** The version a package manifest's source carries, or undefined for none. */
-export function manifestVersion(manifestSource) {
-  const { version } = JSON.parse(manifestSource);
-  return typeof version === "string" && version !== "" ? version : undefined;
-}
-
 /**
  * The PROTOCOL_VERSION a source file declares, or undefined when its `export
  * const` initializer is not an integer literal.
@@ -247,6 +242,13 @@ export function suggestedLedger(pins, version, digests) {
   return `${JSON.stringify({ pins: { ...pins, [version]: digests } }, null, 2)}\n`;
 }
 
+// The shape a ledger key carries: the PROTOCOL_VERSION integer written out, and
+// nothing else. JSON object keys are text, so every lookup here is by exactly
+// `String(protocolVersion)` -- a key in any other shape ("abc", "1.0", "01") is
+// one this check never looks up and never compares, so it fails rather than
+// sitting in the ledger carrying a pin nothing is held to.
+const LEDGER_VERSION_KEY = /^[1-9][0-9]*$/;
+
 /**
  * The reasons the recorded pin and the tree do not agree, as `{kind, message}`;
  * empty when they agree, and empty while the rule is inert. `digests` is the
@@ -257,10 +259,20 @@ export function suggestedLedger(pins, version, digests) {
  */
 export function pinViolations({ published, protocolVersion, digests, pins }) {
   if (!published) return [];
-  const recorded = Object.keys(pins)
+  const violations = [];
+
+  const keys = Object.keys(pins);
+  const malformed = keys.filter((key) => !LEDGER_VERSION_KEY.test(key));
+  for (const key of malformed) {
+    violations.push({
+      kind: "ledger",
+      message: `${PINS_FILE} records a pin under "${key}", which is not a PROTOCOL_VERSION. A ledger key is the version's integer written out ("1", "2"), and a pin is looked up by exactly that string, so a key in any other shape records a wire format nothing is ever held to.`,
+    });
+  }
+  const recorded = keys
+    .filter((key) => LEDGER_VERSION_KEY.test(key))
     .map((version) => Number(version))
     .sort((a, b) => a - b);
-  const violations = [];
 
   for (const version of recorded) {
     if (version > protocolVersion) {

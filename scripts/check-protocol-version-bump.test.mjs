@@ -430,6 +430,50 @@ describe("the rule once a release marker arms it", () => {
     expect(status).toBe(1);
     expect(stderr).toContain("but none for 2");
   });
+
+  it("fails a ledger key that is not a PROTOCOL_VERSION, naming the key", () => {
+    // A key `Number()` reads as NaN compares false against every version, so a
+    // pin recorded under one is held to nothing while sitting in the ledger
+    // looking recorded.
+    const sources = vectorsSources();
+    const root = fixtureTree({
+      releaseVersion: "0.2.0",
+      sources,
+      pins: { 1: pinOf(sources), abc: pinOf(sources) },
+    });
+    const { status, stderr } = runCheck(root);
+    expect(status).toBe(1);
+    expect(stderr).toContain(PINS_FILE);
+    expect(stderr).toContain('records a pin under "abc"');
+    // A malformed ledger is not repaired by a pin to write, so none is printed.
+    expect(stderr).not.toContain("would carry for PROTOCOL_VERSION");
+  });
+
+  it("fails every key shape a pin lookup would miss", () => {
+    // The lookup is by `String(protocolVersion)` exactly: "01" and "1.0" name
+    // version 1 to a reader and match no entry this check ever asks for, so
+    // each is as unheld as "abc".
+    const entry = pinOf(vectorsSources());
+    for (const key of ["abc", "1.0", "01", "0", " 1", "", "-1", "1e1"]) {
+      const [violation] = pinViolations({
+        published: true,
+        protocolVersion: 1,
+        digests: entry,
+        pins: { 1: entry, [key]: entry },
+      });
+      expect(violation.kind).toBe("ledger");
+      expect(violation.message).toContain(`"${key}"`);
+    }
+    // A version of more than one digit is a ledger key, not a malformed one.
+    expect(
+      pinViolations({
+        published: true,
+        protocolVersion: 10,
+        digests: entry,
+        pins: { 10: entry },
+      }),
+    ).toEqual([]);
+  });
 });
 
 describe("the inputs it refuses to run without", () => {
