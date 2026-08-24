@@ -943,6 +943,37 @@ test("single-pass carries the survivor-relative rule into a group", async () => 
   ]);
 });
 
+test("a group in a later round forms from the deduplicating sender's survivors alone", async () => {
+  // The mirror of the case above, on the side that ships the index table: the
+  // starter is the PSI sender as well as the "many" side, so the replay resolves
+  // its rounds without asking its side anything, and candidacy is the whole of
+  // what keeps a matched row out of a later round's group.
+  //
+  // The starter's rows 0 and 1 are one entity on "S1" and pair with the joiner's
+  // row 0 in round 0, leaving candidacy. All four of its rows hold "N1", so a
+  // sweep reading past candidacy would group all four onto the joiner's row 1;
+  // the two survivors alone form that group.
+  const [starter, joiner] = await expectStrategiesAgree(
+    "starter",
+    [
+      ["S1", "S1", undefined, undefined],
+      ["N1", "N1", "N1", "N1"],
+    ],
+    [
+      ["S1", "X"],
+      ["Q", "N1"],
+    ],
+  );
+  expect(starter).toStrictEqual([
+    [0, 1, 2, 3],
+    [0, 0, 1, 1],
+  ]);
+  expect(joiner).toStrictEqual([
+    [0, 0, 1, 1],
+    [0, 1, 2, 3],
+  ]);
+});
+
 // --- the single-pass bounds under multiplicity --------------------------------
 // Every single-pass bound rests on the premise that a party's (key, record) cell
 // count upper-bounds its distinct-value count. A deduplicating party contributes

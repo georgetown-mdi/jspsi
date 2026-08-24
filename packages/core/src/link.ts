@@ -1724,11 +1724,14 @@ export function decodeRaggedIndexTable(
 // reached takes part with a value (RoundValueParticipation); the receiver's is
 // asked which rows a value stands for (RoundValueOwners). A "many" sender's group
 // is the rows its own ascending loop reaches, so only the receiver's form ever
-// needs the groups materialized.
+// needs the groups materialized. A "many" sender needs no form at all: dropping
+// nothing leaves it asking a question fixed at yes for every value the sweep reads
+// off its own candidate rows, which singlePassRoundValueParticipation.test.ts pins.
 
 // The first pass both forms share: the first candidate row holding each of the
 // round's values, and the values more than one candidate row holds.
-function roundValueFirstRows(
+/** @internal exported for the round-value participation differential test. */
+export function roundValueFirstRows(
   cells: KeyCells,
   numRecords: number,
   outOfCandidacy: Uint8Array,
@@ -1747,32 +1750,29 @@ function roundValueFirstRows(
   return { firstRow, recurring };
 }
 
-class RoundValueParticipation {
-  private constructor(
-    private readonly firstRow: Map<number, number>,
-    private readonly keepsDuplicates: boolean,
-  ) {}
+// The sender's form on a party that DROPS its duplicates: the values the round
+// keeps, each against the one candidate row holding it.
+/** @internal exported for the round-value participation differential test. */
+export class RoundValueParticipation {
+  private constructor(private readonly firstRow: Map<number, number>) {}
 
   static forRound(
     cells: KeyCells,
     numRecords: number,
     outOfCandidacy: Uint8Array,
-    keepsDuplicates: boolean,
   ): RoundValueParticipation {
     const { firstRow, recurring } = roundValueFirstRows(
       cells,
       numRecords,
       outOfCandidacy,
     );
-    if (!keepsDuplicates) for (const value of recurring) firstRow.delete(value);
-    return new RoundValueParticipation(firstRow, keepsDuplicates);
+    for (const value of recurring) firstRow.delete(value);
+    return new RoundValueParticipation(firstRow);
   }
 
   /** Whether `row` takes part in this round with `value`. */
   holds(value: number, row: number): boolean {
-    return this.keepsDuplicates
-      ? this.firstRow.has(value)
-      : this.firstRow.get(value) === row;
+    return this.firstRow.get(value) === row;
   }
 }
 
@@ -1852,19 +1852,23 @@ class RoundValueOwners {
  * `sides` carries the receiver's own resolved cardinality into both steps that a
  * deduplicating one relaxes, and nothing else moves: the "many" side keeps a value
  * several of its candidate records hold and stands the round's position for that
- * group ({@link RoundValueParticipation} and {@link RoundValueOwners}), and step
- * 2's acceptance clause binds the MANY side's record alone, whether or not the
- * "one" side's record has already been accepted (docs/spec/PROTOCOL.md, The
- * per-side rules). Which side is which is read from the receiver's label, so this
- * reproduces what the cascade computes from the two parties' mirror labels for the
- * same exchange.
+ * group -- {@link RoundValueOwners} materializes the receiver's, while a "many"
+ * sender's is the rows its own ascending loop reaches, so it builds no
+ * {@link RoundValueParticipation} -- and step 2's acceptance clause binds the MANY
+ * side's record alone, whether or not the "one" side's record has already been
+ * accepted (docs/spec/PROTOCOL.md, The per-side rules). Which side is which is read
+ * from the receiver's label, so this reproduces what the cascade computes from the
+ * two parties' mirror labels for the same exchange.
  *
  * On inputs where every cell holds at most one value and neither side deduplicates
  * this reduces to the single-valued cascade: each round's candidate pairs are then
  * a partial one-to-one correspondence, so the sweep accepts every pair and removal
  * on a potential match coincides with removal on a match.
+ *
+ * @internal exported for the round-value participation differential test, which
+ *   drives the sweep over instrumented cells.
  */
-function replaySinglePassCascade(
+export function replaySinglePassCascade(
   receiverCells: Array<KeyCells>,
   senderCells: Array<KeyCells>,
   senderToReceiverDistinctValue: ReadonlyMap<number, number>,
@@ -1915,12 +1919,17 @@ function replaySinglePassCascade(
       receiverOut,
       receiverKeepsDuplicates,
     );
-    const senderParticipation = RoundValueParticipation.forRound(
-      senderCells[j],
-      numSenderRecords,
-      senderOut,
-      senderKeepsDuplicates,
-    );
+    // Absent on a sender that keeps its duplicates: the loop below reads each
+    // value off the candidate row it has reached, and such a sender keeps every
+    // value one of its candidate rows holds, so there is nothing left to ask. Only
+    // a sender that drops them has a round its own rows can fall out of.
+    const senderParticipation = senderKeepsDuplicates
+      ? undefined
+      : RoundValueParticipation.forRound(
+          senderCells[j],
+          numSenderRecords,
+          senderOut,
+        );
     const touchedReceiverRows: Array<number> = [];
     const touchedSenderRows: Array<number> = [];
     const acceptedReceiverRows = new Set<number>();
@@ -1933,7 +1942,11 @@ function replaySinglePassCascade(
         const senderValue = senderCells[j].valueAt(senderRow, k);
         // Not held here means the value left the round: ambiguous within the
         // sender's own round, which only a side that drops its duplicates does.
-        if (!senderParticipation.holds(senderValue, senderRow)) continue;
+        if (
+          senderParticipation !== undefined &&
+          !senderParticipation.holds(senderValue, senderRow)
+        )
+          continue;
         const receiverValue = senderToReceiverDistinctValue.get(senderValue);
         if (receiverValue === undefined) continue;
         receiverOwners.appendOwners(receiverValue, receiverCandidates);
