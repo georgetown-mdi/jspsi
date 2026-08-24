@@ -89,9 +89,8 @@ The keys are not derived from a published linkage standard. Their basis is
 class the product primarily serves, running against their own administrative
 records, and the key combinations the set ships with -- and the order they are
 applied in -- are the ones that engagement settled on. That operational
-validation is what a user of the built-in rules is relying on, and the whole of
-the
-claim this repository records: no certification, no accreditation, and no
+validation is what a user of the built-in rules is relying on, and the whole
+of the claim this repository records: no certification, no accreditation, and no
 benchmark against a public gold-standard linked file.
 
 Two limits on this note, stated rather than left to be inferred:
@@ -211,4 +210,3 @@ Two things the versions deliberately are not:
   document itself, key by key, exactly as before.
 - **Not a migration ladder.** There is no path from one version of a set to
   another and no meaning attached to the semver components beyond ordering.
-</content>
