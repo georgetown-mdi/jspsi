@@ -289,18 +289,27 @@ async function resetMountedBench(): Promise<void> {
   vi.unstubAllGlobals();
 }
 
+// The markers the probe's regions are resolved from. A region derived by
+// walking up from something inside it -- the alert, say -- moves whenever the
+// markup around it is reshaped, so an assertion over that region would quietly
+// cover less DOM and keep passing.
+const PROBE_RESULT_MARKER = "probe-result";
+const PROBE_ANNOUNCEMENT_MARKER = "probe-announcement";
+
 /** The probe's whole visible result: the trigger, the outcome surface, and the
- * peer-bytes field when there is one. */
+ * peer-bytes field when there is one. Resolved through the page locator, which
+ * throws on an absent or duplicated marker: a region resolved that way is not
+ * the region the assertion over it means, so it stops rather than scanning
+ * whatever else the document offers. */
 function probeResult(): HTMLElement {
-  return document.querySelector('[data-testid="probe-result"]') as HTMLElement;
+  return page.getByTestId(PROBE_RESULT_MARKER).element() as HTMLElement;
 }
 
 /** The probe's one announcing channel: the stable polite region mounted in every
- * phase, first in the result. */
+ * phase, first in the result. Resolved through the page locator (see
+ * {@link probeResult}). */
 function probeAnnouncement(): HTMLElement {
-  return document.querySelector(
-    '[data-testid="probe-announcement"]',
-  ) as HTMLElement;
+  return page.getByTestId(PROBE_ANNOUNCEMENT_MARKER).element() as HTMLElement;
 }
 
 /** Everything an assistive technology reads out of a live region: its text, plus
@@ -322,6 +331,25 @@ function textNodesOf(root: Node): Array<Text> {
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode())
     nodes.push(node as Text);
   return nodes;
+}
+
+/** The console's own text that follows the peer's bytes within the probe
+ * result: what terminality requires to be empty. The scanned region is the
+ * marked result root, so what is covered is fixed by that marker and not by how
+ * deeply the alert and the field happen to be nested inside it. */
+function firstPartyTextAfterPeerBytes(peerBytes: Element): Array<string> {
+  const result = probeResult();
+  expect(result.contains(peerBytes)).toBe(true);
+  return textNodesOf(result)
+    .filter(
+      (node) =>
+        node.textContent.trim() !== "" &&
+        !peerBytes.contains(node) &&
+        (peerBytes.compareDocumentPosition(node) &
+          Node.DOCUMENT_POSITION_FOLLOWING) !==
+          0,
+    )
+    .map((node) => node.textContent);
 }
 
 /** Open the form and fill host + username only, leaving the fingerprint EMPTY so
@@ -892,7 +920,7 @@ describe("console SFTP connection authoring", () => {
     await openFormForProbe();
 
     const region = probeAnnouncement();
-    const announced = page.getByTestId("probe-announcement");
+    const announced = page.getByTestId(PROBE_ANNOUNCEMENT_MARKER);
     const trigger = page.getByRole("button", {
       name: "Read the fingerprint from the server",
     });
@@ -954,16 +982,70 @@ describe("console SFTP connection authoring", () => {
     // probe result, so even an assistive technology that flattens the result to
     // one run ends on them and cannot resume in the console's voice. Asserted as
     // the DOM-order property rather than against today's sentences.
-    expect(result.contains(peerBytes)).toBe(true);
-    const following = textNodesOf(result).filter(
-      (node) =>
-        node.textContent.trim() !== "" &&
-        !peerBytes.contains(node) &&
-        (peerBytes.compareDocumentPosition(node) &
-          Node.DOCUMENT_POSITION_FOLLOWING) !==
-          0,
-    );
-    expect(following.map((node) => node.textContent)).toEqual([]);
+    expect(firstPartyTextAfterPeerBytes(peerBytes)).toEqual([]);
+  });
+
+  test("the terminality scan is anchored on the result root, not on what encloses the alert", async () => {
+    const peerBytes = await probeWithExcerpt("HTTP/1.1 403 Forbidden");
+    const result = probeResult();
+    const children = Array.from(result.children);
+    const alert = result.querySelector('[role="presentation"]');
+    if (alert === null) throw new Error("The probe failure alert is missing.");
+    const scannedBefore = textNodesOf(result).map((node) => node.textContent);
+
+    // The reshaping the anchor has to survive: an element introduced around the
+    // alert and the peer's field, as a refactor grouping the two would leave.
+    const regrouped = children.slice(children.indexOf(alert));
+    const wrapper = document.createElement("div");
+    // A console sentence left after that wrapper: inside the probe result, so
+    // terminality is broken -- but outside what a walk up from the alert
+    // resolves, so which region the scan covers decides whether it is seen.
+    const trailing = document.createElement("p");
+    trailing.textContent = "Try a different port.";
+    result.append(wrapper);
+    wrapper.append(...regrouped);
+    try {
+      // Narrowing is not hypothetical: what a walk up from the alert now
+      // resolves holds neither the announcing region nor the trigger, so a scan
+      // anchored there would pass over strictly less DOM without failing.
+      expect(alert.parentElement).toBe(wrapper);
+      expect(wrapper.contains(probeAnnouncement())).toBe(false);
+      expect(textNodesOf(wrapper).length).toBeLessThan(scannedBefore.length);
+
+      // Anchored on the marker, the region is the same node covering the same
+      // text, and terminality still holds over it.
+      expect(probeResult()).toBe(result);
+      expect(textNodesOf(result).map((node) => node.textContent)).toEqual(
+        scannedBefore,
+      );
+      expect(firstPartyTextAfterPeerBytes(peerBytes)).toEqual([]);
+
+      result.append(trailing);
+      expect(firstPartyTextAfterPeerBytes(peerBytes)).toEqual([
+        "Try a different port.",
+      ]);
+    } finally {
+      // Hand React back the tree it rendered, so teardown removes what it owns.
+      trailing.remove();
+      result.append(...regrouped);
+      wrapper.remove();
+    }
+  });
+
+  test("a missing result root marker fails the terminality scan by name", async () => {
+    const peerBytes = await probeWithExcerpt("HTTP/1.1 403 Forbidden");
+    const result = probeResult();
+    result.removeAttribute("data-testid");
+    try {
+      // With the anchor gone there is no quieter region to fall back to: the
+      // scan stops on the Locator's own zero-match error, which names the
+      // marker it could not resolve.
+      expect(() => firstPartyTextAfterPeerBytes(peerBytes)).toThrow(
+        "getByTestId('probe-result')",
+      );
+    } finally {
+      result.setAttribute("data-testid", PROBE_RESULT_MARKER);
+    }
   });
 
   test("the peer's bytes are named by the console, whatever the bytes are", async () => {

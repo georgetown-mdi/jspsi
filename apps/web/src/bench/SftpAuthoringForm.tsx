@@ -756,6 +756,10 @@ function HostKeyProbe({
   }
 
   return (
+    // The marker names the whole probe result as one region: the accessibility
+    // properties this surface carries -- the peer's bytes staying out of the
+    // announced run and last in the result -- are properties of everything
+    // below, so their tests anchor on it and fail by name if it goes.
     <Stack gap={4} data-testid="probe-result">
       {/* The probe's one announcing channel: a stable polite region, mounted in
           every phase and first in the result, so a settle reaches assistive tech
