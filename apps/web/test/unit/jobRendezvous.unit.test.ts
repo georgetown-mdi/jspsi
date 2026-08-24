@@ -34,10 +34,73 @@ import type { RendezvousLeg } from "@jobs/jobRendezvous";
 
 const dirs: Array<string> = [];
 
-/** A fresh, existing, writable directory under the OS temp dir, so the preflight's
- * stat checks pass and only the overlap branch can add a warning. */
-function tempDir(label: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `psilink-${label}-`));
+/** The random characters `fs.mkdtempSync` appends to the prefix it is handed. */
+const MKDTEMP_SUFFIX_LENGTH = 6;
+
+/** The prefix {@link tempDir} hands `mkdtempSync` for `label`. */
+function tempDirPrefix(label: string): string {
+  return `psilink-${label}-`;
+}
+
+/** What the directory {@link tempDir} creates for a mount spends of a path budget
+ * before the mount has a name of its own. Stands in for a real one where the
+ * question is only the length. */
+const TEMP_DIR_SEGMENT = `${tempDirPrefix("rendezvous")}${"X".repeat(
+  MKDTEMP_SUFFIX_LENGTH,
+)}`;
+
+/**
+ * What the mount an "ordinary" budget case is driven at renders to, pinned rather
+ * than left to whatever the host's temp root happens to make it.
+ *
+ * Ordinary means short enough that the notice about the mount still names it, and
+ * what a notice has room for is whatever its own first-party copy leaves of
+ * {@link RENDEZVOUS_NOTICE_BUDGET} -- tens of characters, measured against this
+ * number by the premise test below rather than asserted in prose here. A mkdtemp
+ * directory and a short name measure this much under a `/tmp` root, so the pin
+ * changes nothing where the root is already short and makes every other host
+ * compose the same notice.
+ */
+const ORDINARY_MOUNT_COST = 36;
+
+/** Whether a mount pinned to {@link ORDINARY_MOUNT_COST} still has a name of its
+ * own under `root`, once the directory {@link tempDir} creates there is paid for. */
+function fitsOrdinaryMount(root: string): boolean {
+  return (
+    renderedDisplayCost(path.join(root, TEMP_DIR_SEGMENT, "d")) <=
+    ORDINARY_MOUNT_COST
+  );
+}
+
+/** The short temp root every POSIX host has, whatever its own `os.tmpdir()` is. */
+const POSIX_SHORT_TEMP_ROOT = "/tmp";
+
+/**
+ * The root the directories here are created under: `os.tmpdir()` where that is
+ * short enough to build an ordinary mount under, and `/tmp` where it is not.
+ *
+ * The host's own root is not a safe default for a mount a notice has to NAME. The
+ * budget those notices are fitted to leaves a mount tens of characters once the
+ * notice's own copy is spent, which is less than the difference between the `/tmp`
+ * a Linux host hands `os.tmpdir()` and the `/var/folders/<hash>/T` a macOS one
+ * does. Rooted at the host's temp dir, an "ordinary" mount is ordinary on the one
+ * host and past the budget on the other, where the fit drops the path and the
+ * budget cases read as a product regression rather than a host difference.
+ *
+ * A host with no short root of its own -- Windows, whose temp dir is long and whose
+ * drive root is not writable -- is served by pointing TMPDIR (TEMP there) at a short
+ * writable directory, which `os.tmpdir()` then returns. {@link ordinaryMount} is
+ * the check that says so.
+ */
+const TEST_TEMP_ROOT =
+  fitsOrdinaryMount(os.tmpdir()) || process.platform === "win32"
+    ? os.tmpdir()
+    : POSIX_SHORT_TEMP_ROOT;
+
+/** A fresh, existing, writable directory under {@link TEST_TEMP_ROOT}, so the
+ * preflight's stat checks pass and only the overlap branch can add a warning. */
+function tempDir(label: string, root: string = TEST_TEMP_ROOT): string {
+  const dir = fs.mkdtempSync(path.join(root, tempDirPrefix(label)));
   dirs.push(dir);
   return dir;
 }
@@ -1062,10 +1125,39 @@ type PreflightArgs = [
   boolean,
 ];
 
+/** A path segment long enough that a mount built from it is past the notice budget
+ * on its raw length alone, before any escaping. */
+const OVERLONG_SEGMENT = "d".repeat(200);
+
 /** A mount path whose own rendered cost is far past the notice budget, under a
  * fresh temp root. Nothing is created: each shape creates what its branch needs. */
 function overlongMount(segment: string): string {
   return path.join(tempDir("rendezvous"), segment, segment);
+}
+
+/**
+ * The mount an ordinary case is driven at: a path under a fresh temp directory,
+ * pinned to {@link ORDINARY_MOUNT_COST} so every host composes the same notice.
+ * Nothing is created: each shape creates what its branch needs.
+ *
+ * A root leaving no room for it is refused here rather than measured. What a notice
+ * does with a mount it cannot fit is drop it, so a root that broke the premise would
+ * otherwise reach the cases as a fit that gave up a path it had room for.
+ */
+function ordinaryMount(root: string = TEST_TEMP_ROOT): string {
+  const parent = tempDir("rendezvous", root);
+  const nameCost =
+    ORDINARY_MOUNT_COST - renderedDisplayCost(parent) - path.sep.length;
+  if (nameCost < 1)
+    throw new Error(
+      `a mount pinned to ${ORDINARY_MOUNT_COST} rendered characters has no room ` +
+        `left for a name under ${parent}, which spends ` +
+        `${renderedDisplayCost(parent)} of them. These cases pin the mount's ` +
+        "length so that what they measure is the notice fit rather than this " +
+        "host's temp root; point TMPDIR (TEMP on Windows) at a short writable " +
+        "directory.",
+    );
+  return path.join(parent, "d".repeat(nameCost));
 }
 
 /** Fixtures that keep every branch except this shape's own quiet: a data root and a
@@ -1203,6 +1295,16 @@ const NOTICE_SHAPES: Array<NoticeShape> = [
   },
 ];
 
+/** The shapes whose notice interpolates the mount, less any this process cannot
+ * arrange: as root the mode-bit branches never fire. These are the shapes whose
+ * budget the mount shares, so they are the ones an ordinary mount has to fit. */
+function mountNamingShapes(): Array<NoticeShape> {
+  return NOTICE_SHAPES.filter(
+    (shape) =>
+      shape.namesMount && !(shape.unprivilegedOnly && process.getuid?.() === 0),
+  );
+}
+
 /** The one notice `shape` raises for `mount` on `leg`, raw and as the seat renders
  * it, alongside every warning the same call raised. */
 function noticeFor(
@@ -1244,13 +1346,43 @@ describe("every preflight notice fits its budget once rendered", () => {
     );
   });
 
+  test("an ordinary mount fits the residual the widest notice leaves", () => {
+    // What every ordinary case below rests on: a mount short enough that the fit
+    // has no reason to drop it. The residual is what makes that a premise rather
+    // than a triviality -- a notice's own first-party copy is most of the budget,
+    // so what is left for the mount is tens of characters, and a mount built under
+    // the host's own temp root is one host apart from not fitting in it. Measured
+    // against the pin here, so copy that grows into the residual reddens with the
+    // arithmetic rather than as notices below that stopped naming their mount.
+    const pathless = mountNamingShapes().flatMap((shape) =>
+      NOTICE_LEGS.map((leg) =>
+        renderedDisplayCost(
+          noticeFor(shape, overlongMount(OVERLONG_SEGMENT), leg).raw,
+        ),
+      ),
+    );
+    const residual = RENDEZVOUS_NOTICE_BUDGET - Math.max(...pathless);
+    // Strictly inside: the notice with the least room to spare sets the mount off
+    // from its label with a space, which the mount's own cost does not cover.
+    expect(ORDINARY_MOUNT_COST).toBeLessThan(residual);
+    expect(renderedDisplayCost(ordinaryMount())).toBe(ORDINARY_MOUNT_COST);
+  });
+
+  test("a temp root too long for an ordinary mount is refused, not measured", () => {
+    // The macOS case forced onto any host: `os.tmpdir()` there is
+    // `/var/folders/<hash>/T`, long enough to spend the residual above on the root
+    // alone, and what a notice then does with the mount is drop it silently.
+    const longRoot = subDir(tempDir("root"), "T".repeat(ORDINARY_MOUNT_COST));
+    expect(() => ordinaryMount(longRoot)).toThrow(/TMPDIR/);
+  });
+
   for (const shape of NOTICE_SHAPES)
     for (const leg of NOTICE_LEGS) {
       const run =
         shape.unprivilegedOnly && process.getuid?.() === 0 ? test.skip : test;
 
       run(`${shape.label} gives nothing up at an ordinary ${leg} mount`, () => {
-        const mount = path.join(tempDir("rendezvous"), "drops");
+        const mount = ordinaryMount();
         const { raw, rendered, allRaw } = noticeFor(shape, mount, leg);
         // The residual: at an ordinary path nothing is given up, so a fit that
         // started dropping its fragment unconditionally would redden here rather
@@ -1273,7 +1405,7 @@ describe("every preflight notice fits its budget once rendered", () => {
       // path there. Which arithmetic the fit does is the whole of the difference
       // between the two classes, and the raw-length premise below is what says so.
       for (const [pathLabel, segment, rawLengthFitsBudget] of [
-        ["past the budget on its own length", "d".repeat(200), false],
+        ["past the budget on its own length", OVERLONG_SEGMENT, false],
         [
           "past the budget only once escaped",
           WIDE_ESCAPING_CHAR.repeat(20),
