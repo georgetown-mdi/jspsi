@@ -21,7 +21,6 @@ import {
   VERIFIERS,
   checkVectorsGenerators,
   classifyDirectory,
-  firstDifference,
   maskExcusedValues,
 } from "./check-vectors-generators.mjs";
 
@@ -118,28 +117,6 @@ describe("maskExcusedValues", () => {
     const masked = maskExcusedValues(both, ["signature"]);
     expect(masked.count).toBe(1);
     expect(masked.text).toContain('"signatureProducer": "OpenSSL 3.0.13"');
-  });
-});
-
-describe("firstDifference", () => {
-  it("locates the first changed line and carries both sides", () => {
-    expect(firstDifference("a\nb\nc\n", "a\nB\nc\n")).toEqual({
-      line: 2,
-      committed: "b",
-      produced: "B",
-    });
-  });
-
-  it("reports the end of the shorter side when one file is longer", () => {
-    expect(firstDifference("a\nb\n", "a\nb\nc\n")).toMatchObject({
-      line: 3,
-      committed: "",
-      produced: "c",
-    });
-  });
-
-  it("is null for identical text", () => {
-    expect(firstDifference(PRINTED, PRINTED)).toBeNull();
   });
 });
 

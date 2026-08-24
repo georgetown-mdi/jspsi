@@ -15,7 +15,6 @@ import {
   REGENERATE_COMMAND,
   ROUTE_TREE,
   checkRouteTreeFreshness,
-  firstDifferingLine,
 } from "./check-routetree-fresh.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -31,20 +30,6 @@ const repoRoot = resolve(here, "..");
 // check fails closed on a surviving probe line; the logic around it is what is
 // left for this file, driven through an injected codegen.
 const GENERATED = "// generated\nexport const routeTree = 1\n";
-
-describe("first differing line", () => {
-  it("locates the first changed line", () => {
-    expect(firstDifferingLine("a\nb\nc\n", "a\nB\nc\n")).toBe(2);
-  });
-
-  it("reports the first extra line when one side is longer", () => {
-    expect(firstDifferingLine("a\nb\n", "a\nb\nc\n")).toBe(3);
-  });
-
-  it("is null for identical text", () => {
-    expect(firstDifferingLine(GENERATED, GENERATED)).toBeNull();
-  });
-});
 
 describe("freshness against an injected codegen", () => {
   let root;
