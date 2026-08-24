@@ -169,6 +169,19 @@ jobs:
       # line survives, and restores the working-tree copy either way.
       - name: Route tree freshness
         run: npm run check:routetree
+      # apps/web/vite.config.ts is evaluated with no transform in front of it by
+      # Vite's `configLoader: "native"` and by a plain `node` import, both of
+      # which hand it to Node's strip-only type stripping. That refuses any
+      # TypeScript construct needing code generated for it -- a parameter
+      # property, an enum, a namespace, an `import x = require(...)` alias --
+      # anywhere in the config's transitive import graph, which reaches app
+      # source that nothing else holds to erasable syntax; typecheck, lint, and
+      # `vite build` all run a real transform and see none of it. This drives
+      # both load paths for real, and calibrates each against a control fixture
+      # first, so a loader that stopped being strip-only fails the step rather
+      # than passing it silently.
+      - name: Web config native load
+        run: npm run check:web-config-native-load
       # The known-answer vectors under packages/core/test/vectors/ are asserted
       # by the suites in one direction only -- that the code reproduces the
       # checked-in JSON -- so a failing conformance assertion could be silenced

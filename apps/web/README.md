@@ -34,6 +34,22 @@ npm exec --workspace apps/web -- vitest list --project unit
 `npm run check:routetree` guards the checked-in copy, on every pull request and locally.
 It regenerates with the generator the lockfile pins, compares byte for byte, and restores the working-tree copy either way, so a stale file fails the build instead of resurfacing as an unrelated modification in a branch that touched no route.
 
+## Erasable syntax in the config's import graph
+
+`vite.config.ts` is evaluated with no transform in front of it by Vite's `configLoader: "native"` and by a plain `node` import, both of which hand it to Node's strip-only type stripping.
+That erases type annotations and nothing else, so a TypeScript construct needing code generated for it -- a constructor parameter property, an `enum`, a non-`declare` `namespace`, an `import x = require(...)` alias -- is refused outright with `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`.
+
+The refusal is a parse error in whichever module carries the construct, so it applies to everything the config imports, transitively -- including the app source it reaches (`src/utils/serverConfig.ts`, `src/httpServer.ts`).
+Write erasable syntax there: a parameter property becomes a field declaration plus an assignment in the constructor body.
+Nothing else holds those modules to it, and typecheck, lint, and `vite build` all run a real TypeScript transform and so see none of it.
+
+```sh
+npm run check:web-config-native-load
+```
+
+That guards the property, on every pull request and locally.
+It drives both load paths for real, and calibrates each against a control fixture first, so a loader that stopped being strip-only fails rather than passing silently.
+
 ## Running tests
 
 ```sh
