@@ -25,9 +25,23 @@ runs:
       # @openmined/psi.js is a file: dependency carrying prebuilt native .node
       # binaries; npm records no integrity hash for a file: tarball, so verify the
       # committed sha256 before install to catch a swapped or corrupted vendored
-      # artifact. See lib/*.tgz.sha256.
+      # artifact. See lib/*.tgz.sha256. Offline and dependency-free, which is why
+      # it stays ahead of the provenance check below and of npm ci.
       run: sha256sum -c lib/openmined-psi.js-*.tgz.sha256
       shell: bash
+    - name: Verify vendored native tarball provenance
+      # The sidecar above is written in the same psilink commit as the bytes it
+      # describes, so it cannot bind them to the fork build that produced them.
+      # This reads the GitHub artifact attestation stored against the PRODUCING
+      # repository instead. It is armed by the marker committed beside the
+      # tarball and passes with a warning while that marker is disarmed, so the
+      # sidecar baseline stands until the fork attests a build. Runs before
+      # npm ci: the script has no dependencies, only Node above it.
+      run: npm run check:prebuild-provenance
+      shell: bash
+      env:
+        # gh attestation verify queries api.github.com at verification time.
+        GH_TOKEN: ${{ github.token }}
     - name: Install dependencies
       run: npm ci
       shell: bash

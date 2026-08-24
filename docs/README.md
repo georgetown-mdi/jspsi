@@ -16,7 +16,7 @@ PSI-Link is a privacy-preserving record linkage (PPRL) tool that enables partner
 | Privacy reviewer | [PRIVACY.md](../PRIVACY.md) | [COMPLIANCE.md](COMPLIANCE.md), [SECURITY_DESIGN.md](SECURITY_DESIGN.md) |
 | IT professional operationalizing an exchange | [CLI.md](CLI.md) | [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md), [DEPLOYMENT.md](DEPLOYMENT.md) |
 | Developer contributing to the project | [DESIGN.md](DESIGN.md) | [PROTOCOL.md](spec/PROTOCOL.md), [COMMUNICATION.md](COMMUNICATION.md), [FILE_SYNC.md](spec/FILE_SYNC.md), [CONTRIBUTING.md](../CONTRIBUTING.md), [TESTING.md](TESTING.md) |
-| Maintainer upgrading a pinned dependency | [CONTRIBUTING.md](../CONTRIBUTING.md#dependency-policy) | [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md) |
+| Maintainer upgrading a pinned dependency | [CONTRIBUTING.md](../CONTRIBUTING.md#dependency-policy) | [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md), [PREBUILD_REVENDOR.md](PREBUILD_REVENDOR.md) |
 | Partner agency setting up an exchange | [CLI.md](CLI.md) | [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md) |
 
 ## Document inventory
@@ -36,6 +36,7 @@ The documentation is organized in three tiers: this **overview** tier (`docs/`) 
 - [DEPLOYMENT.md](DEPLOYMENT.md) - operating supporting services and Docker deployment of the CLI
 - [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md) - the SFTP deployment profile for agencies required to use FIPS-approved cryptography: the algorithm settings, what they exclude, and the host-key gap
 - [RELEASES.md](RELEASES.md) - versioning policy, release checklist, and artifact publication
+- [PREBUILD_REVENDOR.md](PREBUILD_REVENDOR.md) - replacing the vendored native PSI prebuild: the two integrity controls, the ordered procedure, and the chain-of-custody steps a reviewer performs
 - [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md) - the responder's runbook behind [SECURITY.md](../SECURITY.md): triage and severity, affected versions, the private fix and hotfix release, advisory and CVE publication, reporter communication, the maintainer-unavailable path, and the tabletop exercise record
 - [TESTING.md](TESTING.md) - test-suite reference: integration backends and profiles, the console sentinel, the browser suite, and the coverage rationale
 - [ROADMAP.md](ROADMAP.md) - roadmap of planned functionality

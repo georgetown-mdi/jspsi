@@ -33,6 +33,7 @@
     "check:vectors": "node scripts/check-vectors-generators.mjs",
     "check:protocol-version-bump": "node scripts/check-protocol-version-bump.mjs",
     "check:release-version": "node scripts/check-release-version.mjs",
+    "check:prebuild-provenance": "node scripts/verify-prebuild-provenance.mjs",
     "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/peerjs-broker/tsconfig.json && tsc -p apps/cli/tsconfig.test.json && tsc -p apps/web/tsconfig.json",
     "test": "npm run test -w packages/core -w apps/cli -w apps/web",
     "test:scripts": "vitest run --project scripts --project repo-scripts --project hooks",
