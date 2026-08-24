@@ -1,13 +1,22 @@
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import {
   checkProvenance,
   markerProblems,
+  readMarkerSource,
   resolveTarballName,
   verifyArgv,
 } from "./verify-prebuild-provenance.mjs";
@@ -197,6 +206,53 @@ describe("the offline binding between the marker and the bytes", () => {
     const result = check({ markerSource: "{ not json" });
     expect(result.ok).toBe(false);
     expect(result.problems.join("\n")).toMatch(/not valid JSON/);
+  });
+});
+
+describe("reading the marker", () => {
+  const dir = mkdtempSync(join(tmpdir(), "psilink-provenance-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("returns the bytes of a marker that is there", () => {
+    const path = join(dir, "present.provenance.json");
+    writeFileSync(path, JSON.stringify(DISARMED));
+    const { markerSource, problem } = readMarkerSource(path);
+    expect(problem).toBeUndefined();
+    expect(markerSource).toBe(JSON.stringify(DISARMED));
+  });
+
+  it("reports an absent marker as absence rather than a read failure", () => {
+    const { markerSource, problem } = readMarkerSource(
+      join(dir, "absent.provenance.json"),
+    );
+    expect(problem).toBeUndefined();
+    expect(markerSource).toBeUndefined();
+  });
+
+  it("names the read error when a directory sits in the marker's place", () => {
+    // Driven against the real filesystem rather than an injected error code, so
+    // the reported cause is whatever this platform actually raises.
+    const path = join(dir, "directory.provenance.json");
+    mkdirSync(path);
+    const { markerSource, problem } = readMarkerSource(path);
+    expect(markerSource).toBeUndefined();
+    expect(problem).toContain(path);
+    expect(problem).toMatch(/could not be read/);
+    expect(problem).not.toMatch(/is missing/);
+  });
+
+  it("does not report an unreadable marker as a missing one", () => {
+    const { markerSource, problem } = readMarkerSource(
+      TARBALL_PATH + ".provenance.json",
+      () => {
+        throw Object.assign(new Error("EACCES: permission denied, open"), {
+          code: "EACCES",
+        });
+      },
+    );
+    expect(markerSource).toBeUndefined();
+    expect(problem).toMatch(/EACCES: permission denied/);
+    expect(problem).not.toMatch(/is missing/);
   });
 });
 

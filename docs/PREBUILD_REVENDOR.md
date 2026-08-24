@@ -102,7 +102,7 @@ run's commit. Then, from a branch in this repository:
    sha256sum -c lib/openmined-psi.js-*.tgz.sha256
    npm run check:prebuild-provenance
    npx vitest run --project repo-scripts scripts/verify-prebuild-provenance.test.mjs
-   npx vitest run --project scripts scripts/vendored-psi-deps.test.mjs
+   npx vitest run --project repo-scripts scripts/vendored-psi-deps.test.mjs
    npm run build -w packages/core && npm test
    ```
 

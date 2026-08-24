@@ -158,6 +158,24 @@ export function verifyArgv(tarballPath, marker) {
 }
 
 /**
+ * The marker's bytes when it is there, `{ markerSource: undefined }` when it is
+ * absent, and a problem when it exists but cannot be read. An unreadable marker
+ * -- a permission error, a directory in its place -- is reported as itself
+ * rather than folded into the missing-marker report, which would name the wrong
+ * cause; both still fail the check. `readFile` is the test seam.
+ */
+export function readMarkerSource(markerPath, readFile = readFileSync) {
+  try {
+    return { markerSource: readFile(markerPath, "utf8") };
+  } catch (error) {
+    if (error?.code === "ENOENT") return { markerSource: undefined };
+    return {
+      problem: `${markerPath} could not be read: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+/**
  * The whole decision, with the bytes and the verifier handed in so a test can
  * drive every branch without a 16 MB fixture or a live GitHub lookup.
  *
@@ -275,17 +293,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     .update(readFileSync(absolute))
     .digest("hex");
 
-  let markerSource;
-  try {
-    markerSource = readFileSync(absolute + MARKER_SUFFIX, "utf8");
-  } catch {
-    markerSource = undefined;
+  const marker = readMarkerSource(absolute + MARKER_SUFFIX);
+  if (marker.problem !== undefined) {
+    console.error(`Prebuild provenance check failed:\n\n  ${marker.problem}`);
+    process.exit(1);
   }
 
   const result = checkProvenance({
     tarballPath,
     digest,
-    markerSource,
+    markerSource: marker.markerSource,
     // An absent or failing `gh` is a failed verification, not a skipped one:
     // reaching here means the marker asked for enforcement.
     runVerifier: (argv) => {
