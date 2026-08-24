@@ -57,7 +57,12 @@ run's commit. Then, from a branch in this repository:
 
 1. **Download the tarball** from the run's `openmined-psi-tarball` artifact into
    `lib/`, and delete the tarball it replaces along with its `.sha256` and
-   `.provenance.json`.
+   `.provenance.json`. Give a rebuild its own `seclink` suffix --
+   `2.0.6-seclink.4` rather than a second `2.0.6-seclink.3` -- so byte-distinct
+   tarballs never share a version string: it costs one digit and removes the
+   condition step 5 has to work around, though what guarantees the new bytes
+   install is the lockfile integrity that step brings onto them, not this
+   naming.
 
 2. **Verify provenance before anything else records the new digest.** This
    ordering matters: a sidecar written first is a hash over unverified bytes.
@@ -160,12 +165,16 @@ procedure. Against the branch:
    check:prebuild-provenance` or the `gh attestation verify` invocation above.
    The verifier reaches past `api.github.com`, fetching the Sigstore bundle from
    its blob host and the trust root from the TUF CDN, so a host fenced from
-   either -- a locked-down dev container among them -- fails closed with the
-   same message a missing attestation produces. Run it where that egress exists,
-   or read CI's own run of the check on the pull request; a red result from a
-   fenced host says nothing about the attestation. Do not read the CI result as
-   a substitute while the marker is disarmed: a disarmed check reports rather
-   than verifies, and says so in its annotation.
+   either -- a locked-down dev container among them -- fails closed. Run it
+   where that egress exists, or read CI's own run of the check on the pull
+   request; a red result from a fenced host says nothing about the attestation.
+   The check names an egress or credential failure as itself, rather than as
+   the no-attestation conclusion, wherever the verifier's own output shows one;
+   that recognition is best effort, so an unrecognized failure is reported as
+   the lookup's answer and the verifier's output printed above the check's
+   stays the authority on the cause. Do not read the CI result as a substitute while
+   the marker is disarmed: a disarmed check reports rather than verifies, and
+   says so in its annotation.
 
 4. **Check the identity the marker pins**, not just that verification passed.
    `producer_repository` and `signer_workflow` must name the fork and its

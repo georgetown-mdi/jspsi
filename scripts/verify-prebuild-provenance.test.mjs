@@ -16,14 +16,16 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   checkProvenance,
   markerProblems,
+  nonLookupFailure,
   readMarkerSource,
   resolveTarballName,
   verifyArgv,
 } from "./verify-prebuild-provenance.mjs";
 
 // What these cover, and what they deliberately do not. They drive this repo's
-// own wiring -- arming, the offline digest binding, argv construction, and
-// failure propagation -- across an injected verifier boundary. They do NOT
+// own wiring -- arming, the offline digest binding, argv construction, and how
+// a failure propagates and is named -- across an injected verifier boundary.
+// They do NOT
 // model what `gh attestation verify` decides: reimplementing the verifier's
 // semantics here would assert a prediction rather than an outcome. The live
 // half is `npm run check:prebuild-provenance`, which drives the real tool
@@ -51,6 +53,35 @@ const DISARMED = {
 };
 
 const TARBALL_PATH = "lib/openmined-psi.js-9.9.9.tgz";
+
+// Verbatim stderr from real `gh attestation verify` 2.98.0 runs, captured on
+// 2026-08-24: an egress-fenced container for the two unreachable cases, a
+// blob with no attestation for the completed lookup, an empty `GH_CONFIG_DIR`
+// with no token for the missing credential, and a syntactically valid but
+// unknown token for the rejected one. They are fixtures of what the tool said,
+// not a model of what it decides; the live half stays
+// `npm run check:prebuild-provenance`.
+const VERIFIER_STDERR = {
+  unreachableBundleHost: `
+Error: failed to fetch bundle with URL: failed to fetch bundle with URL: request to fetch bundle from URL failed: Get "https://tmaproduction.blob.core.windows.net/attestations/1015612889/2026/08/24/42646518.json.sn?se=2026-08-24T20%3A00%3A30Z&sp=r&spr=https&sr=b&sv=2026-06-06": dial tcp 20.209.163.161:443: connect: no route to host
+`,
+  unreachableTrustRoot: `error creating Sigstore verifier: no valid Sigstore verifiers could be initialized
+`,
+  noAttestation: `
+Error: HTTP 404: Not Found (https://api.github.com/repos/georgetown-mdi/OpenMinedPSI/attestations/sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03?per_page=30&predicate_type=https%3A%2F%2Fslsa.dev%2Fprovenance%2Fv1)
+`,
+  missingCredential: `To get started with GitHub CLI, please run:  gh auth login
+Alternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.
+`,
+  rejectedCredential: `
+Error: HTTP 401: Bad credentials (https://api.github.com/repos/georgetown-mdi/OpenMinedPSI/attestations/sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03?per_page=30&predicate_type=https%3A%2F%2Fslsa.dev%2Fprovenance%2Fv1)
+`,
+};
+
+// The conclusion an operator must not read for an outage: it is a claim about
+// the vendored bytes, and only a completed lookup earns it.
+const TAMPERING_SHAPED =
+  /carry no attestation|does not match the recorded identity/;
 
 // Fails the test if the verifier is reached; every case that must not consult
 // GitHub uses it, so "never called" is asserted rather than assumed.
@@ -145,7 +176,7 @@ describe("arming", () => {
       marker: ARMED,
       runVerifier: (argv) => {
         calls.push(argv);
-        return 0;
+        return { status: 0 };
       },
     });
     expect(result.ok).toBe(true);
@@ -154,17 +185,125 @@ describe("arming", () => {
   });
 
   it("propagates a non-zero verifier exit as a failure", () => {
-    const result = check({ marker: ARMED, runVerifier: () => 1 });
+    const result = check({ marker: ARMED, runVerifier: () => ({ status: 1 }) });
     expect(result.ok).toBe(false);
     expect(result.armed).toBe(true);
     expect(result.problems.join("\n")).toMatch(/exited 1/);
   });
 
   it("treats an unavailable verifier as a failure, not a skip", () => {
-    // The CLI entry maps a missing `gh` to 127; an armed check must not pass
-    // because the tool it depends on is absent.
-    const result = check({ marker: ARMED, runVerifier: () => 127 });
+    // An armed check must not pass because the tool it depends on is absent.
+    const result = check({
+      marker: ARMED,
+      runVerifier: () => ({ spawnError: "spawnSync gh ENOENT" }),
+    });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("what a verifier failure is reported as", () => {
+  const failure = (outcome) =>
+    check({ marker: ARMED, runVerifier: () => outcome }).problems.join("\n");
+
+  it("names an unrunnable verifier rather than concluding anything about the bytes", () => {
+    const problem = failure({ spawnError: "spawnSync gh ENOENT" });
+    expect(problem).toMatch(/could not be run: spawnSync gh ENOENT/);
+    expect(problem).toMatch(/lookup never happened/);
+    expect(problem).not.toMatch(TAMPERING_SHAPED);
+  });
+
+  it("names an unreachable Sigstore blob host as a network failure", () => {
+    const problem = failure({
+      status: 1,
+      stderr: VERIFIER_STDERR.unreachableBundleHost,
+    });
+    expect(problem).toMatch(/exited 1/);
+    expect(problem).toMatch(/network failure/);
+    expect(problem).not.toMatch(TAMPERING_SHAPED);
+  });
+
+  it("names an unreachable trust root as a network failure", () => {
+    // This one is the reason the recognizer reads gh's own wording and not
+    // only the Go transport strings: the fetch that fails is the TUF trust
+    // root, and the message it surfaces carries no network words at all.
+    const problem = failure({
+      status: 1,
+      stderr: VERIFIER_STDERR.unreachableTrustRoot,
+    });
+    expect(problem).toMatch(/network failure/);
+    expect(problem).not.toMatch(TAMPERING_SHAPED);
+  });
+
+  it.each([
+    ["missing", VERIFIER_STDERR.missingCredential, 4],
+    ["rejected", VERIFIER_STDERR.rejectedCredential, 1],
+  ])("names a %s credential as a credential failure", (_, stderr, status) => {
+    const problem = failure({ status, stderr });
+    expect(problem).toMatch(/missing or rejected GitHub credential/);
+    expect(problem).not.toMatch(TAMPERING_SHAPED);
+  });
+
+  it("keeps the no-attestation conclusion for a lookup that completed", () => {
+    const problem = failure({
+      status: 1,
+      stderr: VERIFIER_STDERR.noAttestation,
+    });
+    expect(problem).toMatch(TAMPERING_SHAPED);
+    expect(problem).toMatch(ARMED.producer_repository);
+    expect(problem).toMatch(ARMED.source_digest);
+  });
+
+  it("falls back to that conclusion for a shape it does not recognize", () => {
+    // The recognizer is best effort, so this is the stated limit rather than a
+    // desired outcome: an unrecognized cause is reported as the lookup's own
+    // answer. The direction it fails in is what matters, asserted below.
+    const problem = failure({ status: 1, stderr: "Error: something new\n" });
+    expect(problem).toMatch(TAMPERING_SHAPED);
+  });
+
+  it("fails closed whatever the cause", () => {
+    const outcomes = [
+      { spawnError: "spawnSync gh ENOENT" },
+      ...Object.values(VERIFIER_STDERR).map((stderr) => ({
+        status: 1,
+        stderr,
+      })),
+      { status: 1, stderr: "Error: something new\n" },
+      { status: 1 },
+    ];
+    for (const outcome of outcomes) {
+      const result = check({ marker: ARMED, runVerifier: () => outcome });
+      expect(result.ok).toBe(false);
+      expect(result.armed).toBe(true);
+      expect(result.problems).toHaveLength(1);
+    }
+  });
+
+  it.each([
+    ["a bare exit status", 0],
+    ["a bare non-zero status", 1],
+    ["nothing at all", undefined],
+    ["an outcome carrying neither field", {}],
+  ])("refuses to read %s as a verified artifact", (_, outcome) => {
+    // The verifier contract is an object; a caller still returning the older
+    // bare status would destructure to `status: undefined`, which reads as a
+    // clean exit unless this branch catches it first.
+    const result = check({ marker: ARMED, runVerifier: () => outcome });
+    expect(result.ok).toBe(false);
+    expect(result.armed).toBe(true);
+    expect(result.problems.join("\n")).toMatch(
+      /neither an exit status nor a spawn failure/,
+    );
+  });
+
+  it("quotes the marker it matched so the operator can judge the call", () => {
+    expect(nonLookupFailure(VERIFIER_STDERR.unreachableBundleHost)).toContain(
+      "`failed to fetch bundle`",
+    );
+    expect(nonLookupFailure(VERIFIER_STDERR.rejectedCredential)).toContain(
+      "`HTTP 401`",
+    );
+    expect(nonLookupFailure(VERIFIER_STDERR.noAttestation)).toBeUndefined();
   });
 });
 
@@ -324,7 +463,7 @@ describe("the committed marker", () => {
       ),
       runVerifier: (argv) => {
         invocations.push(argv);
-        return 0;
+        return { status: 0 };
       },
     });
     expect(result.problems).toEqual([]);

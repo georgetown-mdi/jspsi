@@ -159,6 +159,59 @@ export function verifyArgv(tarballPath, marker) {
   ];
 }
 
+// Verifier failures that are not the lookup's own answer, recognized by what
+// the run wrote to stderr. Substrings rather than a parse: the point is to stop
+// naming a tampering-shaped conclusion for an outage, not to reproduce `gh`'s
+// error taxonomy.
+//
+// Each marker below was produced by driving `gh attestation verify` 2.98.0 and
+// reading its stderr, except the four Go transport strings noted inline, which
+// are the sibling errno and timeout renderings of the same `net/http` path the
+// measured `dial tcp` line comes from. The list is a best-effort recognizer,
+// not a partition: a shape it does not carry falls through to the wording
+// below, and every one of these branches fails the check either way.
+const NON_LOOKUP_FAILURES = [
+  {
+    // A missing credential exits 4 with the login prompt; a rejected one comes
+    // back as the API's own 401.
+    markers: ["gh auth login", "HTTP 401"],
+    describe: (marker) =>
+      `before it could complete the attestation lookup: its output names a missing or rejected GitHub credential (\`${marker}\`). Authenticate \`gh\` or set \`GH_TOKEN\`, then re-run.`,
+  },
+  {
+    markers: [
+      // The trust root is fetched from the TUF CDN before any lookup runs, and
+      // a host fenced from it gets this line and no network wording at all.
+      "no valid Sigstore verifiers could be initialized",
+      // The Sigstore bundle is fetched from a blob host that is neither
+      // api.github.com nor the TUF CDN.
+      "failed to fetch bundle",
+      "dial tcp",
+      "no route to host",
+      // Go transport renderings the measured `dial tcp` line does not carry.
+      "no such host",
+      "i/o timeout",
+      "TLS handshake timeout",
+      "context deadline exceeded",
+    ],
+    describe: (marker) =>
+      `before it could complete the attestation lookup: its output names a network failure (\`${marker}\`). Verification reaches api.github.com, the Sigstore bundle's blob host, and the TUF CDN, so a host fenced from any of them fails here whatever the attestation says. Re-run where that egress exists, or read CI's own run of this check (docs/PREBUILD_REVENDOR.md).`,
+  },
+];
+
+/**
+ * How a failing verifier run says the attestation lookup never completed, or
+ * `undefined` when nothing in its output says so and the exit is read as the
+ * lookup's own answer. Recognition is best effort: see `NON_LOOKUP_FAILURES`.
+ */
+export function nonLookupFailure(stderr) {
+  for (const { markers, describe } of NON_LOOKUP_FAILURES) {
+    const marker = markers.find((candidate) => stderr.includes(candidate));
+    if (marker !== undefined) return describe(marker);
+  }
+  return undefined;
+}
+
 /**
  * The marker's bytes when it is there, `{ markerSource: undefined }` when it is
  * absent, and a problem when it exists but cannot be read. An unreadable marker
@@ -181,8 +234,10 @@ export function readMarkerSource(markerPath, readFile = readFileSync) {
  * The whole decision, with the bytes and the verifier handed in so a test can
  * drive every branch without a 16 MB fixture or a live GitHub lookup.
  *
- * `runVerifier(argv)` returns the verifier's exit status, or a falsy status for
- * success; it is only called once the offline checks have all passed.
+ * `runVerifier(argv)` returns `{ status, stderr }` -- the verifier's exit
+ * status, falsy for success, and whatever it wrote to stderr -- or
+ * `{ spawnError }` when the verifier could not be started at all. It is only
+ * called once the offline checks have all passed.
  *
  * Returns `{ ok, armed, problems, notes }`.
  */
@@ -255,13 +310,45 @@ export function checkProvenance({
   }
 
   const argv = verifyArgv(tarballPath, marker);
-  const status = runVerifier(argv);
-  if (status) {
+  const invocation = `\`gh ${argv.join(" ")}\``;
+  const { status, stderr = "", spawnError } = runVerifier(argv) ?? {};
+
+  // Success is a reported zero, never an unreported anything: a verifier
+  // handing back a bare status leaves `status` undefined here, which would
+  // otherwise be indistinguishable from a clean exit.
+  if (spawnError === undefined && typeof status !== "number") {
     return {
       ok: false,
       armed: true,
       problems: [
-        `\`gh ${argv.join(" ")}\` exited ${status}. The vendored bytes carry no attestation from ${marker.producer_repository} at ${marker.source_digest}, or the attestation does not match the recorded identity.`,
+        `${invocation} reported neither an exit status nor a spawn failure, so nothing was verified about ${artifact}.`,
+      ],
+      notes: [],
+    };
+  }
+
+  // A cause that is not the lookup's own answer is named as itself. The
+  // no-attestation conclusion below is a claim about the bytes, and reporting
+  // it for an unrunnable `gh` or a fenced host reads an outage as tampering.
+  if (spawnError !== undefined) {
+    return {
+      ok: false,
+      armed: true,
+      problems: [
+        `${invocation} could not be run: ${spawnError}. The attestation lookup never happened, so this is an absent or unrunnable \`gh\` rather than anything about ${artifact}. Install \`gh\` and re-run, or read CI's own run of this check (docs/PREBUILD_REVENDOR.md).`,
+      ],
+      notes: [],
+    };
+  }
+  if (status) {
+    const nonLookup = nonLookupFailure(stderr);
+    return {
+      ok: false,
+      armed: true,
+      problems: [
+        nonLookup === undefined
+          ? `${invocation} exited ${status}. The vendored bytes carry no attestation from ${marker.producer_repository} at ${marker.source_digest}, or the attestation does not match the recorded identity.`
+          : `${invocation} exited ${status} ${nonLookup}`,
       ],
       notes: [],
     };
@@ -306,14 +393,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     digest,
     markerSource: marker.markerSource,
     // An absent or failing `gh` is a failed verification, not a skipped one:
-    // reaching here means the marker asked for enforcement.
+    // reaching here means the marker asked for enforcement. stderr is piped
+    // rather than inherited so the failure cause can be named from what the
+    // run said, and is written straight back out so the operator still reads
+    // the verifier's own words.
     runVerifier: (argv) => {
-      const run = spawnSync("gh", argv, { cwd: root, stdio: "inherit" });
-      if (run.error !== undefined) {
-        console.error(`  could not run \`gh\`: ${run.error.message}`);
-        return 127;
-      }
-      return run.status ?? 1;
+      const run = spawnSync("gh", argv, {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["inherit", "inherit", "pipe"],
+      });
+      if (run.error !== undefined) return { spawnError: run.error.message };
+      const stderr = run.stderr ?? "";
+      process.stderr.write(stderr);
+      return { status: run.status ?? 1, stderr };
     },
   });
 
