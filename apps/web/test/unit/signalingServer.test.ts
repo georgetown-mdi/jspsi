@@ -17,7 +17,7 @@ import { Realm } from "@psilink/peerjs-broker/models/realm";
 import {
   loopbackTlsCert,
   requireLoopbackTlsCert,
-} from "../utils/loopbackTlsCert";
+} from "@psilink/testkit/loopbackTlsCert";
 import { hardenUpgradeSurface } from "../../server/upgradeHardening";
 
 import type { AddressInfo } from "node:net";

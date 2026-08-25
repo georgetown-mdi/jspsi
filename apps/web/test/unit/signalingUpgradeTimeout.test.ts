@@ -6,14 +6,15 @@ import tls from "node:tls";
 import { describe, expect, test, vi } from "vitest";
 
 import {
+  loopbackTlsCert,
+  requireLoopbackTlsCert,
+} from "@psilink/testkit/loopbackTlsCert";
+
+import {
   SIGNALING_HEADERS_TIMEOUT_MS,
   SIGNALING_REQUEST_TIMEOUT_MS,
   hardenUpgradeSurface,
 } from "../../server/upgradeHardening";
-import {
-  loopbackTlsCert,
-  requireLoopbackTlsCert,
-} from "../utils/loopbackTlsCert";
 
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";

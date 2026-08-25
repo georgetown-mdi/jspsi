@@ -1,12 +1,13 @@
 import { describe, expect, test, vi } from "vitest";
 
+import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
+
 import {
   ALLOW_MISSING_PREREQUISITES_ENV,
   prerequisitesAreRequired,
   requireTestPrerequisites,
   webTestPrerequisites,
 } from "../requireTestPrerequisites";
-import { loopbackTlsCert } from "../utils/loopbackTlsCert";
 
 import type { TestPrerequisite } from "../requireTestPrerequisites";
 

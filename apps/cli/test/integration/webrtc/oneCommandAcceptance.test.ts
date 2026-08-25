@@ -1,0 +1,366 @@
+import fs from "node:fs";
+import https from "node:https";
+import os from "node:os";
+import path from "node:path";
+
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "vitest";
+import YAML from "yaml";
+
+import { parseExchangeSpec } from "@psilink/core";
+import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
+
+import { describeCliRun, startCli } from "../../cliProcess";
+import { loadKeyFile } from "../../../src/keyFile";
+import { keysPathFor } from "../../../src/recordFile";
+import { startBrokerProcess } from "../../signaling/brokerProcess";
+import { startTlsBrokerFront } from "../../signaling/tlsBrokerFront";
+
+import type { RunningCli } from "../../cliProcess";
+import type { BrokerProcess } from "../../signaling/brokerProcess";
+import type { TlsBrokerFront } from "../../signaling/tlsBrokerFront";
+
+/**
+ * The one-command acceptance, live: an inviting CLI mints a webrtc invitation
+ * and waits, and an accepting CLI runs the whole acceptance -- positional
+ * resolution, the consent prompt, the connection resolved from the invitation's
+ * own endpoint, the dial, and the exchange -- in the single command an operator
+ * types.
+ *
+ * Both parties are child processes running the real command line, so what is
+ * exercised is the wiring BETWEEN the steps rather than any one of them: the
+ * unit suite drives the acceptance path with the bootstrap mocked out, and the
+ * sibling `test/integration/onlineInviteAccept.test.ts` drives the bootstrap
+ * with the command layer left out. A break in the seam between them -- an
+ * acceptance that resolves a connection it cannot dial, prompts about a server
+ * it does not use, or reaches the exchange without the token's secret -- shows
+ * up here and nowhere else.
+ *
+ * Only the acceptance is the subject; the inviting party is the peer it needs.
+ * The two roles must differ or the second registration meets the broker's
+ * id-taken refusal, and each command stamps its own (`withWebRTCPeerRole`).
+ */
+
+/**
+ * A webrtc invitation names a coordination server without a scheme, so the
+ * acceptance seeded from it resolves TLS and the leg needs a `wss://` broker
+ * (see `test/signaling/tlsBrokerFront.ts`). Minting the throwaway certificate
+ * needs `openssl`, which the environment supplies rather than this repository.
+ *
+ * Absent, the leg cannot run. Where the environment was supposed to supply it
+ * -- CI, provisioned to a spec -- that is a hard failure rather than a skip, so
+ * a run cannot report a pass over a leg that never executed; anywhere else the
+ * leg skips and the run's skipped-leg report names it. The opt-out is the same
+ * one the web suite's prerequisite gate takes, so an operator who knows their
+ * machine has no `openssl` sets one variable for both.
+ */
+const PREREQUISITE_OPT_OUT = "PSILINK_ALLOW_MISSING_TEST_PREREQUISITES";
+const prerequisitesAreRequired =
+  process.env[PREREQUISITE_OPT_OUT] !== "1" &&
+  process.env.CI !== undefined &&
+  process.env.CI !== "" &&
+  process.env.CI !== "false";
+if (loopbackTlsCert === null && prerequisitesAreRequired)
+  throw new Error(
+    "no loopback TLS certificate could be minted here, so the live " +
+      "one-command webrtc acceptance would silently skip in an environment " +
+      "that is supposed to supply one. Install `openssl`, or set " +
+      `${PREREQUISITE_OPT_OUT}=1 to skip the leg deliberately.`,
+  );
+const liveTest = test.skipIf(loopbackTlsCert === null);
+
+/** The broker's own mount and the loopback address the parties dial it at. */
+const BROKER_HOST = "127.0.0.1";
+
+/**
+ * The inviting party's budget for the whole run: the wait for the partner to
+ * accept, and the peer waits of the exchange that follows. Generous against the
+ * measured ~12s an ICE round takes here (candidate gathering falls back to host
+ * candidates, which costs about ten seconds), and well inside the per-process
+ * deadlines below, so a stall is reported as a peer timeout by the party that
+ * hit it rather than by a killed process.
+ */
+const ACCEPT_TIMEOUT = "60s";
+
+/**
+ * Hard deadline on each party. The accepting side takes the webrtc transport's
+ * own rendezvous default (ten minutes) because an acceptance seeded from an
+ * invitation endpoint carries no `peer_timeout_ms` and the offline path applies
+ * no `--peer-timeout` override, so without this a stalled acceptance would run
+ * until vitest killed the worker under it. Killed here instead, the run is
+ * reported with its cause and its diagnostics.
+ */
+const PARTY_DEADLINE_MS = 90_000;
+
+// The de-symmetrized inputs, so the result proves the PSI filtered on both
+// sides rather than echoing every record: each side carries one non-matcher
+// (the inviter's Dave, the acceptor's Zoe) and the two sit at different
+// positions, so the association table is transpose-asymmetric and a swapped or
+// mis-keyed partner index fails the assertion, not merely a dropped row.
+// Intersection: Bob, Carol.
+const INVITE_CSV =
+  "first_name,last_name,date_of_birth\n" +
+  "Bob,Jones,1990-01-02\n" +
+  "Carol,Lee,1985-07-16\n" +
+  "Dave,Kim,1978-11-30\n";
+const ACCEPT_CSV =
+  "first_name,last_name,date_of_birth\n" +
+  "Zoe,Adams,2001-03-03\n" +
+  "Bob,Jones,1990-01-02\n" +
+  "Carol,Lee,1985-07-16\n";
+
+let broker: BrokerProcess;
+let front: TlsBrokerFront;
+let suiteDir: string;
+let certPath: string;
+let work: string;
+/** Every party started by a test, stopped after it whether it exited or not. */
+const parties: Array<RunningCli> = [];
+
+beforeAll(async () => {
+  if (loopbackTlsCert === null) return;
+  suiteDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-onecmd-suite-"));
+  // The certificate reaches each party as a file, because that is what
+  // NODE_EXTRA_CA_CERTS names: the party trusts this one certificate rather
+  // than running with verification disabled.
+  certPath = path.join(suiteDir, "broker-front.pem");
+  fs.writeFileSync(certPath, loopbackTlsCert.cert);
+  broker = await startBrokerProcess();
+  front = await startTlsBrokerFront(loopbackTlsCert, broker.port);
+}, 90_000);
+
+beforeEach(() => {
+  work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-onecmd-"));
+});
+
+afterEach(async () => {
+  await Promise.all(parties.splice(0).map((running) => running.stop()));
+  try {
+    if (work) fs.rmSync(work, { recursive: true, force: true });
+  } catch {
+    // best-effort
+  }
+}, 30_000);
+
+afterAll(async () => {
+  await front?.stop();
+  await broker?.stop();
+  try {
+    if (suiteDir) fs.rmSync(suiteDir, { recursive: true, force: true });
+  } catch {
+    // best-effort
+  }
+});
+
+/** Start one party, tracked so the test's teardown cannot leave it running. */
+function party(args: string[], stdin?: string): RunningCli {
+  const running = startCli({
+    args,
+    // Each party runs from the work directory, so an artifact written to a
+    // relative default path lands there and is removed with it rather than in
+    // the workspace this suite runs from.
+    cwd: work,
+    env: { NODE_EXTRA_CA_CERTS: certPath },
+    stdin,
+    timeoutMs: PARTY_DEADLINE_MS,
+  });
+  parties.push(running);
+  return running;
+}
+
+/** The association table a party wrote, as its header and its row pairs. */
+function resultTable(file: string): { header: string; pairs: Set<string> } {
+  const lines = fs.readFileSync(file, "utf8").trim().split("\n");
+  return { header: lines[0], pairs: new Set(lines.slice(1)) };
+}
+
+liveTest(
+  "the vendored broker answers through the TLS front (environment precondition)",
+  async () => {
+    // Separate from the leg below, and ahead of it, so a broker that did not
+    // start, a front that is not listening, or a certificate this environment
+    // could not mint fails as itself. Past this, a failure below belongs to the
+    // command path rather than to the coordination server it runs through.
+    //
+    // A plain request is the whole round trip in one: the front terminates TLS
+    // with the certificate the parties are given, pipes the stream on, and the
+    // broker's own handler answers 404 to anything that is not a WebSocket
+    // upgrade. The certificate is passed as the only trusted authority, so this
+    // also proves what the parties will trust is what the front presents.
+    const status = await new Promise<number | undefined>((resolve, reject) => {
+      const request = https.request(
+        {
+          host: BROKER_HOST,
+          port: front.port,
+          path: broker.path,
+          method: "GET",
+          ca: loopbackTlsCert?.cert,
+        },
+        (response) => {
+          response.resume();
+          resolve(response.statusCode);
+        },
+      );
+      request.on("error", (err: Error) =>
+        reject(
+          new Error(
+            "the signaling broker could not be reached through the TLS " +
+              `front at ${BROKER_HOST}:${front.port}: ${err.message}`,
+          ),
+        ),
+      );
+      request.end();
+    });
+    expect(
+      status,
+      "the TLS front answered, but not with the vendored broker's own refusal " +
+        "of a non-upgrade request; something other than that broker is behind it",
+    ).toBe(404);
+  },
+  30_000,
+);
+
+liveTest(
+  "an accepting CLI runs the whole acceptance in one command and both parties get the linkage result",
+  async () => {
+    const inviteInput = path.join(work, "invite-input.csv");
+    fs.writeFileSync(inviteInput, INVITE_CSV);
+    const acceptInput = path.join(work, "accept-input.csv");
+    fs.writeFileSync(acceptInput, ACCEPT_CSV);
+    const inviteOut = path.join(work, "invite-out.csv");
+    const acceptOut = path.join(work, "accept-out.csv");
+    const inviteConfig = path.join(work, "invite.yaml");
+    const acceptConfig = path.join(work, "accept.yaml");
+    const inviteKey = path.join(work, "invite.key");
+    const acceptKey = path.join(work, "accept.key");
+    const acceptRecord = path.join(work, "accept-record.json");
+
+    // The inviting party: a wss:// coordination server of its own, from which
+    // the invitation's endpoint is derived. It records no audit, so the one
+    // below is unambiguously the acceptance's.
+    const inviter = party([
+      "invite",
+      `wss://${BROKER_HOST}:${front.port}${broker.path}`,
+      inviteInput,
+      inviteOut,
+      "--config-file",
+      inviteConfig,
+      "--key-file",
+      inviteKey,
+      "--identity",
+      "invite",
+      "--accept-timeout",
+      ACCEPT_TIMEOUT,
+      "--no-record",
+      "--log-level",
+      "info",
+    ]);
+
+    // The invitation is delivered on stdout, so this is the same string an
+    // operator copies out of their terminal and sends to their partner.
+    const invitation = await inviter.firstStdoutLine(60_000);
+    expect(invitation).toMatch(/^[A-Za-z0-9_-]+$/);
+
+    // The acceptance an operator types: the invitation, an input file, and a
+    // destination -- no URL, because the invitation names the coordination
+    // server itself. `y` answers the confirmation prompt, the one human
+    // checkpoint before this command connects and transmits.
+    const acceptor = party(
+      [
+        "accept",
+        invitation,
+        acceptInput,
+        acceptOut,
+        "--config-file",
+        acceptConfig,
+        "--key-file",
+        acceptKey,
+        "--identity",
+        "accept",
+        "--record-file",
+        acceptRecord,
+        "--log-level",
+        "info",
+      ],
+      "y\n",
+    );
+
+    const [acceptRun, inviteRun] = await Promise.all([
+      acceptor.finished,
+      inviter.finished,
+    ]);
+    expect(
+      acceptRun.exitCode,
+      describeCliRun("the acceptance", acceptRun),
+    ).toBe(0);
+    expect(
+      inviteRun.exitCode,
+      describeCliRun("the inviting party", inviteRun),
+    ).toBe(0);
+
+    // The acceptance asked about the coordination server it actually dialed --
+    // host and port, resolved from the invitation's endpoint by the same
+    // resolver the dial uses. This is the last checkpoint before a locator the
+    // operator never typed is connected to, so a prompt naming something else
+    // (or nothing) is a consent failure even where the exchange completes.
+    expect(acceptRun.stderr).toContain(
+      "Accept this invitation and run the exchange now, through " +
+        `${BROKER_HOST}:${front.port}?`,
+    );
+
+    // The invitation is the whole of what the inviting party puts on stdout;
+    // every diagnostic went to stderr.
+    expect(inviteRun.stdout.trim()).toBe(invitation);
+
+    // Both parties hold the intersection, each mapping its own matched rows to
+    // the partner's: from the inviter, Bob (row 0) -> accept row 1 and Carol
+    // (row 1) -> accept row 2; from the acceptor, Bob (row 1) -> invite row 0
+    // and Carol (row 2) -> invite row 1. Neither non-matcher appears.
+    const inviteTable = resultTable(inviteOut);
+    const acceptTable = resultTable(acceptOut);
+    expect(inviteTable.header).toBe("row_id,their_row_id");
+    expect(acceptTable.header).toBe("row_id,their_row_id");
+    expect(inviteTable.pairs).toEqual(new Set(["0,1", "1,2"]));
+    expect(acceptTable.pairs).toEqual(new Set(["1,0", "2,1"]));
+
+    // One command left the acceptance provisioned exactly as a two-command one
+    // would: the connection block seeded from the invitation's endpoint, this
+    // party's end of the rendezvous stamped on it, and the key file holding the
+    // token the exchange rotated. The two parties deriving the SAME rotated
+    // secret is what proves the live authenticated handshake ran between them.
+    const acceptSpec = parseExchangeSpec(
+      YAML.parse(fs.readFileSync(acceptConfig, "utf8")),
+    );
+    expect(acceptSpec.connection.channel).toBe("webrtc");
+    if (acceptSpec.connection.channel !== "webrtc")
+      throw new Error("expected a webrtc connection");
+    expect(acceptSpec.connection.server.host).toBe(BROKER_HOST);
+    expect(acceptSpec.connection.server.port).toBe(front.port);
+    expect(acceptSpec.connection.server.path).toBe(broker.path);
+    expect(acceptSpec.connection.role).toBe("acceptor");
+    const acceptToken = loadKeyFile(acceptKey);
+    const inviteToken = loadKeyFile(inviteKey);
+    expect(acceptToken?.sharedSecret).toBeDefined();
+    expect(acceptToken?.sharedSecret).toBe(inviteToken?.sharedSecret);
+
+    // And the audit record lands on disk with its private verification keys
+    // beside it, naming this exchange's two parties. Recording is the shipped
+    // default and no flag turns it off here; only its destination is given, to
+    // keep it out of the process's own directory.
+    expect(fs.existsSync(acceptRecord)).toBe(true);
+    expect(fs.existsSync(keysPathFor(acceptRecord))).toBe(true);
+    const record = JSON.parse(fs.readFileSync(acceptRecord, "utf8")) as {
+      localIdentity?: unknown;
+      partnerIdentity?: unknown;
+    };
+    expect(record.localIdentity).toBe("accept");
+    expect(record.partnerIdentity).toBe("invite");
+  },
+  180_000,
+);

@@ -164,6 +164,41 @@ in the field. It is pinned in `apps/cli/test/unit/webrtcNegotiation.test.ts`,
 which drives the negotiation against a scripted broker and peer connection and
 asserts the ORDER of what goes on the wire.
 
+#### The one-command acceptance leg
+
+`oneCommandAcceptance.test.ts` drives whole COMMANDS rather than the transport
+beneath them: an inviting `psilink invite` mints a webrtc invitation and waits,
+and an accepting `psilink accept INVITATION INPUT_FILE OUTPUT_FILE` resolves its
+positionals, renders the consent surface, takes its confirmation from stdin,
+resolves the connection from the invitation's own endpoint, dials, and runs the
+exchange -- with the linkage result asserted on both sides. Both parties are
+child processes (`apps/cli/test/cliProcess.ts`), so each run has its own argv,
+stdin, stdout, and exit code; an acceptance driven through the exported handler
+would have to stub the confirmation prompt, which is the checkpoint the leg
+exists to cover. It costs about fifteen seconds, most of it ICE gathering falling
+back to host candidates.
+
+The leg needs a `wss://` coordination server. An invitation's connection endpoint
+is a credential-free locator carrying no scheme, so an acceptance seeded from one
+resolves the coordination server over TLS, and the one-command form has no
+configuration file for an operator to set `secure: false` on first. So the leg
+puts a TLS terminator (`apps/cli/test/signaling/tlsBrokerFront.ts`) in front of
+the same vendored broker every other file here spawns, pipes each stream through
+unread, and starts each party with `NODE_EXTRA_CA_CERTS` pointed at the throwaway
+certificate -- trusting that one certificate in that one process rather than
+disabling verification anywhere. Terminating in front of the broker rather than
+inside it keeps the spawned entry point, and every byte the broker sees, the same
+as the rest of the project's.
+
+A broker or environment failure stays distinguishable from an exchange failure. A
+precondition test ahead of the leg fetches the broker's own 404 through the
+front, with the throwaway certificate as its only trusted authority, so a broker
+that did not start, a front that is not listening, or a certificate this
+environment could not mint fails as itself; past it, a failing leg belongs to the
+command path. Each party also carries a hard deadline of its own, so a stalled
+run is reported with its exit status and the tail of its diagnostics instead of
+running until the framework kills the worker under it.
+
 ### The backend-agnostic project
 
 The integration files no SFTP backend differentiates are a third project,
@@ -304,11 +339,11 @@ a source since reverted to identical bytes.
 
 ### A missing environment prerequisite is named, and fails in CI
 
-Some legs need a tool the repository does not ship. The web signaling suites
-need a self-signed loopback certificate, which Node cannot issue, so
-`apps/web/test/utils/loopbackTlsCert.ts` shells out to `openssl` and the legs
-skip where it cannot mint one (no `openssl`, or a LibreSSL one that takes the
-flags differently).
+Some legs need a tool the repository does not ship. The web signaling suites and
+the CLI's live one-command acceptance need a self-signed loopback certificate,
+which Node cannot issue, so `@psilink/testkit/loopbackTlsCert` shells out to
+`openssl` and those legs skip where it cannot mint one (no `openssl`, or a
+LibreSSL one that takes the flags differently).
 
 `apps/web/test/requireTestPrerequisites.ts` declares each such prerequisite and
 decides what its absence costs, by where the run happens. On a workstation the
@@ -319,10 +354,14 @@ or the workflow rather than a property of somebody's laptop. Set
 `PSILINK_ALLOW_MISSING_TEST_PREREQUISITES=1` to skip those legs deliberately.
 
 A suite that needs a new prerequisite adds it to `webTestPrerequisites()` beside
-the certificate. The CLI states two of its own the same way but per leg, since
+the certificate. The CLI states three of its own the same way but per leg, since
 the legs that must have them are named individually:
 `PSILINK_REQUIRE_WORKER_BUILD=1` on the leg that builds the CLI worker bundle,
-and `PSILINK_SFTP_CHROOT_REQUIRED=1` on the chroot profile.
+`PSILINK_SFTP_CHROOT_REQUIRED=1` on the chroot profile, and the one-command
+acceptance leg's own `openssl`, which it mints its TLS front's certificate with.
+That leg reads `CI` and the same `PSILINK_ALLOW_MISSING_TEST_PREREQUISITES`
+opt-out as the web gate, so an operator whose machine has no `openssl` sets one
+variable for both.
 
 ### Every skipped test is named
 

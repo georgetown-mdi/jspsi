@@ -7,6 +7,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./loopbackTlsCert": "./src/loopbackTlsCert.ts",
     "./webrtcInboundFrames": "./src/webrtcInboundFrames.ts"
   },
   "dependencies": {

@@ -1,4 +1,4 @@
-import { loopbackTlsCert } from "./utils/loopbackTlsCert";
+import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
 
 // A suite that skips when a tool the environment did not supply is missing is
 // only honest while the skip is visible. `apps/web/test/integration/requireProdBuild.ts`
