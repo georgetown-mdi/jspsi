@@ -160,10 +160,22 @@ of false matches would be expected to challenge exactly those keys.
 `zip_code` are semantic types the product recognizes, infers from column names,
 and can match on -- and no built-in key references any of them. A party whose
 data carries a phone number gets no matching value from it under the built-in
-rules; it has to author a key itself. The gap is not an oversight to be closed
+rules; it has to add a key itself. The gap is not an oversight to be closed
 by adding keys casually: rules for those fields would carry their own
 precision/recall consequences and are not covered by the validation these keys
 rest on, so they need their own grounding before they could ship as built-in.
+
+What closes the gap without moving the set is offering those types beside it
+rather than inside it. The web app's guided key list carries, after the built-in
+keys and turned off, one key per such type its file supplies -- the type on its
+own -- and says at the control that turning one on departs from the validated
+set, and that a ZIP code alone is a weak identifier whose place is a compound
+key. The offer is the type alone, not a composition of it with the built-in
+fields, for the same reason the set does not grow: a composed key is a rule
+nothing here has grounded, and authoring one is what the expert key editor is
+for. Terms carrying an added key are not drawn from the set, so they cite none
+-- the departure reaches the accepting party's terms review, not only the
+operator's screen.
 
 The honest summary is that the key set is looser than some standards where it
 matches, and narrower than the product's own capability in what it can match

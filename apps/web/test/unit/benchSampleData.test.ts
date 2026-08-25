@@ -6,6 +6,7 @@ import {
   buildKeyStrings,
   buildStandardizedDataset,
   inferMetadata,
+  isOptInLinkageKey,
   loadCSVFile,
 } from "@psilink/core";
 
@@ -121,8 +122,19 @@ describe("sample data", () => {
     const editor = editorFromCsv("Sample Org", inviter);
     // The seed enables every derived key, and several keys are derivable from
     // these columns, so the file is matchable straight out of read.
-    expect(editor.draft.keys.length).toBeGreaterThan(1);
-    expect(editor.draft.keys.every((entry) => entry.enabled)).toBe(true);
+    const derived = editor.draft.keys.filter(
+      (entry) => !isOptInLinkageKey(entry.key),
+    );
+    expect(derived.length).toBeGreaterThan(1);
+    expect(derived.every((entry) => entry.enabled)).toBe(true);
+    // The ZIP column makes the offered ZIP key visible, and it arrives off: the
+    // walkthrough runs the default set, and adding to it is a choice a visitor
+    // makes rather than one the sample makes for them.
+    const offered = editor.draft.keys.filter((entry) =>
+      isOptInLinkageKey(entry.key),
+    );
+    expect(offered.map((entry) => entry.key.name)).toEqual(["ZIP"]);
+    expect(offered.every((entry) => entry.enabled)).toBe(false);
   });
 
   test("the seven engineered pairs standardize equal under default cleaning", async () => {

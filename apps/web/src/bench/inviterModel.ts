@@ -8,9 +8,9 @@ import {
 } from "@psilink/core";
 
 import {
-  defaultStandardizationForRows,
   draftFromTerms,
   draftWithFieldAdded,
+  inviterDefaultStandardization,
   producibleFieldNames,
   seedAdvancedInvite,
   setDraftMetadata,
@@ -680,7 +680,7 @@ export function editorWithRecommendedCleaning(
     ...editor,
     draft: {
       ...editor.draft,
-      standardization: defaultStandardizationForRows(
+      standardization: inviterDefaultStandardization(
         editor.draft.metadata,
         getDefaultLinkageTerms(editor.draft.identity, editor.draft.metadata),
         seedRows(csv),
