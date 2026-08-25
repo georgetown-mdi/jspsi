@@ -20,6 +20,7 @@ import {
   MAX_TEXT_LENGTH,
   MAX_LINKAGE_ENTRIES,
   MAX_DATE_FORMAT_LENGTH,
+  MAX_TRANSFORM_PARAM_LENGTH,
 } from "../src/config/linkageTerms";
 import { NestingDepthExceededError } from "../src/utils/camelizeKeys";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
@@ -327,6 +328,41 @@ test("decodeInvitation: a param spelling the fold leaves non-canonical is inert 
   // uses its default.
   expect(params).toEqual({ INPUT_FORMAT: overCap });
   expect(params).not.toHaveProperty("inputFormat");
+});
+
+test("decodeInvitation refuses a transform param over the content bound", async () => {
+  // The content bound on a string-valued transform param sits on the params
+  // record's value stage within LinkageTermsSchema, so the invitation-token decode
+  // -- a partner's document, checksum-verified but not authenticated -- refuses it
+  // like the other parse paths, before any row runs.
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                {
+                  function: "replace_regex",
+                  params: {
+                    pattern: "\\d",
+                    replacement: "x".repeat(MAX_TRANSFORM_PARAM_LENGTH + 1),
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
+    /transform param must not exceed/,
+  );
 });
 
 test("decodeInvitation rejects a deeply-nested transform.params at decode (bounded fold)", async () => {
