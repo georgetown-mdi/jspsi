@@ -14,10 +14,11 @@
  *
  * A record stores partner-authored free text byte-exactly (the partner identity,
  * the agreement reference and purpose, the payload column names and their
- * dictionary descriptions), which is what the byte-exact cross-party validation
- * needs and what makes this module the display sink the record format's rendering
- * note requires: every such value crosses {@link sanitizeForDisplay} here, once, on
- * its way to a screen or an exported file, and the stored record is never mutated.
+ * dictionary descriptions, and the cited rule set's names and content versions),
+ * which is what the byte-exact cross-party validation needs and what makes this
+ * module the display sink the record format's rendering note requires: every such
+ * value crosses {@link sanitizeForDisplay} here, once, on its way to a screen or
+ * an exported file, and the stored record is never mutated.
  * The {@link Displayable} type is what enforces it -- a raw `string` does not
  * typecheck into a fact.
  */
@@ -27,7 +28,12 @@ import { displayText, sanitizeForDisplay } from "@psilink/core";
 import { dateTimeLabel } from "./inviterModel";
 import { recordFileStamp } from "./runOutputs";
 
-import type { Algorithm, Displayable, ExchangeRecord } from "@psilink/core";
+import type {
+  Algorithm,
+  Displayable,
+  ExchangeRecord,
+  RecordLinkageRuleSet,
+} from "@psilink/core";
 import type { DisclosureAccounting } from "@psi/disclosureAccounting";
 
 /**
@@ -35,11 +41,18 @@ import type { DisclosureAccounting } from "@psi/disclosureAccounting";
  * (several, for a category list), and the named empty state shown when it carries
  * none. `muted` is always populated, so a fact never renders -- or exports -- as a
  * blank cell whose meaning the reader has to guess.
+ *
+ * `note` is fixed first-party copy qualifying what the values assert, carried by a
+ * fact whose label alone would overstate them. It travels with the fact rather
+ * than living in the renderer so the screen and the export state one qualification
+ * rather than two, and it is attached only where values stand: a fact showing its
+ * named empty state has no assertion to qualify.
  */
 export interface DisclosureFact {
   label: string;
   values: ReadonlyArray<Displayable>;
   muted: string;
+  note?: string;
 }
 
 /** One completed run's disclosure, as the accounting presents it. */
@@ -84,6 +97,7 @@ export const DISCLOSURE_FACT_LABELS: ReadonlyArray<string> = [
   "Columns you sent",
   "Columns you received",
   "Matched on",
+  "Rule set cited",
   "Records you exposed",
   "Result size",
   "Where the result was filed",
@@ -102,6 +116,29 @@ const NO_COLUMNS = "No columns";
  * docs/spec/EXCHANGE_RECORD.md), so its absence is a statement about entitlement,
  * not a missing number. */
 const RESULT_SIZE_ABSENT = "Not recorded - only one party received the result";
+
+/** The label of the rule-set citation, named because both branches of the fact
+ * below carry it. It is held to {@link DISCLOSURE_FACT_LABELS} by the same unit
+ * test that pins every other fact's label against the export's columns. */
+const RULE_SET_LABEL = "Rule set cited";
+
+/** The named empty state for a record whose agreed terms cited no named set. The
+ * record omits the field exactly then (see docs/spec/EXCHANGE_RECORD.md, "The
+ * rule-set citation"), so the absence is a statement about how the terms were
+ * authored, not a field the writer left out. */
+const RULE_SET_ABSENT =
+  "Not cited - the agreed terms' rules were authored rather than drawn from a named set";
+
+/** The caveat a present citation carries. The record's citation is the authoring
+ * party's own declaration, carried through unvetted: nothing on the exchange path
+ * resolves a name to a set or checks it against the fields and keys the same terms
+ * declare (see docs/spec/EXCHANGE_RECORD.md, "The rule-set citation"). The
+ * acceptance surfaces state the same limit for the same value, in the second
+ * person a partner's invitation is read in; a filed record is read without a side,
+ * an inviter's own citation reaching its record as an acceptor's adopted one does,
+ * so this says it without attributing the citation to either party. */
+const RULE_SET_UNVOUCHED =
+  "psilink has not checked this citation: nothing resolves these names to a rule set, or checks them against the fields matched on. What the exchange held both parties to is the matching basis recorded beside it.";
 
 /** What each `algorithm` disclosed, in plain language: the record's own reading of
  * the field (`psi` revealed matched identifiers, `psi-c` only a count). */
@@ -147,11 +184,41 @@ function categoryLabel(column: {
 }
 
 /**
+ * The rule-set citation as its two cited halves, keys before fields -- the
+ * specific artifact before the substrate it is built from, the order core's own
+ * rule-set mismatch message and the acceptance surfaces both present them in.
+ *
+ * Each name is quoted because it is free text of the authoring party's choosing
+ * that may carry a space, which would otherwise blur into the version beside it
+ * ("hmis-keys 9.9.9" reading as either). The quoting reaches that far and no
+ * further: a name carrying a double quote of its own can still close the quotes
+ * early and fake the structure for a skimming reader, the same residual core
+ * states for the clause it renders. The half's name leads the line as this app's
+ * own chrome, outside the quotes, so a crafted value cannot occupy it.
+ */
+function ruleSetFact(
+  ruleSet: RecordLinkageRuleSet | undefined,
+): DisclosureFact {
+  if (ruleSet === undefined)
+    return { label: RULE_SET_LABEL, values: [], muted: RULE_SET_ABSENT };
+  return {
+    label: RULE_SET_LABEL,
+    values: [
+      displayText`Keys: "${sanitizeForDisplay(ruleSet.keySet.name)}" ${sanitizeForDisplay(ruleSet.keySet.version)}`,
+      displayText`Fields: "${sanitizeForDisplay(ruleSet.fieldSet.name)}" ${sanitizeForDisplay(ruleSet.fieldSet.version)}`,
+    ],
+    muted: RULE_SET_ABSENT,
+    note: RULE_SET_UNVOUCHED,
+  };
+}
+
+/**
  * The facts of one disclosure, in the fixed order {@link DISCLOSURE_FACT_LABELS}
  * names: to whom, under what authority and for what purpose, what kind of
- * disclosure it was, the categories each way, the basis the match keyed on, the
- * records this party exposed, the result size where it was recorded, and where the
- * result was filed. Each is a field of the run's exchange record.
+ * disclosure it was, the categories each way, the basis the match keyed on and the
+ * rule set the terms cited it to, the records this party exposed, the result size
+ * where it was recorded, and where the result was filed. Each is a field of the
+ * run's exchange record.
  */
 export function disclosureFacts(
   record: ExchangeRecord,
@@ -192,6 +259,7 @@ export function disclosureFacts(
       ),
       "No fields",
     ),
+    ruleSetFact(governance.linkageRuleSet),
     fact("Records you exposed", displayText`${record.recordsExposed}`),
     optionalFact(
       "Result size",
@@ -254,11 +322,18 @@ function csvCell(value: string): string {
   return `"${guarded.replaceAll('"', '""')}"`;
 }
 
-/** One fact as a cell: its values one per line, or its named empty state. */
+/** One fact as a cell: its values one per line and its caveat on a line below
+ * them, or its named empty state. The caveat travels into the export because the
+ * export is where a compliance reader meets the fact without the screen around it
+ * -- a qualification the screen shows and the file drops would leave the file
+ * asserting more than the screen did. */
 function factCell(entry: DisclosureFact): string {
-  return csvCell(
-    entry.values.length === 0 ? entry.muted : entry.values.join("\n"),
-  );
+  if (entry.values.length === 0) return csvCell(entry.muted);
+  const lines: Array<string> =
+    entry.note === undefined
+      ? [...entry.values]
+      : [...entry.values, entry.note];
+  return csvCell(lines.join("\n"));
 }
 
 /**

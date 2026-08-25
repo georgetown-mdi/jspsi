@@ -84,7 +84,18 @@ export interface DisclosureRecordOverrides {
    * record byte-exactly -- the hook a suite uses to plant partner-controlled text
    * in a payload column name rather than in an identity. */
   partnerPayloadColumn?: string;
+  /** The named rule set both parties' terms cite. Omitted by default, the case a
+   * record that cites none is built from; the standing citation is what a suite
+   * asks for by passing `true`, and an object plants the names it needs. */
+  linkageRuleSet?: LinkageTerms["linkageRuleSet"] | true;
 }
+
+/** The rule set the citing fixture terms name: a field set and a key set, each
+ * separately named and separately versioned as the terms document carries them. */
+const LOCAL_RULE_SET: NonNullable<LinkageTerms["linkageRuleSet"]> = {
+  fieldSet: { name: "baseline-pii", version: "1.0.0" },
+  keySet: { name: "hmis-keys", version: "2.1.0" },
+};
 
 /** Build one run's self-attested exchange record. */
 export async function disclosureRecord(
@@ -97,10 +108,15 @@ export async function disclosureRecord(
   // The agreement key is omitted rather than set to undefined: the canonical
   // encoding the record hashes its terms through rejects an explicit undefined.
   const { legalAgreement: _declared, ...termsWithoutAgreement } = LOCAL_TERMS;
+  const ruleSet =
+    overrides.linkageRuleSet === true
+      ? LOCAL_RULE_SET
+      : overrides.linkageRuleSet;
   const localTerms: LinkageTerms = {
     ...termsWithoutAgreement,
     algorithm: overrides.algorithm ?? LOCAL_TERMS.algorithm,
     ...(agreement !== undefined ? { legalAgreement: agreement } : {}),
+    ...(ruleSet !== undefined ? { linkageRuleSet: ruleSet } : {}),
   };
   const built = await buildExchangeRecord({
     localTerms,
