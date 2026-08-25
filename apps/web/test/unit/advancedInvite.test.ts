@@ -10,6 +10,7 @@ import {
   canonicalString,
   deriveAcceptedLinkageTerms,
   getDefaultLinkageTerms,
+  getDefaultStandardization,
   inferMetadata,
   linkageRuleSetReferenceFor,
   prepareForExchange,
@@ -33,6 +34,7 @@ import {
   outputForDirection,
   seedAdvancedInvite,
   setDraftMetadata,
+  setDraftMetadataKeepingKeys,
   standardizationForTerms,
   validateAdvancedInvite,
 } from "../../src/psi/advancedInvite.js";
@@ -1558,6 +1560,253 @@ describe("draftFromTerms reconstructs multi-field bindings on import", () => {
     expect(canonicalString(buildAdvancedTerms(imported))).toEqual(
       canonicalString(exported),
     );
+  });
+});
+
+describe("draftFromTerms binds an imported field of a type no built-in key uses", () => {
+  // The opt-in matchable types (phone_number, email_address, zip_code) have no
+  // default field, so a document declaring one names it whatever its author chose.
+  // The inviter's own columns must still supply it: the reconstruction reads the
+  // document's field NAMES, and nothing may claim the column ahead of them.
+  const NOW = new Date("2026-06-20T00:00:00.000Z");
+
+  /** `role: linkage` columns of the given names and types, the shape both the
+   * document's author and the importing inviter are described by here. */
+  function linkageColumns(
+    columns: Array<[string, Metadata[number]["type"]]>,
+  ): Metadata {
+    return columns.map(([name, type]) => ({
+      name,
+      type,
+      role: "linkage",
+      isPayload: false,
+    }));
+  }
+
+  /** A fresh editor seed over the given metadata, the import target. */
+  function seedFor(m: Metadata): AdvancedInviteSeed {
+    return {
+      terms: getDefaultLinkageTerms("Inviter", m),
+      metadata: m,
+      columns: m.map((column) => column.name),
+    };
+  }
+
+  /**
+   * A document whose phone fields carry the author's own names rather than the
+   * bare type. `phoneFields` names one per author-side phone column; a `last_name`
+   * field and key ride along so the document also carries a built-in key.
+   */
+  function phoneDocument(phoneFields: Array<string>): LinkageTerms {
+    const authorMetadata = linkageColumns([
+      ...phoneFields.map((_, index): [string, Metadata[number]["type"]] => [
+        `author_phone_${index + 1}`,
+        "phone_number",
+      ]),
+      ["author_surname", "last_name"],
+    ]);
+    return buildAdvancedTerms({
+      identity: "Author",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      linkageStrategy: "cascade",
+      metadata: authorMetadata,
+      standardization: [
+        ...phoneFields.map((output, index) => ({
+          output,
+          input: `author_phone_${index + 1}`,
+          steps: [],
+        })),
+        { output: "last_name", input: "author_surname", steps: [] },
+      ],
+      keys: [
+        ...phoneFields.map((field) => ({
+          key: { name: field.toUpperCase(), elements: [{ field }] },
+          enabled: true,
+        })),
+        {
+          key: { name: "NAME", elements: [{ field: "last_name" }] },
+          enabled: true,
+        },
+      ],
+    });
+  }
+
+  /** Each transformation binding one of `metadata`'s phone columns, in order. */
+  function phoneBindings(
+    standardization: AdvancedInviteDraft["standardization"],
+    metadata: Metadata,
+  ): Array<{ output: string; input: string }> {
+    return standardization
+      .filter((t) =>
+        metadata.some((c) => c.name === t.input && c.type === "phone_number"),
+      )
+      .map((t) => ({ output: t.output, input: t.input }));
+  }
+
+  test("the document names it cell_phone; the inviter's only phone column supplies it", () => {
+    const document = phoneDocument(["cell_phone"]);
+    expect(document.linkageFields).toContainEqual({
+      name: "cell_phone",
+      type: "phone_number",
+    });
+
+    const metadata = linkageColumns([
+      ["phone_col", "phone_number"],
+      ["last_col", "last_name"],
+    ]);
+    const rawRows = [{ phone_col: "(312) 555-0142", last_col: "Alvarez" }];
+    const seed = seedFor(metadata);
+    const imported = draftFromTerms(document, seed, 3600, rawRows);
+
+    expect(phoneBindings(imported.standardization, metadata)).toEqual([
+      { output: "cell_phone", input: "phone_col" },
+    ]);
+
+    // Declarable, so the key referencing it is supplyable and arrives enabled
+    // alongside the built-in one -- not disabled as unsatisfiable.
+    expect(
+      imported.keys.map((entry) => [entry.key.name, entry.enabled]),
+    ).toEqual([
+      ["CELL_PHONE", true],
+      ["NAME", true],
+    ]);
+    const built = buildAdvancedTerms(imported);
+    expect(built.linkageFields).toContainEqual({
+      name: "cell_phone",
+      type: "phone_number",
+    });
+    const validation = validateAdvancedInvite(imported, seed, NOW);
+    expect(validation.errors.keys).toBeUndefined();
+    expect(validation.canGenerate).toBe(true);
+
+    // It matches through its type's pipeline, and through the SAME pipeline the
+    // accepting party derives from these terms -- two parties cleaning one field
+    // differently match almost nothing.
+    const prepared = prepareForExchange(
+      {
+        linkageTerms: built,
+        metadata,
+        standardization: imported.standardization,
+      },
+      "Inviter",
+      rawRows,
+      seed.columns,
+    );
+    expect(prepared.dataset.getField("cell_phone")?.get(0)).toEqual([
+      "3125550142",
+    ]);
+    const stepsFor = (standardization: typeof imported.standardization) =>
+      standardization.find((t) => t.output === "cell_phone")?.steps;
+    expect(stepsFor(imported.standardization)).toEqual(
+      stepsFor(
+        getDefaultStandardization(
+          metadata,
+          deriveAcceptedLinkageTerms(built, "Acceptor"),
+        ),
+      ),
+    );
+    expect(stepsFor(imported.standardization)).not.toEqual([]);
+  });
+
+  test("with two phone columns it takes the first and leaves the second free", () => {
+    const metadata = linkageColumns([
+      ["phone_a", "phone_number"],
+      ["phone_b", "phone_number"],
+      ["last_col", "last_name"],
+    ]);
+    const imported = draftFromTerms(
+      phoneDocument(["cell_phone"]),
+      seedFor(metadata),
+      3600,
+      [],
+    );
+    expect(phoneBindings(imported.standardization, metadata)).toEqual([
+      { output: "cell_phone", input: "phone_a" },
+    ]);
+  });
+
+  test("two differently-named phone fields take a column each", () => {
+    const metadata = linkageColumns([
+      ["phone_a", "phone_number"],
+      ["phone_b", "phone_number"],
+      ["last_col", "last_name"],
+    ]);
+    const rawRows = [
+      {
+        phone_a: "(312) 555-0142",
+        phone_b: "312-555-9876",
+        last_col: "Alvarez",
+      },
+    ];
+    const seed = seedFor(metadata);
+    const imported = draftFromTerms(
+      phoneDocument(["cell_phone", "home_phone"]),
+      seed,
+      3600,
+      rawRows,
+    );
+
+    expect(phoneBindings(imported.standardization, metadata)).toEqual([
+      { output: "cell_phone", input: "phone_a" },
+      { output: "home_phone", input: "phone_b" },
+    ]);
+    expect(imported.keys.every((entry) => entry.enabled)).toBe(true);
+
+    // Each field reads its own column, so the two phone columns produce distinct
+    // values rather than one collapsed pair.
+    const prepared = prepareForExchange(
+      {
+        linkageTerms: buildAdvancedTerms(imported),
+        metadata,
+        standardization: imported.standardization,
+      },
+      "Inviter",
+      rawRows,
+      seed.columns,
+    );
+    expect(prepared.dataset.getField("cell_phone")?.get(0)).toEqual([
+      "3125550142",
+    ]);
+    expect(prepared.dataset.getField("home_phone")?.get(0)).toEqual([
+      "3125559876",
+    ]);
+  });
+
+  test("a metadata edit after the import leaves the field on its column", () => {
+    // The other door the widened default serves, `reconcileStandardization`: it adds
+    // a default binding only for a semantic type the kept set does not cover, so the
+    // freshly-typed column gains its own cleaning while the imported field keeps both
+    // its name and its column.
+    const metadata: Metadata = [
+      ...linkageColumns([
+        ["phone_col", "phone_number"],
+        ["first_col", "first_name"],
+        ["last_col", "last_name"],
+      ]),
+      { name: "birthday", type: "other", role: "ignored", isPayload: false },
+    ];
+    const seed = seedFor(metadata);
+    const imported = draftFromTerms(
+      phoneDocument(["cell_phone"]),
+      seed,
+      3600,
+      [],
+    );
+    const edited = setDraftMetadataKeepingKeys(
+      imported,
+      setColumnType(imported.metadata, "birthday", "date_of_birth").metadata,
+      [],
+    );
+
+    expect(phoneBindings(edited.standardization, metadata)).toEqual([
+      { output: "cell_phone", input: "phone_col" },
+    ]);
+    expect(
+      edited.standardization.find((t) => t.output === "date_of_birth")?.input,
+    ).toBe("birthday");
   });
 });
 

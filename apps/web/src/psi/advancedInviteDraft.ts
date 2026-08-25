@@ -638,17 +638,26 @@ function uniqueKeyName(base: string, taken: ReadonlySet<string>): string {
  * columns can satisfy, the import-time analogue of the workbench's `addFieldForType`
  * (the producer of these bindings).
  *
- * It starts from the full per-type default ({@link inviterDefaultStandardization}
- * over the seed's default terms -- the standardization a single-field import
- * opens on, and the seed's own), then adds a binding for each imported
- * linkage field the default does not already declare: the multi-field fields, a
- * second-or-later field of one semantic type (e.g. `first_name_2`). Each such field
+ * It starts from the full per-type default ({@link defaultStandardizationForRows}
+ * over the seed's default terms -- the standardization a single-field import opens
+ * on), then adds a binding for each imported linkage field the default does not
+ * already declare: the multi-field fields, a second-or-later field of one semantic
+ * type (e.g. `first_name_2`), and every field of an `OPT_IN_LINKAGE_FIELD_TYPES`
+ * type, which the default terms declare under no name at all. Each such field
  * binds to the next `role: linkage` column of its type not already bound -- one the
  * operator designated for matching, NOT an `identifier`- or `payload`-roled column
  * (see the binding rationale at the column search below) -- reusing its type's
  * recommended cleaning steps (derived from {@link defaultStandardizationForRows}
  * over the IMPORTED terms, so the steps and the row-inferred date format hold even
  * when the seed's default terms declare no field of that type).
+ *
+ * The base is that unwidened default rather than the seed path's
+ * {@link inviterDefaultStandardization}: the widening binds an opt-in type's first
+ * column to a field named for the type, which on this path claims the column ahead
+ * of the loop below and leaves an imported field the document named otherwise
+ * (`cell_phone` for a `phone_number` column) with nothing free to bind. Here the
+ * imported document's own field names decide the binding; the widening serves the
+ * guided path, where no document has named anything.
  *
  * The reconstructed binding is local and never enters the token, so it cannot move
  * the cross-party hash; `authoredLinkageFields` over the result re-declares the
@@ -684,7 +693,7 @@ function standardizationForImportedTerms(
   rawRows: ReadonlyArray<CSVRow>,
   dateInputFormat?: string,
 ): Standardization {
-  const base = inviterDefaultStandardization(
+  const base = defaultStandardizationForRows(
     metadata,
     defaultTerms,
     rawRows,
@@ -692,11 +701,12 @@ function standardizationForImportedTerms(
   );
   // The recommended steps each imported field's type cleans with, keyed by field
   // name. Derived from the default standardization over the IMPORTED terms (not the
-  // seed's), so it covers every imported field's type -- including one the inviter
-  // has columns for but no default key uses, which the seed's default terms (and so
-  // `base`) would not carry -- and bakes in the row-inferred date format. The input
-  // columns it picks collide on the first per type; only the steps are read here,
-  // and the distinct columns are assigned below.
+  // seed's), so it covers every imported field's type -- including an
+  // `OPT_IN_LINKAGE_FIELD_TYPES` type the inviter has columns for but no built-in
+  // key uses, which the seed's default terms (and so `base`) do not carry -- and
+  // bakes in the row-inferred date format. The input columns it picks collide on the
+  // first per type; only the steps are read here, and the distinct columns are
+  // assigned below.
   const stepsByField = new Map(
     defaultStandardizationForRows(
       metadata,
