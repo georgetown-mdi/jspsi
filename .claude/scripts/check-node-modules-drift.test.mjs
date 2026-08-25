@@ -23,6 +23,7 @@ import {
   lockfileInstallPaths,
   parseNpmSummary,
   runNpmDryRun,
+  staleFileDependencies,
   treeRelativePath,
 } from "./check-node-modules-drift.mjs";
 
@@ -309,6 +310,95 @@ describe("classifying npm's verdict", () => {
   });
 });
 
+describe("staleFileDependencies", () => {
+  const fileEntry = (version, integrity) => ({
+    resolved: "file:lib/vendored.tgz",
+    integrity,
+    version,
+  });
+
+  function writeInstalledLock(dir, packages) {
+    mkdirSync(join(dir, "node_modules"), { recursive: true });
+    writeFileSync(
+      join(dir, "node_modules", ".package-lock.json"),
+      JSON.stringify({ packages }),
+    );
+  }
+
+  let dir;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "stale-file-deps-"));
+  });
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("does nothing when the lockfile has no file: tarball entry", () => {
+    const lock = { packages: { "node_modules/pkg": { version: "1.0.0" } } };
+    expect(staleFileDependencies(dir, lock)).toEqual([]);
+  });
+
+  it("ignores a workspace's own local file: link, which carries no integrity", () => {
+    const lock = {
+      packages: {
+        "node_modules/@psilink/core": { resolved: "packages/core", link: true },
+      },
+    };
+    expect(staleFileDependencies(dir, lock)).toEqual([]);
+  });
+
+  it("passes when the installed record's integrity matches the lockfile's", () => {
+    writeInstalledLock(dir, {
+      "node_modules/vendored": fileEntry("1.0.0", "sha512-same"),
+    });
+    const lock = {
+      packages: { "node_modules/vendored": fileEntry("1.0.0", "sha512-same") },
+    };
+    expect(staleFileDependencies(dir, lock)).toEqual([]);
+  });
+
+  it("flags a same-version entry whose installed integrity differs", () => {
+    writeInstalledLock(dir, {
+      "node_modules/vendored": fileEntry("1.0.0", "sha512-old"),
+    });
+    const lock = {
+      packages: { "node_modules/vendored": fileEntry("1.0.0", "sha512-new") },
+    };
+    expect(staleFileDependencies(dir, lock)).toEqual([
+      { name: "vendored", version: "1.0.0" },
+    ]);
+  });
+
+  it("leaves a version bump to driftFrom's own wrongVersion class", () => {
+    writeInstalledLock(dir, {
+      "node_modules/vendored": fileEntry("1.0.0", "sha512-old"),
+    });
+    const lock = {
+      packages: { "node_modules/vendored": fileEntry("2.0.0", "sha512-new") },
+    };
+    expect(staleFileDependencies(dir, lock)).toEqual([]);
+  });
+
+  it("leaves an entry absent from the installed record to driftFrom's missing/add handling", () => {
+    writeInstalledLock(dir, { "node_modules/other": fileEntry("1.0.0", "x") });
+    const lock = {
+      packages: { "node_modules/vendored": fileEntry("1.0.0", "sha512-new") },
+    };
+    expect(staleFileDependencies(dir, lock)).toEqual([]);
+  });
+
+  it("throws rather than passing when a file: entry exists but the installed record cannot be read", () => {
+    const empty = mkdtempSync(join(tmpdir(), "stale-file-deps-unreadable-"));
+    const lock = {
+      packages: { "node_modules/vendored": fileEntry("1.0.0", "sha512-new") },
+    };
+    expect(() => staleFileDependencies(empty, lock)).toThrow(
+      /\.package-lock\.json could not be read/,
+    );
+    rmSync(empty, { recursive: true, force: true });
+  });
+});
+
 describe("the drift report", () => {
   const drift = {
     wrongVersion: Array.from({ length: 20 }, (_, index) => ({
@@ -355,6 +445,7 @@ describe("driving npm against a real tree", () => {
       wrongVersion: [],
       missing: [],
       extra: [],
+      staleFile: [],
     });
     const { status, output } = runCli(clean);
     expect(status).toBe(0);
@@ -392,6 +483,7 @@ describe("driving npm against a real tree", () => {
       wrongVersion: [{ name: "moves-on", installed: "1.0.0", locked: "2.0.0" }],
       missing: [],
       extra: [{ name: "goes-away", version: "1.0.0" }],
+      staleFile: [],
     });
   }, 120_000);
 
@@ -421,6 +513,7 @@ describe("driving npm against a real tree", () => {
       wrongVersion: [{ name: "moves-on", installed: "1.0.0", locked: "2.0.0" }],
       missing: [],
       extra: [{ name: "goes-away", version: "1.0.0" }],
+      staleFile: [],
     });
   }, 120_000);
 
@@ -434,7 +527,104 @@ describe("driving npm against a real tree", () => {
       wrongVersion: [],
       missing: [],
       extra: [],
+      staleFile: [],
     });
     expect(fingerprint(drifted)).toBe(before);
+  }, 120_000);
+});
+
+describe("driving npm against a re-vendored file: tarball", () => {
+  // The scenario driftFrom's version-keyed diff cannot see: a tarball whose
+  // bytes change without its version changing, exactly what a re-vendored
+  // @openmined/psi.js does. Reproduced with real installs per the module header's
+  // measurement, rather than modeled: pack the same name and version twice with
+  // different contents, install each separately, then mirror the second
+  // install's lockfile over the first install's node_modules.
+  let oldInstall;
+  let newInstall;
+  let mirrorTree;
+
+  beforeAll(() => {
+    pack("stalefile", "1.0.0");
+    oldInstall = join(root, "stalefile-old");
+    writeManifest(oldInstall, { stalefile: tarball("stalefile", "1.0.0") });
+    npm(["install"], oldInstall);
+
+    // Re-vendor: same name and version, different bytes.
+    const packedDir = join(root, "packed", "stalefile-1.0.0");
+    writeFileSync(
+      join(packedDir, "index.js"),
+      'module.exports = "stalefile@1.0.0, re-vendored";',
+    );
+    rmSync(join(vendor, "stalefile-1.0.0.tgz"));
+    npm(["pack", "--pack-destination", vendor], packedDir);
+
+    newInstall = join(root, "stalefile-new");
+    writeManifest(newInstall, { stalefile: tarball("stalefile", "1.0.0") });
+    npm(["install"], newInstall);
+
+    // worktree-init.sh's shape when a primary has not reinstalled since the
+    // tarball changed: the re-vendored lockfile over the old install's
+    // node_modules.
+    mirrorTree = join(root, "stalefile-mirror");
+    mkdirSync(join(mirrorTree, "node_modules"), { recursive: true });
+    cpSync(join(newInstall, "package.json"), join(mirrorTree, "package.json"));
+    cpSync(
+      join(newInstall, "package-lock.json"),
+      join(mirrorTree, "package-lock.json"),
+    );
+    for (const entry of readdirSync(join(oldInstall, "node_modules"))) {
+      symlinkSync(
+        join(oldInstall, "node_modules", entry),
+        join(mirrorTree, "node_modules", entry),
+      );
+    }
+  }, 120_000);
+
+  it("records the same version but different integrity for the two installs", () => {
+    const packages = (dir) =>
+      JSON.parse(readFileSync(join(dir, "package-lock.json"), "utf8")).packages;
+    const old = packages(oldInstall)["node_modules/stalefile"];
+    const updated = packages(newInstall)["node_modules/stalefile"];
+    expect(old.version).toBe(updated.version);
+    expect(old.integrity).not.toBe(updated.integrity);
+  });
+
+  it("flags the stale content though the version is unchanged, and nothing else", () => {
+    expect(checkTree(mirrorTree)).toEqual({
+      wrongVersion: [],
+      missing: [],
+      extra: [],
+      staleFile: [{ name: "stalefile", version: "1.0.0" }],
+    });
+  });
+
+  it("fails the CLI and names the package", () => {
+    const { status, output } = runCli(mirrorTree, "--shared-from", "/primary");
+    expect(status).toBe(1);
+    expect(output).toContain(
+      "stalefile  installed content does not match the lockfile's integrity (version 1.0.0 unchanged)",
+    );
+    expect(output).toContain("1 stale file dependency");
+    expect(output).toContain("npm install` in /primary");
+  });
+
+  it("clears once the tree is installed for real", () => {
+    const fixed = join(root, "stalefile-fixed");
+    cpSync(mirrorTree, fixed, { recursive: true, verbatimSymlinks: true });
+    npm(["install"], fixed);
+
+    expect(checkTree(fixed)).toEqual({
+      wrongVersion: [],
+      missing: [],
+      extra: [],
+      staleFile: [],
+    });
+    expect(
+      readFileSync(
+        join(fixed, "node_modules", "stalefile", "index.js"),
+        "utf8",
+      ),
+    ).toContain("re-vendored");
   }, 120_000);
 });

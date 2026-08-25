@@ -61,11 +61,28 @@
 //     branch's lockfile never mentions, and an extra package cannot change what
 //     the lockfile does describe.
 //
-// What it cannot see: anything below a version number. Two installs of the same
-// version compare equal here whatever their contents, so a corrupted or patched
-// package passes. It also asserts nothing about a tree npm cannot diff at all --
-// an npm failure or an unrecognized summary shape is reported as unverified and
-// exits non-zero rather than passing.
+// What it cannot see from the version-keyed diff alone: a `file:` tarball
+// dependency keeps its version string across a re-vendor, so a mirror whose
+// installed bytes lag the worktree's lockfile passes on version identity while
+// running stale code. staleFileDependencies() below closes that one gap with an
+// independent integrity comparison; every other class here still asserts nothing
+// below a version number, and a tree npm cannot diff at all is reported as
+// unverified and exits non-zero rather than passing.
+//
+// Driving that comparison, measured 2026-08-24 against npm 11.17.0 / node 26.4.0
+// in throwaway trees: `npm install --package-lock-only` on a `file:` dependency
+// whose tarball changed bytes without changing its version left the lockfile's
+// integrity untouched (npm treated the existing satisfying entry as up to date
+// and never re-hashed), so the divergence has to be read from an install that
+// actually happened rather than produced by asking npm to only refresh the
+// lockfile. A real `npm install` against the new tarball, by contrast, both
+// updates package-lock.json's integrity AND leaves node_modules/.package-lock.json
+// -- npm's own record of what it actually extracted -- holding that same value;
+// an install that has not been re-run since keeps the old value there. So a
+// `file:` entry's installed staleness is read by comparing the checked
+// package-lock.json's integrity for that path against node_modules/.package-lock.json's
+// (which the mirror shares from the primary by symlink, same as everything else
+// it mirrors) rather than by re-deriving what npm would install.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -185,13 +202,14 @@ const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 /** The lines a drifted tree reports: what is wrong, then how to fix it. */
 export function formatDrift(dir, drift, sharedFrom = null, limit = LISTED) {
+  const staleFile = drift.staleFile ?? [];
   const lines = [
     `${NAME}: node_modules in ${dir} does not match its package-lock.json.`,
     "",
   ];
   const width = Math.max(
     1,
-    ...[...drift.wrongVersion, ...drift.missing].map(
+    ...[...drift.wrongVersion, ...drift.missing, ...staleFile].map(
       (item) => item.name.length,
     ),
   );
@@ -203,6 +221,10 @@ export function formatDrift(dir, drift, sharedFrom = null, limit = LISTED) {
     ...drift.missing.map((item) => ({
       name: item.name,
       text: `not installed, lockfile pins ${item.locked}`,
+    })),
+    ...staleFile.map((item) => ({
+      name: item.name,
+      text: `installed content does not match the lockfile's integrity (version ${item.version} unchanged)`,
     })),
   ].sort(
     (a, b) => a.name.localeCompare(b.name) || a.text.localeCompare(b.text),
@@ -217,9 +239,13 @@ export function formatDrift(dir, drift, sharedFrom = null, limit = LISTED) {
     drift.extra.length === 0
       ? ""
       : `, plus ${plural(drift.extra.length, "package")} on disk the lockfile does not list`;
+  const staleFileCount =
+    staleFile.length === 0
+      ? ""
+      : `, ${plural(staleFile.length, "stale file dependency")}`;
   lines.push(
     "",
-    `${plural(drift.wrongVersion.length, "wrong version")}, ${plural(drift.missing.length, "missing package")}${extra}.`,
+    `${plural(drift.wrongVersion.length, "wrong version")}, ${plural(drift.missing.length, "missing package")}${staleFileCount}${extra}.`,
   );
   if (sharedFrom) {
     lines.push(
@@ -235,6 +261,56 @@ export function formatDrift(dir, drift, sharedFrom = null, limit = LISTED) {
   return lines;
 }
 
+/** The install-path key's package name, e.g. "@openmined/psi.js" from
+ * "node_modules/@openmined/psi.js" or "node_modules/has-nested/node_modules/leaf"
+ * from the latter's own tail. */
+function nameFromInstallPath(path) {
+  const marker = "node_modules/";
+  return path.slice(path.lastIndexOf(marker) + marker.length);
+}
+
+/**
+ * `file:` tarball dependencies (a `resolved` starting "file:" carrying a string
+ * `integrity` -- a workspace's own local package links the same way but with
+ * neither, so it is not in scope here) whose installed bytes no longer match
+ * `lock`'s recorded integrity though the version string is unchanged: the class
+ * `driftFrom`'s version-keyed diff cannot see. Compared against
+ * node_modules/.package-lock.json, npm's own record of what it actually
+ * extracted, per the module header. An entry missing from that record is left to
+ * `driftFrom`'s own missing/add handling rather than flagged here.
+ */
+export function staleFileDependencies(dir, lock) {
+  const fileEntries = Object.entries(lock?.packages ?? {}).filter(
+    ([, entry]) =>
+      typeof entry?.resolved === "string" &&
+      entry.resolved.startsWith("file:") &&
+      typeof entry?.integrity === "string",
+  );
+  if (fileEntries.length === 0) return [];
+
+  const installedLockPath = join(dir, "node_modules", ".package-lock.json");
+  let installedLock;
+  try {
+    installedLock = JSON.parse(readFileSync(installedLockPath, "utf8"));
+  } catch (cause) {
+    throw new Error(`${installedLockPath} could not be read`, { cause });
+  }
+
+  const stale = [];
+  for (const [path, entry] of fileEntries) {
+    const installed = installedLock.packages?.[path];
+    if (installed === undefined) continue;
+    // A version bump is `driftFrom`'s own wrongVersion class; flagging it again
+    // here would double-report the same package under two classes. This class is
+    // only the gap that leaves: same recorded version, different bytes.
+    if (installed.version !== entry.version) continue;
+    if (installed.integrity !== entry.integrity) {
+      stale.push({ name: nameFromInstallPath(path), version: entry.version });
+    }
+  }
+  return stale;
+}
+
 /** Drive npm's dry-run diff in `dir` and sort its verdict into drift classes. */
 export function checkTree(dir, run = runNpmDryRun) {
   const lockPath = join(dir, "package-lock.json");
@@ -244,10 +320,11 @@ export function checkTree(dir, run = runNpmDryRun) {
   } catch (cause) {
     throw new Error(`${lockPath} could not be read`, { cause });
   }
-  return driftFrom(parseNpmSummary(run(dir)), {
+  const drift = driftFrom(parseNpmSummary(run(dir)), {
     lockPaths: lockfileInstallPaths(lock),
     versionAt: (relative) => installedVersionAt(join(dir, relative)),
   });
+  return { ...drift, staleFile: staleFileDependencies(dir, lock) };
 }
 
 /** npm's own diff of `dir`'s ideal tree against what is installed there. */
@@ -283,7 +360,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(2);
   }
 
-  if (drift.wrongVersion.length > 0 || drift.missing.length > 0) {
+  if (
+    drift.wrongVersion.length > 0 ||
+    drift.missing.length > 0 ||
+    drift.staleFile.length > 0
+  ) {
     const report = formatDrift(dir, drift, sharedFrom, all ? Infinity : LISTED);
     for (const line of report) console.error(line);
     process.exit(1);
