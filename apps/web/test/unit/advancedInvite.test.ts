@@ -26,6 +26,8 @@ import {
   draftFromTerms,
   draftWithFieldAdded,
   gatedActiveSettingMessage,
+  importedCitationDropCause,
+  importedCitationDropNotice,
   importedConstraintDivergenceMessage,
   inviterExchangeDataSpec,
   outputForDirection,
@@ -2200,6 +2202,219 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     expect(
       importedConstraintDivergenceMessage(imported, seedFor(), rawRows),
     ).toBeDefined();
+  });
+});
+
+describe("the editor says when an imported citation will not be re-emitted", () => {
+  const rawRows = constrainedRawRows;
+  const seedFor = constrainedSeed;
+  const defaultExport = constrainedDefaultExport;
+
+  /** A citation naming a set this build does not ship, so the rules the citing
+   * document declared for it are what it is checked against. */
+  const FOREIGN_REFERENCE = {
+    fieldSet: { name: "partner-pii", version: "4.2.0" },
+    keySet: { name: "partner-keys", version: "4.2.0" },
+  };
+
+  /** The editor's own export, re-citing `reference` over those same rules. */
+  function citing(
+    reference: NonNullable<LinkageTerms["linkageRuleSet"]>,
+  ): LinkageTerms {
+    const terms = structuredClone(defaultExport());
+    terms.linkageRuleSet = reference;
+    return terms;
+  }
+
+  /** The draft an import of `terms` against these columns loads. */
+  function draftFor(terms: LinkageTerms): AdvancedInviteDraft {
+    return draftFromTerms(terms, seedFor(), 3600, rawRows);
+  }
+
+  function withKeys(
+    draft: AdvancedInviteDraft,
+    keys: AdvancedInviteDraft["keys"],
+  ): AdvancedInviteDraft {
+    return { ...draft, keys };
+  }
+
+  /** A document citing the set this build ships over a key renamed out of it -- the
+   * citation that fails against the real built-in rules on arrival. */
+  function misdescribingShippedSet(): LinkageTerms {
+    const terms = structuredClone(defaultExport());
+    terms.linkageKeys[0] = {
+      ...terms.linkageKeys[0],
+      name: `${terms.linkageKeys[0].name} (house rules)`,
+    };
+    return terms;
+  }
+
+  /** A foreign-cited import whose cascade the operator then reversed -- the drop an
+   * edit here reaches. */
+  function reorderedForeignImport(): AdvancedInviteDraft {
+    const draft = draftFor(citing(FOREIGN_REFERENCE));
+    return withKeys(draft, [...draft.keys].reverse());
+  }
+
+  test("no notice while the rebuild carries the citation the import made", () => {
+    // The unedited round trip, both resolvable and not: the built-in citation over
+    // the set's own rules, and a foreign citation over the rules its document
+    // claimed. Each survives the rebuild, so there is nothing to tell the operator.
+    for (const imported of [defaultExport(), citing(FOREIGN_REFERENCE)]) {
+      expect(imported.linkageRuleSet).toBeDefined();
+      const draft = draftFor(imported);
+      expect(buildAdvancedTerms(draft).linkageRuleSet).toEqual(
+        imported.linkageRuleSet,
+      );
+      expect(importedCitationDropNotice(draft)).toBeUndefined();
+    }
+  });
+
+  test("no notice for a narrowing that leaves the rules drawn from the cited set", () => {
+    // Disabling a key narrows the rules without editing them, so the citation
+    // stands -- the notice must not fire on the edit an operator makes most.
+    const imported = citing(FOREIGN_REFERENCE);
+    const draft = draftFor(imported);
+    const narrowed = withKeys(
+      draft,
+      draft.keys.map((entry, index) =>
+        index === 0 ? { ...entry, enabled: false } : entry,
+      ),
+    );
+    expect(buildAdvancedTerms(narrowed).linkageRuleSet).toEqual(
+      FOREIGN_REFERENCE,
+    );
+    expect(importedCitationDropNotice(narrowed)).toBeUndefined();
+  });
+
+  test("no notice, and no drop, for an unmet citation the editor's own narrowing repairs", () => {
+    // The document cites the set this build ships over a key that set does not
+    // declare -- but the key references a field these columns cannot supply, so the
+    // import disables it and the rebuilt rules ARE drawn from the set. The citation
+    // stands, exactly as it did before there was a notice: naming a cause must never
+    // become a fourth reason to drop one, since the drop moves what goes on the wire.
+    const imported = structuredClone(defaultExport());
+    imported.linkageFields = [
+      ...imported.linkageFields,
+      { name: "phone_number", type: "phone_number" },
+    ];
+    imported.linkageKeys = [
+      ...imported.linkageKeys,
+      { name: "Phone", elements: [{ field: "phone_number" }] },
+    ];
+    expect(safeParseLinkageTerms(imported).success).toBe(true);
+    // The document's own rules are not the shipped set's: the extra key and field
+    // are additions to it, so the citation as it arrived is unmet.
+    expect(
+      linkageRuleSetReferenceFor({
+        linkageFields: imported.linkageFields,
+        linkageKeys: imported.linkageKeys,
+      }),
+    ).toBeUndefined();
+
+    const draft = draftFor(imported);
+    expect(
+      draft.keys.find((entry) => entry.key.name === "Phone")?.enabled,
+    ).toBe(false);
+    expect(buildAdvancedTerms(draft).linkageRuleSet).toEqual(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
+    expect(importedCitationDropNotice(draft)).toBeUndefined();
+  });
+
+  test("no notice for a draft with no imported citation to lose", () => {
+    // A document that cited nothing declined the claim rather than losing it, and a
+    // draft that imported nothing re-derives its citation on content, so neither is
+    // the operator's to be told about.
+    const uncited = structuredClone(defaultExport());
+    delete uncited.linkageRuleSet;
+    expect(importedCitationDropNotice(draftFor(uncited))).toBeUndefined();
+    expect(
+      importedCitationDropNotice(
+        seedAdvancedInvite("Inviter", [...ALL_COLUMNS]).draft,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("a notice when the draft edits its rules out of the cited set", () => {
+    // Reversing the cascade keeps every key and changes which one claims a record
+    // more than one would match, so the rules are no longer the cited set's. The
+    // cause is the edit, whether the citation resolves to the shipped set or not.
+    for (const imported of [defaultExport(), citing(FOREIGN_REFERENCE)]) {
+      const draft = draftFor(imported);
+      expect(importedCitationDropNotice(draft)).toBeUndefined();
+      const reordered = withKeys(draft, [...draft.keys].reverse());
+      expect(buildAdvancedTerms(reordered).linkageRuleSet).toBeUndefined();
+      expect(importedCitationDropCause(reordered)).toBe("rules-not-drawn");
+      expect(importedCitationDropNotice(reordered)).toContain(
+        "no longer drawn from the rule set",
+      );
+    }
+  });
+
+  test("a notice when a citation of the shipped set never described the document's own rules", () => {
+    // The other cause, and the one no edit here reaches: the document names the set
+    // this build ships over rules that are not it, so the citation fails against the
+    // real built-in rules at the import itself. The operator is told before touching
+    // anything, and told something different from the edited-out-of-it case.
+    const misdescribed = misdescribingShippedSet();
+    expect(misdescribed.linkageRuleSet).toEqual(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
+    expect(safeParseLinkageTerms(misdescribed).success).toBe(true);
+
+    const draft = draftFor(misdescribed);
+    expect(buildAdvancedTerms(draft).linkageRuleSet).toBeUndefined();
+    expect(importedCitationDropCause(draft)).toBe("shipped-set-unmet");
+    const notice = importedCitationDropNotice(draft);
+    expect(notice).toContain("cannot be verified");
+    expect(notice).not.toEqual(
+      importedCitationDropNotice(reorderedForeignImport()),
+    );
+  });
+
+  test("the unmet-shipped-set cause outlives an edit made after the import", () => {
+    // A citation the document's own rules never met is not something the operator
+    // did, so an edit on top of it must not re-attribute the drop to that edit --
+    // "undo the key edits" would be an instruction that cannot work.
+    const draft = draftFor(misdescribingShippedSet());
+    const reordered = withKeys(draft, [...draft.keys].reverse());
+    expect(importedCitationDropCause(reordered)).toBe("shipped-set-unmet");
+  });
+
+  test("a keyless draft is told the citation goes with the keys", () => {
+    // Turning every key off is an intermediate the terms export can carry out of the
+    // browser, and the citation goes with the keys it asserts provenance for. Its own
+    // cause: the remedy is to turn a key back on, not to undo an edit to one.
+    const draft = draftFor(citing(FOREIGN_REFERENCE));
+    const allOff = withKeys(
+      draft,
+      draft.keys.map((entry) => ({ ...entry, enabled: false })),
+    );
+    expect(buildAdvancedTerms(allOff).linkageRuleSet).toBeUndefined();
+    expect(importedCitationDropCause(allOff)).toBe("no-keys");
+    expect(importedCitationDropNotice(allOff)).toContain(
+      "Turn a linkage key back on",
+    );
+  });
+
+  test("the notice does not block generating", () => {
+    // The drop stays the behavior: the operator is told what the outgoing document
+    // will say, not stopped from creating it.
+    for (const dropping of [
+      draftFor(misdescribingShippedSet()),
+      reorderedForeignImport(),
+    ]) {
+      expect(importedCitationDropNotice(dropping)).toBeDefined();
+      const validation = validateAdvancedInvite(
+        dropping,
+        seedFor(),
+        new Date("2026-06-20T00:00:00.000Z"),
+      );
+      expect(validation.errors).toEqual({});
+      expect(validation.canGenerate).toBe(true);
+      expect(validation.terms?.linkageRuleSet).toBeUndefined();
+    }
   });
 });
 

@@ -15,11 +15,14 @@ import {
 } from "@psilink/core";
 
 import {
+  buildAdvancedTerms,
+  importedCitationDropCause,
+} from "./advancedInviteTerms";
+import {
   declarableFieldNames,
   draftFromTerms,
   keyIsSupplyable,
 } from "./advancedInviteDraft";
-import { buildAdvancedTerms } from "./advancedInviteTerms";
 import { isStepValid } from "./standardizationAuthoring";
 import { outputForDirection } from "./advancedInviteTypes";
 
@@ -29,6 +32,8 @@ import type {
   LinkageTerms,
 } from "@psilink/core";
 
+import type { ImportedCitationDropCause } from "./advancedInviteTerms";
+
 import type {
   AdvancedField,
   AdvancedInviteDraft,
@@ -37,12 +42,15 @@ import type {
 } from "./advancedInviteTypes";
 
 /**
- * The Generate gate and the import-refusal messages. {@link validateAdvancedInvite}
- * runs a draft's built terms through the core schema (the single validation source
+ * The Generate gate, the import-refusal messages, and the one import notice that
+ * refuses nothing. {@link validateAdvancedInvite} runs a draft's built terms
+ * through the core schema (the single validation source
  * for everything it covers) and adds only the gates the schema does not express;
  * {@link gatedActiveSettingMessage} and {@link importedConstraintDivergenceMessage}
  * refuse an import that carries a gated setting or a constraint the editor cannot
- * represent. No React, no I/O.
+ * represent; {@link importedCitationDropNotice} tells the operator when the rebuilt
+ * document loses the rule-set citation the imported one carried, which is a
+ * consequence to state rather than an obstacle to clear. No React, no I/O.
  */
 
 /** Today's date as YYYY-MM-DD, for the legal-agreement expiry check. Matches the
@@ -595,4 +603,61 @@ export function importedConstraintDivergenceMessage(
       );
   }
   return undefined;
+}
+
+/** What every dropped citation costs, in the words the consent surface uses for
+ * the same fact (`CONSENT_FACTS.linkageRuleSet.note`): the citation is a claim
+ * ABOUT the keys and fields, which travel either way, so losing it moves the
+ * document the two parties compare without moving what they match on. */
+const CITATION_DROP_CONSEQUENCE =
+  "The keys and fields themselves are unchanged, and they are what the exchange " +
+  "holds both parties to; only the citation goes, so the terms you create will " +
+  "not match the document you imported exactly.";
+
+/**
+ * What each {@link ImportedCitationDropCause} tells the operator: that the rule-set
+ * citation is left out of what the editor emits, why, and -- where an edit here
+ * reaches the cause -- how to get it back.
+ *
+ * None of them names the set. An imported citation's names and versions are
+ * partner-controlled free text, and a document carries exactly one citation, so a
+ * name identifies nothing here that the sentence does not: the same reason
+ * {@link UNSUPPLYABLE_KEY_MESSAGE} and core's schema refines locate an offender by
+ * path rather than by value. The consent surface, which must show the operator the
+ * partner's own words, is where those names render -- each escaped and bound in its
+ * own chrome-free box (`InvitationTerms`), which prose cannot do.
+ */
+const CITATION_DROP_NOTICES: Record<ImportedCitationDropCause, string> = {
+  "shipped-set-unmet":
+    "The document you imported cites a rule set this application ships, but the " +
+    "keys and fields it declares are not that set's, so the citation cannot be " +
+    "verified and is left out of the terms you create. " +
+    `${CITATION_DROP_CONSEQUENCE} No edit here restores the citation.`,
+  "no-keys":
+    "A rule-set citation says which set the linkage keys came from, and these " +
+    "terms enable none, so the citation your imported document made is left out " +
+    "of the terms you create. Turn a linkage key back on to carry it.",
+  "rules-not-drawn":
+    "The keys and fields these terms declare are no longer drawn from the rule " +
+    "set your imported document cites, so that citation is left out of the terms " +
+    `you create. ${CITATION_DROP_CONSEQUENCE} Undo the key edits to carry the ` +
+    "citation, or create the invitation without it.",
+};
+
+/**
+ * The notice for an imported rule-set citation the rebuilt document will not carry,
+ * or `undefined` when it carries it (and for a draft that imported nothing, or
+ * imported a document that cited nothing -- neither has a citation to lose).
+ *
+ * It blocks nothing: dropping the citation is the correct behavior in all three
+ * cases -- re-emitting it would claim a provenance the rules do not have -- so the
+ * operator is told what the outgoing document will say, not stopped from creating
+ * it. That is why this is not one of {@link validateAdvancedInvite}'s errors, whose
+ * every member holds the Generate gate shut.
+ */
+export function importedCitationDropNotice(
+  draft: AdvancedInviteDraft,
+): string | undefined {
+  const cause = importedCitationDropCause(draft);
+  return cause === undefined ? undefined : CITATION_DROP_NOTICES[cause];
 }

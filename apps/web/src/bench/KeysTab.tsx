@@ -7,8 +7,13 @@ import {
   NativeSelect,
   Radio,
   Switch,
+  VisuallyHidden,
 } from "@mantine/core";
-import { IconArrowDown, IconArrowUp } from "@tabler/icons-react";
+import {
+  IconAlertCircle,
+  IconArrowDown,
+  IconArrowUp,
+} from "@tabler/icons-react";
 
 import {
   APPLIED_SETTINGS,
@@ -17,7 +22,10 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
-import { buildAdvancedTerms } from "@psi/advancedInvite";
+import {
+  buildAdvancedTerms,
+  importedCitationDropNotice,
+} from "@psi/advancedInvite";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { TermsImportExport } from "@components/TermsImportExport";
@@ -64,6 +72,11 @@ const KEY_VERDICT_BADGES: Record<
  * authoring and terms import/export, and the matching settings -- the linkage
  * strategy, matching method, and deduplication controls, each live while the
  * exchange applies what it writes.
+ *
+ * It also carries the one notice about the terms the editor will emit that refuses
+ * nothing: an imported document's rule-set citation the rebuild will not carry
+ * ({@link importedCitationDropNotice}), read live from the draft so it appears the
+ * moment the import lands or an edit costs the citation.
  */
 export function KeysTab({
   editor,
@@ -105,6 +118,10 @@ export function KeysTab({
   );
   const currentTerms = useMemo(
     () => buildAdvancedTerms(editor.draft),
+    [editor.draft],
+  );
+  const citationDrop = useMemo(
+    () => importedCitationDropNotice(editor.draft),
     [editor.draft],
   );
   const keyCount = editor.draft.keys.length;
@@ -175,6 +192,30 @@ export function KeysTab({
           {keysError}
         </p>
       )}
+      {/* Rendered against the key list rather than beside the import control
+        below: the list is what costs the citation and what restores it, and the
+        drop outlives the Expert switch the import hides behind. It states a
+        consequence and blocks nothing -- creating without the citation is the
+        right outcome -- so it is not a Problems entry, whose every member holds
+        the create gate shut. The announcement rides the persistent region below:
+        a conditionally-mounted live region is missed by screen readers that watch
+        only regions already in the DOM. */}
+      {citationDrop !== undefined && (
+        <Alert
+          role="note"
+          color="yellow"
+          icon={<IconAlertCircle aria-hidden />}
+          title="The imported rule-set citation will not be carried"
+          mt="md"
+        >
+          {citationDrop}
+        </Alert>
+      )}
+      <VisuallyHidden>
+        <p role="status" aria-live="polite" aria-atomic="true">
+          {citationDrop ?? ""}
+        </p>
+      </VisuallyHidden>
       <Switch
         label="Expert authoring"
         description="Build linkage keys element by element, edit transforms and swaps, and import or export the terms as JSON or YAML."
