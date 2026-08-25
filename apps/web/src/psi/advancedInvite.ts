@@ -10,8 +10,8 @@
  * - {@link ./advancedInviteTerms} -- the linkage-terms mapping: a draft to the
  *   {@link LinkageTerms} it represents, and the inviter's own exchange spec. The
  *   gated-setting clamp (dedup / fuzzy) lives here.
- * - {@link ./advancedInviteValidation} -- the Generate gate and the import-refusal
- *   messages.
+ * - {@link ./advancedInviteValidation} -- the Generate gate, the import-refusal
+ *   messages, and the notice for an imported rule-set citation the rebuild drops.
  */
 
 export type {
@@ -44,9 +44,13 @@ export {
   updateKeyAt,
 } from "./advancedInviteDraft";
 
-export type { InviterDataEdits } from "./advancedInviteTerms";
+export type {
+  ImportedCitationDropCause,
+  InviterDataEdits,
+} from "./advancedInviteTerms";
 export {
   buildAdvancedTerms,
+  importedCitationDropCause,
   inviterExchangeDataSpec,
   producibleFieldNames,
   standardizationForTerms,
@@ -54,6 +58,7 @@ export {
 
 export {
   gatedActiveSettingMessage,
+  importedCitationDropNotice,
   importedConstraintDivergenceMessage,
   validateAdvancedInvite,
 } from "./advancedInviteValidation";
