@@ -123,9 +123,27 @@ export const DEFAULT_LINKAGE_KEY_SET_VERSION = "1.0.0";
 
 /**
  * The linkage key combinations of the {@link DEFAULT_LINKAGE_KEY_SET_NAME} key
- * set. Keys are listed from most precise (all PII) to least precise (name only).
- * The filtering logic below removes any key whose elements cannot be satisfied
- * by the columns present in the input.
+ * set, in the set's cascade order: an earlier key claims a record first, and a
+ * record it claims is withheld from every later round.
+ *
+ * The order is not a ranking by precision or by strength of evidence, and
+ * reading it as one misdescribes the set: keys carrying no SSN evidence sit
+ * above SSN-bearing ones, and a key carrying an SSN but no last name sits above
+ * both. What the published cascades order on instead, and what the per-key
+ * measurements say about either arrangement, is set out in
+ * `docs/notes/linkage-rule-grounding.md`.
+ *
+ * The ordering the set does hold to is over the date of birth: coarsening it to
+ * a year and month is a fallback for a key's own full-date form rather than a
+ * competitor to it, so wherever the set declares both, the full-date key
+ * precedes the coarsened key built from the same other elements.
+ *
+ * Both statements are asserted over this array in
+ * `test/builtInLinkageKeyOrder.test.ts` -- an ordering claim made only in prose
+ * has nothing to fail when an edit breaks it.
+ *
+ * {@link linkageTermsFromRuleSet} emits a SUBSET of these: a key whose elements
+ * the input's columns cannot satisfy is dropped.
  */
 const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
   {
@@ -298,7 +316,7 @@ export interface BuiltInLinkageRuleSet {
   reference: LinkageRuleSetReference;
   /** The set's linkage fields, in declaration order. */
   linkageFields: ReadonlyArray<LinkageField>;
-  /** The set's linkage keys, in cascade order (most to least precise). */
+  /** The set's linkage keys, in the cascade order the set declares. */
   linkageKeys: ReadonlyArray<LinkageKey>;
 }
 
