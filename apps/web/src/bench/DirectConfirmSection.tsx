@@ -15,6 +15,7 @@ import { Link } from "@tanstack/react-router";
 
 import { InvitationTerms } from "@components/InvitationTerms";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
+import { useOnlineStatus } from "@components/useOnlineStatus";
 
 import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
 import { overlongColumnsAlert } from "@psi/columnNames";
@@ -24,6 +25,7 @@ import {
   previewInferredTerms,
 } from "./directExchangeModel";
 import { FileProfileSummary } from "./ServerFilePicker";
+import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import styles from "./bench.module.css";
 
 import type { ProfiledJobInput } from "@psi/workInputClient";
@@ -79,6 +81,13 @@ export function DirectConfirmSection({
     () => previewInferredTerms(profile.columns, DEFAULT_PREVIEW_IDENTITY),
     [profile],
   );
+
+  // A direct run is a live two-party session against the agreed server, dialled
+  // by the appliance sharing this machine, so a device reporting no network
+  // cannot carry it. Naming that here beats pressing Run into an opaque
+  // connection failure. Only the offline direction is gated -- being online is no
+  // promise the partner is there (see @utils/networkStatus).
+  const online = useOnlineStatus();
 
   const linkable = preview.satisfiableKeyCount > 0;
   const unlinkable = unlinkableFileAlert(preview.unsatisfied);
@@ -209,23 +218,31 @@ export function DirectConfirmSection({
         </Text>
       </div>
 
-      <Group>
-        <Button
-          onClick={onRun}
-          disabled={
-            !affirmed ||
-            !linkable ||
-            overlongAlert !== undefined ||
-            running ||
-            identityError !== undefined
-          }
-        >
-          Run the exchange
-        </Button>
-        <Button variant="default" onClick={onBack}>
-          Back
-        </Button>
-      </Group>
+      <Stack gap="sm">
+        <Group>
+          <Button
+            onClick={onRun}
+            disabled={
+              !affirmed ||
+              !linkable ||
+              overlongAlert !== undefined ||
+              running ||
+              identityError !== undefined ||
+              !online
+            }
+          >
+            Run the exchange
+          </Button>
+          <Button variant="default" onClick={onBack}>
+            Back
+          </Button>
+        </Group>
+        {!online && (
+          <Text size="sm" c="dimmed">
+            {OFFLINE_EXCHANGE_REASON}
+          </Text>
+        )}
+      </Stack>
     </Stack>
   );
 }

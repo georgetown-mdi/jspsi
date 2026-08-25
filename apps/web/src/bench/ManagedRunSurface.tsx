@@ -52,6 +52,7 @@ import { dateLabel, dateTimeLabel } from "./inviterModel";
 import { BenchPage } from "./BenchPage";
 import { DeleteExchangeButton } from "./SavedExchanges";
 import { ManagedExchangeDetail } from "./ManagedExchangeDetail";
+import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import { appendSanitizedRunWarning } from "./runWarnings";
 import styles from "./bench.module.css";
 import { useBeforeUnloadPrompt } from "./useUnloadGuard";
@@ -697,9 +698,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
             </p>
             {!online && (
               <p className={styles.sub}>
-                This device is offline, so this exchange cannot run: it connects
-                straight to your partner, who has to be running their side at
-                the same time. Everything else here is available.
+                {OFFLINE_EXCHANGE_REASON} Everything else here is available.
               </p>
             )}
             {running && (

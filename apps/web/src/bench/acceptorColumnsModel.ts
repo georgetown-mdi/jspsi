@@ -23,6 +23,8 @@ import { defaultStandardizationForRows } from "@psi/advancedInvite";
 
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
+import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
+
 import type {
   CSVRow,
   Displayable,
@@ -278,6 +280,12 @@ export function acceptorUnsatisfiedTypes(
  * launch chain -- model-side and step-side -- resolves in one place.
  */
 export interface AcceptorLaunchStepBlocks {
+  /** Whether the browser reports no network. Every accept ends in a live
+   * two-party session -- in this browser, or on the console appliance -- so an
+   * offline device blocks the launch outright. Only this direction is a block:
+   * a device reporting online is no promise the partner is reachable (see
+   * `apps/web/src/utils/networkStatus.ts`). */
+  offline: boolean;
   /** An SFTP accept whose transport connection is not authored yet. */
   connectionBlocked: boolean;
   /** A file-handling combination core refuses. */
@@ -297,6 +305,7 @@ export interface AcceptorLaunchStepBlocks {
 }
 
 const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
+  offline: false,
   connectionBlocked: false,
   exchangeFilesBlocked: false,
   connectionTuningBlocked: false,
@@ -326,15 +335,17 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  * itself carries, so the notice's title and the button's reason are chosen in a
  * single place and cannot name different directions of the same disagreement.
  *
- * The chain follows the step's own reading order, so the sentence names the topmost
- * unresolved surface and an operator working down the screen is sent to the first
- * thing they meet: the verdict, then the count-only refusal, then the
- * declaration conflict, then the over-long name notice, then the grid's
- * identifier rule, then the cleaning steps, then the connection, the split
- * rendezvous's retain-mode requirement, and the file-handling and
- * connection-tuning cards below them. Each names what to fix on this screen,
- * in the words of the notice it points at -- naming the card it is about, since
- * the collapsed cards below show no problem of their own until opened.
+ * The chain opens with the one blocker that is not on the screen at all -- a
+ * device reporting no network, which no edit here clears -- and then follows the
+ * step's own reading order, so the sentence names the topmost unresolved surface
+ * and an operator working down the screen is sent to the first thing they meet:
+ * the verdict, then the count-only refusal, then the declaration conflict, then
+ * the over-long name notice, then the grid's identifier rule, then the cleaning
+ * steps, then the connection, the split rendezvous's retain-mode requirement, and
+ * the file-handling and connection-tuning cards below them. Each names what to fix
+ * on this screen, in the words of the notice it points at -- naming the card it is
+ * about, since the collapsed cards below show no problem of their own until
+ * opened.
  */
 export function acceptorLaunchBlockedReason(
   verdict: AcceptorVerdictViewModel,
@@ -342,6 +353,7 @@ export function acceptorLaunchBlockedReason(
   invitationTerms: LinkageTerms,
   stepBlocks: AcceptorLaunchStepBlocks = NO_STEP_BLOCKS,
 ): string | undefined {
+  if (stepBlocks.offline) return OFFLINE_EXCHANGE_REASON;
   if (verdict.satisfiableKeyCount === 0)
     return "Set your columns to the missing field types above before you can start.";
   // A count-only invitation answers the payload question outright, ahead of the

@@ -11,9 +11,11 @@ import { listManagedLocalState } from "@psi/managedLocalState";
 import { tokenFromInput } from "@psi/invitation";
 
 import { isConsoleBuild } from "@utils/clientConfig";
+import { useOnlineStatus } from "@components/useOnlineStatus";
 
 import { BenchPage } from "./BenchPage";
 import { FILE_ASSURANCE_LINE } from "./fileAssurance";
+import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import { downloadSampleCsvs } from "./sampleData";
 import { loadSavedExchanges } from "./savedExchangesLoad";
 import styles from "./bench.module.css";
@@ -31,6 +33,14 @@ export function BenchLobby() {
   const navigate = useNavigate();
   const [invitation, setInvitation] = useState("");
   const [invitationError, setInvitationError] = useState<string>();
+
+  // Advisory only. Every entry below navigates or reads -- authoring an exchange
+  // file for the command-line tool reaches no partner, and neither does reading
+  // an invitation -- so the block belongs to the create or run each flow ends in,
+  // which carries it. Saying so here spares an operator the walk to a gate they
+  // will meet after choosing a file. Only the offline direction is read: being
+  // online is no promise the partner is there (see @utils/networkStatus).
+  const online = useOnlineStatus();
 
   // Whether this browser already holds a saved recurring exchange, read once on
   // mount. The "run it again" pointer below is gated on it, so a first-run visitor
@@ -163,6 +173,14 @@ export function BenchLobby() {
             </div>
           )}
         </div>
+        {!online && (
+          <p className={`${styles.sub} ${styles.small}`}>
+            {OFFLINE_EXCHANGE_REASON} Reading an invitation and authoring an
+            exchange file for the command-line tool reach no partner, so those
+            stay open; each flow states this again at the create or run that
+            would start the exchange.
+          </p>
+        )}
         <p className={`${styles.sub} ${styles.small}`}>
           First time here?{" "}
           <Anchor

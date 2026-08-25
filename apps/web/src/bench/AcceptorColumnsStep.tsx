@@ -22,6 +22,7 @@ import { OUTBOUND_SEND_NO_PAYLOAD_SENTENCE } from "@psilink/core";
 import { ColumnName, isolatedColumnName } from "@components/ColumnName";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
+import { useOnlineStatus } from "@components/useOnlineStatus";
 
 import { overlongColumnsAlert } from "@psi/columnNames";
 
@@ -166,6 +167,8 @@ export function AcceptorColumnsStep({
     verdict.announcement,
   );
 
+  const online = useOnlineStatus();
+
   const unsatisfiedTypes = acceptorUnsatisfiedTypes(
     columns,
     linkageTerms,
@@ -220,6 +223,10 @@ export function AcceptorColumnsStep({
     editorState,
     linkageTerms,
     {
+      // An accept ends in a live two-party session however it runs, so the
+      // launch is held while the browser reports no network -- named in the same
+      // line every other blocker speaks through.
+      offline: !online,
       connectionBlocked,
       exchangeFilesBlocked,
       connectionTuningBlocked,
