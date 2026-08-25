@@ -229,10 +229,19 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // drops it), and an import that cited nothing emits nothing whatever its rules
   // match.
   const importedCitation = draft.importedRuleSetCitation;
+  // Rules declaring no key and no field are drawn from every set vacuously, so the
+  // predicate alone would re-emit the import's citation over a document carrying none
+  // of the rules it names. The draft reaches that state as an intermediate (disabling
+  // every key), and the built terms can leave the browser from there via the terms
+  // export, so exclude it here -- the same exclusion linkageRuleSetReferenceFor makes
+  // on the derived branch.
+  const declaresNoRules =
+    terms.linkageKeys.length === 0 && terms.linkageFields.length === 0;
   const ruleSetReference =
     importedCitation === undefined
       ? linkageRuleSetReferenceFor(terms)
       : importedCitation.kind === "cited" &&
+          !declaresNoRules &&
           isDrawnFromLinkageRuleSet(importedCitation.ruleSet, terms)
         ? importedCitation.ruleSet.reference
         : undefined;

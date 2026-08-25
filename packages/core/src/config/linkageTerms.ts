@@ -955,11 +955,17 @@ const LinkageRuleSetReferenceSchema: z.ZodType<LinkageRuleSetReference> =
  * A rule-set reference as one readable clause, keys first: the keys are the
  * specific artifact and the fields the substrate they are built from, so a
  * reader meets the narrower claim before the broader one.
+ *
+ * The set names are free text a partner chooses, so they are delimited the way
+ * the legal-agreement mismatches delimit theirs -- a name carrying a space or
+ * the clause's own " over " reads as one value rather than blurring into the
+ * surrounding prose. The versions are schema-constrained semver and stay bare,
+ * like the legal agreement's expiration date.
  */
 function describeRuleSet(reference: LinkageRuleSetReference): string {
   return (
-    `${reference.keySet.name} ${reference.keySet.version} over ` +
-    `${reference.fieldSet.name} ${reference.fieldSet.version}`
+    `"${reference.keySet.name}" ${reference.keySet.version} over ` +
+    `"${reference.fieldSet.name}" ${reference.fieldSet.version}`
   );
 }
 

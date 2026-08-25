@@ -2976,12 +2976,32 @@ describe("linkageRuleSet", () => {
     });
     const { errors } = validateCompatibility(local, partner);
     expect(errors).toEqual([
-      "linkage rule set mismatch: local names hmis-keys 1.0.0 over " +
-        "baseline-pii 1.0.0, partner names hmis-keys 2.0.0 over " +
-        "baseline-pii 1.0.0",
+      'linkage rule set mismatch: local names "hmis-keys" 1.0.0 over ' +
+        '"baseline-pii" 1.0.0, partner names "hmis-keys" 2.0.0 over ' +
+        '"baseline-pii" 1.0.0',
     ]);
     // Symmetric: both parties reach the same verdict from their own copy.
     expect(validateCompatibility(partner, local).errors).toHaveLength(1);
+  });
+
+  test("delimits a partner set name that carries the clause's own connective", () => {
+    // The name is free text the partner chooses, so an undelimited one could pass
+    // itself off as the whole clause: "keys 1.0.0 over pii" as a name would read as
+    // a rule set the partner does not cite. The quotes keep each name one value.
+    const local = parseLinkageTerms({ ...base, linkage_rule_set: citation });
+    const partner = parseLinkageTerms({
+      ...base,
+      output: { expectsOutput: false, shareWithPartner: true },
+      linkage_rule_set: {
+        ...citation,
+        keySet: { name: "hmis-keys 9.9.9 over baseline-pii", version: "1.0.0" },
+      },
+    });
+    expect(validateCompatibility(local, partner).errors).toEqual([
+      'linkage rule set mismatch: local names "hmis-keys" 1.0.0 over ' +
+        '"baseline-pii" 1.0.0, partner names ' +
+        '"hmis-keys 9.9.9 over baseline-pii" 1.0.0 over "baseline-pii" 1.0.0',
+    ]);
   });
 
   test("is skipped where either party cites nothing", () => {

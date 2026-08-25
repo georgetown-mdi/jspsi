@@ -1979,6 +1979,39 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     expect(buildAdvancedTerms(reordered).linkageRuleSet).toBeUndefined();
   });
 
+  test("an imported citation is dropped once the draft disables every key", () => {
+    // Rules declaring no key and no field are drawn from every set vacuously, so
+    // re-emitting the import's citation here would name rules the document carries
+    // none of. The draft reaches this state as an intermediate, and the terms
+    // export can carry it out of the browser from there.
+    const imported = structuredClone(defaultExport());
+    imported.linkageRuleSet = {
+      fieldSet: { name: "partner-pii", version: "4.2.0" },
+      keySet: { name: "partner-keys", version: "4.2.0" },
+    };
+    const draft = draftFromTerms(imported, seedFor(), 3600, rawRows);
+    const allOff = {
+      ...draft,
+      keys: draft.keys.map((entry) => ({ ...entry, enabled: false })),
+    };
+    const emptied = buildAdvancedTerms(allOff);
+    expect(emptied.linkageKeys).toEqual([]);
+    expect(emptied.linkageFields).toEqual([]);
+    expect(emptied.linkageRuleSet).toBeUndefined();
+
+    // Narrowing to ONE enabled key still declares rules drawn from the cited set,
+    // so that import keeps its citation verbatim.
+    const oneOn = {
+      ...draft,
+      keys: draft.keys.map((entry, index) =>
+        index === 0 ? entry : { ...entry, enabled: false },
+      ),
+    };
+    const narrowed = buildAdvancedTerms(oneOn);
+    expect(narrowed.linkageKeys).toHaveLength(1);
+    expect(narrowed.linkageRuleSet).toEqual(imported.linkageRuleSet);
+  });
+
   test("a guided draft that edits nothing still cites the built-in set", () => {
     // The no-op baseline: the editor's own default export carries the citation and
     // rebuilds with it, so the guided path's terms -- and the cross-party hash --
