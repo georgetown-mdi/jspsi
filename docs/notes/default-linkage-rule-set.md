@@ -10,11 +10,13 @@ _Status: decided and built. The two sets are defined in
 `DEFAULT_LINKAGE_KEY_SET_NAME` / `DEFAULT_LINKAGE_KEY_SET_VERSION`, and the
 operator-facing description -- which paths use them and what each name covers
 -- is in [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#the-built-in-rules).
-Nothing about an exchange changes because the rules have names: no identifier
-is in an invitation, on the wire, or in an exchange record. This note records
-what the two sets are, why they are named apart, what the key set's validation
-rests on, the criticisms on record against it, and why both names are neutral.
-See [docs/notes/README.md](README.md)._
+Terms drawn from the sets cite them, in
+[`linkage_terms.linkage_rule_set`](../EXCHANGE_REFERENCE.md#linkage_termslinkage_rule_set),
+so the citation travels with the exchange and lands in each party's record;
+what a citation does and does not assert is that field's to state. This note
+records what the two sets are, why they are named apart, what the key set's
+validation rests on, the criticisms on record against it, and why both names
+are neutral. See [docs/notes/README.md](README.md)._
 
 This is design rationale. Nothing here binds an implementation.
 
@@ -238,8 +240,13 @@ digest, and what the check cannot see, are in the script's own header.
 
 Two things the versions deliberately are not:
 
-- **Not a compatibility negotiation.** Neither is exchanged or checked against
-  the partner's. Whether two parties' terms agree is decided by the terms
-  document itself, key by key, exactly as before.
+- **Not a compatibility negotiation.** Whether two parties' terms agree is
+  decided by the terms document itself, field by field and key by key, exactly
+  as it was before the sets had names. The citation travels beside those rules
+  and is compared where both parties carry one, but nothing is negotiated from
+  it: two builds shipping different versions of a set do not reconcile them, and
+  a party citing nothing is not held to the other's citation. What a version
+  buys is that the artifact a record names is identifiable, not that a partner
+  can be met halfway on it.
 - **Not a migration ladder.** There is no path from one version of a set to
   another and no meaning attached to the semver components beyond ordering.

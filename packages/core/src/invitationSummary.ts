@@ -155,6 +155,38 @@ export interface InvitationLegalAgreementSummary {
   expirationDate: Displayable;
 }
 
+/**
+ * One half of the rule-set citation the inviter declares -- the field set or the
+ * key set -- with both strings sanitized for display.
+ *
+ * The values are the INVITER's declaration about its own rules, carried through
+ * unvetted: the token is accepted on a transcription checksum, not an
+ * authenticity guarantee, so nothing here has been checked against the rules the
+ * same invitation carries. A surface therefore presents it as the inviting
+ * party's citation rather than as a psilink-vouched provenance, and leaves the
+ * declared keys and fields beside it -- which the acceptor's consent actually
+ * turns on -- to stand as the account of what will run. Sanitized once here, at
+ * the single display boundary, like every other partner string.
+ */
+export interface InvitationRuleSetIdentitySummary {
+  /** The set's declared name, sanitized for display. */
+  name: Displayable;
+  /** The set's declared content version, sanitized for display. */
+  version: Displayable;
+}
+
+/**
+ * The named rule set the inviter cites its linkage fields and keys to. Present
+ * only when the invitation declares one; terms whose rules were authored carry
+ * no citation, and a surface renders nothing rather than inventing one.
+ */
+export interface InvitationRuleSetSummary {
+  /** The set the declared linkage fields are cited to. */
+  fieldSet: InvitationRuleSetIdentitySummary;
+  /** The set the declared linkage keys are cited to. */
+  keySet: InvitationRuleSetIdentitySummary;
+}
+
 /** The optional data columns the inviter declares, with names sanitized. */
 export interface InvitationPayloadSummary {
   /** Columns the inviter will send for matched records (what the acceptor
@@ -535,6 +567,13 @@ export interface InvitationSummary {
   matchedFields: Array<Displayable>;
   /** PII fields involved, each with its label and declared constraints. */
   linkageFields: Array<InvitationFieldSummary>;
+  /**
+   * The named rule set the inviter cites the keys and fields above to. Present
+   * only when the invitation declares one; see
+   * {@link InvitationRuleSetSummary} for why a surface renders it as the
+   * inviter's citation rather than as a vouched provenance.
+   */
+  linkageRuleSet?: InvitationRuleSetSummary;
   /** Present only when the inviter attached a legal agreement. */
   legalAgreement?: InvitationLegalAgreementSummary;
   /** Present only when the inviter declared payload columns to send or receive. */
@@ -1287,6 +1326,23 @@ export function summarizeInvitation(
       source.inviterRetainsFiles === true ||
       endpointRequiresRetainedFiles(endpoint),
   };
+
+  if (terms.linkageRuleSet !== undefined) {
+    summary.linkageRuleSet = {
+      fieldSet: {
+        name: redactAndSanitizeForDisplay(terms.linkageRuleSet.fieldSet.name),
+        version: redactAndSanitizeForDisplay(
+          terms.linkageRuleSet.fieldSet.version,
+        ),
+      },
+      keySet: {
+        name: redactAndSanitizeForDisplay(terms.linkageRuleSet.keySet.name),
+        version: redactAndSanitizeForDisplay(
+          terms.linkageRuleSet.keySet.version,
+        ),
+      },
+    };
+  }
 
   if (terms.legalAgreement !== undefined) {
     summary.legalAgreement = {

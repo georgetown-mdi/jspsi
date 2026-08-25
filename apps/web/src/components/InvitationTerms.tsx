@@ -62,6 +62,19 @@ function joinList(items: Array<string>): string {
  * {@link ColumnChips} list) can name itself from the visible caption via
  * aria-labelledby rather than carrying a second, separately-authored aria-label that
  * could drift from the caption. */
+/**
+ * The bounded frame a raw partner-controlled value is rendered in: its own box,
+ * so the value cannot run into the fixed chrome around it. Shared by the
+ * rule-set citation and declared apart from the allowed-character class's inline
+ * copy only because the citation renders two of them.
+ */
+const ruleSetValueStyle = {
+  border: "1px solid var(--mantine-color-default-border)",
+  borderRadius: "var(--mantine-radius-sm)",
+  padding: "2px 6px",
+  wordBreak: "break-all",
+} as const;
+
 function Term({
   label,
   captionId,
@@ -1298,6 +1311,36 @@ export function InvitationTerms({
                   ? CONSENT_FACTS.fanOutCandidates.note
                   : CONSENT_FACTS.fanOutRefused.note}
               </Text>
+            </Term>
+          )}
+
+          {/* The rules' citation, above the matching list it cites: a reader meets
+            the name before the enumeration it stands for, and meets in the same
+            place that the name is the inviting party's word while the keys and
+            fields beneath it are what the exchange holds both parties to (the
+            caveat is read from CONSENT_FACTS, so this surface and the CLI accept
+            prompt state it in the same words). Keys before fields, since the key
+            set is the specific artifact and the field set the substrate it is
+            built from. Both names and both versions are partner-controlled text,
+            sanitized by summarizeInvitation and bound in their own Text between
+            fixed chrome -- never joined into the label -- for the reason the
+            allowed-character class below is: a crafted value must not be able to
+            read as system chrome. */}
+          {summary.linkageRuleSet !== undefined && (
+            <Term label="Linkage rule set">
+              <Stack gap={2}>
+                <Text size="sm">Keys:</Text>
+                <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
+                  {summary.linkageRuleSet.keySet.name}{" "}
+                  {summary.linkageRuleSet.keySet.version}
+                </Text>
+                <Text size="sm">Fields:</Text>
+                <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
+                  {summary.linkageRuleSet.fieldSet.name}{" "}
+                  {summary.linkageRuleSet.fieldSet.version}
+                </Text>
+              </Stack>
+              <Text size="sm">{CONSENT_FACTS.linkageRuleSet.note}</Text>
             </Term>
           )}
 

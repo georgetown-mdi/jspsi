@@ -744,6 +744,11 @@ test("saveConfig emits snake_case keys and round-trips through parseExchangeSpec
   expect(raw).toContain("linkage_keys:");
   expect(raw).toContain("expects_output:");
   expect(raw).toContain("share_with_partner:");
+  // The rule-set citation the default terms carry, so the saved config names the
+  // set the exchange it configures will run.
+  expect(raw).toContain("linkage_rule_set:");
+  expect(raw).toContain("field_set:");
+  expect(raw).toContain("key_set:");
   // ... never camelCase.
   expect(raw).not.toContain("linkageFields");
   expect(raw).not.toContain("expectsOutput");

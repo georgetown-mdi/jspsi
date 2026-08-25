@@ -317,6 +317,41 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     );
   });
 
+  test("the rule-set citation is always-visible, marked as the partner's word, and absent when none is cited", async () => {
+    // The citation names the rules the collapsed list below enumerates, so it
+    // stays outside the disclosure: an acceptor reads which set was cited without
+    // expanding. The caveat rides with it in the same place, because the name is
+    // the inviting party's claim and nothing here checks it against the keys.
+    renderTerms({
+      ...terms,
+      linkageRuleSet: {
+        fieldSet: { name: "baseline-pii", version: "1.0.0" },
+        keySet: { name: "hmis-keys", version: "2.3.0" },
+      },
+    });
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    expect(app.container.textContent).toContain("Linkage rule set");
+    expect(app.container.textContent).toContain("hmis-keys 2.3.0");
+    expect(app.container.textContent).toContain("baseline-pii 1.0.0");
+    expect(app.container.textContent).toContain(
+      CONSENT_FACTS.linkageRuleSet.note,
+    );
+    expect((await readyPanel("Matching strategies")).textContent).not.toContain(
+      "hmis-keys 2.3.0",
+    );
+  });
+
+  test("terms citing no rule set render no citation at all", async () => {
+    // Hand-authored rules have no citation, and inventing one would attribute
+    // them -- so the block is absent rather than empty or hedged.
+    renderTerms({ ...terms, linkageRuleSet: undefined });
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    expect(app.container.textContent).not.toContain("Linkage rule set");
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.linkageRuleSet.note,
+    );
+  });
+
   test("opening one key disclosure exposes its detail to AT and leaves the others collapsed", async () => {
     renderTerms();
 

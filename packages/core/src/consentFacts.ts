@@ -393,6 +393,24 @@ export const CONSENT_FACTS = {
       "against this party's own copy before data moves, but psilink vets " +
       "neither the agreement nor the purpose it states.",
   },
+  linkageRuleSet: {
+    basis: "trust-contingent",
+    reason:
+      "The inviting party's citation of its own rules -- two names and two " +
+      "content versions it wrote into the invitation, carried on a " +
+      "transcription checksum. Nothing here is checked against the keys and " +
+      "fields the same invitation declares, and nothing resolves a name to a " +
+      "set: a document may cite a set this build ships while declaring rules " +
+      "that are not it. Where BOTH parties cite a set the two citations must " +
+      "match before data moves, but that binds an acceptor to the inviter's " +
+      "own string rather than vouching for it. What consent actually turns on " +
+      "is the declared keys and fields shown beside this, which ARE " +
+      "byte-compared between the parties.",
+    note:
+      "Your partner cites this rule set for the keys and fields below; " +
+      "psilink has not checked them against it. The keys and fields " +
+      "themselves are what the exchange holds both parties to.",
+  },
   invitationExpiry: {
     basis: "enforced",
     reason:

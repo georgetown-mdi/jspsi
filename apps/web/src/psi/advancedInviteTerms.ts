@@ -3,6 +3,8 @@ import {
   assessLinkageSatisfiability,
   authoredLinkageFields,
   getDefaultLinkageTerms,
+  isDrawnFromLinkageRuleSet,
+  linkageRuleSetReferenceFor,
   referencedLinkageFieldNames,
 } from "@psilink/core";
 
@@ -145,6 +147,9 @@ function stripFuzzy(key: LinkageKey): LinkageKey {
  * ones in draft order,
  * and linkage fields are filtered to those the enabled keys reference (mirroring
  * `getDefaultLinkageTerms`, so disabling a key drops a now-unreferenced field).
+ * The rule-set citation is re-decided against the built terms rather than carried
+ * from the seed, so an edited draft cites nothing and an unedited one still cites
+ * the built-in set.
  *
  * Pure: it does not validate. {@link validateAdvancedInvite} runs the result
  * through the core schema, which stays the single validation source.
@@ -205,6 +210,28 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
     linkageFields,
     linkageKeys: enabledKeys,
   };
+
+  // The seed cites the built-in rule set, and the draft may have edited its way
+  // out of it -- a key reordered, a field renamed by an authored cleaning, an
+  // imported document's own rules. Re-decide the citation against what this draft
+  // actually built rather than carrying the seed's: a citation over edited rules
+  // would claim a provenance they do not have. A guided draft that changed
+  // none of them still cites the set, which is what keeps the guided path's terms
+  // (and the acceptor's reading of them) unchanged.
+  //
+  // An IMPORTED document's own citation is decided first and wins where it still
+  // applies, on the same round-trip-fidelity grounds the imported field
+  // declaration is re-emitted on: the imported document may cite a set this build
+  // does not ship, and re-deriving would silently relabel it. It applies while the
+  // built rules are still drawn from the imported ones -- narrowing by disabling a
+  // key keeps the citation, editing or adding one drops it.
+  const ruleSetReference =
+    draft.importedLinkageRuleSet !== undefined &&
+    isDrawnFromLinkageRuleSet(draft.importedLinkageRuleSet, terms)
+      ? draft.importedLinkageRuleSet.reference
+      : linkageRuleSetReferenceFor(terms);
+  if (ruleSetReference !== undefined) terms.linkageRuleSet = ruleSetReference;
+  else delete terms.linkageRuleSet;
 
   // Author terms.payload.send from the columns the draft metadata discloses, via the
   // shared payloadSendForMetadata derivation the quick path also uses (so the two

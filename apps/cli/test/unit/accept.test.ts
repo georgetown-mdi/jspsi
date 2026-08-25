@@ -1985,6 +1985,37 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
   );
 });
 
+test("displayInvitation: the rule-set citation reads as the partner's word, and is absent when none is cited", () => {
+  // The citation is the inviting party's own claim about its rules, so it carries
+  // the trust-contingent marker and the shared caveat rather than reading as a
+  // provenance psilink vouched for. An invitation citing nothing prints no line:
+  // hand-authored rules have no citation, and inventing one would attribute them.
+  const log = getLogger("accept-display-rule-set-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  const cited = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      linkageRuleSet: {
+        fieldSet: { name: "baseline-pii", version: "1.0.0" },
+        keySet: { name: "hmis-keys", version: "2.3.0" },
+      },
+    },
+  });
+  expect(cited).toContain("linkage rule set (your partner's word):");
+  expect(cited).toContain("\n    keys: hmis-keys 2.3.0");
+  expect(cited).toContain("\n    fields: baseline-pii 1.0.0");
+  expect(cited).toContain(CONSENT_FACTS.linkageRuleSet.note);
+
+  const uncited = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms: { ...base.linkageTerms, linkageRuleSet: undefined },
+  });
+  expect(uncited).not.toContain("linkage rule set");
+  expect(uncited).not.toContain(CONSENT_FACTS.linkageRuleSet.note);
+});
+
 test("displayInvitation: the received-columns marker follows what the invitation carried, not what it declared", () => {
   // The same line has two sources and they do not rest on the same thing. The
   // carried subset is the set an acceptance locks in and reconciles the received

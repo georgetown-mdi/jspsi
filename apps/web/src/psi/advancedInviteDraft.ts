@@ -733,6 +733,18 @@ export function draftFromTerms(
     // (order + declared-but-unreferenced fields + a benign empty `constraints: {}`); see
     // AdvancedInviteDraft.importedLinkageFields.
     importedLinkageFields: terms.linkageFields,
+    // And the citation over them, with the rules it cited, so the rebuild can
+    // re-emit it while the draft still builds those rules; see
+    // AdvancedInviteDraft.importedLinkageRuleSet.
+    ...(terms.linkageRuleSet !== undefined
+      ? {
+          importedLinkageRuleSet: {
+            reference: terms.linkageRuleSet,
+            linkageFields: terms.linkageFields,
+            linkageKeys: terms.linkageKeys,
+          },
+        }
+      : {}),
     keys: terms.linkageKeys.map((key) => ({
       key,
       enabled: keyIsSupplyable(key, declarable),

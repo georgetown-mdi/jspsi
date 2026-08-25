@@ -667,6 +667,26 @@ export function displayInvitation(params: {
         summary.matchedFields.join(", "),
     );
 
+  // The rules' citation, ahead of the fields and keys it cites so a reader meets
+  // the name before the enumeration it stands for -- and meets, in the same
+  // place, that the name is the inviting party's word while the enumeration
+  // beneath it is what the exchange holds both parties to. Keys first within the
+  // line, since the key set is the specific artifact and the field set the
+  // substrate it is built from. Both names and both versions are partner-
+  // controlled free text, sanitized by the summary.
+  if (summary.linkageRuleSet !== undefined) {
+    emit(`  ${marked("linkage rule set", "linkageRuleSet")}:`);
+    emit(
+      `    keys: ${summary.linkageRuleSet.keySet.name} ` +
+        `${summary.linkageRuleSet.keySet.version}`,
+    );
+    emit(
+      `    fields: ${summary.linkageRuleSet.fieldSet.name} ` +
+        `${summary.linkageRuleSet.fieldSet.version}`,
+    );
+    emit(`    ${CONSENT_FACTS.linkageRuleSet.note}`);
+  }
+
   // The short, high-level field list precedes the long key list: the keys enumerate
   // the combinations OF these fields, and on a terminal the block printed second is
   // the one that scrolls the first off the screen.

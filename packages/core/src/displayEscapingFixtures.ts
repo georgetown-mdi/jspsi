@@ -46,8 +46,9 @@ export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
  * them is what the walk needs; the hostile bytes sit in the partner text beside
  * them (the pattern's value, the field and key names).
  *
- * Deliberately beyond what the schema admits: `version`, `date`, and
- * `expirationDate` are format-constrained (semver, `z.iso.date`), so a decoded
+ * Deliberately beyond what the schema admits: `version`, `date`,
+ * `expirationDate`, and the two rule-set `version` strings are
+ * format-constrained (semver, `z.iso.date`), so a decoded
  * token cannot carry a hostile byte in them today. They carry one here because
  * the display boundary's contract is uniform and does not depend on that
  * validation staying in place -- the same reason `summarizeInvitation` routes
@@ -108,6 +109,10 @@ export const hostileTerms: LinkageTerms = {
       swap: [`elem${RLO}one`, `last${BEL}name`],
     },
   ],
+  linkageRuleSet: {
+    fieldSet: { name: `base${BEL}line`, version: `1.0.0${RLO}` },
+    keySet: { name: `key${RLO}set`, version: `2.0.0${BEL}` },
+  },
   payload: {
     send: [{ name: `risk${BEL}score`, description: `sco${RLO}re` }],
     receive: [{ name: `outcome${RLO}` }],

@@ -1,5 +1,6 @@
 import type {
   Algorithm,
+  BuiltInLinkageRuleSet,
   LinkageField,
   LinkageKey,
   LinkageKeyElement,
@@ -181,6 +182,21 @@ export interface AdvancedInviteDraft {
    * the rebuild reconciles it.
    */
   importedLinkageFields?: Array<LinkageField>;
+  /**
+   * An IMPORTED terms document's rule-set citation together with the rules it
+   * cited, carried so {@link buildAdvancedTerms} can re-emit the citation while
+   * the draft still builds those rules -- the round-trip fidelity
+   * {@link importedLinkageFields} gives the field declaration, extended to the
+   * provenance claim over it. Set only by {@link draftFromTerms}, and only for an
+   * imported document that carried a citation.
+   *
+   * The rules travel with it because the citation is not re-emitted
+   * unconditionally: an import narrowed by disabling keys still builds rules drawn
+   * from the imported document, while one whose keys were edited, reordered, or
+   * added to does not, and a citation over those would claim a provenance they no
+   * longer have.
+   */
+  importedLinkageRuleSet?: BuiltInLinkageRuleSet;
 }
 
 /** The fixed starting point for an editor session: the auto-derived terms the

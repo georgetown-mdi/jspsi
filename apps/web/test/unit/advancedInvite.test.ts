@@ -1908,6 +1908,59 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     ).toBe("date_of_birth");
   });
 
+  test("an imported document's own rule-set citation survives the round trip", () => {
+    // The imported citation is re-emitted rather than re-derived, on the same
+    // fidelity grounds the field order is: a document may cite a set this build
+    // does not ship, and re-deriving would silently relabel it as the built-in
+    // one over rules that happen to match.
+    const imported = structuredClone(defaultExport());
+    imported.linkageRuleSet = {
+      fieldSet: { name: "partner-pii", version: "4.2.0" },
+      keySet: { name: "partner-keys", version: "4.2.0" },
+    };
+    expect(rebuild(imported).linkageRuleSet).toEqual(imported.linkageRuleSet);
+    expect(canonicalString(rebuild(imported))).toEqual(
+      canonicalString(imported),
+    );
+  });
+
+  test("an imported citation is dropped once the draft edits its way out of the cited rules", () => {
+    const imported = structuredClone(defaultExport());
+    imported.linkageRuleSet = {
+      fieldSet: { name: "partner-pii", version: "4.2.0" },
+      keySet: { name: "partner-keys", version: "4.2.0" },
+    };
+    const draft = draftFromTerms(imported, seedFor(), 3600, rawRows);
+    // Reversing the cascade keeps every key and changes which one claims a record
+    // more than one would match, so the imported citation does not describe
+    // these rules -- and they are not the built-in set's either.
+    const reordered = { ...draft, keys: [...draft.keys].reverse() };
+    expect(buildAdvancedTerms(reordered).linkageRuleSet).toBeUndefined();
+  });
+
+  test("a guided draft that edits nothing still cites the built-in set", () => {
+    // The no-op baseline: the editor's own default export carries the citation and
+    // rebuilds with it, so the guided path's terms -- and the cross-party hash --
+    // are what the quick path would have embedded.
+    const exported = defaultExport();
+    expect(exported.linkageRuleSet).toBeDefined();
+    expect(rebuild(exported).linkageRuleSet).toEqual(exported.linkageRuleSet);
+  });
+
+  test("disabling a key narrows the rules and keeps the citation", () => {
+    const exported = defaultExport();
+    const draft = draftFromTerms(exported, seedFor(), 3600, rawRows);
+    const narrowed = {
+      ...draft,
+      keys: draft.keys.map((entry, index) =>
+        index === 0 ? { ...entry, enabled: false } : entry,
+      ),
+    };
+    const terms = buildAdvancedTerms(narrowed);
+    expect(terms.linkageKeys.length).toBe(exported.linkageKeys.length - 1);
+    expect(terms.linkageRuleSet).toEqual(exported.linkageRuleSet);
+  });
+
   test("an empty constraints object that STRIPS a type default (ssn) stays refused", () => {
     // ssn's default is { exclude, validOnly }, so an empty {} is NOT a benign no-op -- it
     // drops the SSN validity checks the editor would author. That is a real,

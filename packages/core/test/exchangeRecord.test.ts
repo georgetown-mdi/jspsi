@@ -964,7 +964,7 @@ describe("serialize / parse", () => {
 
   test("parseExchangeRecord rejects an unrecognized version", async () => {
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const bumped = { ...record, version: "psilink-exchange-record/v3" };
+    const bumped = { ...record, version: "psilink-exchange-record/v4" };
     expect(() => parseExchangeRecord(bumped)).toThrow();
   });
 
@@ -976,6 +976,46 @@ describe("serialize / parse", () => {
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
     const v1 = { ...record, version: "psilink-exchange-record/v1" };
     expect(() => parseExchangeRecord(v1)).toThrow();
+  });
+
+  test("parseExchangeRecord refuses a record written before the rule-set citation", async () => {
+    // The v2 shape: a governance block with no linkageRuleSet, which a reader of
+    // this version would take as "the agreed terms cited no named rule set" --
+    // not what a writer that could not cite one meant. Refused on the version
+    // discriminant for the same reason the run binder above is.
+    const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
+    const v2 = { ...record, version: "psilink-exchange-record/v2" };
+    expect(() => parseExchangeRecord(v2)).toThrow();
+  });
+
+  test("a record carries the agreed terms' rule-set citation, and omits it when the terms cite none", async () => {
+    const cited = await buildExchangeRecord(
+      {
+        ...baseInputs,
+        localTerms: {
+          ...baseInputs.localTerms,
+          linkageRuleSet: {
+            fieldSet: { name: "baseline-pii", version: "1.0.0" },
+            keySet: { name: "hmis-keys", version: "1.0.0" },
+          },
+        },
+      },
+      fixedRandomness,
+    );
+    expect(cited.record.governance.linkageRuleSet).toEqual({
+      fieldSet: { name: "baseline-pii", version: "1.0.0" },
+      keySet: { name: "hmis-keys", version: "1.0.0" },
+    });
+    // Round-trips through the on-disk form rather than only the built object.
+    expect(
+      parseExchangeRecord(JSON.parse(serializeExchangeRecord(cited.record)))
+        .governance.linkageRuleSet,
+    ).toEqual(cited.record.governance.linkageRuleSet);
+
+    // Absent by omission, not by an explicit null: an absent key and a null key
+    // are distinct in the canonical encoding a record is hashed over.
+    const uncited = await buildExchangeRecord(baseInputs, fixedRandomness);
+    expect("linkageRuleSet" in uncited.record.governance).toBe(false);
   });
 });
 
