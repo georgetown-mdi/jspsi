@@ -673,15 +673,18 @@ export function displayInvitation(params: {
   // beneath it is what the exchange holds both parties to. Keys first within the
   // line, since the key set is the specific artifact and the field set the
   // substrate it is built from. Both names and both versions are partner-
-  // controlled free text, sanitized by the summary.
+  // controlled free text, sanitized by the summary. The name is quoted, as core's
+  // rule-set mismatch message quotes it: it is free text that may carry a space,
+  // so an unquoted name reading "hmis-keys 9.9.9" would be indistinguishable from
+  // the name plus the schema-constrained semver version beside it.
   if (summary.linkageRuleSet !== undefined) {
     emit(`  ${marked("linkage rule set", "linkageRuleSet")}:`);
     emit(
-      `    keys: ${summary.linkageRuleSet.keySet.name} ` +
+      `    keys: "${summary.linkageRuleSet.keySet.name}" ` +
         `${summary.linkageRuleSet.keySet.version}`,
     );
     emit(
-      `    fields: ${summary.linkageRuleSet.fieldSet.name} ` +
+      `    fields: "${summary.linkageRuleSet.fieldSet.name}" ` +
         `${summary.linkageRuleSet.fieldSet.version}`,
     );
     emit(`    ${CONSENT_FACTS.linkageRuleSet.note}`);

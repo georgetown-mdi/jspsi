@@ -228,27 +228,42 @@ describe("linkageRuleSetReferenceFor", () => {
     ).toBeUndefined();
   });
 
-  test("cites nothing over rules that declare no key and no field", () => {
-    // Empty rules are drawn from every set vacuously -- the predicate says so --
-    // so the citation is decided here instead: a document declaring nothing
-    // carries no provenance to claim.
+  test("cites nothing over rules that declare no key", () => {
+    // Keyless rules are drawn from every set vacuously -- the predicate says so
+    // -- so the citation is decided here instead: it asserts that the keys came
+    // from the named set, and a document declaring none carries no provenance.
     const empty = { linkageFields: [], linkageKeys: [] };
     expect(isDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, empty)).toBe(
       true,
     );
     expect(linkageRuleSetReferenceFor(empty)).toBeUndefined();
-    // One key alone, or one field alone, is enough to be judged on its content.
+    // Field declarations left behind by the keys that referenced them do not
+    // rescue the citation: they name none of the keys the set is cited for.
+    expect(
+      linkageRuleSetReferenceFor({
+        linkageFields: [...DEFAULT_LINKAGE_RULE_SET.linkageFields],
+        linkageKeys: [],
+      }),
+    ).toBeUndefined();
+    // One key alone is enough to be judged on its content.
     expect(
       linkageRuleSetReferenceFor({
         linkageFields: [],
         linkageKeys: [DEFAULT_LINKAGE_RULE_SET.linkageKeys[0]],
       }),
     ).toStrictEqual(DEFAULT_LINKAGE_RULE_SET.reference);
-    expect(
-      linkageRuleSetReferenceFor({
-        linkageFields: [DEFAULT_LINKAGE_RULE_SET.linkageFields[0]],
-        linkageKeys: [],
-      }),
-    ).toStrictEqual(DEFAULT_LINKAGE_RULE_SET.reference);
+  });
+
+  test("reads the same over rules derived from the set, which drop a keyless derivation's fields", () => {
+    // A derivation filters its fields to the ones its emitted keys reference, so
+    // one that emits no key declares no field either -- which is what makes
+    // deciding on the keys alone leave every derived document's citation where
+    // it was.
+    const noSupplyableKey = getDefaultLinkageTerms("Party A", [
+      col("record_id", "identifier", "identifier"),
+    ]);
+    expect(noSupplyableKey.linkageKeys).toStrictEqual([]);
+    expect(noSupplyableKey.linkageFields).toStrictEqual([]);
+    expect(linkageRuleSetReferenceFor(noSupplyableKey)).toBeUndefined();
   });
 });

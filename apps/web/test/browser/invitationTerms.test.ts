@@ -335,14 +335,33 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     renderTerms(citingTerms, { perspective: "review" });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
     expect(app.container.textContent).toContain("Linkage rule set");
-    expect(app.container.textContent).toContain("hmis-keys 2.3.0");
-    expect(app.container.textContent).toContain("baseline-pii 1.0.0");
+    expect(app.container.textContent).toContain('"hmis-keys" 2.3.0');
+    expect(app.container.textContent).toContain('"baseline-pii" 1.0.0');
     expect(app.container.textContent).toContain(
       CONSENT_FACTS.linkageRuleSet.note,
     );
     expect((await readyPanel("Matching strategies")).textContent).not.toContain(
-      "hmis-keys 2.3.0",
+      "hmis-keys",
     );
+  });
+
+  test("a set name carrying a version-shaped token stays delimited from the version", async () => {
+    // The name is partner-controlled free text and the version beside it is not,
+    // so the quoting is what keeps the boundary between them readable: a name
+    // ending in a version-shaped token must not read as the version this block
+    // reports.
+    renderTerms(
+      {
+        ...citingTerms,
+        linkageRuleSet: {
+          fieldSet: { name: "baseline-pii", version: "1.0.0" },
+          keySet: { name: "hmis-keys 9.9.9", version: "2.3.0" },
+        },
+      },
+      { perspective: "review" },
+    );
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    expect(app.container.textContent).toContain('"hmis-keys 9.9.9" 2.3.0');
   });
 
   test("the viewer's own proposing preview cites the set without attributing it to a partner", async () => {
@@ -354,8 +373,8 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     renderTerms(citingTerms, { perspective: "proposing" });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
     expect(app.container.textContent).toContain("Linkage rule set");
-    expect(app.container.textContent).toContain("hmis-keys 2.3.0");
-    expect(app.container.textContent).toContain("baseline-pii 1.0.0");
+    expect(app.container.textContent).toContain('"hmis-keys" 2.3.0');
+    expect(app.container.textContent).toContain('"baseline-pii" 1.0.0');
     expect(app.container.textContent).not.toContain(
       CONSENT_FACTS.linkageRuleSet.note,
     );
@@ -367,7 +386,7 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     // The citation itself stays, since the accepted terms still carry it.
     renderTerms(citingTerms, { perspective: "accepted" });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
-    expect(app.container.textContent).toContain("hmis-keys 2.3.0");
+    expect(app.container.textContent).toContain('"hmis-keys" 2.3.0');
     expect(app.container.textContent).not.toContain(
       CONSENT_FACTS.linkageRuleSet.note,
     );

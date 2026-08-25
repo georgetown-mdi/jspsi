@@ -1329,7 +1329,10 @@ export function InvitationTerms({
             sanitized by summarizeInvitation and bound in their own Text between
             fixed chrome -- never joined into the label -- for the reason the
             allowed-character class below is: a crafted value must not be able to
-            read as system chrome.
+            read as system chrome. Within the box, the name is quoted as core's
+            rule-set mismatch message quotes it: a name may carry a space, so an
+            unquoted "hmis-keys 9.9.9" would be indistinguishable from the name
+            plus the schema-constrained semver version beside it.
 
             The names and versions themselves are true of the terms whoever
             authored them, so the block renders under every perspective; the
@@ -1342,12 +1345,12 @@ export function InvitationTerms({
               <Stack gap={2}>
                 <Text size="sm">Keys:</Text>
                 <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
-                  {summary.linkageRuleSet.keySet.name}{" "}
+                  &quot;{summary.linkageRuleSet.keySet.name}&quot;{" "}
                   {summary.linkageRuleSet.keySet.version}
                 </Text>
                 <Text size="sm">Fields:</Text>
                 <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
-                  {summary.linkageRuleSet.fieldSet.name}{" "}
+                  &quot;{summary.linkageRuleSet.fieldSet.name}&quot;{" "}
                   {summary.linkageRuleSet.fieldSet.version}
                 </Text>
               </Stack>

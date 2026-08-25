@@ -2004,9 +2004,24 @@ test("displayInvitation: the rule-set citation reads as the partner's word, and 
     },
   });
   expect(cited).toContain("linkage rule set (your partner's word):");
-  expect(cited).toContain("\n    keys: hmis-keys 2.3.0");
-  expect(cited).toContain("\n    fields: baseline-pii 1.0.0");
+  expect(cited).toContain('\n    keys: "hmis-keys" 2.3.0');
+  expect(cited).toContain('\n    fields: "baseline-pii" 1.0.0');
   expect(cited).toContain(CONSENT_FACTS.linkageRuleSet.note);
+
+  // The name is partner-controlled free text and the version beside it is not, so
+  // the quoting is what keeps the boundary between them readable: a name ending in
+  // a version-shaped token must not read as the version this line reports.
+  const spacedName = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      linkageRuleSet: {
+        fieldSet: { name: "baseline-pii", version: "1.0.0" },
+        keySet: { name: "hmis-keys 9.9.9", version: "2.3.0" },
+      },
+    },
+  });
+  expect(spacedName).toContain('\n    keys: "hmis-keys 9.9.9" 2.3.0');
 
   const uncited = renderDisplayInvitation(log, {
     ...base,

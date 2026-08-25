@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  DEFAULT_LINKAGE_RULE_SET,
   MAX_INVITATION_LIFETIME_SECONDS,
   MAX_NAME_LENGTH,
   assertPayloadSendDisclosed,
@@ -1835,8 +1836,15 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     expect(rebuilt.linkageFields.find((f) => f.name === "zip_extra")).toEqual(
       extra,
     );
-    // The field AND its constraint survive, so the agreement hash is unchanged.
-    expect(canonicalString(rebuilt)).toEqual(canonicalString(withExtra));
+    // The field and its constraint survive, and so does every other term -- but not
+    // the citation the export carried: the document cites the built-in set while
+    // declaring a field that set does not, and a citation naming the one set this
+    // build ships is checked against that set rather than against the rules the
+    // document claimed for it.
+    expect(rebuilt.linkageRuleSet).toBeUndefined();
+    const uncited = structuredClone(withExtra);
+    delete uncited.linkageRuleSet;
+    expect(canonicalString(rebuilt)).toEqual(canonicalString(uncited));
 
     // The realistic flow still generates: the inert extra field neither blocks the
     // satisfiability gate (no key references it) nor fails the schema parse.
@@ -1862,8 +1870,8 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     // date_of_birth has no default constraint, so a from-defaults rebuild emits no
     // constraints key -- diverging from an imported empty {} and tripping the
     // refuse-on-import guard even though {} is behaviorally identical to absent.
-    // Preserving the {} keeps the canonical forms equal: neither a silent divergence
-    // nor an over-refusal.
+    // Preserving the {} keeps the field declarations equal: neither a silent
+    // divergence nor an over-refusal.
     const imported = withFieldConstraints(defaultExport(), "date_of_birth", {});
     expect(
       imported.linkageFields.find((f) => f.name === "date_of_birth"),
@@ -1876,7 +1884,14 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     expect(
       rebuilt.linkageFields.find((f) => f.name === "date_of_birth"),
     ).toHaveProperty("constraints", {});
-    expect(canonicalString(rebuilt)).toEqual(canonicalString(imported));
+    // The built-in citation the export carried does not survive with it: the {} is
+    // behaviorally inert but canonically distinct, and the set this build ships
+    // declares that field without it, so the document no longer describes the set
+    // it names. Everything else round-trips byte for byte.
+    expect(rebuilt.linkageRuleSet).toBeUndefined();
+    const uncited = structuredClone(imported);
+    delete uncited.linkageRuleSet;
+    expect(canonicalString(rebuilt)).toEqual(canonicalString(uncited));
   });
 
   test("a name/type-confused referenced field with an empty {} stays refused, not preserved", () => {
@@ -2012,6 +2027,78 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     expect(narrowed.linkageRuleSet).toEqual(imported.linkageRuleSet);
   });
 
+  test("an imported citation is dropped by a keyless draft whatever field declarations outlive the keys", () => {
+    // A keyless draft is not an empty document: the round trip preserves a field
+    // no key references, so field declarations outlive the keys that referenced
+    // them. The citation asserts where the KEYS came from, so it goes on the keys
+    // alone -- and the terms export carries this state out of the browser without
+    // passing validation, which is what would otherwise refuse a keyless document.
+    const imported = structuredClone(defaultExport());
+    imported.linkageRuleSet = {
+      fieldSet: { name: "partner-pii", version: "4.2.0" },
+      keySet: { name: "partner-keys", version: "4.2.0" },
+    };
+    imported.linkageFields = [
+      ...imported.linkageFields,
+      { name: "zip_extra", type: "zip_code", constraints: { exclude: ["0"] } },
+    ];
+    expect(safeParseLinkageTerms(imported).success).toBe(true);
+
+    const draft = draftFromTerms(imported, seedFor(), 3600, rawRows);
+    const allOff = {
+      ...draft,
+      keys: draft.keys.map((entry) => ({ ...entry, enabled: false })),
+    };
+    const emptied = buildAdvancedTerms(allOff);
+    expect(emptied.linkageKeys).toEqual([]);
+    expect(emptied.linkageFields.map((field) => field.name)).toEqual([
+      "zip_extra",
+    ]);
+    expect(emptied.linkageRuleSet).toBeUndefined();
+  });
+
+  test("an import citing the built-in set over rules that are not it emits no citation", () => {
+    // The one reference this build can resolve is checked against the SET, not
+    // against the rules the importing document claimed for it. A partner document
+    // is free to put psilink's own set name over anything; re-emitting it would
+    // have psilink vouch for a misdescription of rules it ships and knows.
+    const misdescribed = structuredClone(defaultExport());
+    expect(misdescribed.linkageRuleSet).toEqual(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
+    misdescribed.linkageKeys[0] = {
+      ...misdescribed.linkageKeys[0],
+      name: `${misdescribed.linkageKeys[0].name} (house rules)`,
+    };
+    expect(safeParseLinkageTerms(misdescribed).success).toBe(true);
+    // Unedited by the operator: the rebuild of the import as it arrived already
+    // declines the citation.
+    expect(rebuild(misdescribed).linkageRuleSet).toBeUndefined();
+  });
+
+  test("the built-in sets at another version are not the resolvable reference, and round-trip verbatim", () => {
+    // Resolution is an exact match on both halves' name AND version: a set this
+    // build does not ship is one it cannot check rules against, however familiar
+    // the name, so it keeps the round-trip fidelity behavior -- the same edited
+    // key that costs the resolvable citation above leaves this one standing.
+    const otherVersion = structuredClone(defaultExport());
+    otherVersion.linkageRuleSet = {
+      fieldSet: DEFAULT_LINKAGE_RULE_SET.reference.fieldSet,
+      keySet: {
+        name: DEFAULT_LINKAGE_RULE_SET.reference.keySet.name,
+        version: "9.9.9",
+      },
+    };
+    otherVersion.linkageKeys[0] = {
+      ...otherVersion.linkageKeys[0],
+      name: `${otherVersion.linkageKeys[0].name} (house rules)`,
+    };
+    expect(safeParseLinkageTerms(otherVersion).success).toBe(true);
+    expect(rebuild(otherVersion).linkageRuleSet).toEqual(
+      otherVersion.linkageRuleSet,
+    );
+  });
+
   test("a guided draft that edits nothing still cites the built-in set", () => {
     // The no-op baseline: the editor's own default export carries the citation and
     // rebuilds with it, so the guided path's terms -- and the cross-party hash --
@@ -2022,7 +2109,11 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
   });
 
   test("disabling a key narrows the rules and keeps the citation", () => {
+    // The resolvable citation over the rules it genuinely names: narrowing leaves
+    // the rules drawn from the built-in set, so the set's own content -- what the
+    // citation is checked against -- still covers them.
     const exported = defaultExport();
+    expect(exported.linkageRuleSet).toEqual(DEFAULT_LINKAGE_RULE_SET.reference);
     const draft = draftFromTerms(exported, seedFor(), 3600, rawRows);
     const narrowed = {
       ...draft,

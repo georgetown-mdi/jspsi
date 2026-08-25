@@ -395,21 +395,21 @@ export function isDrawnFromLinkageRuleSet(
 /**
  * The citation `rules` are entitled to: {@link DEFAULT_LINKAGE_RULE_SET}'s
  * reference where the rules were drawn from that set, and `undefined` where they
- * were not -- edited, reordered, authored from scratch, or empty. The single
- * place a builder that lets an operator EDIT seeded rules decides whether the
- * result may still cite the set it started from.
+ * were not -- edited, reordered, authored from scratch, or declaring no key. The
+ * single place a builder that lets an operator EDIT seeded rules decides whether
+ * the result may still cite the set it started from.
  *
- * Rules declaring no key and no field are drawn from every set vacuously, so the
- * predicate alone would hand an empty document the built-in citation -- a
- * provenance claim over rules it does not carry. A builder reaches that state as
- * an intermediate (disabling every key in the web editor), so the empty case is
+ * A citation asserts that the keys came from the named set, so rules declaring
+ * none carry no provenance to claim: they are drawn from every set vacuously,
+ * and the predicate alone would hand them the built-in citation over whatever
+ * field declarations outlived their keys. A builder reaches that state as an
+ * intermediate (disabling every key in the web editor), so the keyless case is
  * excluded here rather than left to the downstream rejection.
  */
 export function linkageRuleSetReferenceFor(
   rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
 ): LinkageRuleSetReference | undefined {
-  if (rules.linkageKeys.length === 0 && rules.linkageFields.length === 0)
-    return undefined;
+  if (rules.linkageKeys.length === 0) return undefined;
   return isDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, rules)
     ? DEFAULT_LINKAGE_RULE_SET.reference
     : undefined;
