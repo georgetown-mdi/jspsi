@@ -1041,6 +1041,7 @@ test("warnUnsupportedWebRTCServerFlags: webrtc warns once per flag set", () => {
     "webrtc",
     { serverPort: 9000, serverUsername: "alice" },
     both,
+    "url",
   );
   expect(both.messages).toHaveLength(2);
   expect(both.messages[0]).toContain("--server-port");
@@ -1051,12 +1052,48 @@ test("warnUnsupportedWebRTCServerFlags: webrtc warns once per flag set", () => {
   expect(both.messages.join("")).not.toContain("9000");
 
   const onlyPort = collectWarnings();
-  warnUnsupportedWebRTCServerFlags("webrtc", { serverPort: 9000 }, onlyPort);
+  warnUnsupportedWebRTCServerFlags(
+    "webrtc",
+    { serverPort: 9000 },
+    onlyPort,
+    "url",
+  );
   expect(onlyPort.messages).toHaveLength(1);
 
   const neither = collectWarnings();
-  warnUnsupportedWebRTCServerFlags("webrtc", {}, neither);
+  warnUnsupportedWebRTCServerFlags("webrtc", {}, neither, "url");
   expect(neither.messages).toHaveLength(0);
+});
+
+test("warnUnsupportedWebRTCServerFlags: each remedy points at the connection the caller has", () => {
+  // The two flags carrying a remedy of their own are the two that can point at
+  // the wrong thing: a caller running a configuration has no URL to be told its
+  // port comes from, and telling it to author a config and run 'psilink
+  // exchange' is the command it already is.
+  const fromUrl = collectWarnings();
+  warnUnsupportedWebRTCServerFlags(
+    "webrtc",
+    { serverPort: 9000, serverUsername: "alice" },
+    fromUrl,
+    "url",
+  );
+  expect(fromUrl.messages[0]).toContain("ws:// or wss:// URL");
+  expect(fromUrl.messages[1]).toContain("psilink exchange");
+
+  const fromConfiguration = collectWarnings();
+  warnUnsupportedWebRTCServerFlags(
+    "webrtc",
+    { serverPort: 9000, serverUsername: "alice" },
+    fromConfiguration,
+    "configuration",
+  );
+  expect(fromConfiguration.messages[0]).toContain("`connection.server`");
+  expect(fromConfiguration.messages[1]).toContain("`connection.server.key`");
+  // Neither remedy sends a caller already running a configuration to a URL it
+  // was not given, or back to the command it is.
+  const rendered = fromConfiguration.messages.join("");
+  expect(rendered).not.toContain("ws://");
+  expect(rendered).not.toContain("psilink exchange'");
 });
 
 test("warnUnsupportedWebRTCServerFlags: every dropped credential flag is reported, by name only", () => {
@@ -1072,7 +1109,7 @@ test("warnUnsupportedWebRTCServerFlags: every dropped credential flag is reporte
     serverHostKeyFingerprint: `SHA256:${"A".repeat(43)}`,
   } as const;
   const log = collectWarnings();
-  warnUnsupportedWebRTCServerFlags("webrtc", secrets, log);
+  warnUnsupportedWebRTCServerFlags("webrtc", secrets, log, "url");
   expect(log.messages).toHaveLength(5);
   for (const flag of [
     "--server-password",
@@ -1092,13 +1129,38 @@ test("warnUnsupportedWebRTCServerFlags: every dropped credential flag is reporte
     "webrtc",
     { serverKeyboardInteractive: false },
     negated,
+    "url",
   );
   expect(negated.messages).toHaveLength(0);
 });
 
+test("warnUnsupportedWebRTCServerFlags: the credential line claims silence for the flags, not for the channel", () => {
+  // What the dropped flag values do is the claim this line can make: they are
+  // neither used nor echoed. What the channel does is not -- a connection
+  // carrying a `server.key` sends it to the coordination server as part of the
+  // request it authorizes -- so the line states that rather than a blanket
+  // "no credential of any kind is sent", which is false on a keyed connection
+  // and is read by a caller running exactly one.
+  for (const source of ["url", "configuration"] as const) {
+    const log = collectWarnings();
+    warnUnsupportedWebRTCServerFlags(
+      "webrtc",
+      { serverPassword: "hunter2" },
+      log,
+      source,
+    );
+    expect(log.messages).toHaveLength(1);
+    const message = log.messages[0];
+    expect(message).toContain("neither used nor echoed");
+    expect(message).toContain("`server.key`");
+    expect(message).toContain("sent to that server");
+    expect(message).not.toContain("no credential of any kind");
+  }
+});
+
 test("warnUnsupportedWebRTCServerFlags: the file-sync channels never warn", () => {
   // Every one of these is applied on sftp, and the messages' wording (a
-  // coordination server named by a ws/wss URL) fits no other channel.
+  // coordination server and its API key) fits no other channel.
   for (const channel of ["sftp", "filedrop"] as const) {
     const log = collectWarnings();
     warnUnsupportedWebRTCServerFlags(
@@ -1113,6 +1175,7 @@ test("warnUnsupportedWebRTCServerFlags: the file-sync channels never warn", () =
         serverHostKeyFingerprint: `SHA256:${"A".repeat(43)}`,
       },
       log,
+      "url",
     );
     expect(log.messages).toHaveLength(0);
   }

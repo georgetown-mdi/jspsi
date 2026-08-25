@@ -673,6 +673,154 @@ test("a webrtc config with no role still loads; the transport refuses it", () =>
   expect(loadConfig(baseOptions()).connection.channel).toBe("webrtc");
 });
 
+// --- webrtc ignored-flag reports ---------------------------------------------
+// exchange registers the file-sync flags and the whole --server-* set, and
+// applyConnectionOverrides drops every one of them on a webrtc config: the
+// file-sync options because they are FileSyncOptions fields, the server block
+// because it is merged on sftp alone. Each drop is reported by name, so a
+// credential typed at a channel that discards it does not look, from the
+// terminal, exactly like one that was used.
+
+const minimalWebRTCConfig = {
+  connection: {
+    channel: "webrtc",
+    server: { host: "peers.example.org" },
+    role: "acceptor",
+  },
+  linkageTerms: minimalLinkageTerms,
+};
+
+/** The flags reported ignored, read out of the collected warnings by name. */
+function reportedIgnoredFlags(): string[] {
+  return mockState.warnings
+    .filter((m) => m.includes("has no effect on the webrtc channel"))
+    .map((m) => m.slice(0, m.indexOf(" has no effect")));
+}
+
+test("a webrtc config reports every file-sync flag the operator set", () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalWebRTCConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  loadConfig({
+    ...baseOptions(),
+    locklessRendezvous: true,
+    retainFiles: true,
+    pollingFrequencyMs: 5_000,
+    connectionPerPoll: true,
+    peerId: "acceptor-1",
+    timestampInFilename: true,
+  });
+  expect(reportedIgnoredFlags().sort()).toEqual(
+    [
+      "--connection-per-poll",
+      "--lockless-rendezvous",
+      "--peer-id",
+      "--polling-frequency",
+      "--retain-files",
+      "--timestamp-in-filename",
+    ].sort(),
+  );
+});
+
+test("a webrtc config reports every --server-* flag the operator set", () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalWebRTCConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  loadConfig({
+    ...baseOptions(),
+    serverPort: 9000,
+    serverUsername: "someone",
+    serverPassword: "s3cret",
+    serverPrivateKey: "KEYDATA",
+    serverPrivateKeyPassphrase: "unlock-me",
+    serverKeyboardInteractive: true,
+    serverHostKeyFingerprint: "SHA256:" + "A".repeat(42) + "A",
+  });
+  expect(reportedIgnoredFlags().sort()).toEqual(
+    [
+      "--server-host-key-fingerprint",
+      "--server-keyboard-interactive",
+      "--server-password",
+      "--server-port",
+      "--server-private-key",
+      "--server-private-key-passphrase",
+      "--server-username",
+    ].sort(),
+  );
+  // Security invariant: the messages name the flag and nothing else, so a
+  // credential typed at a channel that discards it is not echoed to the terminal
+  // or a --log-file on its way out.
+  for (const secret of ["s3cret", "KEYDATA", "unlock-me", "someone"])
+    expect(mockState.warnings.some((m) => m.includes(secret))).toBe(false);
+});
+
+test("the webrtc drops are reported in wording that fits a configured exchange", () => {
+  // This caller has no URL and is already the command an invite-flavored remedy
+  // would send it to, so each report points at the connection block it loaded.
+  // The credential line is measured here too, because this is the caller that
+  // can hold a `server.key`: claiming the channel sends no credential of any
+  // kind would be false on exactly the configuration being run.
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalWebRTCConfig,
+      connection: {
+        ...minimalWebRTCConfig.connection,
+        server: { host: "peers.example.org", key: "deployment-key" },
+      },
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  loadConfig({
+    ...baseOptions(),
+    serverPort: 9000,
+    serverUsername: "someone",
+    serverPassword: "s3cret",
+  });
+  const reports = mockState.warnings.filter((m) =>
+    m.includes("has no effect on the webrtc channel"),
+  );
+  const port = reports.find((m) => m.startsWith("--server-port "));
+  const username = reports.find((m) => m.startsWith("--server-username "));
+  const password = reports.find((m) => m.startsWith("--server-password "));
+  expect(port).toContain("`connection.server`");
+  expect(username).toContain("`connection.server.key`");
+  expect(password).toContain("neither used nor echoed");
+  expect(password).toContain("a configured `server.key` is sent");
+  const rendered = reports.join("");
+  // No remedy sends this operator to a URL they were never given, back to the
+  // command they are running, or away with a promise the channel does not keep.
+  expect(rendered).not.toContain("ws://");
+  expect(rendered).not.toContain("run 'psilink exchange'");
+  expect(rendered).not.toContain("no credential of any kind");
+  // The configured key is named as a field, never echoed as a value.
+  expect(rendered).not.toContain("deployment-key");
+});
+
+test("a webrtc config setting none of them reports nothing", () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalWebRTCConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  loadConfig(baseOptions());
+  expect(reportedIgnoredFlags()).toEqual([]);
+});
+
+test("a file-sync config reports none of the webrtc drops", () => {
+  // The same flags against an sftp config: every one of them is applied there,
+  // so the ignored-flag reports stay silent and the operator sees no warning
+  // about a flag that took effect.
+  fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  loadConfig({
+    ...baseOptions(),
+    serverPort: 2222,
+    serverUsername: "someone",
+    serverPassword: "s3cret",
+    peerId: "acceptor-1",
+    timestampInFilename: true,
+  });
+  expect(mockState.warnings.filter((m) => m.includes("has no effect"))).toEqual(
+    [],
+  );
+});
+
 // --- token_max_age_days and load-time expiry ---------------------------------
 
 test("loadConfig surfaces token_max_age_days from the authentication block", () => {

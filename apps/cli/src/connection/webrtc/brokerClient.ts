@@ -239,6 +239,23 @@ export function dialedBrokerAuthority(location: BrokerLocation): string {
 }
 
 /**
+ * The same dialed authority as {@link dialedBrokerAuthority}, with the port
+ * always shown.
+ *
+ * For the consent surface of an acceptance that dials a partner-supplied
+ * locator: the operator is being asked to let this run reach a coordination
+ * server they never typed, and the authority form omits a port that is the
+ * scheme's default -- so the one line naming the server would leave the port to
+ * be inferred from a scheme it does not carry. The host half is the parser's,
+ * for the reason above.
+ *
+ * @throws {ConnectionError} of kind `usage` if `host` is not a bare authority.
+ */
+export function dialedBrokerHostAndPort(location: BrokerLocation): string {
+  return `${brokerAuthority(location).hostname}:${location.port}`;
+}
+
+/**
  * Refuse an address that does not dial the configured broker.
  *
  * The string is re-parsed rather than read off the builder because this is the

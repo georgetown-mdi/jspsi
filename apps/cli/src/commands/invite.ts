@@ -399,6 +399,7 @@ export async function validateInvite(params: {
         serverHostKeyFingerprint: options.serverHostKeyFingerprint,
       },
       log,
+      "url",
     );
     // A webrtc endpoint carries no scheme, so a plaintext coordination server is
     // one thing this invitation cannot convey: the acceptor seeded from it
@@ -1186,8 +1187,8 @@ const INVITATION_PLACEHOLDER = "<INVITATION>";
  * invitation's accept template references the shared server the partner reaches
  * it at; an online webrtc invitation's does not, because there is no shared
  * server the partner types -- the invitation's own endpoint names the
- * coordination server, and the partner's accept writes it into a connection
- * block `psilink exchange` then dials while this command waits.
+ * coordination server, so their accept writes the connection block and dials it
+ * in the one command, while this one waits.
  *
  * The templates name the invitation by {@link INVITATION_PLACEHOLDER} rather than
  * carrying it.
@@ -1214,10 +1215,10 @@ function printInvitation(
   }
   if (online.channel === "webrtc") {
     log.info(
-      `Your partner accepts with:\n  psilink accept ` +
-        `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nand then, while this command ` +
-        `is still waiting, runs:\n  psilink exchange\nwhere ` +
-        `${INVITATION_PLACEHOLDER} is the invitation printed above.`,
+      `Your partner accepts and runs the exchange with:\n  psilink accept ` +
+        `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nrun while this command is ` +
+        `still waiting, where ${INVITATION_PLACEHOLDER} is the invitation ` +
+        "printed above.",
     );
     return;
   }

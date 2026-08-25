@@ -131,6 +131,42 @@ const OUTBOUND_SEND_NO_PAYLOAD =
   "(none) -- the inviting party receives no result, so no payload is sent";
 
 /**
+ * State that this acceptance conducts the exchange itself, and where: the one
+ * command both writes the configuration and dials, so the operator's answer to
+ * the question below is the last checkpoint before their data moves, on a
+ * locator they never typed.
+ *
+ * It heads the surface rather than sitting among the terms because it is not one:
+ * the terms are the inviting party's proposal, while this is what THIS command
+ * does with them. The prompt carries the same locator, so the fact is on screen
+ * at the question too without the outline being interrupted to put it there.
+ *
+ * `brokerAuthority` is the host and port the dial resolves to, partner-supplied
+ * (the invitation's endpoint) and reaching no display boundary of its own, so it
+ * is escaped here, at its sink, and sits at the end of its line behind a fixed
+ * first-party label like every other partner-controlled value on this surface.
+ */
+function logAcceptanceRunsExchange(
+  emit: ConsentSurfaceSink,
+  brokerAuthority: string,
+  promptFollows: boolean,
+): void {
+  emit(
+    "This acceptance runs the exchange itself, through the coordination " +
+      `server this invitation names: ${redactAndSanitizeForDisplay(brokerAuthority)}`,
+  );
+  emit(
+    promptFollows
+      ? "  Confirming connects to that server immediately and runs the " +
+          "exchange from your input file, transmitting your linkage data on " +
+          "the terms below; declining writes nothing and connects to nothing."
+      : "  This run connects to that server immediately and runs the exchange " +
+          "from your input file, transmitting your linkage data on the terms " +
+          "below; --consent-to-terms recorded that consent in advance.",
+  );
+}
+
+/**
  * The heading above the repeated decision block on the prompting path, where the
  * question this block is answered against comes next.
  */
@@ -475,17 +511,27 @@ export function logDecisionFacts(
  * so they are escaped here, at their sink.
  *
  * `promptFollows` says whether a confirmation prompt runs after this returns. It
- * selects the heading above the repeated decision block and nothing else: the block
- * itself is byte-identical either way, so the two printings stay one wording.
+ * selects the heading above the repeated decision block, and the tense of the
+ * run statement below, and nothing else: the decision block itself is
+ * byte-identical either way, so the two printings stay one wording.
+ *
+ * `runsExchangeThrough` is the coordination server an acceptance that conducts
+ * the exchange itself will dial, present on that path alone; an acceptance that
+ * writes a configuration and stops passes nothing and its surface is unchanged
+ * (see {@link logAcceptanceRunsExchange}).
  */
 export function displayInvitation(params: {
   token: InvitationToken;
   ownOutboundSend: ReadonlyArray<string> | undefined;
   emit: ConsentSurfaceSink;
   promptFollows: boolean;
+  runsExchangeThrough?: string;
 }): void {
-  const { token, ownOutboundSend, emit, promptFollows } = params;
+  const { token, ownOutboundSend, emit, promptFollows, runsExchangeThrough } =
+    params;
   const summary = summarizeInvitation(token);
+  if (runsExchangeThrough !== undefined)
+    logAcceptanceRunsExchange(emit, runsExchangeThrough, promptFollows);
   emit("Invitation details:");
   logDecisionFacts(emit, summary, ownOutboundSend);
   // The linkage strategy is a mandatory-consistency term (like the algorithm),

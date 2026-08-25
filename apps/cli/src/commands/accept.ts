@@ -21,6 +21,7 @@ import type {
   LinkageTerms,
   OutboundPayloadConsent,
   PreparedExchange,
+  WebRTCConnectionConfig,
 } from "@psilink/core";
 
 import {
@@ -52,6 +53,8 @@ import {
   connectionFromURL,
   type RunnableConnectionConfig,
 } from "../connectionFromUrl";
+import { brokerLocationFromConnection } from "../connection/webrtc/weriftPeer";
+import { dialedBrokerHostAndPort } from "../connection/webrtc/brokerClient";
 import { withWebRTCPeerRole } from "../webrtcPeerRole";
 import { diffConnectionAgainstTarget } from "../reconcile";
 import {
@@ -90,17 +93,18 @@ export function builder(cmd: Argv): Argv {
         type: "string",
         array: true,
         describe:
-          "INVITATION [INPUT_FILE] (offline), or URL INVITATION INPUT_FILE " +
-          "[OUTPUT_FILE] (online)",
+          "INVITATION [INPUT_FILE] [OUTPUT_FILE] (offline), or URL INVITATION " +
+          "INPUT_FILE [OUTPUT_FILE] (online)",
       })
       .usage(
         "Usage:\n" +
-          "  $0 accept [options] INVITATION [INPUT_FILE]                  (offline)\n" +
+          "  $0 accept [options] INVITATION [INPUT_FILE] [OUTPUT_FILE]    (offline)\n" +
           "  $0 accept [options] URL INVITATION INPUT_FILE [OUTPUT_FILE]  (online)\n\n" +
           "INVITATION is a base64url string or an @path reference to a file\n" +
           "containing one. Offline: decode, confirm, and write config and key\n" +
-          "files. Online: also connect, complete the handshake, and run the\n" +
-          "exchange.",
+          "files; an invitation naming a webrtc coordination server, given an\n" +
+          "INPUT_FILE, also runs the exchange it accepts. Online: connect,\n" +
+          "complete the handshake, and run the exchange.",
       ),
     // --consent-to-terms is the one accept-specific option: it records, in
     // advance, the operator's consent to THIS invitation's disclosed terms -- the
@@ -120,9 +124,13 @@ export function builder(cmd: Argv): Argv {
       "consent in advance to this invitation's disclosed terms, skipping the " +
       "interactive confirmation, so accept can run unattended or in a script. " +
       "This BYPASSES the one human checkpoint before the configuration and " +
-      "linkage key are written from the partner-supplied invitation, so review " +
-      "the terms before using it; it does not affect SSH host-key verification. " +
-      "It also frees standard input, so INPUT_FILE may be `-` to read the CSV " +
+      "linkage key are written from the partner-supplied invitation; on an " +
+      "invitation carrying a webrtc endpoint, given an INPUT_FILE, that same " +
+      "checkpoint is the last one before this command connects to the " +
+      "coordination server the invitation names and runs the exchange, so the " +
+      "flag also authorizes connecting and transmitting unattended. Review the " +
+      "terms before using it; it does not affect SSH host-key verification. It " +
+      "also frees standard input, so INPUT_FILE may be `-` to read the CSV " +
       "from stdin.",
   });
 }
@@ -138,10 +146,15 @@ export function builder(cmd: Argv): Argv {
  * a flag -- the top-level parser is configured to push unknown `-`-leading
  * tokens into the positionals for this reason.
  *
+ * Both forms end in an optional OUTPUT_FILE, the destination of the result an
+ * acceptance that runs its own exchange writes (see {@link validateAccept}).
+ * Offline it is honored only by an acceptance that runs one, which reports it
+ * unused otherwise rather than dropping a positional the operator typed.
+ *
  * @internal exported for testing
  */
 export function resolveAcceptPositionals(positionals: Array<unknown>):
-  | { mode: "offline"; invitation: string; input?: string }
+  | { mode: "offline"; invitation: string; input?: string; output?: string }
   | {
       mode: "online";
       url: URL;
@@ -154,7 +167,7 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
   if (arg0 === undefined)
     throw new UsageError(
       "an invitation is required; usage: psilink accept INVITATION " +
-        "[INPUT_FILE]",
+        "[INPUT_FILE] [OUTPUT_FILE]",
     );
 
   if (looksLikeUrl(arg0)) {
@@ -176,6 +189,7 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
     mode: "offline",
     invitation: arg0,
     input: positionals[1] !== undefined ? String(positionals[1]) : undefined,
+    output: positionals[2] !== undefined ? String(positionals[2]) : undefined,
   };
 }
 
@@ -211,6 +225,28 @@ type AcceptReady = {
       output?: string;
       token: InvitationToken;
       connection: RunnableConnectionConfig;
+      dataSpec: ResolvedDataSpec;
+      prepared: PreparedExchange;
+    }
+  | {
+      /**
+       * An acceptance that runs the exchange on the connection the invitation's
+       * own endpoint names, with no server URL of its own: the webrtc
+       * rendezvous. It reaches {@link runOnlineBootstrap} exactly as the URL-driven
+       * mode above does, so it writes the same configuration, key file, record,
+       * and result -- what differs is only where the connection came from.
+       */
+      mode: "endpointRun";
+      output?: string;
+      token: InvitationToken;
+      connection: WebRTCConnectionConfig;
+      /**
+       * The host and port the rendezvous will dial, resolved from the endpoint
+       * by the same resolver the dial uses. Carried so the consent surface and
+       * the confirmation question can name the coordination server this run
+       * connects to, which on this path the operator never typed.
+       */
+      brokerAuthority: string;
       dataSpec: ResolvedDataSpec;
       prepared: PreparedExchange;
     }
@@ -422,6 +458,10 @@ export async function validateAccept(params: {
       consentedPayloadColumns: token.disclosedPayloadColumns,
       log,
     });
+  const { connection: endpointConnection, seeded } = connectionFromEndpoint(
+    token.connectionEndpoint,
+  );
+  const connection = withWebRTCPeerRole(endpointConnection, "acceptor");
   // `-` is gated on `--consent-to-terms` here exactly as on the online path
   // above: stdin serves the confirmation prompt unless the flag skips it, freeing
   // it for the CSV.
@@ -429,6 +469,46 @@ export async function validateAccept(params: {
     resolved.input !== undefined
       ? await loadInputRows(resolved.input, { allowStdin: consentToTerms })
       : undefined;
+  // The connection this acceptance can run the exchange on itself, rather than
+  // writing a configuration for a later `psilink exchange`. A webrtc acceptance
+  // holds everything the run needs and nothing the operator must still fill in:
+  // the invitation's endpoint IS the coordination server, the role is this
+  // command's own (stamped above), and the shared secret is the token's -- so the
+  // partner need not run a second command while the inviter sits inside its
+  // accept timeout. The other channels are not runnable here: their connection
+  // block is a locator whose credentials the operator still supplies by hand.
+  //
+  // A kept configuration is excluded because it, not this acceptance, governs
+  // the exchange: `psilink exchange` loads that file, resolves its `@path`
+  // references and its own `server.key`/`secure`, and dials what it says.
+  // Running the endpoint-built connection here instead would dial a different
+  // coordination server than the acceptance's own configuration names.
+  const runnableConnection =
+    connection.channel === "webrtc" && !reuseExistingConfig
+      ? connection
+      : undefined;
+  const runsExchange = runnableConnection !== undefined && rows !== undefined;
+  // Name the kept configuration as the reason a webrtc acceptance stops short of
+  // the run its endpoint would otherwise support, so an operator who passed an
+  // input file expecting one reads why rather than a silent exit 0 with no
+  // result. (The other reason -- no input file at all -- is named where the
+  // configuration is written, since only then is there a path to point at.)
+  if (connection.channel === "webrtc" && reuseExistingConfig)
+    log.info(
+      "this acceptance keeps the existing configuration, so it writes the key " +
+        "file and stops: the exchange is governed by that configuration's own " +
+        "connection block rather than by the invitation's endpoint. Run " +
+        "'psilink exchange' with your input file once this command finishes.",
+    );
+  // The result destination belongs to a run; an acceptance that writes only a
+  // configuration and key file has none to send there, so report the positional
+  // rather than drop it silently.
+  if (resolved.output !== undefined && !runsExchange)
+    log.warn(
+      "the OUTPUT_FILE positional has no effect on this acceptance: it writes " +
+        "the configuration and key file and runs no exchange, so there is no " +
+        "result to write. Pass the destination to 'psilink exchange' instead.",
+    );
   if (rows !== undefined)
     checkLinkageSatisfiability(
       rows.columns,
@@ -449,17 +529,57 @@ export async function validateAccept(params: {
     metadata: dataSpec.metadata,
     columnNames: rows?.columns,
     terms: myTerms,
-    mode: "offline",
+    // What the acceptance does after the warning is what the mode selects, and a
+    // run reaches prepareForOnlineExchange below -- the same prepareForExchange
+    // that carries the refusal -- so it stops before the terms are displayed,
+    // exactly as the URL-driven mode does.
+    mode: runsExchange ? "online" : "offline",
     log,
   });
 
-  const { connection, seeded } = connectionFromEndpoint(
-    token.connectionEndpoint,
-  );
+  if (runnableConnection !== undefined && rows !== undefined) {
+    // Resolve the partner-supplied locator into the broker location the dial
+    // would use, here rather than inside the exchange: every shape
+    // `webRtcDialFrom` refuses -- an undialable port, or a delimiter the
+    // endpoint schema's length-only bound carried into the host or path -- is
+    // then a usage error before the terms are displayed, so a locator this run
+    // could not dial costs neither a confirmation nor a written file. This is
+    // the same resolver the dial itself calls, so nothing here decides what is
+    // dialable. The warn callback is a no-op because the dial below runs in this
+    // same process and emits the plaintext advisory itself.
+    const brokerLocation = brokerLocationFromConnection(
+      runnableConnection.server,
+      () => {},
+    );
+    const prepared = await prepareForOnlineExchange(dataSpec, myIdentity, rows);
+    // The same two bindings the URL-driven mode sets on its prepared exchange,
+    // for the same single run: the columns the invitation declared its party
+    // will send, and the cardinality side it declared for itself.
+    prepared.expectedPayloadColumns = token.disclosedPayloadColumns;
+    prepared.expectedPartnerDeduplicate = token.linkageTerms.deduplicate;
+    return {
+      mode: "endpointRun",
+      output: resolved.output,
+      token,
+      connection: runnableConnection,
+      // What the socket will actually dial, not the endpoint's own text: the URL
+      // parser normalizes a host on its way to the wire, so naming the partner's
+      // spelling on the consent surface could name a server this run never
+      // contacts (see dialedBrokerHostAndPort). It runs the same authority parse
+      // the dial does, so a locator that fails it fails identically at the dial,
+      // here before the terms are displayed.
+      brokerAuthority: dialedBrokerHostAndPort(brokerLocation),
+      dataSpec,
+      prepared,
+      reuseExistingConfig,
+      existingOutputShares,
+    };
+  }
+
   return {
     mode: "offline",
     token,
-    connection: withWebRTCPeerRole(connection, "acceptor"),
+    connection,
     seeded,
     dataSpec,
     reuseExistingConfig,
@@ -691,16 +811,16 @@ export async function handler(argv: Arguments): Promise<void> {
       // via the same isDisclosedToPartner predicate preparePayload transmits on, so
       // the prompt cannot overstate what leaves this machine.
       //
-      // The online path reads it off the PREPARED exchange -- the very object this
-      // invocation transmits from -- rather than off the written spec, so the set
-      // shown is the set sent. The offline path has no prepared exchange to read:
-      // it writes a configuration and stops, so an acceptance given no input file
-      // carries no metadata to read the set off, and the display
+      // A running acceptance reads it off the PREPARED exchange -- the very object
+      // this invocation transmits from -- rather than off the written spec, so the
+      // set shown is the set sent. The offline path has no prepared exchange to
+      // read: it writes a configuration and stops, so an acceptance given no input
+      // file carries no metadata to read the set off, and the display
       // forward-references it.
       const ownMetadata =
-        ready.mode === "online"
-          ? ready.prepared.metadata
-          : ready.dataSpec.metadata;
+        ready.mode === "offline"
+          ? ready.dataSpec.metadata
+          : ready.prepared.metadata;
       const ownOutboundSend =
         ownMetadata !== undefined
           ? disclosedColumnNames(ownMetadata)
@@ -732,6 +852,14 @@ export async function handler(argv: Arguments): Promise<void> {
           : ready.existingOutputShares === true
             ? { status: "pending" }
             : undefined;
+      // The coordination server this acceptance will dial itself, stated above
+      // the terms and again in the question: on this path confirming is what
+      // connects and transmits, and the locator is the invitation's rather than
+      // anything the operator typed. The endpointRun path alone -- the
+      // URL-driven mode's server is the URL the operator gave it, and an
+      // acceptance that writes a configuration and stops dials nothing.
+      const runsExchangeThrough =
+        ready.mode === "endpointRun" ? ready.brokerAuthority : undefined;
       // Rendered through a sink that knows whether the prompt below will run: when
       // it will, the terms reach the terminal it asks on even when the operator
       // routed diagnostics to a --log-file or above info, so consent is never asked
@@ -746,6 +874,7 @@ export async function handler(argv: Arguments): Promise<void> {
           willPrompt: !consentToTerms,
         }),
         promptFollows: !consentToTerms,
+        runsExchangeThrough,
       });
       // With --consent-to-terms, skip the prompt and proceed on the recorded
       // advance consent. Log the bypass so an unattended run's own log shows the
@@ -759,8 +888,16 @@ export async function handler(argv: Arguments): Promise<void> {
         );
         confirmed = true;
       } else {
+        // The question names what answering yes does. Where this acceptance runs
+        // the exchange it also carries the coordination server, escaped at this
+        // sink as it is at the display's: the terms run past a screen, so the
+        // locator stated above them has scrolled away by the time the question
+        // arrives, and this is the line that has not.
         confirmed = await promptConfirm(
-          "Accept this invitation and write configuration?",
+          runsExchangeThrough !== undefined
+            ? "Accept this invitation and run the exchange now, through " +
+                `${redactAndSanitizeForDisplay(runsExchangeThrough)}?`
+            : "Accept this invitation and write configuration?",
         );
       }
       if (!confirmed) {
@@ -768,7 +905,12 @@ export async function handler(argv: Arguments): Promise<void> {
         return;
       }
 
-      if (ready.mode === "online") {
+      // The two running modes reach one bootstrap: what differs between them is
+      // where the connection came from -- the acceptance's own URL, or the
+      // invitation's webrtc endpoint -- and that decision was made in
+      // validateAccept. Everything from here (the config, key file, record,
+      // result, and every consent record below) is written identically.
+      if (ready.mode === "online" || ready.mode === "endpointRun") {
         const { configWriteError } = await runOnlineBootstrap({
           connection: ready.connection,
           dataSpec: ready.dataSpec,
@@ -914,7 +1056,16 @@ export async function handler(argv: Arguments): Promise<void> {
           `reused the existing configuration at ${configPath}; it already matches ` +
             "the invitation, so the connection and linkage settings are unchanged.",
         );
-      } else if (ready.seeded)
+      } else if (ready.seeded && ready.connection.channel === "webrtc")
+        // A webrtc connection block is complete as seeded: the endpoint is the
+        // whole locator and the channel authenticates from the shared secret, so
+        // there is no credential for the operator to add before running it.
+        log.info(
+          `wrote config to ${configPath}, seeding the connection block from the ` +
+            "invitation's endpoint; it needs no credentials of your own. Run " +
+            "'psilink exchange' with your input file to conduct the exchange.",
+        );
+      else if (ready.seeded)
         log.info(
           `wrote config to ${configPath}, seeding the connection block from the ` +
             "invitation's endpoint; review it and add your own credentials " +

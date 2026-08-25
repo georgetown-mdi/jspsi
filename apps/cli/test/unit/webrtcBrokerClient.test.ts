@@ -7,6 +7,7 @@ import {
   BROKER_MESSAGE,
   assertDialsConfiguredBroker,
   connectToBroker,
+  dialedBrokerHostAndPort,
 } from "../../src/connection/webrtc/brokerClient";
 
 import type {
@@ -269,6 +270,43 @@ test("an address naming another host is refused rather than dialed", async () =>
   expect(() => {
     assertDialsConfiguredBroker(url.href, LOCATION);
   }).not.toThrow();
+});
+
+test("the consent-surface authority normalizes the host and always shows the port", async () => {
+  // What an acceptance names on the surface it asks consent against. The host is
+  // the parser's, as the rendezvous line's is, so the operator is never shown a
+  // server the run would not contact; the port is shown even where it is the
+  // scheme's default, which the authority form drops -- a consent line naming a
+  // coordination server states where the dial goes rather than leaving the port
+  // to a scheme the line does not carry.
+  // Written as escapes because one of the two is invisible in source.
+  expect(
+    dialedBrokerHostAndPort({
+      ...LOCATION,
+      host: "PEERS\u3002Example\u200B.ORG",
+    }),
+  ).toBe("peers.example.org:9000");
+  for (const [secure, port] of [
+    [true, 443],
+    [false, 80],
+  ] as const)
+    expect(
+      dialedBrokerHostAndPort({
+        ...LOCATION,
+        host: "signal.example",
+        port,
+        secure,
+      }),
+    ).toBe(`signal.example:${port}`);
+  // An IPv6 literal keeps its brackets, so the port stays readable as a port.
+  expect(dialedBrokerHostAndPort({ ...LOCATION, host: "[::1]" })).toBe(
+    "[::1]:9000",
+  );
+  // The same refusal the dial makes: a host that could move the authority is not
+  // rendered on a consent surface either.
+  expect(() =>
+    dialedBrokerHostAndPort({ ...LOCATION, host: "signal.example:9000@evil" }),
+  ).toThrow(ConnectionError);
 });
 
 test("registration resolves only on the server's OPEN, not on the socket opening", async () => {
