@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, test } from "vitest";
 
 import {
@@ -121,7 +123,7 @@ describe("quoteTermsValue", () => {
 
 describe("bareTermsValue", () => {
   test("renders a schema-shaped value undelimited", () => {
-    for (const value of ["1.0.0", "psi", "psi-c", "single-pass", "2030-01-01"])
+    for (const value of ["1.0.0", "2.0.0", "2030-01-01", "9"])
       expect(bareTermsValue(value)).toBe(value);
   });
 
@@ -131,6 +133,9 @@ describe("bareTermsValue", () => {
     // takes two LinkageTerms objects and nothing in it makes them schema-parsed.
     for (const value of [
       "",
+      "psi",
+      "psi-c",
+      "single-pass",
       '1.0.0", partner is "9.9.9',
       "1.0.0, partner is 9.9.9",
       "1.0.0 9.9.9",
@@ -143,12 +148,33 @@ describe("bareTermsValue", () => {
   });
 
   test("the bare shape carries nothing a clause boundary is made of", () => {
-    // What licenses rendering a value bare at all. Every connective these
-    // diagnostics use contains a space, the payload list is built from `,`, `[`,
-    // and `]`, and a run is closed by the delimiter -- so a shape admitting none
-    // of those cannot participate in the structure whatever the value is.
+    // Half of what licenses rendering a value bare at all: the payload list is
+    // built from `,`, `[`, and `]`, and a run is closed by the delimiter, so a
+    // shape admitting none of those cannot reach for the structure around it.
+    // Each case carries a digit so it is the character under test that fails it
+    // rather than the digit requirement below.
     for (const forbidden of [TERMS_VALUE_DELIMITER, " ", ",", "[", "]", "\n"])
-      expect(BARE_TERMS_VALUE_PATTERN.test(`a${forbidden}b`)).toBe(false);
+      expect(BARE_TERMS_VALUE_PATTERN.test(`a1${forbidden}b`)).toBe(false);
+  });
+
+  test("a value carrying no digit is not bare-shaped", () => {
+    // The other half. Excluding the space makes a bare value exactly one
+    // whitespace-delimited token, which on its own does NOT keep it out of a
+    // connective position: the TEMPLATE supplies the spaces around a bare slot,
+    // so a letters-only value would stand in the clause as undelimited as the
+    // connective beside it. The digit is what separates the two vocabularies --
+    // every value these diagnostics render bare carries one, and no token of
+    // first-party copy does, which the templates themselves are held to below.
+    for (const value of [
+      "over",
+      "names",
+      "local",
+      "is",
+      "match",
+      "payload.receive",
+      "psi-c",
+    ])
+      expect(BARE_TERMS_VALUE_PATTERN.test(value)).toBe(false);
   });
 });
 
@@ -178,6 +204,66 @@ test("a raw terms value cannot be composed into a diagnostic", () => {
   // The runtime is unaffected -- the guarantee is the type error above, and this
   // keeps the binding used so the assertion is not silently dropped.
   expect(composed).toContain("local is ");
+});
+
+// --- The vocabulary a bare value must not be able to spell --------------------
+
+const DIAGNOSTIC_MODULE_SOURCE = readFileSync(
+  new URL("../src/config/linkageTerms.ts", import.meta.url),
+  "utf8",
+);
+
+/**
+ * Every token of first-party copy the compatibility diagnostics are built from.
+ *
+ * Read out of the templates in `validateCompatibility`'s own module rather than
+ * restated here, so the vocabulary cannot fall behind a template edit: a
+ * diagnostic reworded to carry a digit in its prose fails the assertion below
+ * instead of silently reopening the bare form's connective position. A tagged
+ * template's fixed spans are what remains once its interpolations are removed,
+ * and none of these templates nests a backtick.
+ */
+const firstPartyTokens = (): string[] => {
+  const templates = [
+    ...DIAGNOSTIC_MODULE_SOURCE.matchAll(/compatibilityMessage`([^`]*)`/g),
+  ].map((match) => match[1]);
+  // A call site the pattern failed to reach would shrink the vocabulary without
+  // failing anything, so the count is tied back to the call sites themselves.
+  expect(templates).toHaveLength(
+    DIAGNOSTIC_MODULE_SOURCE.split("compatibilityMessage`").length - 1,
+  );
+  return [
+    ...new Set(
+      templates.flatMap((template) =>
+        template.replaceAll(/\$\{[^}]*\}/g, " ").split(/\s+/),
+      ),
+    ),
+  ].filter((token) => token.length > 0);
+};
+
+test("no connective or label the diagnostics are built from is bare-shaped", () => {
+  // The argument the bare form rests on, as a check rather than as prose. A bare
+  // value carries no space, so it is exactly one token wherever the template
+  // drops it; if no token the templates are built from can meet the bare shape,
+  // then no bare value can be read as a connective or a label this function
+  // wrote, whatever the partner chose. The digit requirement is what makes the
+  // two vocabularies disjoint, so a pattern relaxed to admit a digit-free value
+  // -- or a connective reworded to carry a digit -- fails here.
+  const tokens = firstPartyTokens();
+  expect(tokens).toEqual(
+    expect.arrayContaining([
+      "over",
+      "names",
+      "local",
+      "is",
+      "do",
+      "not",
+      "match",
+      "payload.receive",
+    ]),
+  );
+  for (const token of tokens)
+    expect(BARE_TERMS_VALUE_PATTERN.test(token), token).toBe(false);
 });
 
 // --- The swept diagnostics ---------------------------------------------------
@@ -332,6 +418,19 @@ interface SweptDiagnostic {
    * encoder's JSON-quoted path -- which re-escapes before the seam sees it.
    */
   readonly verbatim?: false;
+  /**
+   * Whether `value` can reach this diagnostic at all.
+   *
+   * Declared by the one entry whose branch is a PREDICATE on the value -- the
+   * expiry check fires for a date that sorts before today -- where every other
+   * branch compares the two documents and fires for any two values that differ.
+   * A shape whose value misses the predicate would leave the diagnostic unraised
+   * rather than restructured, which is not what these assertions are about, so it
+   * is held out by name in the test listing. The hold-out is bounded to a single
+   * entry per shape by the assertion below, so it cannot grow into a way to
+   * silence a shape that fails.
+   */
+  readonly reachedBy?: (value: string) => boolean;
 }
 
 const SWEPT: readonly SweptDiagnostic[] = [
@@ -469,6 +568,7 @@ const SWEPT: readonly SweptDiagnostic[] = [
   {
     id: "legal agreement expired on",
     benign: "2020-01-01",
+    reachedBy: (value) => value < new Date().toISOString().slice(0, 10),
     compose: (value) =>
       errorStartingWith(
         withAgreement(base, "MOU-001", "Care coordination", value),
@@ -623,18 +723,24 @@ const SWEPT: readonly SweptDiagnostic[] = [
 ];
 
 /**
- * The three adversarial value shapes the acceptance criteria name, each built
- * around the benign token the diagnostic would carry anyway.
+ * The adversarial value shapes, each built around the benign token the
+ * diagnostic would carry anyway. The first three reach the seam's DELIMITED
+ * branch, whose hostile case is a value carrying a delimiter or a space; the last
+ * two reach its BARE branch, whose hostile case is a value the checked bare shape
+ * admits and the template then surrounds with spaces of its own.
  */
 const ADVERSARIAL_SHAPES: ReadonlyArray<{
   readonly name: string;
   readonly shape: (benign: string) => string;
+  /** A token the shape plants that must not survive as first-party structure. */
+  readonly marker?: string;
 }> = [
   {
     // A value carrying the delimiter itself: undelimited, it closes psilink's
     // own quoted token and opens a second clause.
     name: "a double quote",
     shape: (benign) => `${benign}", partner is "${benign}-forged`,
+    marker: "forged",
   },
   {
     // A value carrying the clause separators these diagnostics are built from --
@@ -642,74 +748,160 @@ const ADVERSARIAL_SHAPES: ReadonlyArray<{
     name: "the clause separator",
     shape: (benign) =>
       `${benign}, partner is forged, partner names forged over forged] do not match partner send columns [forged,also_forged`,
+    marker: "forged",
   },
   {
     // A value that reads as the "<name> <version>" pair the rule-set clause
     // renders, so an undelimited one passes off a version nobody cited.
     name: "a space-joined version",
     shape: (benign) => `${benign} 9.9.9 over forged-substrate`,
+    marker: "forged",
+  },
+  {
+    // A bare connective, which the other three cannot be: each carries a space or
+    // a comma, so each is delimited whatever the value slot does with it. This
+    // one is the seam's charset throughout and spells the rule-set clause's own
+    // " over " with none of the space -- the template supplies that -- so it is
+    // the shape the digit requirement exists for, and it takes the delimited
+    // branch only because it carries no digit. It plants no marker: it IS a token
+    // the templates are built from, which is the whole of the attack.
+    name: "a bare connective",
+    shape: () => "over",
+  },
+  {
+    // The bare branch's own hostile case: still the seam's charset, and this one
+    // DOES carry a digit, so it renders undelimited into a slot the template
+    // spaces on both sides. What holds there is the vocabulary argument rather
+    // than a delimiter -- one token, and not one the templates are built from.
+    name: "a bare digit-carrying connective",
+    shape: (benign) => `${benign}9over-forged`,
+    marker: "forged",
   },
 ];
 
 /**
- * The clause skeleton a benign run of `diagnostic` produces, with the benign
- * value's own rendering collapsed to the placeholder a delimited run gets.
+ * The clause skeleton `rendered` shows an operator, with the terms value `value`
+ * collapsed to one placeholder whichever of the seam's two forms it took.
  *
- * A value that meets the checked bare shape is rendered undelimited, so it leaves
- * no run for {@link readMessage} to collapse -- which is what that shape licenses,
- * since it can carry no delimiter, space, or list punctuation. Normalizing the
- * position here keeps the comparison about STRUCTURE: the hostile run taking the
- * delimited branch is the control working, not a difference to fail on.
+ * A delimited run is collapsed by {@link readMessage} itself. A value that meets
+ * the checked bare shape leaves no run to collapse -- which is what that shape
+ * licenses -- so its own text is collapsed here instead. Normalizing both forms
+ * to the same placeholder keeps the comparison about STRUCTURE: which branch the
+ * seam took for a given value is the control choosing a rendering, not a
+ * difference to fail on. What makes collapsing the bare form sound is the
+ * vocabulary check above -- a bare value is one token, and no token these
+ * templates are built from can be bare-shaped -- so a bare value cannot be
+ * standing where a connective would.
  */
-const benignClauseSkeleton = (
+const clauseSkeleton = (rendered: string, value: string): string => {
+  const { skeleton } = readMessage(rendered);
+  return bareTermsValue(value) === value
+    ? skeleton.replaceAll(value, "<value>")
+    : skeleton;
+};
+
+/**
+ * The value the display-route assertions use: the shape with a control sequence
+ * appended, so the escape they run through has something to act on.
+ */
+const withControlSequence = (shaped: string): string => `${shaped}\x1b[31m`;
+
+/** The shapes that reach `diagnostic` at all, by its own stated predicate. */
+const shapesReaching = (
   diagnostic: SweptDiagnostic,
-  produce: (value: string) => string,
-): string =>
-  readMessage(produce(diagnostic.benign)).skeleton.replaceAll(
-    diagnostic.benign,
-    "<value>",
+  asValue: (shaped: string) => string = (shaped) => shaped,
+) =>
+  ADVERSARIAL_SHAPES.filter(
+    ({ shape }) =>
+      diagnostic.reachedBy?.(asValue(shape(diagnostic.benign))) !== false,
   );
+
+test("every adversarial shape is swept across all but one diagnostic", () => {
+  // The bound on the hold-out above: a shape may miss at most the single
+  // value-predicated branch, so `reachedBy` cannot become a way to drop a shape
+  // from the sweep it fails.
+  for (const shape of ADVERSARIAL_SHAPES)
+    for (const asValue of [(shaped: string) => shaped, withControlSequence])
+      expect(
+        SWEPT.filter((diagnostic) =>
+          shapesReaching(diagnostic, asValue).includes(shape),
+        ).length,
+        shape.name,
+      ).toBeGreaterThanOrEqual(SWEPT.length - 1);
+});
+
+test("a hostile value does reach the seam's bare branch", () => {
+  // Otherwise the shapes above would say nothing about the branch the digit
+  // requirement governs: every slot could quote every one of them and the sweep
+  // would still pass. A value is carried bare where the message holds it
+  // undelimited, which is exactly where readMessage recovers no run for it.
+  const bareShapes = ADVERSARIAL_SHAPES.filter(
+    ({ shape }) => bareTermsValue(shape("1.0.0")) === shape("1.0.0"),
+  );
+  expect(bareShapes.length).toBeGreaterThan(0);
+  for (const { name, shape } of bareShapes) {
+    const carriedBare = SWEPT.filter((diagnostic) => {
+      const hostile = shape(diagnostic.benign);
+      if (bareTermsValue(hostile) !== hostile) return false;
+      const message = diagnostic.compose(hostile).message;
+      return (
+        message.includes(hostile) &&
+        !readMessage(message).values.includes(hostile)
+      );
+    });
+    expect(carriedBare.length, name).toBeGreaterThan(0);
+  }
+});
 
 describe.each(SWEPT)("$id", (diagnostic) => {
   const composed = (value: string): string => diagnostic.compose(value).message;
   const displayed = (value: string): string =>
     renderForRoute(diagnostic.compose(value));
 
-  test.each(ADVERSARIAL_SHAPES)("is not restructured by $name", ({ shape }) => {
-    const hostile = shape(diagnostic.benign);
-    const hostileRead = readMessage(composed(hostile));
+  test.each(shapesReaching(diagnostic))(
+    "is not restructured by $name",
+    ({ shape, marker }) => {
+      const hostile = shape(diagnostic.benign);
+      const hostileMessage = composed(hostile);
+      const hostileSkeleton = clauseSkeleton(hostileMessage, hostile);
 
-    // The whole claim: an operator reading the hostile run is shown exactly the
-    // clause structure this function wrote for the benign one. Nothing the
-    // partner chose became prose.
-    expect(hostileRead.skeleton).toBe(
-      benignClauseSkeleton(diagnostic, composed),
-    );
-    // And the value is carried whole rather than mangled or split across runs,
-    // so the delimiting costs the operator no fidelity.
-    if (diagnostic.verbatim !== false)
-      expect(hostileRead.values).toContain(hostile);
-    // Every shape plants this marker, and none of it survives outside a run.
-    expect(hostileRead.skeleton).not.toContain("forged");
-    expect(hostileRead.skeleton).not.toContain("<unterminated>");
-  });
+      // The whole claim: an operator reading the hostile run is shown exactly the
+      // clause structure this function wrote for the benign one. Nothing the
+      // partner chose became prose.
+      expect(hostileSkeleton).toBe(
+        clauseSkeleton(composed(diagnostic.benign), diagnostic.benign),
+      );
+      // And the value is carried whole rather than mangled or split, so the
+      // delimiting costs the operator no fidelity: inside one run, or -- where
+      // the checked bare shape let it through -- verbatim in the clause.
+      if (diagnostic.verbatim !== false)
+        expect(
+          readMessage(hostileMessage).values.includes(hostile) ||
+            (bareTermsValue(hostile) === hostile &&
+              hostileMessage.includes(hostile)),
+          `the value is not carried whole: ${hostileMessage}`,
+        ).toBe(true);
+      if (marker !== undefined) expect(hostileSkeleton).not.toContain(marker);
+      expect(hostileSkeleton).not.toContain("<unterminated>");
+    },
+  );
 
-  test.each(ADVERSARIAL_SHAPES)(
+  test.each(shapesReaching(diagnostic, withControlSequence))(
     "survives its own display route intact under $name",
-    ({ shape }) => {
+    ({ shape, marker }) => {
       // The delimiting is composed in validateCompatibility and the escape runs
       // on the route that carries the diagnostic away from it, so the structure
       // has to hold on what the operator actually sees -- with a control
       // sequence in the value for the escape to act on.
-      const hostile = `${shape(diagnostic.benign)}\x1b[31m`;
+      const hostile = withControlSequence(shape(diagnostic.benign));
       const routed = diagnostic.compose(hostile);
       const rendered = renderForRoute(routed);
 
-      const renderedSkeleton = readMessage(rendered).skeleton;
+      const renderedSkeleton = clauseSkeleton(rendered, hostile);
       expect(renderedSkeleton).toBe(
-        benignClauseSkeleton(diagnostic, displayed),
+        clauseSkeleton(displayed(diagnostic.benign), diagnostic.benign),
       );
-      expect(renderedSkeleton).not.toContain("forged");
+      if (marker !== undefined) expect(renderedSkeleton).not.toContain(marker);
       if (diagnostic.verbatim !== false) {
         // The escape acted inside the run and left the run's boundaries
         // untouched, and it ran as many times as this route escapes: once at

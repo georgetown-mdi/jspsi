@@ -82,16 +82,32 @@ export const MAX_BARE_TERMS_VALUE_LENGTH = 64;
 
 /**
  * The shape {@link bareTermsValue} renders undelimited: letters, digits, `.`,
- * `_`, and `-`, up to {@link MAX_BARE_TERMS_VALUE_LENGTH} of them.
+ * `_`, and `-`, at least one of them a DIGIT, up to
+ * {@link MAX_BARE_TERMS_VALUE_LENGTH} characters.
  *
  * Chosen as the shape that cannot participate in a clause boundary at all. It
  * excludes {@link TERMS_VALUE_DELIMITER}, so such a value cannot close a
- * delimiter; it excludes the space, and every connective these diagnostics use
- * ("local is", ", partner is", " over ", "do not match") contains one, so such a
- * value cannot spell a connective either; and it excludes `,`, `[`, and `]`, the
- * payload list's own punctuation.
+ * delimiter, and it excludes `,`, `[`, and `]`, the payload list's own
+ * punctuation.
+ *
+ * The digit is what stops it spelling a connective. Excluding the space makes a
+ * bare value exactly one whitespace-delimited token, but that alone does not keep
+ * it out of a connective position, because the TEMPLATE supplies the spaces
+ * around a bare slot: the rule-set clause renders `<name> <version> over <name>
+ * <version>`, so a letters-only version would stand in that sentence as
+ * undelimited as the `over` beside it. Every value these diagnostics render bare
+ * is a semver string or an ISO date, both of which carry a digit, while every
+ * connective and label the templates are built from is digit-free -- so requiring
+ * a digit leaves the two vocabularies in disjoint shapes, and a bare value cannot
+ * be read as first-party structure whatever it says. A value with no digit takes
+ * the quoted form instead, which costs the reading nothing.
+ *
+ * The digit-free half of that argument is executed rather than asserted:
+ * `packages/core/test/compatibilityMessage.test.ts` reads the diagnostics'
+ * templates out of their own module and fails if any token of first-party copy
+ * they are built from meets this shape.
  */
-export const BARE_TERMS_VALUE_PATTERN = /^[A-Za-z0-9._-]+$/;
+export const BARE_TERMS_VALUE_PATTERN = /^[A-Za-z0-9._-]*[0-9][A-Za-z0-9._-]*$/;
 
 /**
  * Render a terms value as one delimited run: wrapped in
@@ -126,9 +142,8 @@ export function quoteTermsValue(value: string): CompatibilityMessageFragment {
 
 /**
  * Render a terms value the schema constrains to a delimiter-free shape -- a
- * semver string, an ISO date, an algorithm or strategy enum member -- without
- * delimiters, so the common diagnostic reads as prose rather than as a row of
- * quoted tokens.
+ * semver string or an ISO date -- without delimiters, so the common
+ * diagnostic reads as prose rather than as a row of quoted tokens.
  *
  * The constraint is RE-CHECKED here rather than assumed
  * ({@link BARE_TERMS_VALUE_PATTERN}), and a value that does not meet it falls
