@@ -399,6 +399,7 @@ export async function validateInvite(params: {
         serverHostKeyFingerprint: options.serverHostKeyFingerprint,
       },
       log,
+      "url",
     );
     // A webrtc endpoint carries no scheme, so a plaintext coordination server is
     // one thing this invitation cannot convey: the acceptor seeded from it

@@ -752,6 +752,49 @@ test("a webrtc config reports every --server-* flag the operator set", () => {
     expect(mockState.warnings.some((m) => m.includes(secret))).toBe(false);
 });
 
+test("the webrtc drops are reported in wording that fits a configured exchange", () => {
+  // This caller has no URL and is already the command an invite-flavored remedy
+  // would send it to, so each report points at the connection block it loaded.
+  // The credential line is measured here too, because this is the caller that
+  // can hold a `server.key`: claiming the channel sends no credential of any
+  // kind would be false on exactly the configuration being run.
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalWebRTCConfig,
+      connection: {
+        ...minimalWebRTCConfig.connection,
+        server: { host: "peers.example.org", key: "deployment-key" },
+      },
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  loadConfig({
+    ...baseOptions(),
+    serverPort: 9000,
+    serverUsername: "someone",
+    serverPassword: "s3cret",
+  });
+  const reports = mockState.warnings.filter((m) =>
+    m.includes("has no effect on the webrtc channel"),
+  );
+  const port = reports.find((m) => m.startsWith("--server-port "));
+  const username = reports.find((m) => m.startsWith("--server-username "));
+  const password = reports.find((m) => m.startsWith("--server-password "));
+  expect(port).toContain("`connection.server`");
+  expect(username).toContain("`connection.server.key`");
+  expect(password).toContain("neither used nor echoed");
+  expect(password).toContain("a configured `server.key` is sent");
+  const rendered = reports.join("");
+  // No remedy sends this operator to a URL they were never given, back to the
+  // command they are running, or away with a promise the channel does not keep.
+  expect(rendered).not.toContain("ws://");
+  expect(rendered).not.toContain("run 'psilink exchange'");
+  expect(rendered).not.toContain("no credential of any kind");
+  // The configured key is named as a field, never echoed as a value.
+  expect(rendered).not.toContain("deployment-key");
+});
+
 test("a webrtc config setting none of them reports nothing", () => {
   fs.writeFileSync(configFile, YAML.stringify(minimalWebRTCConfig));
   saveKeyFile(keyFile, { sharedSecret: TOKEN_A });

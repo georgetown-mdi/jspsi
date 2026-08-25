@@ -595,24 +595,42 @@ export function warnUnsupportedFileSyncFlags(
 }
 
 /**
+ * Where the webrtc connection whose `--server-*` flags were dropped came from,
+ * which is the only thing the two flags carrying their own remedy differ on: a
+ * `ws://`/`wss://` URL the command was given (`url`), or the `connection` block
+ * of the configuration it is running (`configuration`).
+ */
+export type WebRTCConnectionSource = "url" | "configuration";
+
+/**
  * Warn that the `--server-*` overrides a webrtc connection cannot take have no
  * effect on it, naming whichever the caller actually set.
  * {@link applyConnectionOverrides} merges the server sub-group on `sftp` alone,
  * so on webrtc every one of them is parsed and dropped; this is the ignored-flag
  * warning for that drop, the counterpart to the file-sync one
  * {@link warnUnsupportedFileSyncFlags} emits. A no-op on every other channel,
- * where the wording below (which names the coordination server and the ws/wss
- * URL) would not apply. Warn-not-block, per the trusted-operator posture.
+ * where the wording below (which names a coordination server) would not apply.
+ * Warn-not-block, per the trusted-operator posture.
  *
  * `--server-port` and `--server-username` carry remedies of their own, so each
  * warns for itself: the coordination server's port is part of the location the
- * URL already gives, while its `username` has no webrtc form at all -- the
- * server is reached by location and its API key alone (the same remedy
- * {@link WEBRTC_URL_EXTRAS_REFUSED} gives for `server.key`). The rest are SSH
- * authentication material with no counterpart on a signaling socket at all, so
- * they share one line -- and they are the ones that most need it: a credential
- * typed at a channel that discards it looks, from the terminal, exactly like
- * one that was used.
+ * connection already carries, while its `username` has no webrtc form at all --
+ * the server is reached by location and its API key alone (the same remedy
+ * {@link WEBRTC_URL_EXTRAS_REFUSED} gives for `server.key`). Where that location
+ * came from is what `source` selects, so neither remedy points at a URL on the
+ * caller that has none: `psilink invite` builds the connection from a
+ * ws://wss:// URL, while `psilink exchange` runs one already written in the
+ * configuration, where telling the operator to author a config and run exchange
+ * would be circular.
+ *
+ * The rest are SSH authentication material with no counterpart on a signaling
+ * socket at all, so they share one line -- and they are the ones that most need
+ * it: a credential typed at a channel that discards it looks, from the terminal,
+ * exactly like one that was used. That line states the one credential this
+ * channel does send, because the flags' own silence is not the channel's: a
+ * configured `server.key` goes to the coordination server as part of the
+ * request it authorizes, so a blanket "no credential of any kind is sent" would
+ * be false on any connection carrying one.
  */
 export function warnUnsupportedWebRTCServerFlags(
   channel: ConnectionConfig["channel"],
@@ -626,6 +644,7 @@ export function warnUnsupportedWebRTCServerFlags(
     serverHostKeyFingerprint?: string;
   },
   log: { warn: (message: string) => void },
+  source: WebRTCConnectionSource,
 ): void {
   if (channel !== "webrtc") return;
   // Security invariant, as in warnServerOverridesIgnoredOffline: emit the flag
@@ -635,17 +654,23 @@ export function warnUnsupportedWebRTCServerFlags(
   if (flags.serverPort !== undefined)
     log.warn(
       "--server-port has no effect on the webrtc channel and will be ignored; " +
-        "the coordination server's port is part of the ws:// or wss:// URL " +
-        "this invitation is built from.",
+        "the coordination server's port is part of " +
+        (source === "url"
+          ? "the ws:// or wss:// URL this invitation is built from."
+          : "`connection.server` in the configuration this exchange runs."),
     );
   if (flags.serverUsername !== undefined)
     log.warn(
       "--server-username has no effect on the webrtc channel and will be " +
-        "ignored; a webrtc invitation reaches its coordination server by " +
+        "ignored; a webrtc connection reaches its coordination server by " +
         "location and its API key alone. For a coordination server that " +
-        "needs a key, author `channel: webrtc` (with `server.key`) in " +
-        "psilink.yaml and run 'psilink exchange'. A username has no webrtc " +
-        "form and is never sent.",
+        "needs a key, " +
+        (source === "url"
+          ? "author `channel: webrtc` (with `server.key`) in psilink.yaml and " +
+            "run 'psilink exchange'."
+          : "set `connection.server.key` in the configuration this exchange " +
+            "runs.") +
+        " A username has no webrtc form and is never sent.",
     );
   const sshAuthenticationFlags: ReadonlyArray<readonly [string, boolean]> = [
     ["--server-password", flags.serverPassword !== undefined],
@@ -664,9 +689,11 @@ export function warnUnsupportedWebRTCServerFlags(
     if (set)
       log.warn(
         `${flag} has no effect on the webrtc channel and will be ignored; it ` +
-          "authenticates an SSH server, and a webrtc invitation reaches its " +
-          "coordination server by location alone -- no credential of any kind " +
-          "is sent, saved, or carried on the invitation.",
+          "authenticates an SSH server, and no SSH credential applies to a " +
+          "webrtc coordination server -- what you typed is neither used nor " +
+          "echoed. The one credential this channel has is the coordination " +
+          "server's own API key: a configured `server.key` is sent to that " +
+          "server as part of the request it authorizes.",
       );
 }
 

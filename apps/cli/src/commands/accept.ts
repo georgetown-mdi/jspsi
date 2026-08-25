@@ -54,6 +54,7 @@ import {
   type RunnableConnectionConfig,
 } from "../connectionFromUrl";
 import { brokerLocationFromConnection } from "../connection/webrtc/weriftPeer";
+import { dialedBrokerHostAndPort } from "../connection/webrtc/brokerClient";
 import { withWebRTCPeerRole } from "../webrtcPeerRole";
 import { diffConnectionAgainstTarget } from "../reconcile";
 import {
@@ -123,9 +124,13 @@ export function builder(cmd: Argv): Argv {
       "consent in advance to this invitation's disclosed terms, skipping the " +
       "interactive confirmation, so accept can run unattended or in a script. " +
       "This BYPASSES the one human checkpoint before the configuration and " +
-      "linkage key are written from the partner-supplied invitation, so review " +
-      "the terms before using it; it does not affect SSH host-key verification. " +
-      "It also frees standard input, so INPUT_FILE may be `-` to read the CSV " +
+      "linkage key are written from the partner-supplied invitation; on an " +
+      "invitation carrying a webrtc endpoint, given an INPUT_FILE, that same " +
+      "checkpoint is the last one before this command connects to the " +
+      "coordination server the invitation names and runs the exchange, so the " +
+      "flag also authorizes connecting and transmitting unattended. Review the " +
+      "terms before using it; it does not affect SSH host-key verification. It " +
+      "also frees standard input, so INPUT_FILE may be `-` to read the CSV " +
       "from stdin.",
   });
 }
@@ -235,6 +240,13 @@ type AcceptReady = {
       output?: string;
       token: InvitationToken;
       connection: WebRTCConnectionConfig;
+      /**
+       * The host and port the rendezvous will dial, resolved from the endpoint
+       * by the same resolver the dial uses. Carried so the consent surface and
+       * the confirmation question can name the coordination server this run
+       * connects to, which on this path the operator never typed.
+       */
+      brokerAuthority: string;
       dataSpec: ResolvedDataSpec;
       prepared: PreparedExchange;
     }
@@ -535,7 +547,10 @@ export async function validateAccept(params: {
     // the same resolver the dial itself calls, so nothing here decides what is
     // dialable. The warn callback is a no-op because the dial below runs in this
     // same process and emits the plaintext advisory itself.
-    brokerLocationFromConnection(runnableConnection.server, () => {});
+    const brokerLocation = brokerLocationFromConnection(
+      runnableConnection.server,
+      () => {},
+    );
     const prepared = await prepareForOnlineExchange(dataSpec, myIdentity, rows);
     // The same two bindings the URL-driven mode sets on its prepared exchange,
     // for the same single run: the columns the invitation declared its party
@@ -547,6 +562,13 @@ export async function validateAccept(params: {
       output: resolved.output,
       token,
       connection: runnableConnection,
+      // What the socket will actually dial, not the endpoint's own text: the URL
+      // parser normalizes a host on its way to the wire, so naming the partner's
+      // spelling on the consent surface could name a server this run never
+      // contacts (see dialedBrokerHostAndPort). It runs the same authority parse
+      // the dial does, so a locator that fails it fails identically at the dial,
+      // here before the terms are displayed.
+      brokerAuthority: dialedBrokerHostAndPort(brokerLocation),
       dataSpec,
       prepared,
       reuseExistingConfig,
@@ -830,6 +852,14 @@ export async function handler(argv: Arguments): Promise<void> {
           : ready.existingOutputShares === true
             ? { status: "pending" }
             : undefined;
+      // The coordination server this acceptance will dial itself, stated above
+      // the terms and again in the question: on this path confirming is what
+      // connects and transmits, and the locator is the invitation's rather than
+      // anything the operator typed. The endpointRun path alone -- the
+      // URL-driven mode's server is the URL the operator gave it, and an
+      // acceptance that writes a configuration and stops dials nothing.
+      const runsExchangeThrough =
+        ready.mode === "endpointRun" ? ready.brokerAuthority : undefined;
       // Rendered through a sink that knows whether the prompt below will run: when
       // it will, the terms reach the terminal it asks on even when the operator
       // routed diagnostics to a --log-file or above info, so consent is never asked
@@ -844,6 +874,7 @@ export async function handler(argv: Arguments): Promise<void> {
           willPrompt: !consentToTerms,
         }),
         promptFollows: !consentToTerms,
+        runsExchangeThrough,
       });
       // With --consent-to-terms, skip the prompt and proceed on the recorded
       // advance consent. Log the bypass so an unattended run's own log shows the
@@ -857,8 +888,16 @@ export async function handler(argv: Arguments): Promise<void> {
         );
         confirmed = true;
       } else {
+        // The question names what answering yes does. Where this acceptance runs
+        // the exchange it also carries the coordination server, escaped at this
+        // sink as it is at the display's: the terms run past a screen, so the
+        // locator stated above them has scrolled away by the time the question
+        // arrives, and this is the line that has not.
         confirmed = await promptConfirm(
-          "Accept this invitation and write configuration?",
+          runsExchangeThrough !== undefined
+            ? "Accept this invitation and run the exchange now, through " +
+                `${redactAndSanitizeForDisplay(runsExchangeThrough)}?`
+            : "Accept this invitation and write configuration?",
         );
       }
       if (!confirmed) {

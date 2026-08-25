@@ -451,6 +451,10 @@ export function loadConfig(options: ExchangeOptions): {
       serverHostKeyFingerprint: options.serverHostKeyFingerprint,
     },
     log,
+    // The connection is the loaded configuration's own, so the remedies point at
+    // its `connection.server` block rather than at a URL this command took none
+    // of.
+    "configuration",
   );
   warnLowPollingFrequency(connection.channel, options.pollingFrequencyMs, log);
 

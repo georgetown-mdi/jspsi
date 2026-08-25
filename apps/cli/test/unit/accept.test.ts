@@ -3774,10 +3774,16 @@ async function expectedConsentSurface(
 async function runOfflineAcceptCapturingStdio(params: {
   encoded: string;
   fixture: ReturnType<typeof offlineAcceptFixture>;
+  /**
+   * The positionals after the invitation, defaulting to the fixture's input CSV.
+   * An empty array is the acceptance given no input file, which writes a
+   * configuration and runs nothing.
+   */
+  positionals?: Array<string>;
   flags?: Record<string, unknown>;
   onPrompt?: (stderrWrites: ReadonlyArray<string>) => boolean;
 }): Promise<{ stderrWrites: Array<string>; stdoutWrites: Array<string> }> {
-  const { encoded, fixture, flags, onPrompt } = params;
+  const { encoded, fixture, positionals, flags, onPrompt } = params;
   // A real invocation creates getLogger("accept") after applying --log-level, so
   // the command's logger carries the level the flag names. This suite runs many
   // invocations in one process, where that logger already exists and loglevel's
@@ -3803,7 +3809,7 @@ async function runOfflineAcceptCapturingStdio(params: {
     await acceptHandler({
       _: [],
       $0: "psilink",
-      args: [encoded, fixture.input],
+      args: [encoded, ...(positionals ?? [fixture.input])],
       "config-file": fixture.configFile,
       "key-file": fixture.keyFile,
       record: false,
@@ -3860,6 +3866,133 @@ test("handler: nothing reaches the operator between the terms and the question",
       // repeated block, entire and in order. Anything written in that window --
       // by either route -- lands after it and fails this.
       expect(atPrompt!.slice(-repeated.length)).toEqual(repeated);
+      promptConfirmMock.mockReset();
+    }
+  } finally {
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: the one-command path names the coordination server it will dial before it asks", async () => {
+  // On this path the confirmation is the last checkpoint before data moves, and
+  // the locator is one the operator never typed: the surface states that this
+  // acceptance runs the exchange and names the server it resolves to dial, and
+  // the question carries that server too, since the terms between the two run
+  // past a screen.
+  const fixture = offlineAcceptFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(FUTURE(), WEBRTC_ENDPOINT),
+    );
+    let atPrompt: Array<string> | undefined;
+    await runOfflineAcceptCapturingStdio({
+      encoded,
+      fixture,
+      onPrompt: (stderrWrites) => {
+        atPrompt = stderrLines([...stderrWrites]);
+        return false;
+      },
+    });
+    expect(atPrompt).toBeDefined();
+    const beforeThePrompt = atPrompt!.join("\n");
+    // The endpoint carries no port, so the line resolves the default the dial
+    // would use rather than leaving it to be inferred from a scheme it does not
+    // print.
+    expect(beforeThePrompt).toContain(
+      "This acceptance runs the exchange itself, through the coordination " +
+        "server this invitation names: peer.example.org:443",
+    );
+    expect(beforeThePrompt).toContain(
+      "Confirming connects to that server immediately and runs the exchange " +
+        "from your input file, transmitting your linkage data on the terms " +
+        "below",
+    );
+    expect(promptConfirmMock).toHaveBeenCalledWith(
+      "Accept this invitation and run the exchange now, through " +
+        "peer.example.org:443?",
+    );
+    // The gate still holds what it always did: declining dials nothing and
+    // writes nothing.
+    expect(runOnlineBootstrapMock).not.toHaveBeenCalled();
+    expect(fs.existsSync(fixture.configFile)).toBe(false);
+    expect(fs.existsSync(fixture.keyFile)).toBe(false);
+  } finally {
+    runOnlineBootstrapMock.mockReset();
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: the unattended one-command path states the run it is about to make", async () => {
+  // Nothing asks under --consent-to-terms, so the statement is made in the tense
+  // of a consent already recorded: the run and the server it reaches are still
+  // named, in the unattended run's own record, and the wording that invites an
+  // answer never reaches a run that takes none.
+  const fixture = offlineAcceptFixture();
+  const logFile = path.join(fixture.dir, "accept.log");
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(FUTURE(), WEBRTC_ENDPOINT),
+    );
+    await runOfflineAcceptCapturingStdio({
+      encoded,
+      fixture,
+      flags: { "consent-to-terms": true, "log-file": logFile },
+    });
+    expect(promptConfirmMock).not.toHaveBeenCalled();
+    expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
+    const logged = fs.readFileSync(logFile, "utf8");
+    expect(logged).toContain(
+      "This acceptance runs the exchange itself, through the coordination " +
+        "server this invitation names: peer.example.org:443",
+    );
+    expect(logged).toContain(
+      "--consent-to-terms recorded that consent in advance",
+    );
+    expect(logged).not.toContain("Confirming connects to that server");
+  } finally {
+    runOnlineBootstrapMock.mockReset();
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: an acceptance that runs no exchange names no server and states no run", async () => {
+  // The two shapes that keep the two-command form -- no input file to exchange,
+  // and an invitation naming no webrtc coordination server -- dial nothing, so
+  // neither surface carries a locator or the run statement, and each asks the
+  // question about writing files that it always asked.
+  const fixture = offlineAcceptFixture();
+  try {
+    for (const { encoded, positionals } of [
+      {
+        encoded: await encodeInvitation(sampleToken(FUTURE(), WEBRTC_ENDPOINT)),
+        positionals: [] as Array<string>,
+      },
+      {
+        encoded: await encodeInvitation(sampleToken(FUTURE())),
+        positionals: undefined,
+      },
+    ]) {
+      let atPrompt: Array<string> | undefined;
+      await runOfflineAcceptCapturingStdio({
+        encoded,
+        fixture,
+        positionals,
+        onPrompt: (stderrWrites) => {
+          atPrompt = stderrLines([...stderrWrites]);
+          return false;
+        },
+      });
+      expect(atPrompt).toBeDefined();
+      const beforeThePrompt = atPrompt!.join("\n");
+      expect(beforeThePrompt).not.toContain("peer.example.org");
+      expect(beforeThePrompt).not.toContain("runs the exchange itself");
+      expect(promptConfirmMock).toHaveBeenCalledWith(
+        "Accept this invitation and write configuration?",
+      );
       promptConfirmMock.mockReset();
     }
   } finally {
