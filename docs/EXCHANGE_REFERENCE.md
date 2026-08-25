@@ -360,7 +360,7 @@ linkage_terms:
       version: "1.0.0"
 ```
 
-Every path that fills in your fields and keys for you writes this citation: a zero-setup exchange, the template `psilink init` writes, and the web app's quick and Advanced invite paths. It travels wherever the terms do -- into the invitation, onto the wire, onto the accepting party's terms review, and into each party's exchange record, which is what lets "which rules did this linkage match on" be answered by a name and a version.
+Every path that fills in your fields and keys for you writes this citation: a zero-setup exchange, the template `psilink init` writes, the web app's quick and Advanced invite paths, and the console's Direct exchange, whose confirm screen shows it in the terms it infers from your file. It travels wherever the terms do -- into the invitation, onto the wire, onto the accepting party's terms review, and into each party's exchange record, which is what lets "which rules did this linkage match on" be answered by a name and a version.
 
 What it does and does not settle:
 

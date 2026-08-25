@@ -9,6 +9,8 @@ import { createElement } from "react";
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
 
+import { CONSENT_FACTS } from "@psilink/core";
+
 import { BenchLobby } from "@bench/BenchLobby";
 import { DirectExchangeBench } from "@bench/DirectExchangeBench";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
@@ -284,6 +286,14 @@ describe("direct exchange confirm and run", () => {
       .toBeInTheDocument();
     expect(app.container.textContent).not.toContain("Exchange proposal");
     expect(app.container.textContent).not.toContain("must review and consent");
+
+    // The inferred terms cite the built-in rule set, and here the citation is the
+    // operator's OWN word: no partner has been contacted, so the acceptor's
+    // partner-attribution caveat must not ride along with the names.
+    expect(app.container.textContent).toContain("Linkage rule set");
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.linkageRuleSet.note,
+    );
 
     // The two fixed symmetry notices frame the preview.
     await expect

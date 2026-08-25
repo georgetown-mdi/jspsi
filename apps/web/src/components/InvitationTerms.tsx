@@ -532,7 +532,9 @@ function CondensableDetails({
  * -- plus the viewer-centric blocks whose framing depends on who is reading: Result
  * sharing and the payload send/receive copy read first-person for each party, so the
  * direction tiers place each fact by the viewer's own direction. The matching keys
- * and the rest of the body are identical across all three. The optional `framing`
+ * and the rest of the body are identical across all three, save the two caveats a
+ * partner's own word carries -- the unverified-identity note and the rule-set
+ * citation's attribution sentence -- which are `review`-only. The optional `framing`
  * override replaces ONLY the heading and intro strings (for the console direct
  * exchange, which pairs it with `proposing` to render the operator's own inferred
  * terms honestly, with no false partner-consent claim); it leaves every
@@ -601,10 +603,12 @@ export function InvitationTerms({
    * party no result: the payload step transmits nothing at all to a partner not
    * entitled to one, so the block states that instead of any column set. */
   outboundColumns?: Array<string>;
-  /** Which context this renders in. Drives the heading and intro copy and the
+  /** Which context this renders in. Drives the heading and intro copy, the
    * viewer-centric blocks (Result sharing, the payload send/receive framing, and
-   * the inviter-only sent-columns chips above "Other details"); the matching keys
-   * and the rest of the body are identical. */
+   * the inviter-only sent-columns chips above "Other details"), and the two
+   * `review`-only caveats on a partner's own word (the unverified identity and
+   * the rule-set citation's attribution); the matching keys and the rest of the
+   * body are identical. */
   perspective?: "review" | "accepted" | "proposing";
   /** Semantic heading level (its visual size is fixed at the h2 scale), so the
    * heading nests correctly under its container -- h1 when this is the page's
@@ -1325,7 +1329,14 @@ export function InvitationTerms({
             sanitized by summarizeInvitation and bound in their own Text between
             fixed chrome -- never joined into the label -- for the reason the
             allowed-character class below is: a crafted value must not be able to
-            read as system chrome. */}
+            read as system chrome.
+
+            The names and versions themselves are true of the terms whoever
+            authored them, so the block renders under every perspective; the
+            caveat attributes them to a partner, so it is gated to `review` like
+            the unverified-identity note above -- `proposing` shows the viewer's
+            own citation, and `accepted` is past the decision the caveat
+            informs. */}
           {summary.linkageRuleSet !== undefined && (
             <Term label="Linkage rule set">
               <Stack gap={2}>
@@ -1340,7 +1351,9 @@ export function InvitationTerms({
                   {summary.linkageRuleSet.fieldSet.version}
                 </Text>
               </Stack>
-              <Text size="sm">{CONSENT_FACTS.linkageRuleSet.note}</Text>
+              {perspective === "review" && (
+                <Text size="sm">{CONSENT_FACTS.linkageRuleSet.note}</Text>
+              )}
             </Term>
           )}
 
