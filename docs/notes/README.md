@@ -6,6 +6,34 @@ implementation, and points at the spec for the normative rows rather than
 restating them. A note carries a status line stating where its subject stands,
 from a direction still open to a decision taken and built.
 
+## Index
+
+| Note | Status |
+| ---- | ------ |
+| [app-shell-service-worker.md](app-shell-service-worker.md) | Decided and built. |
+| [cli-webrtc-stack.md](cli-webrtc-stack.md) | Decided and built. |
+| [connection-per-poll-sftp.md](connection-per-poll-sftp.md) | Shipped. |
+| [console-announce-and-focus.md](console-announce-and-focus.md) | Decided and built, by a 3-panelist design panel deciding 2-1. |
+| [cosign-keyless-signing.md](cosign-keyless-signing.md) | Decided and built. |
+| [cross-workspace-test-material.md](cross-workspace-test-material.md) | Decided and built. |
+| [deduplicate-matching-semantics.md](deduplicate-matching-semantics.md) | Specified, and run end to end under both linkage strategies for the one-sided cardinalities. |
+| [default-linkage-rule-set.md](default-linkage-rule-set.md) | Decided and built. |
+| [fan-out-matching-resolution.md](fan-out-matching-resolution.md) | Built under `single-pass`; the cascade realization stays open work. |
+| [fips-provider-surface.md](fips-provider-surface.md) | Measurement, plus two decisions taken on it; whether to pursue a FIPS claim at all remains open. |
+| [fips-variant-image.md](fips-variant-image.md) | Decided, built, and published. |
+| [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) | Decided and implemented. |
+| [linkage-rule-grounding.md](linkage-rule-grounding.md) | Proposal, pending adoption -- nothing here is adopted or shipped. |
+| [one-sided-disclosure.md](one-sided-disclosure.md) | Resolved - shipped as the opt-in `single-pass` linkage strategy (the cascade stays the default). |
+| [prebuild-provenance.md](prebuild-provenance.md) | Decided, built, and armed against a fork that attests. |
+| [psi-c-count-only.md](psi-c-count-only.md) | Decided and built. |
+| [receipt-run-binding.md](receipt-run-binding.md) | Resolved - built. |
+| [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md) | Decided. |
+| [rule-set-citation-verdict.md](rule-set-citation-verdict.md) | Resolved - built. |
+| [sftp-adapter-state-machine.md](sftp-adapter-state-machine.md) | Shipped. |
+| [shared-consent-summary.md](shared-consent-summary.md) | Shipped. |
+
+Each note carries the full status statement at its own top; this table is a pointer, not a restatement.
+
 The maturity ladder:
 
 - `scratch/` (gitignored) - personal, throwaway thinking, no audience.
