@@ -34,16 +34,32 @@ function accountingOf(...records: Array<ExchangeRecord>): DisclosureAccounting {
   );
 }
 
+/** One labelled fact. */
+function factNamed(
+  facts: ReadonlyArray<DisclosureFact>,
+  label: string,
+): DisclosureFact {
+  const found = facts.find((fact) => fact.label === label);
+  if (found === undefined) throw new Error(`no fact labelled ${label}`);
+  return found;
+}
+
 /** The values of one labelled fact, or its named empty state when it carries
  * none. */
 function factValues(
   facts: ReadonlyArray<DisclosureFact>,
   label: string,
 ): Array<string> {
-  const found = facts.find((fact) => fact.label === label);
-  if (found === undefined) throw new Error(`no fact labelled ${label}`);
+  const found = factNamed(facts, label);
   return found.values.length === 0 ? [found.muted] : [...found.values];
 }
+
+/** The caveat the accounting attaches to a present rule-set citation: the record
+ * carries the authoring party's own declaration, which nothing on the exchange
+ * path resolved to a set or checked against the keys and fields the same terms
+ * declared. */
+const RULE_SET_CAVEAT =
+  "psilink has not checked this citation: nothing resolves these names to a rule set, or checks them against the fields matched on. What the exchange held both parties to is the matching basis recorded beside it.";
 
 /** The exported CSV split into physical rows, the trailing terminator dropped. */
 function csvRows(csv: string): Array<string> {
@@ -105,6 +121,53 @@ describe("a disclosure's facts", () => {
     expect(factValues(facts, "Agreement")).toEqual(["Not recorded"]);
     expect(factValues(facts, "Purpose of the disclosure")).toEqual([
       "Not recorded",
+    ]);
+  });
+
+  test("state the rule set the terms cited, keys before fields, under the caveat that nothing checked it", async () => {
+    const record = await disclosureRecord({ linkageRuleSet: true });
+
+    const facts = disclosureFacts(record);
+
+    expect(factValues(facts, "Rule set cited")).toEqual([
+      'Keys: "hmis-keys" 2.1.0',
+      'Fields: "baseline-pii" 1.0.0',
+    ]);
+    expect(factNamed(facts, "Rule set cited").note).toBe(RULE_SET_CAVEAT);
+  });
+
+  test("say the terms cited no rule set rather than leaving the cell blank, and caveat nothing", async () => {
+    // The record omits the citation exactly when the terms drew their rules from
+    // no named set, so the accounting reports that rather than a gap -- and a
+    // citation that is not there has nothing for the caveat to qualify.
+    const record = await disclosureRecord();
+    expect(record.governance.linkageRuleSet).toBeUndefined();
+
+    const fact = factNamed(disclosureFacts(record), "Rule set cited");
+
+    expect(factValues([fact], "Rule set cited")).toEqual([
+      "Not cited - the agreed terms' rules were authored rather than drawn from a named set",
+    ]);
+    expect(fact.note).toBeUndefined();
+  });
+
+  test("escape a cited set's name and version, which the authoring party chose", async () => {
+    // The citation is carried through unvetted, so its names and versions are free
+    // text of somebody's choosing exactly as the partner identity is; this module
+    // is their display sink too.
+    const record = await disclosureRecord({
+      linkageRuleSet: {
+        fieldSet: { name: "baseline‮pii", version: "1.0.0" },
+        keySet: { name: "hmis-keys", version: "2.1.0[31m" },
+      },
+    });
+    expect(record.governance.linkageRuleSet?.fieldSet.name).toBe(
+      "baseline‮pii",
+    );
+
+    expect(factValues(disclosureFacts(record), "Rule set cited")).toEqual([
+      'Keys: "hmis-keys" 2.1.0\\x1b[31m',
+      'Fields: "baseline\\u202epii" 1.0.0',
     ]);
   });
 
@@ -228,6 +291,63 @@ describe("the exported accounting", () => {
     expect(row).toContain('"7"');
     expect(row).toContain('"3"');
     expect(row).toContain('"Program share drive, 3-year hold"');
+  });
+
+  test("carries the rule-set citation and its caveat in the same row as the run's other governance fields", async () => {
+    const accounting = accountingOf(
+      await disclosureRecord({ linkageRuleSet: true }),
+    );
+
+    const [header, row] = csvRows(disclosureAccountingCsv(accounting));
+
+    // One cell of the one run's row, beside the agreement and the matching basis:
+    // both cited halves and the caveat, which the export carries because it is
+    // read without the screen that showed it.
+    expect(
+      splitCsvRow(row)[splitCsvRow(header).indexOf("Rule set cited")],
+    ).toBe(
+      `Keys: "hmis-keys" 2.1.0\nFields: "baseline-pii" 1.0.0\n${RULE_SET_CAVEAT}`,
+    );
+    expect(row).toContain('"MOU-2025-0042"');
+    expect(splitCsvRow(row)).toHaveLength(splitCsvRow(header).length);
+  });
+
+  test("exports the uncited case as its named empty state, with no caveat to qualify it", async () => {
+    const accounting = accountingOf(await disclosureRecord());
+
+    const [header, row] = csvRows(disclosureAccountingCsv(accounting));
+
+    expect(
+      splitCsvRow(row)[splitCsvRow(header).indexOf("Rule set cited")],
+    ).toBe(
+      "Not cited - the agreed terms' rules were authored rather than drawn from a named set",
+    );
+  });
+
+  test("leaves a formula-led set name unable to lead its cell, this app's own chrome holding that position", async () => {
+    // The cited names are free text of the authoring party's choosing, so a
+    // spreadsheet lead can reach this cell -- but each line opens with the half's
+    // fixed name, so no partner byte occupies the position a spreadsheet reads a
+    // formula from. Pinned as a check rather than argued.
+    const accounting = accountingOf(
+      await disclosureRecord({
+        linkageRuleSet: {
+          fieldSet: { name: "=1+1", version: "1.0.0" },
+          keySet: { name: "@SUM(A1:A9)", version: "2.1.0" },
+        },
+      }),
+    );
+
+    const [header, row] = csvRows(disclosureAccountingCsv(accounting));
+    const cell =
+      splitCsvRow(row)[splitCsvRow(header).indexOf("Rule set cited")];
+
+    expect(cell.startsWith("Keys: ")).toBe(true);
+    expect(cell).toContain('Keys: "@SUM(A1:A9)" 2.1.0');
+    expect(cell).toContain('Fields: "=1+1" 1.0.0');
+    // The apostrophe guard is for a cell a partner value leads; it has nothing to
+    // neutralize here, so it adds nothing.
+    expect(row).not.toContain("\"'Keys:");
   });
 
   test("quotes a value carrying the delimiter, so a comma cannot shift the columns", async () => {

@@ -70,7 +70,7 @@ Three limits on what it asserts:
 
 Omitted when the agreed terms cited no set (their rules were authored rather than drawn from one) -- absent by omission, never a null, which is why the record's format version moves with it.
 
-**Where it is read.** The record is the only surface that carries it: the web disclosure-accounting screen and the CSV it exports present the matching basis and the other governance fields, not the citation, so a reader answering "which rules did this linkage match on" from the accounting alone does not have it.
+**Where it is read.** The web disclosure-accounting screen and the CSV it exports present it beside the matching basis, each half named and versioned, so a governance reader answers "which rules did this linkage match on" from the accounting alone. Both carry a caveat with it, since a citation shown bare would read as a checked provenance: nothing resolved its names to a set or checked them against the fields the run matched on, and the matching basis beside it is what the exchange held both parties to. A record whose terms cited no set reads as that rather than as a blank.
 
 ## Retention and disposition pointer
 
