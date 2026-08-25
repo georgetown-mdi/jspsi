@@ -21,11 +21,46 @@
 //     it in template state and it reports a comment-only edit as a change.
 //
 // Path classification fails closed. Markdown is exempt because the rule names
-// it; every other non-source path -- package.json, a workflow yaml, a
-// Dockerfile, a .sh -- is UNVERIFIABLE and fails the run rather than being waved
-// through as "not a JS/TS extension", which would attest an executable delta in
-// any of them. A verifier backing an attestation must not report HOLDS over a
-// file it did not examine.
+// it; a `.yml`/`.yaml` path is parsed and compared as YAML (below); every other
+// non-source path -- package.json, a Dockerfile, a .sh -- is UNVERIFIABLE and
+// fails the run rather than being waved through as "not a JS/TS extension",
+// which would attest an executable delta in any of them. A verifier backing an
+// attestation must not report HOLDS over a file it did not examine.
+//
+// YAML comparison: parse each side with the `yaml` package and deep-compare the
+// values it materializes with `node:util`'s `isDeepStrictEqual`, which reads a
+// mapping's key order as insignificant -- YAML's is -- while keeping a
+// sequence's, which is not. A comparison key built by stringifying the value is
+// measured wrong here the same way the two cheaper source primitives above are,
+// and is not to be reached for again: `JSON.stringify` writes NaN, Infinity,
+// -Infinity and null all as `null`, and an own-keys walk writes every Date
+// (`!!timestamp`) and every Set (`!!set`) as the same empty object, so a real
+// value change in any of them reads comment-only. The colocated test pins each
+// of those cases as an executable delta.
+//
+// `uniqueKeys` and `strict` are passed even though both already default on, so a
+// future default change cannot silently loosen the check. Three conditions are
+// then UNVERIFIABLE rather than compared, each measured against the installed
+// `yaml` and each with a soundness probe standing on it:
+//
+//   - a stream carrying more than one document, because this verifier does not
+//     attempt to align documents across two multi-document streams;
+//   - a document `parseAllDocuments` reports a diagnostic for, a duplicate key
+//     among them: it lands as a `doc.errors` entry rather than being resolved
+//     last-wins, so it fails closed the way a syntax error does;
+//   - a document that parses clean and cannot be materialized, because
+//     `doc.errors` does not surface every unsafe materialization -- an
+//     unresolved alias throws out of `toJS()`, an alias-expansion bomb trips
+//     that package's own resource cap, and an anchor aliased inside its own
+//     value comes back as a circular object with no diagnostic at all, refused
+//     because nothing finite was read.
+//
+// Each refusal is a reason on that path's own verdict, so an unreadable file
+// leaves every other path in the run with a verdict. An empty or comment-only
+// stream is the one zero-document case, and canonicalizes to the same `null`
+// value an absent side does, so adding or deleting a comment-only YAML file
+// reads comment-only while adding or deleting one carrying any value reads as
+// an executable delta -- the same rule the source comparison applies below.
 //
 // A side that does not exist canonicalizes to the empty program, so adding or
 // deleting a comments-only file reads comment-only while adding or deleting one
@@ -50,15 +85,18 @@
 // Exit codes: 0 the property holds; 1 it is violated or a changed path could not
 // be verified; 2 usage or git error; 3 the verifier failed its own soundness
 // probes. The probes run before every comparison so an attestation proves its
-// soundness on the TypeScript actually installed, rather than trusting that CI
-// ran the test suite at some point.
+// soundness on the TypeScript and `yaml` actually installed, rather than
+// trusting that CI ran the test suite at some point.
 
 import { execFileSync } from "node:child_process";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import ts from "typescript";
+import { parseAllDocuments } from "yaml";
 
 const EXEMPT_EXTENSIONS = new Set([".md"]);
+const YAML_EXTENSIONS = new Set([".yml", ".yaml"]);
 
 const SCRIPT_KINDS = new Map([
   [".ts", ts.ScriptKind.TS],
@@ -75,14 +113,21 @@ const printer = ts.createPrinter({ removeComments: true });
 
 /**
  * How a changed path is handled: `exempt` (markdown, which the rule allows),
- * `source` (parsed and compared), or `unverifiable` (anything else, which fails
- * the run).
+ * `source` (parsed and compared as TypeScript/JavaScript), `yaml` (parsed and
+ * compared as YAML), or `unverifiable` (anything else, which fails the run).
  */
 export function classifyPath(path) {
   const extension = extname(path).toLowerCase();
   if (EXEMPT_EXTENSIONS.has(extension)) return "exempt";
   if (SCRIPT_KINDS.has(extension)) return "source";
+  if (YAML_EXTENSIONS.has(extension)) return "yaml";
   return "unverifiable";
+}
+
+/** Whether a path's content (rather than its classification alone) decides its verdict. */
+function needsContent(path) {
+  const classification = classifyPath(path);
+  return classification === "source" || classification === "yaml";
 }
 
 /**
@@ -109,6 +154,111 @@ export function canonicalSource(text, path) {
 }
 
 /**
+ * Whether a materialized YAML value contains a reference back to itself.
+ * `ancestors` is the path currently being walked and `acyclic` the nodes
+ * already cleared, which keeps a document whose aliases share subtrees to one
+ * visit per node.
+ */
+function containsCycle(value, ancestors = new Set(), acyclic = new Set()) {
+  if (value === null || typeof value !== "object") return false;
+  if (ancestors.has(value)) return true;
+  if (acyclic.has(value)) return false;
+  ancestors.add(value);
+  const children =
+    value instanceof Map
+      ? [...value.keys(), ...value.values()]
+      : value instanceof Set
+        ? [...value]
+        : Object.values(value);
+  const cyclic = children.some((child) =>
+    containsCycle(child, ancestors, acyclic),
+  );
+  ancestors.delete(value);
+  if (!cyclic) acyclic.add(value);
+  return cyclic;
+}
+
+/**
+ * Canonical form of one side of a YAML path -- the value its single document
+ * materializes to -- or, in `error`, the reason this verifier will not compare
+ * that side, which every caller checks before reading `value`. `text` is null
+ * for a side where the file does not exist; that and a zero-document stream
+ * (an empty or comment-only file) both canonicalize to `value: null`, the same
+ * "no content" reading `canonicalSource` gives an absent TypeScript/JavaScript
+ * side. Nothing the side is refused for throws out of here: a refusal is a
+ * reason string, so the run's other paths still reach their own verdicts.
+ */
+export function canonicalYaml(text) {
+  if (text === null) return { value: null, error: null };
+  let documents;
+  try {
+    documents = parseAllDocuments(text, { uniqueKeys: true, strict: true });
+  } catch (error) {
+    return { value: undefined, error: `does not parse: ${error.message}` };
+  }
+  if (documents.length > 1) {
+    return {
+      value: undefined,
+      error: `carries ${documents.length} YAML documents in one stream -- this verifier compares a single document only`,
+    };
+  }
+  const [document] = documents;
+  if (document === undefined) return { value: null, error: null };
+  if (document.errors.length > 0) {
+    return {
+      value: undefined,
+      error: `does not parse: ${document.errors[0].message}`,
+    };
+  }
+  let value;
+  try {
+    value = document.toJS();
+    if (containsCycle(value)) {
+      return {
+        value: undefined,
+        error:
+          "refers to itself -- this verifier compares finite values, and an anchor aliased inside its own value materializes to a circular one",
+      };
+    }
+  } catch (error) {
+    return {
+      value: undefined,
+      error: `does not materialize: ${error.message}`,
+    };
+  }
+  return { value, error: null };
+}
+
+/**
+ * Verdict for one changed YAML path. `before` and `after` are the file's text
+ * at each ref, or null where it does not exist on that side. A refused side is
+ * named in the reason, the way the source comparison names the side its parse
+ * errors came from.
+ */
+export function yamlVerdict({ path, before, after }) {
+  const left = canonicalYaml(before);
+  const right = canonicalYaml(after);
+  if (left.error !== null || right.error !== null) {
+    return {
+      path,
+      verdict: "unverifiable",
+      reason: [
+        left.error === null ? null : `before ${left.error}`,
+        right.error === null ? null : `after ${right.error}`,
+      ]
+        .filter((reason) => reason !== null)
+        .join("; "),
+    };
+  }
+  return {
+    path,
+    verdict: isDeepStrictEqual(left.value, right.value)
+      ? "comment-only"
+      : "executable-delta",
+  };
+}
+
+/**
  * Verdict for one changed path. `before` and `after` are the file's text at each
  * ref, or null where it does not exist on that side; both are ignored for a path
  * decided by classification alone.
@@ -121,9 +271,10 @@ export function fileVerdict({ path, before, after }) {
       path,
       verdict: "unverifiable",
       reason:
-        "not markdown and not a TypeScript/JavaScript path -- this verifier cannot read it for executable content",
+        "not markdown, YAML, or a TypeScript/JavaScript path -- this verifier cannot read it for executable content",
     };
   }
+  if (classification === "yaml") return yamlVerdict({ path, before, after });
   const left = canonicalSource(before, path);
   const right = canonicalSource(after, path);
   if (left.parseErrors !== 0 || right.parseErrors !== 0) {
@@ -240,14 +391,17 @@ export function collectVerdicts({ attested, head, git }) {
         reason: `file mode changed from ${mode.beforeMode} to ${mode.afterMode} -- this verifier compares file content, not modes`,
       };
     }
-    // Content is read only for a parseable source path; an exempt or
-    // unverifiable verdict is decided by the path alone.
-    const isSource = classifyPath(path) === "source";
+    // Content is read only for a parseable path; an exempt or unverifiable
+    // verdict is decided by the path alone.
+    const readContent = needsContent(path);
     return fileVerdict({
       path,
       before:
-        isSource && sides.before ? git(["show", `${attested}:${path}`]) : null,
-      after: isSource && sides.after ? git(["show", `${head}:${path}`]) : null,
+        readContent && sides.before
+          ? git(["show", `${attested}:${path}`])
+          : null,
+      after:
+        readContent && sides.after ? git(["show", `${head}:${path}`]) : null,
     });
   });
 }
@@ -262,6 +416,9 @@ export function summarize(verdicts) {
 
 const probeCanonical = (text, path = "probe.ts") =>
   canonicalSource(text, path).canonical;
+
+const probeYamlVerdict = (before, after) =>
+  yamlVerdict({ path: "probe.yaml", before, after }).verdict;
 
 const PROBES = [
   {
@@ -305,11 +462,70 @@ const PROBES = [
       canonicalSource("const a = ;\nfunction (\n", "probe.ts").parseErrors >
         0 && canonicalSource("const a = 1;\n", "probe.ts").parseErrors === 0,
   },
+  {
+    name: "a YAML comment change reads as comment-only",
+    run: () =>
+      probeYamlVerdict("a: 1 # x\nb: 2\n", "a: 1 # y\nb: 2\n") ===
+      "comment-only",
+  },
+  {
+    name: "reordering YAML mapping keys reads as comment-only",
+    run: () =>
+      probeYamlVerdict("a: 1\nb: 2\n", "b: 2\na: 1\n") === "comment-only",
+  },
+  {
+    name: "reordering a YAML sequence reads as a change",
+    run: () =>
+      probeYamlVerdict("a:\n  - 1\n  - 2\n", "a:\n  - 2\n  - 1\n") ===
+      "executable-delta",
+  },
+  {
+    name: "YAML values that share one JSON text read as a change",
+    run: () =>
+      probeYamlVerdict("a: .nan\n", "a: .inf\n") === "executable-delta" &&
+      probeYamlVerdict("a: .inf\n", "a: -.inf\n") === "executable-delta" &&
+      probeYamlVerdict("a: null\n", "a: .nan\n") === "executable-delta" &&
+      probeYamlVerdict("a: .nan # x\n", "a: .nan # y\n") === "comment-only",
+  },
+  {
+    name: "YAML values that share one set of own keys read as a change",
+    run: () =>
+      probeYamlVerdict(
+        "a: !!timestamp 2001-12-14\n",
+        "a: !!timestamp 2002-12-14\n",
+      ) === "executable-delta" &&
+      probeYamlVerdict("a: !!set\n  ? x\n", "a: !!set\n  ? y\n") ===
+        "executable-delta",
+  },
+  {
+    name: "a duplicate YAML key is refused rather than resolved last-wins",
+    run: () => canonicalYaml("a: 1\na: 2\n").error !== null,
+  },
+  {
+    name: "a multi-document YAML stream is refused rather than compared partially",
+    run: () => canonicalYaml("a: 1\n---\nb: 2\n").error !== null,
+  },
+  {
+    name: "a YAML alias that does not resolve is refused rather than thrown",
+    run: () => canonicalYaml("a: *missing\n").error !== null,
+  },
+  {
+    name: "a self-referential YAML anchor is refused rather than compared",
+    run: () => canonicalYaml("a: &x\n  b: *x\n").error !== null,
+  },
+  {
+    name: "an absent YAML side canonicalizes to the same value as an empty document",
+    run: () =>
+      canonicalYaml(null).error === null &&
+      canonicalYaml(null).value === null &&
+      canonicalYaml("# comment only\n").error === null &&
+      canonicalYaml("# comment only\n").value === null,
+  },
 ];
 
 /**
- * The soundness probes as `{name, ok}` results: the properties the comparison
- * rests on, re-measured against the installed TypeScript on every run.
+ * The soundness probes as `{name, ok}` results: the properties the comparisons
+ * rest on, re-measured against the installed TypeScript and `yaml` on every run.
  */
 export function soundnessProbes() {
   return PROBES.map(({ name, run }) => ({ name, ok: run() }));
