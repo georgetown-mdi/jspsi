@@ -57,6 +57,19 @@ function joinList(items: Array<string>): string {
   return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
+/**
+ * The bounded frame a raw partner-controlled value is rendered in: its own box,
+ * so the value cannot run into the fixed chrome around it. Shared by the
+ * rule-set citation and declared apart from the allowed-character class's inline
+ * copy only because the citation renders two of them.
+ */
+const ruleSetValueStyle = {
+  border: "1px solid var(--mantine-color-default-border)",
+  borderRadius: "var(--mantine-radius-sm)",
+  padding: "2px 6px",
+  wordBreak: "break-all",
+} as const;
+
 /** A labelled block: a bold caption above its value(s). When `captionId` is set it
  * is put on the caption, so a child that is itself a labelled region (a
  * {@link ColumnChips} list) can name itself from the visible caption via
@@ -519,7 +532,9 @@ function CondensableDetails({
  * -- plus the viewer-centric blocks whose framing depends on who is reading: Result
  * sharing and the payload send/receive copy read first-person for each party, so the
  * direction tiers place each fact by the viewer's own direction. The matching keys
- * and the rest of the body are identical across all three. The optional `framing`
+ * and the rest of the body are identical across all three, save the two caveats a
+ * partner's own word carries -- the unverified-identity note and the rule-set
+ * citation's attribution sentence -- which are `review`-only. The optional `framing`
  * override replaces ONLY the heading and intro strings (for the console direct
  * exchange, which pairs it with `proposing` to render the operator's own inferred
  * terms honestly, with no false partner-consent claim); it leaves every
@@ -588,10 +603,12 @@ export function InvitationTerms({
    * party no result: the payload step transmits nothing at all to a partner not
    * entitled to one, so the block states that instead of any column set. */
   outboundColumns?: Array<string>;
-  /** Which context this renders in. Drives the heading and intro copy and the
+  /** Which context this renders in. Drives the heading and intro copy, the
    * viewer-centric blocks (Result sharing, the payload send/receive framing, and
-   * the inviter-only sent-columns chips above "Other details"); the matching keys
-   * and the rest of the body are identical. */
+   * the inviter-only sent-columns chips above "Other details"), and the two
+   * `review`-only caveats on a partner's own word (the unverified identity and
+   * the rule-set citation's attribution); the matching keys and the rest of the
+   * body are identical. */
   perspective?: "review" | "accepted" | "proposing";
   /** Semantic heading level (its visual size is fixed at the h2 scale), so the
    * heading nests correctly under its container -- h1 when this is the page's
@@ -1298,6 +1315,51 @@ export function InvitationTerms({
                   ? CONSENT_FACTS.fanOutCandidates.note
                   : CONSENT_FACTS.fanOutRefused.note}
               </Text>
+            </Term>
+          )}
+
+          {/* The rules' citation, above the matching list it cites: a reader meets
+            the name before the enumeration it stands for, and meets in the same
+            place that the name is the inviting party's word while the keys and
+            fields beneath it are what the exchange holds both parties to (the
+            caveat is read from CONSENT_FACTS, so this surface and the CLI accept
+            prompt state it in the same words). Keys before fields, since the key
+            set is the specific artifact and the field set the substrate it is
+            built from. Both names and both versions are partner-controlled text,
+            sanitized by summarizeInvitation and bound in their own Text between
+            fixed chrome -- never joined into the label -- for the reason the
+            allowed-character class below is: a crafted value must not be able to
+            read as system chrome. Within the box, the name is quoted as core's
+            rule-set mismatch message quotes it: a name may carry a space, so an
+            unquoted "hmis-keys 9.9.9" would be indistinguishable from the name
+            plus the schema-constrained semver version beside it. The quoting
+            shares that message's stated limit -- a name may itself carry a double
+            quote -- though each half renders in its own bordered box, which
+            confines the misreading.
+
+            The names and versions themselves are true of the terms whoever
+            authored them, so the block renders under every perspective; the
+            caveat attributes them to a partner, so it is gated to `review` like
+            the unverified-identity note above -- `proposing` shows the viewer's
+            own citation, and `accepted` is past the decision the caveat
+            informs. */}
+          {summary.linkageRuleSet !== undefined && (
+            <Term label="Linkage rule set">
+              <Stack gap={2}>
+                <Text size="sm">Keys:</Text>
+                <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
+                  &quot;{summary.linkageRuleSet.keySet.name}&quot;{" "}
+                  {summary.linkageRuleSet.keySet.version}
+                </Text>
+                <Text size="sm">Fields:</Text>
+                <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
+                  &quot;{summary.linkageRuleSet.fieldSet.name}&quot;{" "}
+                  {summary.linkageRuleSet.fieldSet.version}
+                </Text>
+              </Stack>
+              {perspective === "review" && (
+                <Text size="sm">{CONSENT_FACTS.linkageRuleSet.note}</Text>
+              )}
             </Term>
           )}
 

@@ -317,6 +317,92 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     );
   });
 
+  // Terms citing a rule set, rendered under each perspective below so the three
+  // cases differ at the perspective alone.
+  const citingTerms: LinkageTerms = {
+    ...terms,
+    linkageRuleSet: {
+      fieldSet: { name: "baseline-pii", version: "1.0.0" },
+      keySet: { name: "hmis-keys", version: "2.3.0" },
+    },
+  };
+
+  test("the rule-set citation is always-visible, marked as the partner's word, and absent when none is cited", async () => {
+    // The citation names the rules the collapsed list below enumerates, so it
+    // stays outside the disclosure: an acceptor reads which set was cited without
+    // expanding. The caveat rides with it in the same place, because the name is
+    // the inviting party's claim and nothing here checks it against the keys.
+    renderTerms(citingTerms, { perspective: "review" });
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    expect(app.container.textContent).toContain("Linkage rule set");
+    expect(app.container.textContent).toContain('"hmis-keys" 2.3.0');
+    expect(app.container.textContent).toContain('"baseline-pii" 1.0.0');
+    expect(app.container.textContent).toContain(
+      CONSENT_FACTS.linkageRuleSet.note,
+    );
+    expect((await readyPanel("Matching strategies")).textContent).not.toContain(
+      "hmis-keys",
+    );
+  });
+
+  test("a set name carrying a version-shaped token stays delimited from the version", async () => {
+    // The name is partner-controlled free text and the version beside it is not,
+    // so the quoting is what keeps the boundary between them readable: a name
+    // ending in a version-shaped token must not read as the version this block
+    // reports.
+    renderTerms(
+      {
+        ...citingTerms,
+        linkageRuleSet: {
+          fieldSet: { name: "baseline-pii", version: "1.0.0" },
+          keySet: { name: "hmis-keys 9.9.9", version: "2.3.0" },
+        },
+      },
+      { perspective: "review" },
+    );
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    expect(app.container.textContent).toContain('"hmis-keys 9.9.9" 2.3.0');
+  });
+
+  test("the viewer's own proposing preview cites the set without attributing it to a partner", async () => {
+    // Under "proposing" the terms are the viewer's own -- the console's direct
+    // exchange states outright that there is no invitation for a partner to
+    // review -- so the citation is the operator's own word. The names and
+    // versions still render (they are true of these terms whoever authored
+    // them); the caveat that a PARTNER cites them does not.
+    renderTerms(citingTerms, { perspective: "proposing" });
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    expect(app.container.textContent).toContain("Linkage rule set");
+    expect(app.container.textContent).toContain('"hmis-keys" 2.3.0');
+    expect(app.container.textContent).toContain('"baseline-pii" 1.0.0');
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.linkageRuleSet.note,
+    );
+  });
+
+  test("the attribution caveat is absent from the during-run accepted view, after consent is committed", async () => {
+    // Same gate as the unverified-identity note: the caveat is a pre-consent
+    // decision-point marker, so it drops once the decision it informs is past.
+    // The citation itself stays, since the accepted terms still carry it.
+    renderTerms(citingTerms, { perspective: "accepted" });
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    expect(app.container.textContent).toContain('"hmis-keys" 2.3.0');
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.linkageRuleSet.note,
+    );
+  });
+
+  test("terms citing no rule set render no citation at all", async () => {
+    // Hand-authored rules have no citation, and inventing one would attribute
+    // them -- so the block is absent rather than empty or hedged.
+    renderTerms({ ...terms, linkageRuleSet: undefined });
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    expect(app.container.textContent).not.toContain("Linkage rule set");
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.linkageRuleSet.note,
+    );
+  });
+
   test("opening one key disclosure exposes its detail to AT and leaves the others collapsed", async () => {
     renderTerms();
 

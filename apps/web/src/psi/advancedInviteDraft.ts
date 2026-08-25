@@ -733,6 +733,22 @@ export function draftFromTerms(
     // (order + declared-but-unreferenced fields + a benign empty `constraints: {}`); see
     // AdvancedInviteDraft.importedLinkageFields.
     importedLinkageFields: terms.linkageFields,
+    // And what the document said about the rules' provenance -- the set it cited
+    // with the rules it cited them over, or that it cited none. Both answers are
+    // recorded: a document citing nothing is re-exported citing nothing, which
+    // absence alone could not express (see
+    // AdvancedInviteDraft.importedRuleSetCitation).
+    importedRuleSetCitation:
+      terms.linkageRuleSet !== undefined
+        ? {
+            kind: "cited",
+            ruleSet: {
+              reference: terms.linkageRuleSet,
+              linkageFields: terms.linkageFields,
+              linkageKeys: terms.linkageKeys,
+            },
+          }
+        : { kind: "uncited" },
     keys: terms.linkageKeys.map((key) => ({
       key,
       enabled: keyIsSupplyable(key, declarable),

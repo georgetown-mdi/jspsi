@@ -895,6 +895,87 @@ export const LinkageStrategySchema: z.ZodType<LinkageStrategy> = z.enum([
   "single-pass",
 ]);
 
+// --- Linkage rule set --------------------------------------------------------
+
+/**
+ * A named, versioned artifact the linkage rules were drawn from: one half of a
+ * {@link LinkageRuleSetReference}.
+ *
+ * The `version` versions the CONTENT of the named artifact and moves
+ * independently of `LinkageTerms.version`, which versions the terms document's
+ * SCHEMA. The two are unrelated and happen to start at the same value.
+ */
+export interface LinkageSetIdentity {
+  /** Stable identifier of the set (e.g. `baseline-pii`). */
+  name: string;
+  /** Semver string versioning the set's content (e.g. `1.0.0`). */
+  version: string;
+}
+
+const LinkageSetIdentitySchema: z.ZodType<LinkageSetIdentity> = z.object({
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  version: z
+    .string()
+    .max(MAX_NAME_LENGTH)
+    .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
+});
+
+/**
+ * Which named rule set the linkage fields and keys of a terms document were
+ * drawn from. The fields and the keys are separately named and separately
+ * versioned: the fields are a generic substrate (which PII is matched on and how
+ * each element is cleaned) where the keys are specific (which combinations count
+ * as a match, and in what cascade order), and an edit to one leaves the other's
+ * citation untouched.
+ *
+ * A citation, not a specification: the fields and keys a run actually matched on
+ * are the terms document's own `linkageFields` and `linkageKeys`, which travel
+ * with the exchange and are compared between the parties whole. Terms derived
+ * from an input file leave out any key that input cannot supply, so a reference
+ * is an upper bound on what was tried rather than the account of what ran.
+ *
+ * Optional throughout: terms whose rules were authored rather than drawn from a
+ * named set carry no reference, and the absence is the honest statement rather
+ * than a default.
+ */
+export interface LinkageRuleSetReference {
+  /** The set the `linkageFields` were drawn from. */
+  fieldSet: LinkageSetIdentity;
+  /** The set the `linkageKeys` were drawn from. */
+  keySet: LinkageSetIdentity;
+}
+
+const LinkageRuleSetReferenceSchema: z.ZodType<LinkageRuleSetReference> =
+  z.object({
+    fieldSet: LinkageSetIdentitySchema,
+    keySet: LinkageSetIdentitySchema,
+  });
+
+/**
+ * A rule-set reference as one readable clause, keys first: the keys are the
+ * specific artifact and the fields the substrate they are built from, so a
+ * reader meets the narrower claim before the broader one.
+ *
+ * The set names are free text a partner chooses, so they are delimited the way
+ * the legal-agreement mismatches delimit theirs -- a name carrying a space or
+ * the clause's own " over " reads as one value rather than blurring into the
+ * surrounding prose. The delimiting reaches only that far: the names are
+ * interpolated raw and the schema constrains only their length, so a name
+ * carrying a double quote of its own can still close the clause early and fake
+ * its structure for a skimming reader. That residual is pre-existing across
+ * these mismatch messages -- the legal-agreement reference and purpose quote
+ * raw partner text identically -- and the rendered message is sanitized at each
+ * display boundary, so what is left is a misreading rather than an injection.
+ * The versions are schema-constrained semver and stay bare, like the legal
+ * agreement's expiration date.
+ */
+function describeRuleSet(reference: LinkageRuleSetReference): string {
+  return (
+    `"${reference.keySet.name}" ${reference.keySet.version} over ` +
+    `"${reference.fieldSet.name}" ${reference.fieldSet.version}`
+  );
+}
+
 // --- Linkage Terms -----------------------------------------------------------
 
 /**
@@ -919,6 +1000,8 @@ export const LinkageStrategySchema: z.ZodType<LinkageStrategy> = z.enum([
  *   matched to the same output.
  * - `linkageFields` -- mandatory.
  * - `linkageKeys` -- mandatory.
+ * - `linkageRuleSet` -- mandatory if BOTH parties declare one; a party that
+ *   declares none is not held to the other's citation.
  * - `legalAgreement` -- mandatory if present. The `reference`, `purpose`, and
  *   `expirationDate` are cross-checked; any mismatch, or an `expirationDate`
  *   that has passed, cancels the exchange.
@@ -990,6 +1073,17 @@ export interface LinkageTerms {
    * Consistency: mandatory.
    */
   linkageKeys: LinkageKey[];
+  /**
+   * The named rule set the `linkageFields` and `linkageKeys` above were drawn
+   * from; see {@link LinkageRuleSetReference}. Absent when the rules were
+   * authored rather than drawn from a named set.
+   * Consistency: mandatory between two parties that BOTH declare one -- a
+   * disagreement about which rules ran is refused rather than recorded twice
+   * over -- and skipped where either declares none, which is what lets a party
+   * running hand-authored rules exchange with one running a named set whose
+   * fields and keys its own document matches.
+   */
+  linkageRuleSet?: LinkageRuleSetReference;
   payload?: Payload;
   legalAgreement?: LegalAgreement;
 }
@@ -1027,6 +1121,7 @@ const LinkageTermsBaseSchema = z.object({
     `linkageKeys must not exceed ${MAX_LINKAGE_ENTRIES} entries`,
     1,
   ),
+  linkageRuleSet: LinkageRuleSetReferenceSchema.optional(),
   payload: PayloadSchema.optional(),
   legalAgreement: LegalAgreementSchema.optional(),
 });
@@ -1464,9 +1559,9 @@ export function safeParseLinkageTerms(raw: unknown) {
  * Derive the {@link LinkageTerms} an ACCEPTOR runs from the inviter's terms
  * decoded from an invitation. The acceptor adopts the inviter's shared, agreed
  * fields verbatim -- `version`, `algorithm`, `linkageFields`, `linkageKeys`,
- * `legalAgreement`, and so on are cross-checked for equality at exchange time,
- * so both sides must carry an identical set -- but the facets below are the
- * acceptor's own perspective and are derived, not copied:
+ * `linkageRuleSet`, `legalAgreement`, and so on are cross-checked for equality at
+ * exchange time, so both sides must carry an identical set -- but the facets
+ * below are the acceptor's own perspective and are derived, not copied:
  *
  * - `identity` is replaced with the acceptor's own name, so the inviter's
  *   identity does not leak into the acceptor's prepared terms (and from there
@@ -1805,6 +1900,43 @@ export function validateCompatibility(
     localKeysCanonical !== partnerKeysCanonical
   ) {
     errors.push("linkage keys do not match");
+  }
+
+  // The rule-set citation, checked only where BOTH parties declare one. It names
+  // rules the two documents already had to agree on field by field and key by
+  // key, so a disagreement here is a disagreement about the NAME of matching
+  // content -- which still cancels, because each party records its own citation
+  // in its own exchange record and two records naming different rules for one run
+  // is the thing the naming exists to prevent. Skipped where either party
+  // declares none: a hand-authored document carries no citation, and holding it
+  // to the partner's would refuse an exchange whose rules match exactly. Compared
+  // by canonical form, like the fields and keys above, so the comparison is
+  // byte-exact and property order does not enter it. Values are interpolated raw
+  // for the same reason the legal-agreement mismatches below are: an error is
+  // escaped once where it is shown.
+  if (
+    local.linkageRuleSet !== undefined &&
+    partner.linkageRuleSet !== undefined
+  ) {
+    const localRuleSet = canonicalOrError(
+      local.linkageRuleSet,
+      "local linkage rule set",
+    );
+    const partnerRuleSet = canonicalOrError(
+      partner.linkageRuleSet,
+      "partner linkage rule set",
+    );
+    if (
+      localRuleSet !== null &&
+      partnerRuleSet !== null &&
+      localRuleSet !== partnerRuleSet
+    ) {
+      errors.push(
+        "linkage rule set mismatch: local names " +
+          `${describeRuleSet(local.linkageRuleSet)}, ` +
+          `partner names ${describeRuleSet(partner.linkageRuleSet)}`,
+      );
+    }
   }
 
   if (

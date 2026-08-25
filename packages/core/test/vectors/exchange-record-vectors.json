@@ -124,7 +124,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v2",
+        "version": "psilink-exchange-record/v3",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
         "localIdentity": "Party A",
@@ -256,7 +256,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v2",
+        "version": "psilink-exchange-record/v3",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "1pgvorgQseW486XCURs3KAcOP_YN3bnIhVndGsrHHwc",
         "localIdentity": "Party A",
@@ -385,7 +385,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v2",
+        "version": "psilink-exchange-record/v3",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "0mw2vkRK9EL4_K_3ZPpnmToLl2eyDBS3zGfoxqOlOTc",
         "localIdentity": "Party A",
@@ -521,7 +521,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v2",
+        "version": "psilink-exchange-record/v3",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "0mw2vkRK9EL4_K_3ZPpnmToLl2eyDBS3zGfoxqOlOTc",
         "localIdentity": "Party B",
@@ -685,7 +685,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v2",
+        "version": "psilink-exchange-record/v3",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "eZBA72rLn0xaADBj7BGC0mWHe_7s0pwED7tzDaUVjWk",
         "localIdentity": "Party A",
@@ -856,7 +856,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v2",
+        "version": "psilink-exchange-record/v3",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "AzJi5GLcAEIuLecddIrltTqEXxzN35jvu9OPcLpZ910",
         "localIdentity": "Party A",
@@ -1025,7 +1025,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v2",
+        "version": "psilink-exchange-record/v3",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
         "localIdentity": "Party A",
@@ -1072,6 +1072,152 @@
           "localPayloadSent": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
           "partnerPayloadReceived": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
           "associationTable": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM"
+        }
+      }
+    },
+    {
+      "name": "cited-rule-set",
+      "description": "Both parties' agreed terms cite a named linkage rule set, so governance carries linkageRuleSet -- the name and content version of the field set and of the key set -- beside the per-field matching basis. Otherwise identical to no-data-payloads, so the pair pins both sides of the citation: present here, absent there, and absent by omission rather than by a null. The citation is part of the agreed terms, so it is folded into termsHash: this vector's hash differs from no-data-payloads' for that reason alone.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Party A",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ],
+          "linkageRuleSet": {
+            "fieldSet": {
+              "name": "baseline-pii",
+              "version": "1.0.0"
+            },
+            "keySet": {
+              "name": "hmis-keys",
+              "version": "1.0.0"
+            }
+          }
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Party B",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ],
+          "linkageRuleSet": {
+            "fieldSet": {
+              "name": "baseline-pii",
+              "version": "1.0.0"
+            },
+            "keySet": {
+              "name": "hmis-keys",
+              "version": "1.0.0"
+            }
+          }
+        },
+        "resultSize": 1,
+        "associationTable": [[0], [0]],
+        "localPayloadSent": {
+          "columns": [],
+          "rows": []
+        },
+        "partnerPayloadReceived": {
+          "columns": [],
+          "rows": []
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "recordsExposed": 3
+      },
+      "randomness": {
+        "bindingNonce": "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA",
+        "salts": {
+          "localPayloadSent": "ISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISE",
+          "partnerPayloadReceived": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI",
+          "associationTable": "IyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyM"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v3",
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "termsHash": "-mC6tZrCMQSzff2U5-6INjSqA4k8GbYkVTWjmJq92tk",
+        "localIdentity": "Party A",
+        "partnerIdentity": "Party B",
+        "governance": {
+          "algorithm": "psi",
+          "matchingBasis": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageRuleSet": {
+            "fieldSet": {
+              "name": "baseline-pii",
+              "version": "1.0.0"
+            },
+            "keySet": {
+              "name": "hmis-keys",
+              "version": "1.0.0"
+            }
+          },
+          "payloadSent": [],
+          "payloadReceived": []
+        },
+        "recordsExposed": 3,
+        "resultSize": 1,
+        "bindingNonce": "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA",
+        "commitments": {
+          "localPayloadSent": "8gU6p6IpkpGyAXoR6mAayxW4dfbiyi8gFV5ZFqXoZ44",
+          "partnerPayloadReceived": "6H0aJP3KiyYEZ810pzBFrN8R6mhwk2hky5b91guSK1s",
+          "associationTable": "Hl4_pX4zuo1erpTCB1ixFoNRi8_CiUUWoJIeH9wYc9s"
+        }
+      },
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "ISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISE",
+          "partnerPayloadReceived": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI",
+          "associationTable": "IyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyM"
         }
       }
     }

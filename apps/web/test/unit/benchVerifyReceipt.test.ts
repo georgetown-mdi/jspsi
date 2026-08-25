@@ -160,7 +160,7 @@ describe("parseRecordDocument", () => {
     expect(parsed.kind).toBe("unrecognized-version");
     if (parsed.kind === "unrecognized-version") {
       expect(parsed.message).toContain("does not recognize");
-      expect(parsed.message).toContain("psilink-exchange-record/v2");
+      expect(parsed.message).toContain("psilink-exchange-record/v3");
     }
   });
 

@@ -1,10 +1,12 @@
 import { referencedLinkageFieldNames } from "../config/linkageTerms";
 import type {
+  LinkageRuleSetReference,
   LinkageTerms,
   LinkageField,
   LinkageKey,
 } from "../config/linkageTerms";
 import type { Metadata } from "../config/metadata";
+import { canonicalString } from "../utils/canonical";
 import type {
   Standardization,
   StandardizationTransformation,
@@ -280,20 +282,157 @@ const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
 ];
 
 /**
- * Returns a default {@link LinkageTerms} suitable for quick exchanges when no
- * linkage terms are specified explicitly, drawn from the
- * {@link DEFAULT_LINKAGE_KEY_SET_NAME} key set at
- * {@link DEFAULT_LINKAGE_KEY_SET_VERSION}, over the
- * {@link DEFAULT_LINKAGE_FIELD_SET_NAME} field set at
- * {@link DEFAULT_LINKAGE_FIELD_SET_VERSION}.
+ * A named, versioned collection of linkage fields and keys terms can be drawn
+ * from: the field set and the key set that
+ * {@link LinkageRuleSetReference} cites, together with the content each names.
+ *
+ * The reference is what travels -- in a terms document, an invitation, and each
+ * party's exchange record -- while the content is what a terms document is built
+ * from. Keeping both on one object is what makes a set a selectable thing rather
+ * than a pair of loose declarations: a caller selects a set and gets rules and
+ * citation together, so the two cannot come apart.
+ */
+export interface BuiltInLinkageRuleSet {
+  /** The name and version of each half, as a terms document cites them. */
+  reference: LinkageRuleSetReference;
+  /** The set's linkage fields, in declaration order. */
+  linkageFields: ReadonlyArray<LinkageField>;
+  /** The set's linkage keys, in cascade order (most to least precise). */
+  linkageKeys: ReadonlyArray<LinkageKey>;
+}
+
+/**
+ * The one built-in rule set: the {@link DEFAULT_LINKAGE_KEY_SET_NAME} keys over
+ * the {@link DEFAULT_LINKAGE_FIELD_SET_NAME} fields, at the version each
+ * declares. It is the set every path that authors nothing selects, so a
+ * zero-setup exchange, the `psilink init` template, and the web invite editors'
+ * starting point all cite the same rules.
+ *
+ * Composed from the six declarations above rather than replacing them: the
+ * built-in sets' drift and zero-setup checks read those declarations out of this
+ * file by name and require each to be a literal (`scripts/lib/builtInRuleSets.mjs`).
+ */
+export const DEFAULT_LINKAGE_RULE_SET: BuiltInLinkageRuleSet = {
+  reference: {
+    fieldSet: {
+      name: DEFAULT_LINKAGE_FIELD_SET_NAME,
+      version: DEFAULT_LINKAGE_FIELD_SET_VERSION,
+    },
+    keySet: {
+      name: DEFAULT_LINKAGE_KEY_SET_NAME,
+      version: DEFAULT_LINKAGE_KEY_SET_VERSION,
+    },
+  },
+  linkageFields: DEFAULT_LINKAGE_FIELDS,
+  linkageKeys: DEFAULT_LINKAGE_KEYS,
+};
+
+/**
+ * Whether `rules` were drawn from `ruleSet`: every key byte-identical to a key
+ * the set declares, in the set's own cascade order, and every field
+ * byte-identical to a DISTINCT field it declares. A narrowed emission passes --
+ * what an input file cannot supply is left out -- while an added, edited, or
+ * repeated key or field, and a reordered cascade, do not.
+ *
+ * Order is part of the answer for the keys and not for the fields, for the same
+ * reason each set versions its own content: key order is cascade order, so
+ * moving one changes which key claims a record more than one would match,
+ * whereas the field array's order is not significant.
+ *
+ * This is what keeps a citation honest where rules are EDITED after being seeded
+ * from a set -- the web invite editors' path. It is not a check on a partner's
+ * declared citation: a received document's reference is that party's statement
+ * about its own rules, and nothing here re-decides it.
+ *
+ * Compared through the canonical encoding, the same equality the two parties'
+ * terms are compared under, so property order does not enter it. A value outside
+ * the canonical domain (a transform param beyond the safe integer range) cannot
+ * be compared and answers `false` rather than throwing: such rules are not the
+ * built-in set, which carries no such value.
+ */
+export function isDrawnFromLinkageRuleSet(
+  ruleSet: BuiltInLinkageRuleSet,
+  rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
+): boolean {
+  const encode = (value: unknown): string | null => {
+    try {
+      return canonicalString(value);
+    } catch {
+      return null;
+    }
+  };
+  // Each declaration is consumed on match, so a field the candidate repeats meets
+  // no declaration the second time -- the same answer the key cursor gives a
+  // repeated key, rather than a lookup that would accept the repeat.
+  const declaredFields = new Map(
+    ruleSet.linkageFields.map((field) => [field.name, encode(field)] as const),
+  );
+  for (const field of rules.linkageFields) {
+    const declared = declaredFields.get(field.name);
+    if (declared === undefined || declared === null) return false;
+    if (encode(field) !== declared) return false;
+    declaredFields.delete(field.name);
+  }
+  // Walk the set's keys and the candidate's together: each candidate key must
+  // meet the next set key that matches it, so a key the set does not declare, a
+  // repeated key, and a pair in the wrong cascade order all run the cursor off
+  // the end.
+  const declaredKeys = ruleSet.linkageKeys.map(encode);
+  let cursor = 0;
+  for (const key of rules.linkageKeys) {
+    const encoded = encode(key);
+    if (encoded === null) return false;
+    let matched = false;
+    while (cursor < declaredKeys.length && !matched) {
+      matched = declaredKeys[cursor] === encoded;
+      cursor += 1;
+    }
+    if (!matched) return false;
+  }
+  return true;
+}
+
+/**
+ * The citation `rules` are entitled to: {@link DEFAULT_LINKAGE_RULE_SET}'s
+ * reference where the rules were drawn from that set, and `undefined` where they
+ * were not -- edited, reordered, authored from scratch, or declaring no key. The
+ * single place a builder that lets an operator EDIT seeded rules decides whether
+ * the result may still cite the set it started from.
+ *
+ * A citation asserts that the keys came from the named set, so rules declaring
+ * none carry no provenance to claim: they are drawn from every set vacuously,
+ * and the predicate alone would hand them the built-in citation over whatever
+ * field declarations outlived their keys. A builder reaches that state as an
+ * intermediate (disabling every key in the web editor), so the keyless case is
+ * excluded here rather than left to the downstream rejection.
+ */
+export function linkageRuleSetReferenceFor(
+  rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
+): LinkageRuleSetReference | undefined {
+  if (rules.linkageKeys.length === 0) return undefined;
+  return isDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, rules)
+    ? DEFAULT_LINKAGE_RULE_SET.reference
+    : undefined;
+}
+
+/**
+ * Returns a {@link LinkageTerms} drawn from `ruleSet`, citing it: the terms a
+ * party runs when it authors none of its own.
  *
  * When metadata are provided, only linkage key templates whose elements can be
  * satisfied by the present columns are included. If no metadata is provided,
  * all templates are included as a fallback. Either way the emitted keys are a
- * SUBSET of the named key set, never an addition to it: what the input supports
- * narrows the set, and nothing widens it.
+ * SUBSET of the set, never an addition to it: what the input supports narrows
+ * the set, and nothing widens it -- which is what makes the emitted citation
+ * honest, an upper bound on what was tried rather than a claim that every key
+ * ran.
+ *
+ * Narrowed all the way to no key, the citation goes with the keys: it asserts
+ * where the keys came from, so a derivation emitting none has no provenance to
+ * claim -- the same exclusion {@link linkageRuleSetReferenceFor} makes.
  */
-export function getDefaultLinkageTerms(
+export function linkageTermsFromRuleSet(
+  ruleSet: BuiltInLinkageRuleSet,
   identity: string,
   metadata?: Metadata,
 ): LinkageTerms {
@@ -307,15 +446,15 @@ export function getDefaultLinkageTerms(
     const availableTypes = new Set(
       metadata.filter((m) => m.role === "linkage").map((m) => m.type),
     );
-    linkageKeys = DEFAULT_LINKAGE_KEYS.filter((key) =>
+    linkageKeys = ruleSet.linkageKeys.filter((key) =>
       key.elements.every((el) => availableTypes.has(el.field as SemanticType)),
     );
   } else {
-    linkageKeys = [...DEFAULT_LINKAGE_KEYS];
+    linkageKeys = [...ruleSet.linkageKeys];
   }
 
   const referencedFields = referencedLinkageFieldNames(linkageKeys);
-  const linkageFields = DEFAULT_LINKAGE_FIELDS.filter((f) =>
+  const linkageFields = ruleSet.linkageFields.filter((f) =>
     referencedFields.has(f.name),
   );
 
@@ -332,7 +471,21 @@ export function getDefaultLinkageTerms(
     deduplicate: false,
     linkageFields,
     linkageKeys,
+    ...(linkageKeys.length > 0 && { linkageRuleSet: ruleSet.reference }),
   };
+}
+
+/**
+ * Returns a default {@link LinkageTerms} suitable for quick exchanges when no
+ * linkage terms are specified explicitly: {@link linkageTermsFromRuleSet} over
+ * {@link DEFAULT_LINKAGE_RULE_SET}, the built-in set every path that authors
+ * nothing selects.
+ */
+export function getDefaultLinkageTerms(
+  identity: string,
+  metadata?: Metadata,
+): LinkageTerms {
+  return linkageTermsFromRuleSet(DEFAULT_LINKAGE_RULE_SET, identity, metadata);
 }
 
 /**

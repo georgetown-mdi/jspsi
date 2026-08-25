@@ -687,6 +687,32 @@ export function displayInvitation(params: {
         summary.matchedFields.join(", "),
     );
 
+  // The rules' citation, ahead of the fields and keys it cites so a reader meets
+  // the name before the enumeration it stands for -- and meets, in the same
+  // place, that the name is the inviting party's word while the enumeration
+  // beneath it is what the exchange holds both parties to. Keys first within the
+  // line, since the key set is the specific artifact and the field set the
+  // substrate it is built from. Both names and both versions are partner-
+  // controlled free text, sanitized by the summary. The name is quoted, as core's
+  // rule-set mismatch message quotes it: it is free text that may carry a space,
+  // so an unquoted name reading "hmis-keys 9.9.9" would be indistinguishable from
+  // the name plus the schema-constrained semver version beside it. The quoting
+  // shares that message's stated limit: sanitization preserves printable ASCII,
+  // so a name carrying a double quote of its own can close the quote early and
+  // fake the line's structure for a skimming reader.
+  if (summary.linkageRuleSet !== undefined) {
+    emit(`  ${marked("linkage rule set", "linkageRuleSet")}:`);
+    emit(
+      `    keys: "${summary.linkageRuleSet.keySet.name}" ` +
+        `${summary.linkageRuleSet.keySet.version}`,
+    );
+    emit(
+      `    fields: "${summary.linkageRuleSet.fieldSet.name}" ` +
+        `${summary.linkageRuleSet.fieldSet.version}`,
+    );
+    emit(`    ${CONSENT_FACTS.linkageRuleSet.note}`);
+  }
+
   // The short, high-level field list precedes the long key list: the keys enumerate
   // the combinations OF these fields, and on a terminal the block printed second is
   // the one that scrolls the first off the screen.

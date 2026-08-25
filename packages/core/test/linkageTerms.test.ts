@@ -2923,3 +2923,116 @@ describe("referencedLinkageFieldNames", () => {
     expect(referencedLinkageFieldNames([])).toEqual(new Set<string>());
   });
 });
+
+describe("linkageRuleSet", () => {
+  const citation = {
+    fieldSet: { name: "baseline-pii", version: "1.0.0" },
+    keySet: { name: "hmis-keys", version: "1.0.0" },
+  };
+
+  test("parses a citation and leaves a document without one alone", () => {
+    expect(
+      parseLinkageTerms({ ...base, linkage_rule_set: citation }).linkageRuleSet,
+    ).toStrictEqual(citation);
+    expect(parseLinkageTerms(base).linkageRuleSet).toBeUndefined();
+  });
+
+  test("refuses a half-declared citation and a non-semver set version", () => {
+    expect(() =>
+      parseLinkageTerms({
+        ...base,
+        linkage_rule_set: { field_set: citation.fieldSet },
+      }),
+    ).toThrow(ZodError);
+    expect(() =>
+      parseLinkageTerms({
+        ...base,
+        linkage_rule_set: {
+          ...citation,
+          keySet: { name: "hmis-keys", version: "1" },
+        },
+      }),
+    ).toThrow(ZodError);
+    expect(() =>
+      parseLinkageTerms({
+        ...base,
+        linkage_rule_set: {
+          ...citation,
+          keySet: { name: "", version: "1.0.0" },
+        },
+      }),
+    ).toThrow(ZodError);
+  });
+
+  test("cancels the exchange when the two parties cite different sets", () => {
+    const local = parseLinkageTerms({ ...base, linkage_rule_set: citation });
+    const partner = parseLinkageTerms({
+      ...base,
+      output: { expectsOutput: false, shareWithPartner: true },
+      linkage_rule_set: {
+        ...citation,
+        keySet: { name: "hmis-keys", version: "2.0.0" },
+      },
+    });
+    const { errors } = validateCompatibility(local, partner);
+    expect(errors).toEqual([
+      'linkage rule set mismatch: local names "hmis-keys" 1.0.0 over ' +
+        '"baseline-pii" 1.0.0, partner names "hmis-keys" 2.0.0 over ' +
+        '"baseline-pii" 1.0.0',
+    ]);
+    // Symmetric: both parties reach the same verdict from their own copy.
+    expect(validateCompatibility(partner, local).errors).toHaveLength(1);
+  });
+
+  test("delimits a partner set name that carries the clause's own connective", () => {
+    // The name is free text the partner chooses, so an undelimited one could pass
+    // itself off as the whole clause: "keys 1.0.0 over pii" as a name would read as
+    // a rule set the partner does not cite. The quotes keep each name one value.
+    const local = parseLinkageTerms({ ...base, linkage_rule_set: citation });
+    const partner = parseLinkageTerms({
+      ...base,
+      output: { expectsOutput: false, shareWithPartner: true },
+      linkage_rule_set: {
+        ...citation,
+        keySet: { name: "hmis-keys 9.9.9 over baseline-pii", version: "1.0.0" },
+      },
+    });
+    expect(validateCompatibility(local, partner).errors).toEqual([
+      'linkage rule set mismatch: local names "hmis-keys" 1.0.0 over ' +
+        '"baseline-pii" 1.0.0, partner names ' +
+        '"hmis-keys 9.9.9 over baseline-pii" 1.0.0 over "baseline-pii" 1.0.0',
+    ]);
+  });
+
+  test("is skipped where either party cites nothing", () => {
+    // A hand-authored document carries no citation, and holding it to the
+    // partner's would refuse an exchange whose fields and keys match exactly.
+    const cited = parseLinkageTerms({ ...base, linkage_rule_set: citation });
+    const uncited = parseLinkageTerms({
+      ...base,
+      output: { expectsOutput: false, shareWithPartner: true },
+    });
+    expect(validateCompatibility(cited, uncited).errors).toEqual([]);
+    expect(validateCompatibility(uncited, cited).errors).toEqual([]);
+  });
+
+  test("agrees when the two parties cite the same set in either property order", () => {
+    const local = parseLinkageTerms({ ...base, linkage_rule_set: citation });
+    const partner = parseLinkageTerms({
+      ...base,
+      output: { expectsOutput: false, shareWithPartner: true },
+      linkage_rule_set: {
+        key_set: { version: "1.0.0", name: "hmis-keys" },
+        field_set: { version: "1.0.0", name: "baseline-pii" },
+      },
+    });
+    expect(validateCompatibility(local, partner).errors).toEqual([]);
+  });
+
+  test("is adopted verbatim by an acceptor, so both parties record one citation", () => {
+    const inviter = parseLinkageTerms({ ...base, linkage_rule_set: citation });
+    const derived = deriveAcceptedLinkageTerms(inviter, "Accepting Org");
+    expect(derived.linkageRuleSet).toStrictEqual(citation);
+    expect(validateCompatibility(inviter, derived).errors).toEqual([]);
+  });
+});

@@ -1,8 +1,11 @@
 import {
   APPLIED_SETTINGS,
+  DEFAULT_LINKAGE_RULE_SET,
   assessLinkageSatisfiability,
   authoredLinkageFields,
   getDefaultLinkageTerms,
+  isDrawnFromLinkageRuleSet,
+  linkageRuleSetReferenceFor,
   referencedLinkageFieldNames,
 } from "@psilink/core";
 
@@ -10,6 +13,7 @@ import { outputForDirection } from "./advancedInviteTypes";
 import { payloadSendForMetadata } from "./metadataEditing";
 
 import type {
+  BuiltInLinkageRuleSet,
   ExchangeDataSpec,
   LinkageField,
   LinkageKey,
@@ -136,6 +140,45 @@ function stripFuzzy(key: LinkageKey): LinkageKey {
 }
 
 /**
+ * The rule set an imported citation is checked against, resolved one half at a time:
+ * {@link DEFAULT_LINKAGE_RULE_SET}'s own keys where the citation's key-set half names
+ * the built-in key set, its own fields where the field-set half names the built-in
+ * field set -- each matched on that half's name and version, the only halves this
+ * build can resolve -- and otherwise the rules the importing document claimed for the
+ * set it named, which is all there is to check a name this build cannot resolve
+ * against. The two chosen halves are composed under the document's own reference, and
+ * `isDrawnFromLinkageRuleSet` judges fields and keys independently.
+ *
+ * The substitution is what keeps psilink from re-emitting its OWN set's name over rules
+ * that are not that set. A partner document is free to cite the built-in name over
+ * anything, but the build that ships those rules knows what they are, so it re-emits the
+ * name only over rules drawn from them; a name it cannot resolve keeps the round-trip
+ * fidelity behavior instead. Resolving per half is what the design that names, versions,
+ * and edits the halves separately requires: pairing one built-in name with a foreign one
+ * would otherwise buy the built-in half a pass it could not earn alone.
+ */
+function ruleSetForImportedCitation(
+  cited: BuiltInLinkageRuleSet,
+): BuiltInLinkageRuleSet {
+  const builtIn = DEFAULT_LINKAGE_RULE_SET.reference;
+  const namesBuiltInKeySet =
+    cited.reference.keySet.name === builtIn.keySet.name &&
+    cited.reference.keySet.version === builtIn.keySet.version;
+  const namesBuiltInFieldSet =
+    cited.reference.fieldSet.name === builtIn.fieldSet.name &&
+    cited.reference.fieldSet.version === builtIn.fieldSet.version;
+  return {
+    reference: cited.reference,
+    linkageFields: namesBuiltInFieldSet
+      ? DEFAULT_LINKAGE_RULE_SET.linkageFields
+      : cited.linkageFields,
+    linkageKeys: namesBuiltInKeySet
+      ? DEFAULT_LINKAGE_RULE_SET.linkageKeys
+      : cited.linkageKeys,
+  };
+}
+
+/**
  * Build the {@link LinkageTerms} a draft represents. `version` and `date` are
  * carried from the seed unchanged (the editor exposes no control for them, so a
  * draft cannot alter them); `algorithm` and `deduplicate` come from the draft but
@@ -145,6 +188,11 @@ function stripFuzzy(key: LinkageKey): LinkageKey {
  * ones in draft order,
  * and linkage fields are filtered to those the enabled keys reference (mirroring
  * `getDefaultLinkageTerms`, so disabling a key drops a now-unreferenced field).
+ * The rule-set citation is re-decided against the built terms rather than carried
+ * from the seed, so an edited draft cites nothing and an unedited one still cites
+ * the built-in set; an IMPORTED draft instead re-emits its source document's
+ * citation state, whether that document cited a set or none, for as long as the
+ * built rules are still drawn from the set that citation names.
  *
  * Pure: it does not validate. {@link validateAdvancedInvite} runs the result
  * through the core schema, which stays the single validation source.
@@ -205,6 +253,47 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
     linkageFields,
     linkageKeys: enabledKeys,
   };
+
+  // The seed cites the built-in rule set, and the draft may have edited its way
+  // out of it -- a key reordered, a field renamed by an authored cleaning. Re-decide
+  // the citation against what this draft actually built rather than carrying the
+  // seed's: a citation over edited rules would claim a provenance they do not have.
+  // A guided draft that changed none of them still cites the set, which is what
+  // keeps the guided path's terms (and the acceptor's reading of them) unchanged.
+  //
+  // An IMPORTED document's citation is carried rather than re-derived, on the same
+  // round-trip-fidelity grounds the imported field declaration is re-emitted on: a
+  // document may cite a set this build does not ship, and a document may decline to
+  // cite one at all -- re-deriving would relabel the first and stamp a provenance on
+  // the second its author declined, moving the terms hash in both directions. So the
+  // import re-emits its own citation while the built rules are still drawn from the
+  // set it cited (narrowing by disabling a key keeps it, editing or adding one drops
+  // it), and an import that cited nothing emits nothing whatever its rules match.
+  // Which rules "the set it cited" means is ruleSetForImportedCitation's answer, taken
+  // one half at a time: the built-in half's own rules where the citation names it, the
+  // document's claim for that half otherwise.
+  const importedCitation = draft.importedRuleSetCitation;
+  const citedRuleSet =
+    importedCitation?.kind === "cited"
+      ? ruleSetForImportedCitation(importedCitation.ruleSet)
+      : undefined;
+  // Keyless rules are drawn from every set vacuously, so the predicate alone would
+  // re-emit a citation over a document carrying none of the keys it asserts provenance
+  // for -- including one whose leftover imported field declarations survive their keys.
+  // The draft reaches that state as an intermediate (disabling every key), and the
+  // built terms can leave the browser from there via the terms export, so exclude it
+  // here -- the same exclusion linkageRuleSetReferenceFor makes on the derived branch.
+  const declaresNoKeys = terms.linkageKeys.length === 0;
+  const ruleSetReference =
+    importedCitation === undefined
+      ? linkageRuleSetReferenceFor(terms)
+      : citedRuleSet !== undefined &&
+          !declaresNoKeys &&
+          isDrawnFromLinkageRuleSet(citedRuleSet, terms)
+        ? citedRuleSet.reference
+        : undefined;
+  if (ruleSetReference !== undefined) terms.linkageRuleSet = ruleSetReference;
+  else delete terms.linkageRuleSet;
 
   // Author terms.payload.send from the columns the draft metadata discloses, via the
   // shared payloadSendForMetadata derivation the quick path also uses (so the two

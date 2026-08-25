@@ -56,7 +56,7 @@ What the names do and do not cover:
 - They do not cover the rest of the terms document. `identity`, `date`, `algorithm`, `linkage_strategy`, `output`, and `deduplicate` are each party's own choice on the day, and two parties can run the same rules while differing on them.
 - A run matches on a **subset** of the key set, never on an addition to it: when the terms are derived from your input file, a key whose fields no column can supply is left out of them. The terms document that travels with the exchange still records exactly which keys ran, so it -- not either name -- is the authoritative account of any one exchange.
 
-The names and versions are in-product identifiers for citing the rules in an agreement or a governance review. None of them is sent to your partner, carried in an invitation, or written into an exchange record.
+Terms drawn from these rules cite them, in the [`linkage_rule_set`](#linkage_termslinkage_rule_set) field below, so the citation travels with the exchange: it is in the invitation, on the wire, on the accepting party's terms review, and in each party's exchange record.
 
 To match on `phone_number`, `email_address`, or `zip_code`, author a key yourself: they are matchable semantic types (see [Semantic types](#semantic-types)) that neither built-in artifact uses.
 
@@ -340,6 +340,34 @@ Each step in a `transform` array applies one function from the cleaning and stan
 #### Swapped keys
 
 When a `swap` array is present, the receiver transmits a linkage key generated with the two named elements swapped, while the sender generates a linkage key with un-swapped elements. A `swap` target names an element by that element's effective identifier: its `name` if it declares one, otherwise its `field`. An element that declares a `name` is referenced by that `name`, not by its `field`. For example, a key might match first name swapped with last name to catch data entry errors where the names are reversed at one agency. Each `swap` target must resolve to an element of the same key by this rule; a target matching no element in its key is rejected when the terms are decoded, rather than silently doing nothing at exchange time.
+
+### `linkage_terms.linkage_rule_set`
+
+*Type:* object  
+*Required:* no  
+*Consistency:* mandatory when both parties declare one
+
+The named rule set the `linkage_fields` and `linkage_keys` above were drawn from -- a citation, not a specification. It names two artifacts and their content versions: `field_set` for the fields, `key_set` for the keys. [The built-in rules](#the-built-in-rules) are the one set psilink ships.
+
+```yaml
+linkage_terms:
+  linkage_rule_set:
+    field_set:
+      name: "baseline-pii"
+      version: "1.0.0"
+    key_set:
+      name: "hmis-keys"
+      version: "1.0.0"
+```
+
+Every path that fills in your fields and keys for you writes this citation: a zero-setup exchange, the template `psilink init` writes, the web app's quick and Advanced invite paths, and the console's Direct exchange, whose confirm screen shows it in the terms it infers from your file. It travels wherever the terms do -- into the invitation, onto the wire, onto the accepting party's terms review, and into each party's exchange record, which is what lets "which rules did this linkage match on" be answered by a name and a version.
+
+What it does and does not settle:
+
+- **It is not what the exchange runs on.** The `linkage_fields` and `linkage_keys` are, and they are cross-checked between the parties field by field and key by key. A run matches on a subset of the cited set, never on an addition to it, so a citation is an upper bound on what was tried.
+- **It is not vouched for.** Your partner's citation is text your partner wrote; nothing resolves a name to a set or checks it against the keys and fields the same invitation declares. The accepting party's terms review says so where it shows the citation. What both parties are held to is the declared keys and fields.
+- **Omit it for rules you author yourself.** Rules you author can cite only the built-in set -- there is no way to select another -- and citing a set your rules were not drawn from misdescribes them. A terms document you import keeps the citation its own author wrote, including one naming a set psilink does not ship; the web Advanced invite path drops that citation as soon as the rules stop being drawn from the set it names, exactly as it drops the built-in citation when you edit your way out of the rules it seeded from.
+- **Two parties that both cite a set must cite the same one**; a mismatch cancels the exchange before any data moves. A party that cites none is not held to the other's, which is what lets hand-authored rules meet an identical named set.
 
 ### `linkage_terms.legal_agreement`
 

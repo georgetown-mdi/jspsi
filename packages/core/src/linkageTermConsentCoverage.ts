@@ -260,6 +260,13 @@ export const CONSENT_PROBE_TERMS: LinkageTerms = {
       swap: ["given", "family"],
     },
   ],
+  // A citation of its own rather than the built-in set's: the probe's fields and
+  // keys are not the built-in ones, so citing `hmis-keys` here would make the
+  // document claim rules it does not carry.
+  linkageRuleSet: {
+    fieldSet: { name: "probe-pii", version: "1.0.0" },
+    keySet: { name: "probe-keys", version: "1.0.0" },
+  },
   payload: {
     send: [
       { name: "risk_score", description: "Model score for the matched record" },
@@ -602,6 +609,56 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     vary: (terms) =>
       edited(terms, (draft) => {
         delete draft.linkageKeys[0].swap;
+      }),
+  },
+  "linkageRuleSet.fieldSet.name": {
+    classification: "consent-relevant",
+    reason:
+      "Names the artifact the declared linkage fields are cited to, which is " +
+      "what an acceptor checks the exchange against an agreement or a " +
+      "governance review by -- and what its own disclosure log records as the " +
+      "substrate the match keyed on.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        if (draft.linkageRuleSet !== undefined)
+          draft.linkageRuleSet.fieldSet.name = "probe-pii-extended";
+      }),
+  },
+  "linkageRuleSet.fieldSet.version": {
+    classification: "consent-relevant",
+    reason:
+      "Pins which content the field set's name stands for. Two versions of one " +
+      "name are two different sets of fields and constraints, so a citation " +
+      "without the version identifies nothing an acceptor can rely on.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        if (draft.linkageRuleSet !== undefined)
+          draft.linkageRuleSet.fieldSet.version = "2.0.0";
+      }),
+  },
+  "linkageRuleSet.keySet.name": {
+    classification: "consent-relevant",
+    reason:
+      "Names the artifact the declared linkage keys are cited to -- which " +
+      "combinations of PII count as a match, and the set any validation on " +
+      "record attaches to. It is the citation an acceptor carries into an " +
+      "agreement and into its own disclosure log.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        if (draft.linkageRuleSet !== undefined)
+          draft.linkageRuleSet.keySet.name = "probe-keys-strict";
+      }),
+  },
+  "linkageRuleSet.keySet.version": {
+    classification: "consent-relevant",
+    reason:
+      "Pins which content the key set's name stands for. A key added, dropped, " +
+      "or moved in the cascade is a new version, so the version is what makes " +
+      "the citation identify the rules that ran rather than the name alone.",
+    vary: (terms) =>
+      edited(terms, (draft) => {
+        if (draft.linkageRuleSet !== undefined)
+          draft.linkageRuleSet.keySet.version = "2.0.0";
       }),
   },
   "payload.send[].name": {

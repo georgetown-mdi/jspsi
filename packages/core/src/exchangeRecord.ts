@@ -60,9 +60,12 @@ import type { Algorithm, AssociationTable } from "./types.js";
  * field set, so a record written before {@link ExchangeRecord.receiptBinder} --
  * whose absence a reader cannot distinguish from an exchange that produced no
  * signed receipt -- is refused on this discriminant rather than paired against a
- * receipt it has no value to pair with.
+ * receipt it has no value to pair with. The same reasoning carries
+ * {@link ExchangeRecordGovernance.linkageRuleSet}: absent, it states that the
+ * terms cited no named rule set, which is not what an earlier record's silence
+ * meant.
  */
-export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v2";
+export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v3";
 
 /** The one recognized format version for v1 {@link VerificationKeys}. */
 export const EXCHANGE_KEYS_VERSION = "psilink-exchange-keys/v1";
@@ -278,6 +281,30 @@ export interface RecordLinkageField {
   type: string;
 }
 
+/** The named rule set the agreed terms cited their linkage fields and keys to,
+ * copied from those terms: the name and content version of each half. It is what
+ * lets the record answer "which rules did this linkage match on" with a citation
+ * an agreement or a governance review can carry, rather than only with the
+ * per-field {@link RecordLinkageField} basis beside it.
+ *
+ * A citation, not an account: the set is an upper bound on the keys that could
+ * have run, since terms derived from an input file leave out any key that input
+ * cannot supply. Structurally this mirrors the linkage-terms reference but is
+ * owned by the record format (like {@link RecordPayloadColumn}), so a change to
+ * the config type cannot silently move this version-frozen on-disk format.
+ *
+ * Cross-party consistency is the terms' own: two parties that both cite a set are
+ * required to cite the same one before any data moves, so their records agree.
+ * Where the partner cited none, this is this party's citation of its own terms
+ * and the partner's record carries none -- an asymmetry the exchange permits so
+ * hand-authored rules can meet a named set. */
+export interface RecordLinkageRuleSet {
+  /** Name and content version of the set the linkage fields were cited to. */
+  fieldSet: { name: string; version: string };
+  /** Name and content version of the set the linkage keys were cited to. */
+  keySet: { name: string; version: string };
+}
+
 /**
  * Readable, non-sensitive governance metadata that lets the record stand on its
  * own as a disclosure-log entry: the authority for the disclosure and the
@@ -308,6 +335,10 @@ export interface ExchangeRecordGovernance {
    * only -- never values. Sorted by `name` (UTF-16 code unit) so both parties and
    * both implementations derive the same order. */
   matchingBasis: RecordLinkageField[];
+  /** The named rule set the agreed terms cited, when they cited one; omitted
+   * when the terms named no set (their rules were authored rather than drawn
+   * from one), so its absence is a statement rather than a gap. */
+  linkageRuleSet?: RecordLinkageRuleSet;
   /** The payload columns this party committed as sent for matched records (names
    * and any data-dictionary descriptions) -- the columns the disclosure gate
    * actually transmitted, not a declared dictionary that may under-state them.
@@ -543,6 +574,22 @@ const RecordLinkageFieldSchema: z.ZodType<RecordLinkageField> = z.object({
   type: z.string().min(1).max(MAX_NAME_LENGTH),
 });
 
+// Both halves take the same shape, so the identity is declared once. `version`
+// is an open, length-capped string rather than a semver pattern, for the reason
+// RecordLinkageField.type is an open string: the record is a frozen log, and a
+// reader accepts the citation a (possibly newer) writer recorded rather than
+// re-deciding its form. The linkage-terms schema is where a version's form is
+// enforced, on the document that travels.
+const RecordLinkageSetIdentitySchema = z.object({
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  version: z.string().min(1).max(MAX_NAME_LENGTH),
+});
+
+const RecordLinkageRuleSetSchema: z.ZodType<RecordLinkageRuleSet> = z.object({
+  fieldSet: RecordLinkageSetIdentitySchema,
+  keySet: RecordLinkageSetIdentitySchema,
+});
+
 const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> =
   z.object({
     // algorithm stays pinned to the closed enum even though the sibling
@@ -567,6 +614,7 @@ const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> =
       MAX_LINKAGE_ENTRIES,
       `matchingBasis must not exceed ${MAX_LINKAGE_ENTRIES} entries`,
     ),
+    linkageRuleSet: RecordLinkageRuleSetSchema.optional(),
     payloadSent: boundedArray(
       RecordPayloadColumnSchema,
       MAX_PAYLOAD_ENTRIES,
@@ -704,9 +752,11 @@ export interface BuiltExchangeRecord {
 /**
  * Derive the record's readable governance metadata.
  *
- * `algorithm`, `legalAgreement`, and the matching basis come from this party's
- * agreed terms: the first two are cross-party validated (so they equal the
- * partner's), and the matching basis is the linkage fields the keys reference.
+ * `algorithm`, `legalAgreement`, the rule-set citation, and the matching basis
+ * come from this party's agreed terms: the first two are cross-party validated
+ * (so they equal the partner's), the citation is validated between two parties
+ * that both carry one, and the matching basis is the linkage fields the keys
+ * reference.
  *
  * The payload column SETS, however, are read from the COMMITTED payloads
  * (`localPayloadSent` / `partnerPayloadReceived`), not from the optional
@@ -790,6 +840,23 @@ function governanceFromTerms(
         }
       : {}),
     matchingBasis,
+    // Copied field by field rather than by reference, so the record holds its own
+    // value in the record format's own shape: a later edit to the config type
+    // cannot reach this frozen on-disk format through a shared object.
+    ...(terms.linkageRuleSet !== undefined
+      ? {
+          linkageRuleSet: {
+            fieldSet: {
+              name: terms.linkageRuleSet.fieldSet.name,
+              version: terms.linkageRuleSet.fieldSet.version,
+            },
+            keySet: {
+              name: terms.linkageRuleSet.keySet.name,
+              version: terms.linkageRuleSet.keySet.version,
+            },
+          },
+        }
+      : {}),
     payloadSent: describeCommitted(
       localPayloadSent.columns,
       terms.payload?.send,
