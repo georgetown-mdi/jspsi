@@ -1,7 +1,11 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { getDefaultLinkageTerms } from "@psilink/core";
+
+import {
+  RECORDED_LINKAGE_RULE_SET_CAVEAT,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 
 import { page } from "vitest/browser";
 
@@ -460,7 +464,7 @@ describe("managed exchange detail accounting of disclosures", () => {
       .toBeInTheDocument();
   });
 
-  test("an opened disclosure shows the cited rule set under the caveat that nothing checked it", async () => {
+  test("an opened disclosure shows the cited rule set under core's recorded-citation caveat", async () => {
     const accounting = appendDisclosureRecord(
       undefined,
       await disclosureRecord({ linkageRuleSet: true }),
@@ -488,12 +492,12 @@ describe("managed exchange detail accounting of disclosures", () => {
       .element(page.getByText('Fields: "baseline-pii" 1.0.0'))
       .toBeVisible();
     // The citation is the authoring party's own declaration; the screen says so
-    // beside it rather than letting the row read as a checked provenance.
+    // beside it rather than letting the row read as a checked provenance, and
+    // sends a reader after this build's own finding to the record's verdict --
+    // which this surface deliberately does not restate.
     await expect
       .element(
-        page.getByText("psilink has not checked this citation", {
-          exact: false,
-        }),
+        page.getByText(RECORDED_LINKAGE_RULE_SET_CAVEAT, { exact: false }),
       )
       .toBeVisible();
   });
@@ -528,7 +532,7 @@ describe("managed exchange detail accounting of disclosures", () => {
       .toBeVisible();
     expect(
       page
-        .getByText("psilink has not checked this citation", { exact: false })
+        .getByText(RECORDED_LINKAGE_RULE_SET_CAVEAT, { exact: false })
         .query(),
     ).toBeNull();
   });

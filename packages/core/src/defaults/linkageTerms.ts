@@ -303,6 +303,17 @@ export interface BuiltInLinkageRuleSet {
 }
 
 /**
+ * `value` frozen, and every array and object it holds frozen with it, returned at
+ * its own type. `Object.freeze` alone reaches one level, which on an array of
+ * declarations leaves each declaration writable.
+ */
+function frozenThroughContents<T>(value: T): T {
+  if (typeof value !== "object" || value === null) return value;
+  for (const held of Object.values(value)) frozenThroughContents(held);
+  return Object.freeze(value);
+}
+
+/**
  * The one built-in rule set: the {@link DEFAULT_LINKAGE_KEY_SET_NAME} keys over
  * the {@link DEFAULT_LINKAGE_FIELD_SET_NAME} fields, at the version each
  * declares. It is the set every path that authors nothing selects, so a
@@ -313,14 +324,18 @@ export interface BuiltInLinkageRuleSet {
  * built-in sets' drift and zero-setup checks read those declarations out of this
  * file by name and require each to be a literal (`scripts/lib/builtInRuleSets.mjs`).
  *
- * The {@link BuiltInLinkageRuleSet.reference} is frozen through both its levels,
- * and this object with it. That one reference is ALIASED into every terms
- * document derived from the set ({@link linkageTermsFromRuleSet}) and from there
- * into each party's exchange record, so a single in-place edit of a name or a
- * version would rewrite the built-in citation in every document the process later
+ * Frozen through every level, and this object with it. The reference, the fields,
+ * and the keys are all ALIASED into every terms document derived from the set
+ * ({@link linkageTermsFromRuleSet}) and from there into each party's exchange
+ * record, so a single in-place edit of a name, a version, a constraint, or a key
+ * element would rewrite the built-in set in every document the process later
  * derives, and in every record written from one -- without touching the
- * declarations above that the drift checks pin. Freezing makes such an edit throw
- * where it is attempted instead.
+ * declarations above that the drift checks pin. The rules carry the same weight
+ * the citation does: they are what {@link checkLinkageRuleSetCitation} compares a
+ * cited document against, so an edited set decides later verdicts too. Freezing
+ * makes such an edit throw where it is attempted instead, and it happens at this
+ * composition because those declarations must stay plain literals for the checks
+ * named above to read them.
  */
 export const DEFAULT_LINKAGE_RULE_SET: BuiltInLinkageRuleSet = Object.freeze({
   reference: Object.freeze({
@@ -333,8 +348,8 @@ export const DEFAULT_LINKAGE_RULE_SET: BuiltInLinkageRuleSet = Object.freeze({
       version: DEFAULT_LINKAGE_KEY_SET_VERSION,
     }),
   }),
-  linkageFields: DEFAULT_LINKAGE_FIELDS,
-  linkageKeys: DEFAULT_LINKAGE_KEYS,
+  linkageFields: frozenThroughContents(DEFAULT_LINKAGE_FIELDS),
+  linkageKeys: frozenThroughContents(DEFAULT_LINKAGE_KEYS),
 });
 
 /**

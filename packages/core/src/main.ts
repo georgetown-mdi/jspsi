@@ -148,13 +148,16 @@ export {
   LINKAGE_RULE_SET_VERDICT_COPY,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
+  RECORDED_LINKAGE_RULE_SET_CAVEAT,
   UNRECOGNIZED_TRANSFORM_NOTE,
   distinctLinkageRuleSetVerdicts,
+  linkageRuleSetVerdictNote,
 } from "./consentFacts.js";
 export type {
   ConsentFact,
   ConsentFactBasis,
   ConsentFactId,
+  LinkageRuleSetVerdictReader,
 } from "./consentFacts.js";
 // Which proposed settings today's exchange actually applies. Read by the summary
 // above (to flag a proposed-but-not-applied term) and by the web app's linkage-

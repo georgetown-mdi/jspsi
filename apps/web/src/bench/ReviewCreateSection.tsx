@@ -1,8 +1,17 @@
+import { useMemo } from "react";
+
 import { Button, NativeSelect, Radio, VisuallyHidden } from "@mantine/core";
+
+import {
+  buildAdvancedTerms,
+  importedCitationDropNotice,
+} from "@psi/advancedInvite";
 
 import { isConsoleBuild } from "@utils/clientConfig";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 import { useOnlineStatus } from "@components/useOnlineStatus";
+
+import { CitationDropNotice } from "./CitationDropNotice";
 
 import {
   CONFIG_EXCHANGE_FILES,
@@ -58,8 +67,9 @@ const DIRECTION_CHOICES: ReadonlyArray<{
 /**
  * Step 3 of the inviter spine: the review-time decisions (lifetime, result
  * direction, transport), the check-your-answers restatement of the whole
- * proposal, and the create action -- the point of no return whose copy says
- * so. The transport chooser offers the live-browser exchange and the two
+ * proposal, the dropped-citation notice where an imported document's citation
+ * will not be carried, and the create action -- the point of no return whose copy
+ * says so. The transport chooser offers the live-browser exchange and the two
  * command-line transports (SFTP and a shared directory); its copy comes from
  * {@link transportChooserCopy}, which reflects whether the deployment runs a
  * shared-directory or SFTP exchange here (the console appliance) or saves an
@@ -156,6 +166,17 @@ export function ReviewCreateSection({
 }) {
   const consoleBuild = isConsoleBuild();
   const online = useOnlineStatus();
+  // Derived from the draft here rather than passed in, the same read the Matching
+  // keys tab makes: the notice is a function of the terms this step is
+  // restating, and the two steps must not answer it differently.
+  const citationDrop = useMemo(
+    () =>
+      importedCitationDropNotice(
+        editor.draft,
+        buildAdvancedTerms(editor.draft),
+      ),
+    [editor.draft],
+  );
   const sftpConfigured = sftpConnection != null;
   const rendezvousConfigured = rendezvous?.configured === true;
   const available = availableTransports(
@@ -394,6 +415,14 @@ export function ReviewCreateSection({
         Check every term before you create the invitation. Creating it seals the
         terms.
       </p>
+      {/* The one fact about the outgoing terms that the restatement below cannot
+        show: a citation the rebuilt document drops is absent from it, so a table
+        of what the terms say has nothing to put in the row. It is stated where
+        the terms are confirmed as well as in the tab that costs it, since an
+        operator can import there and come straight here. */}
+      {citationDrop !== undefined && (
+        <CitationDropNotice notice={citationDrop} />
+      )}
       <div className={styles.tableScroll}>
         <table className={`${styles.benchTable} ${styles.answers}`}>
           <caption className={styles.visuallyHidden}>

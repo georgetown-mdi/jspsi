@@ -428,4 +428,61 @@ describe("the built-in citation resists mutation", () => {
       DEFAULT_LINKAGE_RULE_SET.reference,
     );
   });
+
+  test("the declared rules are frozen through their contents, arrays and members alike", () => {
+    // The same aliasing as the reference, over what the citation is CHECKED
+    // against: an in-place edit of a field's constraints or of a key's elements
+    // would move what counts as drawn from the built-in set for every later
+    // verdict, while the declarations the drift checks pin stayed put.
+    const set = DEFAULT_LINKAGE_RULE_SET as unknown as {
+      linkageFields: Array<{
+        name: string;
+        constraints?: { exclude?: Array<string>; validOnly?: boolean };
+      }>;
+      linkageKeys: Array<{
+        name: string;
+        elements: Array<{
+          field: string;
+          transform?: Array<{ function: string; params: { start?: number } }>;
+        }>;
+      }>;
+    };
+    const [firstField] = set.linkageFields;
+    const [firstKey] = set.linkageKeys;
+
+    expect(() => {
+      set.linkageFields.push({ name: "poisoned", type: "ssn" } as never);
+    }).toThrow(TypeError);
+    expect(() => {
+      firstField.name = "poisoned";
+    }).toThrow(TypeError);
+    expect(() => {
+      if (firstField.constraints !== undefined)
+        firstField.constraints.validOnly = false;
+    }).toThrow(TypeError);
+    expect(() => {
+      firstField.constraints?.exclude?.push("999999999");
+    }).toThrow(TypeError);
+    expect(() => {
+      set.linkageKeys.reverse();
+    }).toThrow(TypeError);
+    expect(() => {
+      firstKey.elements[0].field = "poisoned";
+    }).toThrow(TypeError);
+    expect(() => {
+      const [transform] = firstKey.elements
+        .map((element) => element.transform)
+        .filter((entry) => entry !== undefined);
+      transform[0].params.start = 99;
+    }).toThrow(TypeError);
+
+    // The verdict a citation of the set reaches is what those edits were aimed
+    // at, and it is the one the untouched set gives.
+    expect(
+      checkLinkageRuleSetCitation(DEFAULT_LINKAGE_RULE_SET.reference, {
+        linkageFields: [...DEFAULT_LINKAGE_RULE_SET.linkageFields],
+        linkageKeys: [...DEFAULT_LINKAGE_RULE_SET.linkageKeys],
+      }),
+    ).toStrictEqual({ fieldSet: "consistent", keySet: "consistent" });
+  });
 });

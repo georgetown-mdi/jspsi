@@ -1420,6 +1420,202 @@
           "partnerPayloadReceived": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"
         }
       }
+    },
+    {
+      "name": "cited-rule-set-unchecked",
+      "description": "The third verdict: the agreed terms cite a rule set this build does not ship, so neither half resolves to anything to compare against and each verdict is `unchecked`. The declared rules are byte-identical to cited-rule-set-consistent's -- the built-in fields and the most precise built-in key -- which is what pins that a half is resolved by the cited NAME and content version rather than by the rules beside it: the same declarations reach `consistent` under a citation naming the shipped set and `unchecked` under one this build cannot resolve. The citation is recorded verbatim either way, so a reader can tell a name that was checked and matched from one nothing was compared against.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Party A",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn",
+              "constraints": {
+                "exclude": ["111111111", "123456789"],
+                "validOnly": true
+              }
+            },
+            {
+              "name": "last_name",
+              "type": "last_name",
+              "constraints": {
+                "affixesAllowed": false,
+                "allowedCharacters": "A-Z "
+              }
+            },
+            {
+              "name": "date_of_birth",
+              "type": "date_of_birth"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN + LN + DOB",
+              "elements": [
+                {
+                  "field": "ssn"
+                },
+                {
+                  "field": "last_name"
+                },
+                {
+                  "field": "date_of_birth"
+                }
+              ]
+            }
+          ],
+          "linkageRuleSet": {
+            "fieldSet": {
+              "name": "county-pii",
+              "version": "2.0.0"
+            },
+            "keySet": {
+              "name": "county-keys",
+              "version": "2.0.0"
+            }
+          }
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Party B",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn",
+              "constraints": {
+                "exclude": ["111111111", "123456789"],
+                "validOnly": true
+              }
+            },
+            {
+              "name": "last_name",
+              "type": "last_name",
+              "constraints": {
+                "affixesAllowed": false,
+                "allowedCharacters": "A-Z "
+              }
+            },
+            {
+              "name": "date_of_birth",
+              "type": "date_of_birth"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN + LN + DOB",
+              "elements": [
+                {
+                  "field": "ssn"
+                },
+                {
+                  "field": "last_name"
+                },
+                {
+                  "field": "date_of_birth"
+                }
+              ]
+            }
+          ],
+          "linkageRuleSet": {
+            "fieldSet": {
+              "name": "county-pii",
+              "version": "2.0.0"
+            },
+            "keySet": {
+              "name": "county-keys",
+              "version": "2.0.0"
+            }
+          }
+        },
+        "recordsExposed": 5,
+        "localPayloadSent": {
+          "columns": [],
+          "rows": []
+        },
+        "partnerPayloadReceived": {
+          "columns": [],
+          "rows": []
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z"
+      },
+      "randomness": {
+        "bindingNonce": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
+        "salts": {
+          "localPayloadSent": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE",
+          "partnerPayloadReceived": "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v4",
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "termsHash": "rpEsquyNSax88z8WM723OMdf7SoVFtV45Pgy3FkeeOc",
+        "localIdentity": "Party A",
+        "partnerIdentity": "Party B",
+        "governance": {
+          "algorithm": "psi",
+          "matchingBasis": [
+            {
+              "name": "date_of_birth",
+              "type": "date_of_birth"
+            },
+            {
+              "name": "last_name",
+              "type": "last_name"
+            },
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageRuleSet": {
+            "fieldSet": {
+              "name": "county-pii",
+              "version": "2.0.0"
+            },
+            "keySet": {
+              "name": "county-keys",
+              "version": "2.0.0"
+            }
+          },
+          "linkageRuleSetVerdict": {
+            "fieldSet": "unchecked",
+            "keySet": "unchecked"
+          },
+          "payloadSent": [],
+          "payloadReceived": []
+        },
+        "recordsExposed": 5,
+        "bindingNonce": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
+        "commitments": {
+          "localPayloadSent": "BWH-xoJGeTE7Mxyu8Iv4Zrq5tFgJ4Vh8CxP34kLZU4k",
+          "partnerPayloadReceived": "gGDifZitToLJdciH5jBwob0WWYpR8QsLD6Sf48y-t8M"
+        }
+      },
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE",
+          "partnerPayloadReceived": "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI"
+        }
+      }
     }
   ]
 }

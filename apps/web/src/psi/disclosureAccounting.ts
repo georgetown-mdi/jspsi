@@ -6,12 +6,14 @@
  *
  * An entry IS a run's exchange record, verbatim -- not a summary derived from one
  * and not a second format beside it. Every fact the accounting states (the
- * partner, the governing agreement and the purpose of the disclosure under it, the
- * categories of data disclosed each way, the records this party exposed, the
- * result size where both parties were entitled to it, and the instant) is a field
- * of that record, which is exactly what makes the record the accounting's single
- * source (see docs/spec/EXCHANGE_RECORD.md). A reader that wants more than the
- * accounting renders opens the entry itself.
+ * partner, the governing agreement and the purpose of the disclosure under it,
+ * what kind of disclosure the algorithm made, the categories of data disclosed
+ * each way, the matching basis the linkage keyed on and the rule set the terms
+ * cited it to, the records this party exposed, the result size where both parties
+ * were entitled to it, where this party filed its copy of the result, and the
+ * instant) is a field of that record, which is exactly what makes the record the
+ * accounting's single source (see docs/spec/EXCHANGE_RECORD.md). A reader that
+ * wants more than the accounting renders opens the entry itself.
  *
  * The managed record deliberately cannot hold this: its `lastRun` is a timestamp
  * and closed enums by design, and it keeps only the most recent run (see

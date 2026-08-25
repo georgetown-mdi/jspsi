@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  LINKAGE_RULE_SET_VERDICT_COPY,
+  RECORDED_LINKAGE_RULE_SET_CAVEAT,
+} from "@psilink/core";
+
+import {
   DISCLOSED_AT_LABEL,
   DISCLOSURE_FACT_LABELS,
   disclosureAccountingCsv,
@@ -54,12 +59,11 @@ function factValues(
   return found.values.length === 0 ? [found.muted] : [...found.values];
 }
 
-/** The caveat the accounting attaches to a present rule-set citation: the record
- * carries the authoring party's own declaration, which nothing on the exchange
- * path resolved to a set or checked against the keys and fields the same terms
- * declared. */
-const RULE_SET_CAVEAT =
-  "psilink has not checked this citation: nothing resolves these names to a rule set, or checks them against the fields matched on. What the exchange held both parties to is the matching basis recorded beside it.";
+/** The caveat the accounting attaches to a present rule-set citation. Read from
+ * core rather than restated here: it is the sentence the consent surfaces'
+ * per-verdict copy sits beside, and a literal transcribed into this suite would
+ * let the accounting drift from it while every assertion stayed green. */
+const RULE_SET_CAVEAT = RECORDED_LINKAGE_RULE_SET_CAVEAT;
 
 /** The exported CSV split into physical rows, the trailing terminator dropped. */
 function csvRows(csv: string): Array<string> {
@@ -124,7 +128,7 @@ describe("a disclosure's facts", () => {
     ]);
   });
 
-  test("state the rule set the terms cited, keys before fields, under the caveat that nothing checked it", async () => {
+  test("state the rule set the terms cited, keys before fields, under core's caveat for a recorded citation", async () => {
     const record = await disclosureRecord({ linkageRuleSet: true });
 
     const facts = disclosureFacts(record);
@@ -134,6 +138,24 @@ describe("a disclosure's facts", () => {
       'Fields: "baseline-pii" 1.0.0',
     ]);
     expect(factNamed(facts, "Rule set cited").note).toBe(RULE_SET_CAVEAT);
+  });
+
+  test("point the reader at the record's own verdict rather than denying one was reached", async () => {
+    // A record's citation is always paired with the writing party's verdict on
+    // it, so a caveat asserting that nothing checked the citation would be false
+    // of every record the accounting can render -- including one whose citation
+    // this build resolved and disproved.
+    const record = await disclosureRecord({ linkageRuleSet: true });
+    expect(record.governance.linkageRuleSetVerdict).toBeDefined();
+
+    const { note } = factNamed(disclosureFacts(record), "Rule set cited");
+
+    expect(note).toContain("exchange record");
+    expect(note).not.toContain("has not checked");
+    // The verdict is pointed at, never restated: its own vocabulary -- the
+    // markers the consent surfaces put on each half -- stays off this surface.
+    for (const verdict of ["consistent", "contradicted", "unchecked"] as const)
+      expect(note).not.toContain(LINKAGE_RULE_SET_VERDICT_COPY[verdict].marker);
   });
 
   test("say the terms cited no rule set rather than leaving the cell blank, and caveat nothing", async () => {

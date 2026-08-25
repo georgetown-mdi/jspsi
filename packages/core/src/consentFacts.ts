@@ -478,6 +478,19 @@ export const CONSENT_BASIS_MARKERS: Record<ConsentFactBasis, string> = {
   "trust-contingent": "your partner's word",
 };
 
+/** The finding a `contradicted` half states, and the clause naming what governs
+ * the run whatever the citation says. Both readers' caveats below are composed
+ * from these two, so the sentences differ only in the remedy each reader can act
+ * on -- never in what this build found. */
+const CONTRADICTED_FINDING =
+  "A half marked as not matching names a rule set psilink ships, and the " +
+  "rules declared for it are NOT drawn from that set -- so the citation does " +
+  "not describe what the exchange would match on.";
+
+const CONTRADICTED_RULES_GOVERN =
+  "the declared keys and fields are what the exchange holds both parties to, " +
+  "and what would run.";
+
 /**
  * The marker and the caveat a surface renders for ONE half of a cited linkage
  * rule set, keyed by this build's verdict on that half
@@ -501,6 +514,11 @@ export const CONSENT_BASIS_MARKERS: Record<ConsentFactBasis, string> = {
  * operator reading both the citation and the declared rules on one screen is the
  * party who decides what the mismatch means.
  *
+ * Each `note` addresses the party the citation is shown TO. A surface whose
+ * reader wrote the citation reads {@link linkageRuleSetVerdictNote} instead,
+ * which swaps in the remedy that reader can act on and withholds the sentences
+ * that have none rather than attributing the citation to the wrong party.
+ *
  * Fixed first-party copy throughout -- no set name, version, or other
  * partner-controlled value reaches any of it -- so a surface renders it verbatim.
  */
@@ -518,11 +536,8 @@ export const LINKAGE_RULE_SET_VERDICT_COPY: Record<
   contradicted: {
     marker: "checked: does not match",
     note:
-      "A half marked as not matching names a rule set psilink ships, and the " +
-      "rules declared for it are NOT drawn from that set -- so the citation " +
-      "does not describe what the exchange would match on. Treat the name as " +
-      "unreliable and settle it with the other party; the declared keys and " +
-      "fields are what the exchange holds both parties to, and what would run.",
+      `${CONTRADICTED_FINDING} Treat the name as unreliable and settle it with ` +
+      `the other party; ${CONTRADICTED_RULES_GOVERN}`,
   },
   unchecked: {
     marker: "not checked",
@@ -533,10 +548,23 @@ export const LINKAGE_RULE_SET_VERDICT_COPY: Record<
   },
 };
 
-/** The order the caveats above are stated in, most severe first: a reader who
- * stops after one line has read the one that changes their decision. */
-const LINKAGE_RULE_SET_VERDICT_SEVERITY: ReadonlyArray<LinkageRuleSetCitationVerdict> =
-  ["contradicted", "unchecked", "consistent"];
+/**
+ * How severe each verdict is, lowest rank first: a reader who stops after one
+ * line has read the one that changes their decision.
+ *
+ * A rank per verdict rather than an ordered list of them, so the union's
+ * completeness is the type's to enforce: a verdict added to
+ * {@link LinkageRuleSetCitationVerdict} and not ranked here fails to compile,
+ * where a list would have silently sorted it out of every surface's caveats.
+ */
+const LINKAGE_RULE_SET_VERDICT_SEVERITY: Record<
+  LinkageRuleSetCitationVerdict,
+  number
+> = {
+  contradicted: 0,
+  unchecked: 1,
+  consistent: 2,
+};
 
 /**
  * The verdicts a citation's halves reached, deduplicated and ordered most severe
@@ -552,11 +580,105 @@ const LINKAGE_RULE_SET_VERDICT_SEVERITY: ReadonlyArray<LinkageRuleSetCitationVer
 export function distinctLinkageRuleSetVerdicts(
   ...verdicts: ReadonlyArray<LinkageRuleSetCitationVerdict>
 ): Array<LinkageRuleSetCitationVerdict> {
-  const reached = new Set(verdicts);
-  return LINKAGE_RULE_SET_VERDICT_SEVERITY.filter((verdict) =>
-    reached.has(verdict),
+  return [...new Set(verdicts)].sort(
+    (one, other) =>
+      LINKAGE_RULE_SET_VERDICT_SEVERITY[one] -
+      LINKAGE_RULE_SET_VERDICT_SEVERITY[other],
   );
 }
+
+/**
+ * Who a surface is showing a citation's verdict to: the party the citation was
+ * made to, or the party that wrote it.
+ *
+ * The distinction is the remedy, not the finding. A recipient cannot edit the
+ * document, so the only move it has is to take the name up with the other party;
+ * the citing party is looking at its own terms, which it can correct before it
+ * proposes them.
+ */
+export type LinkageRuleSetVerdictReader = "recipient" | "citing-party";
+
+/** The caveats {@link linkageRuleSetVerdictNote} substitutes for a citing-party
+ * reader. Only `contradicted` has one: the other two caveats attribute the
+ * citation to a partner, so a surface showing the viewer its OWN citation
+ * withholds them rather than rewording them. */
+const LINKAGE_RULE_SET_CITING_PARTY_NOTES: Partial<
+  Record<LinkageRuleSetCitationVerdict, string>
+> = {
+  contradicted:
+    `${CONTRADICTED_FINDING} The terms are yours to correct: restore the rules ` +
+    `the cited set declares, or drop the citation. Either way, ` +
+    `${CONTRADICTED_RULES_GOVERN}`,
+};
+
+/**
+ * The caveat `verdict` carries for a reader the citation was made TO:
+ * {@link LINKAGE_RULE_SET_VERDICT_COPY}'s own sentence, which every verdict has.
+ *
+ * The selection lives here rather than in a renderer for the reason the copy
+ * does. A surface picking between two sentences inline is a second place the
+ * judgment is made, and the two readings of one finding are exactly where a
+ * divergence would be hardest to see: both sentences are true, and only one is
+ * actionable by the reader in front of it.
+ */
+export function linkageRuleSetVerdictNote(
+  verdict: LinkageRuleSetCitationVerdict,
+  reader: "recipient",
+): string;
+/**
+ * The caveat `verdict` carries for a reader that may have WRITTEN the citation:
+ * {@link LINKAGE_RULE_SET_CITING_PARTY_NOTES}'s substitute where the verdict has
+ * one, the recipient's sentence for a reader that is not the citing party, and
+ * `undefined` where a citing party has none.
+ *
+ * The `undefined` is a withholding rather than a gap: the caveats with no
+ * substitute attribute the citation to a partner, so read back to the party that
+ * wrote it they name the wrong author of its own terms. A surface renders nothing
+ * there instead -- rewording is not this function's to do, since each reader's
+ * sentence is copy, written once beside the one it stands in for.
+ */
+export function linkageRuleSetVerdictNote(
+  verdict: LinkageRuleSetCitationVerdict,
+  reader: LinkageRuleSetVerdictReader,
+): string | undefined;
+export function linkageRuleSetVerdictNote(
+  verdict: LinkageRuleSetCitationVerdict,
+  reader: LinkageRuleSetVerdictReader,
+): string | undefined {
+  return reader === "citing-party"
+    ? LINKAGE_RULE_SET_CITING_PARTY_NOTES[verdict]
+    : LINKAGE_RULE_SET_VERDICT_COPY[verdict].note;
+}
+
+/**
+ * The caveat a surface reading a FILED exchange record renders beside the
+ * rule-set citation it carries: the disclosure accounting's screen and the CSV it
+ * exports.
+ *
+ * The same classification {@link LINKAGE_RULE_SET_VERDICT_COPY} carries, stated
+ * for a reader who is holding the verdict rather than being shown it. A record's
+ * citation is always paired with the writing party's verdict on it
+ * (docs/spec/EXCHANGE_RECORD.md, "The writing party's verdict"), so a caveat
+ * asserting that nothing checked the citation would be false of every record --
+ * including one whose citation this build resolved and disproved. It points at
+ * the verdict instead of restating its value: the accounting presents the
+ * citation, and the record beside it is where the finding is read.
+ *
+ * Deliberately says what a check could and could not establish rather than
+ * summarizing an outcome, because one sentence serves all three verdicts here:
+ * silence must not read as verification, and a name this build cannot resolve
+ * must not read as one it checked.
+ *
+ * Fixed first-party copy naming no set, version, or party, so a surface renders
+ * it verbatim beside the escaped names it qualifies.
+ */
+export const RECORDED_LINKAGE_RULE_SET_CAVEAT =
+  "This citation is the authoring party's own declaration, recorded as " +
+  "written. What psilink could check about it -- whether these names resolve " +
+  "to a rule set it ships, and whether the declared rules are drawn from that " +
+  "set -- is the writing party's verdict, recorded beside the citation in the " +
+  "exchange record itself. What the exchange held both parties to is the " +
+  "matching basis recorded beside it.";
 
 /**
  * The sentence a surface renders in the outbound-send slot, in place of any

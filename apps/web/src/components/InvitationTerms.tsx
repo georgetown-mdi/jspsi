@@ -25,6 +25,7 @@ import {
   PROPOSED_NOT_APPLIED_NOTES,
   UNRECOGNIZED_TRANSFORM_NOTE,
   distinctLinkageRuleSetVerdicts,
+  linkageRuleSetVerdictNote,
   sanitizeForDisplay,
   summarizeInvitation,
 } from "@psilink/core";
@@ -1359,7 +1360,10 @@ export function InvitationTerms({
             is not gated: it is this build's own finding about the document on
             screen rather than an attribution to anyone, and a false provenance is
             worth stating to the party about to mint it and to the party reading
-            back what it accepted. */}
+            back what it accepted. It is the remedy that turns on the reader --
+            take the name up with the other party, or correct terms that are your
+            own -- so which sentence a perspective gets is core's call
+            (`linkageRuleSetVerdictNote`) rather than a second judgment here. */}
           {summary.linkageRuleSet !== undefined && (
             <Term label="Linkage rule set">
               <Stack gap={2}>
@@ -1404,7 +1408,12 @@ export function InvitationTerms({
                     size="sm"
                     fw={verdict === "contradicted" ? 500 : undefined}
                   >
-                    {LINKAGE_RULE_SET_VERDICT_COPY[verdict].note}
+                    {linkageRuleSetVerdictNote(
+                      verdict,
+                      perspective === "proposing"
+                        ? "citing-party"
+                        : "recipient",
+                    )}
                   </Text>
                 ))}
             </Term>

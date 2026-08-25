@@ -23,7 +23,11 @@
  * typecheck into a fact.
  */
 
-import { displayText, sanitizeForDisplay } from "@psilink/core";
+import {
+  RECORDED_LINKAGE_RULE_SET_CAVEAT,
+  displayText,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import { dateTimeLabel } from "./inviterModel";
 import { recordFileStamp } from "./runOutputs";
@@ -129,17 +133,6 @@ const RULE_SET_LABEL = "Rule set cited";
 const RULE_SET_ABSENT =
   "Not cited - the agreed terms' rules were authored rather than drawn from a named set";
 
-/** The caveat a present citation carries. The record's citation is the authoring
- * party's own declaration, carried through unvetted: nothing on the exchange path
- * resolves a name to a set or checks it against the fields and keys the same terms
- * declare (see docs/spec/EXCHANGE_RECORD.md, "The rule-set citation"). The
- * acceptance surfaces state the same limit for the same value, in the second
- * person a partner's invitation is read in; a filed record is read without a side,
- * an inviter's own citation reaching its record as an acceptor's adopted one does,
- * so this says it without attributing the citation to either party. */
-const RULE_SET_UNVOUCHED =
-  "psilink has not checked this citation: nothing resolves these names to a rule set, or checks them against the fields matched on. What the exchange held both parties to is the matching basis recorded beside it.";
-
 /** What each `algorithm` disclosed, in plain language: the record's own reading of
  * the field (`psi` revealed matched identifiers, `psi-c` only a count). */
 const ALGORITHM_DISCLOSURE: Record<Algorithm, Displayable> = {
@@ -195,6 +188,13 @@ function categoryLabel(column: {
  * early and fake the structure for a skimming reader, the same residual core
  * states for the clause it renders. The half's name leads the line as this app's
  * own chrome, outside the quotes, so a crafted value cannot occupy it.
+ *
+ * The caveat beneath them is core's ({@link RECORDED_LINKAGE_RULE_SET_CAVEAT}),
+ * beside the per-verdict copy the consent surfaces render, so what the accounting
+ * says a citation is worth cannot drift from what they say. It points at the
+ * writing party's verdict in the record rather than restating its value: the
+ * accounting presents the citation, not the verdict (see
+ * docs/spec/EXCHANGE_RECORD.md, "The writing party's verdict").
  */
 function ruleSetFact(
   ruleSet: RecordLinkageRuleSet | undefined,
@@ -208,7 +208,7 @@ function ruleSetFact(
       displayText`Fields: "${sanitizeForDisplay(ruleSet.fieldSet.name)}" ${sanitizeForDisplay(ruleSet.fieldSet.version)}`,
     ],
     muted: RULE_SET_ABSENT,
-    note: RULE_SET_UNVOUCHED,
+    note: RECORDED_LINKAGE_RULE_SET_CAVEAT,
   };
 }
 
