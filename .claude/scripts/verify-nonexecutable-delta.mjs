@@ -21,11 +21,29 @@
 //     it in template state and it reports a comment-only edit as a change.
 //
 // Path classification fails closed. Markdown is exempt because the rule names
-// it; every other non-source path -- package.json, a workflow yaml, a
-// Dockerfile, a .sh -- is UNVERIFIABLE and fails the run rather than being waved
-// through as "not a JS/TS extension", which would attest an executable delta in
-// any of them. A verifier backing an attestation must not report HOLDS over a
-// file it did not examine.
+// it; a `.yml`/`.yaml` path is parsed and compared as YAML (below); every other
+// non-source path -- package.json, a Dockerfile, a .sh -- is UNVERIFIABLE and
+// fails the run rather than being waved through as "not a JS/TS extension",
+// which would attest an executable delta in any of them. A verifier backing an
+// attestation must not report HOLDS over a file it did not examine.
+//
+// YAML comparison: parse each side with the `yaml` package and deep-compare the
+// resulting values, ignoring key order (a mapping's order is not semantically
+// significant). Explicit and fail-closed rather than a string compare:
+// `uniqueKeys` and `strict` are passed even though both already default on,
+// so a future default change cannot silently loosen the check; a stream that
+// does not parse to exactly one document -- zero, because of a parse error
+// diagnostic on the lone document, or more than one, because this verifier
+// does not attempt to align documents across two multi-document streams --
+// is UNVERIFIABLE rather than compared partially. A duplicate key is one such
+// diagnostic (measured against the installed `yaml`: `parseAllDocuments`
+// reports it as a `doc.errors` entry rather than resolving it last-wins), so
+// it fails closed the same way a genuine syntax error does. An empty or
+// comment-only stream parses to zero documents, which canonicalizes to the
+// same `null` value an absent side does, so adding or deleting a comment-only
+// YAML file reads comment-only while adding or deleting one carrying any
+// value reads as an executable delta -- the same rule the source comparison
+// applies below.
 //
 // A side that does not exist canonicalizes to the empty program, so adding or
 // deleting a comments-only file reads comment-only while adding or deleting one
@@ -57,8 +75,10 @@ import { execFileSync } from "node:child_process";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { parseAllDocuments } from "yaml";
 
 const EXEMPT_EXTENSIONS = new Set([".md"]);
+const YAML_EXTENSIONS = new Set([".yml", ".yaml"]);
 
 const SCRIPT_KINDS = new Map([
   [".ts", ts.ScriptKind.TS],
@@ -75,14 +95,21 @@ const printer = ts.createPrinter({ removeComments: true });
 
 /**
  * How a changed path is handled: `exempt` (markdown, which the rule allows),
- * `source` (parsed and compared), or `unverifiable` (anything else, which fails
- * the run).
+ * `source` (parsed and compared as TypeScript/JavaScript), `yaml` (parsed and
+ * compared as YAML), or `unverifiable` (anything else, which fails the run).
  */
 export function classifyPath(path) {
   const extension = extname(path).toLowerCase();
   if (EXEMPT_EXTENSIONS.has(extension)) return "exempt";
   if (SCRIPT_KINDS.has(extension)) return "source";
+  if (YAML_EXTENSIONS.has(extension)) return "yaml";
   return "unverifiable";
+}
+
+/** Whether a path's content (rather than its classification alone) decides its verdict. */
+function needsContent(path) {
+  const classification = classifyPath(path);
+  return classification === "source" || classification === "yaml";
 }
 
 /**
@@ -109,6 +136,90 @@ export function canonicalSource(text, path) {
 }
 
 /**
+ * Canonical form of one side of a YAML path -- the value of its single parsed
+ * document -- or an explicit failure reason for anything this verifier will
+ * not silently paper over. `text` is null for a side where the file does not
+ * exist; that and a stream with zero documents (an empty or comment-only
+ * file) both canonicalize to `value: null`, the same "no content" reading
+ * `canonicalSource` gives an absent TypeScript/JavaScript side.
+ *
+ * `uniqueKeys` and `strict` are passed explicitly even though the installed
+ * `yaml` already defaults both on, so a future default change cannot loosen
+ * this silently. A stream of more than one document is refused rather than
+ * compared partially -- this verifier does not attempt to align documents
+ * across two multi-document streams -- and a duplicate key is refused the
+ * same way a genuine syntax error is: measured against the installed `yaml`,
+ * `parseAllDocuments` reports it as a `doc.errors` entry rather than
+ * resolving it last-wins.
+ */
+export function canonicalYaml(text) {
+  if (text === null) return { value: null, error: null };
+  let documents;
+  try {
+    documents = parseAllDocuments(text, { uniqueKeys: true, strict: true });
+  } catch (error) {
+    return { value: undefined, error: `does not parse: ${error.message}` };
+  }
+  if (documents.length > 1) {
+    return {
+      value: undefined,
+      error: `${documents.length} YAML documents in one stream -- this verifier compares a single document only`,
+    };
+  }
+  const [document] = documents;
+  if (document === undefined) return { value: null, error: null };
+  if (document.errors.length > 0) {
+    return {
+      value: undefined,
+      error: `does not parse: ${document.errors[0].message}`,
+    };
+  }
+  return { value: document.toJS(), error: null };
+}
+
+/**
+ * A deep-equality key for a YAML value that ignores mapping key order --
+ * order is not semantically significant for a YAML mapping -- while keeping
+ * sequence order, which is. `undefined` never reaches this function: both
+ * canonicalYaml failure paths report `error` instead, and every call site
+ * checks `error` first.
+ */
+function yamlComparisonKey(value) {
+  if (Array.isArray(value))
+    return `[${value.map(yamlComparisonKey).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${yamlComparisonKey(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * Verdict for one changed YAML path. `before` and `after` are the file's text
+ * at each ref, or null where it does not exist on that side.
+ */
+export function yamlVerdict({ path, before, after }) {
+  const left = canonicalYaml(before);
+  const right = canonicalYaml(after);
+  if (left.error !== null || right.error !== null) {
+    return {
+      path,
+      verdict: "unverifiable",
+      reason: [left.error, right.error]
+        .filter((error) => error !== null)
+        .join("; "),
+    };
+  }
+  return {
+    path,
+    verdict:
+      yamlComparisonKey(left.value) === yamlComparisonKey(right.value)
+        ? "comment-only"
+        : "executable-delta",
+  };
+}
+
+/**
  * Verdict for one changed path. `before` and `after` are the file's text at each
  * ref, or null where it does not exist on that side; both are ignored for a path
  * decided by classification alone.
@@ -121,9 +232,10 @@ export function fileVerdict({ path, before, after }) {
       path,
       verdict: "unverifiable",
       reason:
-        "not markdown and not a TypeScript/JavaScript path -- this verifier cannot read it for executable content",
+        "not markdown, YAML, or a TypeScript/JavaScript path -- this verifier cannot read it for executable content",
     };
   }
+  if (classification === "yaml") return yamlVerdict({ path, before, after });
   const left = canonicalSource(before, path);
   const right = canonicalSource(after, path);
   if (left.parseErrors !== 0 || right.parseErrors !== 0) {
@@ -240,14 +352,17 @@ export function collectVerdicts({ attested, head, git }) {
         reason: `file mode changed from ${mode.beforeMode} to ${mode.afterMode} -- this verifier compares file content, not modes`,
       };
     }
-    // Content is read only for a parseable source path; an exempt or
-    // unverifiable verdict is decided by the path alone.
-    const isSource = classifyPath(path) === "source";
+    // Content is read only for a parseable path; an exempt or unverifiable
+    // verdict is decided by the path alone.
+    const readContent = needsContent(path);
     return fileVerdict({
       path,
       before:
-        isSource && sides.before ? git(["show", `${attested}:${path}`]) : null,
-      after: isSource && sides.after ? git(["show", `${head}:${path}`]) : null,
+        readContent && sides.before
+          ? git(["show", `${attested}:${path}`])
+          : null,
+      after:
+        readContent && sides.after ? git(["show", `${head}:${path}`]) : null,
     });
   });
 }
@@ -304,6 +419,40 @@ const PROBES = [
     run: () =>
       canonicalSource("const a = ;\nfunction (\n", "probe.ts").parseErrors >
         0 && canonicalSource("const a = 1;\n", "probe.ts").parseErrors === 0,
+  },
+  {
+    name: "a YAML comment change reads as comment-only",
+    run: () =>
+      yamlComparisonKey(canonicalYaml("a: 1 # x\nb: 2\n").value) ===
+      yamlComparisonKey(canonicalYaml("a: 1 # y\nb: 2\n").value),
+  },
+  {
+    name: "reordering YAML mapping keys reads as comment-only",
+    run: () =>
+      yamlComparisonKey(canonicalYaml("a: 1\nb: 2\n").value) ===
+      yamlComparisonKey(canonicalYaml("b: 2\na: 1\n").value),
+  },
+  {
+    name: "reordering a YAML sequence reads as a change",
+    run: () =>
+      yamlComparisonKey(canonicalYaml("a:\n  - 1\n  - 2\n").value) !==
+      yamlComparisonKey(canonicalYaml("a:\n  - 2\n  - 1\n").value),
+  },
+  {
+    name: "a duplicate YAML key is refused rather than resolved last-wins",
+    run: () => canonicalYaml("a: 1\na: 2\n").error !== null,
+  },
+  {
+    name: "a multi-document YAML stream is refused rather than compared partially",
+    run: () => canonicalYaml("a: 1\n---\nb: 2\n").error !== null,
+  },
+  {
+    name: "an absent YAML side canonicalizes to the same value as an empty document",
+    run: () =>
+      canonicalYaml(null).error === null &&
+      canonicalYaml(null).value === null &&
+      canonicalYaml("# comment only\n").error === null &&
+      canonicalYaml("# comment only\n").value === null,
   },
 ];
 

@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   canonicalSource,
+  canonicalYaml,
   classifyPath,
   collectVerdicts,
   fileVerdict,
@@ -20,6 +21,7 @@ import {
   sidesForStatus,
   soundnessProbes,
   summarize,
+  yamlVerdict,
 } from "./verify-nonexecutable-delta.mjs";
 
 // These tests, not the comparison, are the load-bearing part of the verifier:
@@ -137,9 +139,18 @@ describe("path classification", () => {
     expect(classifyPath("README.MD")).toBe("exempt");
   });
 
-  it("fails closed on every other path, rather than exempting a non-source extension", () => {
+  it("treats .yml and .yaml as parseable YAML", () => {
     for (const path of [
       ".github/workflows/static_checks.yaml",
+      ".github/actions/setup/action.yml",
+      "deep/dir/a.YAML",
+    ]) {
+      expect(classifyPath(path)).toBe("yaml");
+    }
+  });
+
+  it("fails closed on every other path, rather than exempting a non-source extension", () => {
+    for (const path of [
       "package.json",
       "Dockerfile",
       "scripts/release.sh",
@@ -154,13 +165,13 @@ describe("path classification", () => {
 
   it("decides an exempt or unverifiable path without reading either side", () => {
     expect(verdictOf("# heading\n", "# other\n", "docs/X.md")).toBe("exempt");
-    const yaml = fileVerdict({
-      path: ".github/workflows/x.yaml",
+    const dockerfile = fileVerdict({
+      path: "Dockerfile",
       before: null,
       after: null,
     });
-    expect(yaml.verdict).toBe("unverifiable");
-    expect(yaml.reason).toMatch(/cannot read it/);
+    expect(dockerfile.verdict).toBe("unverifiable");
+    expect(dockerfile.reason).toMatch(/cannot read it/);
   });
 });
 
@@ -237,6 +248,102 @@ describe("unparseable content", () => {
     });
     expect(result.verdict).toBe("unverifiable");
     expect(result.reason).toMatch(/parse errors/);
+  });
+});
+
+// Every claim below about the `yaml` package's behavior -- duplicate-key
+// rejection, multi-document handling, key-order insensitivity -- was measured
+// by running it, the same discipline the TypeScript comparison above holds
+// itself to.
+describe("YAML comparison", () => {
+  const yamlVerdictOf = (before, after, path = "a.yaml") =>
+    yamlVerdict({ path, before, after }).verdict;
+
+  it("reads a comment-only edit as comment-only", () => {
+    expect(yamlVerdictOf("a: 1 # note\nb: 2\n", "a: 1\nb: 2 # moved\n")).toBe(
+      "comment-only",
+    );
+  });
+
+  it("reads reordered mapping keys as comment-only", () => {
+    expect(yamlVerdictOf("a: 1\nb: 2\n", "b: 2\na: 1\n")).toBe("comment-only");
+  });
+
+  it("reads a one-key value change as a content difference", () => {
+    expect(yamlVerdictOf("a: 1\nb: 2\n", "a: 1\nb: 3\n")).toBe(
+      "executable-delta",
+    );
+  });
+
+  it("reads a reordered sequence as a content difference", () => {
+    expect(yamlVerdictOf("a:\n  - 1\n  - 2\n", "a:\n  - 2\n  - 1\n")).toBe(
+      "executable-delta",
+    );
+  });
+
+  it("refuses a duplicate key rather than resolving it last-wins", () => {
+    const result = yamlVerdict({
+      path: "a.yaml",
+      before: "a: 1\n",
+      after: "a: 1\na: 2\n",
+    });
+    expect(result.verdict).toBe("unverifiable");
+    expect(result.reason).toMatch(/does not parse/);
+  });
+
+  it("refuses a multi-document stream rather than comparing it partially", () => {
+    const result = yamlVerdict({
+      path: "a.yaml",
+      before: "a: 1\n",
+      after: "a: 1\n---\nb: 2\n",
+    });
+    expect(result.verdict).toBe("unverifiable");
+    expect(result.reason).toMatch(/documents in one stream/);
+  });
+
+  it("refuses a document that does not parse", () => {
+    const result = yamlVerdict({
+      path: "a.yaml",
+      before: "a: 1\n",
+      after: 'a: "unterminated\n',
+    });
+    expect(result.verdict).toBe("unverifiable");
+    expect(result.reason).toMatch(/does not parse/);
+  });
+
+  it("canonicalizes an absent side to the same value as an empty document", () => {
+    expect(canonicalYaml(null)).toEqual({ value: null, error: null });
+    expect(canonicalYaml("# only a comment\n")).toEqual({
+      value: null,
+      error: null,
+    });
+  });
+
+  it("reads adding or deleting a comment-only YAML file as comment-only", () => {
+    expect(yamlVerdictOf(null, "# only a comment\n")).toBe("comment-only");
+    expect(yamlVerdictOf("# only a comment\n", null)).toBe("comment-only");
+  });
+
+  it("reads adding or deleting a YAML file carrying a value as a content difference", () => {
+    expect(yamlVerdictOf(null, "a: 1\n")).toBe("executable-delta");
+    expect(yamlVerdictOf("a: 1\n", null)).toBe("executable-delta");
+  });
+
+  it("decides a yaml path through fileVerdict the same way", () => {
+    expect(
+      fileVerdict({
+        path: ".github/workflows/x.yaml",
+        before: "on: push\n",
+        after: "on: push # trigger\n",
+      }).verdict,
+    ).toBe("comment-only");
+    expect(
+      fileVerdict({
+        path: ".github/workflows/x.yaml",
+        before: "on: push\n",
+        after: "on: pull_request\n",
+      }).verdict,
+    ).toBe("executable-delta");
   });
 });
 
@@ -421,7 +528,7 @@ describe("against a real git repository", () => {
   const byPath = (verdicts) =>
     Object.fromEntries(verdicts.map((v) => [v.path, v.verdict]));
 
-  it("verdicts a modified, added, deleted, markdown, and non-source path from one real diff", () => {
+  it("verdicts a modified, added, deleted, markdown, YAML, and non-source path from one real diff", () => {
     const { git, write, remove, commit } = makeFixture();
     write("src/commented.ts", "export const a = 1;\n");
     write("src/changed.ts", "export const b = 1;\n");
@@ -448,21 +555,26 @@ describe("against a real git repository", () => {
       "src/added.mjs": "executable-delta",
       "docs/notes.md": "exempt",
       "package.json": "unverifiable",
-      ".github/workflows/ci.yaml": "unverifiable",
+      ".github/workflows/ci.yaml": "executable-delta",
     });
     expect(summarize(verdicts).exitCode).toBe(1);
   });
 
-  it("exits 0 for a real diff that is comments and markdown only", () => {
+  it("exits 0 for a real diff that is comments, markdown, and YAML formatting only", () => {
     const { git, write, remove, commit } = makeFixture();
     write("src/kept.ts", "export const a = 1;\n");
     write("src/gone.mts", "/* only a comment */\n");
     write("README.md", "# Fixture\n");
+    write(".github/workflows/ci.yaml", "on:\n  push: {}\n  pull_request: {}\n");
     const attested = commit("Base");
 
     write("src/kept.ts", "export const a = 1; // trailing\n");
     remove("src/gone.mts");
     write("README.md", "# Fixture\n\nRewritten wholesale.\n");
+    write(
+      ".github/workflows/ci.yaml",
+      "on: # reordered and reformatted\n  pull_request: {}\n  push: {}\n",
+    );
     const head = commit("Comments and markdown");
 
     const result = summarize(collectVerdicts({ attested, head, git }));
@@ -543,6 +655,23 @@ describe("against a real git repository", () => {
     expect(byPath(collectVerdicts({ attested, head, git }))).toEqual({
       "docs/plain.md": "unverifiable",
       "docs/rewritten.md": "unverifiable",
+    });
+  });
+
+  it("fails a chmod on a YAML path regardless of its content verdict", () => {
+    const { git, write, chmod, commit } = makeFixture();
+    write(".github/workflows/unchanged.yaml", "on: push\n");
+    write(".github/workflows/commented.yaml", "on: push\n");
+    const attested = commit("Base");
+
+    chmod(".github/workflows/unchanged.yaml", 0o755);
+    chmod(".github/workflows/commented.yaml", 0o755);
+    write(".github/workflows/commented.yaml", "on: push # note\n");
+    const head = commit("Chmod the workflows");
+
+    expect(byPath(collectVerdicts({ attested, head, git }))).toEqual({
+      ".github/workflows/unchanged.yaml": "unverifiable",
+      ".github/workflows/commented.yaml": "unverifiable",
     });
   });
 
