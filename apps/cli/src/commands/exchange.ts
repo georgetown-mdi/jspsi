@@ -22,6 +22,7 @@ import {
   announceRetainMode,
   assertRetainSweepGuard,
   DEFAULT_CONFIG_PATH,
+  warnOnLinkageRuleSetCitationDrift,
 } from "../config";
 import { expandTilde } from "../fileUtils";
 import { establishHostKeyTrust } from "../hostKeyTrust";
@@ -395,6 +396,13 @@ export function loadConfig(options: ExchangeOptions): {
     ...exchangeDataSpec
   } = resolvedSpec;
   log.info("loaded exchange spec from", options.configFile);
+
+  if (exchangeDataSpec.linkageTerms !== undefined)
+    warnOnLinkageRuleSetCitationDrift(
+      exchangeDataSpec.linkageTerms,
+      options.configFile,
+      log,
+    );
 
   const connection = applyConnectionOverrides(
     baseConn,

@@ -59,6 +59,14 @@ Durations on the command line are written as a positive integer followed by a si
 
 The timeout flags `--connection-timeout`, `--peer-timeout`, and `--accept-timeout` also have a sanity ceiling of `7d`: a value above it is rejected with a usage error naming the flag and the maximum, before any connection attempt, token, or file write. A timeout is a coordination window that even a generous async setup measures in hours, so a value past a week is treated as a mistake rather than an intent; this is a usability guard, not a security bound (the accept window is in any case bounded by the invitation lifetime). It is separate from the `--expires-in` one-year ceiling, which bounds how long the invitation stays valid rather than how long a command waits.
 
+### A rule-set citation that no longer fits
+
+`linkage_terms.linkage_rule_set` names the rule set your linkage fields and keys were drawn from, and every path that fills those lists in for you writes it -- including the template `psilink init` produces. Nothing re-decides it when you edit `linkage_fields` or `linkage_keys` by hand, so a citation can outlive the rules it describes and travel that way onto the invitation, your partner's terms review, and both parties' exchange records. See [`linkage_terms.linkage_rule_set`](EXCHANGE_REFERENCE.md#linkage_termslinkage_rule_set) for what the citation does and does not settle.
+
+Every command that reads linkage terms out of a configuration file checks the citation against that file's own rules and warns when they no longer support it, naming the cited set and which of the two lists diverged: `psilink exchange`, an offline `psilink invite` that takes its terms from the configuration, a `psilink accept` that reuses one already at the path, and `psilink verify-receipt` reading your terms from `--config-file`. It is a warning, not a refusal -- the file is yours, and the citation is recorded and displayed but never selects or alters matching, so the command proceeds. Omit `linkage_rule_set` for rules you author yourself, or restore the rules the cited set declares.
+
+Only a set this build ships can be checked. A citation naming another set, or the built-in set at a version this build does not carry, passes without comment: there is nothing behind that name here to compare your rules against. The field set and the key set are checked separately, so a citation pairing a name this build does not know with the built-in key set is still held to the built-in keys. A partner's citation on an invitation is their statement about their own rules and is not checked here either.
+
 ## Initialization
 
 ```sh
