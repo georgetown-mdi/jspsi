@@ -14,6 +14,7 @@ import {
   LINKAGE_RULE_SET_VERDICT_COPY,
   UNRECOGNIZED_TRANSFORM_NOTE,
   getDefaultLinkageTerms,
+  linkageRuleSetVerdictNote,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -409,21 +410,25 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     expect(app.container.textContent).toContain('"hmis-keys 9.9.9" 2.3.0');
   });
 
-  test("the viewer's own proposing preview cites the set without attributing it to a partner, and still states a disproved half", async () => {
+  test("the viewer's own proposing preview cites the set without attributing it to a partner, and states a disproved half as theirs to correct", async () => {
     // Under "proposing" the terms are the viewer's own -- the console's direct
     // exchange states outright that there is no invitation for a partner to
     // review -- so the citation is the operator's own word. The names, versions,
     // and verdicts still render (they are true of these terms whoever authored
     // them); the caveat that a PARTNER cites them does not. The disproved half's
     // warning is not attribution -- it is this build's finding about the document
-    // on screen -- so it renders here too, where it is the operator's own
-    // citation about to be minted.
+    // on screen -- so it renders here too, in the reading that fits this reader:
+    // the remedy is the one they can act on, not the recipient's "settle it with
+    // the other party" over a document they cannot edit.
     renderTerms(citingTerms, { perspective: "proposing" });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
     expect(app.container.textContent).toContain("Linkage rule set");
     expect(app.container.textContent).toContain('"hmis-keys" 2.3.0');
     expect(app.container.textContent).toContain('"baseline-pii" 1.0.0');
     expect(app.container.textContent).toContain(
+      linkageRuleSetVerdictNote("contradicted", "citing-party"),
+    );
+    expect(app.container.textContent).not.toContain(
       LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note,
     );
     expect(app.container.textContent).not.toContain(

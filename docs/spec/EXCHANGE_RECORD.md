@@ -70,7 +70,7 @@ Three limits on what it asserts:
 
 Omitted when the agreed terms cited no set (their rules were authored rather than drawn from one) -- absent by omission, never a null, which is why the record's format version moves with it.
 
-**Where it is read.** The web disclosure-accounting screen and the CSV it exports present it beside the matching basis, each half named and versioned, so a governance reader answers "which rules did this linkage match on" from the accounting alone. Both carry a caveat with it, since a citation shown bare would read as a checked provenance: nothing resolved its names to a set or checked them against the fields the run matched on, and the matching basis beside it is what the exchange held both parties to. A record whose terms cited no set reads as that rather than as a blank.
+**Where it is read.** The web disclosure-accounting screen and the CSV it exports present it beside the matching basis, each half named and versioned, so a governance reader answers "which rules did this linkage match on" from the accounting alone. Both carry a caveat with it, since a citation shown bare would read as a checked provenance: the caveat states that the citation is the authoring party's own declaration recorded as written, sends the reader to the [verdict](#the-writing-partys-verdict) recorded beside it for what the writing party could establish about the names, and names the matching basis as what the exchange held both parties to. A record whose terms cited no set reads as that rather than as a blank.
 
 #### The writing party's verdict
 
@@ -96,7 +96,7 @@ Four properties fix how the row is read.
 
 **It changes nothing about the run.** The verdict is written after the exchange, from terms both parties already agreed; which fields and keys a run matches on, and what it discloses, are settled entirely by the declared rules. Both parties write it on the same rule -- the inviting party over its own citation, the accepting party over the inviter's citation as adopted -- so the row means the same thing in either record.
 
-Besides the record, the verdict is surfaced beside the citation on the pre-consent accept prompt (CLI) and consent review screen (web), before either party commits: [`linkage_terms.linkage_rule_set`](../EXCHANGE_REFERENCE.md#linkage_termslinkage_rule_set) and [the design note behind it](../notes/rule-set-citation-verdict.md) cover where and why. The disclosure accounting is not among those surfaces: it presents the citation under its caveat, not the verdict beside it.
+Besides the record, the verdict is surfaced beside the citation on the pre-consent accept prompt (CLI) and consent review screen (web), before either party commits: [`linkage_terms.linkage_rule_set`](../EXCHANGE_REFERENCE.md#linkage_termslinkage_rule_set) and [the design note behind it](../notes/rule-set-citation-verdict.md) cover where and why. The disclosure accounting is not among those surfaces: it presents the citation under its caveat, whose pointer to the verdict beside it in the record is as far as it goes -- the value itself is not a row there.
 
 ## Retention and disposition pointer
 
