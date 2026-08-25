@@ -4019,12 +4019,16 @@ test("handler: the server named on both surfaces keeps its port at any host leng
   // The port is the reason this line carries more than the plain authority, and
   // a host is partner-supplied at up to the length the whole display budget
   // allows -- so escaping a joined "host:port" would cut away exactly the value
-  // the line exists to add. Driven at the longest host that still resolves to a
-  // dialable authority, on both surfaces that name the server.
+  // the line exists to add. Driven at the longest host an invitation can carry,
+  // on both surfaces that name the server: the endpoint schema's maximum is
+  // inclusive, and it is exactly the per-value display cap, so an admissible
+  // host of that length is the equality case of the escape's own comparison.
+  // One character short of it leaves that case undriven.
   const fixture = offlineAcceptFixture();
   const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
   runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
-  const host = `${"h".repeat(MAX_ENDPOINT_HOST_LENGTH - 5)}.org`;
+  const host = `${"h".repeat(MAX_ENDPOINT_HOST_LENGTH - 4)}.org`;
+  expect(host).toHaveLength(MAX_ENDPOINT_HOST_LENGTH);
   try {
     const encoded = await encodeInvitation(
       sampleToken(FUTURE(), { ...WEBRTC_ENDPOINT, host }),
