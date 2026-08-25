@@ -9,11 +9,7 @@ import {
   Switch,
   VisuallyHidden,
 } from "@mantine/core";
-import {
-  IconAlertCircle,
-  IconArrowDown,
-  IconArrowUp,
-} from "@tabler/icons-react";
+import { IconArrowDown, IconArrowUp } from "@tabler/icons-react";
 
 import {
   APPLIED_SETTINGS,
@@ -30,6 +26,8 @@ import {
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { TermsImportExport } from "@components/TermsImportExport";
 
+import { CITATION_DROP_TITLE, CitationDropNotice } from "./CitationDropNotice";
+
 import {
   declaredFieldsFor,
   keySatisfiabilityFor,
@@ -40,12 +38,6 @@ import styles from "./bench.module.css";
 import type { AcquiredCsv, InviterEditor, KeyVerdict } from "./inviterModel";
 import type { Algorithm, LinkageStrategy, LinkageTerms } from "@psilink/core";
 import type { AdvancedInviteDraft } from "@psi/advancedInvite";
-
-/** The dropped-citation Alert's title, reused as the live region's announced
- * headline so a screen reader hears the short heading -- not the full body twice
- * (once as a live update, once in reading order next to the Alert). */
-const CITATION_DROP_TITLE =
-  "The imported rule-set citation will not be carried";
 
 /** The guided-list badge copy and CSS class for each per-key verdict
  * ({@link KeyVerdict}). A dead key warns ("won't match", amber) rather than
@@ -79,10 +71,12 @@ const KEY_VERDICT_BADGES: Record<
  * strategy, matching method, and deduplication controls, each live while the
  * exchange applies what it writes.
  *
- * It also carries the one notice about the terms the editor will emit that refuses
+ * It also carries the notice about the terms the editor will emit that refuses
  * nothing: an imported document's rule-set citation the rebuild will not carry
  * ({@link importedCitationDropNotice}), read live from the draft so it appears the
- * moment the import lands or an edit costs the citation.
+ * moment the import lands or an edit costs the citation. Review & create restates
+ * the same notice, since an operator who imports here can leave without reading
+ * it.
  */
 export function KeysTab({
   editor,
@@ -200,24 +194,14 @@ export function KeysTab({
       )}
       {/* Rendered against the key list rather than beside the import control
         below: the list is what costs the citation and what restores it, and the
-        drop outlives the Expert switch the import hides behind. It states a
-        consequence and blocks nothing -- creating without the citation is the
-        right outcome -- so it is not a Problems entry, whose every member holds
-        the create gate shut. The persistent region below announces the headline
-        (this Alert's title), not the body it also renders here: a
-        conditionally-mounted region is missed by screen readers that watch only
-        what is already in the DOM, and repeating the whole body would voice it
-        once as a live update and again in reading order beside the Alert. */}
+        drop outlives the Expert switch the import hides behind. The persistent
+        region below announces the headline (the notice's own title), not the
+        body beside it: a conditionally-mounted region is missed by screen
+        readers that watch only what is already in the DOM, and repeating the
+        whole body would voice it once as a live update and again in reading
+        order. */}
       {citationDrop !== undefined && (
-        <Alert
-          role="note"
-          color="yellow"
-          icon={<IconAlertCircle aria-hidden />}
-          title={CITATION_DROP_TITLE}
-          mt="md"
-        >
-          {citationDrop}
-        </Alert>
+        <CitationDropNotice notice={citationDrop} />
       )}
       <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
         {citationDrop !== undefined ? CITATION_DROP_TITLE : ""}
