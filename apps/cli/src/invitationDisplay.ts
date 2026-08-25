@@ -8,6 +8,8 @@ import {
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   displayText,
+  distinctLinkageRuleSetVerdicts,
+  LINKAGE_RULE_SET_VERDICT_COPY,
   PROPOSED_NOT_APPLIED_NOTES,
   redactAndSanitizeForDisplay,
   summarizeInvitation,
@@ -22,8 +24,10 @@ import type {
   ConsentFactId,
   Displayable,
   InvitationKeySummary,
+  InvitationRuleSetSummary,
   InvitationSummary,
   InvitationToken,
+  LinkageRuleSetCitationVerdict,
   getLogger,
 } from "@psilink/core";
 
@@ -83,6 +87,63 @@ export function consentSurfaceSink(params: {
  */
 function marked(label: string, fact: ConsentFactId): string {
   return `${label} (${CONSENT_BASIS_MARKERS[CONSENT_FACTS[fact].basis]})`;
+}
+
+/**
+ * The label one half of a cited rule set carries: its own wording plus this
+ * build's verdict on that half, from the shared table. It stands in for the basis
+ * marker on these two lines, which the block's own label already carries -- what
+ * an operator needs beside a set name is whether psilink could check it and what
+ * it found, which the enforced/partner's-word vocabulary cannot say.
+ *
+ * On the LABEL for the reason {@link marked} is: the set name and version that
+ * follow are partner-controlled, so a marker placed after them could be
+ * manufactured by a crafted name.
+ */
+function verdictMarked(
+  label: string,
+  verdict: LinkageRuleSetCitationVerdict,
+): string {
+  return `${label} (${LINKAGE_RULE_SET_VERDICT_COPY[verdict].marker})`;
+}
+
+/**
+ * The rules' citation: the two set identities the inviting party names, each
+ * under this build's verdict on it, and then one caveat per verdict in `notes`.
+ *
+ * One renderer for the two places the block appears -- with the terms it cites,
+ * and repeated in the decision block above the prompt -- so the second is a
+ * repetition rather than a second account of the same citation. Only the caveats
+ * differ between them, which is what `notes` selects.
+ *
+ * Keys before fields, since the key set is the specific artifact and the field
+ * set the substrate it is built from. Both names and both versions are
+ * partner-controlled free text, sanitized by the summary, and each follows a
+ * fixed first-party label on its own line so none can begin a line or be read as
+ * carrying the marker before it. The name is quoted, as core's rule-set mismatch
+ * message quotes it: it is free text that may carry a space, so an unquoted name
+ * reading "hmis-keys 9.9.9" would be indistinguishable from the name plus the
+ * schema-constrained semver version beside it. The quoting shares that message's
+ * stated limit: sanitization preserves printable ASCII, so a name carrying a
+ * double quote of its own can close the quote early and fake the line's structure
+ * for a skimming reader.
+ */
+function displayRuleSetCitation(
+  emit: ConsentSurfaceSink,
+  ruleSet: InvitationRuleSetSummary,
+  notes: ReadonlyArray<LinkageRuleSetCitationVerdict>,
+): void {
+  emit(`  ${marked("linkage rule set", "linkageRuleSet")}:`);
+  emit(
+    `    ${verdictMarked("keys", ruleSet.keySet.verdict)}: ` +
+      `"${ruleSet.keySet.name}" ${ruleSet.keySet.version}`,
+  );
+  emit(
+    `    ${verdictMarked("fields", ruleSet.fieldSet.verdict)}: ` +
+      `"${ruleSet.fieldSet.name}" ${ruleSet.fieldSet.version}`,
+  );
+  for (const verdict of notes)
+    emit(`    ${LINKAGE_RULE_SET_VERDICT_COPY[verdict].note}`);
 }
 
 /**
@@ -496,6 +557,24 @@ export function logDecisionFacts(
     );
     emit(`    ${CONSENT_FACTS.retainedFiles.note}`);
   }
+
+  // A citation this build resolved and DISPROVED, repeated here for the reason
+  // the whole block is repeated: the terms run well past a screen, and this fact
+  // has scrolled away by the time the prompt is answered. Accepting writes the
+  // citation into this party's own disclosure record, so the operator answering
+  // the prompt is the one who decides what a name their build can prove wrong is
+  // worth. Only the contradicted CAVEAT is lifted -- the other two verdicts say
+  // what has and has not been checked, which is context for the citation rather
+  // than a fact the decision turns on -- while the citation itself renders whole,
+  // both halves under their own markers, so the operator reads which name is
+  // disproved rather than only that one is.
+  const citation = summary.linkageRuleSet;
+  if (
+    citation !== undefined &&
+    (citation.keySet.verdict === "contradicted" ||
+      citation.fieldSet.verdict === "contradicted")
+  )
+    displayRuleSetCitation(emit, citation, ["contradicted"]);
 }
 
 /**
@@ -699,29 +778,21 @@ export function displayInvitation(params: {
 
   // The rules' citation, ahead of the fields and keys it cites so a reader meets
   // the name before the enumeration it stands for -- and meets, in the same
-  // place, that the name is the inviting party's word while the enumeration
-  // beneath it is what the exchange holds both parties to. Keys first within the
-  // line, since the key set is the specific artifact and the field set the
-  // substrate it is built from. Both names and both versions are partner-
-  // controlled free text, sanitized by the summary. The name is quoted, as core's
-  // rule-set mismatch message quotes it: it is free text that may carry a space,
-  // so an unquoted name reading "hmis-keys 9.9.9" would be indistinguishable from
-  // the name plus the schema-constrained semver version beside it. The quoting
-  // shares that message's stated limit: sanitization preserves printable ASCII,
-  // so a name carrying a double quote of its own can close the quote early and
-  // fake the line's structure for a skimming reader.
-  if (summary.linkageRuleSet !== undefined) {
-    emit(`  ${marked("linkage rule set", "linkageRuleSet")}:`);
-    emit(
-      `    keys: "${summary.linkageRuleSet.keySet.name}" ` +
-        `${summary.linkageRuleSet.keySet.version}`,
+  // place, that the name is the inviting party's word, that this build's own
+  // verdict on it is beside it, and that the enumeration beneath is what the
+  // exchange holds both parties to. Here the block carries one caveat per DISTINCT
+  // verdict the two halves reached, in descending severity, rather than one per
+  // half: where both halves reached the same verdict the sentence covers both, and
+  // where they differ each half's marker is what ties it to its caveat.
+  if (summary.linkageRuleSet !== undefined)
+    displayRuleSetCitation(
+      emit,
+      summary.linkageRuleSet,
+      distinctLinkageRuleSetVerdicts(
+        summary.linkageRuleSet.keySet.verdict,
+        summary.linkageRuleSet.fieldSet.verdict,
+      ),
     );
-    emit(
-      `    fields: "${summary.linkageRuleSet.fieldSet.name}" ` +
-        `${summary.linkageRuleSet.fieldSet.version}`,
-    );
-    emit(`    ${CONSENT_FACTS.linkageRuleSet.note}`);
-  }
 
   // The short, high-level field list precedes the long key list: the keys enumerate
   // the combinations OF these fields, and on a terminal the block printed second is

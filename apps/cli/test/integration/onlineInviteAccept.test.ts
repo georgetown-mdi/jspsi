@@ -401,7 +401,7 @@ async function runOnlineRoundTrip(params: {
       localIdentity?: unknown;
       partnerIdentity?: unknown;
     };
-    expect(record.version).toBe("psilink-exchange-record/v3");
+    expect(record.version).toBe("psilink-exchange-record/v4");
     expect(record.localIdentity).toBe(party.local);
     expect(record.partnerIdentity).toBe(party.partner);
   }

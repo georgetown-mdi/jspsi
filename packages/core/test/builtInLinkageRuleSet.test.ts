@@ -6,6 +6,7 @@ import {
   DEFAULT_LINKAGE_KEY_SET_NAME,
   DEFAULT_LINKAGE_KEY_SET_VERSION,
   DEFAULT_LINKAGE_RULE_SET,
+  checkLinkageRuleSetCitation,
   getDefaultLinkageTerms,
   isDrawnFromLinkageRuleSet,
   linkageRuleSetReferenceFor,
@@ -270,5 +271,161 @@ describe("linkageRuleSetReferenceFor", () => {
     // citation either, rather than leaving the vacuous one to the downstream
     // rejection.
     expect(noSupplyableKey.linkageRuleSet).toBeUndefined();
+  });
+});
+
+describe("checkLinkageRuleSetCitation", () => {
+  const cite = (
+    rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
+    citation = DEFAULT_LINKAGE_RULE_SET.reference,
+  ) => checkLinkageRuleSetCitation(citation, rules);
+
+  test("reads a truthful citation as consistent on both halves", () => {
+    expect(cite(wholeSet())).toStrictEqual({
+      fieldSet: "consistent",
+      keySet: "consistent",
+    });
+    // A narrowed emission is still drawn from the set: what an input file cannot
+    // supply is left out, and nothing is added.
+    const narrowed = getDefaultLinkageTerms("Party A", [
+      col("s", "ssn"),
+      col("l", "last_name"),
+      col("d", "date_of_birth"),
+    ]);
+    expect(narrowed.linkageKeys.length).toBeLessThan(
+      DEFAULT_LINKAGE_RULE_SET.linkageKeys.length,
+    );
+    expect(cite(narrowed)).toStrictEqual({
+      fieldSet: "consistent",
+      keySet: "consistent",
+    });
+  });
+
+  test("reads rules the build can prove are not the set as contradicted", () => {
+    // An added key, an edited field, and a reordered cascade: three of the edits
+    // the drawn-from predicate refuses, each landing on the half it belongs to.
+    const added = wholeSet();
+    added.linkageKeys.push({
+      name: "LN only",
+      elements: [{ field: "last_name" }],
+    });
+    expect(cite(added)).toStrictEqual({
+      fieldSet: "consistent",
+      keySet: "contradicted",
+    });
+
+    const edited = wholeSet();
+    delete edited.linkageFields[0].constraints;
+    expect(cite(edited)).toStrictEqual({
+      fieldSet: "contradicted",
+      keySet: "consistent",
+    });
+
+    const reordered = wholeSet();
+    reordered.linkageKeys.reverse();
+    expect(cite(reordered).keySet).toBe("contradicted");
+  });
+
+  test("reads a set this build does not ship as unchecked, never contradicted", () => {
+    // Nothing here resolves a partner's set name: an unresolvable name is not
+    // compared against anything, whatever the declared rules turn out to be.
+    const foreign = {
+      fieldSet: { name: "county-pii", version: "3.1.0" },
+      keySet: { name: "county-keys", version: "3.1.0" },
+    };
+    const edited = wholeSet();
+    edited.linkageKeys.reverse();
+    expect(cite(edited, foreign)).toStrictEqual({
+      fieldSet: "unchecked",
+      keySet: "unchecked",
+    });
+    expect(cite(wholeSet(), foreign)).toStrictEqual({
+      fieldSet: "unchecked",
+      keySet: "unchecked",
+    });
+  });
+
+  test("resolves each half on its own name AND version", () => {
+    // A half is resolvable only at the exact version this build ships: the name
+    // alone identifies no fixed content, so a version it does not ship is a set
+    // it cannot check.
+    const shipped = DEFAULT_LINKAGE_RULE_SET.reference;
+    expect(
+      cite(wholeSet(), {
+        fieldSet: shipped.fieldSet,
+        keySet: { name: shipped.keySet.name, version: "2.3.0" },
+      }),
+    ).toStrictEqual({ fieldSet: "consistent", keySet: "unchecked" });
+    expect(
+      cite(wholeSet(), {
+        fieldSet: { name: "county-pii", version: "3.1.0" },
+        keySet: shipped.keySet,
+      }),
+    ).toStrictEqual({ fieldSet: "unchecked", keySet: "consistent" });
+  });
+
+  test("agrees with the whole-set predicate wherever both halves resolve", () => {
+    // The verdict IS the drawn-from predicate, taken per half: it widens and
+    // narrows that notion nowhere.
+    const addedKey = wholeSet();
+    addedKey.linkageKeys.push({
+      name: "LN only",
+      elements: [{ field: "last_name" }],
+    });
+    const reordered = wholeSet();
+    reordered.linkageKeys.reverse();
+    const editedField = wholeSet();
+    delete editedField.linkageFields[0].constraints;
+    for (const rules of [wholeSet(), addedKey, reordered, editedField]) {
+      const verdicts = cite(rules);
+      const bothConsistent =
+        verdicts.fieldSet === "consistent" && verdicts.keySet === "consistent";
+      expect(bothConsistent).toBe(
+        isDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, rules),
+      );
+    }
+  });
+});
+
+describe("the built-in citation resists mutation", () => {
+  test("the reference and its halves are frozen, in place and by replacement", () => {
+    // The one object is aliased into every derived terms document and from there
+    // into each party's exchange record, so an in-place edit would rewrite the
+    // built-in citation process-wide. Module code is strict, so each attempt
+    // throws rather than silently failing.
+    const reference = DEFAULT_LINKAGE_RULE_SET.reference as {
+      keySet: { name: string; version: string };
+      fieldSet: { name: string; version: string };
+    };
+    expect(() => {
+      reference.keySet.name = "poisoned-keys";
+    }).toThrow(TypeError);
+    expect(() => {
+      reference.fieldSet.version = "9.9.9";
+    }).toThrow(TypeError);
+    expect(() => {
+      reference.keySet = { name: "poisoned-keys", version: "9.9.9" };
+    }).toThrow(TypeError);
+    expect(() => {
+      (DEFAULT_LINKAGE_RULE_SET as { reference: unknown }).reference = {
+        fieldSet: { name: "poisoned-pii", version: "9.9.9" },
+        keySet: { name: "poisoned-keys", version: "9.9.9" },
+      };
+    }).toThrow(TypeError);
+
+    expect(DEFAULT_LINKAGE_RULE_SET.reference).toStrictEqual({
+      fieldSet: {
+        name: DEFAULT_LINKAGE_FIELD_SET_NAME,
+        version: DEFAULT_LINKAGE_FIELD_SET_VERSION,
+      },
+      keySet: {
+        name: DEFAULT_LINKAGE_KEY_SET_NAME,
+        version: DEFAULT_LINKAGE_KEY_SET_VERSION,
+      },
+    });
+    // And a document derived after those attempts still cites the real set.
+    expect(getDefaultLinkageTerms("Party A").linkageRuleSet).toStrictEqual(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
   });
 });

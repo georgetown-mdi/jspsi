@@ -25,6 +25,8 @@
 //
 // Rationale and the decisions taken: docs/notes/shared-consent-summary.md.
 
+import type { LinkageRuleSetCitationVerdict } from "./defaults/linkageTerms.js";
+
 /**
  * Whether the exchange holds a consent fact itself, or the fact is the inviting
  * party's declaration -- shown faithfully, neither verified nor enforceable.
@@ -398,18 +400,15 @@ export const CONSENT_FACTS = {
     reason:
       "The inviting party's citation of its own rules -- two names and two " +
       "content versions it wrote into the invitation, carried on a " +
-      "transcription checksum. Nothing here is checked against the keys and " +
-      "fields the same invitation declares, and nothing resolves a name to a " +
-      "set: a document may cite a set this build ships while declaring rules " +
-      "that are not it. Where BOTH parties cite a set the two citations must " +
-      "match before data moves, but that binds an acceptor to the inviter's " +
-      "own string rather than vouching for it. What consent actually turns on " +
-      "is the declared keys and fields shown beside this, which ARE " +
-      "byte-compared between the parties.",
-    note:
-      "Your partner cites this rule set for the keys and fields below; " +
-      "psilink has not checked them against it. The keys and fields " +
-      "themselves are what the exchange holds both parties to.",
+      "transcription checksum. Nothing authenticates them, and where BOTH " +
+      "parties cite a set the two citations must match before data moves, " +
+      "which binds an acceptor to the inviter's own string rather than " +
+      "vouching for it. What consent actually turns on is the declared keys " +
+      "and fields shown beside this, which ARE byte-compared between the " +
+      "parties. The caveat this row would otherwise carry is per half and " +
+      "per verdict, so it lives in LINKAGE_RULE_SET_VERDICT_COPY below: a " +
+      "single sentence cannot serve a name this build resolved and one it " +
+      "could not.",
   },
   invitationExpiry: {
     basis: "enforced",
@@ -478,6 +477,86 @@ export const CONSENT_BASIS_MARKERS: Record<ConsentFactBasis, string> = {
   enforced: "enforced",
   "trust-contingent": "your partner's word",
 };
+
+/**
+ * The marker and the caveat a surface renders for ONE half of a cited linkage
+ * rule set, keyed by this build's verdict on that half
+ * ({@link LinkageRuleSetCitationVerdict}).
+ *
+ * Keyed by verdict rather than carried on the `linkageRuleSet` fact because the
+ * caveat is exactly what the verdict changes. The fixed sentence that fact used
+ * to carry asserted psilink had checked nothing, which is false of a half whose
+ * name this build resolves and compares -- and the two halves are decided
+ * independently, so one document can need two different sentences at once.
+ *
+ * The marker goes on the half's own first-party LABEL, in place of the basis
+ * marker, for two reasons. The basis vocabulary answers a different question
+ * (does the exchange hold this, or does the partner's word) and has no way to say
+ * that a citation has been disproved. And a marker placed after the value would
+ * sit behind partner-controlled text on the line, where a crafted set name could
+ * manufacture one.
+ *
+ * A `contradicted` half is a warning, never a refusal: the exchange still runs on
+ * the declared keys and fields, which are what both parties are held to, and an
+ * operator reading both the citation and the declared rules on one screen is the
+ * party who decides what the mismatch means.
+ *
+ * Fixed first-party copy throughout -- no set name, version, or other
+ * partner-controlled value reaches any of it -- so a surface renders it verbatim.
+ */
+export const LINKAGE_RULE_SET_VERDICT_COPY: Record<
+  LinkageRuleSetCitationVerdict,
+  { marker: string; note: string }
+> = {
+  consistent: {
+    marker: "checked: matches",
+    note:
+      "A half marked as matching names a rule set psilink ships, and the rules " +
+      "declared for it are drawn from that set. The declared keys and fields " +
+      "are still what the exchange holds both parties to.",
+  },
+  contradicted: {
+    marker: "checked: does not match",
+    note:
+      "A half marked as not matching names a rule set psilink ships, and the " +
+      "rules declared for it are NOT drawn from that set -- so the citation " +
+      "does not describe what the exchange would match on. Treat the name as " +
+      "unreliable and settle it with the other party; the declared keys and " +
+      "fields are what the exchange holds both parties to, and what would run.",
+  },
+  unchecked: {
+    marker: "not checked",
+    note:
+      "A half marked as not checked names a rule set psilink does not ship, so " +
+      "nothing was compared against it. Your partner's declared keys and " +
+      "fields are what the exchange holds both parties to.",
+  },
+};
+
+/** The order the caveats above are stated in, most severe first: a reader who
+ * stops after one line has read the one that changes their decision. */
+const LINKAGE_RULE_SET_VERDICT_SEVERITY: ReadonlyArray<LinkageRuleSetCitationVerdict> =
+  ["contradicted", "unchecked", "consistent"];
+
+/**
+ * The verdicts a citation's halves reached, deduplicated and ordered most severe
+ * first: the caveats a surface renders beneath the two half lines, one per
+ * distinct verdict rather than one per half.
+ *
+ * Shared for the reason the copy above is. The two halves usually agree, so a
+ * per-half caveat would print one sentence twice; which sentences are printed,
+ * and in what order, is then a judgment both surfaces must make identically, and
+ * a renderer deciding it inline could state a `contradicted` half second or drop
+ * it against a `consistent` one.
+ */
+export function distinctLinkageRuleSetVerdicts(
+  ...verdicts: ReadonlyArray<LinkageRuleSetCitationVerdict>
+): Array<LinkageRuleSetCitationVerdict> {
+  const reached = new Set(verdicts);
+  return LINKAGE_RULE_SET_VERDICT_SEVERITY.filter((verdict) =>
+    reached.has(verdict),
+  );
+}
 
 /**
  * The sentence a surface renders in the outbound-send slot, in place of any

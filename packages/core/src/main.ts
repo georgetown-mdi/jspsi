@@ -130,6 +130,8 @@ export type {
   InvitationKeySummary,
   InvitationLegalAgreementSummary,
   InvitationPayloadSummary,
+  InvitationRuleSetIdentitySummary,
+  InvitationRuleSetSummary,
   InvitationSummary,
   InvitationTransformSummary,
 } from "./invitationSummary.js";
@@ -143,9 +145,11 @@ export {
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  LINKAGE_RULE_SET_VERDICT_COPY,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
   UNRECOGNIZED_TRANSFORM_NOTE,
+  distinctLinkageRuleSetVerdicts,
 } from "./consentFacts.js";
 export type {
   ConsentFact,

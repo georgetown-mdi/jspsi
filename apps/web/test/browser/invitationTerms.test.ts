@@ -11,7 +11,9 @@ import {
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  LINKAGE_RULE_SET_VERDICT_COPY,
   UNRECOGNIZED_TRANSFORM_NOTE,
+  getDefaultLinkageTerms,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -318,7 +320,11 @@ describe("InvitationTerms: per-key matching disclosures", () => {
   });
 
   // Terms citing a rule set, rendered under each perspective below so the three
-  // cases differ at the perspective alone.
+  // cases differ at the perspective alone. The two halves reach DIFFERENT
+  // verdicts against this build, which is what the citation's independent halves
+  // are for: `baseline-pii 1.0.0` is a set this build ships, and the fields above
+  // are not it (no constraints on `ssn`, a field named `dob`), while
+  // `hmis-keys 2.3.0` is a version it does not ship at all.
   const citingTerms: LinkageTerms = {
     ...terms,
     linkageRuleSet: {
@@ -327,21 +333,60 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     },
   };
 
-  test("the rule-set citation is always-visible, marked as the partner's word, and absent when none is cited", async () => {
+  test("the rule-set citation is always-visible, each half carrying this build's verdict, and absent when none is cited", async () => {
     // The citation names the rules the collapsed list below enumerates, so it
-    // stays outside the disclosure: an acceptor reads which set was cited without
-    // expanding. The caveat rides with it in the same place, because the name is
-    // the inviting party's claim and nothing here checks it against the keys.
+    // stays outside the disclosure: an acceptor reads which set was cited, and
+    // what psilink found about it, without expanding. A disproved half must not
+    // be reachable only by opening the matching panel.
     renderTerms(citingTerms, { perspective: "review" });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
     expect(app.container.textContent).toContain("Linkage rule set");
     expect(app.container.textContent).toContain('"hmis-keys" 2.3.0');
     expect(app.container.textContent).toContain('"baseline-pii" 1.0.0');
     expect(app.container.textContent).toContain(
-      CONSENT_FACTS.linkageRuleSet.note,
+      `Keys (${LINKAGE_RULE_SET_VERDICT_COPY.unchecked.marker}):`,
     );
-    expect((await readyPanel("Matching strategies")).textContent).not.toContain(
-      "hmis-keys",
+    expect(app.container.textContent).toContain(
+      `Fields (${LINKAGE_RULE_SET_VERDICT_COPY.contradicted.marker}):`,
+    );
+    // Both halves' caveats, and the disproved one first.
+    expect(app.container.textContent).toContain(
+      LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note,
+    );
+    expect(app.container.textContent).toContain(
+      LINKAGE_RULE_SET_VERDICT_COPY.unchecked.note,
+    );
+    const text = app.container.textContent;
+    expect(
+      text.indexOf(LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note),
+    ).toBeLessThan(text.indexOf(LINKAGE_RULE_SET_VERDICT_COPY.unchecked.note));
+    const panel = (await readyPanel("Matching strategies")).textContent;
+    expect(panel).not.toContain("hmis-keys");
+    expect(panel).not.toContain(
+      LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note,
+    );
+  });
+
+  test("a truthful citation says so rather than reading as unchecked", async () => {
+    // The other side of the same block: rules genuinely drawn from the shipped
+    // sets get a `consistent` verdict on both halves, so the absence of a warning
+    // is never all an acceptor has to go on.
+    const drawnFromDefaults = getDefaultLinkageTerms(
+      "County Health Department",
+    );
+    renderTerms(drawnFromDefaults, { perspective: "review" });
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      `Keys (${LINKAGE_RULE_SET_VERDICT_COPY.consistent.marker}):`,
+    );
+    expect(app.container.textContent).toContain(
+      `Fields (${LINKAGE_RULE_SET_VERDICT_COPY.consistent.marker}):`,
+    );
+    expect(app.container.textContent).toContain(
+      LINKAGE_RULE_SET_VERDICT_COPY.consistent.note,
+    );
+    expect(app.container.textContent).not.toContain(
+      LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note,
     );
   });
 
@@ -364,43 +409,56 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     expect(app.container.textContent).toContain('"hmis-keys 9.9.9" 2.3.0');
   });
 
-  test("the viewer's own proposing preview cites the set without attributing it to a partner", async () => {
+  test("the viewer's own proposing preview cites the set without attributing it to a partner, and still states a disproved half", async () => {
     // Under "proposing" the terms are the viewer's own -- the console's direct
     // exchange states outright that there is no invitation for a partner to
-    // review -- so the citation is the operator's own word. The names and
-    // versions still render (they are true of these terms whoever authored
-    // them); the caveat that a PARTNER cites them does not.
+    // review -- so the citation is the operator's own word. The names, versions,
+    // and verdicts still render (they are true of these terms whoever authored
+    // them); the caveat that a PARTNER cites them does not. The disproved half's
+    // warning is not attribution -- it is this build's finding about the document
+    // on screen -- so it renders here too, where it is the operator's own
+    // citation about to be minted.
     renderTerms(citingTerms, { perspective: "proposing" });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
     expect(app.container.textContent).toContain("Linkage rule set");
     expect(app.container.textContent).toContain('"hmis-keys" 2.3.0');
     expect(app.container.textContent).toContain('"baseline-pii" 1.0.0');
+    expect(app.container.textContent).toContain(
+      LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note,
+    );
     expect(app.container.textContent).not.toContain(
-      CONSENT_FACTS.linkageRuleSet.note,
+      LINKAGE_RULE_SET_VERDICT_COPY.unchecked.note,
     );
   });
 
   test("the attribution caveat is absent from the during-run accepted view, after consent is committed", async () => {
     // Same gate as the unverified-identity note: the caveat is a pre-consent
     // decision-point marker, so it drops once the decision it informs is past.
-    // The citation itself stays, since the accepted terms still carry it.
+    // The citation itself stays, since the accepted terms still carry it, and so
+    // does the disproved half's warning -- what a party accepted a false
+    // provenance under is worth reading back.
     renderTerms(citingTerms, { perspective: "accepted" });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
     expect(app.container.textContent).toContain('"hmis-keys" 2.3.0');
+    expect(app.container.textContent).toContain(
+      LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note,
+    );
     expect(app.container.textContent).not.toContain(
-      CONSENT_FACTS.linkageRuleSet.note,
+      LINKAGE_RULE_SET_VERDICT_COPY.unchecked.note,
     );
   });
 
   test("terms citing no rule set render no citation at all", async () => {
     // Hand-authored rules have no citation, and inventing one would attribute
-    // them -- so the block is absent rather than empty or hedged.
+    // them -- so the block is absent rather than empty or hedged, and there is no
+    // verdict to state about a claim nobody made.
     renderTerms({ ...terms, linkageRuleSet: undefined });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
     expect(app.container.textContent).not.toContain("Linkage rule set");
-    expect(app.container.textContent).not.toContain(
-      CONSENT_FACTS.linkageRuleSet.note,
-    );
+    for (const verdict of ["consistent", "contradicted", "unchecked"] as const)
+      expect(app.container.textContent).not.toContain(
+        LINKAGE_RULE_SET_VERDICT_COPY[verdict].note,
+      );
   });
 
   test("opening one key disclosure exposes its detail to AT and leaves the others collapsed", async () => {

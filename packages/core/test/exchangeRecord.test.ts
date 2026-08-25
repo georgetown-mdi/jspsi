@@ -30,7 +30,12 @@ import {
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
+  deriveAcceptedLinkageTerms,
 } from "../src/config/linkageTerms";
+import {
+  DEFAULT_LINKAGE_RULE_SET,
+  getDefaultLinkageTerms,
+} from "../src/defaults/linkageTerms";
 
 // --- Fixtures ----------------------------------------------------------------
 
@@ -964,7 +969,7 @@ describe("serialize / parse", () => {
 
   test("parseExchangeRecord rejects an unrecognized version", async () => {
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const bumped = { ...record, version: "psilink-exchange-record/v4" };
+    const bumped = { ...record, version: "psilink-exchange-record/v5" };
     expect(() => parseExchangeRecord(bumped)).toThrow();
   });
 
@@ -986,6 +991,17 @@ describe("serialize / parse", () => {
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
     const v2 = { ...record, version: "psilink-exchange-record/v2" };
     expect(() => parseExchangeRecord(v2)).toThrow();
+  });
+
+  test("parseExchangeRecord refuses a record written before the citation verdict", async () => {
+    // The v3 shape: a governance block that could carry a citation but never a
+    // verdict on it. A reader of this version takes a citation with no verdict
+    // beside it as a writer that checked and reached nothing, where a v3 writer
+    // ran no check at all -- so it is refused on the version discriminant, like
+    // the two shapes above.
+    const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
+    const v3 = { ...record, version: "psilink-exchange-record/v3" };
+    expect(() => parseExchangeRecord(v3)).toThrow();
   });
 
   test("a record carries the agreed terms' rule-set citation, and omits it when the terms cite none", async () => {
@@ -1016,6 +1032,153 @@ describe("serialize / parse", () => {
     // are distinct in the canonical encoding a record is hashed over.
     const uncited = await buildExchangeRecord(baseInputs, fixedRandomness);
     expect("linkageRuleSet" in uncited.record.governance).toBe(false);
+    expect("linkageRuleSetVerdict" in uncited.record.governance).toBe(false);
+  });
+
+  test("a citation this build disproves is recorded verbatim, with a contradicted verdict beside it", async () => {
+    // termsA declares one field and one key of its own, and cites both built-in
+    // sets over them: the citation this build ships those sets and can therefore
+    // resolve, and disprove.
+    const { record } = await buildExchangeRecord(
+      {
+        ...baseInputs,
+        localTerms: {
+          ...baseInputs.localTerms,
+          linkageRuleSet: {
+            fieldSet: { name: "baseline-pii", version: "1.0.0" },
+            keySet: { name: "hmis-keys", version: "1.0.0" },
+          },
+        },
+      },
+      fixedRandomness,
+    );
+    // Verbatim: the refuted claim is annotated, never dropped or rewritten, so
+    // the record still states what the declaring party claimed.
+    expect(record.governance.linkageRuleSet).toEqual({
+      fieldSet: { name: "baseline-pii", version: "1.0.0" },
+      keySet: { name: "hmis-keys", version: "1.0.0" },
+    });
+    expect(record.governance.linkageRuleSetVerdict).toEqual({
+      fieldSet: "contradicted",
+      keySet: "contradicted",
+    });
+    expect(
+      parseExchangeRecord(JSON.parse(serializeExchangeRecord(record)))
+        .governance.linkageRuleSetVerdict,
+    ).toEqual({ fieldSet: "contradicted", keySet: "contradicted" });
+  });
+
+  test("a truthful citation is recorded consistent, and an unresolvable one unchecked", async () => {
+    const drawnFromDefaults = getDefaultLinkageTerms("Party A");
+    const truthful = await buildExchangeRecord(
+      {
+        ...baseInputs,
+        localTerms: drawnFromDefaults,
+        partnerTerms: { ...drawnFromDefaults, identity: "Party B" },
+      },
+      fixedRandomness,
+    );
+    expect(truthful.record.governance.linkageRuleSet).toEqual(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
+    expect(truthful.record.governance.linkageRuleSetVerdict).toEqual({
+      fieldSet: "consistent",
+      keySet: "consistent",
+    });
+
+    // A set name this build does not ship resolves to nothing, so nothing is
+    // compared: the citation is carried exactly as before and reported unchecked,
+    // never contradicted. Nothing here resolves a partner's set name.
+    const foreign = await buildExchangeRecord(
+      {
+        ...baseInputs,
+        localTerms: {
+          ...drawnFromDefaults,
+          linkageRuleSet: {
+            fieldSet: { name: "county-pii", version: "3.1.0" },
+            keySet: { name: "county-keys", version: "3.1.0" },
+          },
+        },
+      },
+      fixedRandomness,
+    );
+    expect(foreign.record.governance.linkageRuleSet).toEqual({
+      fieldSet: { name: "county-pii", version: "3.1.0" },
+      keySet: { name: "county-keys", version: "3.1.0" },
+    });
+    expect(foreign.record.governance.linkageRuleSetVerdict).toEqual({
+      fieldSet: "unchecked",
+      keySet: "unchecked",
+    });
+  });
+
+  test("the acceptor's record verdict is reached on the same rule as the inviter's", async () => {
+    // Both parties' record writes read this party's OWN agreed terms, so the
+    // acceptor -- whose terms carry the inviter's citation as adopted -- reaches
+    // the verdict the inviter's own record carries for the same document.
+    const inviterTerms: LinkageTerms = {
+      ...baseInputs.localTerms,
+      linkageRuleSet: {
+        fieldSet: { name: "baseline-pii", version: "1.0.0" },
+        keySet: { name: "hmis-keys", version: "1.0.0" },
+      },
+    };
+    const accepted = deriveAcceptedLinkageTerms(inviterTerms, "Party B");
+    expect(accepted.linkageRuleSet).toEqual(inviterTerms.linkageRuleSet);
+    const inviterRecord = await buildExchangeRecord(
+      { ...baseInputs, localTerms: inviterTerms, partnerTerms: accepted },
+      fixedRandomness,
+    );
+    const acceptorRecord = await buildExchangeRecord(
+      { ...baseInputs, localTerms: accepted, partnerTerms: inviterTerms },
+      fixedRandomness,
+    );
+    expect(acceptorRecord.record.governance.linkageRuleSetVerdict).toEqual(
+      inviterRecord.record.governance.linkageRuleSetVerdict,
+    );
+    expect(acceptorRecord.record.governance.linkageRuleSetVerdict).toEqual({
+      fieldSet: "contradicted",
+      keySet: "contradicted",
+    });
+  });
+
+  test("a citation and its verdict are refused apart", async () => {
+    const { record } = await buildExchangeRecord(
+      {
+        ...baseInputs,
+        localTerms: getDefaultLinkageTerms("Party A"),
+      },
+      fixedRandomness,
+    );
+    const { linkageRuleSetVerdict, ...withoutVerdict } = record.governance;
+    expect(linkageRuleSetVerdict).toBeDefined();
+    expect(() =>
+      parseExchangeRecord({ ...record, governance: withoutVerdict }),
+    ).toThrow();
+    const { linkageRuleSet, ...withoutCitation } = record.governance;
+    expect(linkageRuleSet).toBeDefined();
+    expect(() =>
+      parseExchangeRecord({ ...record, governance: withoutCitation }),
+    ).toThrow();
+  });
+
+  test("a verdict outside the recognized three is refused", async () => {
+    const { record } = await buildExchangeRecord(
+      {
+        ...baseInputs,
+        localTerms: getDefaultLinkageTerms("Party A"),
+      },
+      fixedRandomness,
+    );
+    expect(() =>
+      parseExchangeRecord({
+        ...record,
+        governance: {
+          ...record.governance,
+          linkageRuleSetVerdict: { fieldSet: "verified", keySet: "consistent" },
+        },
+      }),
+    ).toThrow();
   });
 });
 
