@@ -45,8 +45,9 @@ function dateComponent(key: LinkageKey): "full" | "coarsened" | "absent" {
  * Everything a key is built from except its date component, as a value two keys
  * can be compared on: the same fields under the same transforms, plus the same
  * swap. Element order is deliberately not part of it -- it decides how the key
- * string is concatenated, not which evidence the key rests on, and the set
- * declares one such pair whose shared elements are listed in different orders.
+ * string is concatenated, not which evidence the key rests on -- so the
+ * comparison stays indifferent to a reordered pair should the set ever declare
+ * one (today none does).
  */
 function nonDateShape(key: LinkageKey): string {
   const elements = key.elements
