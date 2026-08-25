@@ -590,8 +590,9 @@ function renderRuleSetCitation(reference: LinkageRuleSetReference): string {
  * NOT the cross-party {@link validateCompatibility} (which checks that two
  * different parties' terms work together). Reusing the existing config must not
  * silently change what was agreed, so the agreement-defining fields -- version,
- * algorithm, the linkage strategy, linkage fields and keys, legal agreement, and
- * payload -- must match.
+ * algorithm, the linkage strategy, linkage fields and keys, the rule-set
+ * citation (where both sides declare one), legal agreement, and payload -- must
+ * match.
  *
  * The per-party fields are excluded, because each party legitimately holds its
  * own value (per the LinkageTerms consistency model): `identity` (the holding
