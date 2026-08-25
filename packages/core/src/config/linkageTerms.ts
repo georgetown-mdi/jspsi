@@ -959,8 +959,15 @@ const LinkageRuleSetReferenceSchema: z.ZodType<LinkageRuleSetReference> =
  * The set names are free text a partner chooses, so they are delimited the way
  * the legal-agreement mismatches delimit theirs -- a name carrying a space or
  * the clause's own " over " reads as one value rather than blurring into the
- * surrounding prose. The versions are schema-constrained semver and stay bare,
- * like the legal agreement's expiration date.
+ * surrounding prose. The delimiting reaches only that far: the names are
+ * interpolated raw and the schema constrains only their length, so a name
+ * carrying a double quote of its own can still close the clause early and fake
+ * its structure for a skimming reader. That residual is pre-existing across
+ * these mismatch messages -- the legal-agreement reference and purpose quote
+ * raw partner text identically -- and the rendered message is sanitized at each
+ * display boundary, so what is left is a misreading rather than an injection.
+ * The versions are schema-constrained semver and stay bare, like the legal
+ * agreement's expiration date.
  */
 function describeRuleSet(reference: LinkageRuleSetReference): string {
   return (

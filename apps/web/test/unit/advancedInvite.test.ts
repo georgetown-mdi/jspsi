@@ -2076,11 +2076,76 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     expect(rebuild(misdescribed).linkageRuleSet).toBeUndefined();
   });
 
+  test("a citation half-naming the built-in key set is still checked against those keys", () => {
+    // Each half is named and versioned on its own, so each resolves on its own:
+    // pairing a field-set name this build cannot resolve with psilink's own key
+    // set buys the key half no pass. Those keys are checked against the set this
+    // build ships, and one edited key costs the citation.
+    const halfMatched = structuredClone(defaultExport());
+    halfMatched.linkageRuleSet = {
+      fieldSet: { name: "attacker-pii", version: "9.9.9" },
+      keySet: DEFAULT_LINKAGE_RULE_SET.reference.keySet,
+    };
+    halfMatched.linkageKeys[0] = {
+      ...halfMatched.linkageKeys[0],
+      name: `${halfMatched.linkageKeys[0].name} (house rules)`,
+    };
+    expect(safeParseLinkageTerms(halfMatched).success).toBe(true);
+    // Unedited by the operator: the rebuild of the import as it arrived already
+    // declines it, so psilink never re-emits its own key-set name over keys that
+    // are provably not that set.
+    expect(rebuild(halfMatched).linkageRuleSet).toBeUndefined();
+  });
+
+  test("a citation half-naming the built-in field set is still checked against those fields", () => {
+    // The mirror half. The document declares a field the built-in field set does
+    // not, so the half citing that set does not describe these fields -- however
+    // unresolvable the key-set name it is paired with.
+    const halfMatched = structuredClone(defaultExport());
+    halfMatched.linkageRuleSet = {
+      fieldSet: DEFAULT_LINKAGE_RULE_SET.reference.fieldSet,
+      keySet: { name: "attacker-keys", version: "9.9.9" },
+    };
+    halfMatched.linkageFields = [
+      ...halfMatched.linkageFields,
+      { name: "zip_extra", type: "zip_code", constraints: { exclude: ["0"] } },
+    ];
+    expect(safeParseLinkageTerms(halfMatched).success).toBe(true);
+    const rebuilt = rebuild(halfMatched);
+    // The extra field is inert and survives the round trip, which is exactly what
+    // the resolved field half is judged on.
+    expect(rebuilt.linkageFields.map((f) => f.name)).toContain("zip_extra");
+    expect(rebuilt.linkageRuleSet).toBeUndefined();
+  });
+
+  test("a half-matched citation honest in both halves keeps it", () => {
+    // Per-half resolution is not a refusal of half-matched references: the
+    // built-in key half is checked against the keys this build ships and covers
+    // them, while the field half names a set this build cannot resolve and is
+    // checked against the declaration the document made for it -- including a
+    // field the built-in set does not declare, which is that other set's business.
+    const halfMatched = structuredClone(defaultExport());
+    halfMatched.linkageRuleSet = {
+      fieldSet: { name: "partner-pii", version: "4.2.0" },
+      keySet: DEFAULT_LINKAGE_RULE_SET.reference.keySet,
+    };
+    halfMatched.linkageFields = [
+      ...halfMatched.linkageFields,
+      { name: "zip_extra", type: "zip_code", constraints: { exclude: ["0"] } },
+    ];
+    expect(safeParseLinkageTerms(halfMatched).success).toBe(true);
+    const rebuilt = rebuild(halfMatched);
+    expect(rebuilt.linkageRuleSet).toEqual(halfMatched.linkageRuleSet);
+    expect(canonicalString(rebuilt)).toEqual(canonicalString(halfMatched));
+  });
+
   test("the built-in sets at another version are not the resolvable reference, and round-trip verbatim", () => {
-    // Resolution is an exact match on both halves' name AND version: a set this
-    // build does not ship is one it cannot check rules against, however familiar
-    // the name, so it keeps the round-trip fidelity behavior -- the same edited
-    // key that costs the resolvable citation above leaves this one standing.
+    // Resolution is per half, on an exact match of that half's name AND version:
+    // a set this build does not ship is one it cannot check rules against, however
+    // familiar the name, so the half citing it keeps the round-trip fidelity
+    // behavior -- the same edited key that costs the resolvable citation above
+    // leaves this key half standing, while the field half, citing the set this
+    // build does ship, describes it faithfully.
     const otherVersion = structuredClone(defaultExport());
     otherVersion.linkageRuleSet = {
       fieldSet: DEFAULT_LINKAGE_RULE_SET.reference.fieldSet,

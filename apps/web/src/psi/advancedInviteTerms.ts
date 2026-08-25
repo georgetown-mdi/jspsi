@@ -140,28 +140,42 @@ function stripFuzzy(key: LinkageKey): LinkageKey {
 }
 
 /**
- * The rule set an imported citation is checked against: {@link DEFAULT_LINKAGE_RULE_SET}
- * where the citation names it -- the one reference this build can resolve, matched on
- * the name and version of both halves -- and otherwise the rules the importing document
- * claimed for the set it named, which is all there is to check a name this build cannot
- * resolve against.
+ * The rule set an imported citation is checked against, resolved one half at a time:
+ * {@link DEFAULT_LINKAGE_RULE_SET}'s own keys where the citation's key-set half names
+ * the built-in key set, its own fields where the field-set half names the built-in
+ * field set -- each matched on that half's name and version, the only halves this
+ * build can resolve -- and otherwise the rules the importing document claimed for the
+ * set it named, which is all there is to check a name this build cannot resolve
+ * against. The two chosen halves are composed under the document's own reference, and
+ * `isDrawnFromLinkageRuleSet` judges fields and keys independently.
  *
  * The substitution is what keeps psilink from re-emitting its OWN set's name over rules
  * that are not that set. A partner document is free to cite the built-in name over
  * anything, but the build that ships those rules knows what they are, so it re-emits the
  * name only over rules drawn from them; a name it cannot resolve keeps the round-trip
- * fidelity behavior instead.
+ * fidelity behavior instead. Resolving per half is what the design that names, versions,
+ * and edits the halves separately requires: pairing one built-in name with a foreign one
+ * would otherwise buy the built-in half a pass it could not earn alone.
  */
 function ruleSetForImportedCitation(
   cited: BuiltInLinkageRuleSet,
 ): BuiltInLinkageRuleSet {
   const builtIn = DEFAULT_LINKAGE_RULE_SET.reference;
-  const namesBuiltInSet =
+  const namesBuiltInKeySet =
     cited.reference.keySet.name === builtIn.keySet.name &&
-    cited.reference.keySet.version === builtIn.keySet.version &&
+    cited.reference.keySet.version === builtIn.keySet.version;
+  const namesBuiltInFieldSet =
     cited.reference.fieldSet.name === builtIn.fieldSet.name &&
     cited.reference.fieldSet.version === builtIn.fieldSet.version;
-  return namesBuiltInSet ? DEFAULT_LINKAGE_RULE_SET : cited;
+  return {
+    reference: cited.reference,
+    linkageFields: namesBuiltInFieldSet
+      ? DEFAULT_LINKAGE_RULE_SET.linkageFields
+      : cited.linkageFields,
+    linkageKeys: namesBuiltInKeySet
+      ? DEFAULT_LINKAGE_RULE_SET.linkageKeys
+      : cited.linkageKeys,
+  };
 }
 
 /**
@@ -255,8 +269,9 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // import re-emits its own citation while the built rules are still drawn from the
   // set it cited (narrowing by disabling a key keeps it, editing or adding one drops
   // it), and an import that cited nothing emits nothing whatever its rules match.
-  // Which rules "the set it cited" means is ruleSetForImportedCitation's answer: the
-  // built-in set itself where the citation names it, the document's claim otherwise.
+  // Which rules "the set it cited" means is ruleSetForImportedCitation's answer, taken
+  // one half at a time: the built-in half's own rules where the citation names it, the
+  // document's claim for that half otherwise.
   const importedCitation = draft.importedRuleSetCitation;
   const citedRuleSet =
     importedCitation?.kind === "cited"

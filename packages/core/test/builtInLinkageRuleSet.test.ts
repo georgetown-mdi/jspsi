@@ -265,5 +265,10 @@ describe("linkageRuleSetReferenceFor", () => {
     expect(noSupplyableKey.linkageKeys).toStrictEqual([]);
     expect(noSupplyableKey.linkageFields).toStrictEqual([]);
     expect(linkageRuleSetReferenceFor(noSupplyableKey)).toBeUndefined();
+    // The derivation reaches the same answer on its own output: it emits the
+    // citation it was asked to draw, so a run that emits no key emits no
+    // citation either, rather than leaving the vacuous one to the downstream
+    // rejection.
+    expect(noSupplyableKey.linkageRuleSet).toBeUndefined();
   });
 });

@@ -426,6 +426,10 @@ export function linkageRuleSetReferenceFor(
  * the set, and nothing widens it -- which is what makes the emitted citation
  * honest, an upper bound on what was tried rather than a claim that every key
  * ran.
+ *
+ * Narrowed all the way to no key, the citation goes with the keys: it asserts
+ * where the keys came from, so a derivation emitting none has no provenance to
+ * claim -- the same exclusion {@link linkageRuleSetReferenceFor} makes.
  */
 export function linkageTermsFromRuleSet(
   ruleSet: BuiltInLinkageRuleSet,
@@ -467,7 +471,7 @@ export function linkageTermsFromRuleSet(
     deduplicate: false,
     linkageFields,
     linkageKeys,
-    linkageRuleSet: ruleSet.reference,
+    ...(linkageKeys.length > 0 && { linkageRuleSet: ruleSet.reference }),
   };
 }
 
