@@ -97,6 +97,11 @@ export function CreateInstanceWSOnly({
     // emit("disconnect", client);
   });
 
+  // Attached rather than left off: an `error` emitted with no listener is thrown
+  // rather than dropped, and the broker raises one over a peer hang-up it is
+  // built to survive. Discarding it is the limit of this wiring; one that wants
+  // the broker's reports read attaches a sink here.
+  // See docs/spec/CHANNEL_SECURITY.md.
   wss.on("error", (_error: Error) => {
     // emit("error", error);
   });

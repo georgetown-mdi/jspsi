@@ -253,8 +253,12 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     this._registerClient({ socket, id, token });
   }
 
+  // A report leaves this server on its own `error` event, and in the shipped
+  // wirings that is where it stops: `CreateInstanceWSOnly` attaches a listener
+  // that discards it -- load-bearing all the same, an `error` emitted with no
+  // listener being thrown rather than dropped. A wiring that wants these read
+  // attaches a sink of its own. See docs/spec/CHANNEL_SECURITY.md.
   private _onSocketError(error: Error): void {
-    // handle error
     this.emit("error", error);
   }
 

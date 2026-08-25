@@ -177,7 +177,14 @@ async function startSignaling(
       // upgrade on the signaling path has already been adopted by it.
       if (req.url?.startsWith("/api/peerjs")) return;
       const handlesAtWindowOpen = handleCounts(socket);
-      adopter?.handleUpgrade(req, socket, head, () => {});
+      // An adopter owns the errors of the connection it took, as Vite's HMR
+      // handler does, so the adopted socket gets a listener of its own here:
+      // `ws` rethrows an error on a connection carrying none as an unhandled
+      // EventEmitter `error`, which would end the run rather than leave a case
+      // free to measure which side released the socket.
+      adopter?.handleUpgrade(req, socket, head, (adopted) => {
+        adopted.on("error", () => {});
+      });
       coResidentUpgrades.push({
         url: req.url ?? "",
         handlesBeforeWindow,
@@ -818,6 +825,44 @@ describe("signaling socket release", () => {
 
     // The process is not merely alive but still brokering.
     const ws = new WebSocket(signalingUrl(sig.port, "peer-after-reset"));
+    await waitForFrame(ws, "OPEN");
+    ws.close();
+  }, 15_000);
+
+  test("a peer that resets after adoption but before the bound is released and reported by this server", async () => {
+    // The watch comes off at the bound rather than at the adopter's answer, so
+    // between the two -- most of a second, an adopter answering in the same tick
+    // as the decline -- a socket someone else already owns still carries it.
+    // What the watch does in that stretch is what this pins: the socket is
+    // released and the error raised here rather than left to the adopter. The
+    // report is what attributes the release, an adopter having reasons of its
+    // own to destroy a socket that just reset but no way to raise one here.
+    const sig = await startSignaling({ coResidentUpgrade: "answers" });
+
+    const peer = openRawUpgrade(sig.port, "/not-the-signaling-path");
+    await waitFor(() => peer.received().includes("101 Switching Protocols"));
+    await waitFor(() => sig.coResidentUpgrades.length > 0);
+    // Adopted, and the bound a whole second off: the reset lands in the stretch.
+    peer.reset();
+
+    await waitFor(() => sig.errors.length > 0);
+    expect(sig.errors).toHaveLength(1);
+    expect(sig.errors[0].message).toContain("ECONNRESET");
+    expect(sig.accepted).toHaveLength(1);
+    expect(sig.accepted[0].destroyed).toBe(true);
+
+    // Past the bound: the release the watch already performed is the whole of
+    // it, so nothing is reclaimed a second time and an adopted socket is not
+    // accused of leaving an upgrade unanswered.
+    await new Promise((resolve) =>
+      setTimeout(resolve, SOCKET_RELEASE_TIMEOUT_MS * 2),
+    );
+    expect(sig.errors).toHaveLength(1);
+
+    // The process is not merely alive but still brokering.
+    const ws = new WebSocket(
+      signalingUrl(sig.port, "peer-after-adopted-reset"),
+    );
     await waitForFrame(ws, "OPEN");
     ws.close();
   }, 15_000);
