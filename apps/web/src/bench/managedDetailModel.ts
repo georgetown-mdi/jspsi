@@ -47,14 +47,16 @@ export const SIDE_LABELS: Record<ManagedExchangeSide, string> = {
  * view is where a compliance user confirms the agreed terms, and the class that
  * matters here is the one JSX escaping does not touch: a bidi override, a
  * zero-width joiner, or a homoglyph renders as the term the reader expects while
- * being another string entirely. `label` and `muted` stay plain `string` because
- * both are this app's own fixed copy.
+ * being another string entirely. `label`, `muted`, and `note` stay plain `string`
+ * because all three are this app's own fixed copy.
  */
 export interface ConfigRow {
   label: string;
   value?: Displayable;
   values?: ReadonlyArray<Displayable>;
   muted?: string;
+  /** A caveat qualifying what the row's value asserts, rendered below it. */
+  note?: string;
 }
 
 /**

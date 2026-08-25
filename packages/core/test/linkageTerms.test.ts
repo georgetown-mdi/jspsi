@@ -14,6 +14,7 @@ import {
   MAX_PAD_LEFT_LENGTH,
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PATTERN_LENGTH,
+  MAX_TRANSFORM_PARAM_LENGTH,
   MAX_EXCLUDE_ENTRIES,
   MAX_TRANSFORM_STEPS,
   MAX_KEY_ELEMENTS,
@@ -921,6 +922,211 @@ test("a transform regex outside the dialect is rejected by the gate", () => {
     result.error.issues.some((i) =>
       /outside the linear-time dialect/.test(i.message),
     ),
+  ).toBe(true);
+});
+
+// --- transform param content bound (partner-controlled per-row amplification) --
+// Every STRING-valued transform param is capped at MAX_TRANSFORM_PARAM_LENGTH by
+// the params record's value stage, whatever function reads it. A string param
+// sizes what the rest of the element pipeline carries on every row -- a
+// replace_regex `replacement` rewrites the operator's own cell into a value of the
+// replacement's own size -- so the cap is uniform across params rather than per
+// measured amplifier, and rejects at validation before any row runs.
+
+const transformStepTerms = (fn: string, params: Record<string, unknown>) => ({
+  ...base,
+  linkageKeys: [
+    {
+      name: "PARAM",
+      elements: [{ field: "ssn", transform: [{ function: fn, params }] }],
+    },
+  ],
+});
+
+const overBoundValue = "x".repeat(MAX_TRANSFORM_PARAM_LENGTH + 1);
+
+test("a transform param at exactly the content bound parses; one over it is refused", () => {
+  expect(
+    safeParseLinkageTerms(
+      transformStepTerms("replace_regex", {
+        pattern: "\\d",
+        replacement: "x".repeat(MAX_TRANSFORM_PARAM_LENGTH),
+      }),
+    ).success,
+  ).toBe(true);
+  expect(
+    safeParseLinkageTerms(
+      transformStepTerms("replace_regex", {
+        pattern: "\\d",
+        replacement: overBoundValue,
+      }),
+    ).success,
+  ).toBe(false);
+});
+
+test("a megabyte-scale replacement is refused as a terms error, not a mid-run allocation", () => {
+  // The measured amplifier: a 1 MB replacement over a 10-character operator cell
+  // rewrites every row's value to a megabyte, which each later step of the element
+  // then carries. The refusal lands at terms validation, before any row runs.
+  const result = safeParseLinkageTerms(
+    transformStepTerms("replace_regex", {
+      pattern: "^.*$",
+      replacement: "x".repeat(1_000_000),
+    }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(
+    result.error.issues.some((i) =>
+      /transform param must not exceed/.test(i.message),
+    ),
+  ).toBe(true);
+});
+
+test("an operator-sized replacement parses and is preserved (no clamp)", () => {
+  // Preservation matters: PSI requires both parties to derive byte-identical keys,
+  // so the bound rejects an out-of-range value rather than rewriting an in-range
+  // one. A real replacement is a few characters.
+  const result = safeParseLinkageTerms(
+    transformStepTerms("replace_regex", { pattern: "-", replacement: " " }),
+  );
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.linkageKeys[0].elements[0].transform?.[0].params).toEqual({
+    pattern: "-",
+    replacement: " ",
+  });
+});
+
+test("the refusal locates the offending step and param by issue path, echoing no value", () => {
+  const result = safeParseLinkageTerms(
+    transformStepTerms("replace_regex", {
+      pattern: "\\d",
+      replacement: overBoundValue,
+    }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const issue = result.error.issues.find((i) =>
+    /transform param must not exceed/.test(i.message),
+  );
+  expect(issue?.path).toEqual([
+    "linkageKeys",
+    0,
+    "elements",
+    0,
+    "transform",
+    0,
+    "params",
+    "replacement",
+  ]);
+  expect(issue?.message).not.toContain("xxxx");
+});
+
+test("the refusal's path carries the param name escaped, not raw", () => {
+  // The path locates the offender, so it carries a partner-controlled param NAME
+  // -- and for a name UNDER the key-length bound, which the `invalid_key` route
+  // never flags, this refusal is the first issue to place it there. The relay the
+  // terms exchange uses escapes each path segment at the source, so the raw bytes
+  // do not reach the operator.
+  const evilName = "\x1b[31m\u202eEVIL";
+  const result = safeParseLinkageTerms(
+    transformStepTerms("replace_regex", {
+      pattern: "\\d",
+      [evilName]: overBoundValue,
+    }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const relayed = describeDecodeError(result.error);
+  expect(relayed).not.toContain("\x1b");
+  expect(relayed).not.toContain("\u202e");
+  expect(relayed).toContain("\\x1b");
+  expect(relayed).toContain("\\u202e");
+});
+
+test("the content bound covers every string param, not only the measured amplifiers", () => {
+  // Uniform by construction: the bound sits on the params record's value stage, so
+  // it holds for a param no per-function refine covers and for a function this
+  // build does not implement -- neither can be the route content is smuggled
+  // through.
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["coalesce", { default: overBoundValue }],
+    ["null_if", { value: overBoundValue }],
+    ["pad_left", { length: 9, char: overBoundValue }],
+    ["phonetic", { algorithm: overBoundValue }],
+    ["not_a_standardization_function", { anything: overBoundValue }],
+  ];
+  for (const [fn, params] of cases) {
+    const result = safeParseLinkageTerms(transformStepTerms(fn, params));
+    expect(result.success).toBe(false);
+    if (result.success) continue;
+    expect(
+      result.error.issues.some((i) =>
+        /transform param must not exceed/.test(i.message),
+      ),
+    ).toBe(true);
+  }
+});
+
+test("parseLinkageTerms throws on an over-bound param (the initiator/joiner path)", () => {
+  expect(() =>
+    parseLinkageTerms(
+      transformStepTerms("coalesce", { default: overBoundValue }),
+    ),
+  ).toThrow(ZodError);
+});
+
+test("a replacement carrying substitution sequences parses at the bound (open residual)", () => {
+  // The half of the residual that lives on this schema: the bound reads a param's
+  // LENGTH, so a replacement whose every character pair is a `$'` substitution
+  // sequence -- which re-inserts the operator's own cell at each match position,
+  // amplifying the transformed value past any per-position figure (characterized
+  // in standardization.test.ts) -- is accepted like any other 1000-character
+  // string. Neutralizing those sequences is one of the two closers recorded in
+  // docs/spec/CHANNEL_SECURITY.md, Unbounded transform-parameter rejection.
+  const substituting = "$'".repeat(MAX_TRANSFORM_PARAM_LENGTH / 2);
+  expect(substituting.length).toBe(MAX_TRANSFORM_PARAM_LENGTH);
+  const result = safeParseLinkageTerms(
+    transformStepTerms("replace_regex", {
+      pattern: "a*",
+      replacement: substituting,
+    }),
+  );
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(
+    result.data.linkageKeys[0].elements[0].transform?.[0].params?.replacement,
+  ).toBe(substituting);
+});
+
+test("a non-string param value is untouched by the content bound", () => {
+  // Only a string param carries content the pipeline amplifies; a non-string is
+  // left to the factory's own coercion contract (a non-string `replacement` falls
+  // back to the empty string, pinned in standardization.test.ts), as a malformed
+  // pad_left length is.
+  expect(
+    safeParseLinkageTerms(
+      transformStepTerms("replace_regex", { pattern: "\\d", replacement: 42 }),
+    ).success,
+  ).toBe(true);
+});
+
+test("the bound reaches a param VALUE, not a string nested in an array- or object-valued param", () => {
+  // The stated reach, both halves of it, pinned as behavior rather than left to
+  // prose. Nothing derives a per-row value from a nested string: null_if compares
+  // its `values` entries against the cell and emits the cell or null, and an array
+  // a regex factory would render into a compile source is bounded on the COERCED
+  // source by MAX_TRANSFORM_PATTERN_LENGTH (pinned above).
+  expect(
+    safeParseLinkageTerms(
+      transformStepTerms("null_if", { values: [overBoundValue] }),
+    ).success,
+  ).toBe(true);
+  expect(
+    safeParseLinkageTerms(
+      transformStepTerms("null_if", { value: { deep: overBoundValue } }),
+    ).success,
   ).toBe(true);
 });
 

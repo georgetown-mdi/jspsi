@@ -59,15 +59,20 @@ import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 // rewritten or per-key-validated. Legitimate sizes vary -- a
 // denylist holds hundreds of values, hence the most generous bound
 // (MAX_EXCLUDE_ENTRIES) -- but each bound is far above any real config and far
-// below the RangeError thresholds. The `params` VALUE content is otherwise
-// unbounded (typed `z.unknown()`, with no clean general content bound); the
-// exceptions are the partner-controlled values whose magnitude drives unbounded
-// per-row work, each capped by a per-step refine on TransformStep's schema below:
+// below the RangeError thresholds. The `params` VALUE content carries a uniform
+// content bound of its own: every STRING value of the record is capped at
+// MAX_TRANSFORM_PARAM_LENGTH by the record's value stage, whatever the function
+// and param name, because a string param sizes what the rest of the element
+// pipeline receives on every row. A non-string value stays `z.unknown()`. Above
+// that uniform floor sit the stricter per-function caps, each a per-step refine
+// on TransformStep's schema below, for the params whose magnitude drives
+// unbounded per-row work in a shape a string length does not describe:
 // `pad_left`'s numeric `length` (an unbounded `padStart` allocation,
 // MAX_PAD_LEFT_LENGTH), `parse_date`'s `inputFormat` / `outputFormat` strings (an
 // unbounded per-row regex build and output allocation, MAX_DATE_FORMAT_LENGTH),
 // and the four `tier: "regex"` functions' raw `pattern` / `delimiter` (an
-// unbounded per-row regex compile under the linear-time engine,
+// unbounded per-row regex compile under the linear-time engine, measured on the
+// COERCED source so a non-string param renders no larger a compile source,
 // MAX_TRANSFORM_PATTERN_LENGTH).
 //
 // The `payload` send/receive arrays carry no enclosing array/record/tuple frame
@@ -149,10 +154,10 @@ export const MAX_PARAMS_ENTRIES = 256;
 
 /**
  * Generous upper bound on the `length` param of a `pad_left` transform step --
- * one of the two partner-controlled transform-param VALUES that carry a content
- * bound (with {@link MAX_DATE_FORMAT_LENGTH}; every other param value stays
- * `z.unknown()`; the rest of the bounds in this file cap COLLECTION counts, see
- * the untrusted-input bounds note above).
+ * a NUMERIC param value, so the uniform string bound
+ * ({@link MAX_TRANSFORM_PARAM_LENGTH}) does not describe it and this per-function
+ * cap is the only thing that does (the rest of the bounds in this file cap
+ * COLLECTION counts, see the untrusted-input bounds note above).
  * `pad_left` runs per row inside the key-building pipeline
  * ({@link applyElementTransform}, driven by `buildKeyStrings`), and an unbounded
  * `length` makes every row allocate a `String.prototype.padStart(length, char)`
@@ -171,9 +176,10 @@ export const MAX_PAD_LEFT_LENGTH = 256;
 
 /**
  * Generous upper bound on the `inputFormat` and `outputFormat` params of a
- * `parse_date` transform step -- the other partner-controlled transform-param
- * VALUES that carry a content bound (with {@link MAX_PAD_LEFT_LENGTH}; every other
- * param value stays `z.unknown()`, see the untrusted-input bounds note above).
+ * `parse_date` transform step -- stricter than the uniform string bound every
+ * param value carries ({@link MAX_TRANSFORM_PARAM_LENGTH}), because these two
+ * drive a per-row regex build rather than a one-time allocation (see the
+ * untrusted-input bounds note above).
  * `parse_date` runs per row inside the key-building pipeline
  * ({@link applyElementTransform}, which recompiles each step per row): its factory
  * builds a regex from `inputFormat` and assembles the result from `outputFormat`.
@@ -215,6 +221,60 @@ export const MAX_DATE_FORMAT_LENGTH = 256;
  * limit.
  */
 export const MAX_TRANSFORM_PATTERN_LENGTH = 1000;
+
+/**
+ * Upper bound on the length of a STRING-valued partner-controlled transform
+ * param -- the uniform content bound under the per-function caps above, applied
+ * to every entry of a `transform.params` record whose value is a string,
+ * whatever function or param name it sits under.
+ *
+ * A string param sizes what the rest of the element pipeline receives on every
+ * row, so its length is per-row work regardless of which function reads it: a
+ * `replace_regex` `replacement` rewrites the operator's own cell into a value of
+ * the replacement's size, which every later step of that element carries, and
+ * which the fuzzy expansion replicates across a row's candidates
+ * ({@link MAX_FUZZY_EXPANSION_INPUT_LENGTH} bounds only the value the fuzzy
+ * element itself expands, never a sibling element's transformed cell). Without a
+ * content bound that size is held only by the ~512 MiB frame ceiling
+ * (connection/frameSize.ts). The bound is uniform across params rather than
+ * per-amplifier so content cannot be routed through a param no measurement
+ * covered, and it is deliberately the same threshold as the raw pattern beside it
+ * ({@link MAX_TRANSFORM_PATTERN_LENGTH}), so no string param in a record is more
+ * generous than the pattern it accompanies. A real param value is a few
+ * characters to a few hundred -- a replacement literal, a `coalesce` default, a
+ * `null_if` value -- so 1000 is far above any legitimate authoring and three
+ * orders of magnitude below an amplification that matters.
+ *
+ * Enforced on the `params` record's VALUE stage (see {@link TransformStep}'s
+ * schema) before any row runs, so every path that parses partner terms inherits
+ * it, and the offending param is located by the issue `path` rather than echoed
+ * -- consistent with the unsanitized parse-error path the referential-integrity
+ * and dialect refines rely on.
+ *
+ * It reaches a string VALUE of the record, not a string nested inside an array-
+ * or object-valued param: no factory derives a per-row value from a nested string
+ * (`null_if` compares its `values` entries against the cell and emits the cell or
+ * null; every other factory that reads a string param falls back to its default
+ * for a non-string, pinned in standardization.test.ts), and an array param a
+ * regex factory would render into a compile source is separately bounded on the
+ * COERCED source by {@link MAX_TRANSFORM_PATTERN_LENGTH}.
+ *
+ * What it removes is the partner's ability to supply an unbounded-LENGTH param,
+ * not the ability to amplify the value a row derives from one: this cap does not
+ * bound the transformed value, because a `replace_regex` replacement is a
+ * substitution TEMPLATE whose match-context sequences re-insert the operator's
+ * own cell at every match position, and transform steps compose. That residual is
+ * open; docs/spec/CHANNEL_SECURITY.md (Unbounded transform-parameter rejection)
+ * carries the measurements and the closer -- a byte-aware bound on the
+ * transformed value, or neutralizing the amplifying sequences in a
+ * partner-supplied replacement -- and standardization.test.ts characterizes it as
+ * a lower bound.
+ *
+ * A DoS ceiling on the partner wire path, not a semantic limit: an in-range value
+ * is preserved verbatim, never clamped, since both parties must derive
+ * byte-identical keys.
+ */
+export const MAX_TRANSFORM_PARAM_LENGTH = 1000;
 
 /**
  * Generous upper bound on the COUNT of values in a constraint `exclude`
@@ -519,15 +579,38 @@ export interface TransformStep {
   params?: Record<string, unknown>;
 }
 
+// One value of a transform step's `params` record: any JSON value, with a
+// content bound on a string. The bound is on the VALUE STAGE rather than a
+// per-step refine so it holds for every function and every param name at once --
+// including a function this build does not implement -- which is what makes it
+// undodgeable by routing content through a param no per-function refine covers.
+// A non-string value passes through untouched (`z.unknown()`), leaving each
+// factory's own runtime coercion contract unchanged; the params whose non-string
+// magnitude drives per-row work carry their own stricter refines on
+// TransformStepSchema below. See MAX_TRANSFORM_PARAM_LENGTH for the model and the
+// bound's stated reach.
+const TransformParamValueSchema = z
+  .unknown()
+  .refine(
+    (value) =>
+      typeof value !== "string" || value.length <= MAX_TRANSFORM_PARAM_LENGTH,
+    {
+      // A fixed literal, naming no partner value: the offending step and param
+      // are located by the issue path (linkageKeys[i].elements[j].transform[k]
+      // .params.<name>), which describeDecodeError escapes segment by segment.
+      message: `a linkage key element transform param must not exceed ${MAX_TRANSFORM_PARAM_LENGTH} characters`,
+    },
+  );
+
 // Not annotated as ZodType<TransformStep> because the concrete ZodObject is the
 // base the pad_left refine below chains onto (mirrors LinkageTermsBaseSchema).
 const TransformStepBaseSchema = z.object({
   function: z.string().min(1).max(MAX_NAME_LENGTH),
   // The record's KEYS are partner-controlled strings (parameter names), so they
-  // are length-bounded like every other free-text string; the VALUE content is
-  // `z.unknown()` with no clean per-field bound. The entry COUNT is bounded at
-  // MAX_PARAMS_ENTRIES, and -- critically -- that gate is a bare key count (see
-  // exceedsOwnKeyCount) that runs BEFORE the per-key length check. The
+  // are length-bounded like every other free-text string, and each string VALUE
+  // is length-bounded by TransformParamValueSchema above. The entry COUNT is
+  // bounded at MAX_PARAMS_ENTRIES, and -- critically -- that gate is a bare key
+  // count (see exceedsOwnKeyCount) that runs BEFORE the per-key length check. The
   // `z.unknown()` first stage accepts the value untouched, doing no per-key VALIDATION
   // of its own -- unlike a permissive `z.record(z.string(), z.unknown())` first
   // stage, which would parse every key (a ZodType per key) before the refine
@@ -546,7 +629,8 @@ const TransformStepBaseSchema = z.object({
   // (parseLinkageTerms) is short-circuited for the same over-count record by the
   // same bound, so the record is rewritten by neither pass before this rejection.
   // The pipe keeps the post-cap `invalid_key` path -- and its parse-error
-  // sanitization -- intact for an in-range over-long key.
+  // sanitization -- intact for an in-range over-long key, and carries the
+  // per-value content bound for an in-range one.
   params: z
     .unknown()
     .refine(
@@ -560,17 +644,18 @@ const TransformStepBaseSchema = z.object({
         abort: true,
       },
     )
-    .pipe(z.record(z.string().max(MAX_NAME_LENGTH), z.unknown()))
+    .pipe(z.record(z.string().max(MAX_NAME_LENGTH), TransformParamValueSchema))
     .optional(),
 });
 
-// Content bounds on the two partner-controlled transform-param VALUES whose
-// magnitude drives unbounded per-row work; every other param value stays
-// `z.unknown()` (see the untrusted-input bounds note above). Each is a per-step
-// refine on this wire schema -- not on the editor descriptor an attacker-authored
-// token never passes through -- and each message names no partner value,
-// consistent with the unsanitized parse-error path the referential-integrity and
-// dialect refines rely on.
+// Per-function content bounds, stricter than the uniform string bound every param
+// value already carries (TransformParamValueSchema), on the partner-controlled
+// VALUES whose magnitude drives per-row work in a shape a string length does not
+// describe: a number, a per-row regex build, and a compile source read off a value
+// of any type. Each is a per-step refine on this wire schema -- not on the editor
+// descriptor an attacker-authored token never passes through -- and each message
+// names no partner value, consistent with the unsanitized parse-error path the
+// referential-integrity and dialect refines rely on.
 const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
   // `pad_left` runs per row in the key-building pipeline (standardization.ts
   // applyElementTransform, driven by buildKeyStrings), so an unbounded `length`

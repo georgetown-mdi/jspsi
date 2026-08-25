@@ -38,6 +38,7 @@ import type {
   ConnectionConfig,
   ConnectionEndpoint,
   ConsentFact,
+  Displayable,
   InvitationToken,
   LinkageStrategy,
   LinkageTerms,
@@ -78,6 +79,7 @@ import { decodeAndValidateInvitation } from "../../src/invitationDecode";
 import {
   displayInvitation,
   logDecisionFacts,
+  renderDialedBroker,
 } from "../../src/invitationDisplay";
 import {
   generateSharedSecret,
@@ -1572,6 +1574,49 @@ test("validateAccept: offline reuses a config whose linkage terms match the invi
     expect(ready.reuseExistingConfig).toBe(true);
     expect(ready.mode).toBe("offline");
   } finally {
+    fs.rmSync(options.configFile, { force: true });
+  }
+});
+
+/** The default terms with their first two keys swapped: rules that no longer
+ *  support the rule-set citation the same terms carry, key order being cascade
+ *  order. */
+function termsCitingASetTheyLeft(identity: string): LinkageTerms {
+  const terms = getDefaultLinkageTerms(identity);
+  const [first, second, ...rest] = terms.linkageKeys;
+  return { ...terms, linkageKeys: [second!, first!, ...rest] };
+}
+
+test("validateAccept: a reused config's rule-set citation is checked against its own rules", async () => {
+  // The reconcile compares the terms that define the agreement, and the citation
+  // is not one of them -- so a config agreeing with the invitation key for key
+  // can still carry a citation its own rules left. Reuse proceeds, and the drift
+  // is reported before the confirmation prompt.
+  const options = testOptions();
+  writeExistingConfig(options.configFile, {
+    terms: termsCitingASetTheyLeft("Acceptor Org"),
+  });
+  const log = getLogger("accept-citation-drift");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation({
+      ...sampleToken(FUTURE()),
+      linkageTerms: termsCitingASetTheyLeft("Inviter Org"),
+    });
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded },
+      options,
+      log,
+    });
+    expect(ready.reuseExistingConfig).toBe(true);
+    const drifted = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((message) => message.includes("linkage_rule_set"));
+    expect(drifted).toHaveLength(1);
+    expect(drifted[0]).toContain(options.configFile);
+  } finally {
+    warnSpy.mockRestore();
     fs.rmSync(options.configFile, { force: true });
   }
 });
@@ -4008,6 +4053,20 @@ test("handler: nothing reaches the operator between the terms and the question",
   } finally {
     fs.rmSync(fixture.dir, { recursive: true, force: true });
   }
+});
+
+test("the rendered server carries the display brand, not a bare string", () => {
+  // Both sinks that name the server interpolate the value into a first-party
+  // line, so neither demands a `Displayable` and nothing but this annotation
+  // holds the brand on the return type. It is the check, not documentation:
+  // widening that type back to `string` fails `tsc -p apps/cli/tsconfig.test.json`,
+  // which is a CI check because that config includes the test tree.
+  const named: Displayable = renderDialedBroker({
+    host: "peer.example.org",
+    port: 443,
+  });
+  // And the brand adds no bytes: the line is what the plain template produced.
+  expect(named).toBe("peer.example.org:443");
 });
 
 test("handler: the one-command path names the coordination server it will dial before it asks", async () => {

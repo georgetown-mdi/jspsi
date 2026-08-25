@@ -460,6 +460,79 @@ describe("managed exchange detail accounting of disclosures", () => {
       .toBeInTheDocument();
   });
 
+  test("an opened disclosure shows the cited rule set under the caveat that nothing checked it", async () => {
+    const accounting = appendDisclosureRecord(
+      undefined,
+      await disclosureRecord({ linkageRuleSet: true }),
+    );
+    const [entry] = disclosureEntries(accounting);
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting,
+        accountingUnreadable: false,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    await page.getByRole("button", { name: entry.when, exact: false }).click();
+
+    await expect
+      .element(page.getByText('Keys: "hmis-keys" 2.1.0'))
+      .toBeVisible();
+    await expect
+      .element(page.getByText('Fields: "baseline-pii" 1.0.0'))
+      .toBeVisible();
+    // The citation is the authoring party's own declaration; the screen says so
+    // beside it rather than letting the row read as a checked provenance.
+    await expect
+      .element(
+        page.getByText("psilink has not checked this citation", {
+          exact: false,
+        }),
+      )
+      .toBeVisible();
+  });
+
+  test("a disclosure whose terms cited no rule set says so, with no caveat to qualify", async () => {
+    const accounting = appendDisclosureRecord(
+      undefined,
+      await disclosureRecord(),
+    );
+    const [entry] = disclosureEntries(accounting);
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting,
+        accountingUnreadable: false,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    await page.getByRole("button", { name: entry.when, exact: false }).click();
+
+    await expect
+      .element(
+        page.getByText("Not cited - the agreed terms' rules were authored", {
+          exact: false,
+        }),
+      )
+      .toBeVisible();
+    expect(
+      page
+        .getByText("psilink has not checked this citation", { exact: false })
+        .query(),
+    ).toBeNull();
+  });
+
   test("two disclosures sharing a createdAt open and close independently", async () => {
     // createdAt is millisecond-resolution and not guaranteed unique across runs;
     // only the record's own bindingNonce distinguishes them, so the view must key

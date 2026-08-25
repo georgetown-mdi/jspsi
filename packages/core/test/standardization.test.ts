@@ -31,6 +31,7 @@ import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { inferMetadata } from "../src/config/metadata";
 import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
 import { getDefaultStandardization } from "../src/defaults/standardization";
+import { MAX_TRANSFORM_PARAM_LENGTH } from "../src/config/linkageTerms";
 import type {
   LinkageField,
   LinkageKeyElement,
@@ -768,6 +769,60 @@ describe("runPipeline — null-producing functions", () => {
         { function: "replace_regex", params: { pattern: "\\d" } },
       ]),
     ).toBe("ABC");
+  });
+
+  test("a replacement inside the param bound amplifies past the naive per-position figure (open residual)", () => {
+    // CHARACTERIZATION of an OPEN residual, not a security ceiling. The schema's
+    // string-param bound caps a param's content LENGTH; it does not bound the
+    // value a row derives from that param, and the naive "cell plus one capped
+    // replacement per position" figure is not an upper bound on it
+    // (docs/spec/CHANNEL_SECURITY.md, Unbounded transform-parameter rejection,
+    // carries the measurements and the closer). Every assertion here is a strict
+    // lower bound, so a regex-engine or Unicode-data change cannot satisfy it by
+    // drifting an exact count.
+    const cell = "1234567890";
+    const naivePerPositionFigure =
+      cell.length + (cell.length + 1) * MAX_TRANSFORM_PARAM_LENGTH;
+    const amplify = (input: string, replacements: string[]) => {
+      const out = runPipeline(
+        input,
+        replacements.map((replacement) => ({
+          function: "replace_regex",
+          params: { pattern: "a*", replacement },
+        })),
+      );
+      expect(typeof out).toBe("string");
+      return (out as string).length;
+    };
+
+    // The replacement is a substitution TEMPLATE: `$'` re-inserts the match's
+    // trailing context, and a pattern matching the empty string matches between
+    // every character, so the transformed value is quadratic in the operator's
+    // own cell rather than linear in it.
+    const trailingContext = "$'".repeat(MAX_TRANSFORM_PARAM_LENGTH / 2);
+    expect(trailingContext.length).toBe(MAX_TRANSFORM_PARAM_LENGTH);
+    const amplifiedFromCell = amplify(cell, [trailingContext]);
+    expect(amplifiedFromCell).toBeGreaterThan(naivePerPositionFigure);
+    const longerCell = cell.repeat(20);
+    expect(
+      amplify(longerCell, [trailingContext]) / longerCell.length,
+    ).toBeGreaterThan(amplifiedFromCell / cell.length);
+
+    // Steps compose, so a second in-bound param multiplies the first step's
+    // output rather than the operator's cell.
+    expect(amplify(cell, ["x".repeat(10), trailingContext])).toBeGreaterThan(
+      amplifiedFromCell,
+    );
+
+    // replaceRegexFactory NFC-normalizes the replacement before substituting it,
+    // and normalization can lengthen it -- U+0344 decomposes to two code units
+    // under NFC -- so even a replacement carrying no substitution sequence
+    // exceeds the naive figure.
+    const combining = String.fromCodePoint(0x0344).repeat(
+      MAX_TRANSFORM_PARAM_LENGTH,
+    );
+    expect(combining.length).toBe(MAX_TRANSFORM_PARAM_LENGTH);
+    expect(amplify(cell, [combining])).toBeGreaterThan(naivePerPositionFigure);
   });
 
   test("replace_regex with a non-string replacement does not throw and falls back to empty", () => {

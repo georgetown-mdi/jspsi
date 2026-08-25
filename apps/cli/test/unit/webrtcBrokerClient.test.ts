@@ -264,8 +264,19 @@ test("an address naming another host is refused rather than dialed", async () =>
       LOCATION,
     );
   };
-  expect(moved).toThrow(ConnectionError);
+  expect(moved).toThrow(UsageError);
   expect(moved).toThrow(BROKER_AUTHORITY_REFUSED);
+  // The same exit code the host refusal above carries, which is what the shared
+  // class buys: every undialable-endpoint refusal reports 64, so a supervisor
+  // reads "nothing was dialed, and a retry reaches the same refusal" without
+  // knowing which of the sites caught it.
+  let refusal: unknown;
+  try {
+    moved();
+  } catch (err: unknown) {
+    refusal = err;
+  }
+  expect(exitCodeForError(refusal)).toBe(64);
   // The refusal names the fields, not the address: that carries the peer id.
   expect(BROKER_AUTHORITY_REFUSED).not.toContain(LOCAL_ID);
   // And the address the client itself builds passes.

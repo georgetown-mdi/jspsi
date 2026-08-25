@@ -118,6 +118,12 @@ export function ManagedExchangeDetail({
  * carries holds partner- or operator-authored names, and a name containing the
  * separator would read as two entries in joined text. Keyed by index because a
  * name is not unique across entries and the derivation's order is fixed.
+ *
+ * A caveat wraps onto its own line below the value rather than sitting beside it,
+ * so the reader meets the value and its qualification in that order. It carries
+ * this app's own fixed copy, on the same footing as the row's label and its empty
+ * state; a value somebody else chose reaches the row through the display-boundary
+ * fields instead.
  */
 function ConfigRowItem({ row }: { row: ConfigRow }) {
   return (
@@ -133,6 +139,11 @@ function ConfigRowItem({ row }: { row: ConfigRow }) {
         <span className={styles.sub}>{row.muted}</span>
       ) : (
         <span>{row.value}</span>
+      )}
+      {row.note !== undefined && (
+        <span className={`${styles.dlNote} ${styles.small} ${styles.sub}`}>
+          {row.note}
+        </span>
       )}
     </div>
   );
@@ -395,7 +406,11 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
  * empty state when it does not. */
 function factRow(fact: DisclosureFact): ConfigRow {
   return fact.values.length > 0
-    ? { label: fact.label, values: fact.values }
+    ? {
+        label: fact.label,
+        values: fact.values,
+        ...(fact.note !== undefined ? { note: fact.note } : {}),
+      }
     : { label: fact.label, muted: fact.muted };
 }
 

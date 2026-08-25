@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import YAML from "yaml";
 import {
+  DEFAULT_LINKAGE_RULE_SET,
   getDefaultLinkageTerms,
   MAX_NAME_LENGTH,
   MAX_NESTING_DEPTH,
@@ -26,6 +27,7 @@ import {
   persistOutboundPayloadConsent,
   readConfigLinkageSource,
   saveConfig,
+  warnOnLinkageRuleSetCitationDrift,
 } from "../../src/config";
 import type {
   ConnectionConfig,
@@ -2346,4 +2348,165 @@ test("persistOutboundPayloadConsent writes a confirmed-empty set verbatim", () =
     status: "confirmed",
     columns: [],
   });
+});
+
+// --- warnOnLinkageRuleSetCitationDrift ---------------------------------------
+
+/** The warnings one drift check emits, in order. */
+function citationWarnings(
+  terms: Pick<LinkageTerms, "linkageRuleSet" | "linkageFields" | "linkageKeys">,
+): string[] {
+  const warnings: string[] = [];
+  warnOnLinkageRuleSetCitationDrift(terms, "psilink.yaml", {
+    warn: (message: string) => warnings.push(message),
+  });
+  return warnings;
+}
+
+/** The terms with their first two keys swapped: the smallest edit that takes
+ *  rules out of the set they cite, since key order is cascade order. */
+function withReorderedKeys(terms: LinkageTerms): LinkageTerms {
+  const [first, second, ...rest] = terms.linkageKeys;
+  return { ...terms, linkageKeys: [second!, first!, ...rest] };
+}
+
+/** The terms with a linkage field the cited set does not declare, the
+ *  field-side counterpart of {@link withReorderedKeys}. A narrowed field list
+ *  stays drawn from the set, so it takes an ADDITION to leave it. */
+function withAddedField(terms: LinkageTerms): LinkageTerms {
+  return {
+    ...terms,
+    linkageFields: [
+      ...terms.linkageFields,
+      { name: "zip_code", type: "zip_code" },
+    ],
+  };
+}
+
+test("an untouched psilink init config draws no citation warning", () => {
+  expect(citationWarnings(getDefaultLinkageTerms("Agency A"))).toEqual([]);
+});
+
+test("narrowing the cited key set draws no citation warning", () => {
+  // What an input file that cannot supply every key yields: a subset of the set,
+  // which the citation is an upper bound on rather than a claim against.
+  const terms = getDefaultLinkageTerms("Agency A");
+  expect(
+    citationWarnings({ ...terms, linkageKeys: terms.linkageKeys.slice(0, -1) }),
+  ).toEqual([]);
+});
+
+test("terms carrying no citation draw no warning however their rules read", () => {
+  const terms = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  delete terms.linkageRuleSet;
+  expect(citationWarnings(terms)).toEqual([]);
+});
+
+test("a reordered cascade under the built-in citation warns, naming linkage_keys", () => {
+  const warnings = citationWarnings(
+    withReorderedKeys(getDefaultLinkageTerms("Agency A")),
+  );
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("psilink.yaml: linkage_terms.linkage_rule_set");
+  expect(warnings[0]).toContain(
+    `"${DEFAULT_LINKAGE_RULE_SET.reference.keySet.name}" ` +
+      DEFAULT_LINKAGE_RULE_SET.reference.keySet.version,
+  );
+  expect(warnings[0]).toContain("its linkage_keys are not drawn from");
+  expect(warnings[0]).not.toContain("linkage_fields");
+  expect(warnings[0]).toContain("Omit linkage_rule_set");
+});
+
+test("an added linkage field under the built-in citation warns, naming linkage_fields", () => {
+  const warnings = citationWarnings(
+    withAddedField(getDefaultLinkageTerms("Agency A")),
+  );
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("its linkage_fields are not drawn from");
+  expect(warnings[0]).not.toContain("linkage_keys");
+});
+
+test("both halves edited are reported in one warning", () => {
+  const warnings = citationWarnings(
+    withAddedField(withReorderedKeys(getDefaultLinkageTerms("Agency A"))),
+  );
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("its linkage_fields and linkage_keys are not");
+});
+
+test("a citation this build cannot resolve draws no warning", () => {
+  // Nothing here resolves either name to a set, so nothing about these rules is
+  // provable: reporting drift would assert a comparison never made.
+  const terms = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  terms.linkageRuleSet = {
+    fieldSet: { name: "county-pii", version: "3.1.0" },
+    keySet: { name: "county-keys", version: "3.1.0" },
+  };
+  expect(citationWarnings(withAddedField(terms))).toEqual([]);
+});
+
+test("a built-in set name at a version this build does not ship is not resolvable", () => {
+  // The recorded content attaches to the name and the version together, so a set
+  // at another version is as unknown to this build as another name entirely.
+  const terms = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  terms.linkageRuleSet = {
+    fieldSet: DEFAULT_LINKAGE_RULE_SET.reference.fieldSet,
+    keySet: {
+      name: DEFAULT_LINKAGE_RULE_SET.reference.keySet.name,
+      version: "9.9.9",
+    },
+  };
+  expect(citationWarnings(terms)).toEqual([]);
+});
+
+test("a foreign field-set half does not exempt the built-in key set beside it", () => {
+  const terms = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  terms.linkageRuleSet = {
+    fieldSet: { name: "county-pii", version: "3.1.0" },
+    keySet: DEFAULT_LINKAGE_RULE_SET.reference.keySet,
+  };
+  const warnings = citationWarnings(terms);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("its linkage_keys are not drawn from");
+  expect(warnings[0]).not.toContain("linkage_fields");
+});
+
+test("fields the unresolvable half covers do not decide the resolvable half", () => {
+  // Both lists here have been edited, and only the key set's name resolves: the
+  // report must be the key set's answer alone, with the added field neither
+  // named nor able to turn a fitting key set into a warning.
+  const drifted = withAddedField(
+    withReorderedKeys(getDefaultLinkageTerms("Agency A")),
+  );
+  const foreignFieldSet = { name: "county-pii", version: "3.1.0" };
+  const keySet = DEFAULT_LINKAGE_RULE_SET.reference.keySet;
+  expect(
+    citationWarnings({
+      ...drifted,
+      linkageRuleSet: { fieldSet: foreignFieldSet, keySet },
+    }),
+  ).toEqual([
+    expect.stringContaining("its linkage_keys are not drawn from") as string,
+  ]);
+  expect(
+    citationWarnings({
+      ...withAddedField(getDefaultLinkageTerms("Agency A")),
+      linkageRuleSet: { fieldSet: foreignFieldSet, keySet },
+    }),
+  ).toEqual([]);
+});
+
+test("a set name carrying control characters is escaped at this sink", () => {
+  // Only a resolvable half's name is a shipped literal; the half beside it is
+  // whatever the file says, and this log.warn is that value's display boundary.
+  const terms = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  terms.linkageRuleSet = {
+    fieldSet: { name: "county-pii\u0007\nsecond line", version: "3.1.0" },
+    keySet: DEFAULT_LINKAGE_RULE_SET.reference.keySet,
+  };
+  const warnings = citationWarnings(terms);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("county-pii");
+  expect(warnings[0]).not.toContain("\u0007");
+  expect(warnings[0]).not.toContain("\n");
 });

@@ -30,6 +30,7 @@ import {
   persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
   persistOutboundPayloadConsent,
+  warnOnLinkageRuleSetCitationDrift,
   type ReconcileDiff,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
@@ -686,6 +687,11 @@ function reconcileAcceptConfig(params: {
         `retry with ${retryWith}.`,
     );
   }
+
+  // Reported ahead of the reconciliation below, so a kept config's stale
+  // citation reaches the operator whether or not its terms agree with the
+  // invitation's -- it is a claim about this file's own rules either way.
+  warnOnLinkageRuleSetCitationDrift(existing.linkageTerms, configPath, log);
 
   const { conflicts, warnings } = diffLinkageTerms(
     existing.linkageTerms,

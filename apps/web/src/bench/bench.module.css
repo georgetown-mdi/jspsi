@@ -1007,6 +1007,13 @@
   flex: 1 1 220px;
 }
 
+/* A configuration row's caveat: a full-width basis so the wrapping row breaks
+   before it and the qualification sits under the value it qualifies, rather than
+   competing with it for the value column's width. */
+.dlNote {
+  flex: 1 1 100%;
+}
+
 .keepPrivate {
   color: var(--bench-danger);
   font-weight: 700;

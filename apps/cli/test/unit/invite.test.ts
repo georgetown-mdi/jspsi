@@ -1488,6 +1488,38 @@ test("validateInvite: derives terms from a config when no input file is given", 
   }
 });
 
+test("validateInvite: a config citing a rule set its own keys left is reported at the mint", async () => {
+  // The citation the config carries rides the token to the partner, so a hand
+  // edit that took the keys out of the cited set is named here rather than after
+  // the invitation has left. The mint is not blocked by it.
+  const terms = defaultTerms();
+  const [first, second, ...rest] = terms.linkageKeys;
+  const { dir, configPath, keyPath } = withConfig({
+    ...terms,
+    linkageKeys: [second!, first!, ...rest],
+  });
+  const log = getLogger("invite-citation-drift-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    const drifted = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((message) => message.includes("linkage_rule_set"));
+    expect(drifted).toHaveLength(1);
+    expect(drifted[0]).toContain(configPath);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("validateInvite: config-as-source threads the disclosed subset for the send commitment", async () => {
   // A config with an explicit metadata block: the disclosed set is derived from
   // it, carried on the token, AND threaded to the handler so it is persisted into
