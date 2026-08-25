@@ -121,8 +121,8 @@ export function KeysTab({
     [editor.draft],
   );
   const citationDrop = useMemo(
-    () => importedCitationDropNotice(editor.draft),
-    [editor.draft],
+    () => importedCitationDropNotice(editor.draft, currentTerms),
+    [editor.draft, currentTerms],
   );
   const keyCount = editor.draft.keys.length;
   return (
@@ -211,10 +211,8 @@ export function KeysTab({
           {citationDrop}
         </Alert>
       )}
-      <VisuallyHidden>
-        <p role="status" aria-live="polite" aria-atomic="true">
-          {citationDrop ?? ""}
-        </p>
+      <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
+        {citationDrop ?? ""}
       </VisuallyHidden>
       <Switch
         label="Expert authoring"

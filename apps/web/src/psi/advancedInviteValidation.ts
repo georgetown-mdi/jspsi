@@ -657,7 +657,8 @@ const CITATION_DROP_NOTICES: Record<ImportedCitationDropCause, string> = {
  */
 export function importedCitationDropNotice(
   draft: AdvancedInviteDraft,
+  builtTerms?: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
 ): string | undefined {
-  const cause = importedCitationDropCause(draft);
+  const cause = importedCitationDropCause(draft, builtTerms);
   return cause === undefined ? undefined : CITATION_DROP_NOTICES[cause];
 }

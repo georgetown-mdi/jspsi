@@ -268,13 +268,19 @@ function citationDropCause(
  *
  * Read over the terms the draft currently builds, so it answers for the document
  * the editor would emit right now rather than for the one that was imported.
+ * `builtTerms`, when given, is the caller's own `buildAdvancedTerms(draft)` result
+ * for the same draft, passed to avoid rebuilding it here.
  */
 export function importedCitationDropCause(
   draft: AdvancedInviteDraft,
+  builtTerms?: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
 ): ImportedCitationDropCause | undefined {
   const citation = draft.importedRuleSetCitation;
   if (citation?.kind !== "cited") return undefined;
-  return citationDropCause(citation.ruleSet, buildAdvancedTerms(draft));
+  return citationDropCause(
+    citation.ruleSet,
+    builtTerms ?? buildAdvancedTerms(draft),
+  );
 }
 
 /**
