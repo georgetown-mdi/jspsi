@@ -49,6 +49,28 @@ That is what makes describing a run by the set's name honest: the name is an
 upper bound on what was tried, and the terms document that travels with the
 exchange still records exactly which keys ran.
 
+## What zero-setup rests on
+
+A zero-setup exchange authors nothing. Each party derives its terms from its own
+input file, keeping the built-in keys that file can satisfy, and the two derived
+documents are then cross-checked against each other. That works with no
+authoring for one reason: every built-in key is built from `baseline-pii`, which
+is the guaranteed-minimum PII both parties are sure to bring.
+
+A built-in key over a field outside that substrate would strand the party whose
+file does not carry it -- `phone_number`, `email_address`, and `zip_code` are
+recognized matchable types no built-in field covers. It would do so at run time,
+as a cancelled exchange or as terms referencing a field they never declare, and
+neither of those names its cause to an operator who authored nothing.
+
+So the property is held by a check rather than by review:
+`npm run check:zero-setup-keys` reads the two declared sets and fails a built-in
+key whose elements leave the field set, or name a field a zero-setup input cannot
+supply by semantic type. Widening the field set stays possible and stays
+deliberate: its content is pinned, so widening it takes the version decision
+below. What the check covers, and what it cannot see, are in the script's own
+header.
+
 ## Why the fields and the keys are named apart
 
 One name over both would attach the keys' provenance to the fields. The
@@ -198,10 +220,21 @@ The rule for editing, one per artifact:
 
 The recorded validation attaches to a name and a version together, so an edited
 set carrying the old version would leave this note describing rules nobody ran
--- the exact failure the naming exists to prevent. A change that alters no rule
--- a key renamed without touching its elements, or the file reorganized so that
-the same fields and the same keys are emitted in the same order -- is not a
-content change, and is the only kind that leaves a version alone.
+-- the exact failure the naming exists to prevent. A change that emits the same
+fields and the same keys in the same order -- the file reorganized, a comment
+rewritten, two properties written in the other order -- alters no rule, and is
+the only kind that leaves a version alone. A key's own name is not in that
+class: it travels in the terms document, which the two parties compare whole, so
+two builds spelling a key differently cancel the exchange between them.
+
+The edit that forgets the bump is the one this rule exists for, and nothing
+about a rule written as prose fails when it is forgotten. So the rule is carried
+by a check: `npm run check:built-in-set-versions` digests each set's declared
+content -- the fields with their constraints, the keys with their elements and
+their cascade order -- and holds it to the pin `scripts/built-in-set-pins.json`
+records for the version the source declares. Content that moved under a recorded
+version fails, and a bump is asked to record the pin it ships. What moves the
+digest, and what the check cannot see, are in the script's own header.
 
 Two things the versions deliberately are not:
 

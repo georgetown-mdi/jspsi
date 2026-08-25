@@ -60,7 +60,7 @@ The names and versions are in-product identifiers for citing the rules in an agr
 
 To match on `phone_number`, `email_address`, or `zip_code`, author a key yourself: they are matchable semantic types (see [Semantic types](#semantic-types)) that neither built-in artifact uses.
 
-What the key set's validation rests on, the criticisms recorded against it, and the rule for bumping either version are in [default-linkage-rule-set.md](notes/default-linkage-rule-set.md).
+What the key set's validation rests on, the criticisms recorded against it, what a zero-setup exchange rests on, and the rule for bumping either version are in [default-linkage-rule-set.md](notes/default-linkage-rule-set.md).
 
 ### `linkage_terms.version`
 

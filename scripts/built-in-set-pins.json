@@ -1,0 +1,10 @@
+{
+  "pins": {
+    "baseline-pii": {
+      "1.0.0": "sha256:9aed0ced1287e7c6ddba25b5ffae15a6b3f611e00d9b101ac324b1f8263acee0"
+    },
+    "hmis-keys": {
+      "1.0.0": "sha256:a2518295ec241f22c749ac1be12e7da2bc7231fcf64f3bd6c7f0df3e4ca255de"
+    }
+  }
+}
