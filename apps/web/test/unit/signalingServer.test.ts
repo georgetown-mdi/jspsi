@@ -178,10 +178,7 @@ async function startSignaling(
       if (req.url?.startsWith("/api/peerjs")) return;
       const handlesAtWindowOpen = handleCounts(socket);
       // An adopter owns the errors of the connection it took, as Vite's HMR
-      // handler does, so the adopted socket gets a listener of its own here:
-      // `ws` rethrows an error on a connection carrying none as an unhandled
-      // EventEmitter `error`, which would end the run rather than leave a case
-      // free to measure which side released the socket.
+      // handler does, so the adopted socket gets a listener of its own here.
       adopter?.handleUpgrade(req, socket, head, (adopted) => {
         adopted.on("error", () => {});
       });
