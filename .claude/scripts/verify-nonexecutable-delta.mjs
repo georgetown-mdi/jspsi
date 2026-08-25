@@ -28,22 +28,39 @@
 // attestation must not report HOLDS over a file it did not examine.
 //
 // YAML comparison: parse each side with the `yaml` package and deep-compare the
-// resulting values, ignoring key order (a mapping's order is not semantically
-// significant). Explicit and fail-closed rather than a string compare:
-// `uniqueKeys` and `strict` are passed even though both already default on,
-// so a future default change cannot silently loosen the check; a stream that
-// does not parse to exactly one document -- zero, because of a parse error
-// diagnostic on the lone document, or more than one, because this verifier
-// does not attempt to align documents across two multi-document streams --
-// is UNVERIFIABLE rather than compared partially. A duplicate key is one such
-// diagnostic (measured against the installed `yaml`: `parseAllDocuments`
-// reports it as a `doc.errors` entry rather than resolving it last-wins), so
-// it fails closed the same way a genuine syntax error does. An empty or
-// comment-only stream parses to zero documents, which canonicalizes to the
-// same `null` value an absent side does, so adding or deleting a comment-only
-// YAML file reads comment-only while adding or deleting one carrying any
-// value reads as an executable delta -- the same rule the source comparison
-// applies below.
+// values it materializes with `node:util`'s `isDeepStrictEqual`, which reads a
+// mapping's key order as insignificant -- YAML's is -- while keeping a
+// sequence's, which is not. A comparison key built by stringifying the value is
+// measured wrong here the same way the two cheaper source primitives above are,
+// and is not to be reached for again: `JSON.stringify` writes NaN, Infinity,
+// -Infinity and null all as `null`, and an own-keys walk writes every Date
+// (`!!timestamp`) and every Set (`!!set`) as the same empty object, so a real
+// value change in any of them reads comment-only. The colocated test pins each
+// of those cases as an executable delta.
+//
+// `uniqueKeys` and `strict` are passed even though both already default on, so a
+// future default change cannot silently loosen the check. Three conditions are
+// then UNVERIFIABLE rather than compared, each measured against the installed
+// `yaml` and each with a soundness probe standing on it:
+//
+//   - a stream carrying more than one document, because this verifier does not
+//     attempt to align documents across two multi-document streams;
+//   - a document `parseAllDocuments` reports a diagnostic for, a duplicate key
+//     among them: it lands as a `doc.errors` entry rather than being resolved
+//     last-wins, so it fails closed the way a syntax error does;
+//   - a document that parses clean and cannot be materialized, because
+//     `doc.errors` does not surface every unsafe materialization -- an
+//     unresolved alias throws out of `toJS()`, an alias-expansion bomb trips
+//     that package's own resource cap, and an anchor aliased inside its own
+//     value comes back as a circular object with no diagnostic at all, refused
+//     because nothing finite was read.
+//
+// Each refusal is a reason on that path's own verdict, so an unreadable file
+// leaves every other path in the run with a verdict. An empty or comment-only
+// stream is the one zero-document case, and canonicalizes to the same `null`
+// value an absent side does, so adding or deleting a comment-only YAML file
+// reads comment-only while adding or deleting one carrying any value reads as
+// an executable delta -- the same rule the source comparison applies below.
 //
 // A side that does not exist canonicalizes to the empty program, so adding or
 // deleting a comments-only file reads comment-only while adding or deleting one
@@ -68,12 +85,13 @@
 // Exit codes: 0 the property holds; 1 it is violated or a changed path could not
 // be verified; 2 usage or git error; 3 the verifier failed its own soundness
 // probes. The probes run before every comparison so an attestation proves its
-// soundness on the TypeScript actually installed, rather than trusting that CI
-// ran the test suite at some point.
+// soundness on the TypeScript and `yaml` actually installed, rather than
+// trusting that CI ran the test suite at some point.
 
 import { execFileSync } from "node:child_process";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import ts from "typescript";
 import { parseAllDocuments } from "yaml";
 
@@ -136,21 +154,39 @@ export function canonicalSource(text, path) {
 }
 
 /**
- * Canonical form of one side of a YAML path -- the value of its single parsed
- * document -- or an explicit failure reason for anything this verifier will
- * not silently paper over. `text` is null for a side where the file does not
- * exist; that and a stream with zero documents (an empty or comment-only
- * file) both canonicalize to `value: null`, the same "no content" reading
- * `canonicalSource` gives an absent TypeScript/JavaScript side.
- *
- * `uniqueKeys` and `strict` are passed explicitly even though the installed
- * `yaml` already defaults both on, so a future default change cannot loosen
- * this silently. A stream of more than one document is refused rather than
- * compared partially -- this verifier does not attempt to align documents
- * across two multi-document streams -- and a duplicate key is refused the
- * same way a genuine syntax error is: measured against the installed `yaml`,
- * `parseAllDocuments` reports it as a `doc.errors` entry rather than
- * resolving it last-wins.
+ * Whether a materialized YAML value contains a reference back to itself.
+ * `ancestors` is the path currently being walked and `acyclic` the nodes
+ * already cleared, which keeps a document whose aliases share subtrees to one
+ * visit per node.
+ */
+function containsCycle(value, ancestors = new Set(), acyclic = new Set()) {
+  if (value === null || typeof value !== "object") return false;
+  if (ancestors.has(value)) return true;
+  if (acyclic.has(value)) return false;
+  ancestors.add(value);
+  const children =
+    value instanceof Map
+      ? [...value.keys(), ...value.values()]
+      : value instanceof Set
+        ? [...value]
+        : Object.values(value);
+  const cyclic = children.some((child) =>
+    containsCycle(child, ancestors, acyclic),
+  );
+  ancestors.delete(value);
+  if (!cyclic) acyclic.add(value);
+  return cyclic;
+}
+
+/**
+ * Canonical form of one side of a YAML path -- the value its single document
+ * materializes to -- or, in `error`, the reason this verifier will not compare
+ * that side, which every caller checks before reading `value`. `text` is null
+ * for a side where the file does not exist; that and a zero-document stream
+ * (an empty or comment-only file) both canonicalize to `value: null`, the same
+ * "no content" reading `canonicalSource` gives an absent TypeScript/JavaScript
+ * side. Nothing the side is refused for throws out of here: a refusal is a
+ * reason string, so the run's other paths still reach their own verdicts.
  */
 export function canonicalYaml(text) {
   if (text === null) return { value: null, error: null };
@@ -163,7 +199,7 @@ export function canonicalYaml(text) {
   if (documents.length > 1) {
     return {
       value: undefined,
-      error: `${documents.length} YAML documents in one stream -- this verifier compares a single document only`,
+      error: `carries ${documents.length} YAML documents in one stream -- this verifier compares a single document only`,
     };
   }
   const [document] = documents;
@@ -174,29 +210,30 @@ export function canonicalYaml(text) {
       error: `does not parse: ${document.errors[0].message}`,
     };
   }
-  return { value: document.toJS(), error: null };
-}
-
-/**
- * A deep-equality key for a YAML value that ignores mapping key order --
- * order is not semantically significant for a YAML mapping -- while keeping
- * sequence order, which is. `undefined` never reaches this function: both
- * canonicalYaml failure paths report `error` instead, and every call site
- * checks `error` first.
- */
-function yamlComparisonKey(value) {
-  if (Array.isArray(value))
-    return `[${value.map(yamlComparisonKey).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const keys = Object.keys(value).sort();
-    return `{${keys.map((key) => `${JSON.stringify(key)}:${yamlComparisonKey(value[key])}`).join(",")}}`;
+  let value;
+  try {
+    value = document.toJS();
+    if (containsCycle(value)) {
+      return {
+        value: undefined,
+        error:
+          "refers to itself -- this verifier compares finite values, and an anchor aliased inside its own value materializes to a circular one",
+      };
+    }
+  } catch (error) {
+    return {
+      value: undefined,
+      error: `does not materialize: ${error.message}`,
+    };
   }
-  return JSON.stringify(value);
+  return { value, error: null };
 }
 
 /**
  * Verdict for one changed YAML path. `before` and `after` are the file's text
- * at each ref, or null where it does not exist on that side.
+ * at each ref, or null where it does not exist on that side. A refused side is
+ * named in the reason, the way the source comparison names the side its parse
+ * errors came from.
  */
 export function yamlVerdict({ path, before, after }) {
   const left = canonicalYaml(before);
@@ -205,17 +242,19 @@ export function yamlVerdict({ path, before, after }) {
     return {
       path,
       verdict: "unverifiable",
-      reason: [left.error, right.error]
-        .filter((error) => error !== null)
+      reason: [
+        left.error === null ? null : `before ${left.error}`,
+        right.error === null ? null : `after ${right.error}`,
+      ]
+        .filter((reason) => reason !== null)
         .join("; "),
     };
   }
   return {
     path,
-    verdict:
-      yamlComparisonKey(left.value) === yamlComparisonKey(right.value)
-        ? "comment-only"
-        : "executable-delta",
+    verdict: isDeepStrictEqual(left.value, right.value)
+      ? "comment-only"
+      : "executable-delta",
   };
 }
 
@@ -378,6 +417,9 @@ export function summarize(verdicts) {
 const probeCanonical = (text, path = "probe.ts") =>
   canonicalSource(text, path).canonical;
 
+const probeYamlVerdict = (before, after) =>
+  yamlVerdict({ path: "probe.yaml", before, after }).verdict;
+
 const PROBES = [
   {
     name: "comments are suppressed (line, block, and JSDoc)",
@@ -423,20 +465,37 @@ const PROBES = [
   {
     name: "a YAML comment change reads as comment-only",
     run: () =>
-      yamlComparisonKey(canonicalYaml("a: 1 # x\nb: 2\n").value) ===
-      yamlComparisonKey(canonicalYaml("a: 1 # y\nb: 2\n").value),
+      probeYamlVerdict("a: 1 # x\nb: 2\n", "a: 1 # y\nb: 2\n") ===
+      "comment-only",
   },
   {
     name: "reordering YAML mapping keys reads as comment-only",
     run: () =>
-      yamlComparisonKey(canonicalYaml("a: 1\nb: 2\n").value) ===
-      yamlComparisonKey(canonicalYaml("b: 2\na: 1\n").value),
+      probeYamlVerdict("a: 1\nb: 2\n", "b: 2\na: 1\n") === "comment-only",
   },
   {
     name: "reordering a YAML sequence reads as a change",
     run: () =>
-      yamlComparisonKey(canonicalYaml("a:\n  - 1\n  - 2\n").value) !==
-      yamlComparisonKey(canonicalYaml("a:\n  - 2\n  - 1\n").value),
+      probeYamlVerdict("a:\n  - 1\n  - 2\n", "a:\n  - 2\n  - 1\n") ===
+      "executable-delta",
+  },
+  {
+    name: "YAML values that share one JSON text read as a change",
+    run: () =>
+      probeYamlVerdict("a: .nan\n", "a: .inf\n") === "executable-delta" &&
+      probeYamlVerdict("a: .inf\n", "a: -.inf\n") === "executable-delta" &&
+      probeYamlVerdict("a: null\n", "a: .nan\n") === "executable-delta" &&
+      probeYamlVerdict("a: .nan # x\n", "a: .nan # y\n") === "comment-only",
+  },
+  {
+    name: "YAML values that share one set of own keys read as a change",
+    run: () =>
+      probeYamlVerdict(
+        "a: !!timestamp 2001-12-14\n",
+        "a: !!timestamp 2002-12-14\n",
+      ) === "executable-delta" &&
+      probeYamlVerdict("a: !!set\n  ? x\n", "a: !!set\n  ? y\n") ===
+        "executable-delta",
   },
   {
     name: "a duplicate YAML key is refused rather than resolved last-wins",
@@ -445,6 +504,14 @@ const PROBES = [
   {
     name: "a multi-document YAML stream is refused rather than compared partially",
     run: () => canonicalYaml("a: 1\n---\nb: 2\n").error !== null,
+  },
+  {
+    name: "a YAML alias that does not resolve is refused rather than thrown",
+    run: () => canonicalYaml("a: *missing\n").error !== null,
+  },
+  {
+    name: "a self-referential YAML anchor is refused rather than compared",
+    run: () => canonicalYaml("a: &x\n  b: *x\n").error !== null,
   },
   {
     name: "an absent YAML side canonicalizes to the same value as an empty document",
@@ -457,8 +524,8 @@ const PROBES = [
 ];
 
 /**
- * The soundness probes as `{name, ok}` results: the properties the comparison
- * rests on, re-measured against the installed TypeScript on every run.
+ * The soundness probes as `{name, ok}` results: the properties the comparisons
+ * rest on, re-measured against the installed TypeScript and `yaml` on every run.
  */
 export function soundnessProbes() {
   return PROBES.map(({ name, run }) => ({ name, ok: run() }));

@@ -252,9 +252,9 @@ describe("unparseable content", () => {
 });
 
 // Every claim below about the `yaml` package's behavior -- duplicate-key
-// rejection, multi-document handling, key-order insensitivity -- was measured
-// by running it, the same discipline the TypeScript comparison above holds
-// itself to.
+// rejection, multi-document handling, key-order insensitivity, which values
+// survive `toJS()` and which throw out of it -- was measured by running it, the
+// same discipline the TypeScript comparison above holds itself to.
 describe("YAML comparison", () => {
   const yamlVerdictOf = (before, after, path = "a.yaml") =>
     yamlVerdict({ path, before, after }).verdict;
@@ -279,6 +279,47 @@ describe("YAML comparison", () => {
     expect(yamlVerdictOf("a:\n  - 1\n  - 2\n", "a:\n  - 2\n  - 1\n")).toBe(
       "executable-delta",
     );
+  });
+
+  // The four values below share one JSON text (`null`), so a comparison key
+  // built by stringifying the value reads every edit among them as
+  // comment-only -- an executable delta attested away.
+  it("tells NaN, Infinity, -Infinity, and null apart", () => {
+    expect(yamlVerdictOf("a: .nan\n", "a: .inf\n")).toBe("executable-delta");
+    expect(yamlVerdictOf("a: .inf\n", "a: -.inf\n")).toBe("executable-delta");
+    expect(yamlVerdictOf("a: null\n", "a: .nan\n")).toBe("executable-delta");
+    expect(yamlVerdictOf("a: -.inf\n", "a: ~\n")).toBe("executable-delta");
+  });
+
+  it("reads a comment edit beside an unchanged NaN as comment-only", () => {
+    expect(yamlVerdictOf("a: .nan # note\n", "a: .nan\n")).toBe("comment-only");
+  });
+
+  // `!!timestamp` materializes to a Date and `!!set` to a Set, neither of which
+  // carries its value in its own keys: an own-keys walk reads both sides of
+  // each pair below as the same empty object.
+  it("tells two timestamps and two sets apart", () => {
+    expect(
+      yamlVerdictOf(
+        "a: !!timestamp 2001-12-14\n",
+        "a: !!timestamp 2002-12-14\n",
+      ),
+    ).toBe("executable-delta");
+    expect(yamlVerdictOf("a: !!set\n  ? x\n", "a: !!set\n  ? y\n")).toBe(
+      "executable-delta",
+    );
+  });
+
+  it("reads an unchanged timestamp or set as comment-only", () => {
+    expect(
+      yamlVerdictOf(
+        "a: !!timestamp 2001-12-14 # note\n",
+        "a: !!timestamp 2001-12-14\n",
+      ),
+    ).toBe("comment-only");
+    expect(
+      yamlVerdictOf("a: !!set\n  ? x\n  ? y\n", "a: !!set\n  ? y\n  ? x\n"),
+    ).toBe("comment-only");
   });
 
   it("refuses a duplicate key rather than resolving it last-wins", () => {
@@ -309,6 +350,66 @@ describe("YAML comparison", () => {
     });
     expect(result.verdict).toBe("unverifiable");
     expect(result.reason).toMatch(/does not parse/);
+  });
+
+  // `doc.errors` is empty for each of these: the failure is in materializing
+  // the document, not in parsing it, so a verdict path that trusts the error
+  // count throws out of the run instead of reporting the file.
+  it("refuses an alias that does not resolve, rather than throwing", () => {
+    const result = yamlVerdict({
+      path: "a.yaml",
+      before: "a: 1\n",
+      after: "a: *missing\n",
+    });
+    expect(result.verdict).toBe("unverifiable");
+    expect(result.reason).toMatch(/does not materialize: Unresolved alias/);
+  });
+
+  it("refuses an alias expansion the yaml package caps as an attack", () => {
+    let bomb = "a: &a0 [x]\n";
+    for (let i = 1; i < 8; i += 1) {
+      bomb += `b${i}: &a${i} [*a${i - 1}, *a${i - 1}, *a${i - 1}]\n`;
+    }
+    expect(canonicalYaml(bomb).error).toMatch(
+      /does not materialize: Excessive alias count/,
+    );
+  });
+
+  it("refuses a self-referential anchor, which materializes to a circular value", () => {
+    for (const after of ["a: &x\n  b: *x\n", "a: &x [*x]\n"]) {
+      const result = yamlVerdict({ path: "a.yaml", before: "a: 1\n", after });
+      expect(result.verdict).toBe("unverifiable");
+      expect(result.reason).toMatch(/refers to itself/);
+    }
+  });
+
+  it("compares a document whose aliases only share subtrees", () => {
+    const shared = "base: &b\n  x: 1\nl: *b\nr: *b\n";
+    expect(canonicalYaml(shared).error).toBe(null);
+    expect(yamlVerdictOf(shared, `# note\n${shared}`)).toBe("comment-only");
+    expect(yamlVerdictOf(shared, shared.replace("x: 1", "x: 2"))).toBe(
+      "executable-delta",
+    );
+  });
+
+  it("names the side a refusal came from, as the source comparison does", () => {
+    expect(
+      yamlVerdict({ path: "a.yaml", before: "a: 1\na: 2\n", after: "a: 1\n" })
+        .reason,
+    ).toMatch(/^before does not parse: /);
+    expect(
+      yamlVerdict({ path: "a.yaml", before: "a: 1\n", after: "a: *missing\n" })
+        .reason,
+    ).toMatch(/^after does not materialize: /);
+    expect(
+      yamlVerdict({
+        path: "a.yaml",
+        before: "a: 1\n---\nb: 2\n",
+        after: "a: *missing\n",
+      }).reason,
+    ).toMatch(
+      /^before carries 2 YAML documents in one stream[^;]*; after does not materialize: /,
+    );
   });
 
   it("canonicalizes an absent side to the same value as an empty document", () => {
@@ -557,6 +658,42 @@ describe("against a real git repository", () => {
       "package.json": "unverifiable",
       ".github/workflows/ci.yaml": "executable-delta",
     });
+    expect(summarize(verdicts).exitCode).toBe(1);
+  });
+
+  it("keeps a YAML path it cannot materialize from costing the rest of the run its verdicts", () => {
+    const { git, write, commit } = makeFixture();
+    write(".github/workflows/alias.yaml", "a: 1\n");
+    write(".github/workflows/anchor.yaml", "a: 1\n");
+    write("src/commented.ts", "export const a = 1;\n");
+    write("src/changed.ts", "export const b = 1;\n");
+    const attested = commit("Base");
+
+    // Both parse with no diagnostic at all; only materializing them fails.
+    write(".github/workflows/alias.yaml", "a: *missing\n");
+    write(".github/workflows/anchor.yaml", "a: &x\n  b: *x\n");
+    write("src/commented.ts", "// why this is one\nexport const a = 1;\n");
+    write("src/changed.ts", "export const b = 2;\n");
+    const head = commit("Change");
+
+    const verdicts = collectVerdicts({ attested, head, git });
+    expect(byPath(verdicts)).toEqual({
+      ".github/workflows/alias.yaml": "unverifiable",
+      ".github/workflows/anchor.yaml": "unverifiable",
+      "src/commented.ts": "comment-only",
+      "src/changed.ts": "executable-delta",
+    });
+    const reasons = Object.fromEntries(
+      verdicts.map((v) => [v.path, v.reason ?? ""]),
+    );
+    expect(reasons[".github/workflows/alias.yaml"]).toMatch(
+      /after does not materialize: Unresolved alias/,
+    );
+    expect(reasons[".github/workflows/anchor.yaml"]).toMatch(
+      /after refers to itself/,
+    );
+    // Exit 1 is the documented unverifiable-path outcome; a throw escaping the
+    // run would surface as exit 2, the usage-or-git-error code.
     expect(summarize(verdicts).exitCode).toBe(1);
   });
 
