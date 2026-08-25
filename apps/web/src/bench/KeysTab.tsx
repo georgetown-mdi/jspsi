@@ -75,19 +75,23 @@ const OPT_IN_BADGE_LABEL = "outside the default set";
  * the three types it names are surfaced on identical terms -- none is offered
  * with a caveat the others are spared, and none is offered silently.
  *
- * ZIP code is called out on top of that because its offered key is the type on its
- * own, and a sole-identifier ZIP key matches everyone who shares an area. The
- * remedy is a compound key, which is expert authoring's job, so the copy points
- * there rather than implying this list can build one.
+ * The shape of the offer needs stating as much as the departure does: each type
+ * is offered only inside a compound key, and an operator who reads the list as a
+ * menu of single identifiers would not see why. The closing sentence is about the
+ * badge instead, which a metadata edit can leave on an offer the file no longer
+ * supplies a column for.
  */
 const OPT_IN_KEYS_GUIDANCE =
-  "Phone number, email address, and ZIP code can be matched on, and your file " +
-  "supplies a column for each key offered above -- but the default keys use " +
-  "none of them, so what those keys were validated against says nothing about " +
-  "how these match. Turning one on means this exchange no longer matches on the " +
-  "default set alone. A ZIP code on its own is a weak identifier: it matches " +
-  "everyone who shares an area, and it does its work inside a compound key " +
-  "alongside a name or a date of birth, which Expert authoring builds.";
+  "The default keys use none of phone number, email address, or ZIP code, so " +
+  "what those keys were validated against says nothing about how these match: " +
+  "turning one on means this exchange no longer matches on the default set " +
+  "alone. Each is offered only inside a compound key, never on its own, " +
+  "because a single identifier both over-matches and tells anyone holding a " +
+  "value whether its holder is in the other file -- and a phone number or an " +
+  "email address is often a shared one, covering a household or the " +
+  "organization that helped with an application. Offers " +
+  "appear for the keys your file can supply; one marked not satisfiable lost " +
+  "its column to a later edit.";
 
 /**
  * The Matching keys tab: the guided ordered key list (enable + reorder, with
@@ -96,13 +100,14 @@ const OPT_IN_KEYS_GUIDANCE =
  * strategy, matching method, and deduplication controls, each live while the
  * exchange applies what it writes.
  *
- * The list holds the keys the built-in rule set offers for these columns and, at
- * the end and turned off, the ones `optInLinkageKeys` offers for the matchable
- * types that set uses in none of its keys. Both are the same control -- a
- * checkbox and the reorder pair -- so an addition is made the way a default key
- * is turned off; what tells them apart is a marker on the entry and the guidance
- * below the list ({@link OPT_IN_KEYS_GUIDANCE}), which states what the addition
- * costs rather than a shape of control that hides the choice.
+ * The list holds the keys the built-in rule set offers for these columns and,
+ * turned off and in the cascade position each belongs at, the ones
+ * `optInLinkageKeys` offers for the matchable types that set uses in none of its
+ * keys. Both are the same control -- a checkbox and the reorder pair -- so an
+ * addition is made the way a default key is turned off; what tells them apart is
+ * a marker on the entry and the guidance below the list
+ * ({@link OPT_IN_KEYS_GUIDANCE}), which states what the addition costs rather
+ * than a shape of control that hides the choice.
  *
  * It also carries the notice about the terms the editor will emit that refuses
  * nothing: an imported document's rule-set citation the rebuild will not carry

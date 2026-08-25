@@ -199,27 +199,31 @@ describe("KeysTab: the keys offered outside the default set", () => {
     );
   }
 
-  test("renders the offer as an unchecked key, marked, with the guidance beside it", async () => {
+  test("renders the offer as an unchecked compound key, marked, with the guidance beside it", async () => {
     renderFor(withZip);
 
     // Offered through the list's own control, so adding a key is done the way a
-    // default key is turned off -- and it arrives off.
-    const offered = page.getByRole("checkbox", { name: /ZIP/ });
+    // default key is turned off -- and it arrives off, carrying its type inside a
+    // compound key rather than standing alone.
+    const offered = page.getByRole("checkbox", {
+      name: /LN \+ FN \+ DOB \+ ZIP/,
+    });
     await expect.element(offered).toBeInTheDocument();
     await expect.element(offered).not.toBeChecked();
 
     const marked = page.getByText("outside the default set", { exact: false });
     await expect.element(marked.first()).toBeInTheDocument();
 
-    // The three copy points: the departure from the validated set, ZIP being weak
-    // alone, and where a compound key is built.
+    // The copy points: the departure from the validated set, why the offer is
+    // compound, and the shared-contact hazard behind that.
     const body = document.body.textContent;
     expect(body).toContain("no longer matches on the default set alone");
-    expect(body).toContain("A ZIP code on its own is a weak identifier");
-    expect(body).toContain("compound key");
-    expect(body).toContain("Expert authoring builds");
+    expect(body).toContain("offered only inside a compound key");
+    expect(body).toContain("over-matches");
+    expect(body).toContain("whether its holder is in the other file");
+    expect(body).toContain("often a shared one");
     // All three named, so none is offered on quieter terms than the others.
-    expect(body).toContain("Phone number, email address, and ZIP code");
+    expect(body).toContain("phone number, email address, or ZIP code");
   });
 
   test("says nothing when the file supplies no column for one", async () => {
@@ -230,7 +234,7 @@ describe("KeysTab: the keys offered outside the default set", () => {
       .toBeInTheDocument();
     const body = document.body.textContent;
     expect(body).not.toContain("outside the default set");
-    expect(body).not.toContain("Phone number, email address, and ZIP code");
+    expect(body).not.toContain("phone number, email address, or ZIP code");
   });
 });
 

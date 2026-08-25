@@ -2,11 +2,13 @@ import {
   INVITATION_LIFETIME_SECONDS,
   OPT_IN_LINKAGE_FIELD_TYPES,
   authoredLinkageFields,
+  canonicalString,
   columnValues,
   getDefaultLinkageTerms,
   getDefaultStandardization,
   inferDateFormat,
   inferMetadata,
+  isOptInLinkageKey,
   optInLinkageKeys,
   referencedLinkageFieldNames,
 } from "@psilink/core";
@@ -85,13 +87,17 @@ const OPT_IN_TYPES: ReadonlySet<string> = new Set(OPT_IN_LINKAGE_FIELD_TYPES);
  * declare the field once the key is on, and cleans it. Two parties cleaning one
  * field differently match almost nothing.
  *
- * It is the ENABLED keys, not the columns, that decide it: a draft carries an
- * opt-in type's pipeline exactly while a key it has turned on references that
- * type's field, so the outputs of the cleaning a draft holds name fields the terms
- * it emits declare. Widening on column presence instead would put a pipeline in
- * every guided draft over a file with such a column -- inert against those terms,
- * and refused as an authored standardization contradicting them by every surface
- * that persists the draft rather than reconciling it (`prepareForExchange`).
+ * It is the ENABLED keys, not the columns, that decide it: on the guided paths a
+ * draft carries the OFFER's own type-named cleaning exactly while an enabled key
+ * references that field. The rule governs the offer's cleaning alone -- an
+ * imported document's declared-but-unreferenced fields, and the document-named
+ * bindings {@link draftWithKeyEnabled} deliberately retains, are cleaning a draft
+ * holds against terms that declare nothing for it -- so what guarantees every
+ * PERSISTED artifact is the mint chokepoint instead, where `generateInvitation`
+ * reconciles the cleaning to the terms it embeds and asserts the two agree before
+ * a secret exists. Widening on column presence would put a pipeline in every
+ * guided draft over a file with such a column, serving no key and reconciled away
+ * at that mint.
  *
  * A transformation the widening adds declares its field through
  * `authoredLinkageFields`' explicit branch instead of that function's synthetic
@@ -237,31 +243,66 @@ export function seedAdvancedInvite(
 }
 
 /**
- * What the guided key list offers for `metadata`, in list order: the built-in
- * keys the columns can supply, ON, then the opt-in keys the columns can supply,
- * OFF -- so a fresh draft authors exactly the built-in set it always did and the
- * additions sit below it waiting to be chosen.
+ * What the guided key list offers for `metadata`: the built-in keys the columns
+ * can supply, ON, with the opt-in keys the columns can supply placed among them
+ * ({@link placeOfferedKeys}) and OFF -- so a fresh draft authors exactly the
+ * built-in set it always did and the additions wait to be chosen.
  *
  * Each entry's `enabled` is the flag a key arrives with when it is offered for
  * the first time; {@link reconcileKeys} keeps the operator's own flag for a key
  * already in the draft, so a metadata edit never silently re-enables an opt-in
  * key that was turned off, nor turns off one that was turned on.
- *
- * The opt-in keys go last because list order is cascade order: appended, an
- * opt-in key sees only the records the built-in keys did not already claim,
- * which is the case for adding one. The operator reorders from the list.
  */
 function offerableDraftKeys(
   identity: string,
   metadata: Metadata,
 ): Array<DraftKey> {
-  return [
-    ...getDefaultLinkageTerms(identity, metadata).linkageKeys.map((key) => ({
+  return placeOfferedKeys(
+    getDefaultLinkageTerms(identity, metadata).linkageKeys.map((key) => ({
       key,
       enabled: true,
     })),
-    ...optInLinkageKeys(metadata).map((key) => ({ key, enabled: false })),
-  ];
+    optInLinkageKeys(metadata).map((key) => ({ key, enabled: false })),
+  );
+}
+
+/**
+ * `keys` with each entry of `offers` inserted immediately above the first key it
+ * REFINES -- carrying that key's elements and at least one more -- and at the end
+ * when it refines none of them.
+ *
+ * List order is cascade order, and a round claims the records it matches, so a
+ * refinement below the key it refines is left only what the looser key could not
+ * attribute: the precision the extra element buys is spent on records the looser
+ * key has already taken, several of which it may have taken wrongly. Above it,
+ * the refinement claims the records both would match and the looser key still
+ * catches the rest -- the most-precise-first order the built-in set is already
+ * in. An offer refining nothing (`FN + EMAIL`) goes last, where a thin key
+ * belongs.
+ */
+function placeOfferedKeys(
+  keys: ReadonlyArray<DraftKey>,
+  offers: ReadonlyArray<DraftKey>,
+): Array<DraftKey> {
+  const placed = [...keys];
+  for (const offer of offers) {
+    const at = placed.findIndex((entry) => refines(offer.key, entry.key));
+    if (at === -1) placed.push(offer);
+    else placed.splice(at, 0, offer);
+  }
+  return placed;
+}
+
+/** Whether `key` carries every element of `coarser` and at least one more, the
+ * relation that makes `key` match a subset of what `coarser` matches. Elements
+ * are compared through the canonical encoding, so a transform on one of them is
+ * part of the element rather than ignored; a `swap` key states a matching rule
+ * its elements do not carry, so neither side of the relation may have one. */
+function refines(key: LinkageKey, coarser: LinkageKey): boolean {
+  if (key.swap !== undefined || coarser.swap !== undefined) return false;
+  if (coarser.elements.length >= key.elements.length) return false;
+  const elements = new Set(key.elements.map((el) => canonicalString(el)));
+  return coarser.elements.every((el) => elements.has(canonicalString(el)));
 }
 
 /**
@@ -302,9 +343,9 @@ export function setDraftMetadataKeepingKeys(
  * filtered by the `role: linkage` column types present, and the opt-in keys are
  * offered on the same rule), so this recomputes the offerable key set
  * ({@link offerableDraftKeys}) and reconciles it with the current draft -- keys
- * still offerable keep their enabled flag and position, newly-offerable keys are
- * appended at the flag they are offered at, and keys no longer offerable drop. The
- * threaded metadata is
+ * still offerable keep their enabled flag and position, newly-offerable keys
+ * arrive at the flag and the place the offer gives them ({@link reconcileKeys}),
+ * and keys no longer offerable drop. The threaded metadata is
  * what the inviter's exchange binds on, so a remap that makes a key offerable also
  * makes the run actually produce it. Reconciles the standardization too, against
  * the RECONCILED key set rather than the draft's previous one, so the cleaning an
@@ -355,6 +396,12 @@ export function setDraftMetadata(
  * cleaning is deliberately retained across a disable so re-enabling restores what
  * the operator authored, which the mint reconciles to the terms it emits
  * (`standardizationForTerms`).
+ *
+ * The offer's cleaning is the one an operator's own steps do not survive: custom
+ * steps on an offered type's transformation are discarded when its key goes off
+ * and the recommended pipeline is re-derived when it comes back on, deliberately,
+ * because the accepting party derives that same pipeline from the terms and a
+ * step only one side runs matches nothing.
  */
 export function draftWithKeyEnabled(
   draft: AdvancedInviteDraft,
@@ -499,7 +546,11 @@ function reconcileStandardization(
 /** Reconcile the draft's keys against a freshly-derived offer
  * ({@link offerableDraftKeys}): keep the order and enabled flag of keys that
  * remain offered (replacing the key object with the fresh template), then append
- * any newly-offered key at the flag it is offered at. */
+ * any newly-offered built-in key at the flag it is offered at and place a
+ * newly-offered opt-in key where the offer places it ({@link placeOfferedKeys}),
+ * which is above whichever key it refines wherever the operator has moved that
+ * one. Appending an opt-in key instead would land a retype-driven offer below the
+ * key it refines, the one position where turning it on buys nothing. */
 function reconcileKeys(
   prevKeys: Array<DraftKey>,
   offerable: Array<DraftKey>,
@@ -516,10 +567,13 @@ function reconcileKeys(
       seen.add(entry.key.name);
     }
   }
-  for (const entry of offerable) {
-    if (!seen.has(entry.key.name)) kept.push(entry);
-  }
-  return kept;
+  const fresh = offerable.filter((entry) => !seen.has(entry.key.name));
+  for (const entry of fresh)
+    if (!isOptInLinkageKey(entry.key)) kept.push(entry);
+  return placeOfferedKeys(
+    kept,
+    fresh.filter((entry) => isOptInLinkageKey(entry.key)),
+  );
 }
 
 /** The field names a metadata/standardization pair can declare -- the universe

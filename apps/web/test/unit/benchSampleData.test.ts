@@ -133,7 +133,9 @@ describe("sample data", () => {
     const offered = editor.draft.keys.filter((entry) =>
       isOptInLinkageKey(entry.key),
     );
-    expect(offered.map((entry) => entry.key.name)).toEqual(["ZIP"]);
+    expect(offered.map((entry) => entry.key.name)).toEqual([
+      "LN + FN + DOB + ZIP",
+    ]);
     expect(offered.every((entry) => entry.enabled)).toBe(false);
   });
 

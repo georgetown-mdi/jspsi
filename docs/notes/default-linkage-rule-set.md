@@ -166,16 +166,27 @@ precision/recall consequences and are not covered by the validation these keys
 rest on, so they need their own grounding before they could ship as built-in.
 
 What closes the gap without moving the set is offering those types beside it
-rather than inside it. The web app's guided key list carries, after the built-in
-keys and turned off, one key per such type its file supplies -- the type on its
-own -- and says at the control that turning one on departs from the validated
-set, and that a ZIP code alone is a weak identifier whose place is a compound
-key. The offer is the type alone, not a composition of it with the built-in
-fields, for the same reason the set does not grow: a composed key is a rule
-nothing here has grounded, and authoring one is what the expert key editor is
-for. Terms carrying an added key are not drawn from the set, so they cite none
--- the departure reaches the accepting party's terms review, not only the
-operator's screen.
+rather than inside it. The web app's guided key list carries, turned off, one key
+per such type its file supplies every element of, and says at the control that
+turning one on departs from the validated set.
+
+Each offered key is compound -- the type beside fields the built-in keys already
+use -- and never the type alone, on two grounds that agree. A key
+over a single identifier is a membership oracle: a party holding a candidate
+value learns from the result whether its holder is in the other party's file,
+which is the differencing exposure [SECURITY_DESIGN.md](../SECURITY_DESIGN.md)
+scopes the guarantee against. And a contact value is a shared value in
+program-application data -- one phone number or email address carries across a
+household, and across the people an organization files for -- so a key over one
+alone reports different people as the same person. The shapes, the evidence
+behind each, and the cascade position each has to sit at are derived in
+`docs/notes/linkage-rule-grounding.md`.
+
+One shape per type is the whole offer, not a builder over the types: any other
+combination is a rule nothing here has grounded, and authoring one is what the
+expert key editor is for. Terms carrying an added key are not drawn from the set,
+so they cite none -- the departure reaches the accepting party's terms review,
+not only the operator's screen.
 
 The honest summary is that the key set is looser than some standards where it
 matches, and narrower than the product's own capability in what it can match

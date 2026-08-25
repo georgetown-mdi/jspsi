@@ -48,7 +48,7 @@ import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
 
 /**
  * The guided path's opt-in matchable types: a column of a type no built-in key
- * uses is offered as a key of its own, off, and everything about the emitted
+ * uses is offered inside a compound key, off, and everything about the emitted
  * terms holds still until the operator turns it on.
  */
 
@@ -89,35 +89,54 @@ function withKeyEnabled(
 const offeredKeys = (draft: AdvancedInviteDraft) =>
   draft.keys.filter((entry) => isOptInLinkageKey(entry.key));
 
+const PHONE_KEY = "LN + FN + DOB + PHONE";
+const ZIP_KEY = "LN + FN + DOB + ZIP";
+
+/** The list positions of the named keys, for the placement assertions. */
+const positionOf = (draft: AdvancedInviteDraft, name: string) =>
+  draft.keys.findIndex((entry) => entry.key.name === name);
+
 describe("the guided key list offers the non-default matchable types", () => {
-  test("offers one key per supplied type, off, after the built-in keys", () => {
+  test("offers one compound key per supplied type, off", () => {
     const draft = guidedDraft();
     expect(offeredKeys(draft).map((entry) => entry.key.name)).toEqual([
-      "PHONE",
-      "ZIP",
+      PHONE_KEY,
+      ZIP_KEY,
     ]);
     expect(offeredKeys(draft).every((entry) => entry.enabled)).toBe(false);
-    // Built-in first, offers last: list order is cascade order, so an offer sees
-    // only what the built-in keys did not claim.
-    const firstOffer = draft.keys.findIndex((entry) =>
-      isOptInLinkageKey(entry.key),
-    );
-    expect(
-      draft.keys
-        .slice(0, firstOffer)
-        .some((entry) => isOptInLinkageKey(entry.key)),
-    ).toBe(false);
-    expect(
-      draft.keys
-        .slice(firstOffer)
-        .every((entry) => isOptInLinkageKey(entry.key)),
-    ).toBe(true);
+    // Each carries its type inside a compound key: a key over one identifier
+    // alone would both over-match and answer a membership question.
+    for (const entry of offeredKeys(draft))
+      expect(entry.key.elements.length).toBeGreaterThanOrEqual(2);
     // Every built-in key the columns supply still arrives on.
     expect(
       draft.keys
         .filter((entry) => !isOptInLinkageKey(entry.key))
         .every((entry) => entry.enabled),
     ).toBe(true);
+  });
+
+  test("places each offer above the built-in key it refines", () => {
+    // List order is cascade order and a round claims what it matches, so an offer
+    // sitting below the key whose elements it extends is left only the records
+    // that key could not attribute -- the precision the extra element buys spent
+    // on records already taken.
+    const draft = guidedDraft();
+    const coarser = positionOf(draft, "LN + FN + DOB");
+    expect(coarser).toBeGreaterThan(-1);
+    expect(positionOf(draft, PHONE_KEY)).toBeLessThan(coarser);
+    expect(positionOf(draft, ZIP_KEY)).toBeLessThan(coarser);
+    // Nothing else moves: the built-in keys hold the order the set declares them
+    // in.
+    expect(
+      draft.keys
+        .filter((entry) => !isOptInLinkageKey(entry.key))
+        .map((entry) => entry.key.name),
+    ).toEqual(
+      getDefaultLinkageTerms("Inviter", inferMetadata(COLUMNS)).linkageKeys.map(
+        (key) => key.name,
+      ),
+    );
   });
 
   test("offers nothing for a type the file does not supply", () => {
@@ -130,6 +149,17 @@ describe("the guided key list offers the non-default matchable types", () => {
     expect(offeredKeys(draft)).toEqual([]);
   });
 
+  test("offers nothing when the file cannot supply the whole compound", () => {
+    // Satisfiability runs over every element of the offer, so a file with a ZIP
+    // column and no date of birth is offered no ZIP key rather than a thinner one.
+    const draft = seedAdvancedInvite(
+      "Inviter",
+      ["ssn", "first_name", "last_name", "zip"],
+      [{ ssn: "900-31-2245", first_name: "M", last_name: "A", zip: "60614" }],
+    ).draft;
+    expect(offeredKeys(draft)).toEqual([]);
+  });
+
   test("offers nothing on a column of the type the operator took off matching", () => {
     // The satisfiability filter the built-in keys are narrowed by: only a
     // `role: linkage` column supplies a matchable type.
@@ -139,7 +169,13 @@ describe("the guided key list offers the non-default matchable types", () => {
       offeredKeys(setDraftMetadata(draft, metadata, ROWS)).map(
         (entry) => entry.key.name,
       ),
-    ).toEqual(["PHONE"]);
+    ).toEqual([PHONE_KEY]);
+  });
+
+  test("drops both offers when a column the backbone needs stops matching", () => {
+    const draft = guidedDraft();
+    const { metadata } = setColumnType(draft.metadata, "dob", "other");
+    expect(offeredKeys(setDraftMetadata(draft, metadata, ROWS))).toEqual([]);
   });
 });
 
@@ -175,11 +211,11 @@ describe("an offer left alone changes nothing", () => {
 });
 
 describe("turning an offer on", () => {
-  const enabled = () => withKeyEnabled(guidedDraft(), "ZIP");
+  const enabled = () => withKeyEnabled(guidedDraft(), ZIP_KEY);
 
   test("puts the key and its field into the emitted terms", () => {
     const terms = buildAdvancedTerms(enabled());
-    expect(terms.linkageKeys.map((key) => key.name)).toContain("ZIP");
+    expect(terms.linkageKeys.map((key) => key.name)).toContain(ZIP_KEY);
     expect(terms.linkageFields).toContainEqual({
       name: "zip_code",
       type: "zip_code",
@@ -197,7 +233,7 @@ describe("turning an offer on", () => {
   test("still generates", () => {
     const { draft, seed } = seedAdvancedInvite("Inviter", COLUMNS, ROWS);
     const validation = validateAdvancedInvite(
-      withKeyEnabled(draft, "ZIP"),
+      withKeyEnabled(draft, ZIP_KEY),
       seed,
       new Date("2026-06-20T00:00:00.000Z"),
     );
@@ -263,18 +299,21 @@ describe("turning an offer on", () => {
     expect(summary.linkageFields.map((field) => field.label)).toContain(
       "ZIP code",
     );
-    expect(
-      summary.linkageKeys.find((key) => key.name === "ZIP")?.headerFields,
-    ).toEqual(["ZIP"]);
+    const key = summary.linkageKeys.find((entry) => entry.name === ZIP_KEY);
+    expect(key?.headerFields).toContain("ZIP");
+    // Every element of the compound is disclosed, not the added one alone.
+    expect(key?.headerFields).toHaveLength(4);
   });
 });
 
 describe("an offer survives a column edit the way a built-in key does", () => {
   test("keeps the operator's own choice across an unrelated retype", () => {
-    const draft = withKeyEnabled(guidedDraft(), "ZIP");
+    const draft = withKeyEnabled(guidedDraft(), ZIP_KEY);
     const { metadata } = setColumnType(draft.metadata, "phone", "other");
     const edited = setDraftMetadata(draft, metadata, ROWS);
-    expect(offeredKeys(edited).map((entry) => entry.key.name)).toEqual(["ZIP"]);
+    expect(offeredKeys(edited).map((entry) => entry.key.name)).toEqual([
+      ZIP_KEY,
+    ]);
     // Chosen ON before the edit, still on after it -- the reconciliation does not
     // reset the choice to the flag a fresh offer arrives at.
     expect(offeredKeys(edited)[0].enabled).toBe(true);
@@ -295,8 +334,15 @@ describe("an offer survives a column edit the way a built-in key does", () => {
       setColumnTypeForMatching(draft.metadata, "postal", "zip_code"),
       ROWS,
     );
-    expect(offeredKeys(edited).map((entry) => entry.key.name)).toEqual(["ZIP"]);
+    expect(offeredKeys(edited).map((entry) => entry.key.name)).toEqual([
+      ZIP_KEY,
+    ]);
     expect(offeredKeys(edited)[0].enabled).toBe(false);
+    // And at the position the offer places it, not appended below the key it
+    // refines, where turning it on would buy nothing.
+    expect(positionOf(edited, ZIP_KEY)).toBeLessThan(
+      positionOf(edited, "LN + FN + DOB"),
+    );
     // Off, so the retyped column carries no cleaning yet -- the draft holds a
     // pipeline for a field only while its terms declare one.
     expect(edited.standardization.some((t) => t.output === "zip_code")).toBe(
@@ -305,22 +351,22 @@ describe("an offer survives a column edit the way a built-in key does", () => {
     // Turning the offer on binds the cleaning to the column the retype supplied,
     // so the key matches through the pipeline rather than raw.
     expect(
-      withKeyEnabled(edited, "ZIP").standardization.find(
+      withKeyEnabled(edited, ZIP_KEY).standardization.find(
         (t) => t.output === "zip_code",
       )?.input,
     ).toBe("postal");
   });
 
   test("drops when its column stops supplying the type", () => {
-    const draft = withKeyEnabled(guidedDraft(), "ZIP");
+    const draft = withKeyEnabled(guidedDraft(), ZIP_KEY);
     const { metadata } = setColumnType(draft.metadata, "zip", "identifier");
     const edited = setDraftMetadata(draft, metadata, ROWS);
     expect(offeredKeys(edited).map((entry) => entry.key.name)).toEqual([
-      "PHONE",
+      PHONE_KEY,
     ]);
     expect(
       buildAdvancedTerms(edited).linkageKeys.map((k) => k.name),
-    ).not.toContain("ZIP");
+    ).not.toContain(ZIP_KEY);
   });
 });
 
@@ -334,7 +380,7 @@ describe("turning an offer on and off again", () => {
       false,
     );
 
-    const on = withKeyEnabled(off, "ZIP");
+    const on = withKeyEnabled(off, ZIP_KEY);
 
     // On: the cleaning the accepting party derives from these same terms, so the
     // two sides hash the same value.
@@ -352,7 +398,7 @@ describe("turning an offer on and off again", () => {
     // Off again: the cleaning goes with the key, so the draft is back to what the
     // file seeded -- including the terms every guided invitation over these
     // columns emitted before the offer existed.
-    const back = withKeyEnabled(on, "ZIP", false);
+    const back = withKeyEnabled(on, ZIP_KEY, false);
     expect(back.standardization).toEqual(off.standardization);
     expect(canonicalString(buildAdvancedTerms(back))).toEqual(
       canonicalString(buildAdvancedTerms(off)),

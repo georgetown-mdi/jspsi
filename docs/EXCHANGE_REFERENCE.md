@@ -58,7 +58,7 @@ What the names do and do not cover:
 
 Terms drawn from these rules cite them, in the [`linkage_rule_set`](#linkage_termslinkage_rule_set) field below, so the citation travels with the exchange: it is in the invitation, on the wire, on the accepting party's terms review, and in each party's exchange record.
 
-`phone_number`, `email_address`, and `zip_code` are matchable semantic types (see [Semantic types](#semantic-types)) that neither built-in artifact uses. To match on one, add it to your keys: the web app's Customize / Matching keys tab offers each one your file supplies as a key of its own, off until you turn it on, and expert key authoring builds any other key over them. Either way the resulting terms are an addition to the built-in set rather than a subset of it, so they cite no rule set.
+`phone_number`, `email_address`, and `zip_code` are matchable semantic types (see [Semantic types](#semantic-types)) that neither built-in artifact uses. To match on one, add it to your keys: the web app's Customize / Matching keys tab offers each one your file can supply inside a compound key -- the type beside fields the built-in keys already use, never on its own -- off until you turn it on, and expert key authoring builds any other key over them. Either way the resulting terms are an addition to the built-in set rather than a subset of it, so they cite no rule set.
 
 What the key set's validation rests on, the criticisms recorded against it, what a zero-setup exchange rests on, and the rule for bumping either version are in [default-linkage-rule-set.md](notes/default-linkage-rule-set.md).
 

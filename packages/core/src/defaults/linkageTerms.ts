@@ -658,33 +658,62 @@ export type OptInLinkageFieldType = (typeof OPT_IN_LINKAGE_FIELD_TYPES)[number];
 
 /**
  * The one linkage key each {@link OPT_IN_LINKAGE_FIELD_TYPES} type is offered as:
- * the type on its own, referencing the field
- * {@link authoredLinkageFields} declares for a column of that type.
+ * the type's own field together with the backbone the published evidence pairs it
+ * with, each element naming a field {@link authoredLinkageFields} declares for a
+ * column of that type. The shapes and their cascade placement are derived in
+ * `docs/notes/linkage-rule-grounding.md`.
  *
- * One key per type, and that key the bare type, is the whole offer: a surface
- * that composed these types with the built-in fields would be authoring key
- * combinations of its own -- each with precision and recall consequences nothing
- * here has settled -- which is what the expert key editor is for. A `zip_code`
- * key is therefore a sole-identifier key, which is weak, and the surface offering
- * it says so rather than the shape of the offer hiding it.
+ * Compound and never the type alone, for two reasons that point the same way. A
+ * key built from a single identifier is a membership oracle: a party holding a
+ * candidate value learns from the result whether its holder is in the other
+ * party's file, which is the differencing exposure `docs/SECURITY_DESIGN.md`
+ * scopes the privacy guarantee against. And a contact value is a SHARED value in
+ * program-application data -- one phone number or one email address carries across
+ * a household and across the people an organization files for -- so a key over one
+ * alone reports different people as the same person.
+ *
+ * One key per type is the whole offer. Any other combination is a rule with
+ * precision and recall consequences nothing here has settled, which is what the
+ * expert key editor is for.
  */
 const OPT_IN_LINKAGE_KEYS: Record<OptInLinkageFieldType, LinkageKey> = {
-  phone_number: { name: "PHONE", elements: [{ field: "phone_number" }] },
-  email_address: { name: "EMAIL", elements: [{ field: "email_address" }] },
-  zip_code: { name: "ZIP", elements: [{ field: "zip_code" }] },
+  phone_number: {
+    name: "LN + FN + DOB + PHONE",
+    elements: [
+      { field: "last_name" },
+      { field: "first_name" },
+      { field: "date_of_birth" },
+      { field: "phone_number" },
+    ],
+  },
+  email_address: {
+    name: "FN + EMAIL",
+    elements: [{ field: "first_name" }, { field: "email_address" }],
+  },
+  zip_code: {
+    name: "LN + FN + DOB + ZIP",
+    elements: [
+      { field: "last_name" },
+      { field: "first_name" },
+      { field: "date_of_birth" },
+      { field: "zip_code" },
+    ],
+  },
 };
 
 /**
  * The opt-in keys `metadata` can supply, in {@link OPT_IN_LINKAGE_FIELD_TYPES}
- * order -- one per type present as a `role: linkage` column, and none for a type
- * the file does not carry. Declaration order rather than column order, so what an
- * operator is offered does not shuffle with how their file happens to be laid
- * out.
+ * order -- one per type whose key EVERY element the columns supply, and none for
+ * a key any element goes unsupplied for. Declaration order rather than column
+ * order, so what an operator is offered does not shuffle with how their file
+ * happens to be laid out.
  *
  * The same satisfiability rule {@link linkageTermsFromRuleSet} narrows the
- * built-in keys by, for the same reason: only a `role: linkage` column supplies a
- * matchable type, so a key offered on the strength of an identifier, payload, or
- * ignored column would bind nothing at exchange time.
+ * built-in keys by, over the whole compound for the same reason it runs over the
+ * whole of a built-in key: only a `role: linkage` column supplies a matchable
+ * type, so an element resting on an identifier, payload, ignored, or absent
+ * column would bind nothing at exchange time. A file carrying a phone number but
+ * no date of birth is therefore offered no phone key rather than a thinner one.
  *
  * These are OFFERS, not terms: nothing here enables one, and a caller that
  * enables none emits exactly what it emitted before this existed. Enabling one
@@ -697,8 +726,12 @@ export function optInLinkageKeys(metadata: Metadata): Array<LinkageKey> {
   const available = new Set<SemanticType>(
     metadata.filter((column) => column.role === "linkage").map((c) => c.type),
   );
-  return OPT_IN_LINKAGE_FIELD_TYPES.filter((type) => available.has(type)).map(
+  return OPT_IN_LINKAGE_FIELD_TYPES.map(
     (type) => OPT_IN_LINKAGE_KEYS[type],
+  ).filter((key) =>
+    key.elements.every((element) =>
+      available.has(element.field as SemanticType),
+    ),
   );
 }
 
