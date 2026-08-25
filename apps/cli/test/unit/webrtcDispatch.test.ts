@@ -118,8 +118,9 @@ const {
 } = await import("../../src/protocol");
 const { WEBRTC_URL_REFUSED, WEBRTC_URL_EXTRAS_REFUSED } =
   await import("../../src/connectionFromUrl");
-const { ID_TAKEN_MESSAGE } =
+const { BROKER_ADDRESS_REFUSED, ID_TAKEN_MESSAGE } =
   await import("../../src/connection/webrtc/brokerClient");
+const { exitCodeForError } = await import("../../src/util/cli");
 const { WEBRTC_BROKER_HOST_REFUSED, WEBRTC_BROKER_PATH_REFUSED } =
   await import("../../src/connection/webrtc/weriftPeer");
 const { saveKeyFile } = await import("../../src/keyFile");
@@ -465,6 +466,25 @@ test("a webrtc connection with no role is refused before anything is dialed", as
       "test",
     ),
   ).rejects.toThrow(WEBRTC_ROLE_REQUIRED);
+  expect(mockState.dials).toHaveLength(0);
+});
+
+test("a host the resolver admits but the authority parse refuses exits 64", async () => {
+  // A host carrying its own port is free of every delimiter the resolver's shape
+  // refusal names, so it reaches the rendezvous line, where the authority parse
+  // -- which refuses a host contributing a port, because that silently drops the
+  // configured one -- is what stops it. That raise sits inside the run rather
+  // than at the boundary the refusals above are decided at, and it reaches the
+  // caller as a usage error only because the run's catch rethrows unmodified: a
+  // wrap would exit 69 and set an unattended supervisor retrying a locator that
+  // cannot resolve on any attempt.
+  const error = await runParty("inviter", "peers.example.org:9000").then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(error).toBeInstanceOf(UsageError);
+  expect(exitCodeForError(error)).toBe(64);
+  expect((error as Error).message).toBe(BROKER_ADDRESS_REFUSED);
   expect(mockState.dials).toHaveLength(0);
 });
 

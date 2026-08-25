@@ -1,14 +1,17 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import { ConnectionError } from "@psilink/core";
+import { ConnectionError, UsageError } from "@psilink/core";
 
 import {
+  BROKER_ADDRESS_REFUSED,
   BROKER_AUTHORITY_REFUSED,
   BROKER_MESSAGE,
+  INVITATION_BROKER_ADDRESS_REFUSED,
   assertDialsConfiguredBroker,
   connectToBroker,
   dialedBrokerHostAndPort,
 } from "../../src/connection/webrtc/brokerClient";
+import { exitCodeForError } from "../../src/util/cli";
 
 import type {
   BrokerClient,
@@ -243,10 +246,10 @@ test("a host that is not a bare authority is refused, opening nothing", async ()
       socketFactory,
     }).then(
       () => undefined,
-      (err: unknown) => err as ConnectionError,
+      (err: unknown) => err,
     );
-    expect(error).toBeInstanceOf(ConnectionError);
-    expect(error?.kind).toBe("usage");
+    expect(error).toBeInstanceOf(UsageError);
+    expect(exitCodeForError(error)).toBe(64);
     expect(sockets).toHaveLength(0);
   }
 });
@@ -285,7 +288,7 @@ test("the consent-surface authority normalizes the host and always shows the por
       ...LOCATION,
       host: "PEERS\u3002Example\u200B.ORG",
     }),
-  ).toBe("peers.example.org:9000");
+  ).toEqual({ host: "peers.example.org", port: 9000 });
   for (const [secure, port] of [
     [true, 443],
     [false, 80],
@@ -297,16 +300,25 @@ test("the consent-surface authority normalizes the host and always shows the por
         port,
         secure,
       }),
-    ).toBe(`signal.example:${port}`);
+    ).toEqual({ host: "signal.example", port });
   // An IPv6 literal keeps its brackets, so the port stays readable as a port.
-  expect(dialedBrokerHostAndPort({ ...LOCATION, host: "[::1]" })).toBe(
-    "[::1]:9000",
-  );
+  expect(dialedBrokerHostAndPort({ ...LOCATION, host: "[::1]" })).toEqual({
+    host: "[::1]",
+    port: 9000,
+  });
   // The same refusal the dial makes: a host that could move the authority is not
-  // rendered on a consent surface either.
-  expect(() =>
-    dialedBrokerHostAndPort({ ...LOCATION, host: "signal.example:9000@evil" }),
-  ).toThrow(ConnectionError);
+  // rendered on a consent surface either. It names the invitation the locator
+  // came from rather than a connection block this operator never authored, and
+  // exits 64 as the delimiter refusal ahead of it does.
+  let refusal: unknown;
+  try {
+    dialedBrokerHostAndPort({ ...LOCATION, host: "signal.example:9000@evil" });
+  } catch (err) {
+    refusal = err;
+  }
+  expect(refusal).toBeInstanceOf(UsageError);
+  expect((refusal as Error).message).toBe(INVITATION_BROKER_ADDRESS_REFUSED);
+  expect(exitCodeForError(refusal)).toBe(64);
 });
 
 test("registration resolves only on the server's OPEN, not on the socket opening", async () => {
@@ -604,24 +616,51 @@ test("an abort before registration rejects and closes the socket", async () => {
 test("a host that does not form a valid URL is a usage error, not a raw DOMException", async () => {
   // No socketFactory, so nothing stands between this host and the real
   // `new WebSocket`, which throws a DOMException on it -- an error outside the
-  // ConnectionError taxonomy the rest of the module maintains, carrying an
-  // address that carries the peer id. What this holds is the refusal's shape and
-  // its silence about both values, wherever in the two layers it is raised.
+  // taxonomy the rest of the module maintains, carrying an address that carries
+  // the peer id. What this holds is the refusal's shape and its silence about
+  // both values, wherever in the two layers it is raised.
   const error = await connectToBroker({
     location: { ...LOCATION, host: "bad host" },
     id: LOCAL_ID,
     handlers: { onMessage: () => {}, onClose: () => {} },
   }).then(
     () => undefined,
-    (err: unknown) => err as ConnectionError,
+    (err: unknown) => err,
   );
-  expect(error).toBeInstanceOf(ConnectionError);
-  expect(error?.kind).toBe("usage");
+  expect(error).toBeInstanceOf(UsageError);
+  expect(exitCodeForError(error)).toBe(64);
   // The surfaced error names the operator's own fields and leaks neither the
   // derived id nor the URL that carries it.
-  const rendered = `${error?.message} ${error?.stack ?? ""}`;
+  const rendered = `${(error as Error).message} ${(error as Error).stack ?? ""}`;
   expect(rendered).not.toContain(LOCAL_ID);
   expect(rendered).not.toContain("bad host");
+});
+
+test("a socket constructor that refuses the address raises the same usage error", async () => {
+  // The second of the two layers the refusal is raised at, and the one the test
+  // above cannot reach: an address the parse admits, refused by the WebSocket
+  // constructor itself. One refusal wording carries one exit code, so what the
+  // constructor throws must be replaced rather than propagated -- its message
+  // can embed the URL, which carries the derived peer id, and it exits 69.
+  const error = await connectToBroker({
+    location: LOCATION,
+    id: LOCAL_ID,
+    handlers: { onMessage: () => {}, onClose: () => {} },
+    socketFactory: (url: string) => {
+      throw new Error(`refused ${url}`);
+    },
+  }).then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(error).toBeInstanceOf(UsageError);
+  expect(exitCodeForError(error)).toBe(64);
+  expect((error as Error).message).toBe(BROKER_ADDRESS_REFUSED);
+  // The thrown error is dropped rather than attached as a cause, so neither the
+  // id nor the URL that carries it reaches the rendered chain.
+  expect((error as Error).cause).toBeUndefined();
+  const rendered = `${(error as Error).message} ${(error as Error).stack ?? ""}`;
+  expect(rendered).not.toContain(LOCAL_ID);
 });
 
 test("a registration that is never confirmed times out", async () => {
