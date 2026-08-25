@@ -58,7 +58,7 @@ What the names do and do not cover:
 
 Terms drawn from these rules cite them, in the [`linkage_rule_set`](#linkage_termslinkage_rule_set) field below, so the citation travels with the exchange: it is in the invitation, on the wire, on the accepting party's terms review, and in each party's exchange record.
 
-To match on `phone_number`, `email_address`, or `zip_code`, author a key yourself: they are matchable semantic types (see [Semantic types](#semantic-types)) that neither built-in artifact uses.
+`phone_number`, `email_address`, and `zip_code` are matchable semantic types (see [Semantic types](#semantic-types)) that neither built-in artifact uses. To match on one, add it to your keys: the web app's Customize / Matching keys tab offers each one your file can supply inside a compound key -- the type beside fields the built-in keys already use, never on its own -- off until you turn it on, and expert key authoring builds any other key over them. Either way the resulting terms are an addition to the built-in set rather than a subset of it, so they cite no rule set.
 
 What the key set's validation rests on, the criticisms recorded against it, what a zero-setup exchange rests on, and the rule for bumping either version are in [default-linkage-rule-set.md](notes/default-linkage-rule-set.md).
 
@@ -254,7 +254,7 @@ The first eight values are the complete type set for a `linkage_fields[].type`. 
 
 Additional types will be added as their use case arises.
 
-A ZIP column is inferred as `zip_code` from any of its recognized names (`zip` and its spellings; the complete table is in [DEFAULT_STANDARDIZATION.md](spec/DEFAULT_STANDARDIZATION.md#type-inference-from-column-names)). Like `phone_number` and `email_address`, it is a matchable type with no default linkage key, so an inferred ZIP column is used for matching only when a key references it and is not sent as payload unless you mark it so.
+A ZIP column is inferred as `zip_code` from any of its recognized names (`zip` and its spellings; the complete table is in [DEFAULT_STANDARDIZATION.md](spec/DEFAULT_STANDARDIZATION.md#type-inference-from-column-names)). Like `phone_number` and `email_address`, it is a matchable type with no built-in linkage key, so an inferred ZIP column is used for matching only when a key references it and is not sent as payload unless you mark it so. A ZIP code on its own is a weak identifier -- it matches everyone who shares an area -- so it does its work inside a compound key alongside a name or a date of birth.
 
 #### Constraints
 

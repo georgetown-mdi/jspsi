@@ -160,10 +160,33 @@ of false matches would be expected to challenge exactly those keys.
 `zip_code` are semantic types the product recognizes, infers from column names,
 and can match on -- and no built-in key references any of them. A party whose
 data carries a phone number gets no matching value from it under the built-in
-rules; it has to author a key itself. The gap is not an oversight to be closed
+rules; it has to add a key itself. The gap is not an oversight to be closed
 by adding keys casually: rules for those fields would carry their own
 precision/recall consequences and are not covered by the validation these keys
 rest on, so they need their own grounding before they could ship as built-in.
+
+What closes the gap without moving the set is offering those types beside it
+rather than inside it. The web app's guided key list carries, turned off, one key
+per such type its file supplies every element of, and says at the control that
+turning one on departs from the validated set.
+
+Each offered key is compound -- the type beside fields the built-in keys already
+use -- and never the type alone, on two grounds that agree. A key
+over a single identifier is a membership oracle: a party holding a candidate
+value learns from the result whether its holder is in the other party's file,
+which is the differencing exposure [SECURITY_DESIGN.md](../SECURITY_DESIGN.md)
+scopes the guarantee against. And a contact value is a shared value in
+program-application data -- one phone number or email address carries across a
+household, and across the people an organization files for -- so a key over one
+alone reports different people as the same person. The shapes, the evidence
+behind each, and the cascade position each has to sit at are derived in
+`docs/notes/linkage-rule-grounding.md`.
+
+One shape per type is the whole offer, not a builder over the types: any other
+combination is a rule nothing here has grounded, and authoring one is what the
+expert key editor is for. Terms carrying an added key are not drawn from the set,
+so they cite none -- the departure reaches the accepting party's terms review,
+not only the operator's screen.
 
 The honest summary is that the key set is looser than some standards where it
 matches, and narrower than the product's own capability in what it can match

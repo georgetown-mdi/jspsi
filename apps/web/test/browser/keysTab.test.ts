@@ -169,6 +169,75 @@ describe("KeysTab: the dropped-citation notice", () => {
   });
 });
 
+describe("KeysTab: the keys offered outside the default set", () => {
+  // The same minimal file with a ZIP column, so the guided list carries the one
+  // offered key that column supplies alongside the built-in keys.
+  const withZip: AcquiredCsv = {
+    ...csv,
+    rawRows: [{ ...csv.rawRows[0], zip: "60614" }],
+    columns: [...csv.columns, "zip"],
+  };
+
+  function renderFor(source: AcquiredCsv) {
+    app.render(
+      createElement(KeysTab, {
+        editor: editorFromCsv("Dana Okafor", source),
+        csv: source,
+        expertMode: false,
+        onExpertMode: () => undefined,
+        onKeyEnabled: () => undefined,
+        onKeyMoved: () => undefined,
+        onAuthoredDraft: () => undefined,
+        onStrategy: () => undefined,
+        onAlgorithm: () => undefined,
+        onDeduplicate: () => undefined,
+        onImport: () => undefined,
+        keysError: undefined,
+        announce: () => undefined,
+        onBack: () => undefined,
+      }),
+    );
+  }
+
+  test("renders the offer as an unchecked compound key, marked, with the guidance beside it", async () => {
+    renderFor(withZip);
+
+    // Offered through the list's own control, so adding a key is done the way a
+    // default key is turned off -- and it arrives off, carrying its type inside a
+    // compound key rather than standing alone.
+    const offered = page.getByRole("checkbox", {
+      name: /LN \+ FN \+ DOB \+ ZIP/,
+    });
+    await expect.element(offered).toBeInTheDocument();
+    await expect.element(offered).not.toBeChecked();
+
+    const marked = page.getByText("outside the default set", { exact: false });
+    await expect.element(marked.first()).toBeInTheDocument();
+
+    // The copy points: the departure from the validated set, why the offer is
+    // compound, and the shared-contact hazard behind that.
+    const body = document.body.textContent;
+    expect(body).toContain("no longer matches on the default set alone");
+    expect(body).toContain("offered only inside a compound key");
+    expect(body).toContain("over-matches");
+    expect(body).toContain("whether its holder is in the other file");
+    expect(body).toContain("often a shared one");
+    // All three named, so none is offered on quieter terms than the others.
+    expect(body).toContain("phone number, email address, or ZIP code");
+  });
+
+  test("says nothing when the file supplies no column for one", async () => {
+    renderFor(csv);
+
+    await expect
+      .element(page.getByRole("heading", { name: "Matching keys" }))
+      .toBeInTheDocument();
+    const body = document.body.textContent;
+    expect(body).not.toContain("outside the default set");
+    expect(body).not.toContain("phone number, email address, or ZIP code");
+  });
+});
+
 describe("KeysTab: expert import/export over a rows-withheld console shape", () => {
   test("renders the terms import without reading the throwing rawRows getter", async () => {
     // The console acquires a server-side profile, not the rows, so its `rawRows` is

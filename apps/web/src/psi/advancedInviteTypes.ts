@@ -79,7 +79,13 @@ export type ImportedRuleSetCitation =
 
 /** One linkage key in the editor, paired with whether it is active. Display and
  * match order is the array position (linkage keys are applied most-precise-first,
- * so order is significant); a disabled key is dropped from the built terms. */
+ * so order is significant); a disabled key is dropped from the built terms.
+ *
+ * The list holds both what the built-in rule set offers and what
+ * `optInLinkageKeys` offers beside it, which is why an entry carries no mark of
+ * its own: the two are the same thing to every operation over the list, and a
+ * surface that must tell them apart asks `isOptInLinkageKey` about the key rather
+ * than reading a flag a rename or an import could falsify. */
 export interface DraftKey {
   key: LinkageKey;
   enabled: boolean;
@@ -186,10 +192,11 @@ export interface AdvancedInviteDraft {
   metadata: Metadata;
   /**
    * The inviter's per-party standardization: the ordered cleaning steps and the
-   * input-column binding for each field. Seeded from `getDefaultStandardization`
-   * (so the editor opens on the recommended per-type cleaning, and -- with no edits --
-   * `authoredLinkageFields` over it reproduces the guided default field set
-   * byte-for-byte, keeping the cross-party terms unchanged). The data-prep workbench
+   * input-column binding for each field. Seeded from `inviterDefaultStandardization`
+   * (so the editor opens on the recommended cleaning for every matchable column the
+   * file carries, and -- with no edits -- `authoredLinkageFields` over it declares
+   * the same fields it declares over the metadata alone, keeping the cross-party
+   * terms byte-identical). The data-prep workbench
    * edits it; {@link buildAdvancedTerms} derives the linkage FIELDS from it via
    * `authoredLinkageFields`, which is what lets two transformations of one
    * semantic type bind to distinct columns and declare two fields. Threaded into the

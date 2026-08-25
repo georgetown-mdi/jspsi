@@ -648,6 +648,137 @@ export function getDefaultLinkageTerms(
 }
 
 /**
+ * The matchable semantic types no key of {@link DEFAULT_LINKAGE_KEY_SET_NAME}
+ * references, so a party whose file carries one of these columns gets no
+ * matching value from the built-in rules.
+ *
+ * They are offered as an addition a party OPTS IN to
+ * ({@link optInLinkageKeys}), never folded into the built-in set: that set is
+ * frozen, and its recorded validation covers the keys it declares, which say
+ * nothing about how these types match. Their standardization pipelines are
+ * settled ({@link getDefaultStandardization}) even though no built-in key uses
+ * them, so opting one in cleans the column exactly as a partner cleans its own.
+ *
+ * Written out rather than derived from the difference between the semantic types
+ * and the built-in fields', so each type is offered because it was decided on
+ * rather than because it arrived in the enum. The difference is asserted equal to
+ * this list by test, so a matchable type added without that decision fails there
+ * instead of going silently unoffered.
+ */
+export const OPT_IN_LINKAGE_FIELD_TYPES = [
+  "phone_number",
+  "email_address",
+  "zip_code",
+] as const satisfies ReadonlyArray<LinkageField["type"]>;
+
+/** A semantic type {@link OPT_IN_LINKAGE_FIELD_TYPES} offers. */
+export type OptInLinkageFieldType = (typeof OPT_IN_LINKAGE_FIELD_TYPES)[number];
+
+/**
+ * The one linkage key each {@link OPT_IN_LINKAGE_FIELD_TYPES} type is offered as:
+ * the type's own field together with the backbone the published evidence pairs it
+ * with, each element naming a field {@link authoredLinkageFields} declares for a
+ * column of that type. The shapes and their cascade placement are derived in
+ * `docs/notes/linkage-rule-grounding.md`.
+ *
+ * Compound and never the type alone, for two reasons that point the same way. A
+ * key built from a single identifier is a membership oracle: a party holding a
+ * candidate value learns from the result whether its holder is in the other
+ * party's file, which is the differencing exposure `docs/SECURITY_DESIGN.md`
+ * scopes the privacy guarantee against. And a contact value is a SHARED value in
+ * program-application data -- one phone number or one email address carries across
+ * a household and across the people an organization files for -- so a key over one
+ * alone reports different people as the same person.
+ *
+ * One key per type is the whole offer. Any other combination is a rule with
+ * precision and recall consequences nothing here has settled, which is what the
+ * expert key editor is for.
+ */
+const OPT_IN_LINKAGE_KEYS: Record<OptInLinkageFieldType, LinkageKey> = {
+  phone_number: {
+    name: "LN + FN + DOB + PHONE",
+    elements: [
+      { field: "last_name" },
+      { field: "first_name" },
+      { field: "date_of_birth" },
+      { field: "phone_number" },
+    ],
+  },
+  email_address: {
+    name: "FN + EMAIL",
+    elements: [{ field: "first_name" }, { field: "email_address" }],
+  },
+  zip_code: {
+    name: "LN + FN + DOB + ZIP",
+    elements: [
+      { field: "last_name" },
+      { field: "first_name" },
+      { field: "date_of_birth" },
+      { field: "zip_code" },
+    ],
+  },
+};
+
+/**
+ * The opt-in keys `metadata` can supply, in {@link OPT_IN_LINKAGE_FIELD_TYPES}
+ * order -- one per type whose key EVERY element the columns supply, and none for
+ * a key any element goes unsupplied for. Declaration order rather than column
+ * order, so what an operator is offered does not shuffle with how their file
+ * happens to be laid out.
+ *
+ * The same satisfiability rule {@link linkageTermsFromRuleSet} narrows the
+ * built-in keys by, over the whole compound for the same reason it runs over the
+ * whole of a built-in key: only a `role: linkage` column supplies a matchable
+ * type, so an element resting on an identifier, payload, ignored, or absent
+ * column would bind nothing at exchange time. A file carrying a phone number but
+ * no date of birth is therefore offered no phone key rather than a thinner one.
+ *
+ * These are OFFERS, not terms: nothing here enables one, and a caller that
+ * enables none emits exactly what it emitted before this existed. Enabling one
+ * takes the emitted rules out of {@link DEFAULT_LINKAGE_RULE_SET} -- they are no
+ * longer drawn from it -- so the terms carry no citation of the built-in set,
+ * which is the honest reading of what a party that added a key of its own is
+ * running.
+ */
+export function optInLinkageKeys(metadata: Metadata): Array<LinkageKey> {
+  const available = new Set<SemanticType>(
+    metadata.filter((column) => column.role === "linkage").map((c) => c.type),
+  );
+  return OPT_IN_LINKAGE_FIELD_TYPES.map(
+    (type) => OPT_IN_LINKAGE_KEYS[type],
+  ).filter((key) =>
+    key.elements.every((element) =>
+      available.has(element.field as SemanticType),
+    ),
+  );
+}
+
+/** The offered keys in the byte form {@link isOptInLinkageKey} compares against,
+ * encoded once: the answer is asked per list row per render, and these are fixed
+ * for the process. */
+const OPT_IN_LINKAGE_KEY_ENCODINGS: ReadonlySet<string> = new Set(
+  Object.values(OPT_IN_LINKAGE_KEYS)
+    .map(encodeForComparison)
+    .filter((encoded) => encoded !== null),
+);
+
+/**
+ * Whether `key` is one of the keys {@link optInLinkageKeys} offers, so a surface
+ * can tell an offered addition apart from a built-in key beside it in the same
+ * list without holding a flag of its own.
+ *
+ * Compared through the canonical encoding, the equality the two parties' terms
+ * are compared under, so a key that merely borrows an offered key's NAME -- one
+ * an expert editor renamed, or an imported document declares -- is not mistaken
+ * for the offer. A value outside the canonical domain cannot be compared and
+ * answers `false` rather than throwing: the offered keys carry no such value.
+ */
+export function isOptInLinkageKey(key: LinkageKey): boolean {
+  const encoded = encodeForComparison(key);
+  return encoded !== null && OPT_IN_LINKAGE_KEY_ENCODINGS.has(encoded);
+}
+
+/**
  * Whether a semantic type can be a linkage field's type. `identifier` and `other`
  * are the non-matchable types -- a {@link LinkageField} is never one of them -- so
  * they are excluded. Written as the negation of those two literals (rather than an

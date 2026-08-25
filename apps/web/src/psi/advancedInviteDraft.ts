@@ -1,11 +1,16 @@
 import {
   INVITATION_LIFETIME_SECONDS,
+  OPT_IN_LINKAGE_FIELD_TYPES,
   authoredLinkageFields,
+  canonicalString,
   columnValues,
   getDefaultLinkageTerms,
   getDefaultStandardization,
   inferDateFormat,
   inferMetadata,
+  isOptInLinkageKey,
+  optInLinkageKeys,
+  referencedLinkageFieldNames,
 } from "@psilink/core";
 
 import { buildAdvancedTerms } from "./advancedInviteTerms";
@@ -65,6 +70,76 @@ export function defaultStandardizationForRows(
   });
 }
 
+/** {@link OPT_IN_LINKAGE_FIELD_TYPES} as a membership test, built once: the
+ * question is asked per field of per metadata edit, and the list is fixed. */
+const OPT_IN_TYPES: ReadonlySet<string> = new Set(OPT_IN_LINKAGE_FIELD_TYPES);
+
+/**
+ * The inviter's recommended cleaning: {@link defaultStandardizationForRows}
+ * widened past the fields `terms` declare to the {@link OPT_IN_LINKAGE_FIELD_TYPES}
+ * fields that `enabledKeys` reference.
+ *
+ * The widening is what makes an opt-in key ({@link optInLinkageKeys}) match the
+ * way the built-in keys do. No built-in key references one of those types, so the
+ * default terms declare no field for it and cleaning derived from those terms
+ * carries no pipeline for its column -- leaving an opted-in key to match the column
+ * RAW, while the accepting party derives its own cleaning from the terms that DO
+ * declare the field once the key is on, and cleans it. Two parties cleaning one
+ * field differently match almost nothing.
+ *
+ * It is the ENABLED keys, not the columns, that decide it: on the guided paths a
+ * draft carries the OFFER's own type-named cleaning exactly while an enabled key
+ * references that field. The rule governs the offer's cleaning alone -- an
+ * imported document's declared-but-unreferenced fields, and the document-named
+ * bindings {@link draftWithKeyEnabled} deliberately retains, are cleaning a draft
+ * holds against terms that declare nothing for it -- so what guarantees every
+ * PERSISTED artifact is the mint chokepoint instead, where `generateInvitation`
+ * reconciles the cleaning to the terms it embeds and asserts the two agree before
+ * a secret exists. Widening on column presence would put a pipeline in every
+ * guided draft over a file with such a column, serving no key and reconciled away
+ * at that mint.
+ *
+ * A transformation the widening adds declares its field through
+ * `authoredLinkageFields`' explicit branch instead of that function's synthetic
+ * one, which emits the same `{ name, type }` field for a type with no default
+ * field -- so a draft with no opt-in key enabled builds byte-identical terms,
+ * and the guided path's cross-party hash does not move.
+ */
+export function inviterDefaultStandardization(
+  metadata: Metadata,
+  terms: LinkageTerms,
+  enabledKeys: ReadonlyArray<LinkageKey>,
+  rawRows: ReadonlyArray<CSVRow> = [],
+  dateInputFormat?: string,
+): Standardization {
+  const declared = new Set(terms.linkageFields.map((field) => field.name));
+  const referenced = referencedLinkageFieldNames(enabledKeys);
+  const widened: LinkageTerms = {
+    ...terms,
+    linkageFields: [
+      ...terms.linkageFields,
+      ...authoredLinkageFields(metadata).filter(
+        (field) =>
+          OPT_IN_TYPES.has(field.type) &&
+          !declared.has(field.name) &&
+          referenced.has(field.name),
+      ),
+    ],
+  };
+  return defaultStandardizationForRows(
+    metadata,
+    widened,
+    rawRows,
+    dateInputFormat,
+  );
+}
+
+/** The keys of a draft key list that are turned on -- the set that decides which
+ * fields the emitted terms declare, and so which cleaning the draft may carry. */
+function enabledLinkageKeys(keys: ReadonlyArray<DraftKey>): Array<LinkageKey> {
+  return keys.filter((entry) => entry.enabled).map((entry) => entry.key);
+}
+
 /**
  * The date-of-birth input format the recommended cleaning parses with: inferred
  * from the first present `role: linkage` date_of_birth column's values, or
@@ -106,8 +181,11 @@ export function dateInputFormatForColumns(
  * Seed an editor session from the inviter's identity, CSV columns, and parsed
  * rows. The terms are the metadata-aware defaults (`getDefaultLinkageTerms`
  * over {@link inferMetadata}), so only keys the columns can satisfy are present and
- * the editor never opens on a blank form; the seeded standardization infers the
- * date-of-birth format from `rawRows` (see {@link defaultStandardizationForRows}).
+ * the editor never opens on a blank form; the keys the built-in set does not use
+ * are offered beside them, off ({@link offerableDraftKeys}). The seeded
+ * standardization infers the date-of-birth format from `rawRows` and covers the
+ * fields the enabled keys reference -- which, with every offer arriving off, is the
+ * built-in set's own (see {@link inviterDefaultStandardization}).
  * Calling this again is exactly the "Reset to defaults" action. `rawRows`
  * defaults to empty, which yields the `MM/DD/YYYY` date default; a pre-inferred
  * `dateInputFormat` ({@link dateInputFormatForColumns}) overrides that derivation,
@@ -126,6 +204,7 @@ export function seedAdvancedInvite(
   // unchanged by it.
   const metadata = normalizeForEditor(inferMetadata(columns));
   const terms = getDefaultLinkageTerms(identity, metadata);
+  const keys = offerableDraftKeys(identity, metadata);
   return {
     draft: {
       identity,
@@ -145,20 +224,85 @@ export function seedAdvancedInvite(
       metadata,
       // The recommended per-type cleaning for these columns, with the dob format
       // inferred from the rows. authoredLinkageFields over this reproduces the
-      // default per-type field set (one field per type), so the seeded draft's terms
-      // equal getDefaultLinkageTerms' -- the editor opens on a known-good valid
-      // state, byte-identical to the quick path's (the inferred format lives only in
-      // the local steps, which the terms do not carry).
-      standardization: defaultStandardizationForRows(
+      // one-field-per-type set, and the built terms filter it to the fields the
+      // enabled keys reference -- which, with every offer arriving off, is exactly
+      // getDefaultLinkageTerms' field set. So the editor opens on a known-good
+      // valid state, byte-identical to the quick path's (the inferred format lives
+      // only in the local steps, which the terms do not carry).
+      standardization: inviterDefaultStandardization(
         metadata,
         terms,
+        enabledLinkageKeys(keys),
         rawRows,
         dateInputFormat,
       ),
-      keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
+      keys,
     },
     seed: { terms, metadata, columns },
   };
+}
+
+/**
+ * What the guided key list offers for `metadata`: the built-in keys the columns
+ * can supply, ON, with the opt-in keys the columns can supply placed among them
+ * ({@link placeOfferedKeys}) and OFF -- so a fresh draft authors exactly the
+ * built-in set it always did and the additions wait to be chosen.
+ *
+ * Each entry's `enabled` is the flag a key arrives with when it is offered for
+ * the first time; {@link reconcileKeys} keeps the operator's own flag for a key
+ * already in the draft, so a metadata edit never silently re-enables an opt-in
+ * key that was turned off, nor turns off one that was turned on.
+ */
+function offerableDraftKeys(
+  identity: string,
+  metadata: Metadata,
+): Array<DraftKey> {
+  return placeOfferedKeys(
+    getDefaultLinkageTerms(identity, metadata).linkageKeys.map((key) => ({
+      key,
+      enabled: true,
+    })),
+    optInLinkageKeys(metadata).map((key) => ({ key, enabled: false })),
+  );
+}
+
+/**
+ * `keys` with each entry of `offers` inserted immediately above the first key it
+ * REFINES -- carrying that key's elements and at least one more -- and at the end
+ * when it refines none of them.
+ *
+ * List order is cascade order, and a round claims the records it matches, so a
+ * refinement below the key it refines is left only what the looser key could not
+ * attribute: the precision the extra element buys is spent on records the looser
+ * key has already taken, several of which it may have taken wrongly. Above it,
+ * the refinement claims the records both would match and the looser key still
+ * catches the rest -- the most-precise-first order the built-in set is already
+ * in. An offer refining nothing (`FN + EMAIL`) goes last, where a thin key
+ * belongs.
+ */
+function placeOfferedKeys(
+  keys: ReadonlyArray<DraftKey>,
+  offers: ReadonlyArray<DraftKey>,
+): Array<DraftKey> {
+  const placed = [...keys];
+  for (const offer of offers) {
+    const at = placed.findIndex((entry) => refines(offer.key, entry.key));
+    if (at === -1) placed.push(offer);
+    else placed.splice(at, 0, offer);
+  }
+  return placed;
+}
+
+/** Whether `key` carries every element of `coarser` and at least one more, the
+ * relation that makes `key` match a subset of what `coarser` matches. Elements
+ * are compared through the canonical encoding, so a transform on one of them is
+ * part of the element rather than ignored; a `swap` key states a matching rule
+ * its elements do not carry, so neither side of the relation may have one. */
+function refines(key: LinkageKey, coarser: LinkageKey): boolean {
+  if (key.swap !== undefined || coarser.swap !== undefined) return false;
+  if (coarser.elements.length >= key.elements.length) return false;
+  const elements = new Set(key.elements.map((el) => canonicalString(el)));
+  return coarser.elements.every((el) => elements.has(canonicalString(el)));
 }
 
 /**
@@ -186,6 +330,7 @@ export function setDraftMetadataKeepingKeys(
       draft.metadata,
       metadata,
       draft.identity,
+      enabledLinkageKeys(draft.keys),
       rawRows,
       dateInputFormat,
     ),
@@ -194,16 +339,19 @@ export function setDraftMetadataKeepingKeys(
 
 /**
  * Re-derive the editor's draft for a new column metadata: editing a column's
- * semantic type changes which linkage keys are offerable (`getDefaultLinkageTerms`
- * filters by the `role: linkage` column types present), so this recomputes the
- * offerable key set and reconciles it with the current draft -- keys still
- * offerable keep their enabled flag and position, newly-offerable keys are
- * appended (enabled), and keys no longer offerable drop. The threaded metadata is
+ * semantic type changes which linkage keys are offerable (the built-in set is
+ * filtered by the `role: linkage` column types present, and the opt-in keys are
+ * offered on the same rule), so this recomputes the offerable key set
+ * ({@link offerableDraftKeys}) and reconciles it with the current draft -- keys
+ * still offerable keep their enabled flag and position, newly-offerable keys
+ * arrive at the flag and the place the offer gives them ({@link reconcileKeys}),
+ * and keys no longer offerable drop. The threaded metadata is
  * what the inviter's exchange binds on, so a remap that makes a key offerable also
- * makes the run actually produce it. Reconciles the standardization too (via
- * {@link setDraftMetadataKeepingKeys}); the guided path drives this, the authored
- * key set drives the keep-keys variant so the template key reconciliation stays
- * off it.
+ * makes the run actually produce it. Reconciles the standardization too, against
+ * the RECONCILED key set rather than the draft's previous one, so the cleaning an
+ * opt-in type gains follows the keys the edit leaves enabled; the guided path
+ * drives this, the authored key set drives {@link setDraftMetadataKeepingKeys} so
+ * the template key reconciliation stays off it.
  */
 export function setDraftMetadata(
   draft: AdvancedInviteDraft,
@@ -211,14 +359,120 @@ export function setDraftMetadata(
   rawRows: ReadonlyArray<CSVRow> = [],
   dateInputFormat?: string,
 ): AdvancedInviteDraft {
-  const offerable = getDefaultLinkageTerms(
-    draft.identity,
-    metadata,
-  ).linkageKeys;
+  const keys = reconcileKeys(
+    draft.keys,
+    offerableDraftKeys(draft.identity, metadata),
+  );
   return {
-    ...setDraftMetadataKeepingKeys(draft, metadata, rawRows, dateInputFormat),
-    keys: reconcileKeys(draft.keys, offerable),
+    ...draft,
+    metadata,
+    keys,
+    standardization: reconcileStandardization(
+      draft.standardization,
+      draft.metadata,
+      metadata,
+      draft.identity,
+      enabledLinkageKeys(keys),
+      rawRows,
+      dateInputFormat,
+    ),
   };
+}
+
+/**
+ * Turn the key at `index` on or off and bring the cleaning an opt-in type carries
+ * with it: {@link optInLinkageKeys} offers a key referencing the type-named field
+ * `authoredLinkageFields` synthesizes for a column of that type, and that field
+ * holds its recommended pipeline exactly while an enabled key references it. So
+ * turning an offer on is what creates its cleaning -- the data-prep workbench's
+ * card for the column appears with the key -- and turning it off withdraws it,
+ * leaving the draft's transformation outputs naming fields the emitted terms
+ * declare.
+ *
+ * Only the offer's own cleaning moves. A transformation an imported document's
+ * field name owns (`cell_phone` for a `phone_number` column) is not the offer's to
+ * withdraw -- dropping it would leave the document's key unsupplyable and its
+ * re-enabled cleaning re-derived under the wrong name -- and a built-in type's
+ * cleaning is deliberately retained across a disable so re-enabling restores what
+ * the operator authored, which the mint reconciles to the terms it emits
+ * (`standardizationForTerms`).
+ *
+ * The offer's cleaning is the one an operator's own steps do not survive: custom
+ * steps on an offered type's transformation are discarded when its key goes off
+ * and the recommended pipeline is re-derived when it comes back on, deliberately,
+ * because the accepting party derives that same pipeline from the terms and a
+ * step only one side runs matches nothing.
+ */
+export function draftWithKeyEnabled(
+  draft: AdvancedInviteDraft,
+  index: number,
+  enabled: boolean,
+): AdvancedInviteDraft {
+  const keys = draft.keys.map((entry, at) =>
+    at === index ? { ...entry, enabled } : entry,
+  );
+  return {
+    ...draft,
+    keys,
+    standardization: optInCleaningForKeys(
+      draft.standardization,
+      draft.metadata,
+      draft.identity,
+      enabledLinkageKeys(keys),
+    ),
+  };
+}
+
+/** Whether `transformation` is the cleaning an {@link optInLinkageKeys} offer
+ * mints: bound to a `role: linkage` column of an {@link OPT_IN_LINKAGE_FIELD_TYPES}
+ * type and named for that type, which is the field name the offered key
+ * references. Read from the input column rather than the output name alone, so a
+ * field an imported document named for a type it is not (declarations name and
+ * type fields independently) is not mistaken for the offer's. */
+function isOfferedTypeCleaning(
+  transformation: Standardization[number],
+  columnByName: ReadonlyMap<string, Metadata[number]>,
+): boolean {
+  const column = columnByName.get(transformation.input);
+  return (
+    column !== undefined &&
+    column.role === "linkage" &&
+    OPT_IN_TYPES.has(column.type) &&
+    transformation.output === column.type
+  );
+}
+
+/** The standardization an opt-in offer's enabled flag implies: `standardization`
+ * with the offered cleaning no enabled key references dropped, and the recommended
+ * pipeline added for each offered field an enabled key references and no
+ * transformation yet produces. The addition is derived exactly as the seed derives
+ * it ({@link inviterDefaultStandardization} over the metadata's default terms), so
+ * an offer turned on cleans its column the way the accepting party -- deriving from
+ * the same terms -- cleans its own. */
+function optInCleaningForKeys(
+  standardization: Standardization,
+  metadata: Metadata,
+  identity: string,
+  enabledKeys: ReadonlyArray<LinkageKey>,
+): Standardization {
+  const columnByName = new Map(metadata.map((column) => [column.name, column]));
+  const referenced = referencedLinkageFieldNames(enabledKeys);
+  const kept = standardization.filter(
+    (transformation) =>
+      !isOfferedTypeCleaning(transformation, columnByName) ||
+      referenced.has(transformation.output),
+  );
+  const produced = new Set(kept.map((transformation) => transformation.output));
+  const additions = inviterDefaultStandardization(
+    metadata,
+    getDefaultLinkageTerms(identity, metadata),
+    enabledKeys,
+  ).filter(
+    (transformation) =>
+      isOfferedTypeCleaning(transformation, columnByName) &&
+      !produced.has(transformation.output),
+  );
+  return [...kept, ...additions];
 }
 
 /**
@@ -248,6 +502,7 @@ function reconcileStandardization(
   prevMetadata: Metadata,
   metadata: Metadata,
   identity: string,
+  enabledKeys: ReadonlyArray<LinkageKey>,
   rawRows: ReadonlyArray<CSVRow>,
   dateInputFormat?: string,
 ): Standardization {
@@ -267,13 +522,17 @@ function reconcileStandardization(
       .filter((type) => type !== undefined),
   );
   // Default cleaning for a present type the kept set does not cover. Derived the
-  // same way the seed is (defaultStandardizationForRows over the metadata's default
+  // same way the seed is (inviterDefaultStandardization over the metadata's default
   // terms), so a newly-typed column gains exactly the recommended per-type pipeline
   // -- including the row-inferred date format for a column just retyped to
-  // date_of_birth.
-  const fullDefault = defaultStandardizationForRows(
+  // date_of_birth. A column retyped to a type only an opt-in key uses gains one
+  // only once such a key is enabled: the widening reads the enabled keys, so a
+  // routine retype on an authored or imported draft cannot grow its cleaning by a
+  // pipeline whose output that draft's terms declare nothing for.
+  const fullDefault = inviterDefaultStandardization(
     metadata,
     getDefaultLinkageTerms(identity, metadata),
+    enabledKeys,
     rawRows,
     dateInputFormat,
   );
@@ -284,27 +543,37 @@ function reconcileStandardization(
   return [...kept, ...additions];
 }
 
-/** Reconcile the draft's keys against a freshly-derived offerable set: keep the
- * order and enabled flag of keys that remain offerable (replacing the key object
- * with the fresh template), then append any newly-offerable key as enabled. */
+/** Reconcile the draft's keys against a freshly-derived offer
+ * ({@link offerableDraftKeys}): keep the order and enabled flag of keys that
+ * remain offered (replacing the key object with the fresh template), then append
+ * any newly-offered built-in key at the flag it is offered at and place a
+ * newly-offered opt-in key where the offer places it ({@link placeOfferedKeys}),
+ * which is above whichever key it refines wherever the operator has moved that
+ * one. Appending an opt-in key instead would land a retype-driven offer below the
+ * key it refines, the one position where turning it on buys nothing. */
 function reconcileKeys(
   prevKeys: Array<DraftKey>,
-  offerable: Array<LinkageKey>,
+  offerable: Array<DraftKey>,
 ): Array<DraftKey> {
-  const offerableByName = new Map(offerable.map((key) => [key.name, key]));
+  const offerableByName = new Map(
+    offerable.map((entry) => [entry.key.name, entry]),
+  );
   const kept: Array<DraftKey> = [];
   const seen = new Set<string>();
   for (const entry of prevKeys) {
     const fresh = offerableByName.get(entry.key.name);
     if (fresh !== undefined) {
-      kept.push({ key: fresh, enabled: entry.enabled });
+      kept.push({ key: fresh.key, enabled: entry.enabled });
       seen.add(entry.key.name);
     }
   }
-  for (const key of offerable) {
-    if (!seen.has(key.name)) kept.push({ key, enabled: true });
-  }
-  return kept;
+  const fresh = offerable.filter((entry) => !seen.has(entry.key.name));
+  for (const entry of fresh)
+    if (!isOptInLinkageKey(entry.key)) kept.push(entry);
+  return placeOfferedKeys(
+    kept,
+    fresh.filter((entry) => isOptInLinkageKey(entry.key)),
+  );
 }
 
 /** The field names a metadata/standardization pair can declare -- the universe
@@ -550,16 +819,25 @@ function uniqueKeyName(base: string, taken: ReadonlySet<string>): string {
  * (the producer of these bindings).
  *
  * It starts from the full per-type default ({@link defaultStandardizationForRows}
- * over the seed's default terms -- the standardization a single-field import has
- * always opened on, and the seed's own), then adds a binding for each imported
- * linkage field the default does not already declare: the multi-field fields, a
- * second-or-later field of one semantic type (e.g. `first_name_2`). Each such field
+ * over the seed's default terms -- the standardization a single-field import opens
+ * on), then adds a binding for each imported linkage field the default does not
+ * already declare: the multi-field fields, a second-or-later field of one semantic
+ * type (e.g. `first_name_2`), and every field of an `OPT_IN_LINKAGE_FIELD_TYPES`
+ * type, which the default terms declare under no name at all. Each such field
  * binds to the next `role: linkage` column of its type not already bound -- one the
  * operator designated for matching, NOT an `identifier`- or `payload`-roled column
  * (see the binding rationale at the column search below) -- reusing its type's
  * recommended cleaning steps (derived from {@link defaultStandardizationForRows}
  * over the IMPORTED terms, so the steps and the row-inferred date format hold even
  * when the seed's default terms declare no field of that type).
+ *
+ * The base is that unwidened default rather than the seed path's
+ * {@link inviterDefaultStandardization}: the widening binds an opt-in type's first
+ * column to a field named for the type, which on this path claims the column ahead
+ * of the loop below and leaves an imported field the document named otherwise
+ * (`cell_phone` for a `phone_number` column) with nothing free to bind. Here the
+ * imported document's own field names decide the binding; the widening serves the
+ * guided path, where no document has named anything.
  *
  * The reconstructed binding is local and never enters the token, so it cannot move
  * the cross-party hash; `authoredLinkageFields` over the result re-declares the
@@ -603,11 +881,12 @@ function standardizationForImportedTerms(
   );
   // The recommended steps each imported field's type cleans with, keyed by field
   // name. Derived from the default standardization over the IMPORTED terms (not the
-  // seed's), so it covers every imported field's type -- including one the inviter
-  // has columns for but no default key uses, which the seed's default terms (and so
-  // `base`) would not carry -- and bakes in the row-inferred date format. The input
-  // columns it picks collide on the first per type; only the steps are read here,
-  // and the distinct columns are assigned below.
+  // seed's), so it covers every imported field's type -- including an
+  // `OPT_IN_LINKAGE_FIELD_TYPES` type the inviter has columns for but no built-in
+  // key uses, which the seed's default terms (and so `base`) do not carry -- and
+  // bakes in the row-inferred date format. The input columns it picks collide on the
+  // first per type; only the steps are read here, and the distinct columns are
+  // assigned below.
   const stepsByField = new Map(
     defaultStandardizationForRows(
       metadata,

@@ -8,9 +8,10 @@ import {
 } from "@psilink/core";
 
 import {
-  defaultStandardizationForRows,
   draftFromTerms,
   draftWithFieldAdded,
+  draftWithKeyEnabled,
+  inviterDefaultStandardization,
   producibleFieldNames,
   seedAdvancedInvite,
   setDraftMetadata,
@@ -507,7 +508,8 @@ export function editorWithAuthoredDraft(
   return { ...editor, draft, keysAuthored: true };
 }
 
-/** Enable or disable the key at `index` in the guided list. */
+/** Enable or disable the key at `index` in the guided list, carrying an opt-in
+ * type's cleaning with its key (see {@link draftWithKeyEnabled}). */
 export function editorWithKeyEnabled(
   editor: InviterEditor,
   index: number,
@@ -516,12 +518,7 @@ export function editorWithKeyEnabled(
   if (editor.sealed === true) return editor;
   return {
     ...editor,
-    draft: {
-      ...editor.draft,
-      keys: editor.draft.keys.map((entry, at) =>
-        at === index ? { ...entry, enabled } : entry,
-      ),
-    },
+    draft: draftWithKeyEnabled(editor.draft, index, enabled),
   };
 }
 
@@ -669,8 +666,11 @@ export function editorWithDeduplicate(
   return { ...editor, draft: { ...editor.draft, deduplicate } };
 }
 
-/** Restore the recommended cleaning for the current metadata -- the cleaning
- * error boundary's recovery, scoped to the cleaning alone. */
+/** Restore the recommended cleaning for the current metadata and the keys the
+ * draft has turned on -- the cleaning error boundary's recovery, scoped to the
+ * cleaning alone. Reading the enabled keys is what keeps the reset from minting a
+ * pipeline for an opt-in type whose key is off, which the terms this draft emits
+ * would declare no field for. */
 export function editorWithRecommendedCleaning(
   editor: InviterEditor,
   csv: AcquiredCsv,
@@ -680,9 +680,10 @@ export function editorWithRecommendedCleaning(
     ...editor,
     draft: {
       ...editor.draft,
-      standardization: defaultStandardizationForRows(
+      standardization: inviterDefaultStandardization(
         editor.draft.metadata,
         getDefaultLinkageTerms(editor.draft.identity, editor.draft.metadata),
+        enabledKeys(editor.draft),
         seedRows(csv),
         csv.dateInputFormat,
       ),

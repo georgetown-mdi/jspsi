@@ -3,6 +3,7 @@ import {
   MAX_INVITATION_LIFETIME_SECONDS,
   assertFanOutImplemented,
   assertPayloadSendDisclosed,
+  assertStandardizationMatchesTerms,
   assessLinkageSatisfiability,
   disclosedColumnNames,
   encodeInvitation,
@@ -15,6 +16,7 @@ import {
 import { emptyColumnPositions } from "./columnNames";
 import { loadCSVFileOffMainThread } from "./csvParseController";
 import { payloadSendForMetadata } from "./metadataEditing";
+import { standardizationForTerms } from "./advancedInviteTerms";
 
 import type {
   CSVRow,
@@ -141,12 +143,19 @@ export interface GeneratedInvitation {
   metadata?: Metadata;
   /**
    * The inviter's authored per-party standardization, from the bench's Cleaning
-   * tab. Paired with {@link metadata} and threaded into
-   * the inviter's own `prepareForExchange` (never embedded in the token), so the
-   * cleaning -- and the per-field input-column binding that lets two fields of one
-   * semantic type bind to distinct columns -- matches the run the authored fields
-   * were derived from. Absent on the quick path, where standardization is inferred
-   * downstream. Local-only.
+   * tab, RECONCILED to {@link linkageTerms}. Paired with {@link metadata} and
+   * threaded into the inviter's own `prepareForExchange` (never embedded in the
+   * token), so the cleaning -- and the per-field input-column binding that lets two
+   * fields of one semantic type bind to distinct columns -- matches the run the
+   * authored fields were derived from. Absent on the quick path, where
+   * standardization is inferred downstream. Local-only.
+   *
+   * Reconciled rather than carried verbatim because this is what every surface
+   * that PERSISTS a mint records: the draft keeps a disabled key's cleaning so
+   * re-enabling restores it, and a stored copy of that would be refused as an
+   * authored standardization contradicting its terms at the run it is replayed in.
+   * Every transform output here names a field `linkageTerms` declares, checked at
+   * the mint.
    */
   standardization?: Standardization;
   /**
@@ -342,6 +351,11 @@ function resolveConnectionEndpoint(
  *                      authored standardization declare a step that expands one
  *                      value into several match candidates, which the run refuses
  *                      -- likewise before any secret is minted.
+ * @throws {StandardizationTermsError} (from core) when the authored
+ *                      standardization, reconciled to the emitted terms, still
+ *                      contradicts them -- an unknown step function, the class the
+ *                      reconciliation does not cover. The check every persisting
+ *                      caller inherits (see {@link GeneratedInvitation.standardization}).
  */
 export async function generateInvitation(params: {
   inviterName: string;
@@ -394,11 +408,12 @@ export async function generateInvitation(params: {
   /**
    * The inviter's authored per-party standardization from the bench's Cleaning
    * tab, paired with `metadata`/`linkageTerms`. Returned on
-   * {@link GeneratedInvitation} for the inviter's own exchange and threaded into
-   * the fail-closed satisfiability re-check (which binds against it, mirroring how
-   * `metadata` already does), so the verdict matches the run that produces the
-   * authored fields' keys. Never embedded in the token. Omitted on the quick path,
-   * where standardization is inferred downstream.
+   * {@link GeneratedInvitation} -- reconciled to the emitted terms -- for the
+   * inviter's own exchange, and threaded into the fail-closed satisfiability
+   * re-check (which binds against it, mirroring how `metadata` already does), so
+   * the verdict matches the run that produces the authored fields' keys. Never
+   * embedded in the token. Omitted on the quick path, where standardization is
+   * inferred downstream.
    */
   standardization?: Standardization;
   /**
@@ -613,6 +628,25 @@ export async function generateInvitation(params: {
   // element transforms and this party's own authored cleaning.
   assertFanOutImplemented(linkageTerms, params.standardization);
 
+  // The per-party cleaning this mint stands behind, reconciled ONCE to the terms
+  // it embeds: every surface that keeps a copy of a mint -- the managed-exchange
+  // record a scheduled re-run replays, the CLI exchange file the save path writes,
+  // the console's server-job config -- reads it from here and hands it to
+  // `prepareForExchange` with no boundary of its own in between, where a transform
+  // output naming no declared linkage field is refused as an authored
+  // standardization contradicting its terms. The editor's draft holds cleaning for
+  // fields its terms do not declare by design (a disabled key's, kept so
+  // re-enabling restores it), so the reconciliation belongs at the mint rather
+  // than at each surface that reads one. The assertion is the invariant: it holds
+  // where every persisted copy is derived from, and fails here, before a secret is
+  // minted, rather than at the operator's next unattended run.
+  const standardization =
+    params.standardization === undefined
+      ? undefined
+      : standardizationForTerms(params.standardization, linkageTerms);
+  if (standardization !== undefined)
+    assertStandardizationMatchesTerms(standardization, linkageTerms);
+
   // Bound the token's lifetime so an intercepted invitation cannot be accepted
   // indefinitely. Measured from the current instant, so the lifetime clock starts
   // when the token is minted; the CLI mints `expires` the same way (expiresFromNow
@@ -630,10 +664,6 @@ export async function generateInvitation(params: {
     ...(retainsFiles ? { inviterRetainsFiles: true } : {}),
   };
 
-  // The authored standardization is returned as-is for the inviter's own exchange;
-  // it is reconciled to the emitted terms downstream by inviterExchangeDataSpec, at
-  // the spec-assembly boundary where the spec is handed to prepareForExchange (so
-  // the invariant is enforced no matter how a spec reaches core, not only here).
   const encoded = await encodeInvitation(token);
   return {
     encoded,
@@ -644,7 +674,7 @@ export async function generateInvitation(params: {
     rawRows,
     columns,
     metadata: params.metadata,
-    standardization: params.standardization,
+    standardization,
     disclosedPayloadColumns,
   };
 }

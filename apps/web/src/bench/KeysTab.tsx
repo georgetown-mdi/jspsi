@@ -15,6 +15,7 @@ import {
   APPLIED_SETTINGS,
   AlgorithmSchema,
   LinkageStrategySchema,
+  isOptInLinkageKey,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -64,12 +65,49 @@ const KEY_VERDICT_BADGES: Record<
   },
 };
 
+/** The heading of {@link OPT_IN_KEYS_GUIDANCE}, and the marker on each guided-list
+ * entry the guidance is about, so the two read as one statement. */
+const OPT_IN_BADGE_LABEL = "outside the default set";
+
+/**
+ * What turning on an offered key the built-in set does not declare costs the
+ * operator, stated where the offer is. Rendered whenever the list holds one, so
+ * the three types it names are surfaced on identical terms -- none is offered
+ * with a caveat the others are spared, and none is offered silently.
+ *
+ * The shape of the offer needs stating as much as the departure does: each type
+ * is offered only inside a compound key, and an operator who reads the list as a
+ * menu of single identifiers would not see why. The closing sentence is about the
+ * badge instead, which a metadata edit can leave on an offer the file no longer
+ * supplies a column for.
+ */
+const OPT_IN_KEYS_GUIDANCE =
+  "The default keys use none of phone number, email address, or ZIP code, so " +
+  "what those keys were validated against says nothing about how these match: " +
+  "turning one on means this exchange no longer matches on the default set " +
+  "alone. Each is offered only inside a compound key, never on its own, " +
+  "because a single identifier both over-matches and tells anyone holding a " +
+  "value whether its holder is in the other file -- and a phone number or an " +
+  "email address is often a shared one, covering a household or the " +
+  "organization that helped with an application. Offers " +
+  "appear for the keys your file can supply; one marked not satisfiable lost " +
+  "its column to a later edit.";
+
 /**
  * The Matching keys tab: the guided ordered key list (enable + reorder, with
  * satisfiability badges), the expert switch that opens element-by-element
  * authoring and terms import/export, and the matching settings -- the linkage
  * strategy, matching method, and deduplication controls, each live while the
  * exchange applies what it writes.
+ *
+ * The list holds the keys the built-in rule set offers for these columns and,
+ * turned off and in the cascade position each belongs at, the ones
+ * `optInLinkageKeys` offers for the matchable types that set uses in none of its
+ * keys. Both are the same control -- a checkbox and the reorder pair -- so an
+ * addition is made the way a default key is turned off; what tells them apart is
+ * a marker on the entry and the guidance below the list
+ * ({@link OPT_IN_KEYS_GUIDANCE}), which states what the addition costs rather
+ * than a shape of control that hides the choice.
  *
  * It also carries the notice about the terms the editor will emit that refuses
  * nothing: an imported document's rule-set citation the rebuild will not carry
@@ -125,6 +163,9 @@ export function KeysTab({
     [editor.draft, currentTerms],
   );
   const keyCount = editor.draft.keys.length;
+  const offersOptInKey = editor.draft.keys.some((entry) =>
+    isOptInLinkageKey(entry.key),
+  );
   return (
     <>
       <button type="button" className={styles.backlink} onClick={onBack}>
@@ -159,6 +200,13 @@ export function KeysTab({
                     >
                       {badge.label}
                     </span>
+                    {isOptInLinkageKey(entry.key) && (
+                      <span
+                        className={`${styles.keyBadge} ${styles.keyBadgeOptIn}`}
+                      >
+                        {OPT_IN_BADGE_LABEL}
+                      </span>
+                    )}
                   </>
                 }
               />
@@ -184,6 +232,16 @@ export function KeysTab({
           );
         })}
       </ol>
+      {offersOptInKey && (
+        <Alert
+          variant="light"
+          color="yellow"
+          title={`Some keys are ${OPT_IN_BADGE_LABEL}`}
+          my="md"
+        >
+          {OPT_IN_KEYS_GUIDANCE}
+        </Alert>
+      )}
       {keysError !== undefined && (
         <p
           role="alert"
