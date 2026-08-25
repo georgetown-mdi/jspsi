@@ -11,8 +11,14 @@ import {
 } from "../src/config/compatibilityMessage";
 import { validateCompatibility } from "../src/config/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
-import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
-import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
+import {
+  redactAndSanitizeForDisplay,
+  sanitizeErrorForDisplay,
+} from "../src/utils/sanitizeErrorForDisplay";
+import {
+  WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+  sanitizeForDisplay,
+} from "../src/utils/sanitizeForDisplay";
 
 // --- Reading a composed diagnostic back --------------------------------------
 
@@ -232,19 +238,72 @@ const only = (
   return matched[0];
 };
 
+/**
+ * A diagnostic together with the accumulator it arrived on. The route travels
+ * with the message because it decides the display pipeline that carries it to an
+ * operator, and the two differ in how many times the escape runs. It is produced
+ * by the two helpers below rather than declared per entry, so a case is rendered
+ * through the route `validateCompatibility` actually put it on.
+ */
+interface RoutedDiagnostic {
+  readonly route: "errors" | "warnings";
+  readonly message: string;
+}
+
 const errorStartingWith = (
   local: LinkageTerms,
   partner: LinkageTerms,
   marker: string,
   id: string,
-): string => only(validateCompatibility(local, partner).errors, marker, id);
+): RoutedDiagnostic => ({
+  route: "errors",
+  message: only(validateCompatibility(local, partner).errors, marker, id),
+});
 
 const warningStartingWith = (
   local: LinkageTerms,
   partner: LinkageTerms,
   marker: string,
   id: string,
-): string => only(validateCompatibility(local, partner).warnings, marker, id);
+): RoutedDiagnostic => ({
+  route: "warnings",
+  message: only(validateCompatibility(local, partner).warnings, marker, id),
+});
+
+/**
+ * Render a diagnostic through the pipeline its own route has in production,
+ * which is what the display-side assertions below have to hold on.
+ *
+ * An `errors` diagnostic is composed RAW and becomes an `Error` message where
+ * the terms exchange refuses (`protocolSetup.ts` joins the list behind this same
+ * lead-in), so the escape runs once, at the renderer that shows the chain. A
+ * `warnings` diagnostic is composed ESCAPED -- `validateCompatibility` wraps each
+ * value in `redactAndSanitizeForDisplay` -- and is handed to `runExchange`'s
+ * `onWarning` as display text, whose CLI sink escapes the whole composed warning
+ * a second time: at the stderr log line (`apps/cli/src/protocol.ts`) and at the
+ * fd-3 warning event (`buildWarningEvent` in `apps/cli/src/eventStream.ts`,
+ * whose whole-warning budget is the cap taken here). That two-pass route is one
+ * CHANNEL_SECURITY.md records rather than closes.
+ */
+const renderForRoute = ({ route, message }: RoutedDiagnostic): string =>
+  route === "errors"
+    ? sanitizeErrorForDisplay(
+        new Error(`linkage terms are incompatible: ${message}`),
+      )
+    : redactAndSanitizeForDisplay(message, {
+        maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+      });
+
+/** What ONE escape pass writes for the ESC the hostile values below carry. */
+const ONCE_ESCAPED_ESC = "\\x1b";
+
+/**
+ * What a SECOND pass writes over that, the first pass's backslash doubled. It
+ * CONTAINS the once-escaped form, so an assertion that only looks for that form
+ * is satisfied by either: a single-pass route is pinned by the absence of this
+ * one, and the two-pass route by its presence.
+ */
+const TWICE_ESCAPED_ESC = "\\\\x1b";
 
 /**
  * Every compatibility diagnostic that names a terms value, with the value under
@@ -262,8 +321,11 @@ interface SweptDiagnostic {
   readonly id: string;
   /** A value of the shape this diagnostic legitimately carries. */
   readonly benign: string;
-  /** Produce the diagnostic with `value` in the partner-chosen position. */
-  readonly compose: (value: string) => string;
+  /**
+   * Produce the diagnostic with `value` in the partner-chosen position, on the
+   * accumulator `validateCompatibility` returned it on.
+   */
+  readonly compose: (value: string) => RoutedDiagnostic;
   /**
    * Whether the value reaches the message byte-for-byte. False only where the
    * message names the value through another encoding of its own -- the canonical
@@ -601,23 +663,27 @@ const ADVERSARIAL_SHAPES: ReadonlyArray<{
  */
 const benignClauseSkeleton = (
   diagnostic: SweptDiagnostic,
-  compose: (value: string) => string,
+  produce: (value: string) => string,
 ): string =>
-  readMessage(compose(diagnostic.benign)).skeleton.replaceAll(
+  readMessage(produce(diagnostic.benign)).skeleton.replaceAll(
     diagnostic.benign,
     "<value>",
   );
 
 describe.each(SWEPT)("$id", (diagnostic) => {
+  const composed = (value: string): string => diagnostic.compose(value).message;
+  const displayed = (value: string): string =>
+    renderForRoute(diagnostic.compose(value));
+
   test.each(ADVERSARIAL_SHAPES)("is not restructured by $name", ({ shape }) => {
     const hostile = shape(diagnostic.benign);
-    const hostileRead = readMessage(diagnostic.compose(hostile));
+    const hostileRead = readMessage(composed(hostile));
 
     // The whole claim: an operator reading the hostile run is shown exactly the
     // clause structure this function wrote for the benign one. Nothing the
     // partner chose became prose.
     expect(hostileRead.skeleton).toBe(
-      benignClauseSkeleton(diagnostic, diagnostic.compose),
+      benignClauseSkeleton(diagnostic, composed),
     );
     // And the value is carried whole rather than mangled or split across runs,
     // so the delimiting costs the operator no fidelity.
@@ -629,28 +695,37 @@ describe.each(SWEPT)("$id", (diagnostic) => {
   });
 
   test.each(ADVERSARIAL_SHAPES)(
-    "survives the display boundary intact under $name",
+    "survives its own display route intact under $name",
     ({ shape }) => {
-      // The delimiting is composed here and the escape runs once at the sink, so
-      // the structure has to hold on what the operator actually sees -- with a
-      // control sequence in the value for the escape to act on.
-      const render = (message: string): string =>
-        sanitizeErrorForDisplay(new Error(message));
-      const renderedCompose = (value: string): string =>
-        render(diagnostic.compose(value));
+      // The delimiting is composed in validateCompatibility and the escape runs
+      // on the route that carries the diagnostic away from it, so the structure
+      // has to hold on what the operator actually sees -- with a control
+      // sequence in the value for the escape to act on.
       const hostile = `${shape(diagnostic.benign)}\x1b[31m`;
-      const rendered = renderedCompose(hostile);
+      const routed = diagnostic.compose(hostile);
+      const rendered = renderForRoute(routed);
 
       const renderedSkeleton = readMessage(rendered).skeleton;
       expect(renderedSkeleton).toBe(
-        benignClauseSkeleton(diagnostic, renderedCompose),
+        benignClauseSkeleton(diagnostic, displayed),
       );
       expect(renderedSkeleton).not.toContain("forged");
       if (diagnostic.verbatim !== false) {
-        // The escape acts inside the run and the run's boundaries are untouched:
-        // one pass, not two, and the delimiting survives it.
+        // The escape acted inside the run and left the run's boundaries
+        // untouched, and it ran as many times as this route escapes: once at
+        // the error renderer, or -- on the warnings route -- once at composition
+        // and once at the sink, the second pass doubling the backslash the
+        // first wrote. That doubling is reachable here because
+        // validateCompatibility's signature admits terms no schema parsed; a
+        // date that came through the terms schema carries no byte the escape
+        // rewrites at all, which linkageTerms.test.ts pins.
         expect(rendered).not.toContain("\x1b");
-        expect(rendered).toContain("\\x1b");
+        if (routed.route === "errors") {
+          expect(rendered).toContain(ONCE_ESCAPED_ESC);
+          expect(rendered).not.toContain(TWICE_ESCAPED_ESC);
+        } else {
+          expect(rendered).toContain(TWICE_ESCAPED_ESC);
+        }
       }
     },
   );
