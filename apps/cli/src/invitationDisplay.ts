@@ -7,6 +7,7 @@ import {
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  displayText,
   PROPOSED_NOT_APPLIED_NOTES,
   redactAndSanitizeForDisplay,
   summarizeInvitation,
@@ -19,6 +20,7 @@ import { writePromptLine } from "./util/cli";
 import type { DialedBrokerHostAndPort } from "./connection/webrtc/brokerClient";
 import type {
   ConsentFactId,
+  Displayable,
   InvitationKeySummary,
   InvitationSummary,
   InvitationToken,
@@ -145,9 +147,17 @@ const OUTBOUND_SEND_NO_PAYLOAD =
  *
  * Shared by the two sinks that name the server, the surface line and the
  * confirmation question, so neither can escape a joined value and lose the port.
+ *
+ * {@link Displayable} rather than `string`, composed through
+ * {@link displayText}: the brand is what makes dropping the escape a compile
+ * error instead of a review catch, and the tag is the one composition that keeps
+ * it across the port append (plain interpolation yields `string`). The tag adds
+ * no bytes, so the rendered line is exactly what the template produced.
  */
-export function renderDialedBroker(broker: DialedBrokerHostAndPort): string {
-  return `${redactAndSanitizeForDisplay(broker.host)}:${broker.port}`;
+export function renderDialedBroker(
+  broker: DialedBrokerHostAndPort,
+): Displayable {
+  return displayText`${redactAndSanitizeForDisplay(broker.host)}:${broker.port}`;
 }
 
 /**

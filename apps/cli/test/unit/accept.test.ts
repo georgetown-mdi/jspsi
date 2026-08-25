@@ -38,6 +38,7 @@ import type {
   ConnectionConfig,
   ConnectionEndpoint,
   ConsentFact,
+  Displayable,
   InvitationToken,
   LinkageStrategy,
   LinkageTerms,
@@ -78,6 +79,7 @@ import { decodeAndValidateInvitation } from "../../src/invitationDecode";
 import {
   displayInvitation,
   logDecisionFacts,
+  renderDialedBroker,
 } from "../../src/invitationDisplay";
 import {
   generateSharedSecret,
@@ -4008,6 +4010,20 @@ test("handler: nothing reaches the operator between the terms and the question",
   } finally {
     fs.rmSync(fixture.dir, { recursive: true, force: true });
   }
+});
+
+test("the rendered server carries the display brand, not a bare string", () => {
+  // Both sinks that name the server interpolate the value into a first-party
+  // line, so neither demands a `Displayable` and nothing but this annotation
+  // holds the brand on the return type. It is the check, not documentation:
+  // widening that type back to `string` fails `tsc -p apps/cli/tsconfig.test.json`,
+  // which is a CI check because that config includes the test tree.
+  const named: Displayable = renderDialedBroker({
+    host: "peer.example.org",
+    port: 443,
+  });
+  // And the brand adds no bytes: the line is what the plain template produced.
+  expect(named).toBe("peer.example.org:443");
 });
 
 test("handler: the one-command path names the coordination server it will dial before it asks", async () => {
