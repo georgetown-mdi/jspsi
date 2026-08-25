@@ -230,10 +230,6 @@ test("a host that is not a bare authority is refused, opening nothing", async ()
   // second port, and whitespace or an empty value does not parse at all (the
   // connection schema requires a non-empty host, so the last is the fail-closed
   // floor rather than a reachable config).
-  //
-  // The refusal is a UsageError, so the CLI's classification exits 64: the
-  // location alone decides it, and an unattended supervisor told 69 would re-run
-  // a locator that cannot dial for as long as it is willing to retry.
   for (const host of [
     "evil@attacker.example",
     "signal.example/x",
@@ -285,9 +281,6 @@ test("the consent-surface authority normalizes the host and always shows the por
   // scheme's default, which the authority form drops -- a consent line naming a
   // coordination server states where the dial goes rather than leaving the port
   // to a scheme the line does not carry.
-  // The two are resolved apart so a sink escapes the host alone: joined, a host
-  // at the length an invitation may carry spends the whole display budget and
-  // truncates the port away.
   // Written as escapes because one of the two is invisible in source.
   expect(
     dialedBrokerHostAndPort({
