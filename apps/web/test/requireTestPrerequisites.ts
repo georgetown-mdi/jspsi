@@ -1,4 +1,10 @@
+import {
+  ALLOW_MISSING_PREREQUISITES_ENV,
+  prerequisitesAreRequired,
+} from "@psilink/testkit/prerequisiteGate";
 import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
+
+export { ALLOW_MISSING_PREREQUISITES_ENV, prerequisitesAreRequired };
 
 // A suite that skips when a tool the environment did not supply is missing is
 // only honest while the skip is visible. `apps/web/test/integration/requireProdBuild.ts`
@@ -26,22 +32,6 @@ export interface TestPrerequisite {
   covers: string;
   /** How to supply it. */
   remedy: string;
-}
-
-/** Opt-out for a deliberate run where a prerequisite is knowingly absent. */
-export const ALLOW_MISSING_PREREQUISITES_ENV =
-  "PSILINK_ALLOW_MISSING_TEST_PREREQUISITES";
-
-/**
- * Whether this environment is supposed to supply every test prerequisite. CI
- * runners are provisioned to a spec, so a missing prerequisite there is a
- * failure; anywhere else it is a fact about the machine.
- */
-export function prerequisitesAreRequired(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  if (env[ALLOW_MISSING_PREREQUISITES_ENV] === "1") return false;
-  return env.CI !== undefined && env.CI !== "" && env.CI !== "false";
 }
 
 /** The operator-facing description of what is missing and what it costs. */

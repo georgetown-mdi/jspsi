@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ChildProcess } from "node:child_process";
+import { stopChild } from "./stopChild";
 
 /**
  * Runs `psilink` as a CHILD PROCESS -- the command line an operator types, from
@@ -176,7 +176,7 @@ export function startCli(params: {
         attempt();
       }),
     stop: () => {
-      if (!exited) stopChild(child);
+      void stopChild(child);
       return finished;
     },
   };
@@ -205,11 +205,3 @@ export function describeCliRun(label: string, run: FinishedCli): string {
  * whole stream is on the run for a caller that wants more.
  */
 const STDERR_TAIL_LINES = 15;
-
-/** Terminate `child`; SIGKILL is the backstop so a teardown cannot hang. */
-function stopChild(child: ChildProcess): void {
-  const kill = setTimeout(() => child.kill("SIGKILL"), 2_000);
-  kill.unref();
-  child.once("exit", () => clearTimeout(kill));
-  child.kill("SIGTERM");
-}

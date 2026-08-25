@@ -15,6 +15,10 @@ import YAML from "yaml";
 
 import { parseExchangeSpec } from "@psilink/core";
 import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
+import {
+  ALLOW_MISSING_PREREQUISITES_ENV,
+  prerequisitesAreRequired,
+} from "@psilink/testkit/prerequisiteGate";
 
 import { describeCliRun, startCli } from "../../cliProcess";
 import { loadKeyFile } from "../../../src/keyFile";
@@ -60,18 +64,12 @@ import type { TlsBrokerFront } from "../../signaling/tlsBrokerFront";
  * one the web suite's prerequisite gate takes, so an operator who knows their
  * machine has no `openssl` sets one variable for both.
  */
-const PREREQUISITE_OPT_OUT = "PSILINK_ALLOW_MISSING_TEST_PREREQUISITES";
-const prerequisitesAreRequired =
-  process.env[PREREQUISITE_OPT_OUT] !== "1" &&
-  process.env.CI !== undefined &&
-  process.env.CI !== "" &&
-  process.env.CI !== "false";
-if (loopbackTlsCert === null && prerequisitesAreRequired)
+if (loopbackTlsCert === null && prerequisitesAreRequired(process.env))
   throw new Error(
     "no loopback TLS certificate could be minted here, so the live " +
       "one-command webrtc acceptance would silently skip in an environment " +
       "that is supposed to supply one. Install `openssl`, or set " +
-      `${PREREQUISITE_OPT_OUT}=1 to skip the leg deliberately.`,
+      `${ALLOW_MISSING_PREREQUISITES_ENV}=1 to skip the leg deliberately.`,
   );
 const liveTest = test.skipIf(loopbackTlsCert === null);
 
