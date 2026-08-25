@@ -259,16 +259,16 @@ export const MAX_TRANSFORM_PATTERN_LENGTH = 1000;
  * regex factory would render into a compile source is separately bounded on the
  * COERCED source by {@link MAX_TRANSFORM_PATTERN_LENGTH}.
  *
- * What it leaves is a MULTIPLIER rather than an absolute per-row size:
- * `replace_regex` substitutes its replacement at every match, and a pattern
- * matching the empty string matches between every character, so a row's
- * transformed value can still reach the operator's own cell plus one bounded
- * replacement per position (pinned as a bounded-factor test in
- * standardization.test.ts). What it removes is the partner's ability to size a
- * row's value
- * INDEPENDENTLY of the operator's data (docs/spec/CHANNEL_SECURITY.md, Unbounded
- * transform-parameter rejection, which records the residual and the byte-aware
- * bound that would close it).
+ * What it removes is the partner's ability to supply an unbounded-LENGTH param,
+ * not the ability to amplify the value a row derives from one: this cap does not
+ * bound the transformed value, because a `replace_regex` replacement is a
+ * substitution TEMPLATE whose match-context sequences re-insert the operator's
+ * own cell at every match position, and transform steps compose. That residual is
+ * open; docs/spec/CHANNEL_SECURITY.md (Unbounded transform-parameter rejection)
+ * carries the measurements and the closer -- a byte-aware bound on the
+ * transformed value, or neutralizing the amplifying sequences in a
+ * partner-supplied replacement -- and standardization.test.ts characterizes it as
+ * a lower bound.
  *
  * A DoS ceiling on the partner wire path, not a semantic limit: an in-range value
  * is preserved verbatim, never clamped, since both parties must derive
