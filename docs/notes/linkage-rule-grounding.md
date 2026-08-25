@@ -724,14 +724,19 @@ that carries it has a single token (`First Name + Email`), unmeasured. The one
 published exclusion of an email token is the same evaluation choice made for
 phone, by the same study authors about their own combination and on the same
 error-prone-on-input reasoning; no vendor policy on email is cited here either.
-The attribute analysis that grades every other candidate gives email no row at
-all and rates it the hardest tier to standardize. The one document that
-recommends it does so on a rising-availability argument alone -- 9% to 54% of
-records over nine years -- and the federal matching report classifies it as
-untested and warns that these attributes "are often used to establish a patient's
-identity through knowledge-based authentication ... As such, the capture and
-exchange of these data attributes may contribute to decreased security of
-consumer information."
+Mirel et al.'s NHCS-to-NDI evaluation carries no email-bearing token at all --
+its token selection was restricted to tokens for which "the full complement of
+PII in the survey data were available," and no email field appears among either
+source's identifiers anywhere in the paper -- so it neither supports nor indicts
+the `FN + email` shape, and the measurement this section calls for remains
+outstanding. The attribute analysis that grades every other candidate gives
+email no row at all and rates it the hardest tier to standardize. The one
+document that recommends it does so on a rising-availability argument alone --
+9% to 54% of records over nine years -- and the federal matching report
+classifies it as untested and warns that these attributes "are often used to
+establish a patient's identity through knowledge-based authentication ... As
+such, the capture and exchange of these data attributes may contribute to
+decreased security of consumer information."
 
 Candidate shape, if any: `FN + email`, the shipped token, placed low. The
 argument for it is structural rather than measured -- an email address is
@@ -841,15 +846,28 @@ with that key removed, reporting what recall it added and what precision it cost
 
 State honestly what this requirement rests on. **None of the evaluation guidance
 requires it**, and none of the linkage evaluations read here performs it, with
-one exception, and that one is a secondary reading rather than a report held
-here: a hashed-token re-run of a hospital-to-death-records linkage against its
-own clear-text linkage as truth found the full token set at 93.8%
-precision and 98.7% recall, and dropping the two token combinations that
-generated most of the false pairs -- both coarsened name-plus-birth-date
-combinations, one phonetic and one first-initial -- moved it to 98.9% precision
-at 97.8% recall. That is the shape of the measurement, and it is the reason to
-require it: the two keys that cost the most precision were both of the coarsened
-kind the built-in set carries several of.
+one exception: Mirel et al.'s hashed-token re-run of a hospital-to-death-records
+linkage (2016 NHCS to 2016/17 NDI) against its own clear-text linkage as truth.
+Its ablation unit is the observed token COMBINATION, not the individual token:
+the paper tabulates the 29 unique combinations of tracked tokens that actually
+appeared among the returned pairs, so a weak token such as Token 1 is only
+charged for the pairs where no stronger token (an SSN-bearing Token 5 or 16) also
+matched -- if one had, that pair would appear under a different, mixed-token row
+instead. The cut rule is a pre-stated mechanical threshold, fixed in the methods
+before the results were run: drop any combination whose false positives exceed
+50% of its false positives plus true positives. Four combinations crossed that
+line -- Token 1 alone, Token 2 alone, Tokens 1 and 7 together, and Tokens 1 and 2
+together -- and all four rest on first or last name, sex, and date of birth, with
+no SSN-bearing token in the mix. (The paper never defines what its numbered
+tokens concatenate; the definitions are in a figure this library holds only as an
+image, so no claim about which of them is phonetic or first-initial is
+supportable from the text held here.) Removing those four combinations moved the
+full result set from 93.8% precision and 98.7% recall to 98.9% precision and
+97.8% recall, and the paper reports the cost beside the gain: 11,515 false
+positives were removed at the price of 1,738 true positives, which is the entire
+reason recall fell. That is the shape of the measurement, and it is the reason to
+require it: the combinations that cost the most precision were exactly the
+coarsened, no-SSN kind the built-in set carries several of.
 
 For a cascade, one methodological point makes the requirement stricter than it
 sounds. A key's marginal contribution is what it adds AFTER the earlier keys have
@@ -993,7 +1011,10 @@ Table 1. Harron et al., "A guide to evaluating linkage quality for the analysis 
 linked data", 2017 (`harron-2017-guide-to-evaluating-linkage-quality.md`) --
 Box 1 and Table 2.
 
-**Evaluations and the corpus question.** ASPE/NCHS PPRL evaluation, NHCS to
+**Evaluations and the corpus question.** Mirel, Resnick, Aram and Cox, "A
+methodological assessment of privacy preserving record linkage using survey and
+administrative data", 2022 (`mirel-2022-pprl-linkage-quality-sjiaos.txt`, fetched
+2026-08-25) -- Table 1, Table 2, pp. 7-9. ASPE/NCHS PPRL evaluation, NHCS to
 Medicaid T-MSIS, final report, 2024
 (`aspe-2024-pprl-evaluation-nhcs-medicaid-tmsis-final-report.pdf`). RAND for
 ASPE, *Linking Medicaid Claims, Birth Certificates, and Other Sources*
@@ -1011,8 +1032,8 @@ risk of PPRL encodings shared with de-identified demographics, 2025
 **Secondary source.** *Record Linkage in Practice: Connecting K-12,
 Postsecondary, and Workforce Data* (`real-world-linkage-survey.md`), a survey held
 in the same library. The Maryland cascade, the Census person-key system, the
-NHANES-III SSN rule, the Australian fixed-key comparisons, the hashed-token
-ablation result, the Census person-key differentials, the controlled study of
-name cleaning, and the federal evaluation of commercial matching systems are
-cited through it; each names its own underlying publication, and this note has
-not re-verified those against the originals.
+NHANES-III SSN rule, the Australian fixed-key comparisons, the Census person-key
+differentials, the controlled study of name cleaning, and the federal evaluation
+of commercial matching systems are cited through it; each names its own
+underlying publication, and this note has not re-verified those against the
+originals.
