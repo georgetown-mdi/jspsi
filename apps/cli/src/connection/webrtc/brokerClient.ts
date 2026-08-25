@@ -306,9 +306,15 @@ export function dialedBrokerHostAndPort(
  * covers is a host or path shape that slipped past both and still landed
  * userinfo, or a different host, in the address that would be dialed.
  *
- * @throws {ConnectionError} of kind `usage` if the address names another host.
- * @throws {UsageError} if the configured location is not a bare authority (via
- *   {@link brokerAuthority}, which resolves what the address is compared to).
+ * It raises the class {@link brokerAuthority} raises, and exits 64 for the
+ * reason stated there: the address and the configured location decide it
+ * between them, so a retry reaches it again. One class across every
+ * undialable-endpoint refusal is what leaves the exit code readable as "nothing
+ * was dialed" rather than as which of these sites caught it.
+ *
+ * @throws {UsageError} if the address names another host, or if the configured
+ *   location is not a bare authority (via {@link brokerAuthority}, which
+ *   resolves what the address is compared to).
  * @internal exported for testing
  */
 export function assertDialsConfiguredBroker(
@@ -324,7 +330,7 @@ export function assertDialsConfiguredBroker(
   ) {
     return;
   }
-  throw new ConnectionError(BROKER_AUTHORITY_REFUSED, "usage");
+  throw new UsageError(BROKER_AUTHORITY_REFUSED);
 }
 
 /**
