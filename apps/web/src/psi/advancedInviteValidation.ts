@@ -644,6 +644,19 @@ const CITATION_DROP_NOTICES: Record<ImportedCitationDropCause, string> = {
     "citation, or create the invitation without it.",
 };
 
+/** The `no-keys` drop when NO key can be enabled: an import whose keys none of the
+ * inviter's columns can supply lands with every one disabled, so the generic
+ * "turn a key back on" remedy would only trade this notice for the blocking
+ * unsupplyable-key error. It names the real obstacle and folds into that error's
+ * guidance ({@link UNSUPPLYABLE_KEY_MESSAGE}) rather than pointing at a control
+ * that cannot help. Named no field, for the reason {@link CITATION_DROP_NOTICES}
+ * names no set. */
+const CITATION_DROP_NO_SUPPLYABLE_KEY =
+  "A rule-set citation says which set the linkage keys came from, but none of the " +
+  "linkage keys your imported document declares can be supplied by your file's " +
+  "columns, so the citation it made is left out of the terms you create. Add a " +
+  "column of the type a linkage key needs to carry it.";
+
 /**
  * The notice for an imported rule-set citation the rebuilt document will not carry,
  * or `undefined` when it carries it (and for a draft that imported nothing, or
@@ -660,5 +673,22 @@ export function importedCitationDropNotice(
   builtTerms?: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
 ): string | undefined {
   const cause = importedCitationDropCause(draft, builtTerms);
-  return cause === undefined ? undefined : CITATION_DROP_NOTICES[cause];
+  if (cause === undefined) return undefined;
+  // Split the `no-keys` cause on supplyability, which citationDropCause cannot see
+  // (it reads the terms, not the draft's columns): when no key can be enabled at
+  // all, "turn a key back on" is misdirection, so name the real obstacle instead.
+  if (cause === "no-keys" && !draftHasSupplyableKey(draft))
+    return CITATION_DROP_NO_SUPPLYABLE_KEY;
+  return CITATION_DROP_NOTICES[cause];
+}
+
+/** Whether any of the draft's keys -- enabled or not -- references only fields the
+ * inviter's columns can supply, the same test {@link validateAdvancedInvite} uses
+ * to decide whether enabling a key could help. */
+function draftHasSupplyableKey(draft: AdvancedInviteDraft): boolean {
+  const declarable = declarableFieldNames(
+    draft.metadata,
+    draft.standardization,
+  );
+  return draft.keys.some((entry) => keyIsSupplyable(entry.key, declarable));
 }

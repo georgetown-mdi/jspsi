@@ -137,19 +137,21 @@ describe("KeysTab: the dropped-citation notice", () => {
       }),
     );
 
+    // The visible notice carries the title and the full cause; the persistent live
+    // region announces only the short headline (that title), so a screen-reader
+    // user is not read the whole body twice -- once live, once in reading order.
     await expect
-      .element(
-        page.getByText("The imported rule-set citation will not be carried"),
-      )
-      .toBeInTheDocument();
-    // The visible notice and the persistent live region carry the same cause, so
-    // an operator reading the page and one hearing it are told the same thing.
+      .element(page.getByRole("note"))
+      .toHaveTextContent("The imported rule-set citation will not be carried");
     await expect
       .element(page.getByRole("note"))
       .toHaveTextContent("the citation cannot be verified");
     await expect
       .element(page.getByRole("status"))
-      .toHaveTextContent("the citation cannot be verified");
+      .toHaveTextContent("The imported rule-set citation will not be carried");
+    await expect
+      .element(page.getByRole("status"))
+      .not.toHaveTextContent("the citation cannot be verified");
   });
 
   test("is absent -- and its live region silent, not unmounted -- while the citation stands", async () => {

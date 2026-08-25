@@ -2398,6 +2398,79 @@ describe("the editor says when an imported citation will not be re-emitted", () 
     );
   });
 
+  test("a repaired import's later reorder is the operator's edit, not the document's fault", () => {
+    // The document cites the set this build ships plus one extra key these columns
+    // cannot supply, so the editor disables that key on arrival and the citation
+    // SURVIVES the import. A later ordinary reorder of the surviving keys drops it:
+    // the proximate cause is that edit, and reversing it restores the citation, so
+    // the cause is rules-not-drawn ("undo the edit"), not shipped-set-unmet -- whose
+    // "no edit restores it" would be false here.
+    const imported = structuredClone(defaultExport());
+    imported.linkageFields = [
+      ...imported.linkageFields,
+      { name: "phone_number", type: "phone_number" },
+    ];
+    imported.linkageKeys = [
+      ...imported.linkageKeys,
+      { name: "Phone", elements: [{ field: "phone_number" }] },
+    ];
+    const draft = draftFor(imported);
+    // Survived import: the unsupplyable extra key is disabled and the rebuilt rules
+    // still cite the shipped set.
+    expect(buildAdvancedTerms(draft).linkageRuleSet).toEqual(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
+    expect(importedCitationDropNotice(draft)).toBeUndefined();
+
+    const reordered = withKeys(draft, [...draft.keys].reverse());
+    expect(buildAdvancedTerms(reordered).linkageRuleSet).toBeUndefined();
+    expect(importedCitationDropCause(reordered)).toBe("rules-not-drawn");
+    expect(importedCitationDropNotice(reordered)).toContain(
+      "no longer drawn from the rule set",
+    );
+
+    // Reversing the reorder restores the citation -- proof the drop was the edit's,
+    // which shipped-set-unmet would have denied.
+    const restored = withKeys(reordered, [...reordered.keys].reverse());
+    expect(buildAdvancedTerms(restored).linkageRuleSet).toEqual(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
+    expect(importedCitationDropNotice(restored)).toBeUndefined();
+  });
+
+  test("an import whose keys no column can supply is not told to turn a key on", () => {
+    // Every imported key references a field these columns cannot supply, so the
+    // editor disables them all on arrival -- the operator turned nothing off.
+    // "Turn a linkage key back on" would only trade the notice for the blocking
+    // unsupplyable-key error, so the notice names the real obstacle: no key is
+    // supplyable. The drop cause is still no-keys; only the notice differs.
+    const phoneOnlyMetadata: Metadata = [
+      {
+        name: "phone_col",
+        type: "phone_number",
+        role: "linkage",
+        isPayload: false,
+      },
+    ];
+    const phoneOnlySeed: AdvancedInviteSeed = {
+      terms: getDefaultLinkageTerms("Inviter", phoneOnlyMetadata),
+      metadata: phoneOnlyMetadata,
+      columns: ["phone_col"],
+    };
+    const imported = defaultExport();
+    expect(imported.linkageRuleSet).toEqual(DEFAULT_LINKAGE_RULE_SET.reference);
+    const draft = draftFromTerms(imported, phoneOnlySeed, 3600, [
+      { phone_col: "5551234567" },
+    ]);
+    expect(draft.keys.every((entry) => !entry.enabled)).toBe(true);
+    expect(buildAdvancedTerms(draft).linkageRuleSet).toBeUndefined();
+    expect(importedCitationDropCause(draft)).toBe("no-keys");
+
+    const notice = importedCitationDropNotice(draft);
+    expect(notice).not.toContain("Turn a linkage key back on");
+    expect(notice).toContain("supplied by your file's columns");
+  });
+
   test("the notice does not block generating", () => {
     // The drop stays the behavior: the operator is told what the outgoing document
     // will say, not stopped from creating it.

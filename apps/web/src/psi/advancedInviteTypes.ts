@@ -65,9 +65,17 @@ export type FuzzyComparison = NonNullable<
  * citation its own rules earn. Reading absence as "decide it fresh" would hand an
  * uncited import a provenance claim its source declined, and move the terms hash
  * across the round trip.
+ *
+ * `honoredAtImport` records whether the citation survived the editor's
+ * arrival-time narrowing -- whether the terms the draft built the instant it
+ * imported still carried it. It is fixed at import and never re-derived, so a
+ * later drop is attributed to what caused it: an edit that took honored rules out
+ * of the set (the operator's, reversible), rather than a document whose rules
+ * could never honor the citation it named (the document's, no edit restores it).
  */
 export type ImportedRuleSetCitation =
-  { kind: "cited"; ruleSet: BuiltInLinkageRuleSet } | { kind: "uncited" };
+  | { kind: "cited"; ruleSet: BuiltInLinkageRuleSet; honoredAtImport: boolean }
+  | { kind: "uncited" };
 
 /** One linkage key in the editor, paired with whether it is active. Display and
  * match order is the array position (linkage keys are applied most-precise-first,

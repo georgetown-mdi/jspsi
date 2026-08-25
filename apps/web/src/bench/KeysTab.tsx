@@ -41,6 +41,12 @@ import type { AcquiredCsv, InviterEditor, KeyVerdict } from "./inviterModel";
 import type { Algorithm, LinkageStrategy, LinkageTerms } from "@psilink/core";
 import type { AdvancedInviteDraft } from "@psi/advancedInvite";
 
+/** The dropped-citation Alert's title, reused as the live region's announced
+ * headline so a screen reader hears the short heading -- not the full body twice
+ * (once as a live update, once in reading order next to the Alert). */
+const CITATION_DROP_TITLE =
+  "The imported rule-set citation will not be carried";
+
 /** The guided-list badge copy and CSS class for each per-key verdict
  * ({@link KeyVerdict}). A dead key warns ("won't match", amber) rather than
  * blocking: its columns resolve but a self-defeating transform would run it to
@@ -197,22 +203,24 @@ export function KeysTab({
         drop outlives the Expert switch the import hides behind. It states a
         consequence and blocks nothing -- creating without the citation is the
         right outcome -- so it is not a Problems entry, whose every member holds
-        the create gate shut. The announcement rides the persistent region below:
-        a conditionally-mounted live region is missed by screen readers that watch
-        only regions already in the DOM. */}
+        the create gate shut. The persistent region below announces the headline
+        (this Alert's title), not the body it also renders here: a
+        conditionally-mounted region is missed by screen readers that watch only
+        what is already in the DOM, and repeating the whole body would voice it
+        once as a live update and again in reading order beside the Alert. */}
       {citationDrop !== undefined && (
         <Alert
           role="note"
           color="yellow"
           icon={<IconAlertCircle aria-hidden />}
-          title="The imported rule-set citation will not be carried"
+          title={CITATION_DROP_TITLE}
           mt="md"
         >
           {citationDrop}
         </Alert>
       )}
       <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
-        {citationDrop ?? ""}
+        {citationDrop !== undefined ? CITATION_DROP_TITLE : ""}
       </VisuallyHidden>
       <Switch
         label="Expert authoring"

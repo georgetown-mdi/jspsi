@@ -8,6 +8,7 @@ import {
   inferMetadata,
 } from "@psilink/core";
 
+import { buildAdvancedTerms } from "./advancedInviteTerms";
 import { directionForOutput } from "./advancedInviteTypes";
 import { normalizeForEditor } from "./metadataEditing";
 
@@ -708,7 +709,7 @@ export function draftFromTerms(
   // asked for. validateAdvancedInvite carries the matching message when an
   // unsupplyable key is re-enabled or none is supplyable at all.
   const declarable = declarableFieldNames(seed.metadata, standardization);
-  return {
+  const draft: AdvancedInviteDraft = {
     identity: terms.identity,
     lifetimeSeconds,
     outputDirection: directionForOutput(terms.output),
@@ -747,11 +748,27 @@ export function draftFromTerms(
               linkageFields: terms.linkageFields,
               linkageKeys: terms.linkageKeys,
             },
+            // Finalized just below, once the import-time terms are built.
+            honoredAtImport: false,
           }
         : { kind: "uncited" },
     keys: terms.linkageKeys.map((key) => ({
       key,
       enabled: keyIsSupplyable(key, declarable),
     })),
+  };
+  const citation = draft.importedRuleSetCitation;
+  if (citation?.kind !== "cited") return draft;
+  // Whether the editor's arrival-time narrowing (disabling the keys these columns
+  // cannot supply) left the citation standing: buildAdvancedTerms carries
+  // linkageRuleSet only when it does. Fixed here so a later operator edit that
+  // drops the citation is attributed to that edit, not to the imported document
+  // -- see ImportedRuleSetCitation.honoredAtImport.
+  return {
+    ...draft,
+    importedRuleSetCitation: {
+      ...citation,
+      honoredAtImport: buildAdvancedTerms(draft).linkageRuleSet !== undefined,
+    },
   };
 }

@@ -199,66 +199,82 @@ function shippedHalves(reference: LinkageRuleSetReference): {
  * draft rebuilds -- the three ways {@link buildAdvancedTerms} reaches the drop,
  * which an operator needs told apart because the remedy differs:
  *
- * - `shipped-set-unmet` -- the citation names a set this build ships and the
- *   DOCUMENT's own rules are not that set's, so the citation never described the
- *   rules it arrived over. Nothing edited here reaches or undoes it.
+ * - `shipped-set-unmet` -- the citation names a set this build ships, and the
+ *   document's own rules could not honor it even after the editor's arrival-time
+ *   narrowing, so the citation never described the rules it imported over. No edit
+ *   here restores it. Told apart by the citation's honoredAtImport flag from the
+ *   `rules-not-drawn` case below, whose rules DID honor the citation at import.
  * - `no-keys` -- the rebuilt rules declare no linkage key, so there is no
- *   provenance to claim. Re-enabling a key restores the citation.
- * - `rules-not-drawn` -- the rebuilt rules are not drawn from the cited set: a key
- *   edited, added, or reordered out of it. Undoing that edit restores the citation.
+ *   provenance to claim. Re-enabling a key restores the citation -- unless no key
+ *   is supplyable, which the notice layer distinguishes since supplyability is not
+ *   visible here.
+ * - `rules-not-drawn` -- the rebuilt rules honored the citation at import but an
+ *   edit here took them out of the set: a key edited, added, or reordered. Undoing
+ *   that edit restores the citation.
  */
 export type ImportedCitationDropCause =
   "shipped-set-unmet" | "no-keys" | "rules-not-drawn";
 
 /**
- * The cause `cited` is not re-emitted over `rules`, or `undefined` while it stands:
- * the one decision {@link buildAdvancedTerms} applies and
- * {@link importedCitationDropCause} reports, so the citation the outgoing document
- * carries and the notice the operator reads cannot disagree.
+ * Whether `cited` is still re-emitted over `rules` -- the drop DECISION alone,
+ * shared so {@link buildAdvancedTerms} (which emits the citation only when it
+ * stands) and {@link citationDropCause} (which names a cause only when it does
+ * not) cannot disagree about the outgoing document.
  *
- * Whether the citation goes is settled first and alone, by the two conditions
- * below; only then is the cause chosen. Naming a cause never costs a document its
- * citation -- an import whose offending key the editor disabled rebuilds rules that
- * ARE drawn from the set, and it keeps the citation it would have kept with nothing
- * said. The order within the drop is root cause first: a citation the document's
- * own rules never met is not a state an edit here reached, and the remedies the
- * other two causes offer would be instructions that cannot work.
- *
- * The keyless condition sits beside the predicate rather than inside it: keyless
- * rules are drawn from every set vacuously, so `isDrawnFromLinkageRuleSet` alone
- * would re-emit a citation over a document carrying none of the keys it asserts
+ * The keyless exclusion sits here rather than inside the predicate: keyless rules
+ * are drawn from every set vacuously, so `isDrawnFromLinkageRuleSet` alone would
+ * re-emit a citation over a document carrying none of the keys it asserts
  * provenance for -- including one whose leftover imported field declarations
  * survive their keys. The draft reaches that state as an intermediate (disabling
  * every key), and the built terms can leave the browser from there via the terms
  * export, so exclude it here -- the same exclusion `linkageRuleSetReferenceFor`
  * makes on the derived branch.
  */
+function citationStands(
+  cited: BuiltInLinkageRuleSet,
+  rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
+): boolean {
+  return (
+    rules.linkageKeys.length > 0 &&
+    isDrawnFromLinkageRuleSet(ruleSetForImportedCitation(cited), rules)
+  );
+}
+
+/**
+ * The cause `cited` is not re-emitted over `rules`, or `undefined` while it stands
+ * ({@link citationStands}): the decision {@link buildAdvancedTerms} applies and
+ * {@link importedCitationDropCause} reports, so the citation the outgoing document
+ * carries and the notice the operator reads cannot disagree.
+ *
+ * Naming a cause never costs a document its citation -- an import whose offending
+ * key the editor disabled rebuilds rules that ARE drawn from the set, and it keeps
+ * the citation it would have kept with nothing said. Only once the citation is
+ * gone is the cause chosen, and `honoredAtImport` decides between the two
+ * has-keys causes: a citation the import's own narrowed rules honored can only
+ * have been dropped by an edit here (`rules-not-drawn`, undo the edit), while one
+ * they never honored is the document's own (`shipped-set-unmet`, no edit
+ * restores it). Judging the document by its RAW rules instead would misread a
+ * repaired-then-edited import -- an extra key the editor disabled on arrival never
+ * mattered to what the terms build, so it must not decide the cause of a later
+ * edit's drop.
+ *
+ * `shipped-set-unmet` is asked only of a citation naming a set this build ships:
+ * a citation naming no shipped half resolves to the document's own rules and so
+ * could not fail the arrival check against them, so a foreign document whose later
+ * edit drops the citation is `rules-not-drawn`, not filed under a cause its own
+ * rules could not reach.
+ */
 function citationDropCause(
   cited: BuiltInLinkageRuleSet,
   rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
+  honoredAtImport: boolean,
 ): ImportedCitationDropCause | undefined {
-  const resolved = ruleSetForImportedCitation(cited);
-  const declaresNoKeys = rules.linkageKeys.length === 0;
-  if (!declaresNoKeys && isDrawnFromLinkageRuleSet(resolved, rules))
-    return undefined;
-  // Dropped -- now why. Judge the document's OWN rules against the same resolved
-  // set: where a half names a set this build ships, that is the check the citation
-  // had to pass on arrival, so failing it is a fault of the document rather than of
-  // anything done here. A citation naming no shipped half resolves to the
-  // document's own rules and cannot fail against them, so the question is asked
-  // only of a shipped half; asked of the predicate alone it would file a
-  // canonically incomparable foreign document under this cause. The two arrays are
-  // copied only to meet the predicate's parameter type, the terms' mutable pair.
+  if (citationStands(cited, rules)) return undefined;
+  if (rules.linkageKeys.length === 0) return "no-keys";
   const shipped = shippedHalves(cited.reference);
-  if (
-    (shipped.fieldSet || shipped.keySet) &&
-    !isDrawnFromLinkageRuleSet(resolved, {
-      linkageFields: [...cited.linkageFields],
-      linkageKeys: [...cited.linkageKeys],
-    })
-  )
-    return "shipped-set-unmet";
-  return declaresNoKeys ? "no-keys" : "rules-not-drawn";
+  return !honoredAtImport && (shipped.fieldSet || shipped.keySet)
+    ? "shipped-set-unmet"
+    : "rules-not-drawn";
 }
 
 /**
@@ -280,6 +296,7 @@ export function importedCitationDropCause(
   return citationDropCause(
     citation.ruleSet,
     builtTerms ?? buildAdvancedTerms(draft),
+    citation.honoredAtImport,
   );
 }
 
@@ -376,15 +393,15 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // it), and an import that cited nothing emits nothing whatever its rules match.
   // Which rules "the set it cited" means is ruleSetForImportedCitation's answer, taken
   // one half at a time: the built-in half's own rules where the citation names it, the
-  // document's claim for that half otherwise. The whole condition is citationDropCause's,
-  // so the citation emitted here and the notice the editor shows when it is dropped
-  // cannot disagree.
+  // document's claim for that half otherwise. The emit decision is citationStands',
+  // the same predicate citationDropCause reads to name the drop, so the citation
+  // emitted here and the notice the editor shows when it is dropped cannot disagree.
   const importedCitation = draft.importedRuleSetCitation;
   const ruleSetReference =
     importedCitation === undefined
       ? linkageRuleSetReferenceFor(terms)
       : importedCitation.kind === "cited" &&
-          citationDropCause(importedCitation.ruleSet, terms) === undefined
+          citationStands(importedCitation.ruleSet, terms)
         ? importedCitation.ruleSet.reference
         : undefined;
   if (ruleSetReference !== undefined) terms.linkageRuleSet = ruleSetReference;
