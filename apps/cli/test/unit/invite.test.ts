@@ -1434,6 +1434,7 @@ function withConfig(
   terms: LinkageTerms,
   standardization?: Standardization,
   metadata?: Metadata,
+  expectedPartnerDeduplicate?: boolean,
 ): { dir: string; configPath: string; keyPath: string } {
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-cfg-"));
   const configPath = path.join(dir, "psilink.yaml");
@@ -1442,6 +1443,9 @@ function withConfig(
     linkageTerms: terms,
     ...(standardization !== undefined && { standardization }),
     ...(metadata !== undefined && { metadata }),
+    ...(expectedPartnerDeduplicate !== undefined && {
+      expectedPartnerDeduplicate,
+    }),
   });
   return { dir, configPath, keyPath: path.join(dir, ".psilink.key") };
 }
@@ -1514,6 +1518,45 @@ test("validateInvite: a config citing a rule set its own keys left is reported a
       .filter((message) => message.includes("linkage_rule_set"));
     expect(drifted).toHaveLength(1);
     expect(drifted[0]).toContain(configPath);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a drifted citation on accepted terms offers the mint's own remedy", async () => {
+  // The config carries an acceptance's record, so these terms are agreed with
+  // the party that invited this operator: restoring the cited set's rules would
+  // edit that agreement single-handedly. What this operator is doing is minting
+  // an invitation of their own, where declining to reuse the terms and accepting
+  // again are not choices they have -- authoring fresh terms for the invitation
+  // is.
+  const terms = defaultTerms();
+  const [first, second, ...rest] = terms.linkageKeys;
+  const { dir, configPath, keyPath } = withConfig(
+    { ...terms, linkageKeys: [second!, first!, ...rest] },
+    undefined,
+    undefined,
+    false,
+  );
+  const log = getLogger("invite-accepted-citation-drift-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log,
+    });
+    const drifted = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((message) => message.includes("linkage_rule_set"));
+    expect(drifted).toHaveLength(1);
+    expect(drifted[0]).toContain("not yours alone to correct");
+    expect(drifted[0]).toContain("author fresh terms for this invitation");
+    expect(drifted[0]).not.toContain("decline to reuse these terms");
+    expect(drifted[0]).not.toContain("accept again");
   } finally {
     warnSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });

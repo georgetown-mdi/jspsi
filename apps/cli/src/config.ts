@@ -14,12 +14,14 @@ import type {
 import {
   canonicalString,
   CanonicalEncodingError,
+  clipToRenderedCost,
   DEFAULT_LINKAGE_RULE_SET,
   isDrawnFromLinkageRuleSet,
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
   redactAndSanitizeForDisplay,
   redactPrivateKeyMaterial,
+  renderedDisplayCost,
   safeParseConnectionConfig,
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
@@ -541,8 +543,9 @@ function renderNames(list: ReadonlyArray<{ name: string }>): string {
  * in a sub-field (a linkage field/key's type/constraints/`swap`, a payload
  * column's description) -- fall back to the full JSON of each value, so the
  * conflict message shows what actually differs instead of two identical-looking
- * summaries. The JSON is raw, not NFC-folded, so the user sees the stored values
- * to edit.
+ * summaries. The JSON is of whatever the caller hands it, not an NFC fold of it,
+ * so the user sees the stored values to edit -- treated where the caller has to
+ * treat them before they are shown (see {@link redactAndFitRuleSetCitation}).
  */
 function disambiguate(
   existingRendered: string,
@@ -573,41 +576,157 @@ function renderStructural(
 }
 
 /**
+ * What one value inside a rule-set citation -- a set's name, or its content
+ * version -- may render to where the citation is composed into a conflict line.
+ *
+ * The schema bounds those values by CODE-POINT COUNT, which is not a display
+ * bound: the boundary expands a code point outside printable ASCII to as many as
+ * ten characters, so a name at the schema's bound can render ten times its
+ * length -- past the whole budget the renderer gives the one link this message
+ * is, taking the conflict lines behind it and the retry step the operator has to
+ * act on. Fitting each value where the citation is composed is the discipline
+ * the SFTP listing guard's directory link applies for the same reason: a value
+ * somebody else chose is bounded at the composition site rather than left to
+ * spend whatever the renderer's own cap allows.
+ *
+ * Sized well above the values a real citation carries -- the built-in's widest
+ * is "baseline-pii" at 12 characters, and a semver is shorter still -- so only
+ * an anomalous value is clipped, and small enough that the four values one side
+ * of the comparison carries leave the message its room (see
+ * {@link RULE_SET_CITATION_SIDE_BUDGET}).
+ */
+const RULE_SET_CITATION_VALUE_BUDGET = 48;
+
+/**
+ * One citation value REDACTED and then fitted to
+ * {@link RULE_SET_CITATION_VALUE_BUDGET}, in that order: the clip appends the
+ * marker that says a value was cut, so a `BEGIN` marker left in the kept prefix
+ * would consume it under the display boundary's fail-closed dangling rule (see
+ * {@link clipToRenderedCost}). What is kept is raw, and is escaped once where
+ * the error is shown.
+ */
+function fitCitationValue(value: string): string {
+  return clipToRenderedCost(
+    redactPrivateKeyMaterial(value),
+    RULE_SET_CITATION_VALUE_BUDGET,
+  );
+}
+
+/**
  * Render a rule-set citation for a diff line, keys first -- the order core's
  * mismatch message and the drift warning both render the pair in. Unescaped,
  * unlike {@link describeRuleSetCitation}, whose sink is a `log.warn`: a diff line
  * is composed into a {@link UsageError} and escaped once where it is shown.
  *
- * Each half is nevertheless REDACTED here, because the invitation's side of the
- * comparison is a name the partner chose: the display boundary's private-key
- * rule is fail-closed past a `BEGIN` marker carrying no `END`, so a marker
- * planted in a set name would consume the conflict lines and the recovery step
- * composed after it. Redaction is not escaping and does not make this a second
- * escaping altitude (see {@link redactPrivateKeyMaterial}, which states the
- * composition-site rule this follows).
+ * Each value is nevertheless redacted and fitted here, because the invitation's
+ * side of the comparison is text the partner chose: the display boundary's
+ * private-key rule is fail-closed past a `BEGIN` marker carrying no `END`, so a
+ * marker planted in a set name would consume the conflict lines and the recovery
+ * step composed after it, and a name at the schema's length would crowd out the
+ * same text without any marker at all. Neither redacting nor fitting is
+ * escaping, so this is not a second escaping altitude (see
+ * {@link redactPrivateKeyMaterial}, which states the composition-site rule this
+ * follows).
  */
 function renderRuleSetCitation(reference: LinkageRuleSetReference): string {
   const half = (identity: LinkageSetIdentity): string =>
-    `"${redactPrivateKeyMaterial(identity.name)}" ` +
-    `${redactPrivateKeyMaterial(identity.version)}`;
+    `"${fitCitationValue(identity.name)}" ${fitCitationValue(identity.version)}`;
   return `${half(reference.keySet)} over ${half(reference.fieldSet)}`;
 }
 
 /**
- * The same citation with its halves redacted, for {@link disambiguate}'s
- * full-JSON fallback. The fallback fires when the two rendered clauses read
- * alike, which a pair of names redacting to the same marker produces, and it
- * would otherwise put back on the message the raw marker
- * {@link renderRuleSetCitation} took out of it.
+ * The same citation with each value redacted and fitted, for
+ * {@link disambiguate}'s full-JSON fallback. The fallback fires when the two
+ * rendered clauses read alike, and it renders the same values, so it takes the
+ * same treatment: rendering them raw there would put back on the message the
+ * marker and the length {@link renderRuleSetCitation} took out of it.
  */
-function redactRuleSetCitation(
+function redactAndFitRuleSetCitation(
   reference: LinkageRuleSetReference,
 ): LinkageRuleSetReference {
   const half = (identity: LinkageSetIdentity): LinkageSetIdentity => ({
-    name: redactPrivateKeyMaterial(identity.name),
-    version: redactPrivateKeyMaterial(identity.version),
+    name: fitCitationValue(identity.name),
+    version: fitCitationValue(identity.version),
   });
   return { fieldSet: half(reference.fieldSet), keySet: half(reference.keySet) };
+}
+
+/**
+ * What one side of a citation conflict may render to, whichever form it takes.
+ * Computed by rendering a citation whose every value is at
+ * {@link RULE_SET_CITATION_VALUE_BUDGET}, so it follows a change to the clause's
+ * shape instead of restating one, and the JSON fallback -- whose escaping can
+ * widen a fitted value threefold, a `"` costing one character raw and three
+ * inside a JSON string the boundary escapes again -- is held to the width the
+ * clause form can already reach.
+ *
+ * This bounds the citation's own contribution to the reconcile message. It is
+ * not a bound on the whole message: the conflict lines beside it interpolate
+ * values nothing here fits (a linkage field or key name list, a legal-agreement
+ * reference), and the operator's own config path leads it. What the citation
+ * cannot do is spend the budget those need, which is pinned by a test composing
+ * the accept-shaped message with both sides of the citation at their worst case.
+ */
+const RULE_SET_CITATION_SIDE_BUDGET = renderedDisplayCost(
+  renderRuleSetCitation({
+    fieldSet: {
+      name: "x".repeat(RULE_SET_CITATION_VALUE_BUDGET),
+      version: "x".repeat(RULE_SET_CITATION_VALUE_BUDGET),
+    },
+    keySet: {
+      name: "x".repeat(RULE_SET_CITATION_VALUE_BUDGET),
+      version: "x".repeat(RULE_SET_CITATION_VALUE_BUDGET),
+    },
+  }),
+);
+
+/**
+ * Said of a citation conflict whose two sides render identically because every
+ * value that differs between them was withheld from the display -- redacted as
+ * private-key material, or clipped for length. Fixed first-party text carrying
+ * no bytes from either citation: the pair reaching here is precisely the pair
+ * whose own bytes cannot be shown, so the operator is told that rather than
+ * shown two clauses that read alike.
+ */
+const CITATION_WITHHELD_NOTE =
+  "(these differ only inside text this display withheld: a value redacted as " +
+  "private-key material, or clipped for length)";
+
+/**
+ * The two sides of a `linkage_rule_set` conflict, as a reader can tell them
+ * apart: the clause form where it distinguishes them, {@link disambiguate}'s
+ * full detail where two different citations render the same clause, and
+ * {@link CITATION_WITHHELD_NOTE} where even that is identical -- which is what a
+ * pair differing only inside redacted or clipped text comes to. Each side is
+ * fitted to {@link RULE_SET_CITATION_SIDE_BUDGET} before that last comparison,
+ * so a fallback the fit collapsed is caught by it rather than reported as a
+ * conflict between two identical values.
+ */
+function renderRuleSetCitationConflict(
+  existing: LinkageRuleSetReference,
+  incoming: LinkageRuleSetReference,
+): { existing: string; incoming: string } {
+  const rendered = disambiguate(
+    renderRuleSetCitation(existing),
+    renderRuleSetCitation(incoming),
+    redactAndFitRuleSetCitation(existing),
+    redactAndFitRuleSetCitation(incoming),
+  );
+  const fitted = {
+    existing: clipToRenderedCost(
+      rendered.existing,
+      RULE_SET_CITATION_SIDE_BUDGET,
+    ),
+    incoming: clipToRenderedCost(
+      rendered.incoming,
+      RULE_SET_CITATION_SIDE_BUDGET,
+    ),
+  };
+  if (fitted.existing !== fitted.incoming) return fitted;
+  return {
+    existing: fitted.existing,
+    incoming: `${fitted.incoming} ${CITATION_WITHHELD_NOTE}`,
+  };
 }
 
 /**
@@ -781,11 +900,9 @@ export function diffLinkageTerms(
       "linkage rule set",
     )
   ) {
-    const r = disambiguate(
-      renderRuleSetCitation(existing.linkageRuleSet),
-      renderRuleSetCitation(incoming.linkageRuleSet),
-      redactRuleSetCitation(existing.linkageRuleSet),
-      redactRuleSetCitation(incoming.linkageRuleSet),
+    const r = renderRuleSetCitationConflict(
+      existing.linkageRuleSet,
+      incoming.linkageRuleSet,
     );
     add("linkage_rule_set", r.existing, r.incoming);
   }
@@ -1550,6 +1667,24 @@ function describeRuleSetCitation(reference: LinkageRuleSetReference): string {
 export type LinkageTermsStanding = "held-alone" | "accepted-with-partner";
 
 /**
+ * What a command can offer its operator besides settling a drifted citation with
+ * the party whose acceptance stands behind the terms. Only the
+ * `accepted-with-partner` reading takes it: terms no acceptance stands behind
+ * are the operator's own either way.
+ *
+ * - `decline-to-reuse` -- the command is putting the agreed terms to use
+ *   (accepting against them, running an exchange on them, verifying a receipt
+ *   with them), so the operator can leave them and start from terms that carry
+ *   no claim they cannot support.
+ * - `author-fresh-terms` -- the command is minting an invitation FROM those
+ *   terms, where declining to reuse them is not the choice on offer: the
+ *   operator is authoring a new document and can author its terms instead of
+ *   carrying the accepted ones onto it.
+ */
+export type CitationDriftAlternative =
+  "decline-to-reuse" | "author-fresh-terms";
+
+/**
  * Whether an acceptance stands behind a loaded config's linkage terms, read from
  * `expected_partner_deduplicate`. `psilink accept` records the invitation's
  * declared partner cardinality on every config it writes AND on every config it
@@ -1597,8 +1732,11 @@ export function linkageTermsStandingOf(
  * agreed with the inviting party: telling that operator to restore the cited
  * set's rules would edit terms both parties already hold, and the exchange would
  * then abort against the partner that still runs the originals -- so that
- * reading offers settling the citation with that party, or declining to reuse
- * the terms, and does not address the operator as the author of either side.
+ * reading offers settling the citation with that party, and does not address the
+ * operator as the author of either side. `alternative` names what that operator
+ * can do instead of settling, which is the command's to say rather than this
+ * function's: the wording is one source here, and only the tail varies (see
+ * {@link CitationDriftAlternative}).
  *
  * Each drifted half is reported against the set that half cites, never against
  * "the citation": only a resolvable half is judged, so a citation pairing a
@@ -1610,6 +1748,7 @@ export function warnOnLinkageRuleSetCitationDrift(
   configPath: string,
   log: { warn: (message: string) => void },
   standing: LinkageTermsStanding,
+  alternative: CitationDriftAlternative,
 ): void {
   const cited = terms.linkageRuleSet;
   if (cited === undefined) return;
@@ -1663,9 +1802,12 @@ export function warnOnLinkageRuleSetCitationDrift(
         "claims a provenance these rules do not have. An acceptance stands " +
         "behind these terms, so they are not yours alone to correct: editing " +
         "the rules to match the citation would take them out of agreement " +
-        "with the inviting party, and the exchange would refuse them. Settle " +
-        "the citation with that party and accept again, or decline to reuse " +
-        "these terms."
+        "with the inviting party, and the exchange would refuse them. " +
+        (alternative === "author-fresh-terms"
+          ? "Settle the citation with that party, or author fresh terms for " +
+            "this invitation."
+          : "Settle the citation with that party and accept again, or decline " +
+            "to reuse these terms.")
       : "The citation travels onto the invitation, the accepting party's " +
         "terms review, and both parties' exchange records, where it claims a " +
         "provenance these rules do not have. Omit linkage_rule_set for rules " +

@@ -700,6 +700,7 @@ function reconcileAcceptConfig(params: {
     configPath,
     log,
     linkageTermsStandingOf(existing),
+    "decline-to-reuse",
   );
 
   const { conflicts, warnings } = diffLinkageTerms(

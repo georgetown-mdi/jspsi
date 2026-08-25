@@ -403,6 +403,7 @@ export function loadConfig(options: ExchangeOptions): {
     options.configFile,
     log,
     linkageTermsStandingOf(exchangeDataSpec),
+    "decline-to-reuse",
   );
 
   const connection = applyConnectionOverrides(

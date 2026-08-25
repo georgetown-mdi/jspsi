@@ -4,7 +4,9 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import YAML from "yaml";
 import {
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DEFAULT_LINKAGE_RULE_SET,
+  DISPLAY_TRUNCATION_MARKER,
   getDefaultLinkageTerms,
   MAX_NAME_LENGTH,
   MAX_NESTING_DEPTH,
@@ -32,8 +34,10 @@ import {
   warnOnLinkageRuleSetCitationDrift,
 } from "../../src/config";
 import type {
+  CitationDriftAlternative,
   ConfigLinkageSource,
   LinkageTermsStanding,
+  ReconcileDiff,
 } from "../../src/config";
 import type {
   ConnectionConfig,
@@ -1473,6 +1477,22 @@ function cloneTerms(terms: LinkageTerms): LinkageTerms {
   return structuredClone(terms);
 }
 
+// The message `psilink accept` composes around the diff lines when a kept config
+// disagrees with the invitation, rendered the way the CLI's top-level handler
+// renders a thrown UsageError. Composed here in one place so the tests that
+// measure what survives that boundary all measure the same shape.
+function renderedAcceptReconcileError(conflicts: ReconcileDiff[]): string {
+  return sanitizeErrorForDisplay(
+    new UsageError(
+      "the configuration file at ./psilink.yaml disagrees with the " +
+        "invitation:\n" +
+        formatReconcileDiffs(conflicts) +
+        "\nResolve the differences (or pass --config-file to write " +
+        "elsewhere), then retry with --accept-terms.",
+    ),
+  );
+}
+
 test("diffLinkageTerms: identical terms have no conflicts and no warnings", () => {
   const a = getDefaultLinkageTerms("Inviter Org");
   const b = getDefaultLinkageTerms("Inviter Org");
@@ -1742,21 +1762,116 @@ test("diffLinkageTerms: a private-key marker in a citation cannot truncate the a
     "legal_agreement",
   ]);
 
-  // The shape `psilink accept` composes around the diff lines, rendered the way
-  // the CLI's top-level handler renders a thrown UsageError.
-  const rendered = sanitizeErrorForDisplay(
-    new UsageError(
-      "the configuration file at ./psilink.yaml disagrees with the " +
-        "invitation:\n" +
-        formatReconcileDiffs(conflicts) +
-        "\nResolve the differences (or pass --config-file to write " +
-        "elsewhere), then retry with --accept-terms.",
-    ),
-  );
+  const rendered = renderedAcceptReconcileError(conflicts);
   expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
   expect(rendered).toContain("[redacted private key]");
   expect(rendered).toContain("legal_agreement");
   expect(rendered).toContain("MOU-2025-0042");
+  expect(rendered).toContain("then retry with --accept-terms.");
+});
+
+test("diffLinkageTerms: citation values at the schema's length cannot truncate the accept error", () => {
+  // Every value in a citation is text the partner chose, bounded by the schema
+  // in CODE POINTS, which is not a display bound: one code point escapes to as
+  // many as ten characters at the display boundary, so a name at the schema's
+  // maximum can render past the whole budget the renderer gives this one link --
+  // eating the conflict lines behind the citation's and the retry step the
+  // operator has to act on, with no marker or delimiter involved at all.
+  //
+  // Driven at that maximum on BOTH sides, over the widest-rendering shapes the
+  // schema admits, and in the two forms fitting the values can produce: a pair
+  // the fitted clauses still tell apart, and a pair differing only inside what
+  // the fit dropped.
+  const longSemver = `1.0.${"9".repeat(MAX_NAME_LENGTH - 4)}`;
+  expect(longSemver).toHaveLength(MAX_NAME_LENGTH);
+  const vectors = [
+    // A code point that escapes to four characters, at the schema's maximum.
+    "\u{00e9}".repeat(MAX_NAME_LENGTH),
+    // Astral code points escape to ten characters each and cost two of the
+    // schema's units, so half the count is the same bound.
+    "\u{1f600}".repeat(MAX_NAME_LENGTH / 2),
+    // Nothing to escape: the case where the raw length IS the rendered length.
+    "x".repeat(MAX_NAME_LENGTH),
+  ];
+  const replacingFirst = (value: string): string =>
+    ["a", ...Array.from(value).slice(1)].join("");
+  const replacingLast = (value: string): string =>
+    [...Array.from(value).slice(0, -1), "a"].join("");
+
+  for (const vector of vectors) {
+    for (const differing of [replacingFirst, replacingLast]) {
+      const citation = (name: string): LinkageRuleSetReference => ({
+        fieldSet: { name, version: longSemver },
+        keySet: { name, version: longSemver },
+      });
+      const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+      const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+      existing.linkageRuleSet = citation(vector);
+      incoming.linkageRuleSet = citation(differing(vector));
+      // A second conflict, so the message carries a diff line AFTER the
+      // citation's, and the legal agreement is what an operator reads next.
+      incoming.legalAgreement = {
+        reference: "MOU-2025-0042",
+        purpose: "Audit and evaluation of the State tutoring program",
+        expirationDate: "2030-01-01",
+      };
+      const { conflicts } = diffLinkageTerms(existing, incoming);
+      expect(conflicts.map((c) => c.field)).toEqual([
+        "linkage_rule_set",
+        "legal_agreement",
+      ]);
+
+      const rendered = renderedAcceptReconcileError(conflicts);
+      // Under the renderer's own cap, which is what says nothing was cut: the
+      // boundary truncates a link that runs past it and appends the marker on
+      // top, so a message this length is one it delivered whole.
+      expect(rendered.length).toBeLessThanOrEqual(
+        COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+      );
+      expect(rendered).toContain("legal_agreement");
+      expect(rendered).toContain("MOU-2025-0042");
+      expect(rendered).toContain("then retry with --accept-terms.");
+      // The values were fitted rather than dropped: the operator is told a
+      // citation value was cut, and both halves of both sides are still shown.
+      expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
+      expect(rendered.split(" over ")).toHaveLength(
+        differing === replacingFirst ? 3 : 1,
+      );
+      // A pair the fit cannot tell apart says so, rather than showing the
+      // operator two clauses that read alike.
+      if (differing === replacingLast)
+        expect(rendered).toContain(
+          "differ only inside text this display withheld",
+        );
+    }
+  }
+});
+
+test("diffLinkageTerms: a citation both sides redact away is reported as withheld", () => {
+  // Reaching this takes a marker on BOTH sides, so the config the operator holds
+  // carries one too. The two names redact to the same replacement, the clause
+  // forms match, and the full-detail fallback -- built from those same redacted
+  // values -- matches as well: every byte that differs is a byte the display
+  // will not show. Saying so is the only honest reading left.
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  existing.linkageRuleSet = {
+    fieldSet: { name: "-----BEGIN OPENSSH PRIVATE KEY-----", version: "1.0.0" },
+    keySet: { name: "hmis-keys", version: "1.0.0" },
+  };
+  incoming.linkageRuleSet = {
+    fieldSet: { name: "-----BEGIN RSA PRIVATE KEY-----", version: "1.0.0" },
+    keySet: { name: "hmis-keys", version: "1.0.0" },
+  };
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts).toHaveLength(1);
+  expect(conflicts[0].existing).not.toBe(conflicts[0].incoming);
+
+  const rendered = renderedAcceptReconcileError(conflicts);
+  expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+  expect(rendered).not.toContain("BEGIN RSA PRIVATE KEY");
+  expect(rendered).toContain("differ only inside text this display withheld");
+  expect(rendered).toContain("redacted");
   expect(rendered).toContain("then retry with --accept-terms.");
 });
 
@@ -2533,10 +2648,12 @@ test("persistOutboundPayloadConsent writes a confirmed-empty set verbatim", () =
 // --- warnOnLinkageRuleSetCitationDrift ---------------------------------------
 
 /** The warnings one drift check emits, in order. Terms default to the standing
- *  that offers both remedies; the accepted standing is asked for explicitly. */
+ *  that offers both remedies; the accepted standing is asked for explicitly, as
+ *  is the alternative a command minting an invitation from them offers. */
 function citationWarnings(
   terms: Pick<LinkageTerms, "linkageRuleSet" | "linkageFields" | "linkageKeys">,
   standing: LinkageTermsStanding = "held-alone",
+  alternative: CitationDriftAlternative = "decline-to-reuse",
 ): string[] {
   const warnings: string[] = [];
   warnOnLinkageRuleSetCitationDrift(
@@ -2544,6 +2661,7 @@ function citationWarnings(
     "psilink.yaml",
     { warn: (message: string) => warnings.push(message) },
     standing,
+    alternative,
   );
   return warnings;
 }
@@ -2737,6 +2855,38 @@ test("terms an acceptance stands behind are not addressed to their author", () =
   expect(warnings[0]).not.toContain("restore the rules the cited set declares");
   expect(warnings[0]).toContain("not yours alone to correct");
   expect(warnings[0]).toContain("decline to reuse these terms");
+});
+
+test("a mint from accepted terms is offered the remedy a mint has", () => {
+  // "Accept again" and "decline to reuse these terms" name nothing an operator
+  // minting an invitation can do: the acceptance behind these terms is already
+  // recorded, and what is in front of them is a new document to author. Settling
+  // with the party that acceptance was made with is still the first choice, so
+  // only the alternative changes.
+  const drifted = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  const warnings = citationWarnings(
+    drifted,
+    "accepted-with-partner",
+    "author-fresh-terms",
+  );
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("Settle the citation with that party");
+  expect(warnings[0]).toContain("author fresh terms for this invitation");
+  expect(warnings[0]).not.toContain("accept again");
+  expect(warnings[0]).not.toContain("decline to reuse these terms");
+  // The clauses before the remedy are one source, so the mint reading carries
+  // the same account of why the terms are not the operator's alone.
+  expect(warnings[0]).toContain("not yours alone to correct");
+  expect(warnings[0]).toContain("its linkage_keys are not drawn from");
+});
+
+test("terms no acceptance stands behind read the same whatever the command", () => {
+  // The alternative is the accepted reading's alone: terms held alone are the
+  // operator's to edit whether they are being used or minted from.
+  const drifted = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  expect(citationWarnings(drifted, "held-alone", "author-fresh-terms")).toEqual(
+    citationWarnings(drifted, "held-alone", "decline-to-reuse"),
+  );
 });
 
 test("a drifted citation is reported under either standing", () => {

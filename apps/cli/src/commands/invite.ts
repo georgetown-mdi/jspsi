@@ -566,6 +566,7 @@ export async function validateInvite(params: {
       options.configFile,
       log,
       configSource.linkageTermsStanding,
+      "author-fresh-terms",
     );
     // The config is the authoritative terms source here, so --linkage-strategy
     // cannot silently override its linkage_strategy; name it as ignored (like the
