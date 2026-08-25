@@ -70,6 +70,8 @@ Three limits on what it asserts:
 
 Omitted when the agreed terms cited no set (their rules were authored rather than drawn from one) -- absent by omission, never a null, which is why the record's format version moves with it.
 
+**Where it is read.** The record is the only surface that carries it: the web disclosure-accounting screen and the CSV it exports present the matching basis and the other governance fields, not the citation, so a reader answering "which rules did this linkage match on" from the accounting alone does not have it.
+
 ## Retention and disposition pointer
 
 Distinct from that governance metadata, the record can also carry an optional **retention/disposition pointer**: a free-text note recording where this party filed its copy of the result (the association table and any received payload) and under what retention schedule it is held or disposed of, so the record answers an auditor's first operational question -- where did the result go -- without a separate lookup. Unlike the governance fields, it is **not** drawn from the agreed terms: it is sourced from this party's own local exchange config, so it is per-party (the two parties' pointers are independent and need not match), is never exchanged with the partner, and is not folded into the agreed-terms hash. It is metadata only -- never a payload value, a linkage-field value, or a matched identifier -- and is recorded only when configured; its absence is explicit (the field is omitted, never an empty string). Configured via [`retention_disposition`](../EXCHANGE_REFERENCE.md#retention-and-disposition) in the exchange spec.

@@ -54,6 +54,21 @@ export type FuzzyComparison = NonNullable<
   LinkageKeyElement["generateFuzzyComparisons"]
 >;
 
+/**
+ * What an IMPORTED terms document said about the rule set its rules came from:
+ * either the set it cited, carried with the rules it cited them over, or the
+ * explicit statement that it cited none.
+ *
+ * The uncited case is a state of its own rather than an absent field because the
+ * two answers differ: a document that cites nothing is re-exported citing
+ * nothing, while a draft that was never imported is entitled to the built-in
+ * citation its own rules earn. Reading absence as "decide it fresh" would hand an
+ * uncited import a provenance claim its source declined, and move the terms hash
+ * across the round trip.
+ */
+export type ImportedRuleSetCitation =
+  { kind: "cited"; ruleSet: BuiltInLinkageRuleSet } | { kind: "uncited" };
+
 /** One linkage key in the editor, paired with whether it is active. Display and
  * match order is the array position (linkage keys are applied most-precise-first,
  * so order is significant); a disabled key is dropped from the built terms. */
@@ -183,20 +198,20 @@ export interface AdvancedInviteDraft {
    */
   importedLinkageFields?: Array<LinkageField>;
   /**
-   * An IMPORTED terms document's rule-set citation together with the rules it
-   * cited, carried so {@link buildAdvancedTerms} can re-emit the citation while
-   * the draft still builds those rules -- the round-trip fidelity
-   * {@link importedLinkageFields} gives the field declaration, extended to the
-   * provenance claim over it. Set only by {@link draftFromTerms}, and only for an
-   * imported document that carried a citation.
+   * An IMPORTED terms document's rule-set citation state, carried so
+   * {@link buildAdvancedTerms} re-emits what the document claimed instead of
+   * re-deciding it -- the round-trip fidelity {@link importedLinkageFields} gives
+   * the field declaration, extended to the provenance claim over it. Set by
+   * {@link draftFromTerms} on every import, cited or not; absent for the seed,
+   * guided, and expert paths, which earn the built-in citation on content.
    *
-   * The rules travel with it because the citation is not re-emitted
-   * unconditionally: an import narrowed by disabling keys still builds rules drawn
-   * from the imported document, while one whose keys were edited, reordered, or
-   * added to does not, and a citation over those would claim a provenance they no
-   * longer have.
+   * A cited import carries the rules it cited along with the reference, because
+   * the citation is not re-emitted unconditionally: an import narrowed by
+   * disabling keys still builds rules drawn from the imported document, while one
+   * whose keys were edited, reordered, or added to does not, and a citation over
+   * those would claim a provenance they no longer have.
    */
-  importedLinkageRuleSet?: BuiltInLinkageRuleSet;
+  importedRuleSetCitation?: ImportedRuleSetCitation;
 }
 
 /** The fixed starting point for an editor session: the auto-derived terms the

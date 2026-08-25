@@ -160,6 +160,20 @@ describe("isDrawnFromLinkageRuleSet", () => {
     ).toBe(false);
   });
 
+  test("refuses a repeated field, as it refuses a repeated key", () => {
+    // Each declaration answers for one field: a candidate that names the same
+    // declared field twice declares more than the set does. The terms schema
+    // refines field names unique, so this is the predicate holding its own line
+    // rather than a shape a valid document reaches.
+    const rules = wholeSet();
+    expect(
+      isDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, {
+        linkageFields: [...rules.linkageFields, rules.linkageFields[0]],
+        linkageKeys: rules.linkageKeys,
+      }),
+    ).toBe(false);
+  });
+
   test("refuses an edited or undeclared field", () => {
     const rules = wholeSet();
     const loosened = structuredClone(rules.linkageFields);
@@ -212,5 +226,29 @@ describe("linkageRuleSetReferenceFor", () => {
         linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
       }),
     ).toBeUndefined();
+  });
+
+  test("cites nothing over rules that declare no key and no field", () => {
+    // Empty rules are drawn from every set vacuously -- the predicate says so --
+    // so the citation is decided here instead: a document declaring nothing
+    // carries no provenance to claim.
+    const empty = { linkageFields: [], linkageKeys: [] };
+    expect(isDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, empty)).toBe(
+      true,
+    );
+    expect(linkageRuleSetReferenceFor(empty)).toBeUndefined();
+    // One key alone, or one field alone, is enough to be judged on its content.
+    expect(
+      linkageRuleSetReferenceFor({
+        linkageFields: [],
+        linkageKeys: [DEFAULT_LINKAGE_RULE_SET.linkageKeys[0]],
+      }),
+    ).toStrictEqual(DEFAULT_LINKAGE_RULE_SET.reference);
+    expect(
+      linkageRuleSetReferenceFor({
+        linkageFields: [DEFAULT_LINKAGE_RULE_SET.linkageFields[0]],
+        linkageKeys: [],
+      }),
+    ).toStrictEqual(DEFAULT_LINKAGE_RULE_SET.reference);
   });
 });

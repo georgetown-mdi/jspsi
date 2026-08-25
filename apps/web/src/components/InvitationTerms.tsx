@@ -57,11 +57,6 @@ function joinList(items: Array<string>): string {
   return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
-/** A labelled block: a bold caption above its value(s). When `captionId` is set it
- * is put on the caption, so a child that is itself a labelled region (a
- * {@link ColumnChips} list) can name itself from the visible caption via
- * aria-labelledby rather than carrying a second, separately-authored aria-label that
- * could drift from the caption. */
 /**
  * The bounded frame a raw partner-controlled value is rendered in: its own box,
  * so the value cannot run into the fixed chrome around it. Shared by the
@@ -75,6 +70,11 @@ const ruleSetValueStyle = {
   wordBreak: "break-all",
 } as const;
 
+/** A labelled block: a bold caption above its value(s). When `captionId` is set it
+ * is put on the caption, so a child that is itself a labelled region (a
+ * {@link ColumnChips} list) can name itself from the visible caption via
+ * aria-labelledby rather than carrying a second, separately-authored aria-label that
+ * could drift from the caption. */
 function Term({
   label,
   captionId,

@@ -330,9 +330,9 @@ export const DEFAULT_LINKAGE_RULE_SET: BuiltInLinkageRuleSet = {
 /**
  * Whether `rules` were drawn from `ruleSet`: every key byte-identical to a key
  * the set declares, in the set's own cascade order, and every field
- * byte-identical to a field it declares. A narrowed emission passes -- what an
- * input file cannot supply is left out -- while an added, edited, or reordered
- * key does not.
+ * byte-identical to a DISTINCT field it declares. A narrowed emission passes --
+ * what an input file cannot supply is left out -- while an added, edited, or
+ * repeated key or field, and a reordered cascade, do not.
  *
  * Order is part of the answer for the keys and not for the fields, for the same
  * reason each set versions its own content: key order is cascade order, so
@@ -361,6 +361,9 @@ export function isDrawnFromLinkageRuleSet(
       return null;
     }
   };
+  // Each declaration is consumed on match, so a field the candidate repeats meets
+  // no declaration the second time -- the same answer the key cursor gives a
+  // repeated key, rather than a lookup that would accept the repeat.
   const declaredFields = new Map(
     ruleSet.linkageFields.map((field) => [field.name, encode(field)] as const),
   );
@@ -368,6 +371,7 @@ export function isDrawnFromLinkageRuleSet(
     const declared = declaredFields.get(field.name);
     if (declared === undefined || declared === null) return false;
     if (encode(field) !== declared) return false;
+    declaredFields.delete(field.name);
   }
   // Walk the set's keys and the candidate's together: each candidate key must
   // meet the next set key that matches it, so a key the set does not declare, a
@@ -391,13 +395,21 @@ export function isDrawnFromLinkageRuleSet(
 /**
  * The citation `rules` are entitled to: {@link DEFAULT_LINKAGE_RULE_SET}'s
  * reference where the rules were drawn from that set, and `undefined` where they
- * were not -- edited, reordered, or authored from scratch. The single place a
- * builder that lets an operator EDIT seeded rules decides whether the result may
- * still cite the set it started from.
+ * were not -- edited, reordered, authored from scratch, or empty. The single
+ * place a builder that lets an operator EDIT seeded rules decides whether the
+ * result may still cite the set it started from.
+ *
+ * Rules declaring no key and no field are drawn from every set vacuously, so the
+ * predicate alone would hand an empty document the built-in citation -- a
+ * provenance claim over rules it does not carry. A builder reaches that state as
+ * an intermediate (disabling every key in the web editor), so the empty case is
+ * excluded here rather than left to the downstream rejection.
  */
 export function linkageRuleSetReferenceFor(
   rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
 ): LinkageRuleSetReference | undefined {
+  if (rules.linkageKeys.length === 0 && rules.linkageFields.length === 0)
+    return undefined;
   return isDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, rules)
     ? DEFAULT_LINKAGE_RULE_SET.reference
     : undefined;

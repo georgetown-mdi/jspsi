@@ -10,6 +10,7 @@ import {
   deriveAcceptedLinkageTerms,
   getDefaultLinkageTerms,
   inferMetadata,
+  linkageRuleSetReferenceFor,
   prepareForExchange,
   safeParseLinkageTerms,
   validateCompatibility,
@@ -1922,6 +1923,46 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     expect(canonicalString(rebuild(imported))).toEqual(
       canonicalString(imported),
     );
+  });
+
+  test("an imported document that cites nothing round-trips citing nothing", () => {
+    // The mirror of the case above, and the same fidelity question: declining to
+    // cite a set is a claim too. Re-deriving here would stamp the built-in
+    // citation on a document whose author left it out -- asserting a provenance
+    // in the outgoing invitation and record that the source declined, and moving
+    // the terms hash the two parties compare.
+    const uncited = structuredClone(defaultExport());
+    expect(uncited.linkageRuleSet).toBeDefined();
+    delete uncited.linkageRuleSet;
+    expect(safeParseLinkageTerms(uncited).success).toBe(true);
+    // Its rules ARE the built-in set's byte for byte, which is what would earn the
+    // citation on content alone.
+    expect(
+      linkageRuleSetReferenceFor({
+        linkageFields: uncited.linkageFields,
+        linkageKeys: uncited.linkageKeys,
+      }),
+    ).toBeDefined();
+    expect(rebuild(uncited).linkageRuleSet).toBeUndefined();
+    expect(canonicalString(rebuild(uncited))).toEqual(canonicalString(uncited));
+  });
+
+  test("an uncited import stays uncited through an edit that keeps the rules drawn from the built-in set", () => {
+    // Narrowing keeps the rules drawn from the set, so content alone would cite
+    // it. The import's own answer governs instead, for as long as the draft
+    // carries it: the operator adopted a document that claimed no provenance.
+    const uncited = structuredClone(defaultExport());
+    delete uncited.linkageRuleSet;
+    const draft = draftFromTerms(uncited, seedFor(), 3600, rawRows);
+    const narrowed = {
+      ...draft,
+      keys: draft.keys.map((entry, index) =>
+        index === 0 ? { ...entry, enabled: false } : entry,
+      ),
+    };
+    const terms = buildAdvancedTerms(narrowed);
+    expect(terms.linkageKeys.length).toBe(uncited.linkageKeys.length - 1);
+    expect(terms.linkageRuleSet).toBeUndefined();
   });
 
   test("an imported citation is dropped once the draft edits its way out of the cited rules", () => {

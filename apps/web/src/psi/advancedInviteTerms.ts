@@ -149,7 +149,8 @@ function stripFuzzy(key: LinkageKey): LinkageKey {
  * `getDefaultLinkageTerms`, so disabling a key drops a now-unreferenced field).
  * The rule-set citation is re-decided against the built terms rather than carried
  * from the seed, so an edited draft cites nothing and an unedited one still cites
- * the built-in set.
+ * the built-in set; an IMPORTED draft instead re-emits its source document's
+ * citation state, whether that document cited a set or none.
  *
  * Pure: it does not validate. {@link validateAdvancedInvite} runs the result
  * through the core schema, which stays the single validation source.
@@ -212,24 +213,29 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   };
 
   // The seed cites the built-in rule set, and the draft may have edited its way
-  // out of it -- a key reordered, a field renamed by an authored cleaning, an
-  // imported document's own rules. Re-decide the citation against what this draft
-  // actually built rather than carrying the seed's: a citation over edited rules
-  // would claim a provenance they do not have. A guided draft that changed
-  // none of them still cites the set, which is what keeps the guided path's terms
-  // (and the acceptor's reading of them) unchanged.
+  // out of it -- a key reordered, a field renamed by an authored cleaning. Re-decide
+  // the citation against what this draft actually built rather than carrying the
+  // seed's: a citation over edited rules would claim a provenance they do not have.
+  // A guided draft that changed none of them still cites the set, which is what
+  // keeps the guided path's terms (and the acceptor's reading of them) unchanged.
   //
-  // An IMPORTED document's own citation is decided first and wins where it still
-  // applies, on the same round-trip-fidelity grounds the imported field
-  // declaration is re-emitted on: the imported document may cite a set this build
-  // does not ship, and re-deriving would silently relabel it. It applies while the
-  // built rules are still drawn from the imported ones -- narrowing by disabling a
-  // key keeps the citation, editing or adding one drops it.
+  // An IMPORTED document's citation is not re-decided at all, on the same
+  // round-trip-fidelity grounds the imported field declaration is re-emitted on: a
+  // document may cite a set this build does not ship, and a document may decline to
+  // cite one at all -- re-deriving would relabel the first and stamp a provenance on
+  // the second its author declined, moving the terms hash in both directions. So the
+  // import re-emits its own citation while the built rules are still drawn from the
+  // rules it cited (narrowing by disabling a key keeps it, editing or adding one
+  // drops it), and an import that cited nothing emits nothing whatever its rules
+  // match.
+  const importedCitation = draft.importedRuleSetCitation;
   const ruleSetReference =
-    draft.importedLinkageRuleSet !== undefined &&
-    isDrawnFromLinkageRuleSet(draft.importedLinkageRuleSet, terms)
-      ? draft.importedLinkageRuleSet.reference
-      : linkageRuleSetReferenceFor(terms);
+    importedCitation === undefined
+      ? linkageRuleSetReferenceFor(terms)
+      : importedCitation.kind === "cited" &&
+          isDrawnFromLinkageRuleSet(importedCitation.ruleSet, terms)
+        ? importedCitation.ruleSet.reference
+        : undefined;
   if (ruleSetReference !== undefined) terms.linkageRuleSet = ruleSetReference;
   else delete terms.linkageRuleSet;
 

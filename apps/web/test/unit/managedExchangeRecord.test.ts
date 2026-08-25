@@ -1,4 +1,5 @@
 import {
+  DEFAULT_LINKAGE_KEY_SET_NAME,
   connectionFromLocator,
   generateSharedSecret,
   getDefaultLinkageTerms,
@@ -81,14 +82,20 @@ describe("composeManagedExchangeFile", () => {
     // The webrtc server locator carries only host/port/path -- no PeerJS key, no
     // username, no relay credential.
     expect(Object.keys(server ?? {}).sort()).toEqual(["host", "path", "port"]);
-    // Matched as JSON property names rather than as bare substrings: the linkage
-    // terms carry a rule-set citation whose halves are named `fieldSet`/`keySet`,
-    // and a bare "key" scan reads that rule-set name as a credential. The
-    // credential this guards against is a property called `key` (the PeerJS API
-    // key, an SSH key) or `username`, wherever in the document it sits.
+    // Scanned as bare substrings, so a credential carried as a VALUE (a PeerJS API
+    // key, an SSH username) is caught wherever in the document it sits, not just a
+    // property named for one. The two strings the linkage terms' rule-set citation
+    // legitimately spells "key" in -- the `keySet` property and the key set's own
+    // name -- are excised by their exact text first, so the scan keeps its reach
+    // without reading the citation as a credential.
     const serialized = JSON.stringify(file);
-    expect(serialized).not.toContain('"username"');
-    expect(serialized).not.toContain('"key"');
+    expect(serialized).toContain('"keySet"');
+    expect(serialized).toContain(DEFAULT_LINKAGE_KEY_SET_NAME);
+    const withoutCitation = serialized
+      .replaceAll('"keySet"', "")
+      .replaceAll(DEFAULT_LINKAGE_KEY_SET_NAME, "");
+    expect(withoutCitation).not.toContain("username");
+    expect(withoutCitation).not.toContain("key");
   });
 
   test("rejects a locator smuggling a credential-bearing field", () => {
