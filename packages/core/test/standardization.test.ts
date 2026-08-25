@@ -31,6 +31,7 @@ import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { inferMetadata } from "../src/config/metadata";
 import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
 import { getDefaultStandardization } from "../src/defaults/standardization";
+import { MAX_TRANSFORM_PARAM_LENGTH } from "../src/config/linkageTerms";
 import type {
   LinkageField,
   LinkageKeyElement,
@@ -768,6 +769,36 @@ describe("runPipeline — null-producing functions", () => {
         { function: "replace_regex", params: { pattern: "\\d" } },
       ]),
     ).toBe("ABC");
+  });
+
+  test("a replacement at the param bound amplifies a cell by a bounded factor", () => {
+    // The residual the schema's string-param bound leaves is a MULTIPLIER, not an
+    // absolute size (docs/spec/CHANNEL_SECURITY.md, Unbounded transform-parameter
+    // rejection): the replacement is substituted once per match, a pattern
+    // matching the empty string matches between every character, and an empty
+    // match consumes nothing -- so the ceiling is the cell plus one bounded
+    // replacement per position. A 10-character cell reaches 11,010 characters,
+    // three orders of magnitude below the megabyte an unbounded param reached.
+    // Pinned against the engine rather than reasoned about, so the factor the
+    // spec records cannot drift from what the transform produces.
+    const cell = "1234567890";
+    const replacement = "x".repeat(MAX_TRANSFORM_PARAM_LENGTH);
+    const ceiling =
+      cell.length + (cell.length + 1) * MAX_TRANSFORM_PARAM_LENGTH;
+    for (const pattern of ["\\d", "a*", "[0-9]?"]) {
+      const out = runPipeline(cell, [
+        { function: "replace_regex", params: { pattern, replacement } },
+      ]);
+      expect(typeof out, pattern).toBe("string");
+      expect((out as string).length, pattern).toBeLessThanOrEqual(ceiling);
+    }
+    expect(
+      (
+        runPipeline(cell, [
+          { function: "replace_regex", params: { pattern: "a*", replacement } },
+        ]) as string
+      ).length,
+    ).toBe(11010);
   });
 
   test("replace_regex with a non-string replacement does not throw and falls back to empty", () => {

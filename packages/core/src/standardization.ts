@@ -355,14 +355,15 @@ export function dateFormatComponents(
 // string tokens YYYY / YY / MM / DD stay as written; delimiter characters are
 // literal. Params arrive as camelCase after camelizeKeys (e.g. inputFormat).
 function parseDateFactory(params: Params): StandardizingFn {
-  // The wire params are z.unknown() and only count-bounded, so a partner can
-  // declare either format as a non-string. An absent input format falls back to
-  // the complete default; a present non-string is a dead key by design (the
-  // satisfiability pre-flight is pinned to that verdict), realized here as an
-  // empty format that tokenizes to an all-dropping pattern -- a raw non-string
-  // would instead throw in parseDateFormat (`.startsWith` on an array). Guard the
-  // output format by type too: a non-string there reaches `.replaceAll` on a
-  // matched row and throws, so it falls back to the absent default.
+  // The wire params are z.unknown() and typed by no per-function shape, so a
+  // partner can declare either format as a non-string. An absent input format
+  // falls back to the complete default; a present non-string is a dead key by
+  // design (the satisfiability pre-flight is pinned to that verdict), realized
+  // here as an empty format that tokenizes to an all-dropping pattern -- a raw
+  // non-string would instead throw in parseDateFormat (`.startsWith` on an
+  // array). Guard the output format by type too: a non-string there reaches
+  // `.replaceAll` on a matched row and throws, so it falls back to the absent
+  // default.
   const rawInputFormat = params.inputFormat;
   const inputFormat =
     rawInputFormat == null
@@ -418,13 +419,14 @@ function parseDateFactory(params: Params): StandardizingFn {
 
 function substringFactory(params: Params): StandardizingFn {
   // Guard both bounds by type, not just presence: the wire params are
-  // z.unknown() and only count-bounded, so a partner can declare either as a
-  // non-integer (a string, float, or other JSON value). An unguarded non-number
-  // `length` turns `startIdx + len` into string concatenation, silently
-  // producing the wrong slice rather than the intended one. A start or length
-  // that is not an integer -- like the always-null `start === 0` no-op -- yields
-  // a fn that drops every value, the ignore path this factory already takes for a
-  // degenerate bound (never crashing the partner-reachable key build).
+  // z.unknown() and typed by no per-function shape, so a partner can declare
+  // either as a non-integer (a string, float, or other JSON value). An unguarded
+  // non-number `length` turns `startIdx + len` into string concatenation,
+  // silently producing the wrong slice rather than the intended one. A start or
+  // length that is not an integer -- like the always-null `start === 0` no-op --
+  // yields a fn that drops every value, the ignore path this factory already
+  // takes for a degenerate bound (never crashing the partner-reachable key
+  // build).
   const start = params.start;
   const len = params.length;
   if (
@@ -508,10 +510,10 @@ function padLeftFactory(params: Params): StandardizingFn {
   // combining mark like U+0344 -> U+0308 U+0301 expands to two -- and padStart
   // treats a multi-unit fill as a cycling pattern, so the one-character contract
   // must hold on the normalized value that actually pads. Guard by type, not just
-  // nullish: the wire params are z.unknown() and only count-bounded, so a partner
-  // can declare `char` as a non-string, and calling `.normalize` on it would
-  // throw. A non-string falls back to the "0" default, consistent with the absent
-  // default.
+  // nullish: the wire params are z.unknown() and typed by no per-function
+  // shape, so a partner can declare `char` as a non-string, and calling
+  // `.normalize` on it would throw. A non-string falls back to the "0" default,
+  // consistent with the absent default.
   const char = (typeof params.char === "string" ? params.char : "0").normalize(
     "NFC",
   );
@@ -522,11 +524,11 @@ function padLeftFactory(params: Params): StandardizingFn {
 
 function nullIfFactory(params: Params): StandardizingFn {
   // Build the exclusion set from string entries only. The wire params are
-  // z.unknown() and only count-bounded, so a partner can declare `values` as a
-  // non-array or with non-string elements, or `value` as a non-string scalar;
-  // normalizing any of those below would throw. A non-string can never equal a
-  // string cell, so a non-array `values` and any non-string entry contribute no
-  // exclusion rather than crashing.
+  // z.unknown() and typed by no per-function shape, so a partner can declare
+  // `values` as a non-array or with non-string elements, or `value` as a
+  // non-string scalar; normalizing any of those below would throw. A non-string
+  // can never equal a string cell, so a non-array `values` and any non-string
+  // entry contribute no exclusion rather than crashing.
   const rawValues =
     params.values !== undefined
       ? Array.isArray(params.values)
@@ -553,10 +555,10 @@ function replaceRegexFactory(params: Params): StandardizingFn {
   // NFC-normalize the replacement literal so it cannot inject a non-NFC byte
   // sequence into the key (the pattern itself is matched as authored; author it
   // in NFC to match NFC runtime values). Guard by type, not just nullish: the
-  // wire params are z.unknown() and only count-bounded, so a partner can declare
-  // `replacement` as a non-string, and calling `.normalize` on it would throw. A
-  // non-string falls back to the empty replacement, consistent with the absent
-  // default.
+  // wire params are z.unknown() and typed by no per-function shape, so a
+  // partner can declare `replacement` as a non-string, and calling `.normalize`
+  // on it would throw. A non-string falls back to the empty replacement,
+  // consistent with the absent default.
   const replacement =
     typeof params.replacement === "string"
       ? params.replacement.normalize("NFC")
@@ -781,9 +783,9 @@ export interface StandardizationFunctionDescriptor {
    * via Zod `.default(...)`, so a parse of omitted params yields the same value
    * the factory falls back to. These schemas describe well-formed editor output
    * (a value, or an omitted default); they are NOT the partner-supplied wire
-   * params, which stay `z.unknown()` and are count-bounded in
-   * `config/linkageTerms.ts`. The drift test pins each schema against its factory
-   * so a descriptor cannot disagree with the function it describes.
+   * params, which stay `z.unknown()`, count-bounded and string-length-bounded
+   * in `config/linkageTerms.ts`. The drift test pins each schema against its
+   * factory so a descriptor cannot disagree with the function it describes.
    *
    * Typed `ZodObject<ZodRawShape>` rather than a per-function shape because the
    * table is homogeneous (a `Record` over one descriptor type). An editor drives
@@ -1168,12 +1170,12 @@ function compileStep(step: {
   if (step.function === "coalesce") {
     // NFC-normalize the literal default so coalesce cannot substitute a non-NFC
     // value into the key (it replaces the whole value, often as the last step).
-    // Guard by type, not just nullish: the wire params are z.unknown() and only
-    // count-bounded, so a partner can declare `default` as any JSON value, and
-    // calling `.normalize` on a non-string (null, number, array, object) would
-    // throw while building the first row's key. Any non-string behaves as an
-    // absent default; it is not String()-coerced, which would mangle an array or
-    // object into a bogus substitution value.
+    // Guard by type, not just nullish: the wire params are z.unknown() and
+    // typed by no per-function shape, so a partner can declare `default` as any
+    // JSON value, and calling `.normalize` on a non-string (null, number,
+    // array, object) would throw while building the first row's key. Any
+    // non-string behaves as an absent default; it is not String()-coerced,
+    // which would mangle an array or object into a bogus substitution value.
     const rawDefault = params.default;
     return {
       kind: "coalesce",

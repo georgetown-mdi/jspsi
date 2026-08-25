@@ -5,7 +5,10 @@ import {
   parseExchangeSpec,
   safeParseExchangeSpec,
 } from "../src/config/exchangeSpec";
-import { MAX_TEXT_LENGTH } from "../src/config/linkageTerms";
+import {
+  MAX_TEXT_LENGTH,
+  MAX_TRANSFORM_PARAM_LENGTH,
+} from "../src/config/linkageTerms";
 
 // Minimal valid components used as a base.
 const minimalLinkageTerms = {
@@ -158,6 +161,45 @@ test("missing connection is rejected", () => {
 test("missing linkageTerms is rejected", () => {
   const result = safeParseExchangeSpec({ connection: minimalConnection });
   expect(result.success).toBe(false);
+});
+
+// --- Embedded linkage-terms bounds -------------------------------------------
+
+test("a transform param over the content bound is rejected through this spec path", () => {
+  // The bound on a string-valued transform param lives on LinkageTermsSchema, so
+  // the spec path inherits it -- the third of the three paths that parse partner
+  // terms, alongside parseLinkageTerms and the invitation-token decode.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    linkageTerms: {
+      ...minimalLinkageTerms,
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                {
+                  function: "coalesce",
+                  params: {
+                    default: "x".repeat(MAX_TRANSFORM_PARAM_LENGTH + 1),
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(
+    result.error.issues.some((i) =>
+      /transform param must not exceed/.test(i.message),
+    ),
+  ).toBe(true);
 });
 
 // --- parse vs safeParse ------------------------------------------------------
