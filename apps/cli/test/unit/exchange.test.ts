@@ -250,6 +250,54 @@ test("injects sharedSecret from key file even when a top-level authentication bl
   expect(result.authentication.sharedSecret).toBe(TOKEN_A);
 });
 
+// --- rule-set citation drift -------------------------------------------------
+
+/** A filedrop config carrying `terms`, plus the key file the load needs. */
+function writeConfigWithTerms(terms: LinkageTerms): void {
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      connection: { channel: "filedrop", path: "/mnt/share/drop" },
+      linkageTerms: terms,
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+}
+
+/** The warnings the load emitted about the rule-set citation. */
+function citationWarnings(): string[] {
+  return mockState.warnings.filter((w) => w.includes("linkage_rule_set"));
+}
+
+test("loadConfig warns on a citation the config's own rules no longer support, and loads anyway", () => {
+  // A hand edit to the cascade order leaves the citation the config was written
+  // with claiming rules it no longer declares. The warning is the whole remedy:
+  // the spec loads and the command proceeds.
+  const terms = getDefaultLinkageTerms("Test Party");
+  const [first, second, ...rest] = terms.linkageKeys;
+  writeConfigWithTerms({ ...terms, linkageKeys: [second!, first!, ...rest] });
+  const result = loadConfig(baseOptions());
+  expect(result.connection.channel).toBe("filedrop");
+  expect(result.authentication.sharedSecret).toBe(TOKEN_A);
+  expect(citationWarnings()).toHaveLength(1);
+  expect(citationWarnings()[0]).toContain(configFile);
+});
+
+test("loadConfig stays silent on a config whose rules still fit its citation", () => {
+  writeConfigWithTerms(getDefaultLinkageTerms("Test Party"));
+  loadConfig(baseOptions());
+  expect(citationWarnings()).toEqual([]);
+});
+
+test("loadConfig stays silent on a config carrying no citation", () => {
+  const terms = getDefaultLinkageTerms("Test Party");
+  const [first, second, ...rest] = terms.linkageKeys;
+  delete terms.linkageRuleSet;
+  writeConfigWithTerms({ ...terms, linkageKeys: [second!, first!, ...rest] });
+  loadConfig(baseOptions());
+  expect(citationWarnings()).toEqual([]);
+});
+
 // --- config file errors ------------------------------------------------------
 
 test("throws with ENOENT code when config file is absent", () => {

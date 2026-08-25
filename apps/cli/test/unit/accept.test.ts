@@ -1578,6 +1578,49 @@ test("validateAccept: offline reuses a config whose linkage terms match the invi
   }
 });
 
+/** The default terms with their first two keys swapped: rules that no longer
+ *  support the rule-set citation the same terms carry, key order being cascade
+ *  order. */
+function termsCitingASetTheyLeft(identity: string): LinkageTerms {
+  const terms = getDefaultLinkageTerms(identity);
+  const [first, second, ...rest] = terms.linkageKeys;
+  return { ...terms, linkageKeys: [second!, first!, ...rest] };
+}
+
+test("validateAccept: a reused config's rule-set citation is checked against its own rules", async () => {
+  // The reconcile compares the terms that define the agreement, and the citation
+  // is not one of them -- so a config agreeing with the invitation key for key
+  // can still carry a citation its own rules left. Reuse proceeds, and the drift
+  // is reported before the confirmation prompt.
+  const options = testOptions();
+  writeExistingConfig(options.configFile, {
+    terms: termsCitingASetTheyLeft("Acceptor Org"),
+  });
+  const log = getLogger("accept-citation-drift");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation({
+      ...sampleToken(FUTURE()),
+      linkageTerms: termsCitingASetTheyLeft("Inviter Org"),
+    });
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded },
+      options,
+      log,
+    });
+    expect(ready.reuseExistingConfig).toBe(true);
+    const drifted = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((message) => message.includes("linkage_rule_set"));
+    expect(drifted).toHaveLength(1);
+    expect(drifted[0]).toContain(options.configFile);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(options.configFile, { force: true });
+  }
+});
+
 test("validateAccept: a matching config is reconciled but a pre-existing key file still hard-aborts", async () => {
   // The reconcile path (#61) makes a pre-existing CONFIG reusable, but a
   // pre-existing KEY file must still abort -- a stale authentication token must

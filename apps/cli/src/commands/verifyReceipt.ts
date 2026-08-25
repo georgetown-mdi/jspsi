@@ -50,7 +50,10 @@ import type {
   VerificationKeys,
 } from "@psilink/core";
 
-import { readConfigLinkageSource } from "../config";
+import {
+  readConfigLinkageSource,
+  warnOnLinkageRuleSetCitationDrift,
+} from "../config";
 import { expandTilde } from "../fileUtils";
 import { keysPathFor } from "../recordFile";
 import { parseSensitiveJson, parseSensitiveYaml } from "../sensitiveFile";
@@ -754,15 +757,26 @@ export function formatSignedRecordReport(
  * a typo to "no terms supplied" would leave the agreed-terms hash reported as
  * merely not checked (the distinction {@link pinnedFingerprintFromConfig} draws
  * for the same file's pin).
+ *
+ * The rule-set citation these terms carry is checked against them here rather
+ * than in the reader they share with `--partner-terms`: a citation on the
+ * PARTNER's document is that party's statement about that party's own rules,
+ * which this party's config load has no standing to report on.
  */
 function configFileTerms(
   configFile: string | undefined,
+  log: { warn: (message: string) => void },
 ): LinkageTerms | undefined {
   if (configFile === undefined) return undefined;
   const source = readConfigLinkageSource(expandTilde(configFile));
   if (source.status === "no-config-file")
     throw new UsageError(`config file ${configFile} does not exist`);
   if (source.status === "no-linkage-terms") return undefined;
+  warnOnLinkageRuleSetCitationDrift(
+    source.source.linkageTerms,
+    configFile,
+    log,
+  );
   return source.source.linkageTerms;
 }
 
@@ -1156,7 +1170,7 @@ export async function handler(argv: Arguments): Promise<void> {
         );
     }
 
-    const localTerms = configFileTerms(configFile);
+    const localTerms = configFileTerms(configFile, log);
     const partnerTerms = partnerTermsFrom(partnerTermsFile);
     const signedRecord =
       artifact.kind === "signed"

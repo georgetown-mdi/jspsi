@@ -11,6 +11,7 @@ import {
   buildExchangeRecord,
   computeCertificateFingerprint,
   generateSigningIdentity,
+  getDefaultLinkageTerms,
   serializeDualSignedRecord,
   serializeExchangeRecord,
   serializeSigningIdentity,
@@ -24,6 +25,7 @@ import type {
   DualSignedRecord,
   DualSignedRecordVerificationReport,
   ExchangeRecordInputs,
+  LinkageTerms,
   ReceiptContent,
   RecordVerificationReport,
   SignedReceiptPartyReport,
@@ -1239,6 +1241,36 @@ describe("handler", () => {
     // passed on this command line.
     expect(lines[termsAt]).toContain(
       "pass a --config-file that defines linkage_terms and --partner-terms",
+    );
+  });
+
+  test("a --config-file citing a rule set its own keys left is reported through the command's log", async () => {
+    // configFileTerms is the fourth call site sharing warnOnLinkageRuleSetCitationDrift
+    // with loadConfig, validateInvite, and validateAccept; this pins only that it
+    // is wired -- the warning fires, reaches the command's log, and the terms it
+    // names still come back (the agreed-terms line below is not the "defines no
+    // linkage_terms" note) -- the warning's own per-half logic is config.test.ts's.
+    const terms = getDefaultLinkageTerms("Test Party");
+    const [first, second, ...rest] = terms.linkageKeys;
+    const drifted: LinkageTerms = {
+      ...terms,
+      linkageKeys: [second!, first!, ...rest],
+    };
+    const { recordPath } = await exchangeArtifacts();
+    const configPath = writeYaml(YAML.stringify({ linkage_terms: drifted }));
+    const { stdout, stderr, exits } = await runVerify({
+      record: recordPath,
+      "config-file": configPath,
+      "log-level": "warn",
+    });
+    expect(exits).toEqual([]);
+    const driftWarnings = stderr
+      .split("\n")
+      .filter((line) => line.includes("linkage_rule_set"));
+    expect(driftWarnings).toHaveLength(1);
+    expect(driftWarnings[0]).toContain(configPath);
+    expect(stdout).toContain(
+      "agreed-terms hash: not checked (pass --partner-terms)",
     );
   });
 

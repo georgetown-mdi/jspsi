@@ -4,6 +4,8 @@ import YAML from "yaml";
 import type {
   ConnectionConfig,
   ExchangeSpec,
+  LinkageRuleSetReference,
+  LinkageSetIdentity,
   LinkageTerms,
   Metadata,
   OutboundPayloadConsent,
@@ -12,8 +14,11 @@ import type {
 import {
   canonicalString,
   CanonicalEncodingError,
+  DEFAULT_LINKAGE_RULE_SET,
+  isDrawnFromLinkageRuleSet,
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
+  redactAndSanitizeForDisplay,
   safeParseConnectionConfig,
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
@@ -1362,4 +1367,106 @@ export function loadConfigLinkageSource(
         "that defines linkage terms",
     );
   return result.source;
+}
+
+// --- Rule-set citation drift -------------------------------------------------
+
+/**
+ * A rule-set citation as one clause, keys first -- the keys are the specific
+ * artifact and the fields the substrate they are built from -- matching the
+ * order the invitation display and core's mismatch message render the pair in.
+ *
+ * The names are free text whoever authored the config chose, and a `log.warn` is
+ * their sink (a value that never becomes an `Error` is escaped at the call site
+ * that shows it), so each is escaped here. Each name is quoted, as core's
+ * rule-set mismatch message quotes it: a name may carry a space, so an unquoted
+ * one reading `hmis-keys 9.9.9` would be indistinguishable from the name plus
+ * the version beside it. The quoting shares that message's stated limit --
+ * sanitization preserves printable ASCII, so a name carrying a double quote of
+ * its own can close the quote early and fake the clause's structure for a
+ * skimming reader.
+ */
+function describeRuleSetCitation(reference: LinkageRuleSetReference): string {
+  const half = (identity: LinkageSetIdentity): string =>
+    `"${redactAndSanitizeForDisplay(identity.name)}" ` +
+    `${redactAndSanitizeForDisplay(identity.version)}`;
+  return `${half(reference.keySet)} over ${half(reference.fieldSet)}`;
+}
+
+/**
+ * Warn when a loaded config's `linkage_terms.linkage_rule_set` cites a set this
+ * build ships over rules that are not drawn from it: the state a hand edit to
+ * `linkage_fields` or `linkage_keys` leaves behind, since nothing on the CLI
+ * re-decides the citation the config was written with. Left unreported, that
+ * citation travels onto the invitation and into both parties' exchange records
+ * claiming a provenance the rules no longer have.
+ *
+ * Only a half this build can RESOLVE is judged. A citation naming a set psilink
+ * does not ship states nothing checkable here -- there is no content behind the
+ * name to compare the rules against -- so that half is passed over, and a
+ * citation whose halves both name a foreign set reports nothing at all. The two
+ * halves are resolved separately for the reason the design names and versions
+ * them separately: pairing one built-in name with a foreign one must not buy the
+ * built-in half a pass it could not earn alone.
+ *
+ * Warns rather than refuses. The config is the operator's own file, the citation
+ * is display-and-record only (it never selects or alters matching), and the
+ * exchange that follows is the one the declared fields and keys describe either
+ * way -- so this reports a claim that has drifted from its rules, and the command
+ * proceeds.
+ */
+export function warnOnLinkageRuleSetCitationDrift(
+  terms: Pick<LinkageTerms, "linkageRuleSet" | "linkageFields" | "linkageKeys">,
+  configPath: string,
+  log: { warn: (message: string) => void },
+): void {
+  const cited = terms.linkageRuleSet;
+  if (cited === undefined) return;
+
+  const shipped = DEFAULT_LINKAGE_RULE_SET;
+  const namesShippedSet = (
+    citedHalf: LinkageSetIdentity,
+    shippedHalf: LinkageSetIdentity,
+  ): boolean =>
+    citedHalf.name === shippedHalf.name &&
+    citedHalf.version === shippedHalf.version;
+
+  // Each half is judged on its own by handing the predicate that half's shipped
+  // declarations over rules that carry nothing on the other side. An empty list
+  // runs neither of the predicate's two loops, so the half not under test cannot
+  // decide the answer -- which a self-comparison (declaring the config's own
+  // rules for that half) would not guarantee, since a value the canonical encoder
+  // rejects fails even against itself.
+  const drifted: string[] = [];
+  if (
+    namesShippedSet(cited.fieldSet, shipped.reference.fieldSet) &&
+    !isDrawnFromLinkageRuleSet(
+      {
+        reference: cited,
+        linkageFields: shipped.linkageFields,
+        linkageKeys: [],
+      },
+      { linkageFields: terms.linkageFields, linkageKeys: [] },
+    )
+  )
+    drifted.push("linkage_fields");
+  if (
+    namesShippedSet(cited.keySet, shipped.reference.keySet) &&
+    !isDrawnFromLinkageRuleSet(
+      { reference: cited, linkageFields: [], linkageKeys: shipped.linkageKeys },
+      { linkageFields: [], linkageKeys: terms.linkageKeys },
+    )
+  )
+    drifted.push("linkage_keys");
+  if (drifted.length === 0) return;
+
+  log.warn(
+    `${configPath}: linkage_terms.linkage_rule_set cites ` +
+      `${describeRuleSetCitation(cited)}, but its ${drifted.join(" and ")} ` +
+      "are not drawn from the rules this build ships under that citation. The " +
+      "citation travels onto the invitation, the accepting party's terms " +
+      "review, and both parties' exchange records, where it claims a " +
+      "provenance these rules do not have. Omit linkage_rule_set for rules you " +
+      "author yourself, or restore the rules the cited set declares.",
+  );
 }
