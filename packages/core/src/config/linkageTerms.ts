@@ -8,6 +8,13 @@ import { canonicalString, CanonicalEncodingError } from "../utils/canonical.js";
 import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay.js";
 import { boundedArray } from "../utils/boundedArray.js";
 import {
+  bareTermsValue,
+  compatibilityMessage,
+  quoteTermsValue,
+  quoteTermsValueList,
+} from "./compatibilityMessage.js";
+import type { CompatibilityMessageFragment } from "./compatibilityMessage.js";
+import {
   coerceToPatternString,
   patternConformsToDialect,
 } from "../utils/linearRegex.js";
@@ -1041,24 +1048,20 @@ const LinkageRuleSetReferenceSchema: z.ZodType<LinkageRuleSetReference> =
  * specific artifact and the fields the substrate they are built from, so a
  * reader meets the narrower claim before the broader one.
  *
- * The set names are free text a partner chooses, so they are delimited the way
- * the legal-agreement mismatches delimit theirs -- a name carrying a space or
- * the clause's own " over " reads as one value rather than blurring into the
- * surrounding prose. The delimiting reaches only that far: the names are
- * interpolated raw and the schema constrains only their length, so a name
- * carrying a double quote of its own can still close the clause early and fake
- * its structure for a skimming reader. That residual is pre-existing across
- * these mismatch messages -- the legal-agreement reference and purpose quote
- * raw partner text identically -- and the rendered message is sanitized at each
- * display boundary, so what is left is a misreading rather than an injection.
- * The versions are schema-constrained semver and stay bare, like the legal
- * agreement's expiration date.
+ * The set names are free text a partner chooses, so each is rendered as one
+ * delimited run through the compatibility-message seam
+ * ({@link quoteTermsValue}): a name carrying a space, the clause's own " over ",
+ * or a delimiter of its own reads as content of one value rather than as
+ * structure this clause asserted. The versions are schema-constrained semver, so
+ * they take the seam's checked bare form ({@link bareTermsValue}) and read as
+ * prose -- falling back to the delimited form for a value that does not meet the
+ * shape, which is what keeps the reading of "schema-constrained" executable here
+ * rather than assumed of a caller.
  */
-function describeRuleSet(reference: LinkageRuleSetReference): string {
-  return (
-    `"${reference.keySet.name}" ${reference.keySet.version} over ` +
-    `"${reference.fieldSet.name}" ${reference.fieldSet.version}`
-  );
+function describeRuleSet(
+  reference: LinkageRuleSetReference,
+): CompatibilityMessageFragment {
+  return compatibilityMessage`${quoteTermsValue(reference.keySet.name)} ${bareTermsValue(reference.keySet.version)} over ${quoteTermsValue(reference.fieldSet.name)} ${bareTermsValue(reference.fieldSet.version)}`;
 }
 
 // --- Linkage Terms -----------------------------------------------------------
@@ -1816,49 +1819,73 @@ export interface CompatibilityResult {
  * Returns errors for mandatory mismatches that must cancel the exchange, and
  * warnings for soft mismatches (currently only `date`) that produce a notice
  * but allow the exchange to continue.
+ *
+ * Every diagnostic it composes names its terms values through the delimiting
+ * seam in `config/compatibilityMessage.ts`, so no value a partner chooses can
+ * close a delimiter or spell a second clause of psilink's own prose. The
+ * enumeration is enforced by type rather than kept as a list here: the two
+ * accumulators hold `CompatibilityMessageFragment`, so a message composed any
+ * other way does not compile. `test/compatibilityMessage.test.ts` drives the
+ * adversarial value shapes through each message and asserts the clause structure
+ * is the one this function wrote.
  */
 export function validateCompatibility(
   local: LinkageTerms,
   partner: LinkageTerms,
 ): CompatibilityResult {
-  const errors: string[] = [];
-  const warnings: string[] = [];
+  // Both accumulators hold CompatibilityMessageFragment rather than string, which
+  // is the whole of the sweep below: a diagnostic reaches either list only
+  // through the compatibilityMessage tagged template, whose interpolations are
+  // fragments and whose fixed spans the compiler supplies. So a terms value put
+  // into a message without passing the delimiting seam -- an edit to a message
+  // here, or a mismatch check added later -- does not compile. Both lists are
+  // returned as the `string[]` of CompatibilityResult, which the brand is
+  // transparent to.
+  const errors: CompatibilityMessageFragment[] = [];
+  const warnings: CompatibilityMessageFragment[] = [];
 
   // The threat both arrays below carry is the partner side: a
-  // mutually-distrusting party controls reference/purpose/identity/column names,
-  // and raw ANSI/control characters or deceptive Unicode there could spoof or
-  // mislead in the local operator's logs or UI. The two take different routes to
-  // that operator, so they are escaped at different points.
+  // mutually-distrusting party controls reference/purpose/set/column names, and
+  // it controls them on the side these messages call "local" as well, since
+  // deriveAcceptedLinkageTerms adopts the inviter's legalAgreement and
+  // linkageRuleSet verbatim. Two distinct controls answer it.
   //
-  // `errors` becomes an Error message here and an abort frame the partner
-  // renders at its own display boundary; an error is escaped once by
-  // sanitizeErrorForDisplay where it is shown, so these values are interpolated
-  // RAW. `warnings` is handed to the caller as display text (runExchange's
-  // onWarning slot) with no error to carry it, so it is escaped here, and
-  // redacted here too: a warning ends at a log line and at the warning event,
-  // both of which redact the whole composed string, and every fragment below
-  // precedes the first-party sentence that explains the mismatch. The CLI
-  // escapes each warning again as it reaches a log line and the event stream,
-  // so a warning makes two passes on that route; every value interpolated below
-  // is schema-constrained to a shape the escape does not rewrite, which is what
+  // DELIMITING is applied here, at composition, to every value either list names
+  // (config/compatibilityMessage.ts): a value is rendered as one delimited run,
+  // or bare only where it is checked to carry nothing a clause boundary is made
+  // of. It answers the reading attack the escape cannot -- a value of printable
+  // ASCII that spells this diagnostic's own clause structure -- and it emits only
+  // printable ASCII, so it neither duplicates the escape nor is rewritten by it.
+  //
+  // ESCAPING stays assigned to one altitude per route, which differs between the
+  // two lists. `errors` becomes an Error message here and an abort frame the
+  // partner renders at its own display boundary; an error is escaped once by
+  // sanitizeErrorForDisplay where it is shown, so the values inside the delimiters
+  // are the RAW ones. `warnings` is handed to the caller as display text
+  // (runExchange's onWarning slot) with no error to carry it, so it is escaped
+  // here, and redacted here too: a warning ends at a log line and at the warning
+  // event, both of which redact the whole composed string, and every fragment
+  // below precedes the first-party sentence that explains the mismatch. The CLI
+  // escapes each warning again as it reaches a log line and the event stream, so
+  // a warning makes two passes on that route; every value interpolated below is
+  // schema-constrained to a shape the escape does not rewrite, which is what
   // keeps the second pass unobservable. CHANNEL_SECURITY.md records why neither
-  // pass is removed.
+  // pass is removed. On that route the escape runs BEFORE the delimiting, so the
+  // truncation inside it can never take the closing delimiter off a run.
   //
-  // The equality CHECKS always compare the RAW values either way -- escaping is
-  // display-only and lossy (it truncates), so comparing escaped forms could mask
-  // a genuine mismatch.
+  // The equality CHECKS always compare the RAW values either way -- both
+  // transforms are display-only and the escape is lossy (it truncates), so
+  // comparing transformed forms could mask a genuine mismatch.
   if (local.version !== partner.version) {
     // TODO: implement migration when new versions exist
     errors.push(
-      `version mismatch: local is ${local.version}, ` +
-        `partner is ${partner.version}`,
+      compatibilityMessage`version mismatch: local is ${bareTermsValue(local.version)}, partner is ${bareTermsValue(partner.version)}`,
     );
   }
 
   if (local.algorithm !== partner.algorithm) {
     errors.push(
-      `algorithm mismatch: local is ${local.algorithm}, ` +
-        `partner is ${partner.algorithm}`,
+      compatibilityMessage`algorithm mismatch: local is ${bareTermsValue(local.algorithm)}, partner is ${bareTermsValue(partner.algorithm)}`,
     );
   }
 
@@ -1867,38 +1894,36 @@ export function validateCompatibility(
   // omitted, so the value is always present and compared directly.
   if (local.linkageStrategy !== partner.linkageStrategy) {
     errors.push(
-      `linkage strategy mismatch: local is ${local.linkageStrategy}, ` +
-        `partner is ${partner.linkageStrategy}`,
+      compatibilityMessage`linkage strategy mismatch: local is ${bareTermsValue(local.linkageStrategy)}, partner is ${bareTermsValue(partner.linkageStrategy)}`,
     );
   }
 
+  // Each branch spells its whole sentence rather than interpolating a phrase
+  // chosen by a ternary: the four readings are fixed first-party copy, and
+  // writing them out is what lets the tagged template above hold for every
+  // message in this function without a `string` step for a first-party fragment
+  // to slip through.
   if (local.output.shareWithPartner !== partner.output.expectsOutput) {
     errors.push(
-      "output mismatch: local " +
-        (local.output.shareWithPartner ? "will" : "will not") +
-        " share with partner, but partner " +
-        (partner.output.expectsOutput ? "expects" : "does not expect") +
-        "output",
+      local.output.shareWithPartner
+        ? compatibilityMessage`output mismatch: local will share with partner, but partner does not expect output`
+        : compatibilityMessage`output mismatch: local will not share with partner, but partner expects output`,
     );
   }
   if (local.output.expectsOutput !== partner.output.shareWithPartner) {
     errors.push(
-      "output mismatch: local " +
-        (local.output.expectsOutput ? "expects" : "does not expect") +
-        " output, but partner " +
-        (partner.output.shareWithPartner ? "will" : "will not") +
-        " share",
+      local.output.expectsOutput
+        ? compatibilityMessage`output mismatch: local expects output, but partner will not share`
+        : compatibilityMessage`output mismatch: local does not expect output, but partner will share`,
     );
   }
   if (!local.output.expectsOutput && !partner.output.expectsOutput) {
-    errors.push("neither party expects output");
+    errors.push(compatibilityMessage`neither party expects output`);
   }
 
   if (local.date !== partner.date) {
     warnings.push(
-      `date mismatch: local is ${redactAndSanitizeForDisplay(local.date)}, ` +
-        `partner is ${redactAndSanitizeForDisplay(partner.date)}; one party ` +
-        "may have a stale copy of the linkage terms",
+      compatibilityMessage`date mismatch: local is ${bareTermsValue(redactAndSanitizeForDisplay(local.date))}, partner is ${bareTermsValue(redactAndSanitizeForDisplay(partner.date))}; one party may have a stale copy of the linkage terms`,
     );
   }
 
@@ -1933,12 +1958,22 @@ export function validateCompatibility(
   // error would be misleading. The encoding error already aborts the exchange.
   // The cost is diagnostic only -- if one side is both un-encodable AND differs,
   // the operator sees the encoding error first and the divergence on a re-run.
-  const canonicalOrError = (value: unknown, label: string): string | null => {
+  //
+  // `label` is first-party copy the caller composes through the same tagged
+  // template, and the encoder's own message is delimited: it names the offending
+  // JSON path, built from the encoded object's keys, which on a partner document
+  // are the partner's.
+  const canonicalOrError = (
+    value: unknown,
+    label: CompatibilityMessageFragment,
+  ): string | null => {
     try {
       return canonicalString(value);
     } catch (err) {
       if (err instanceof CanonicalEncodingError) {
-        errors.push(`${label} cannot be canonically encoded: ${err.message}`);
+        errors.push(
+          compatibilityMessage`${label} cannot be canonically encoded: ${quoteTermsValue(err.message)}`,
+        );
         return null;
       }
       throw err;
@@ -1957,34 +1992,34 @@ export function validateCompatibility(
   const partnerFields = [...partner.linkageFields].sort(byName);
   const localFieldsCanonical = canonicalOrError(
     localFields,
-    "local linkage fields",
+    compatibilityMessage`local linkage fields`,
   );
   const partnerFieldsCanonical = canonicalOrError(
     partnerFields,
-    "partner linkage fields",
+    compatibilityMessage`partner linkage fields`,
   );
   if (
     localFieldsCanonical !== null &&
     partnerFieldsCanonical !== null &&
     localFieldsCanonical !== partnerFieldsCanonical
   ) {
-    errors.push("linkage fields do not match");
+    errors.push(compatibilityMessage`linkage fields do not match`);
   }
 
   const localKeysCanonical = canonicalOrError(
     local.linkageKeys,
-    "local linkage keys",
+    compatibilityMessage`local linkage keys`,
   );
   const partnerKeysCanonical = canonicalOrError(
     partner.linkageKeys,
-    "partner linkage keys",
+    compatibilityMessage`partner linkage keys`,
   );
   if (
     localKeysCanonical !== null &&
     partnerKeysCanonical !== null &&
     localKeysCanonical !== partnerKeysCanonical
   ) {
-    errors.push("linkage keys do not match");
+    errors.push(compatibilityMessage`linkage keys do not match`);
   }
 
   // The rule-set citation, checked only where BOTH parties declare one. It names
@@ -1996,20 +2031,21 @@ export function validateCompatibility(
   // declares none: a hand-authored document carries no citation, and holding it
   // to the partner's would refuse an exchange whose rules match exactly. Compared
   // by canonical form, like the fields and keys above, so the comparison is
-  // byte-exact and property order does not enter it. Values are interpolated raw
-  // for the same reason the legal-agreement mismatches below are: an error is
-  // escaped once where it is shown.
+  // byte-exact and property order does not enter it. The set names are delimited
+  // by describeRuleSet, and the values inside those delimiters stay raw for the
+  // same reason the legal-agreement mismatches below are: an error is escaped
+  // once where it is shown.
   if (
     local.linkageRuleSet !== undefined &&
     partner.linkageRuleSet !== undefined
   ) {
     const localRuleSet = canonicalOrError(
       local.linkageRuleSet,
-      "local linkage rule set",
+      compatibilityMessage`local linkage rule set`,
     );
     const partnerRuleSet = canonicalOrError(
       partner.linkageRuleSet,
-      "partner linkage rule set",
+      compatibilityMessage`partner linkage rule set`,
     );
     if (
       localRuleSet !== null &&
@@ -2017,9 +2053,7 @@ export function validateCompatibility(
       localRuleSet !== partnerRuleSet
     ) {
       errors.push(
-        "linkage rule set mismatch: local names " +
-          `${describeRuleSet(local.linkageRuleSet)}, ` +
-          `partner names ${describeRuleSet(partner.linkageRuleSet)}`,
+        compatibilityMessage`linkage rule set mismatch: local names ${describeRuleSet(local.linkageRuleSet)}, partner names ${describeRuleSet(partner.linkageRuleSet)}`,
       );
     }
   }
@@ -2029,22 +2063,22 @@ export function validateCompatibility(
     partner.legalAgreement !== undefined
   ) {
     if (local.legalAgreement === undefined) {
-      errors.push("partner has a legal agreement but local does not");
+      errors.push(
+        compatibilityMessage`partner has a legal agreement but local does not`,
+      );
     } else if (partner.legalAgreement === undefined) {
-      errors.push("local has a legal agreement but partner does not");
+      errors.push(
+        compatibilityMessage`local has a legal agreement but partner does not`,
+      );
     } else {
       if (local.legalAgreement.reference !== partner.legalAgreement.reference) {
         errors.push(
-          "legal agreement reference mismatch: local is " +
-            `"${local.legalAgreement.reference}", ` +
-            `partner is "${partner.legalAgreement.reference}"`,
+          compatibilityMessage`legal agreement reference mismatch: local is ${quoteTermsValue(local.legalAgreement.reference)}, partner is ${quoteTermsValue(partner.legalAgreement.reference)}`,
         );
       }
       if (local.legalAgreement.purpose !== partner.legalAgreement.purpose) {
         errors.push(
-          "legal agreement purpose mismatch: local is " +
-            `"${local.legalAgreement.purpose}", ` +
-            `partner is "${partner.legalAgreement.purpose}"`,
+          compatibilityMessage`legal agreement purpose mismatch: local is ${quoteTermsValue(local.legalAgreement.purpose)}, partner is ${quoteTermsValue(partner.legalAgreement.purpose)}`,
         );
       }
       if (
@@ -2052,16 +2086,13 @@ export function validateCompatibility(
         partner.legalAgreement.expirationDate
       ) {
         errors.push(
-          "legal agreement expiration date mismatch: local is " +
-            `${local.legalAgreement.expirationDate}, ` +
-            `partner is ${partner.legalAgreement.expirationDate}`,
+          compatibilityMessage`legal agreement expiration date mismatch: local is ${bareTermsValue(local.legalAgreement.expirationDate)}, partner is ${bareTermsValue(partner.legalAgreement.expirationDate)}`,
         );
       }
       const today = new Date().toISOString().slice(0, 10);
       if (local.legalAgreement.expirationDate < today) {
         errors.push(
-          "legal agreement expired on " +
-            `${local.legalAgreement.expirationDate}`,
+          compatibilityMessage`legal agreement expired on ${bareTermsValue(local.legalAgreement.expirationDate)}`,
         );
       }
     }
@@ -2097,33 +2128,40 @@ export function validateCompatibility(
   // unchanged -- so a lazy receiver accepts only what the sender's own consented
   // metadata discloses, and receiving is not disclosing. The gate is symmetric: each
   // direction keys on the same receiver's declared `receive`, so the two parties
-  // (which call this with swapped arguments) compute identical verdicts. Names are
-  // displayed sanitized (partner-controlled free text) while the equality is
-  // byte-exact and element-wise -- compared per sorted column, NOT by a
-  // delimiter-joined string, so a partner-controlled name containing the separator
-  // cannot make two distinct sets join equal (`["a,b"]` vs `["a","b"]`) and slip a
-  // genuine mismatch past the check. Matching the messages elsewhere.
+  // (which call this with swapped arguments) compute identical verdicts. The
+  // equality is byte-exact and element-wise -- compared per sorted column, NOT by
+  // a delimiter-joined string, so a partner-controlled name containing the
+  // separator cannot make two distinct sets join equal (`["a,b"]` vs
+  // `["a","b"]`) and slip a genuine mismatch past the check. The rendering keeps
+  // that partition visible, delimiting each name in its own run
+  // (quoteTermsValueList), so the operator reading the diagnostic counts the same
+  // columns the comparison did. Matching the messages elsewhere.
   const sameColumnSet = (a: Array<string>, b: Array<string>): boolean =>
     a.length === b.length && a.every((name, i) => name === b[i]);
 
   // One direction of the payload mirror: the receiver's declared `receive` must
   // match the sender's `send`, byte-exact and element-wise. Both directions share
-  // the sort/compare/sanitize-join logic; only the two message strings vary, so
-  // they are supplied by the caller (emptyReceiveMessage for the strict empty
-  // `receive: []` case, mismatchMessage otherwise).
+  // the sort/compare/delimit-join logic; only the two messages vary, so they are
+  // supplied by the caller (emptyReceiveMessage for the strict empty `receive: []`
+  // case, mismatchMessage otherwise).
   const checkPayloadDirection = (
     receiverReceive: ReadonlyArray<PayloadColumn>,
     senderSend: ReadonlyArray<PayloadColumn>,
     messages: {
-      emptyReceiveMessage: (senderShown: string) => string;
-      mismatchMessage: (receiverShown: string, senderShown: string) => string;
+      emptyReceiveMessage: (
+        senderShown: CompatibilityMessageFragment,
+      ) => CompatibilityMessageFragment;
+      mismatchMessage: (
+        receiverShown: CompatibilityMessageFragment,
+        senderShown: CompatibilityMessageFragment,
+      ) => CompatibilityMessageFragment;
     },
   ): void => {
     const receiverNames = receiverReceive.map((c) => c.name).sort();
     const senderNames = senderSend.map((c) => c.name).sort();
     if (sameColumnSet(senderNames, receiverNames)) return;
-    const receiverShown = receiverNames.join(",");
-    const senderShown = senderNames.join(",");
+    const receiverShown = quoteTermsValueList(receiverNames);
+    const senderShown = quoteTermsValueList(senderNames);
     errors.push(
       receiverNames.length === 0
         ? messages.emptyReceiveMessage(senderShown)
@@ -2137,12 +2175,9 @@ export function validateCompatibility(
       // declaration (see the gate comment above); spell that out rather than
       // printing an empty bracket pair that reads like a rendering glitch.
       emptyReceiveMessage: (localShown) =>
-        `payload mismatch: partner declared an empty payload.receive ` +
-        `(asserting local sends no payload columns), but local sends ` +
-        `[${localShown}]`,
+        compatibilityMessage`payload mismatch: partner declared an empty payload.receive (asserting local sends no payload columns), but local sends [${localShown}]`,
       mismatchMessage: (partnerShown, localShown) =>
-        `payload mismatch: local send columns [${localShown}] do not match ` +
-        `partner receive columns [${partnerShown}]`,
+        compatibilityMessage`payload mismatch: local send columns [${localShown}] do not match partner receive columns [${partnerShown}]`,
     });
   }
 
@@ -2152,13 +2187,9 @@ export function validateCompatibility(
       // name it and point the operator at the lazy alternative (omit the field),
       // since a hand-authored `receive: []` is the most likely way to land here.
       emptyReceiveMessage: (partnerShown) =>
-        `payload mismatch: local declared an empty payload.receive ` +
-        `(asserting partner sends no payload columns), but partner sends ` +
-        `[${partnerShown}]. Omit payload.receive to accept whatever the ` +
-        `partner sends.`,
+        compatibilityMessage`payload mismatch: local declared an empty payload.receive (asserting partner sends no payload columns), but partner sends [${partnerShown}]. Omit payload.receive to accept whatever the partner sends.`,
       mismatchMessage: (localShown, partnerShown) =>
-        `payload mismatch: local receive columns [${localShown}] do not ` +
-        `match partner send columns [${partnerShown}]`,
+        compatibilityMessage`payload mismatch: local receive columns [${localShown}] do not match partner send columns [${partnerShown}]`,
     });
   }
 
