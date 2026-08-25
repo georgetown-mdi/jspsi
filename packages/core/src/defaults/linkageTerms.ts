@@ -1,6 +1,7 @@
 import { referencedLinkageFieldNames } from "../config/linkageTerms";
 import type {
   LinkageRuleSetReference,
+  LinkageSetIdentity,
   LinkageTerms,
   LinkageField,
   LinkageKey,
@@ -311,21 +312,30 @@ export interface BuiltInLinkageRuleSet {
  * Composed from the six declarations above rather than replacing them: the
  * built-in sets' drift and zero-setup checks read those declarations out of this
  * file by name and require each to be a literal (`scripts/lib/builtInRuleSets.mjs`).
+ *
+ * The {@link BuiltInLinkageRuleSet.reference} is frozen through both its levels,
+ * and this object with it. That one reference is ALIASED into every terms
+ * document derived from the set ({@link linkageTermsFromRuleSet}) and from there
+ * into each party's exchange record, so a single in-place edit of a name or a
+ * version would rewrite the built-in citation in every document the process later
+ * derives, and in every record written from one -- without touching the
+ * declarations above that the drift checks pin. Freezing makes such an edit throw
+ * where it is attempted instead.
  */
-export const DEFAULT_LINKAGE_RULE_SET: BuiltInLinkageRuleSet = {
-  reference: {
-    fieldSet: {
+export const DEFAULT_LINKAGE_RULE_SET: BuiltInLinkageRuleSet = Object.freeze({
+  reference: Object.freeze({
+    fieldSet: Object.freeze({
       name: DEFAULT_LINKAGE_FIELD_SET_NAME,
       version: DEFAULT_LINKAGE_FIELD_SET_VERSION,
-    },
-    keySet: {
+    }),
+    keySet: Object.freeze({
       name: DEFAULT_LINKAGE_KEY_SET_NAME,
       version: DEFAULT_LINKAGE_KEY_SET_VERSION,
-    },
-  },
+    }),
+  }),
   linkageFields: DEFAULT_LINKAGE_FIELDS,
   linkageKeys: DEFAULT_LINKAGE_KEYS,
-};
+});
 
 /**
  * Whether `rules` were drawn from `ruleSet`: every key byte-identical to a key
@@ -340,9 +350,10 @@ export const DEFAULT_LINKAGE_RULE_SET: BuiltInLinkageRuleSet = {
  * whereas the field array's order is not significant.
  *
  * This is what keeps a citation honest where rules are EDITED after being seeded
- * from a set -- the web invite editors' path. It is not a check on a partner's
- * declared citation: a received document's reference is that party's statement
- * about its own rules, and nothing here re-decides it.
+ * from a set -- the web invite editors' path. A received document's citation is
+ * judged by {@link checkLinkageRuleSetCitation} instead, which annotates it with
+ * a verdict rather than rewriting or dropping it: the reference stays that
+ * party's own statement about its own rules.
  *
  * Compared through the canonical encoding, the same equality the two parties'
  * terms are compared under, so property order does not enter it. A value outside
@@ -354,33 +365,57 @@ export function isDrawnFromLinkageRuleSet(
   ruleSet: BuiltInLinkageRuleSet,
   rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
 ): boolean {
-  const encode = (value: unknown): string | null => {
-    try {
-      return canonicalString(value);
-    } catch {
-      return null;
-    }
-  };
+  return (
+    fieldsDrawnFromSet(ruleSet.linkageFields, rules.linkageFields) &&
+    keysDrawnFromSet(ruleSet.linkageKeys, rules.linkageKeys)
+  );
+}
+
+function encodeForComparison(value: unknown): string | null {
+  try {
+    return canonicalString(value);
+  } catch {
+    return null;
+  }
+}
+
+/** The field half of {@link isDrawnFromLinkageRuleSet}: every candidate field
+ * byte-identical to a DISTINCT declared field, order not significant. */
+function fieldsDrawnFromSet(
+  declaredFieldList: ReadonlyArray<LinkageField>,
+  fields: ReadonlyArray<LinkageField>,
+): boolean {
   // Each declaration is consumed on match, so a field the candidate repeats meets
   // no declaration the second time -- the same answer the key cursor gives a
   // repeated key, rather than a lookup that would accept the repeat.
   const declaredFields = new Map(
-    ruleSet.linkageFields.map((field) => [field.name, encode(field)] as const),
+    declaredFieldList.map(
+      (field) => [field.name, encodeForComparison(field)] as const,
+    ),
   );
-  for (const field of rules.linkageFields) {
+  for (const field of fields) {
     const declared = declaredFields.get(field.name);
     if (declared === undefined || declared === null) return false;
-    if (encode(field) !== declared) return false;
+    if (encodeForComparison(field) !== declared) return false;
     declaredFields.delete(field.name);
   }
+  return true;
+}
+
+/** The key half of {@link isDrawnFromLinkageRuleSet}: every candidate key
+ * byte-identical to a declared key, in the set's own cascade order. */
+function keysDrawnFromSet(
+  declaredKeyList: ReadonlyArray<LinkageKey>,
+  keys: ReadonlyArray<LinkageKey>,
+): boolean {
   // Walk the set's keys and the candidate's together: each candidate key must
   // meet the next set key that matches it, so a key the set does not declare, a
   // repeated key, and a pair in the wrong cascade order all run the cursor off
   // the end.
-  const declaredKeys = ruleSet.linkageKeys.map(encode);
+  const declaredKeys = declaredKeyList.map(encodeForComparison);
   let cursor = 0;
-  for (const key of rules.linkageKeys) {
-    const encoded = encode(key);
+  for (const key of keys) {
+    const encoded = encodeForComparison(key);
     if (encoded === null) return false;
     let matched = false;
     while (cursor < declaredKeys.length && !matched) {
@@ -390,6 +425,97 @@ export function isDrawnFromLinkageRuleSet(
     if (!matched) return false;
   }
   return true;
+}
+
+/**
+ * One party's verdict on one half of a rule-set citation, reached by this build
+ * against the sets it ships.
+ *
+ * - `consistent` -- the cited half names a set this build ships, and the rules
+ *   the same document declares for that half are drawn from it.
+ * - `contradicted` -- the cited half names a set this build ships, and the
+ *   declared rules are NOT drawn from it: the citation states a provenance the
+ *   rules beside it do not have.
+ * - `unchecked` -- the cited half names a set this build does not ship, so
+ *   nothing here resolves the name and no comparison was made.
+ *
+ * Three states rather than two because the absence of `contradicted` must never
+ * read as verification: a build that cannot resolve a name has checked nothing,
+ * which is a different statement from having checked and found the rules to
+ * match.
+ */
+export type LinkageRuleSetCitationVerdict =
+  "consistent" | "contradicted" | "unchecked";
+
+/**
+ * A verdict per citation half. The two halves are decided independently, for the
+ * reason they are named and versioned independently: a document can truthfully
+ * cite the built-in field set while its keys are not the built-in key set.
+ */
+export interface LinkageRuleSetCitationVerdicts {
+  /** The verdict on the set the declared linkage fields are cited to. */
+  fieldSet: LinkageRuleSetCitationVerdict;
+  /** The verdict on the set the declared linkage keys are cited to. */
+  keySet: LinkageRuleSetCitationVerdict;
+}
+
+/** Whether two set identities name the same set: both the name and the content
+ * version, since a name without its version identifies no fixed content. */
+function namesSameSet(
+  cited: LinkageSetIdentity,
+  shipped: LinkageSetIdentity,
+): boolean {
+  return cited.name === shipped.name && cited.version === shipped.version;
+}
+
+/**
+ * This build's verdict on `citation`, the rule set `rules` are cited to, one half
+ * at a time.
+ *
+ * Total over a citation that exists: a caller renders or records a verdict
+ * exactly where it has a citation to be about, so the absence of one is the
+ * caller's own branch rather than a fourth state here.
+ *
+ * The verdict is the checking build's OWN check, made at the moment it is asked
+ * for and against the sets that build ships. It is not a property of the terms
+ * and not a cross-party agreement: two parties on different builds may reach
+ * different verdicts on one document, since a set one of them ships is a set the
+ * other may not.
+ *
+ * Resolution is per half and by name AND version together, the pattern the web
+ * import path already resolves a citation by: a half naming the shipped set is
+ * compared against that set's own rules, and any other name is `unchecked`.
+ * Nothing here resolves a partner's set name to content -- an unresolvable name
+ * stays unresolvable, carried and caveated rather than guessed at.
+ *
+ * What "drawn from" means is exactly {@link isDrawnFromLinkageRuleSet}'s
+ * answer for that half, so this widens and narrows nothing: a narrowed emission
+ * is `consistent`, while an added, edited, or repeated rule, or a reordered
+ * cascade, is `contradicted`.
+ */
+export function checkLinkageRuleSetCitation(
+  citation: LinkageRuleSetReference,
+  rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
+): LinkageRuleSetCitationVerdicts {
+  const shipped = DEFAULT_LINKAGE_RULE_SET.reference;
+  return {
+    fieldSet: !namesSameSet(citation.fieldSet, shipped.fieldSet)
+      ? "unchecked"
+      : fieldsDrawnFromSet(
+            DEFAULT_LINKAGE_RULE_SET.linkageFields,
+            rules.linkageFields,
+          )
+        ? "consistent"
+        : "contradicted",
+    keySet: !namesSameSet(citation.keySet, shipped.keySet)
+      ? "unchecked"
+      : keysDrawnFromSet(
+            DEFAULT_LINKAGE_RULE_SET.linkageKeys,
+            rules.linkageKeys,
+          )
+        ? "consistent"
+        : "contradicted",
+  };
 }
 
 /**

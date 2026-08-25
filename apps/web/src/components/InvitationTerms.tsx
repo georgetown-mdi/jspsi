@@ -20,9 +20,11 @@ import {
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  LINKAGE_RULE_SET_VERDICT_COPY,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
   UNRECOGNIZED_TRANSFORM_NOTE,
+  distinctLinkageRuleSetVerdicts,
   sanitizeForDisplay,
   summarizeInvitation,
 } from "@psilink/core";
@@ -1337,29 +1339,73 @@ export function InvitationTerms({
             quote -- though each half renders in its own bordered box, which
             confines the misreading.
 
-            The names and versions themselves are true of the terms whoever
-            authored them, so the block renders under every perspective; the
-            caveat attributes them to a partner, so it is gated to `review` like
-            the unverified-identity note above -- `proposing` shows the viewer's
-            own citation, and `accepted` is past the decision the caveat
-            informs. */}
+            Each half's label carries this build's own verdict on it, from the
+            same shared table the caveats come from, so a name psilink resolved
+            and disproved says so at the citation's own prominence rather than
+            under a blanket caveat that nothing had been checked. The marker sits
+            on the first-party label, ahead of the value, for the reason the value
+            is boxed: a crafted name must not be able to manufacture one. One
+            caveat per DISTINCT verdict the two halves reached follows the pair,
+            most severe first, so agreeing halves state their sentence once and
+            differing ones are tied to it by their markers.
+
+            The names, versions, and verdicts are all true of the terms whoever
+            authored them, so the block renders under every perspective. The
+            `unchecked` and `consistent` caveats attribute the citation to a
+            partner, so they are gated to `review` like the unverified-identity
+            note above -- `proposing` shows the viewer's own citation, and
+            `accepted` is past the decision they inform. The `contradicted` caveat
+            is not gated: it is this build's own finding about the document on
+            screen rather than an attribution to anyone, and a false provenance is
+            worth stating to the party about to mint it and to the party reading
+            back what it accepted. */}
           {summary.linkageRuleSet !== undefined && (
             <Term label="Linkage rule set">
               <Stack gap={2}>
-                <Text size="sm">Keys:</Text>
+                <Text size="sm">
+                  Keys (
+                  {
+                    LINKAGE_RULE_SET_VERDICT_COPY[
+                      summary.linkageRuleSet.keySet.verdict
+                    ].marker
+                  }
+                  ):
+                </Text>
                 <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
                   &quot;{summary.linkageRuleSet.keySet.name}&quot;{" "}
                   {summary.linkageRuleSet.keySet.version}
                 </Text>
-                <Text size="sm">Fields:</Text>
+                <Text size="sm">
+                  Fields (
+                  {
+                    LINKAGE_RULE_SET_VERDICT_COPY[
+                      summary.linkageRuleSet.fieldSet.verdict
+                    ].marker
+                  }
+                  ):
+                </Text>
                 <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
                   &quot;{summary.linkageRuleSet.fieldSet.name}&quot;{" "}
                   {summary.linkageRuleSet.fieldSet.version}
                 </Text>
               </Stack>
-              {perspective === "review" && (
-                <Text size="sm">{CONSENT_FACTS.linkageRuleSet.note}</Text>
-              )}
+              {distinctLinkageRuleSetVerdicts(
+                summary.linkageRuleSet.keySet.verdict,
+                summary.linkageRuleSet.fieldSet.verdict,
+              )
+                .filter(
+                  (verdict) =>
+                    verdict === "contradicted" || perspective === "review",
+                )
+                .map((verdict) => (
+                  <Text
+                    key={verdict}
+                    size="sm"
+                    fw={verdict === "contradicted" ? 700 : undefined}
+                  >
+                    {LINKAGE_RULE_SET_VERDICT_COPY[verdict].note}
+                  </Text>
+                ))}
             </Term>
           )}
 

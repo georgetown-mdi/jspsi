@@ -9,7 +9,7 @@ import { createElement } from "react";
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
 
-import { CONSENT_FACTS } from "@psilink/core";
+import { LINKAGE_RULE_SET_VERDICT_COPY } from "@psilink/core";
 
 import { BenchLobby } from "@bench/BenchLobby";
 import { DirectExchangeBench } from "@bench/DirectExchangeBench";
@@ -289,10 +289,15 @@ describe("direct exchange confirm and run", () => {
 
     // The inferred terms cite the built-in rule set, and here the citation is the
     // operator's OWN word: no partner has been contacted, so the acceptor's
-    // partner-attribution caveat must not ride along with the names.
+    // partner-attribution caveat must not ride along with the names. The rules are
+    // inferred from the file and so drawn from the set they cite, which is what
+    // leaves the disproved-citation warning off this preview too.
     expect(app.container.textContent).toContain("Linkage rule set");
     expect(app.container.textContent).not.toContain(
-      CONSENT_FACTS.linkageRuleSet.note,
+      LINKAGE_RULE_SET_VERDICT_COPY.unchecked.note,
+    );
+    expect(app.container.textContent).not.toContain(
+      LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note,
     );
 
     // The two fixed symmetry notices frame the preview.

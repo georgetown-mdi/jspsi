@@ -20,6 +20,7 @@ import {
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
 } from "./config/linkageTerms.js";
+import { checkLinkageRuleSetCitation } from "./defaults/linkageTerms.js";
 import { boundedArray } from "./utils/boundedArray.js";
 
 import type { CanonicalValue } from "./utils/canonical.js";
@@ -63,9 +64,13 @@ import type { Algorithm, AssociationTable } from "./types.js";
  * receipt it has no value to pair with. The same reasoning carries
  * {@link ExchangeRecordGovernance.linkageRuleSet}: absent, it states that the
  * terms cited no named rule set, which is not what an earlier record's silence
- * meant.
+ * meant. So does
+ * {@link ExchangeRecordGovernance.linkageRuleSetVerdict}: a record carrying a
+ * citation and no verdict beside it would read as a citation this party checked
+ * and reached nothing on, where an earlier record's silence meant the writer
+ * ran no check at all.
  */
-export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v3";
+export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v4";
 
 /** The one recognized format version for v1 {@link VerificationKeys}. */
 export const EXCHANGE_KEYS_VERSION = "psilink-exchange-keys/v1";
@@ -293,16 +298,59 @@ export interface RecordLinkageField {
  * owned by the record format (like {@link RecordPayloadColumn}), so a change to
  * the config type cannot silently move this version-frozen on-disk format.
  *
- * Cross-party consistency is the terms' own: two parties that both cite a set are
- * required to cite the same one before any data moves, so their records agree.
- * Where the partner cited none, this is this party's citation of its own terms
- * and the partner's record carries none -- an asymmetry the exchange permits so
- * hand-authored rules can meet a named set. */
+ * Cross-party consistency of the CITATION is the terms' own: two parties that
+ * both cite a set are required to cite the same one before any data moves, so
+ * their records carry the same names. Where the partner cited none, this is this
+ * party's citation of its own terms and the partner's record carries none -- an
+ * asymmetry the exchange permits so hand-authored rules can meet a named set.
+ * The {@link ExchangeRecordGovernance.linkageRuleSetVerdict} beside it carries no
+ * such guarantee: it is this party's own check rather than an agreed term. */
 export interface RecordLinkageRuleSet {
   /** Name and content version of the set the linkage fields were cited to. */
   fieldSet: { name: string; version: string };
   /** Name and content version of the set the linkage keys were cited to. */
   keySet: { name: string; version: string };
+}
+
+/**
+ * The writing party's own verdict on the citation beside it, one half at a time:
+ * whether the linkage fields and keys the agreed terms declare are drawn from the
+ * sets those terms cite them to.
+ *
+ * The record keeps the citation verbatim whatever the verdict says -- rewriting
+ * or dropping a refuted citation would launder the declaring party's claim out of
+ * the artifact an auditor reads -- so this is the row that stops an unqualified
+ * false provenance entering a HIPAA or FERPA disclosure record. It is written by
+ * both parties on the same rule, over each one's own agreed terms: for the
+ * inviting party that is its own citation, and for the accepting party the
+ * inviter's citation as adopted.
+ *
+ * Three properties fix how it is read.
+ *
+ * It is THIS PARTY'S verdict, not a fact about the terms. The check runs against
+ * the rule sets the writing build ships, so two parties on different builds may
+ * write different verdicts for one run and neither is wrong; nothing in the
+ * exchange compares the two.
+ *
+ * The set identity it was checked against is the citation beside it. A
+ * `consistent` or `contradicted` half is reached only where the cited name and
+ * version resolve to a set this build ships, so that half's own name and version
+ * name the set compared against; an `unchecked` half resolved to nothing.
+ *
+ * It changes nothing about the run. The verdict is display and record only: which
+ * fields and keys a run matches on, and what it discloses, are settled by the
+ * declared rules the two parties byte-compare, exactly as they were before any
+ * verdict was written down.
+ *
+ * Structurally the record format's own, like {@link RecordLinkageRuleSet}: the
+ * three values are spelled out here rather than imported from the checker, so a
+ * verdict added to the core union stops compiling against this version-frozen
+ * on-disk format instead of silently entering it. */
+export interface RecordLinkageRuleSetVerdict {
+  /** Verdict on the set the linkage fields were cited to. */
+  fieldSet: "consistent" | "contradicted" | "unchecked";
+  /** Verdict on the set the linkage keys were cited to. */
+  keySet: "consistent" | "contradicted" | "unchecked";
 }
 
 /**
@@ -337,8 +385,14 @@ export interface ExchangeRecordGovernance {
   matchingBasis: RecordLinkageField[];
   /** The named rule set the agreed terms cited, when they cited one; omitted
    * when the terms named no set (their rules were authored rather than drawn
-   * from one), so its absence is a statement rather than a gap. */
+   * from one), so its absence is a statement rather than a gap. Recorded
+   * verbatim, whatever {@link linkageRuleSetVerdict} says about it. */
   linkageRuleSet?: RecordLinkageRuleSet;
+  /** This party's own verdict on that citation, per half. Present exactly when
+   * {@link linkageRuleSet} is, so a citation is never recorded without the
+   * writer's verdict beside it and a verdict never appears with nothing to be
+   * about. */
+  linkageRuleSetVerdict?: RecordLinkageRuleSetVerdict;
   /** The payload columns this party committed as sent for matched records (names
    * and any data-dictionary descriptions) -- the columns the disclosure gate
    * actually transmitted, not a declared dictionary that may under-state them.
@@ -590,8 +644,27 @@ const RecordLinkageRuleSetSchema: z.ZodType<RecordLinkageRuleSet> = z.object({
   keySet: RecordLinkageSetIdentitySchema,
 });
 
-const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> =
+// Pinned to the closed set of verdicts, the same asymmetry `algorithm` carries
+// against its open sibling `RecordLinkageField.type`: a set name or a content
+// version is descriptive text a frozen-log reader passes through, while a verdict
+// is meaning-bearing -- it states what the writer checked and what it found, and a
+// reader that admitted an unrecognized one would report a provenance claim it
+// cannot interpret. The version literal already refuses a future format, so an
+// unknown verdict is refused here rather than read.
+const RecordLinkageRuleSetVerdictValueSchema = z.enum([
+  "consistent",
+  "contradicted",
+  "unchecked",
+]);
+
+const RecordLinkageRuleSetVerdictSchema: z.ZodType<RecordLinkageRuleSetVerdict> =
   z.object({
+    fieldSet: RecordLinkageRuleSetVerdictValueSchema,
+    keySet: RecordLinkageRuleSetVerdictValueSchema,
+  });
+
+const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> = z
+  .object({
     // algorithm stays pinned to the closed enum even though the sibling
     // RecordLinkageField.type is an open string -- a deliberate asymmetry, not an
     // oversight. type is open descriptive taxonomy: a newer PII category does not
@@ -615,6 +688,7 @@ const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> =
       `matchingBasis must not exceed ${MAX_LINKAGE_ENTRIES} entries`,
     ),
     linkageRuleSet: RecordLinkageRuleSetSchema.optional(),
+    linkageRuleSetVerdict: RecordLinkageRuleSetVerdictSchema.optional(),
     payloadSent: boundedArray(
       RecordPayloadColumnSchema,
       MAX_PAYLOAD_ENTRIES,
@@ -625,7 +699,22 @@ const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> =
       MAX_PAYLOAD_ENTRIES,
       `payloadReceived must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
     ),
-  });
+  })
+  // The citation and the verdict travel together or not at all. A citation with
+  // no verdict beside it is the shape a reader would otherwise have to guess
+  // about -- silence where a v4 writer always states one -- and a verdict with no
+  // citation is a judgment about nothing. Enforced rather than documented,
+  // because both the builder and the untrusted-record reader parse through here.
+  .refine(
+    (governance) =>
+      (governance.linkageRuleSet === undefined) ===
+      (governance.linkageRuleSetVerdict === undefined),
+    {
+      message:
+        "linkageRuleSetVerdict must be present exactly when linkageRuleSet is",
+      path: ["linkageRuleSetVerdict"],
+    },
+  );
 
 const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
   version: z.literal(EXCHANGE_RECORD_VERSION),
@@ -756,7 +845,9 @@ export interface BuiltExchangeRecord {
  * come from this party's agreed terms: the first two are cross-party validated
  * (so they equal the partner's), the citation is validated between two parties
  * that both carry one, and the matching basis is the linkage fields the keys
- * reference.
+ * reference. The citation's VERDICT is not drawn from the terms at all -- it is
+ * computed here, from those same terms against the rule sets this build ships,
+ * so it is this party's own statement rather than an agreed one.
  *
  * The payload column SETS, however, are read from the COMMITTED payloads
  * (`localPayloadSent` / `partnerPayloadReceived`), not from the optional
@@ -828,6 +919,39 @@ function governanceFromTerms(
     a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
   );
 
+  // The citation and this party's verdict on it, both in the record format's own
+  // shape. The citation is copied verbatim and the verdict written BESIDE it,
+  // never in place of it: dropping or rewriting a citation this build has
+  // disproved would launder the declaring party's claim out of the artifact an
+  // auditor reads and leave the record silent about a claim that was made, where
+  // annotating it records both the claim and what this party found. Computed from
+  // the same terms the citation is copied from, so both parties reach a verdict on
+  // one rule -- the inviter over its own citation, the acceptor over the inviter's
+  // as adopted.
+  const citation = terms.linkageRuleSet;
+  const citedRuleSet: Pick<
+    ExchangeRecordGovernance,
+    "linkageRuleSet" | "linkageRuleSetVerdict"
+  > =
+    citation === undefined
+      ? {}
+      : {
+          // Copied field by field rather than by reference, so the record holds
+          // its own value: a later edit to the config type cannot reach this
+          // version-frozen on-disk format through a shared object.
+          linkageRuleSet: {
+            fieldSet: {
+              name: citation.fieldSet.name,
+              version: citation.fieldSet.version,
+            },
+            keySet: {
+              name: citation.keySet.name,
+              version: citation.keySet.version,
+            },
+          },
+          linkageRuleSetVerdict: checkLinkageRuleSetCitation(citation, terms),
+        };
+
   return {
     algorithm: terms.algorithm,
     ...(terms.legalAgreement !== undefined
@@ -840,23 +964,7 @@ function governanceFromTerms(
         }
       : {}),
     matchingBasis,
-    // Copied field by field rather than by reference, so the record holds its own
-    // value in the record format's own shape: a later edit to the config type
-    // cannot reach this frozen on-disk format through a shared object.
-    ...(terms.linkageRuleSet !== undefined
-      ? {
-          linkageRuleSet: {
-            fieldSet: {
-              name: terms.linkageRuleSet.fieldSet.name,
-              version: terms.linkageRuleSet.fieldSet.version,
-            },
-            keySet: {
-              name: terms.linkageRuleSet.keySet.name,
-              version: terms.linkageRuleSet.keySet.version,
-            },
-          },
-        }
-      : {}),
+    ...citedRuleSet,
     payloadSent: describeCommitted(
       localPayloadSent.columns,
       terms.payload?.send,

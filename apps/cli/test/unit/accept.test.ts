@@ -16,6 +16,7 @@ import {
   encodeInvitation,
   getDefaultLinkageTerms,
   getLogger,
+  LINKAGE_RULE_SET_VERDICT_COPY,
   MAX_ENDPOINT_HOST_LENGTH,
   parseExchangeSpec,
   reconcileReceivedPayload,
@@ -2122,9 +2123,9 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
 });
 
 test("displayInvitation: the rule-set citation reads as the partner's word, and is absent when none is cited", () => {
-  // The citation is the inviting party's own claim about its rules, so it carries
-  // the trust-contingent marker and the shared caveat rather than reading as a
-  // provenance psilink vouched for. An invitation citing nothing prints no line:
+  // The citation is the inviting party's own claim about its rules, so the block
+  // carries the trust-contingent marker rather than reading as a provenance
+  // psilink vouched for. An invitation citing nothing prints no line:
   // hand-authored rules have no citation, and inventing one would attribute them.
   const log = getLogger("accept-display-rule-set-test");
   log.setLevel("silent");
@@ -2140,9 +2141,8 @@ test("displayInvitation: the rule-set citation reads as the partner's word, and 
     },
   });
   expect(cited).toContain("linkage rule set (your partner's word):");
-  expect(cited).toContain('\n    keys: "hmis-keys" 2.3.0');
-  expect(cited).toContain('\n    fields: "baseline-pii" 1.0.0');
-  expect(cited).toContain(CONSENT_FACTS.linkageRuleSet.note);
+  expect(cited).toContain('"hmis-keys" 2.3.0');
+  expect(cited).toContain('"baseline-pii" 1.0.0');
 
   // The name is partner-controlled free text and the version beside it is not, so
   // the quoting is what keeps the boundary between them readable: a name ending in
@@ -2157,14 +2157,136 @@ test("displayInvitation: the rule-set citation reads as the partner's word, and 
       },
     },
   });
-  expect(spacedName).toContain('\n    keys: "hmis-keys 9.9.9" 2.3.0');
+  expect(spacedName).toContain('"hmis-keys 9.9.9" 2.3.0');
 
   const uncited = renderDisplayInvitation(log, {
     ...base,
     linkageTerms: { ...base.linkageTerms, linkageRuleSet: undefined },
   });
   expect(uncited).not.toContain("linkage rule set");
-  expect(uncited).not.toContain(CONSENT_FACTS.linkageRuleSet.note);
+  for (const verdict of ["consistent", "contradicted", "unchecked"] as const)
+    expect(uncited).not.toContain(LINKAGE_RULE_SET_VERDICT_COPY[verdict].note);
+});
+
+test("displayInvitation: each citation half carries this build's own verdict on it", () => {
+  const log = getLogger("accept-display-rule-set-verdict-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+
+  // The default terms ARE the built-in sets, narrowed by nothing, and they cite
+  // them: both halves resolve and match.
+  const truthful = renderDisplayInvitation(log, base);
+  expect(truthful).toContain(
+    `keys (${LINKAGE_RULE_SET_VERDICT_COPY.consistent.marker}): "hmis-keys"`,
+  );
+  expect(truthful).toContain(
+    `fields (${LINKAGE_RULE_SET_VERDICT_COPY.consistent.marker}): "baseline-pii"`,
+  );
+  // One caveat for two agreeing halves, rather than the same sentence twice.
+  expect(
+    truthful.split(LINKAGE_RULE_SET_VERDICT_COPY.consistent.note).length - 1,
+  ).toBe(1);
+  expect(truthful).not.toContain(
+    LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note,
+  );
+
+  // The same citation over a REORDERED cascade: key order is cascade order, so
+  // the reordered keys are provably not the set the citation names, while the
+  // untouched fields still are. The halves are decided independently.
+  const reordered = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      linkageKeys: [...base.linkageTerms.linkageKeys].reverse(),
+    },
+  });
+  expect(reordered).toContain(
+    `keys (${LINKAGE_RULE_SET_VERDICT_COPY.contradicted.marker}): "hmis-keys"`,
+  );
+  expect(reordered).toContain(
+    `fields (${LINKAGE_RULE_SET_VERDICT_COPY.consistent.marker}): "baseline-pii"`,
+  );
+  expect(reordered).toContain(LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note);
+  expect(reordered).toContain(LINKAGE_RULE_SET_VERDICT_COPY.consistent.note);
+  // Most severe first, so a reader who stops after one line has read the warning.
+  expect(
+    reordered.indexOf(LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note),
+  ).toBeLessThan(
+    reordered.indexOf(LINKAGE_RULE_SET_VERDICT_COPY.consistent.note),
+  );
+
+  // A name this build does not ship resolves to nothing, so nothing is compared:
+  // unchecked, never contradicted, whatever the declared rules are.
+  const foreign = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      linkageKeys: [...base.linkageTerms.linkageKeys].reverse(),
+      linkageRuleSet: {
+        fieldSet: { name: "county-pii", version: "3.1.0" },
+        keySet: { name: "county-keys", version: "3.1.0" },
+      },
+    },
+  });
+  expect(foreign).toContain(
+    `keys (${LINKAGE_RULE_SET_VERDICT_COPY.unchecked.marker}): "county-keys"`,
+  );
+  expect(foreign).toContain(
+    `fields (${LINKAGE_RULE_SET_VERDICT_COPY.unchecked.marker}): "county-pii"`,
+  );
+  expect(foreign).toContain(LINKAGE_RULE_SET_VERDICT_COPY.unchecked.note);
+  expect(foreign).not.toContain(
+    LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note,
+  );
+});
+
+test("displayInvitation: a disproved citation is repeated in the block above the prompt", () => {
+  // The terms run well past a screen, so the decision block is where an operator
+  // answering the prompt is looking. A citation this build resolved and disproved
+  // is repeated there; the other two verdicts stay with the citation itself.
+  const log = getLogger("accept-display-rule-set-decision-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  const contradicted = {
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      linkageKeys: [...base.linkageTerms.linkageKeys].reverse(),
+    },
+  };
+  const rendered = renderDisplayInvitation(log, contradicted);
+  // Three times on a prompting render: once beside the citation, and once in each
+  // of the decision block's two printings (heading the terms, and again at the
+  // prompt the terms have scrolled away from).
+  expect(
+    rendered.split(LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note).length - 1,
+  ).toBe(3);
+  // The repeated block carries the citation whole -- both halves under their own
+  // markers, each name behind a fixed first-party label -- so an operator reads
+  // WHICH name is disproved. Only the disproved caveat is repeated with it.
+  const decisionLines: string[] = [];
+  logDecisionFacts(
+    (line) => decisionLines.push(line),
+    summarizeInvitation(contradicted),
+    undefined,
+  );
+  const decision = decisionLines.join("\n");
+  expect(decision).toContain(
+    `keys (${LINKAGE_RULE_SET_VERDICT_COPY.contradicted.marker}): "hmis-keys"`,
+  );
+  expect(decision).toContain(
+    `fields (${LINKAGE_RULE_SET_VERDICT_COPY.consistent.marker}): "baseline-pii"`,
+  );
+  expect(decision).toContain(LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note);
+  expect(decision).not.toContain(LINKAGE_RULE_SET_VERDICT_COPY.consistent.note);
+
+  const truthfulLines: string[] = [];
+  logDecisionFacts(
+    (line) => truthfulLines.push(line),
+    summarizeInvitation(base),
+    undefined,
+  );
+  expect(truthfulLines.join("\n")).not.toContain("linkage rule set");
 });
 
 test("displayInvitation: the received-columns marker follows what the invitation carried, not what it declared", () => {
