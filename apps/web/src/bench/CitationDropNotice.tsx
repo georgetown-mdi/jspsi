@@ -16,8 +16,8 @@ export const CITATION_DROP_TITLE =
  * One component for the two steps that show it -- Matching keys, where the edit
  * that costs the citation is made, and Review & create, where the terms are
  * confirmed -- so an operator who imports in one and creates from the other
- * cannot meet two wordings of the same fact, or miss it entirely by not opening
- * the tab it used to live in alone.
+ * cannot meet two wordings of the same fact, and one who works through either
+ * step alone still meets it once.
  *
  * It blocks nothing: dropping the citation is the correct outcome, since
  * re-emitting it would claim a provenance the rules do not have, so the operator

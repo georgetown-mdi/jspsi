@@ -69,14 +69,28 @@ describe("linkageRuleSetVerdictNote", () => {
     expect(author).toContain("yours to correct");
   });
 
-  test("falls back to the recipient sentence where a verdict has no author reading", () => {
+  test("withholds the caveat where a verdict has no author reading", () => {
     // The other two caveats attribute the citation to a partner, so the surfaces
     // showing a viewer its own citation withhold them rather than rewording
     // them; nothing here invents a second sentence for them.
     for (const verdict of ["consistent", "unchecked"] as const)
-      expect(linkageRuleSetVerdictNote(verdict, "citing-party")).toBe(
-        LINKAGE_RULE_SET_VERDICT_COPY[verdict].note,
-      );
+      expect(
+        linkageRuleSetVerdictNote(verdict, "citing-party"),
+      ).toBeUndefined();
+  });
+
+  test("never reads a partner-attributed sentence back to the citing party", () => {
+    // The misattribution this pins is a fallback: handing the party that wrote
+    // the citation the recipient's copy, which tells them their own declaration
+    // is their partner's word. Over the whole union rather than the two verdicts
+    // withheld today, so one that later gains an author reading is held to the
+    // same rule.
+    for (const verdict of ALL_VERDICTS) {
+      const citingParty = linkageRuleSetVerdictNote(verdict, "citing-party");
+      if (citingParty === undefined) continue;
+      expect(citingParty).not.toBe(LINKAGE_RULE_SET_VERDICT_COPY[verdict].note);
+      expect(citingParty).not.toContain("Your partner");
+    }
   });
 });
 

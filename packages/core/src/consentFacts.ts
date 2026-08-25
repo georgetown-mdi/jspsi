@@ -516,7 +516,8 @@ const CONTRADICTED_RULES_GOVERN =
  *
  * Each `note` addresses the party the citation is shown TO. A surface whose
  * reader wrote the citation reads {@link linkageRuleSetVerdictNote} instead,
- * which swaps in the remedy that reader can act on.
+ * which swaps in the remedy that reader can act on and withholds the sentences
+ * that have none rather than attributing the citation to the wrong party.
  *
  * Fixed first-party copy throughout -- no set name, version, or other
  * partner-controlled value reaches any of it -- so a surface renders it verbatim.
@@ -611,9 +612,8 @@ const LINKAGE_RULE_SET_CITING_PARTY_NOTES: Partial<
 };
 
 /**
- * The caveat `verdict` carries for `reader`: {@link LINKAGE_RULE_SET_VERDICT_COPY}'s
- * own sentence for the party the citation was made to, and the citing party's
- * substitute where one exists.
+ * The caveat `verdict` carries for a reader the citation was made TO:
+ * {@link LINKAGE_RULE_SET_VERDICT_COPY}'s own sentence, which every verdict has.
  *
  * The selection lives here rather than in a renderer for the reason the copy
  * does. A surface picking between two sentences inline is a second place the
@@ -623,11 +623,30 @@ const LINKAGE_RULE_SET_CITING_PARTY_NOTES: Partial<
  */
 export function linkageRuleSetVerdictNote(
   verdict: LinkageRuleSetCitationVerdict,
+  reader: "recipient",
+): string;
+/**
+ * The caveat `verdict` carries for a reader that may have WRITTEN the citation:
+ * {@link LINKAGE_RULE_SET_CITING_PARTY_NOTES}'s substitute where the verdict has
+ * one, the recipient's sentence for a reader that is not the citing party, and
+ * `undefined` where a citing party has none.
+ *
+ * The `undefined` is a withholding rather than a gap: the caveats with no
+ * substitute attribute the citation to a partner, so read back to the party that
+ * wrote it they name the wrong author of its own terms. A surface renders nothing
+ * there instead -- rewording is not this function's to do, since each reader's
+ * sentence is copy, written once beside the one it stands in for.
+ */
+export function linkageRuleSetVerdictNote(
+  verdict: LinkageRuleSetCitationVerdict,
   reader: LinkageRuleSetVerdictReader,
-): string {
+): string | undefined;
+export function linkageRuleSetVerdictNote(
+  verdict: LinkageRuleSetCitationVerdict,
+  reader: LinkageRuleSetVerdictReader,
+): string | undefined {
   return reader === "citing-party"
-    ? (LINKAGE_RULE_SET_CITING_PARTY_NOTES[verdict] ??
-        LINKAGE_RULE_SET_VERDICT_COPY[verdict].note)
+    ? LINKAGE_RULE_SET_CITING_PARTY_NOTES[verdict]
     : LINKAGE_RULE_SET_VERDICT_COPY[verdict].note;
 }
 
