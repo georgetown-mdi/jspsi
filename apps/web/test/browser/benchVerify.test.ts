@@ -132,6 +132,16 @@ function csvFile(name: string, content: string): File {
 
 const app = createAppMount();
 
+// A chosen-file card renders beside the dropzone that took the file, under the
+// parent the two share, so a settle signal is read from that region alone: a
+// card some other dropzone holds says nothing about this upload.
+function fileCardRegion(input: Element): Element {
+  const region = input.parentElement?.closest("[aria-label]")?.parentElement;
+  if (region === null || region === undefined)
+    throw new Error("no labelled dropzone encloses this file input");
+  return region;
+}
+
 // userEvent.upload resolves once the change event is dispatched, but the page
 // parses a dropped JSON document across an await and only then writes its state
 // and bumps the run token a verify reads to decide whether its own inputs still
@@ -140,22 +150,49 @@ const app = createAppMount();
 // none at all; a record or keys parse landing that late also clears the
 // re-supply and signed-leg inputs loaded after it. The chosen-file card commits
 // in the same pass as the handler's closing bump, so waiting for that card
-// settles the upload. The card carries the file's name, so two uploads of one
-// name to one dropzone are a single signal.
-async function uploadFile(input: HTMLElement, file: File): Promise<void> {
+// settles the upload -- as long as the card the wait sees is one this upload
+// produced, which the check below is what holds.
+//
+// The input is polled for rather than read once because a disclosure panel's
+// inputs enter the DOM on a commit Mantine's Collapse defers, which the toggle
+// click that opened the panel does not wait for.
+async function uploadFile(
+  findInput: () => Element | null,
+  file: File,
+): Promise<void> {
+  await expect
+    .poll(() => findInput() !== null, {
+      message: `no file input to take '${file.name}' appeared`,
+    })
+    .toBe(true);
+  const input = findInput();
+  if (input === null)
+    throw new Error(`the file input for '${file.name}' left the DOM`);
+  // Resolved per call: a parse alert appearing or clearing re-indexes the
+  // dropzone among its siblings, so a region locator built once goes stale.
+  const cardsNamingFile = () =>
+    page.elementLocator(fileCardRegion(input)).getByText(file.name).elements()
+      .length;
+  if (cardsNamingFile() > 0)
+    throw new Error(
+      `re-uploading '${file.name}' would make the settle-wait vacuous; use a distinct filename`,
+    );
   await userEvent.upload(page.elementLocator(input), file);
-  await expect.element(page.getByText(file.name)).toBeInTheDocument();
+  await expect
+    .poll(cardsNamingFile, {
+      message: `no chosen-file card named '${file.name}' after the upload`,
+    })
+    .toBeGreaterThan(0);
 }
 
 // The Mantine Dropzone renders a hidden file input; the page's dropzones appear
 // in DOM order (record, keys, then the two re-supply CSVs once the section is
-// open). A disclosure panel's inputs enter the DOM on a commit Mantine's
-// Collapse defers, which the toggle click does not wait for, so poll for the nth
-// input rather than reading the list once.
+// open).
 async function uploadAt(index: number, file: File): Promise<void> {
-  const inputs = () => document.querySelectorAll('input[type="file"]');
-  await expect.poll(() => inputs().length).toBeGreaterThan(index);
-  await uploadFile(inputs()[index] as HTMLElement, file);
+  await uploadFile(() => {
+    const inputs = document.querySelectorAll('input[type="file"]');
+    return index < inputs.length ? inputs[index] : null;
+  }, file);
 }
 
 // The signed leg's dropzones are addressed by their label rather than by index:
@@ -163,10 +200,10 @@ async function uploadAt(index: number, file: File): Promise<void> {
 // and Mantine's Collapse decides that from motion preference and environment
 // (see DisclosureSection).
 async function uploadTo(label: string, file: File): Promise<void> {
-  const input = () =>
-    document.querySelector(`[aria-label="${label}"] input[type="file"]`);
-  await expect.poll(() => input() !== null).toBe(true);
-  await uploadFile(input() as HTMLElement, file);
+  await uploadFile(
+    () => document.querySelector(`[aria-label="${label}"] input[type="file"]`),
+    file,
+  );
 }
 
 // The page mounts its dropzones after the first render; wait for the heading so
@@ -498,8 +535,13 @@ describe("verify receipt bench", () => {
     await expect
       .element(page.getByRole("button", { name: "Verify" }))
       .toBeDisabled();
-    // A good record clears the alert and re-enables Verify.
-    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    // A good record clears the alert and re-enables Verify. Its name differs
+    // from the malformed file's so that the card this upload commits is a
+    // signal of its own (see uploadFile).
+    await uploadAt(
+      0,
+      jsonFile("rec-fixed.json", serializeExchangeRecord(record)),
+    );
     await expect
       .element(page.getByRole("button", { name: "Verify" }))
       .toBeEnabled();
