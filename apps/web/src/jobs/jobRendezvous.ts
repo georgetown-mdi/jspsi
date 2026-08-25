@@ -40,7 +40,7 @@ export const JOB_RENDEZVOUS_DIR_ENV = "JOB_RENDEZVOUS_DIR";
  * single-mount console into a split one. Setting it alone provisions no split
  * either: a split takes both legs from their own variables, so an inbound leg that
  * arrived through the data-root fallback is refused (see
- * {@link rendezvousSplitProblem}) rather than synced to the partner.
+ * {@link rendezvousSplitFaults}) rather than synced to the partner.
  *
  * Server-side configuration, never a browser-sent path.
  */
@@ -119,6 +119,15 @@ export interface JobRendezvousProvisioning {
   /** The advisory locator for {@link outboundDir}, on a split appliance. */
   outboundLocator?: string;
   problem?: string;
+  /**
+   * Why the split pair's containment refusal was decided on the configured paths
+   * alone: the console could not read one leg's real path, so a symlink joining
+   * the two legs could not be seen. A warning rather than a refusal -- a
+   * filesystem that cannot answer is not a reason to stop an exchange whose legs
+   * may well be distinct -- and logged at startup beside {@link problem}, which it
+   * qualifies rather than replaces.
+   */
+  unresolvedLegWarning?: string;
 }
 
 /** The inbound (or single shared) rendezvous mount together with WHERE it came
@@ -248,16 +257,122 @@ function containsOrEqual(parent: string, child: string): boolean {
 }
 
 /**
- * Why a split-provisioned appliance cannot run a filedrop exchange, or undefined
- * when the pair is coherent. Each case is a refusal with the variable to set named
- * in it, because none of them is a layout choice the operator can be left to make:
+ * A rendezvous leg in every form the split containment refusal compares it in: the
+ * configured path, lexically resolved, plus the real path symlinks resolve it to
+ * when that differs. Both are held because either can be the form that overlaps the
+ * other leg, and holding the configured path unconditionally is what keeps a leg
+ * whose real path the filesystem will not give up under the lexical test.
+ */
+interface RendezvousLegPaths {
+  forms: Array<string>;
+  /** False when a path component could not be READ (as opposed to not being
+   * there), so {@link forms} carries the configured path alone. */
+  canonicalized: boolean;
+}
+
+/** Whether a filesystem error says a path component is simply not there, as
+ * opposed to one the process could not read. */
+function isMissingPathError(error: unknown): boolean {
+  if (!(error instanceof Error) || !("code" in error)) return false;
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+/**
+ * Resolve a rendezvous leg to the forms {@link legsShareADirectory} compares.
  *
- * - An outbound leg beside an inbound one that nobody named -- the data-root
- *   fallback resolves on every console that runs at all, so an operator who sets
- *   only the outbound variable, or mistypes the inbound one, would otherwise get a
- *   split whose partner-synced INBOUND folder is the data root, holding every job
- *   workdir's config, key, input, and results. A split takes both legs from their
- *   own variables; the fallback stays what it is for an unsplit appliance.
+ * The real path is read through the leg's nearest EXISTING ancestor with the
+ * missing tail re-appended, so a mount the operator has not created yet is still
+ * compared through a symlinked parent: a component that does not exist cannot be
+ * the symlink that joins the two legs, while its parent can. A component the
+ * process cannot read (a permission or I/O failure on the way to the mount) is a
+ * different matter -- the symlink could be exactly there -- so the leg falls back
+ * to its configured path alone and says so through `canonicalized`, because a
+ * filesystem that cannot answer must not become a refusal of its own.
+ */
+function resolveLegPaths(dir: string): RendezvousLegPaths {
+  const resolved = path.resolve(dir);
+  const missingTail: Array<string> = [];
+  let current = resolved;
+  for (;;) {
+    let real: string;
+    try {
+      real = fs.realpathSync(current);
+    } catch (error) {
+      const parent = path.dirname(current);
+      if (!isMissingPathError(error) || parent === current)
+        return { forms: [resolved], canonicalized: false };
+      missingTail.unshift(path.basename(current));
+      current = parent;
+      continue;
+    }
+    const canonical =
+      missingTail.length === 0 ? real : path.join(real, ...missingTail);
+    return { forms: [...new Set([resolved, canonical])], canonicalized: true };
+  }
+}
+
+/**
+ * Whether two legs are one directory, or one is nested inside the other, in ANY
+ * pairing of the forms they resolve to. Comparing across forms is what carries the
+ * refusal to a symlinked leg without letting an unresolvable one out of it: the
+ * configured paths are always among the forms compared, so the lexical verdict
+ * still stands on its own.
+ */
+function legsShareADirectory(
+  first: RendezvousLegPaths,
+  second: RendezvousLegPaths,
+): boolean {
+  return first.forms.some((firstForm) =>
+    second.forms.some(
+      (secondForm) =>
+        containsOrEqual(firstForm, secondForm) ||
+        containsOrEqual(secondForm, firstForm),
+    ),
+  );
+}
+
+/**
+ * The warning for a pair compared without one or both legs' real paths, naming the
+ * variable(s) whose mounts could not be resolved, or undefined when both resolved.
+ * It reports a check that ran narrower than it means to rather than a fault in the
+ * operator's layout, so it names the recovery for the resolution itself.
+ *
+ * A single unresolved leg is worded narrower than a pair of them: the other leg's
+ * real path still took part in the comparison, so only a symlink sitting on the
+ * unresolved side would go uncaught, not a symlink anywhere in the pair.
+ */
+function describeUnresolvedLegs(
+  inbound: RendezvousLegPaths,
+  outbound: RendezvousLegPaths,
+): string | undefined {
+  if (inbound.canonicalized && outbound.canonicalized) return undefined;
+  const recovery =
+    "Give the console read access to every folder on the way to the mount " +
+    "and restart the appliance.";
+  if (!inbound.canonicalized && !outbound.canonicalized)
+    return (
+      `The real path of ${JOB_RENDEZVOUS_DIR_ENV} and ${JOB_RENDEZVOUS_OUTBOUND_DIR_ENV} ` +
+      "could not be read, so the inbound and outbound rendezvous directories " +
+      "were compared as configured and a symlink making them one directory " +
+      `would not be caught. ${recovery}`
+    );
+  const [unresolvedVar, unresolvedLeg, resolvedLeg] = inbound.canonicalized
+    ? [JOB_RENDEZVOUS_OUTBOUND_DIR_ENV, "outbound", "inbound"]
+    : [JOB_RENDEZVOUS_DIR_ENV, "inbound", "outbound"];
+  return (
+    `The real path of ${unresolvedVar} could not be read, so the ` +
+    `${unresolvedLeg} rendezvous directory was compared only as configured; ` +
+    `the ${resolvedLeg} leg's real path still applied, so only a symlink on ` +
+    `the ${unresolvedLeg} side would go uncaught. ${recovery}`
+  );
+}
+
+/**
+ * Why a split pair with both legs of its own cannot run a filedrop exchange, or
+ * undefined when it is coherent. The half-provisioned case is decided before this,
+ * where the legs are not yet a pair.
+ *
  * - Two legs that are one directory, or one nested inside the other, would have
  *   this party read its own writes as the partner's. Core's `pathsResolveToSameDir`
  *   refine catches only textual same-directory equality on the composed config, so
@@ -267,27 +382,14 @@ function containsOrEqual(parent: string, child: string): boolean {
  *   core refuses a filedrop endpoint whose halves resolve alike. Reporting that here
  *   is what turns core's refusal at mint -- with nothing an operator can act on --
  *   into the name variable to set.
- *
- * The containment test is lexical over the resolved paths, exactly as the preflight
- * overlap warnings are: a symlink that makes two distinct paths the same directory
- * is not caught here, and the exchange's own entry guard remains the backstop.
- *
- * @internal exported for testing
  */
-export function rendezvousSplitProblem(
+function splitPairProblem(
   provisioning: JobRendezvousProvisioning,
-  inboundDirFromOwnVariable: boolean,
+  inbound: RendezvousLegPaths,
+  outbound: RendezvousLegPaths,
 ): string | undefined {
-  const { dir, outboundDir, locator, outboundLocator } = provisioning;
-  if (outboundDir === undefined) return undefined;
-  if (dir === undefined || !inboundDirFromOwnVariable)
-    return (
-      `${JOB_RENDEZVOUS_OUTBOUND_DIR_ENV} is set but ${JOB_RENDEZVOUS_DIR_ENV} ` +
-      "is not, so this appliance has only one leg of a split rendezvous. Set " +
-      `${JOB_RENDEZVOUS_DIR_ENV} to the folder your partner writes into and ` +
-      "restart the appliance."
-    );
-  if (containsOrEqual(dir, outboundDir) || containsOrEqual(outboundDir, dir))
+  const { locator, outboundLocator } = provisioning;
+  if (legsShareADirectory(inbound, outbound))
     return (
       "The inbound and outbound rendezvous directories are the same directory, " +
       "or one is inside the other, so this appliance would read its own writes " +
@@ -311,10 +413,68 @@ export function rendezvousSplitProblem(
   return undefined;
 }
 
+/** What a split-provisioned appliance's two mounts are faulted for: the refusal
+ * that stops every filedrop exchange, and the warning that the containment half of
+ * it was decided without a leg's real path. Either or both may be absent. */
+export interface RendezvousSplitFaults {
+  problem?: string;
+  unresolvedLegWarning?: string;
+}
+
+/**
+ * Fault a split-provisioned appliance's rendezvous pair, or return nothing where
+ * there is no split or the pair is coherent. A `problem` is a refusal with the
+ * variable to set named in it, because none of the faults is a layout choice the
+ * operator can be left to make -- the pair faults {@link splitPairProblem} decides,
+ * and, first, an outbound leg beside an inbound one that nobody named: the
+ * data-root fallback resolves on every console that runs at all, so an operator who
+ * sets only the outbound variable, or mistypes the inbound one, would otherwise get
+ * a split whose partner-synced INBOUND folder is the data root, holding every job
+ * workdir's config, key, input, and results. A split takes both legs from their own
+ * variables; the fallback stays what it is for an unsplit appliance.
+ *
+ * The containment half is decided over the configured paths AND the real paths
+ * symlinks resolve them to (see {@link resolveLegPaths}), so an outbound leg
+ * symlinked onto the inbound one meets the same refusal a lexically nested one
+ * does. It is the inbound leg the partner writes, and a pair provisioned as two
+ * folders that silently reorients onto one is what the refusal exists for, however
+ * the reorientation is spelled. A leg whose real path cannot be READ narrows the
+ * comparison back to the configured paths and reports `unresolvedLegWarning`, never
+ * a refusal of its own. The paths are read once, so a symlink repointed while the
+ * appliance runs is not seen; the exchange's own entry guard remains the backstop.
+ *
+ * @internal exported for testing
+ */
+export function rendezvousSplitFaults(
+  provisioning: JobRendezvousProvisioning,
+  inboundDirFromOwnVariable: boolean,
+): RendezvousSplitFaults {
+  const { dir, outboundDir } = provisioning;
+  if (outboundDir === undefined) return {};
+  if (dir === undefined || !inboundDirFromOwnVariable)
+    return {
+      problem:
+        `${JOB_RENDEZVOUS_OUTBOUND_DIR_ENV} is set but ${JOB_RENDEZVOUS_DIR_ENV} ` +
+        "is not, so this appliance has only one leg of a split rendezvous. Set " +
+        `${JOB_RENDEZVOUS_DIR_ENV} to the folder your partner writes into and ` +
+        "restart the appliance.",
+    };
+  const inbound = resolveLegPaths(dir);
+  const outbound = resolveLegPaths(outboundDir);
+  const faults: RendezvousSplitFaults = {};
+  const unresolvedLegWarning = describeUnresolvedLegs(inbound, outbound);
+  if (unresolvedLegWarning !== undefined)
+    faults.unresolvedLegWarning = unresolvedLegWarning;
+  const problem = splitPairProblem(provisioning, inbound, outbound);
+  if (problem !== undefined) faults.problem = problem;
+  return faults;
+}
+
 /**
  * Resolve this appliance's whole rendezvous provisioning from the environment: both
  * legs, their names and locators, and the reason a filedrop exchange cannot run when
- * the pair is incoherent. Pure -- the memoized entry point is
+ * the pair is incoherent. Reads the filesystem once per leg of a split, to resolve
+ * each mount's real path for the containment refusal; the memoized entry point is
  * {@link useJobRendezvousProvisioning}.
  */
 export function resolveJobRendezvousProvisioning(
@@ -341,8 +501,13 @@ export function resolveJobRendezvousProvisioning(
   );
   if (outboundLocator !== undefined)
     provisioning.outboundLocator = outboundLocator;
-  const problem = rendezvousSplitProblem(provisioning, fromOwnVariable);
+  const { problem, unresolvedLegWarning } = rendezvousSplitFaults(
+    provisioning,
+    fromOwnVariable,
+  );
   if (problem !== undefined) provisioning.problem = problem;
+  if (unresolvedLegWarning !== undefined)
+    provisioning.unresolvedLegWarning = unresolvedLegWarning;
   return provisioning;
 }
 

@@ -1276,6 +1276,25 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     // The reason names variables, never the appliance's own paths.
     expect(JSON.stringify(body)).not.toContain(root);
   });
+
+  test("a pair that is one directory THROUGH A SYMLINK reports it too", async () => {
+    // The mint side of the containment refusal: the client reads this body to
+    // decide whether a filedrop invitation can be minted at all, so a symlinked
+    // pair has to arrive here as unavailable exactly as a nested one does.
+    const root = enableJobApi();
+    const inbound = path.join(root, "from-partner");
+    const outbound = path.join(root, "to-partner");
+    fs.mkdirSync(inbound, { recursive: true });
+    fs.symlinkSync(inbound, outbound, "dir");
+    vi.stubEnv("JOB_RENDEZVOUS_DIR", inbound);
+    vi.stubEnv("JOB_RENDEZVOUS_OUTBOUND_DIR", outbound);
+    const body = (await (await getRendezvous()).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(body.configured).toBe(false);
+    expect(body.problem).toContain("read its own writes");
+  });
 });
 
 /** GET /api/jobs/slot with a loopback Host, carrying any extra headers. */

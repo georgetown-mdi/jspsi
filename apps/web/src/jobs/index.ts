@@ -62,22 +62,28 @@ export function bootSftpCredentialScratchDir(
 }
 
 /**
- * Log a startup diagnostic when a filedrop exchange cannot run as this appliance is
- * provisioned -- an incoherent split rendezvous pair (see `rendezvousSplitProblem`).
+ * Log the startup diagnostics for this appliance's rendezvous mounts (see
+ * `rendezvousSplitFaults`): the reason a filedrop exchange cannot run as
+ * provisioned -- an incoherent split rendezvous pair -- and the warning that a leg's
+ * real path could not be read, so the pair's containment refusal was decided on the
+ * configured paths alone.
+ *
  * Non-fatal, and deliberately not a refused boot: the fault stops only the filedrop
  * transport, which the console disables with the same sentence, while an SFTP
  * exchange on the same appliance is unaffected. Logged all the same, because an
  * operator who provisioned a second mount and never opened the invite chooser would
- * otherwise learn of it only from a create that refuses. A no-op when the job API is
- * disabled and when the provisioning is coherent.
+ * otherwise learn of it only from a create that refuses. The warning is logged here
+ * and nowhere else: it qualifies a boot-time comparison rather than describing the
+ * layout a job's own preflight looks at. A no-op when the job API is disabled and
+ * when the provisioning is coherent.
  */
-export function warnJobRendezvousProblem(
+export function warnJobRendezvousProvisioning(
   env: NodeJS.ProcessEnv = process.env,
 ): void {
   if (!isJobApiEnabled(readJobApiConfig(env))) return;
-  const { problem } = useJobRendezvousProvisioning(env);
-  if (problem === undefined) return;
-  log.warn(problem);
+  const { problem, unresolvedLegWarning } = useJobRendezvousProvisioning(env);
+  if (unresolvedLegWarning !== undefined) log.warn(unresolvedLegWarning);
+  if (problem !== undefined) log.warn(problem);
 }
 
 /**

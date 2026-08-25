@@ -103,7 +103,7 @@ export class SftpProbeBusyError extends Error {
  * Thrown by {@link JobManager.createJob} when a filedrop intent arrives but this
  * appliance cannot rendezvous one: no rendezvous directory is resolved (neither
  * `JOB_RENDEZVOUS_DIR` nor its `JOB_DATA_ROOT` fallback is set), or the split pair a
- * second mount provisions is incoherent (see `rendezvousSplitProblem`). The console
+ * second mount provisions is incoherent (see `rendezvousSplitFaults`). The console
  * UI disables the filedrop transport in either state and states the remedy, so this
  * is the server-side backstop for an intent that reached the API anyway; the route
  * maps it to a 400.

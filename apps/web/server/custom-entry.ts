@@ -23,7 +23,7 @@ import {
   bootSftpCredentialScratchDir,
   shutdownJobManager,
   warnJobApiProfileMismatch,
-  warnJobRendezvousProblem,
+  warnJobRendezvousProvisioning,
 } from "../src/jobs/index";
 import { ConfigManager } from "../src/utils/serverConfig";
 import { registerServer } from "../src/httpServer";
@@ -73,8 +73,9 @@ warnJobApiProfileMismatch();
 
 // Warn (non-fatal) when the rendezvous mounts cannot run a filedrop exchange as
 // provisioned, so an incoherent split pair is reported at boot rather than only at
-// the invite chooser. SFTP on the same appliance is unaffected.
-warnJobRendezvousProblem();
+// the invite chooser, and when a leg's real path could not be read for the pair's
+// containment check. SFTP on the same appliance is unaffected.
+warnJobRendezvousProvisioning();
 
 // @ts-ignore part of preset
 const listener = server.listen(path ? { path } : { port, host }, (err) => {
