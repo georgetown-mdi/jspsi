@@ -132,21 +132,41 @@ function csvFile(name: string, content: string): File {
 
 const app = createAppMount();
 
+// userEvent.upload resolves once the change event is dispatched, but the page
+// parses a dropped JSON document across an await and only then writes its state
+// and bumps the run token a verify reads to decide whether its own inputs still
+// stand. A Verify clicked inside that window captures a token the parse then
+// supersedes, so the run discards the verdicts it computed and the page renders
+// none at all; a record or keys parse landing that late also clears the
+// re-supply and signed-leg inputs loaded after it. The chosen-file card commits
+// in the same pass as the handler's closing bump, so waiting for that card
+// settles the upload. The card carries the file's name, so two uploads of one
+// name to one dropzone are a single signal.
+async function uploadFile(input: HTMLElement, file: File): Promise<void> {
+  await userEvent.upload(page.elementLocator(input), file);
+  await expect.element(page.getByText(file.name)).toBeInTheDocument();
+}
+
 // The Mantine Dropzone renders a hidden file input; the page's dropzones appear
 // in DOM order (record, keys, then the two re-supply CSVs once the section is
-// open). Upload to the nth file input.
-function fileInputAt(index: number): HTMLElement {
-  const inputs = document.querySelectorAll('input[type="file"]');
-  return inputs[index] as HTMLElement;
+// open). A disclosure panel's inputs enter the DOM on a commit Mantine's
+// Collapse defers, which the toggle click does not wait for, so poll for the nth
+// input rather than reading the list once.
+async function uploadAt(index: number, file: File): Promise<void> {
+  const inputs = () => document.querySelectorAll('input[type="file"]');
+  await expect.poll(() => inputs().length).toBeGreaterThan(index);
+  await uploadFile(inputs()[index] as HTMLElement, file);
 }
 
 // The signed leg's dropzones are addressed by their label rather than by index:
 // how many inputs precede them depends on which disclosure panels are mounted,
 // and Mantine's Collapse decides that from motion preference and environment
 // (see DisclosureSection).
-function fileInputFor(label: string): HTMLElement {
-  const zone = document.querySelector(`[aria-label="${label}"]`);
-  return zone?.querySelector('input[type="file"]') as HTMLElement;
+async function uploadTo(label: string, file: File): Promise<void> {
+  const input = () =>
+    document.querySelector(`[aria-label="${label}"] input[type="file"]`);
+  await expect.poll(() => input() !== null).toBe(true);
+  await uploadFile(input() as HTMLElement, file);
 }
 
 // The page mounts its dropzones after the first render; wait for the heading so
@@ -172,29 +192,23 @@ async function verifyRecordAndSignedRecord(): Promise<{
     await buildSignedFixture(record);
   await mountVerifyBench();
 
-  await userEvent.upload(
-    page.elementLocator(fileInputAt(0)),
-    jsonFile("rec.json", serializeExchangeRecord(record)),
-  );
-  await userEvent.upload(
-    page.elementLocator(fileInputAt(1)),
-    jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
-  );
+  await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+  await uploadAt(1, jsonFile("rec.keys.json", serializeVerificationKeys(keys)));
   await userEvent.click(
     page.getByRole("button", {
       name: "Check the partner's signatures with the dual-signed record",
     }),
   );
-  await userEvent.upload(
-    page.elementLocator(fileInputFor("Dual-signed record")),
+  await uploadTo(
+    "Dual-signed record",
     jsonFile("psilink-receipt-x.json", serializeDualSignedRecord(signed)),
   );
   await userEvent.fill(
     page.getByLabelText("Your partner's certificate fingerprint"),
     partnerFingerprint,
   );
-  await userEvent.upload(
-    page.elementLocator(fileInputFor("Your exported certificate")),
+  await uploadTo(
+    "Your exported certificate",
     jsonFile("certificate.json", serializeCertificate(ourCertificate)),
   );
   await userEvent.click(
@@ -232,20 +246,14 @@ describe("verify receipt bench", () => {
     await mountVerifyBench();
 
     // Load the record and its keys.
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
+    await uploadAt(
+      0,
       jsonFile("psilink-record-x.json", serializeExchangeRecord(record)),
     );
-    await expect
-      .element(page.getByText("psilink-record-x.json"))
-      .toBeInTheDocument();
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(
+      1,
       jsonFile("psilink-record-x.keys.json", serializeVerificationKeys(keys)),
     );
-    await expect
-      .element(page.getByText("psilink-record-x.keys.json"))
-      .toBeInTheDocument();
 
     // A structure-only verify is honestly incomplete (nothing re-supplied).
     await userEvent.click(page.getByRole("button", { name: "Verify" }));
@@ -262,16 +270,8 @@ describe("verify receipt bench", () => {
         name: "Re-supply your files to open the commitments",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(2)),
-      csvFile("input.csv", INPUT_CSV),
-    );
-    await expect.element(page.getByText("input.csv")).toBeInTheDocument();
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(3)),
-      csvFile("result.csv", RESULT_CSV),
-    );
-    await expect.element(page.getByText("result.csv")).toBeInTheDocument();
+    await uploadAt(2, csvFile("input.csv", INPUT_CSV));
+    await uploadAt(3, csvFile("result.csv", RESULT_CSV));
 
     // Paste both parties' linkage terms so the agreed-terms hash is checked too.
     await userEvent.fill(
@@ -314,12 +314,9 @@ describe("verify receipt bench", () => {
     };
     await mountVerifyBench();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(tampered)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(tampered)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
     // Open re-supply, load the input and result so the commitment is opened and
@@ -329,14 +326,8 @@ describe("verify receipt bench", () => {
         name: "Re-supply your files to open the commitments",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(2)),
-      csvFile("input.csv", INPUT_CSV),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(3)),
-      csvFile("result.csv", RESULT_CSV),
-    );
+    await uploadAt(2, csvFile("input.csv", INPUT_CSV));
+    await uploadAt(3, csvFile("result.csv", RESULT_CSV));
     await userEvent.click(
       page.getByRole("button", { name: "Verify with these files" }),
     );
@@ -374,12 +365,9 @@ describe("verify receipt bench", () => {
     });
     await mountVerifyBench();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
     await userEvent.click(
@@ -387,12 +375,9 @@ describe("verify receipt bench", () => {
         name: "Re-supply your files to open the commitments",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(2)),
-      csvFile("input.csv", INPUT_CSV),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(3)),
+    await uploadAt(2, csvFile("input.csv", INPUT_CSV));
+    await uploadAt(
+      3,
       // Our row 0 pairs the partner's row 1 -- the null cell -- so the result
       // carries it as an empty cell.
       csvFile("result.csv", "pid,their_row_id,clinic\nP0,1,\nP1,0,north\n"),
@@ -427,12 +412,9 @@ describe("verify receipt bench", () => {
     const { record, keys } = await buildFixture();
     await mountVerifyBench();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
     await userEvent.click(
@@ -440,12 +422,9 @@ describe("verify receipt bench", () => {
         name: "Re-supply your files to open the commitments",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(2)),
-      csvFile("input.csv", INPUT_CSV),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(3)),
+    await uploadAt(2, csvFile("input.csv", INPUT_CSV));
+    await uploadAt(
+      3,
       // Our row 0 pairs the partner's row 1, whose committed value was "south";
       // re-supplying a different non-empty value mismatches without an empty
       // cell anywhere in the re-supplied payload.
@@ -483,12 +462,9 @@ describe("verify receipt bench", () => {
     };
     await mountVerifyBench();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(wrongKeys)),
     );
     await userEvent.click(page.getByRole("button", { name: "Verify" }));
@@ -507,14 +483,11 @@ describe("verify receipt bench", () => {
     await mountVerifyBench();
 
     // Load valid keys first, then a malformed record.
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", "{ not json"),
-    );
+    await uploadAt(0, jsonFile("rec.json", "{ not json"));
 
     await expect
       .element(page.getByText("This record could not be used"))
@@ -526,10 +499,7 @@ describe("verify receipt bench", () => {
       .element(page.getByRole("button", { name: "Verify" }))
       .toBeDisabled();
     // A good record clears the alert and re-enables Verify.
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
     await expect
       .element(page.getByRole("button", { name: "Verify" }))
       .toBeEnabled();
@@ -539,12 +509,9 @@ describe("verify receipt bench", () => {
     const { record, keys } = await buildFixture();
     await mountVerifyBench();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
     await expect
@@ -556,10 +523,7 @@ describe("verify receipt bench", () => {
         name: "Re-supply your files to open the commitments",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(2)),
-      csvFile("input.csv", INPUT_CSV),
-    );
+    await uploadAt(2, csvFile("input.csv", INPUT_CSV));
 
     // One of the two re-supply files is present: the top-level Verify button
     // must not silently ignore it, and the warning must be visible outside the
@@ -580,10 +544,7 @@ describe("verify receipt bench", () => {
       .toBeInTheDocument();
 
     // Supplying the second CSV clears the warning and re-enables the button.
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(3)),
-      csvFile("result.csv", RESULT_CSV),
-    );
+    await uploadAt(3, csvFile("result.csv", RESULT_CSV));
     await expect
       .element(page.getByRole("button", { name: "Verify", exact: true }))
       .toBeEnabled();
@@ -601,12 +562,9 @@ describe("verify receipt bench", () => {
     const { record, keys } = await buildFixture();
     await mountVerifyBench();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
     await userEvent.click(
@@ -614,14 +572,8 @@ describe("verify receipt bench", () => {
         name: "Re-supply your files to open the commitments",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(2)),
-      csvFile("input.csv", INPUT_CSV),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(3)),
-      csvFile("result.csv", RESULT_CSV),
-    );
+    await uploadAt(2, csvFile("input.csv", INPUT_CSV));
+    await uploadAt(3, csvFile("result.csv", RESULT_CSV));
     await userEvent.fill(
       page.getByLabelText("Your linkage terms"),
       JSON.stringify(LOCAL_TERMS),
@@ -668,12 +620,9 @@ describe("verify receipt bench", () => {
     const { record, keys } = await buildFixture();
     await mountVerifyBench();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
     await userEvent.click(
@@ -681,23 +630,12 @@ describe("verify receipt bench", () => {
         name: "Re-supply your files to open the commitments",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(2)),
-      csvFile("input.csv", INPUT_CSV),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(3)),
-      csvFile("result.csv", RESULT_CSV),
-    );
-    await expect.element(page.getByText("input.csv")).toBeInTheDocument();
-    await expect.element(page.getByText("result.csv")).toBeInTheDocument();
+    await uploadAt(2, csvFile("input.csv", INPUT_CSV));
+    await uploadAt(3, csvFile("result.csv", RESULT_CSV));
 
     // Swap in a different (still valid) record: the stale re-supply state from
     // the previous exchange must not silently feed the next verify.
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec2.json", serializeExchangeRecord(record)),
-    );
+    await uploadAt(0, jsonFile("rec2.json", serializeExchangeRecord(record)));
     await expect.element(page.getByText("input.csv")).not.toBeInTheDocument();
     await expect.element(page.getByText("result.csv")).not.toBeInTheDocument();
   });
@@ -706,12 +644,9 @@ describe("verify receipt bench", () => {
     const { record, keys } = await buildFixture();
     await mountVerifyBench();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
     await userEvent.click(
@@ -734,10 +669,7 @@ describe("verify receipt bench", () => {
     // re-supply, so the text they were parsed from must go with them: left
     // behind, it invites re-importing the previous partnership's terms against
     // this record.
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec2.json", serializeExchangeRecord(record)),
-    );
+    await uploadAt(0, jsonFile("rec2.json", serializeExchangeRecord(record)));
     await expect
       .element(page.getByLabelText("Your partner's linkage terms"))
       .toHaveValue("");
@@ -750,12 +682,9 @@ describe("verify receipt bench", () => {
     const { record, keys } = await buildFixture();
     await mountVerifyBench();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
     await userEvent.click(
@@ -763,14 +692,8 @@ describe("verify receipt bench", () => {
         name: "Re-supply your files to open the commitments",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(2)),
-      csvFile("input.csv", INPUT_CSV),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(3)),
-      csvFile("result.csv", RESULT_CSV),
-    );
+    await uploadAt(2, csvFile("input.csv", INPUT_CSV));
+    await uploadAt(3, csvFile("result.csv", RESULT_CSV));
     await userEvent.fill(
       page.getByLabelText("Your linkage terms"),
       JSON.stringify(LOCAL_TERMS),
@@ -815,12 +738,9 @@ describe("verify receipt bench", () => {
 
     // The exchange record states who this exchange was between and what terms
     // it agreed, which the signature checks are held against.
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
     await userEvent.click(
@@ -828,16 +748,16 @@ describe("verify receipt bench", () => {
         name: "Check the partner's signatures with the dual-signed record",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputFor("Dual-signed record")),
+    await uploadTo(
+      "Dual-signed record",
       jsonFile("psilink-receipt-x.json", serializeDualSignedRecord(signed)),
     );
     await userEvent.fill(
       page.getByLabelText("Your partner's certificate fingerprint"),
       partnerFingerprint,
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputFor("Your exported certificate")),
+    await uploadTo(
+      "Your exported certificate",
       jsonFile("certificate.json", serializeCertificate(ourCertificate)),
     );
     await userEvent.click(
@@ -867,12 +787,9 @@ describe("verify receipt bench", () => {
     const { signed, ourCertificate } = await buildSignedFixture(record);
     await mountVerifyBench();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
     await userEvent.click(
@@ -880,12 +797,12 @@ describe("verify receipt bench", () => {
         name: "Check the partner's signatures with the dual-signed record",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputFor("Dual-signed record")),
+    await uploadTo(
+      "Dual-signed record",
       jsonFile("receipt.json", serializeDualSignedRecord(signed)),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputFor("Your exported certificate")),
+    await uploadTo(
+      "Your exported certificate",
       jsonFile("certificate.json", serializeCertificate(ourCertificate)),
     );
     await userEvent.click(
@@ -915,8 +832,8 @@ describe("verify receipt bench", () => {
         name: "Check the partner's signatures with the dual-signed record",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputFor("Your exported certificate")),
+    await uploadTo(
+      "Your exported certificate",
       jsonFile("signing-identity.json", serializeSigningIdentity(ourIdentity)),
     );
 
@@ -936,12 +853,9 @@ describe("verify receipt bench", () => {
     const { record, keys } = await buildFixture();
     await mountVerifyBench();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
     await expect
@@ -984,8 +898,8 @@ describe("verify receipt bench", () => {
   test("swapping the certificate after a joint verify clears both verdicts", async () => {
     const { signed } = await verifyRecordAndSignedRecord();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputFor("Your exported certificate")),
+    await uploadTo(
+      "Your exported certificate",
       jsonFile(
         "other-certificate.json",
         serializeCertificate(signed.responder.certificate),
@@ -999,8 +913,8 @@ describe("verify receipt bench", () => {
     const { record } = await verifyRecordAndSignedRecord();
     const { signed: otherSigned } = await buildSignedFixture(record);
 
-    await userEvent.upload(
-      page.elementLocator(fileInputFor("Dual-signed record")),
+    await uploadTo(
+      "Dual-signed record",
       jsonFile("other-receipt.json", serializeDualSignedRecord(otherSigned)),
     );
 
@@ -1018,12 +932,12 @@ describe("verify receipt bench", () => {
     const { record: nextRecord, keys: nextKeys } =
       await buildFixture("bmV4dFJ1bkJpbmRlcg");
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
+    await uploadAt(
+      0,
       jsonFile("rec2.json", serializeExchangeRecord(nextRecord)),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(
+      1,
       jsonFile("rec2.keys.json", serializeVerificationKeys(nextKeys)),
     );
     await expect
@@ -1062,25 +976,22 @@ describe("verify receipt bench", () => {
         name: "Re-supply your files to open the commitments",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(2)),
-      csvFile("input.csv", INPUT_CSV),
-    );
+    await uploadAt(2, csvFile("input.csv", INPUT_CSV));
     await userEvent.click(
       page.getByRole("button", {
         name: "Check the partner's signatures with the dual-signed record",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputFor("Dual-signed record")),
+    await uploadTo(
+      "Dual-signed record",
       jsonFile("receipt.json", serializeDualSignedRecord(signed)),
     );
     await userEvent.fill(
       page.getByLabelText("Your partner's certificate fingerprint"),
       partnerFingerprint,
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputFor("Your exported certificate")),
+    await uploadTo(
+      "Your exported certificate",
       jsonFile("certificate.json", serializeCertificate(ourCertificate)),
     );
 
@@ -1108,12 +1019,9 @@ describe("verify receipt bench", () => {
     const { signed, partnerFingerprint } = await buildSignedFixture(record);
     await mountVerifyBench();
 
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(0)),
-      jsonFile("rec.json", serializeExchangeRecord(record)),
-    );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(1)),
+    await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
+    await uploadAt(
+      1,
       jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
     );
     await userEvent.click(
@@ -1121,17 +1029,14 @@ describe("verify receipt bench", () => {
         name: "Re-supply your files to open the commitments",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputAt(2)),
-      csvFile("input.csv", INPUT_CSV),
-    );
+    await uploadAt(2, csvFile("input.csv", INPUT_CSV));
     await userEvent.click(
       page.getByRole("button", {
         name: "Check the partner's signatures with the dual-signed record",
       }),
     );
-    await userEvent.upload(
-      page.elementLocator(fileInputFor("Dual-signed record")),
+    await uploadTo(
+      "Dual-signed record",
       jsonFile("receipt.json", serializeDualSignedRecord(signed)),
     );
     await userEvent.fill(
