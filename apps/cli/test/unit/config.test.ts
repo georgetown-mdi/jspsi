@@ -13,6 +13,7 @@ import {
   sanitizeErrorForDisplay,
   snakeizeKeys,
   UsageError,
+  validateCompatibility,
 } from "@psilink/core";
 import {
   applyConnectionOverrides,
@@ -1651,10 +1652,12 @@ test("diffLinkageTerms: the rule-set citation follows core's both-sides-only rul
   );
 });
 
-test("diffLinkageTerms: two citations differing only under NFC are not a conflict", () => {
-  // The citation is compared through the same NFC-folded canonical form the
-  // structural fields are, so a name one side authored decomposed is not a false
-  // conflict against the composed spelling of the same name.
+test("diffLinkageTerms: two citations differing only under NFC are a conflict", () => {
+  // The citation is compared by RAW canonical form, matching the predicate
+  // validateCompatibility applies to it: core holds two citations to byte-exact
+  // equality, so this pair aborts the exchange mid-run. Folding the two names
+  // together here would report the reuse clean and let the run reach that abort;
+  // the conflict at accept is the honest pre-emption of it.
   const composed = "acc\u00e9s";
   const decomposed = "acce\u0301s";
   expect(composed).not.toBe(decomposed);
@@ -1668,7 +1671,25 @@ test("diffLinkageTerms: two citations differing only under NFC are not a conflic
     fieldSet: { name: `${decomposed}-pii`, version: "1.0.0" },
     keySet: { name: `${decomposed}-keys`, version: "1.0.0" },
   };
-  expect(diffLinkageTerms(existing, incoming).conflicts).toEqual([]);
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts).toHaveLength(1);
+  expect(conflicts[0].field).toBe("linkage_rule_set");
+  // The same pair through core's own comparison, so the parity this compare
+  // exists for is asserted against core rather than restated here.
+  expect(
+    validateCompatibility(existing, incoming).errors.some((e) =>
+      e.includes("linkage rule set mismatch"),
+    ),
+  ).toBe(true);
+  // The two clauses hold the same characters and would print alike on a
+  // terminal, which would leave the operator a conflict they cannot see. They
+  // are distinguishable because the display boundary escapes each non-ASCII code
+  // point, so the composed and decomposed spellings render differently.
+  const rendered = sanitizeErrorForDisplay(
+    new UsageError(formatReconcileDiffs(conflicts)),
+  );
+  expect(rendered).toContain("acc\\xe9s-keys");
+  expect(rendered).toContain("acce\\u0301s-keys");
 });
 
 test("diffLinkageTerms: citations whose clauses render alike fall back to the full detail", () => {
@@ -1689,6 +1710,54 @@ test("diffLinkageTerms: citations whose clauses render alike fall back to the fu
   expect(conflicts).toHaveLength(1);
   expect(conflicts[0].existing).not.toBe(conflicts[0].incoming);
   expect(conflicts[0].existing).toContain("fieldSet");
+});
+
+test("diffLinkageTerms: a private-key marker in a citation cannot truncate the accept error", () => {
+  // The display boundary's private-key rule is fail-closed past a BEGIN marker
+  // carrying no END: it replaces to the end of the link it appears in. The
+  // partner picks the invitation's set names, so a citation interpolated raw
+  // would let one of them consume every conflict line and the recovery step
+  // composed behind it -- the operator would see an abort with no diff and no
+  // way forward. Redacting the halves where they are interpolated bounds the
+  // rule to the fragment that carried the marker.
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  existing.linkageRuleSet = {
+    fieldSet: { name: "baseline-pii", version: "1.0.0" },
+    keySet: { name: "hmis-keys", version: "1.0.0" },
+  };
+  incoming.linkageRuleSet = {
+    fieldSet: { name: "-----BEGIN OPENSSH PRIVATE KEY-----", version: "1.0.0" },
+    keySet: { name: "hmis-keys", version: "1.0.0" },
+  };
+  // A second conflict, so the message carries a diff line AFTER the citation's.
+  incoming.legalAgreement = {
+    reference: "MOU-2025-0042",
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2030-01-01",
+  };
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts.map((c) => c.field)).toEqual([
+    "linkage_rule_set",
+    "legal_agreement",
+  ]);
+
+  // The shape `psilink accept` composes around the diff lines, rendered the way
+  // the CLI's top-level handler renders a thrown UsageError.
+  const rendered = sanitizeErrorForDisplay(
+    new UsageError(
+      "the configuration file at ./psilink.yaml disagrees with the " +
+        "invitation:\n" +
+        formatReconcileDiffs(conflicts) +
+        "\nResolve the differences (or pass --config-file to write " +
+        "elsewhere), then retry with --accept-terms.",
+    ),
+  );
+  expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+  expect(rendered).toContain("[redacted private key]");
+  expect(rendered).toContain("legal_agreement");
+  expect(rendered).toContain("MOU-2025-0042");
+  expect(rendered).toContain("then retry with --accept-terms.");
 });
 
 test("diffLinkageTerms: an un-encodable value does not throw and identical terms still reconcile", () => {
@@ -2734,13 +2803,16 @@ test("readConfigLinkageSource reads the terms' standing off the loaded file", ()
   ).toBe("accepted-with-partner");
 });
 
-// Both spellings are read, and anything other than a boolean reads as no
-// acceptance rather than as an error: the record is machine-written, and the
-// block stays unparsed here exactly as the retain-mode declaration above does.
+// Both spellings are read, and the record's PRESENCE is what marks an
+// acceptance: a value `psilink accept` would not have written is an operator's
+// edit of a machine-written record, but the record still stands there, so it
+// reads as an acceptance rather than as an error here (the commands that build
+// an exchange from the file refuse the value through core's schema). A key
+// carrying no value at all is YAML's null, which is no record.
 test.each([
   ["a camelCase spelling", "expectedPartnerDeduplicate: true\n", true],
   ["a key with no value", "expected_partner_deduplicate:\n", false],
-  ["a non-boolean value", "expected_partner_deduplicate: 'true'\n", false],
+  ["a non-boolean value", "expected_partner_deduplicate: 'true'\n", true],
 ])(
   "readConfigLinkageSource reads an acceptance from %s: %j",
   (_label, block, accepted) => {

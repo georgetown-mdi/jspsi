@@ -19,6 +19,7 @@ import {
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
   redactAndSanitizeForDisplay,
+  redactPrivateKeyMaterial,
   safeParseConnectionConfig,
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
@@ -571,14 +572,42 @@ function renderStructural(
   );
 }
 
-/** Render a rule-set citation for a diff line, keys first -- the order core's
- *  mismatch message and the drift warning both render the pair in. Raw, unlike
- *  {@link describeRuleSetCitation}, whose sink is a `log.warn`: a diff line is
- *  composed into a {@link UsageError} and escaped once where it is shown. */
+/**
+ * Render a rule-set citation for a diff line, keys first -- the order core's
+ * mismatch message and the drift warning both render the pair in. Unescaped,
+ * unlike {@link describeRuleSetCitation}, whose sink is a `log.warn`: a diff line
+ * is composed into a {@link UsageError} and escaped once where it is shown.
+ *
+ * Each half is nevertheless REDACTED here, because the invitation's side of the
+ * comparison is a name the partner chose: the display boundary's private-key
+ * rule is fail-closed past a `BEGIN` marker carrying no `END`, so a marker
+ * planted in a set name would consume the conflict lines and the recovery step
+ * composed after it. Redaction is not escaping and does not make this a second
+ * escaping altitude (see {@link redactPrivateKeyMaterial}, which states the
+ * composition-site rule this follows).
+ */
 function renderRuleSetCitation(reference: LinkageRuleSetReference): string {
   const half = (identity: LinkageSetIdentity): string =>
-    `"${identity.name}" ${identity.version}`;
+    `"${redactPrivateKeyMaterial(identity.name)}" ` +
+    `${redactPrivateKeyMaterial(identity.version)}`;
   return `${half(reference.keySet)} over ${half(reference.fieldSet)}`;
+}
+
+/**
+ * The same citation with its halves redacted, for {@link disambiguate}'s
+ * full-JSON fallback. The fallback fires when the two rendered clauses read
+ * alike, which a pair of names redacting to the same marker produces, and it
+ * would otherwise put back on the message the raw marker
+ * {@link renderRuleSetCitation} took out of it.
+ */
+function redactRuleSetCitation(
+  reference: LinkageRuleSetReference,
+): LinkageRuleSetReference {
+  const half = (identity: LinkageSetIdentity): LinkageSetIdentity => ({
+    name: redactPrivateKeyMaterial(identity.name),
+    version: redactPrivateKeyMaterial(identity.version),
+  });
+  return { fieldSet: half(reference.fieldSet), keySet: half(reference.keySet) };
 }
 
 /**
@@ -615,9 +644,18 @@ function renderRuleSetCitation(reference: LinkageRuleSetReference): string {
  * cleanly. Where both cite, a difference is a conflict on the same footing as
  * the other agreement-defining fields -- the exchange would otherwise abort
  * mid-run on `validateCompatibility`'s "linkage rule set mismatch", after the
- * reconcile had reported the config as matching. The citation goes through the
- * same NFC-folded canonical compare as the structural fields beside it, so a
- * name authored in one normalization form matches the same name in the other.
+ * reconcile had reported the config as matching.
+ *
+ * The citation is compared by RAW canonical form, NOT the NFC-folded compare the
+ * structural fields beside it use, because that is the predicate
+ * `validateCompatibility` applies to it: core holds two citations to byte-exact
+ * `canonicalString` equality, so a pair of names differing only in normalization
+ * form is a mismatch there. Folding them together here would report such a pair
+ * clean and let the run abort mid-exchange on it -- the failure this comparison
+ * exists to pre-empt, and the partner picks the invitation's spelling. Matching
+ * the gate (both sides declare one) without matching the predicate leaves that
+ * gap open, so the conflict is reported at accept, where the operator can still
+ * settle the spelling with the inviting party.
  */
 export function diffLinkageTerms(
   existing: LinkageTerms,
@@ -648,12 +686,17 @@ export function diffLinkageTerms(
   // depth-bounded upstream (the invitation's params at decode, the config at
   // load), so this backstop is not normally reachable; it stays because nfcDeep
   // is an independent recursion that must not depend on its callers (see nfcDeep).
-  const canonicalDiffers = (a: unknown, b: unknown, label: string): boolean => {
+  const differsUnder = (
+    encode: (value: unknown) => string,
+    a: unknown,
+    b: unknown,
+    label: string,
+  ): boolean => {
     let ca: string;
     let cb: string;
     try {
-      ca = nfcCanonical(a);
-      cb = nfcCanonical(b);
+      ca = encode(a);
+      cb = encode(b);
     } catch (err) {
       if (err instanceof CanonicalEncodingError) {
         warnings.push(
@@ -667,6 +710,13 @@ export function diffLinkageTerms(
     }
     return ca !== cb;
   };
+  const canonicalDiffers = (a: unknown, b: unknown, label: string): boolean =>
+    differsUnder(nfcCanonical, a, b, label);
+  const rawCanonicalDiffers = (
+    a: unknown,
+    b: unknown,
+    label: string,
+  ): boolean => differsUnder(canonicalString, a, b, label);
 
   // version, algorithm, and linkageStrategy are compared by raw equality rather
   // than the nfcCanonical fold used for the user-authored name fields below. All
@@ -719,11 +769,13 @@ export function diffLinkageTerms(
     add("linkage_keys", r.existing, r.incoming);
   }
 
-  // Only where BOTH sides cite, per the doc comment above.
+  // Only where BOTH sides cite, and by raw canonical form rather than the NFC
+  // fold the fields and keys above take -- both halves are validateCompatibility's
+  // rule for the citation, per the doc comment above.
   if (
     existing.linkageRuleSet !== undefined &&
     incoming.linkageRuleSet !== undefined &&
-    canonicalDiffers(
+    rawCanonicalDiffers(
       existing.linkageRuleSet,
       incoming.linkageRuleSet,
       "linkage rule set",
@@ -732,8 +784,8 @@ export function diffLinkageTerms(
     const r = disambiguate(
       renderRuleSetCitation(existing.linkageRuleSet),
       renderRuleSetCitation(incoming.linkageRuleSet),
-      existing.linkageRuleSet,
-      incoming.linkageRuleSet,
+      redactRuleSetCitation(existing.linkageRuleSet),
+      redactRuleSetCitation(incoming.linkageRuleSet),
     );
     add("linkage_rule_set", r.existing, r.incoming);
   }
@@ -1349,28 +1401,34 @@ export function readConfigLinkageSource(
       standardization,
       metadata,
       retainsFiles: readRetainFilesDeclaration(obj),
-      linkageTermsStanding: linkageTermsStandingOf({
-        expectedPartnerDeduplicate: readExpectedPartnerDeduplicate(obj),
-      }),
+      linkageTermsStanding: readLinkageTermsStanding(obj),
     },
   };
 }
 
 /**
- * The config's top-level `expected_partner_deduplicate`, read at its fixed key
- * so the rest of the file stays unparsed here (the reason
- * {@link readRetainFilesDeclaration} reads its own key that way). Both spellings
- * are accepted for the reason the top-level keys above accept both: `saveConfig`
- * writes snake_case, but a hand-authored config may carry either. Any shape
- * other than a boolean reads as absent -- the record `psilink accept` writes is
- * always one.
+ * The standing of a loaded config's terms, read from the presence of a top-level
+ * `expected_partner_deduplicate` at its fixed key so the rest of the file stays
+ * unparsed here (the reason {@link readRetainFilesDeclaration} reads its own key
+ * that way). Both spellings are accepted for the reason the top-level keys above
+ * accept both: `saveConfig` writes snake_case, but a hand-authored config may
+ * carry either.
+ *
+ * Presence alone decides it, on {@link linkageTermsStandingOf}'s rule that the
+ * record says an acceptance happened rather than what was agreed. `psilink
+ * accept` writes only a boolean, so any other value is an operator's edit of a
+ * machine-written record -- but the record still stands there, and reading it as
+ * an acceptance is what points that operator at settling the citation with their
+ * partner rather than at rewriting terms both parties hold. A value the strict
+ * paths refuse is refused there, by core's schema, on the commands that build an
+ * exchange from the file.
  */
-function readExpectedPartnerDeduplicate(
+function readLinkageTermsStanding(
   obj: Record<string, unknown>,
-): boolean | undefined {
+): LinkageTermsStanding {
   const declared =
     obj["expected_partner_deduplicate"] ?? obj["expectedPartnerDeduplicate"];
-  return typeof declared === "boolean" ? declared : undefined;
+  return declared === undefined ? "held-alone" : "accepted-with-partner";
 }
 
 /**

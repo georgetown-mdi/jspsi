@@ -67,6 +67,8 @@ Every command that reads linkage terms out of a configuration file checks the ci
 
 A configuration an acceptance stands behind is the other case, and the warning offers a different remedy there. Those terms are the ones you and the inviting party agreed on, so restoring the cited set's rules would edit that agreement single-handedly, and the exchange would refuse the result against the partner still running the originals. Settle the citation with that party and accept again, or decline to reuse those terms.
 
+That case is recognized from a record `psilink accept` writes into the configuration it produces or reuses, so only the accepting side of an exchange has it. An invitation you sent and a partner accepted leaves nothing in your own file to read, so your copy still reads as terms you hold alone -- and the remedy offered there, restoring the cited set's rules, can still take terms out of an agreement the CLI has no way to see. Check with your partner before acting on it.
+
 Only a set this build ships can be checked. A citation naming another set, or the built-in set at a version this build does not carry, passes without comment: there is nothing behind that name here to compare your rules against. The field set and the key set are checked separately, so a citation pairing a name this build does not know with the built-in key set is still held to the built-in keys. A partner's citation on an invitation is their statement about their own rules; `psilink accept` runs this same check over it against the rules the invitation declares and shows the per-half verdict on the accept prompt before you consent.
 
 ## Initialization
