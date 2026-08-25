@@ -134,15 +134,15 @@ function splitProblem(env: NodeJS.ProcessEnv): string | undefined {
 }
 
 /**
- * Run `body` with `fs.realpathSync` failing `EACCES` for `unreadable` and every
- * path under it, the shape a mount with an unreadable component on the way to it
- * takes.
+ * Fail `fs.realpathSync` with `EACCES` for `unreadable` and every path under it --
+ * the shape a mount with an unreadable component on the way to it takes -- until
+ * the returned restore is called.
  *
  * Injected rather than driven off a real directory mode: a suite running as root
  * traverses a `0000` directory anyway, so the case would silently stop being
  * exercised on exactly the hosts (containers) the console runs in.
  */
-function withUnreadableRealpath<T>(unreadable: string, body: () => T): T {
+function blockRealpath(unreadable: string): () => void {
   const realpathSync = fs.realpathSync;
   const blocked = path.resolve(unreadable);
   const spy = vi
@@ -158,10 +158,16 @@ function withUnreadableRealpath<T>(unreadable: string, body: () => T): T {
       }
       return realpathSync(target, options);
     });
+  return () => spy.mockRestore();
+}
+
+/** Run `body` with {@link blockRealpath} in force for `unreadable`. */
+function withUnreadableRealpath<T>(unreadable: string, body: () => T): T {
+  const restore = blockRealpath(unreadable);
   try {
     return body();
   } finally {
-    spy.mockRestore();
+    restore();
   }
 }
 
@@ -855,6 +861,136 @@ describe("rendezvousStartupWarnings overlap branch", () => {
       ),
     ).toEqual([]);
   });
+
+  test("warns when the rendezvous mount is symlinked ONTO the data root", () => {
+    // What a partner's sync writes reach is the directory at the far end of the
+    // link, so a mount that resolves onto the data root is the case the notice
+    // exists for however the operator spelled it.
+    const mounts = tempDir("mounts");
+    const dataRoot = subDir(mounts, "data");
+    const rendezvous = path.join(mounts, "sync");
+    fs.symlinkSync(dataRoot, rendezvous, "dir");
+    const warnings = overlapWarnings(
+      rendezvousStartupWarnings(
+        rendezvous,
+        "shared",
+        undefined,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
+      ),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("the job data root");
+  });
+
+  test("warns when the work-input directory is reached through a symlinked parent", () => {
+    // The other side of the same comparison: it is the configured work-input path
+    // that carries the link, and the mount that is the plain path.
+    const mounts = tempDir("mounts");
+    const volume = subDir(mounts, "volume");
+    const rendezvous = subDir(volume, "sync");
+    const link = path.join(mounts, "reached-by-link");
+    fs.symlinkSync(volume, link, "dir");
+    const warnings = overlapWarnings(
+      rendezvousStartupWarnings(
+        rendezvous,
+        "shared",
+        path.join(link, "sync"),
+        tempDir("data"),
+        path.join(tempDir("workdirs"), "current-job"),
+        SWEEP_OFF,
+      ),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("the work-input directory");
+  });
+
+  test("does not warn for a symlinked mount that lands beside the data root", () => {
+    // Resolution decides an overlap, never invents one: a link is not itself the
+    // fault, and a console whose mounts are links would otherwise warn always.
+    const mounts = tempDir("mounts");
+    const dataRoot = subDir(mounts, "data");
+    const elsewhere = subDir(mounts, "partner-folder");
+    const rendezvous = path.join(mounts, "sync");
+    fs.symlinkSync(elsewhere, rendezvous, "dir");
+    expect(
+      rendezvousStartupWarnings(
+        rendezvous,
+        "shared",
+        undefined,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
+      ),
+    ).toEqual([]);
+  });
+
+  test("a mount whose real path cannot be read keeps the lexical verdict", () => {
+    // The resolution that would catch a symlinked overlap cannot run, so the
+    // configured comparison stands on its own and the operator is told the check
+    // ran narrower than it means to -- never that the layout is at fault.
+    const dataRoot = tempDir("data");
+    const rendezvous = subDir(dataRoot, "sync");
+    const warnings = withUnreadableRealpath(rendezvous, () =>
+      rendezvousStartupWarnings(
+        rendezvous,
+        "shared",
+        undefined,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
+      ),
+    );
+    expect(overlapWarnings(warnings)).toHaveLength(1);
+    expect(
+      warnings.filter((warning) =>
+        warning.includes("could not be resolved to its real path"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("an unreadable mount symlinked onto the data root reports the narrowed check", () => {
+    // The overlap itself goes unseen, which is exactly what the notice says: the
+    // console reports what it could not check rather than reading as silent.
+    const mounts = tempDir("mounts");
+    const dataRoot = subDir(mounts, "data");
+    const rendezvous = path.join(mounts, "sync");
+    fs.symlinkSync(dataRoot, rendezvous, "dir");
+    const warnings = withUnreadableRealpath(rendezvous, () =>
+      rendezvousStartupWarnings(
+        rendezvous,
+        "shared",
+        undefined,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
+      ),
+    );
+    expect(overlapWarnings(warnings)).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("could not be resolved to its real path");
+    expect(warnings[0]).toContain(
+      "Give the console read access to every folder on the way to it",
+    );
+  });
+
+  test("a mount that does not exist yet raises that notice and no other", () => {
+    // A component that does not exist is resolved through the nearest existing
+    // ancestor, so the absent mount is not also reported as one the console could
+    // not resolve: the operator gets the one fact they can act on.
+    const dataRoot = tempDir("data");
+    const warnings = rendezvousStartupWarnings(
+      path.join(tempDir("rendezvous"), "not-created"),
+      "shared",
+      tempDir("input"),
+      dataRoot,
+      path.join(dataRoot, "current-job"),
+      SWEEP_OFF,
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("does not exist yet");
+  });
 });
 
 /** Whether a preflight warning is one of those about what the directory holds --
@@ -1449,6 +1585,20 @@ const NOTICE_SHAPES: Array<NoticeShape> = [
     },
     match: /overlaps/,
     tail: () => "a partner's sync writes would reach it",
+    namesMount: true,
+  },
+  {
+    label: "a mount whose real path cannot be read",
+    arrange: (mount, leg) => {
+      fs.mkdirSync(mount, { recursive: true });
+      // The fixtures are built before the resolution is blocked, so only the
+      // preflight's own reads meet the failure.
+      const args = isolatedArgs(mount, leg);
+      return { args, restore: blockRealpath(mount) };
+    },
+    match: /could not be resolved/,
+    tail: () =>
+      "Give the console read access to every folder on the way to it.",
     namesMount: true,
   },
 ];

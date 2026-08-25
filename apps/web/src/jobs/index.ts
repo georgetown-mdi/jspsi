@@ -9,7 +9,6 @@ import {
 } from "./gate";
 import {
   jobRendezvousDirs,
-  resolveJobRendezvousProvisioning,
   useJobRendezvousProvisioning,
 } from "./jobRendezvous";
 import {
@@ -45,6 +44,10 @@ declare global {
  * is disabled -- no manager is constructed, so no paste can be authored. The
  * server entry calls this once at startup; a {@link JobApiConfigError} propagates
  * and refuses startup.
+ *
+ * The rendezvous mounts it excludes come from the memoized provisioning, the same
+ * value the boot warning and the manager read, so a split appliance resolves each
+ * leg's real path once per process rather than once per consumer.
  */
 export function bootSftpCredentialScratchDir(
   env: NodeJS.ProcessEnv = process.env,
@@ -55,7 +58,7 @@ export function bootSftpCredentialScratchDir(
   globalThis.jobSftpCredentialScratchDir = setupSftpCredentialScratchDir(
     resolveSftpCredentialScratchDir(env),
     config.dataRoot,
-    jobRendezvousDirs(resolveJobRendezvousProvisioning(env)),
+    jobRendezvousDirs(useJobRendezvousProvisioning(env)),
     useJobSecretsDir(env),
     useJobInputDir(env),
   );

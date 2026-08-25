@@ -15,6 +15,7 @@ import {
 } from "@jobs/sftpScratch";
 import { JobApiConfigError } from "@jobs/gate";
 import { bootSftpCredentialScratchDir } from "@jobs/index";
+import { useJobRendezvousProvisioning } from "@jobs/jobRendezvous";
 
 import { tempDataRoot } from "../utils/jobFixtures";
 
@@ -360,12 +361,14 @@ describe("bootSftpCredentialScratchDir", () => {
       jobSftpCredentialScratchDir?: unknown;
       jobSecretsDirConfig?: unknown;
       jobInputDirConfig?: unknown;
+      jobRendezvousProvisioning?: unknown;
     };
-    // The scratch memo and the secrets/input dir memos are read once per boot;
-    // clear all three so each test re-reads its own env.
+    // The scratch memo and the secrets, input, and rendezvous memos are read once
+    // per boot; clear all four so each test re-reads its own env.
     globals.jobSftpCredentialScratchDir = undefined;
     globals.jobSecretsDirConfig = undefined;
     globals.jobInputDirConfig = undefined;
+    globals.jobRendezvousProvisioning = undefined;
   });
 
   test("is a no-op when the job API is disabled (no directory prepared)", () => {
@@ -408,6 +411,62 @@ describe("bootSftpCredentialScratchDir", () => {
         [JOB_SFTP_CREDENTIAL_DIR_ENV]: path.join(dataRoot, "creds"),
       }),
     ).toThrow(JobApiConfigError);
+  });
+
+  test("resolves the rendezvous mounts through the memoized entry", () => {
+    // Each leg's real path is read where the provisioning is resolved, so a boot
+    // that resolved it a second time would walk a split appliance's mounts twice.
+    // The memo the boot leaves is what the warning log and the manager then read.
+    const base = sandbox("boot-memo");
+    const scratch = path.join(base, "scratch");
+    const dataRoot = path.join(base, "data-root");
+    const inbound = path.join(base, "from-partner");
+    const outbound = path.join(base, "to-partner");
+    fs.mkdirSync(inbound, { recursive: true });
+    fs.mkdirSync(outbound, { recursive: true });
+    bootSftpCredentialScratchDir({
+      VITE_DEPLOYMENT_PROFILE: "console",
+      JOB_DATA_ROOT: dataRoot,
+      JOB_RENDEZVOUS_DIR: inbound,
+      JOB_RENDEZVOUS_OUTBOUND_DIR: outbound,
+      [JOB_SFTP_CREDENTIAL_DIR_ENV]: scratch,
+    });
+    // Read back through an EMPTY environment: what comes out is the boot's own
+    // resolution, so nothing after the boot resolves the mounts again.
+    expect(useJobRendezvousProvisioning({})).toEqual({
+      dir: path.resolve(inbound),
+      outboundDir: path.resolve(outbound),
+      folderName: path.basename(inbound),
+      outboundFolderName: path.basename(outbound),
+      locator: path.basename(inbound),
+      outboundLocator: path.basename(outbound),
+    });
+  });
+
+  test("refuses the boot when a rendezvous leg contains the scratch dir", () => {
+    // The exclusion set the boot asserts is drawn from that same provisioning, so
+    // a scratch dir inside the OUTBOUND leg of a split refuses exactly as one
+    // inside the data root does.
+    const base = sandbox("boot-outbound");
+    const dataRoot = path.join(base, "data-root");
+    const inbound = path.join(base, "from-partner");
+    const outbound = path.join(base, "to-partner");
+    fs.mkdirSync(inbound, { recursive: true });
+    fs.mkdirSync(outbound, { recursive: true });
+    expect(() =>
+      bootSftpCredentialScratchDir({
+        VITE_DEPLOYMENT_PROFILE: "console",
+        JOB_DATA_ROOT: dataRoot,
+        JOB_RENDEZVOUS_DIR: inbound,
+        JOB_RENDEZVOUS_OUTBOUND_DIR: outbound,
+        [JOB_SFTP_CREDENTIAL_DIR_ENV]: path.join(outbound, "creds"),
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "JobApiConfigError",
+        message: expect.stringContaining("rendezvous") as string,
+      }) as Error,
+    );
   });
 
   test("refuses the boot when the override coincides with the secrets mount", () => {

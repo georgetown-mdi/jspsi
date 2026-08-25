@@ -257,13 +257,16 @@ function containsOrEqual(parent: string, child: string): boolean {
 }
 
 /**
- * A rendezvous leg in every form the split containment refusal compares it in: the
+ * A directory in every form the containment comparisons here compare it in: the
  * configured path, lexically resolved, plus the real path symlinks resolve it to
  * when that differs. Both are held because either can be the form that overlaps the
- * other leg, and holding the configured path unconditionally is what keeps a leg
- * whose real path the filesystem will not give up under the lexical test.
+ * other directory, and holding the configured path unconditionally is what keeps a
+ * directory whose real path the filesystem will not give up under the lexical test.
  */
-interface RendezvousLegPaths {
+interface ResolvedPathForms {
+  /** The configured path, lexically resolved -- the form a notice names, and the
+   * one form every comparison has whatever the filesystem answers. */
+  resolved: string;
   forms: Array<string>;
   /** False when a path component could not be READ (as opposed to not being
    * there), so {@link forms} carries the configured path alone. */
@@ -279,18 +282,18 @@ function isMissingPathError(error: unknown): boolean {
 }
 
 /**
- * Resolve a rendezvous leg to the forms {@link legsShareADirectory} compares.
+ * Resolve a directory to the forms {@link pathFormsOverlap} compares.
  *
- * The real path is read through the leg's nearest EXISTING ancestor with the
+ * The real path is read through the directory's nearest EXISTING ancestor with the
  * missing tail re-appended, so a mount the operator has not created yet is still
  * compared through a symlinked parent: a component that does not exist cannot be
- * the symlink that joins the two legs, while its parent can. A component the
+ * the symlink that joins two directories, while its parent can. A component the
  * process cannot read (a permission or I/O failure on the way to the mount) is a
- * different matter -- the symlink could be exactly there -- so the leg falls back
- * to its configured path alone and says so through `canonicalized`, because a
- * filesystem that cannot answer must not become a refusal of its own.
+ * different matter -- the symlink could be exactly there -- so the directory falls
+ * back to its configured path alone and says so through `canonicalized`, because a
+ * filesystem that cannot answer must not become a verdict of its own.
  */
-function resolveLegPaths(dir: string): RendezvousLegPaths {
+function resolvePathForms(dir: string): ResolvedPathForms {
   const resolved = path.resolve(dir);
   const missingTail: Array<string> = [];
   let current = resolved;
@@ -301,27 +304,31 @@ function resolveLegPaths(dir: string): RendezvousLegPaths {
     } catch (error) {
       const parent = path.dirname(current);
       if (!isMissingPathError(error) || parent === current)
-        return { forms: [resolved], canonicalized: false };
+        return { resolved, forms: [resolved], canonicalized: false };
       missingTail.unshift(path.basename(current));
       current = parent;
       continue;
     }
     const canonical =
       missingTail.length === 0 ? real : path.join(real, ...missingTail);
-    return { forms: [...new Set([resolved, canonical])], canonicalized: true };
+    return {
+      resolved,
+      forms: [...new Set([resolved, canonical])],
+      canonicalized: true,
+    };
   }
 }
 
 /**
- * Whether two legs are one directory, or one is nested inside the other, in ANY
- * pairing of the forms they resolve to. Comparing across forms is what carries the
- * refusal to a symlinked leg without letting an unresolvable one out of it: the
- * configured paths are always among the forms compared, so the lexical verdict
- * still stands on its own.
+ * Whether two directories are one directory, or one is nested inside the other, in
+ * ANY pairing of the forms they resolve to. Comparing across forms is what carries
+ * the verdict to a symlinked directory without letting an unresolvable one out of
+ * it: the configured paths are always among the forms compared, so the lexical
+ * verdict still stands on its own.
  */
-function legsShareADirectory(
-  first: RendezvousLegPaths,
-  second: RendezvousLegPaths,
+function pathFormsOverlap(
+  first: ResolvedPathForms,
+  second: ResolvedPathForms,
 ): boolean {
   return first.forms.some((firstForm) =>
     second.forms.some(
@@ -343,8 +350,8 @@ function legsShareADirectory(
  * unresolved side would go uncaught, not a symlink anywhere in the pair.
  */
 function describeUnresolvedLegs(
-  inbound: RendezvousLegPaths,
-  outbound: RendezvousLegPaths,
+  inbound: ResolvedPathForms,
+  outbound: ResolvedPathForms,
 ): string | undefined {
   if (inbound.canonicalized && outbound.canonicalized) return undefined;
   const recovery =
@@ -385,11 +392,11 @@ function describeUnresolvedLegs(
  */
 function splitPairProblem(
   provisioning: JobRendezvousProvisioning,
-  inbound: RendezvousLegPaths,
-  outbound: RendezvousLegPaths,
+  inbound: ResolvedPathForms,
+  outbound: ResolvedPathForms,
 ): string | undefined {
   const { locator, outboundLocator } = provisioning;
-  if (legsShareADirectory(inbound, outbound))
+  if (pathFormsOverlap(inbound, outbound))
     return (
       "The inbound and outbound rendezvous directories are the same directory, " +
       "or one is inside the other, so this appliance would read its own writes " +
@@ -434,7 +441,7 @@ export interface RendezvousSplitFaults {
  * variables; the fallback stays what it is for an unsplit appliance.
  *
  * The containment half is decided over the configured paths AND the real paths
- * symlinks resolve them to (see {@link resolveLegPaths}), so an outbound leg
+ * symlinks resolve them to (see {@link resolvePathForms}), so an outbound leg
  * symlinked onto the inbound one meets the same refusal a lexically nested one
  * does. It is the inbound leg the partner writes, and a pair provisioned as two
  * folders that silently reorients onto one is what the refusal exists for, however
@@ -459,8 +466,8 @@ export function rendezvousSplitFaults(
         `${JOB_RENDEZVOUS_DIR_ENV} to the folder your partner writes into and ` +
         "restart the appliance.",
     };
-  const inbound = resolveLegPaths(dir);
-  const outbound = resolveLegPaths(outboundDir);
+  const inbound = resolvePathForms(dir);
+  const outbound = resolvePathForms(outboundDir);
   const faults: RendezvousSplitFaults = {};
   const unresolvedLegWarning = describeUnresolvedLegs(inbound, outbound);
   if (unresolvedLegWarning !== undefined)
@@ -736,6 +743,14 @@ function describeRendezvousEntries(
  * input, or results -- but the operator's own directory layout is theirs to choose, so
  * it is not refused.
  *
+ * The overlap is decided over each path as configured AND as the real path symlinks
+ * resolve it to (see {@link resolvePathForms}), so a mount symlinked onto the data
+ * root raises the same notice a nested one does: what a partner's sync writes reach
+ * is the directory at the far end of the link, not the path that names it. A mount
+ * whose own real path cannot be READ falls back to the configured comparison and
+ * says so in a further notice, while one that simply does not exist yet is resolved
+ * through its nearest existing ancestor and raises no notice about resolution at all.
+ *
  * A directory that is not empty warns for a different reason: the console rendezvouses
  * every filedrop job out of the same mounts, so a completed retain-mode run leaves its
  * whole transcript where the next run's entry guard refuses it, with no crash anywhere
@@ -764,8 +779,9 @@ function describeRendezvousEntries(
  * listing gives way by name (see {@link describeRendezvousEntries}). What the whole
  * set measures at the rendered boundary is pinned by tests.
  *
- * This does not create the directory, canonicalize it, reject a symlinked mount, or
- * enforce a mode.
+ * This does not create the directory, enforce a mode, or reject a symlinked mount:
+ * the real paths it reads decide which warning to raise, never whether the exchange
+ * runs.
  */
 export function rendezvousStartupWarnings(
   rendezvousDir: string,
@@ -845,25 +861,33 @@ export function rendezvousStartupWarnings(
     }
   }
 
-  const dataRootResolved = path.resolve(dataRoot);
-  const overlaps: Array<[string, string]> = [
-    [dataRootResolved, "the job data root"],
-  ];
+  const rendezvousPaths = resolvePathForms(rendezvousDir);
+  const overlaps: Array<[string, string]> = [[dataRoot, "the job data root"]];
   if (jobInputDir !== undefined)
-    overlaps.push([path.resolve(jobInputDir), "the work-input directory"]);
+    overlaps.push([jobInputDir, "the work-input directory"]);
   for (const [other, otherLabel] of overlaps) {
-    if (
-      containsOrEqual(other, rendezvousDir) ||
-      containsOrEqual(rendezvousDir, other)
-    )
-      warnings.push(
-        fitNotice(
-          `${label} ${rendezvousDir} overlaps ${otherLabel} ` +
-            `(${other}); a partner's sync writes would reach it`,
-          `${label} overlaps ${otherLabel}; a partner's sync ` +
-            "writes would reach it",
-        ),
-      );
+    const otherPaths = resolvePathForms(other);
+    if (!pathFormsOverlap(rendezvousPaths, otherPaths)) continue;
+    warnings.push(
+      fitNotice(
+        `${label} ${rendezvousDir} overlaps ${otherLabel} ` +
+          `(${otherPaths.resolved}); a partner's sync writes would reach it`,
+        `${label} overlaps ${otherLabel}; a partner's sync ` +
+          "writes would reach it",
+      ),
+    );
+  }
+  if (!rendezvousPaths.canonicalized) {
+    const unresolved =
+      " could not be resolved to its real path, so an overlap a symlink " +
+      "makes would go unseen. Give the console read access to every folder " +
+      "on the way to it.";
+    warnings.push(
+      fitNotice(
+        `${label} ${rendezvousDir}${unresolved}`,
+        `${label}${unresolved}`,
+      ),
+    );
   }
   return warnings;
 }
