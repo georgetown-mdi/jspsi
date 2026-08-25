@@ -676,7 +676,10 @@ export function displayInvitation(params: {
   // controlled free text, sanitized by the summary. The name is quoted, as core's
   // rule-set mismatch message quotes it: it is free text that may carry a space,
   // so an unquoted name reading "hmis-keys 9.9.9" would be indistinguishable from
-  // the name plus the schema-constrained semver version beside it.
+  // the name plus the schema-constrained semver version beside it. The quoting
+  // shares that message's stated limit: sanitization preserves printable ASCII,
+  // so a name carrying a double quote of its own can close the quote early and
+  // fake the line's structure for a skimming reader.
   if (summary.linkageRuleSet !== undefined) {
     emit(`  ${marked("linkage rule set", "linkageRuleSet")}:`);
     emit(

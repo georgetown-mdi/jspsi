@@ -65,7 +65,7 @@ Beside the matching basis, the governance block records the **named rule set the
 Three limits on what it asserts:
 
 - **It is a citation, not the account of the run.** A run matches on a subset of the cited set -- terms derived from an input file leave out any key that input cannot supply -- so the citation bounds what was tried above; the matching basis beside it is what the keys actually referenced.
-- **It is a party's own declaration**, carried through unvetted. Nothing resolves the name to a set or checks it against the linkage fields and keys the same terms declare. What the exchange holds both parties to is those fields and keys, which are cross-checked byte for byte.
+- **It is the authoring party's declaration**, carried through unvetted -- an acceptor adopts the inviter's citation into its own record verbatim. Nothing on the exchange path resolves the name to a set or checks it against the linkage fields and keys the same terms declare. What the exchange holds both parties to is those fields and keys, which are cross-checked byte for byte.
 - **Its cross-party consistency is the terms' own.** Two parties that both cite a set are required to cite the same one before any data moves, so their records agree; where one cites none, its record omits the field while the other's carries its own citation.
 
 Omitted when the agreed terms cited no set (their rules were authored rather than drawn from one) -- absent by omission, never a null, which is why the record's format version moves with it.

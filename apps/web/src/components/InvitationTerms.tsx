@@ -1332,7 +1332,10 @@ export function InvitationTerms({
             read as system chrome. Within the box, the name is quoted as core's
             rule-set mismatch message quotes it: a name may carry a space, so an
             unquoted "hmis-keys 9.9.9" would be indistinguishable from the name
-            plus the schema-constrained semver version beside it.
+            plus the schema-constrained semver version beside it. The quoting
+            shares that message's stated limit -- a name may itself carry a double
+            quote -- though each half renders in its own bordered box, which
+            confines the misreading.
 
             The names and versions themselves are true of the terms whoever
             authored them, so the block renders under every perspective; the
