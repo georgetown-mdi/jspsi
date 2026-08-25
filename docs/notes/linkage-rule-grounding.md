@@ -221,7 +221,8 @@ address is unusable, the ZIP is the fragment worth keeping.
 Three published deterministic cascades are close enough in shape to compare
 against.
 
-**Maryland's longitudinal data system** runs a numbered deterministic cascade it
+**Maryland's longitudinal data system**, read here through a secondary survey
+rather than from its own publication, runs a numbered deterministic cascade it
 calls *orders*, tried strictest first, stopping at the first that hits and
 recording which one it was: (1) everything agrees exactly including SSN,
 (2) keep the SSN requirement while dropping corroborating fields in turn,
@@ -231,9 +232,10 @@ analogue to the built-in cascade, and its order is the opposite arrangement: eve
 SSN-bearing rule sits above the no-SSN name-and-date rule, and the SSN-only join
 survives only as a named weaker rule *below* the corroborated one.
 
-**The Census Bureau's person-key system** is a cascade of modules in which a
-record stops as soon as it earns a key. Its exact *Verification* module runs only
-for a record that has an SSN, and assigns a key only when the SSN **and** the
+**The Census Bureau's person-key system**, also read through that secondary
+survey, is a cascade of modules in which a record stops as soon as it earns a
+key. Its exact *Verification* module runs only for a record that has an SSN, and
+assigns a key only when the SSN **and** the
 name **and** the date of birth agree; a record without an SSN, or one that failed
 verification, falls through to probabilistic search modules on name, date of
 birth, sex and address. One of those passes deliberately swaps first and last
@@ -282,8 +284,8 @@ SSN-bearing linkja hash is an SSN4 hash.
 
 **The N3C linkage's shipped configuration** generates eighteen tokens per record
 over a nine-column input of record id, first name, last name, date of birth,
-gender, SSN, ZIP, email and cellphone. Its two SSN tokens are `SSN + Gender +
-DOB` and `SSN + DOB`; there is also `SSN + First Name`. Eight tokens carry a ZIP,
+gender, SSN, ZIP, email and cellphone. Its three SSN-bearing tokens are `SSN +
+Gender + DOB`, `SSN + DOB`, and `SSN + First Name`. Eight tokens carry a ZIP,
 four at three digits and four at five, and every one of the eight also carries a
 last name. Email appears in exactly one token (`First Name + Email`) and
 cellphone in exactly one (`First Name + Cell Phone Number`).
@@ -306,76 +308,97 @@ token that uses gender "will not be generated for that record".
 ### Where it has a direct counterpart
 
 Most of the built-in set is unremarkable against published practice, and saying
-so is part of an honest comparison.
+so is part of an honest comparison. The relation column states which way each
+published key differs from the built-in one, because "counterpart" alone hides
+whether the published key is the same key, a stricter one, or a looser one.
 
-| Built-in key shape | Published counterpart |
-| --- | --- |
-| SSN + last name + date of birth | linkja `fnamelnamedobssn` / `lnamefnamedobssn` (an SSN4 key in linkja's normalization) |
-| SSN + truncated first name + full name and date | linkja `fname3lnamedobssn`; N3C `token_6` truncates the first name to three characters |
-| SSN4 keys | linkja's entire SSN-bearing set; NCHS's second deterministic pass; HUD's own hashed-export SSN construction |
-| Year-and-month in place of a full date | N3C `token_18`; linkja's date-off-by-one-year variant |
-| Last name + first name + date of birth | N3C `token_38`, exactly; measured as Bernstam's Token 4 with gender added |
-| The name-swapped twin | linkja `lnamefnamedob*`; the Census person-key system's swapped-name pass |
-| SSN + first name, no last name | N3C `token_16`, exactly; measured by Bernstam at 99.6% precision, 61.1% recall |
+| Built-in key shape (positions) | Published key | Relation |
+| --- | --- | --- |
+| SSN + last name + date of birth (1, and 4 and 6 with the last name truncated) | linkja `fnamelnamedobssn` / `lnamefnamedobssn`; N3C `token_39` (`SSN + DOB`) | The linkja hashes add a full first name and carry only an SSN4 in linkja's normalization, so they are stricter; `token_39` drops the last name, so it is looser |
+| SSN + truncated first name + date of birth (7) | linkja `fname3lnamedobssn`; N3C `token_6` | Both truncate the first name to three characters the same way, and both are stricter: each adds a full last name, and `token_6` a gender and a ZIP3 |
+| SSN4 keys (8, 9) | linkja's entire SSN-bearing set; NCHS's second deterministic pass; HUD's own hashed-export SSN construction | A counterpart for the SSN4 construction rather than for the key shape: linkja's SSN4 hashes all carry both whole names |
+| Year-and-month in place of a full date (5, 9, 13, 14) | N3C `token_18` | The same coarsening. linkja does not coarsen: for the same class of date error it emits extra whole-date variants -- transposed day and month, date off by one day, date off by one year |
+| Last name + first name + date of birth (10) | N3C `token_38` | The same key. Measured only in its gender-bearing variant, Bernstam's Token 4 |
+| The name-swapped twin (11) | linkja `lnamefnamedob*`; the Census person-key system's swapped-name pass (a secondary reading) | The same device |
+| SSN + first name + a date component, no last name (12 to 14) | N3C `token_16` (`SSN + First Name`) | Looser: the token carries no date component at all, so each built-in key refines it. Bernstam measured the token at 99.6% precision, 61.1% recall |
 
-The last row is the one most worth naming, because the built-in keys at
-positions 12 to 14 have often been described as having no published counterpart.
-They do: `SSN + First Name` is a shipped token in the N3C configuration, and it
-is one of the eight tokens with a published precision figure.
+The last row is the one most worth naming, and it is worth naming carefully. The
+built-in keys at positions 12 to 14 have often been described as having no
+published counterpart; the honest statement sits between that and a match.
+`SSN + First Name` is a shipped token in the N3C configuration and one of the
+eight tokens Bernstam scored, and each of the three built-in keys is that token
+plus a date component -- a whole date at position 12, a year and month at 13 and
+14, with 14 also truncating the first name. They are refinements of a measured
+token, not instances of it. Every pair a built-in key matches, `token_16` would
+match too, so the token's measured false pairs bound the built-in keys' from
+above; the 99.6% precision figure itself does not transfer, because the added
+date component removes true matches along with false ones and precision is a
+ratio of the two. It is an upper-bound analogy on the false-match rate, not a
+figure these keys inherit.
 
 ### Where it is more permissive
 
 Three divergences are real, and each is a recall trade bought at a wider door.
 
-**Truncated names carry keys that published sets keep whole.** Four built-in
+**Truncated names carry keys that published sets keep whole.** Five built-in
 keys match on a three- or four-character last name, and two on a first initial.
 The published sets truncate too, but they truncate the *first* name and keep the
 last name whole: linkja's `fname3lnamedob*` and N3C's `token_6` and `token_7`
 both take the first three characters of the given name against a full family
 name. No linkja hash and no N3C token truncates the last name. The nearest
 published set that truncates a surname is Australia's SLK-581, a single fixed key
-built from letters of both names plus date of birth and sex, which fell as low as
-24% recall and 7% precision in a six-dataset comparison against unions of
-match-keys.
+built from letters of both names plus date of birth and sex, which -- on a
+secondary reading of a six-dataset comparison against unions of match-keys -- fell
+as low as 24% recall on one file and 7% precision on another.
 
 **Two keys carry no SSN evidence at all**, which is stricter-sounding than it is:
-N3C's `token_38` (`Last Name + First Name + DOB`) is exactly this key, and the
-NCHS eligibility rule for linkage requires only two of the three groups
+N3C's `token_38` (`Last Name + First Name + DOB`) is exactly the first of the
+two, the second being its name-swapped twin, and the NCHS eligibility rule for
+linkage requires only two of the three groups
 `{SSN, name, date of birth}`, so a name-plus-date record with no SSN is fully
 eligible there too. What is unusual is not the key's existence but its position,
 which is the cascade-order question below.
 
 **Four keys carry no last name.** Positions 7 and 12 to 14 pair an SSN with a
 first name (whole or truncated to three characters) and a date of birth (whole or
-coarsened to year and month). N3C's `token_16` is the same shape. Where the
-published sets differ is that their nameless and thin-name keys are always
-SSN-anchored and are never *also* coarsened: `token_16` carries a whole first
-name and nothing else, where built-in position 14 carries a three-character first
-name against a year and month. That combination -- SSN plus three characters of a
+coarsened to year and month). N3C's `token_16` is the nearest published shape,
+and it is looser rather than equal: `SSN + First Name`, with no date component at
+all. Where the published sets differ is that a key of theirs carrying no last
+name is anchored on something high-cardinality -- an SSN in `token_5`,
+`token_16` and `token_39`, an email or a cell phone in `token_29` and `token_30`
+-- and is never *also* coarsened: `token_16` carries a whole first name and
+nothing else, where built-in position 14 carries a three-character first name
+against a year and month. That combination -- SSN plus three characters of a
 given name plus year and month of birth -- has no counterpart in any set read
 here.
 
 ### Where it diverges in kind
 
-**No gender.** Every SSN-bearing token in the published sets that is not a whole
-name key carries gender: N3C's `token_5` is `SSN + Gender + DOB`, and Bernstam's
-Tokens 1, 2, 4, 5 and 7 all carry it. The built-in field set has no gender
-element, so the built-in analogues of those keys carry one fewer corroborating
-field. The evidence on what that costs cuts both ways and is set out under
-cascade order below: gender is the field Grannis credits, with first name, for
-protecting against the dominant SSN error, and it is the field NCHS dropped from
+**No gender.** Gender is a standard corroborator in the one published set that
+collects it: nine of the eighteen N3C tokens carry it, including the SSN-bearing
+`token_5` (`SSN + Gender + DOB`), and Bernstam's Tokens 1, 2, 4, 5 and 7 all
+carry it. It is not universal -- N3C's `token_16` and `token_39` carry an SSN and
+no gender, and linkja has no gender field at all -- but the built-in field set has
+no gender element, so every built-in analogue of a gender-bearing key carries one
+fewer corroborating field. The evidence on what that costs cuts both ways and is
+set out under cascade order below: gender is the field Grannis credits, with
+first name, for protecting against the dominant SSN error, and it is the field
+NCHS dropped from
 scoring after finding it had "minimal contribution as a scoring variable and is
 highly correlated with first name agreement".
 
-**No phonetic encoding.** linkja, N3C (`token_2`, `token_24`), and HUD's own
-hashed export all carry a phonetic name form; the built-in keys carry none, using
-prefix truncation instead. This is a defensible divergence rather than a gap: in
-the one controlled study of cleaning, Soundex on surnames raised that field's
-recall from 98.8% to 99.5% while cutting the share of its matches that were
-correct by 65%, and the vendor token set that returned more false pairs than true
-ones on the cleanest data in a federal evaluation was driven by a phonetic name
-token. Truncation makes the same trade with a smaller and more predictable
-window.
+**No phonetic encoding.** N3C (`token_2`, `token_24`) and HUD's own hashed export
+carry a phonetic name form, HUD by hashing the SOUNDEX of each name component.
+linkja does not: its shipped hashes use whole names, a name-order swap, a
+three-character first name and date perturbations, with no phonetic step anywhere
+in its normalization. The built-in keys carry none either, using prefix truncation
+instead, and that is a defensible divergence rather than a gap. On a secondary
+reading of the one controlled study of cleaning, Soundex on surnames raised that
+field's recall from 98.8% to 99.5% while cutting the share of its matches that
+were correct by 65%; on a secondary reading of a federal evaluation of commercial
+matching systems, the vendor token set that returned more false pairs than true
+ones on the cleanest data was driven by a phonetic name token. Truncation makes
+the same trade with a smaller and more predictable window.
 
 **No standardization difference is being papered over.** The three unused fields
 already have shipped standardization pipelines producing exactly the forms the
@@ -415,12 +438,13 @@ before the evidence, because both are checkable against the declaration:
 
 Where a published cascade exists, it is ordered strictest-first on the strength
 of its SSN evidence, and the no-SSN name rule is its floor rather than its
-middle. Maryland's four orders run from everything-agrees down to SSN-only and
-only then to name-and-date-with-no-SSN. The Census person-key system runs its
-exact SSN-and-name-and-date verification first and everything else after. NCHS's
+middle. Maryland's four orders, on the secondary reading above, run from
+everything-agrees down to SSN-only and only then to name-and-date-with-no-SSN.
+The Census person-key system, on that same secondary reading, runs its exact
+SSN-and-name-and-date verification first and everything else after. NCHS's
 deterministic pre-pass runs full SSN, then last-four, and demands *more*
-corroboration of the weaker key -- and its swapped-name handling, like the Census
-system's, is placed late.
+corroboration of the weaker key, and places its swapped-name handling late, as
+the Census system does on that same secondary reading.
 
 Set against that, the built-in order is the opposite arrangement at positions 10
 to 14. Nothing in this library publishes an ordered cascade that places a no-SSN
@@ -445,9 +469,11 @@ way.
 Two readings follow, and both are narrow. First, the whole-name-plus-date key is
 measured as the **most precise** of the eight tokens scored -- more precise than
 either SSN-bearing token -- which is the reverse of the intuition that an SSN key
-is by construction the stricter one. Second, the SSN-plus-first-name key, which
-is the exact shape of the built-in keys at positions 12 to 14, measures at 99.6%
-precision, so it is not a weak rule in absolute terms either. Sequoia's
+is by construction the stricter one. Second, the SSN-plus-first-name token, which
+the built-in keys at positions 12 to 14 refine by adding a date component,
+measures at 99.6% precision, so a key of roughly that shape is not weak in
+absolute terms either -- an analogy for those keys rather than a measurement of
+them, on the reading set out in the membership comparison. Sequoia's
 uniqueness column orders the same way at the top: a name-and-date key plus SSN4
 reaches 99.7% and a name-and-date key plus a phone reaches 99.5%, and Sequoia
 placed the phone rule above the SSN4 rule.
@@ -485,7 +511,8 @@ where a name-and-date key is at its best -- and its no-SSN key carries gender an
 a full date of birth, neither of which the built-in `LN + FN + DOB` has.
 
 A last-name corroboration rule for a degraded SSN does exist in the literature,
-in NCHS's survey-to-death-index methodology: a class for pairs disagreeing on
+in NCHS's survey-to-death-index methodology, read here through a secondary survey
+rather than from the methodology itself: a class for pairs disagreeing on
 three or more digits zeroes the SSN weight outright and requires last name and
 sex to agree, on the reasoning that the number is either miskeyed or the
 spouse's. Two qualifications belong with it. It is from the death-index
@@ -534,9 +561,10 @@ quoted as a pair fill rate or it is overstated.
 
 There is also a fourth difference, of a different kind. The published cascades
 lean on a reference file that holds every name a person ever had -- the Census
-system's alternate-name reference data, the death index's father's-surname
-retrieval criterion. A rule that demands a name alongside a perturbed number can
-afford to, because it never lost the earlier name. Two administrative files with
+system's alternate-name reference data and the death index's father's-surname
+retrieval criterion, both secondary readings. A rule that demands a name
+alongside a perturbed number can afford to, because it never lost the earlier
+name. Two administrative files with
 one name each cannot import that rule without paying for it in the people whose
 surname changed between their two records.
 
@@ -577,9 +605,13 @@ whose consequences for zero setup would have to be argued separately.
 A second constraint follows from the cascade. A candidate key that is a strict
 refinement of an existing key -- the same elements plus one more -- matches a
 subset of what the looser key matches, so it must be placed ABOVE that key or it
-can never fire. Every compound candidate below is a refinement of an existing
-built-in key, so every one of them is a placement decision as much as a
-membership decision.
+can never fire. Three of the candidates below are strict refinements of the
+built-in `LN + FN + DOB` key -- the two ZIP forms and the compound phone form --
+so each of those is a placement decision as much as a membership decision. The
+rest stand in no refinement relation to any built-in key:
+`LN + FN + YOB + MOB + ZIP5` coarsens the date while adding a ZIP, so it is
+neither narrower nor wider, and the two thin contact keys share no shape with any
+built-in key at all.
 
 ### The bearing of the served population, stated once
 
@@ -597,11 +629,12 @@ is bounded by whichever side carries the field, which is at most one of them.
 ### `zip_code`
 
 **Never alone, and never without a name.** The evidence here is unusually
-consistent. ZIP's distinctiveness is measured at 0.6% -- the lowest of every
-attribute graded except sex, race and ethnicity. All eight ZIP-bearing tokens in
-the N3C configuration carry a last name and a first-name component; none stands
-alone. And the key-design analysis of frequency attacks on hashed match-keys
-found that two- and three-attribute keys retain a discrete frequency
+consistent. ZIP's distinctiveness is measured at 0.6% -- lower than every other
+attribute graded except sex, race, ethnicity and the name suffix. All eight
+ZIP-bearing tokens in the N3C configuration carry a last name and a first-name
+component; none stands alone. And the key-design analysis of frequency attacks
+on hashed match-keys found that two- and three-attribute keys retain a discrete
+frequency
 distribution, with frequencies approaching uniform only "with match-keys with
 four or more attributes".
 
@@ -645,10 +678,16 @@ geography around it.
 **The one contact field with a published measurement, and the least stable one
 for this population.** A cell-phone-alone token measures at 95.6% precision and
 52.1% recall at a 68.01% pair fill rate -- the lowest precision of the eight
-tokens scored, and the only one below 97%. The vendor's own token catalogue
-excludes phone-based tokens from its recommended combination list "because they
-are often most prone to error on input", and the one shipped configuration that
-carries a phone pairs it with a first name (`First Name + Cell Phone Number`).
+tokens scored, and the only one below 97%. The one published exclusion of a phone
+token is the study authors' own evaluation choice, not a vendor policy: they
+assembled the multi-token combinations they scored themselves, "by considering
+common matching strategies across sites", and their note on the combination they
+called Net Tokens says tokens based on email, phone, or address "are often most
+prone to error on input". It carries the weight of one research team's judgement
+about their own experiment, and not even consistently: the combination they
+defined retains the address-bearing token that same note excludes. The one
+shipped configuration that carries a phone pairs it with a first name
+(`First Name + Cell Phone Number`).
 
 Candidate shapes:
 
@@ -681,10 +720,12 @@ across people, in any sector.**
 **The weakest evidence of the three, and the only one carrying a stated security
 objection.** No precision, recall, m/u weight, or stability figure for email as a
 matching field exists anywhere in this library. The one shipped configuration
-that carries it has a single token (`First Name + Email`), unmeasured. The
-vendor's own catalogue excludes email tokens from its recommended list as
-error-prone. The attribute analysis that grades every other candidate gives email
-no row at all and rates it the hardest tier to standardize. The one document that
+that carries it has a single token (`First Name + Email`), unmeasured. The one
+published exclusion of an email token is the same evaluation choice made for
+phone, by the same study authors about their own combination and on the same
+error-prone-on-input reasoning; no vendor policy on email is cited here either.
+The attribute analysis that grades every other candidate gives email no row at
+all and rates it the hardest tier to standardize. The one document that
 recommends it does so on a rising-availability argument alone -- 9% to 54% of
 records over nine years -- and the federal matching report classifies it as
 untested and warns that these attributes "are often used to establish a patient's
@@ -780,11 +821,11 @@ sources give it:
   worked example found its gold-standard subset had a lower unlinked rate than
   the cohort overall, and generalizes the point: "records with high quality data
   may differ systematically from those of poorer quality data".
-- **The subset is demographically skewed, measurably.** Census person-key
-  assignment rates run 6 to 16 points lower for Hispanic records, 16 to 34 points
-  lower for non-citizens, and 5 to 10 points lower for people in poverty. A
-  calibration subset defined by carrying a verified identifier measures error
-  best for the people who link best.
+- **The subset is demographically skewed, measurably.** On a secondary reading,
+  Census person-key assignment rates run 6 to 16 points lower for Hispanic
+  records, 16 to 34 points lower for non-citizens, and 5 to 10 points lower for
+  people in poverty. A calibration subset defined by carrying a verified
+  identifier measures error best for the people who link best.
 
 For an HMIS-class file there is a second-order version of the same problem worth
 naming: a benefit-program subset inverts the usual skew, covering the low-income
@@ -800,8 +841,9 @@ with that key removed, reporting what recall it added and what precision it cost
 
 State honestly what this requirement rests on. **None of the evaluation guidance
 requires it**, and none of the linkage evaluations read here performs it, with
-one exception: a hashed-token re-run of a hospital-to-death-records linkage
-against its own clear-text linkage as truth found the full token set at 93.8%
+one exception, and that one is a secondary reading rather than a report held
+here: a hashed-token re-run of a hospital-to-death-records linkage against its
+own clear-text linkage as truth found the full token set at 93.8%
 precision and 98.7% recall, and dropping the two token combinations that
 generated most of the false pairs -- both coarsened name-plus-birth-date
 combinations, one phonetic and one first-initial -- moved it to 98.9% precision
@@ -932,7 +974,10 @@ Regenstrief Linkage Honest Broker site engagement packet, v6, 2021
 is the token list. Datavant Tokenization User Guide, 2023
 (`datavant-tokenization-user-guide.pdf`); the vendor publishes no enumeration of
 its numbered tokens, so the eighteen tokens cited here are the N3C
-configuration's selection.
+configuration's selection. No vendor recommendation about which tokens to combine
+is cited anywhere in this note: the exclusion of phone- and email-based tokens
+quoted under the candidate rules is Bernstam et al.'s own evaluation choice about
+their own experiment, recorded in their Table 1.
 
 **Operating methodologies.** NCHS-CMS T-MSIS Medicaid linkage methodology
 (`nchs-cms-tmsis-medicaid-linkage-methodology.pdf`), NCHS 2016 NHCS-CMS Medicaid
@@ -967,6 +1012,7 @@ risk of PPRL encodings shared with de-identified demographics, 2025
 Postsecondary, and Workforce Data* (`real-world-linkage-survey.md`), a survey held
 in the same library. The Maryland cascade, the Census person-key system, the
 NHANES-III SSN rule, the Australian fixed-key comparisons, the hashed-token
-ablation result, the Census person-key differentials, and the controlled study of
-name cleaning are cited through it; each names its own underlying publication,
-and this note has not re-verified those against the originals.
+ablation result, the Census person-key differentials, the controlled study of
+name cleaning, and the federal evaluation of commercial matching systems are
+cited through it; each names its own underlying publication, and this note has
+not re-verified those against the originals.
