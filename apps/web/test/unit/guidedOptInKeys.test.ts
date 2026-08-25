@@ -8,26 +8,43 @@ import {
   getDefaultStandardization,
   inferMetadata,
   isOptInLinkageKey,
+  mintExchangeFile,
   prepareForExchange,
   safeParseLinkageTerms,
   summarizeInvitation,
+  validateStandardizationAgainstTerms,
 } from "@psilink/core";
 
 import {
+  EMPTY_SAVE_FIELDS,
+  exchangeFileInputFor,
+} from "@bench/saveExchangeModel";
+import { composeManagedDocument } from "@bench/manageOfferModel";
+import { inviterServerJobConfig } from "@bench/useInviterExchange";
+
+import {
   buildAdvancedTerms,
+  draftFromTerms,
+  draftWithKeyEnabled,
   inviterExchangeDataSpec,
   seedAdvancedInvite,
   setDraftMetadata,
+  setDraftMetadataKeepingKeys,
   validateAdvancedInvite,
 } from "../../src/psi/advancedInvite.js";
 import {
   setColumnType,
   setColumnTypeForMatching,
 } from "../../src/psi/metadataEditing.js";
+import { generateInvitation } from "../../src/psi/invitation.js";
+import { prepareManagedRerunExchange } from "../../src/psi/managedPreparedExchange.js";
 
-import type { AdvancedInviteDraft } from "../../src/psi/advancedInvite.js";
+import type {
+  AdvancedInviteDraft,
+  AdvancedInviteSeed,
+} from "../../src/psi/advancedInvite.js";
 
-import type { CSVRow } from "@psilink/core";
+import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
 
 /**
  * The guided path's opt-in matchable types: a column of a type no built-in key
@@ -54,17 +71,19 @@ function guidedDraft(): AdvancedInviteDraft {
   return seedAdvancedInvite("Inviter", COLUMNS, ROWS).draft;
 }
 
-/** The draft with the named offered key turned on -- the checkbox in the list. */
+/** The draft with the named key's checkbox in the list set to `enabled` -- driven
+ * through the control the list actually calls, since turning an offer on is what
+ * gives its column the cleaning. */
 function withKeyEnabled(
   draft: AdvancedInviteDraft,
   name: string,
+  enabled = true,
 ): AdvancedInviteDraft {
-  return {
-    ...draft,
-    keys: draft.keys.map((entry) =>
-      entry.key.name === name ? { ...entry, enabled: true } : entry,
-    ),
-  };
+  return draftWithKeyEnabled(
+    draft,
+    draft.keys.findIndex((entry) => entry.key.name === name),
+    enabled,
+  );
 }
 
 const offeredKeys = (draft: AdvancedInviteDraft) =>
@@ -278,10 +297,17 @@ describe("an offer survives a column edit the way a built-in key does", () => {
     );
     expect(offeredKeys(edited).map((entry) => entry.key.name)).toEqual(["ZIP"]);
     expect(offeredKeys(edited)[0].enabled).toBe(false);
-    // And the retyped column gains its type's cleaning, so turning the key on
-    // matches through the pipeline rather than raw.
+    // Off, so the retyped column carries no cleaning yet -- the draft holds a
+    // pipeline for a field only while its terms declare one.
+    expect(edited.standardization.some((t) => t.output === "zip_code")).toBe(
+      false,
+    );
+    // Turning the offer on binds the cleaning to the column the retype supplied,
+    // so the key matches through the pipeline rather than raw.
     expect(
-      edited.standardization.find((t) => t.output === "zip_code")?.input,
+      withKeyEnabled(edited, "ZIP").standardization.find(
+        (t) => t.output === "zip_code",
+      )?.input,
     ).toBe("postal");
   });
 
@@ -295,5 +321,214 @@ describe("an offer survives a column edit the way a built-in key does", () => {
     expect(
       buildAdvancedTerms(edited).linkageKeys.map((k) => k.name),
     ).not.toContain("ZIP");
+  });
+});
+
+describe("turning an offer on and off again", () => {
+  test("adds the acceptor's own derivation, then withdraws it", () => {
+    const off = guidedDraft();
+    // Off, the column supplies nothing: an offer's cleaning is created by turning
+    // its key on, not by the file carrying a column of the type. A draft holding
+    // one while off would clean a field its own terms declare nothing for.
+    expect(off.standardization.some((t) => t.output === "zip_code")).toBe(
+      false,
+    );
+
+    const on = withKeyEnabled(off, "ZIP");
+
+    // On: the cleaning the accepting party derives from these same terms, so the
+    // two sides hash the same value.
+    const stepsFor = (draft: AdvancedInviteDraft) =>
+      draft.standardization.find((t) => t.output === "zip_code")?.steps;
+    const terms = buildAdvancedTerms(on);
+    expect(stepsFor(on)).toEqual(
+      getDefaultStandardization(
+        inferMetadata(COLUMNS),
+        deriveAcceptedLinkageTerms(terms, "Acceptor"),
+      ).find((t) => t.output === "zip_code")?.steps,
+    );
+    expect(stepsFor(on)).not.toEqual([]);
+
+    // Off again: the cleaning goes with the key, so the draft is back to what the
+    // file seeded -- including the terms every guided invitation over these
+    // columns emitted before the offer existed.
+    const back = withKeyEnabled(on, "ZIP", false);
+    expect(back.standardization).toEqual(off.standardization);
+    expect(canonicalString(buildAdvancedTerms(back))).toEqual(
+      canonicalString(buildAdvancedTerms(off)),
+    );
+  });
+});
+
+describe("what a mint over an offered column hands the surfaces that keep it", () => {
+  // Three surfaces persist a mint and later hand their standardization straight
+  // to prepareForExchange: the managed record a scheduled re-run replays, the CLI
+  // exchange file the save path writes, and the console's server-job config. A
+  // transform output naming no declared linkage field is refused there -- for the
+  // recurring exchange, unattended, on every run.
+  const LOCATION = {
+    origin: "https://example.org",
+    hostname: "example.org",
+    port: "",
+  };
+
+  /** The invitation the bench mints for a draft, taken over profiled columns (the
+   * console's mint source) so no CSV file is parsed here. */
+  function mintFor(draft: AdvancedInviteDraft) {
+    return generateInvitation({
+      inviterName: draft.identity,
+      profiledColumns: COLUMNS,
+      location: LOCATION,
+      lifetimeSeconds: draft.lifetimeSeconds,
+      linkageTerms: buildAdvancedTerms(draft),
+      metadata: draft.metadata,
+      standardization: draft.standardization,
+    });
+  }
+
+  test("a managed record deposited with every offer off re-runs", async () => {
+    const minted = await mintFor(guidedDraft());
+    expect(
+      validateStandardizationAgainstTerms(
+        minted.standardization ?? [],
+        minted.linkageTerms,
+      ),
+    ).toEqual([]);
+
+    const document = composeManagedDocument(
+      {
+        side: "inviter",
+        linkageTerms: minted.linkageTerms,
+        metadata: minted.metadata,
+        standardization: minted.standardization,
+        disclosedPayloadColumns: minted.disclosedPayloadColumns,
+      },
+      { channel: "webrtc", host: "example.org", port: 3000, path: "/api/" },
+    );
+    expect(() =>
+      prepareManagedRerunExchange(document, ROWS, COLUMNS),
+    ).not.toThrow();
+  });
+
+  test("the saved CLI exchange file runs as written", async () => {
+    const minted = await mintFor(guidedDraft());
+    const input = exchangeFileInputFor(
+      "filedrop",
+      { ...EMPTY_SAVE_FIELDS, sharedDirectory: "/srv/psilink" },
+      minted,
+    );
+    expect(
+      validateStandardizationAgainstTerms(
+        input.standardization ?? [],
+        input.linkageTerms,
+      ),
+    ).toEqual([]);
+    // The YAML is a serialization of exactly this spec, so minting it proves the
+    // schema accepts it and preparing the spec is what the CLI does once it has
+    // loaded the file.
+    expect(() => mintExchangeFile(input)).not.toThrow();
+    expect(() =>
+      prepareForExchange(
+        {
+          linkageTerms: input.linkageTerms,
+          metadata: input.metadata,
+          standardization: input.standardization,
+        },
+        input.linkageTerms.identity,
+        ROWS,
+        COLUMNS,
+      ),
+    ).not.toThrow();
+  });
+
+  test("the console's server-job config carries an undeclared output for nothing", async () => {
+    const minted = await mintFor(guidedDraft());
+    const config = inviterServerJobConfig({
+      minted,
+      inputSource: { kind: "inline", csv: "zip\n60614\n" },
+      transport: { channel: "filedrop" },
+    });
+    expect(
+      validateStandardizationAgainstTerms(
+        config.standardization ?? [],
+        config.linkageTerms,
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("a metadata edit on an imported draft grows no cleaning of its own", () => {
+  /** `role: linkage` columns of the given names and types. */
+  function linkageColumns(
+    columns: Array<[string, Metadata[number]["type"]]>,
+  ): Metadata {
+    return columns.map(([name, type]) => ({
+      name,
+      type,
+      role: "linkage",
+      isPayload: false,
+    }));
+  }
+
+  /** A document declaring one `last_name` field and the one key over it -- nothing
+   * of an offered type, whatever the importing party's own columns carry. */
+  function lastNameDocument(): LinkageTerms {
+    const authorMetadata = linkageColumns([["author_surname", "last_name"]]);
+    return buildAdvancedTerms({
+      identity: "Author",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      linkageStrategy: "cascade",
+      metadata: authorMetadata,
+      standardization: [
+        { output: "last_name", input: "author_surname", steps: [] },
+      ],
+      keys: [
+        {
+          key: { name: "NAME", elements: [{ field: "last_name" }] },
+          enabled: true,
+        },
+      ],
+    });
+  }
+
+  test("a routine column retype declares nothing the document did not", () => {
+    // The importing inviter has a ZIP column the document says nothing about, and
+    // retypes an unrelated column. Widening the cleaning on the strength of that
+    // column would put a `zip_code` transformation into a draft whose terms declare
+    // no such field -- inert here, and refused wherever this draft is persisted.
+    const metadata: Metadata = [
+      ...linkageColumns([
+        ["last_col", "last_name"],
+        ["zip_col", "zip_code"],
+      ]),
+      { name: "birthday", type: "other", role: "ignored", isPayload: false },
+    ];
+    const seed: AdvancedInviteSeed = {
+      terms: getDefaultLinkageTerms("Inviter", metadata),
+      metadata,
+      columns: metadata.map((column) => column.name),
+    };
+    const imported = draftFromTerms(lastNameDocument(), seed, 3600, []);
+    expect(imported.standardization.some((t) => t.output === "zip_code")).toBe(
+      false,
+    );
+
+    const edited = setDraftMetadataKeepingKeys(
+      imported,
+      setColumnType(imported.metadata, "birthday", "date_of_birth").metadata,
+      [],
+    );
+    expect(edited.standardization.some((t) => t.output === "zip_code")).toBe(
+      false,
+    );
+    expect(
+      validateStandardizationAgainstTerms(
+        edited.standardization,
+        buildAdvancedTerms(edited),
+      ),
+    ).toEqual([]);
   });
 });

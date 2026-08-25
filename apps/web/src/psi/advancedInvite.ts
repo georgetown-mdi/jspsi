@@ -33,6 +33,7 @@ export {
   defaultStandardizationForRows,
   draftFromTerms,
   draftWithFieldAdded,
+  draftWithKeyEnabled,
   inferDateInputFormat,
   inviterDefaultStandardization,
   moveElement,
