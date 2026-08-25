@@ -19,6 +19,7 @@ import {
   assertRetainSweepGuard,
   diffLinkageTerms,
   formatReconcileDiffs,
+  linkageTermsStandingOf,
   loadConfigLinkageSource,
   persistDisclosedPayloadColumns,
   persistExpectedPartnerDeduplicate,
@@ -30,9 +31,14 @@ import {
   warnOnLinkageRuleSetCitationDrift,
 } from "../../src/config";
 import type {
+  ConfigLinkageSource,
+  LinkageTermsStanding,
+} from "../../src/config";
+import type {
   ConnectionConfig,
   ExchangeSpec,
   FileDropConnectionConfig,
+  LinkageRuleSetReference,
   LinkageTerms,
   SFTPConnectionConfig,
 } from "@psilink/core";
@@ -1581,6 +1587,110 @@ test("diffLinkageTerms: a sub-field difference under matching key names renders 
   expect(keyConflict?.incoming).toContain("_x");
 });
 
+test("diffLinkageTerms: the rule-set citation follows core's both-sides-only rule", () => {
+  // All four citation shapes against one reconcile, held to the rule
+  // validateCompatibility applies: compared only where BOTH sides declare a
+  // citation, so a one-sided one reconciles cleanly and only a two-sided
+  // difference conflicts -- the case that would otherwise abort mid-run.
+  const foreign: LinkageRuleSetReference = {
+    fieldSet: { name: "county-pii", version: "3.1.0" },
+    keySet: { name: "county-keys", version: "3.1.0" },
+  };
+  const withCitation = (
+    citation: LinkageRuleSetReference | undefined,
+  ): LinkageTerms => {
+    const terms = cloneTerms(getDefaultLinkageTerms("Org"));
+    if (citation === undefined) delete terms.linkageRuleSet;
+    else terms.linkageRuleSet = citation;
+    return terms;
+  };
+  const shipped = DEFAULT_LINKAGE_RULE_SET.reference;
+
+  const neither = diffLinkageTerms(
+    withCitation(undefined),
+    withCitation(undefined),
+  );
+  expect(neither.conflicts).toEqual([]);
+  expect(neither.warnings).toEqual([]);
+
+  const configOnly = diffLinkageTerms(
+    withCitation(shipped),
+    withCitation(undefined),
+  );
+  expect(configOnly.conflicts).toEqual([]);
+  expect(configOnly.warnings).toEqual([]);
+
+  const invitationOnly = diffLinkageTerms(
+    withCitation(undefined),
+    withCitation(foreign),
+  );
+  expect(invitationOnly.conflicts).toEqual([]);
+  expect(invitationOnly.warnings).toEqual([]);
+
+  const agreeing = diffLinkageTerms(
+    withCitation(shipped),
+    withCitation({ fieldSet: shipped.fieldSet, keySet: shipped.keySet }),
+  );
+  expect(agreeing.conflicts).toEqual([]);
+  expect(agreeing.warnings).toEqual([]);
+
+  const differing = diffLinkageTerms(
+    withCitation(shipped),
+    withCitation(foreign),
+  );
+  expect(differing.conflicts).toHaveLength(1);
+  expect(differing.conflicts[0].field).toBe("linkage_rule_set");
+  // Keys first, the order core's mismatch message renders the pair in, and raw:
+  // the caller composes this into a UsageError escaped once where it is shown.
+  expect(differing.conflicts[0].existing).toBe(
+    `"${shipped.keySet.name}" ${shipped.keySet.version} over ` +
+      `"${shipped.fieldSet.name}" ${shipped.fieldSet.version}`,
+  );
+  expect(differing.conflicts[0].incoming).toBe(
+    '"county-keys" 3.1.0 over "county-pii" 3.1.0',
+  );
+});
+
+test("diffLinkageTerms: two citations differing only under NFC are not a conflict", () => {
+  // The citation is compared through the same NFC-folded canonical form the
+  // structural fields are, so a name one side authored decomposed is not a false
+  // conflict against the composed spelling of the same name.
+  const composed = "acc\u00e9s";
+  const decomposed = "acce\u0301s";
+  expect(composed).not.toBe(decomposed);
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  existing.linkageRuleSet = {
+    fieldSet: { name: `${composed}-pii`, version: "1.0.0" },
+    keySet: { name: `${composed}-keys`, version: "1.0.0" },
+  };
+  incoming.linkageRuleSet = {
+    fieldSet: { name: `${decomposed}-pii`, version: "1.0.0" },
+    keySet: { name: `${decomposed}-keys`, version: "1.0.0" },
+  };
+  expect(diffLinkageTerms(existing, incoming).conflicts).toEqual([]);
+});
+
+test("diffLinkageTerms: citations whose clauses render alike fall back to the full detail", () => {
+  // A set name carrying the clause's own delimiters can render two different
+  // citations identically; the diff then shows the stored values instead of two
+  // identical-looking summaries.
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  existing.linkageRuleSet = {
+    fieldSet: { name: 'a" 1.0.0 over "b', version: "1.0.0" },
+    keySet: { name: "k", version: "1.0.0" },
+  };
+  incoming.linkageRuleSet = {
+    fieldSet: { name: "b", version: "1.0.0" },
+    keySet: { name: 'k" 1.0.0 over "a', version: "1.0.0" },
+  };
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts).toHaveLength(1);
+  expect(conflicts[0].existing).not.toBe(conflicts[0].incoming);
+  expect(conflicts[0].existing).toContain("fieldSet");
+});
+
 test("diffLinkageTerms: an un-encodable value does not throw and identical terms still reconcile", () => {
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
@@ -1876,6 +1986,7 @@ test("readConfigLinkageSource returns the source a config defines", () => {
       standardization: undefined,
       metadata: undefined,
       retainsFiles: false,
+      linkageTermsStanding: "held-alone",
     },
   });
 });
@@ -2352,14 +2463,19 @@ test("persistOutboundPayloadConsent writes a confirmed-empty set verbatim", () =
 
 // --- warnOnLinkageRuleSetCitationDrift ---------------------------------------
 
-/** The warnings one drift check emits, in order. */
+/** The warnings one drift check emits, in order. Terms default to the standing
+ *  that offers both remedies; the accepted standing is asked for explicitly. */
 function citationWarnings(
   terms: Pick<LinkageTerms, "linkageRuleSet" | "linkageFields" | "linkageKeys">,
+  standing: LinkageTermsStanding = "held-alone",
 ): string[] {
   const warnings: string[] = [];
-  warnOnLinkageRuleSetCitationDrift(terms, "psilink.yaml", {
-    warn: (message: string) => warnings.push(message),
-  });
+  warnOnLinkageRuleSetCitationDrift(
+    terms,
+    "psilink.yaml",
+    { warn: (message: string) => warnings.push(message) },
+    standing,
+  );
   return warnings;
 }
 
@@ -2426,12 +2542,20 @@ test("an added linkage field under the built-in citation warns, naming linkage_f
   expect(warnings[0]).not.toContain("linkage_keys");
 });
 
-test("both halves edited are reported in one warning", () => {
+test("both halves edited are reported in one warning, each against its own set", () => {
   const warnings = citationWarnings(
     withAddedField(withReorderedKeys(getDefaultLinkageTerms("Agency A"))),
   );
+  const { fieldSet, keySet } = DEFAULT_LINKAGE_RULE_SET.reference;
   expect(warnings).toHaveLength(1);
-  expect(warnings[0]).toContain("its linkage_fields and linkage_keys are not");
+  expect(warnings[0]).toContain(
+    `its linkage_fields are not drawn from the "${fieldSet.name}" ` +
+      `${fieldSet.version} this build ships`,
+  );
+  expect(warnings[0]).toContain(
+    `its linkage_keys are not drawn from the "${keySet.name}" ` +
+      `${keySet.version} this build ships`,
+  );
 });
 
 test("a citation this build cannot resolve draws no warning", () => {
@@ -2469,6 +2593,26 @@ test("a foreign field-set half does not exempt the built-in key set beside it", 
   expect(warnings).toHaveLength(1);
   expect(warnings[0]).toContain("its linkage_keys are not drawn from");
   expect(warnings[0]).not.toContain("linkage_fields");
+});
+
+test("a half-foreign citation reports the drift against the half this build ships", () => {
+  // Only the key half resolves here, so the report must name that set rather than
+  // "the citation": the citation also names a set this build does not ship, and
+  // claiming to have compared the rules against it would assert a check no build
+  // here can make.
+  const terms = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  const keySet = DEFAULT_LINKAGE_RULE_SET.reference.keySet;
+  terms.linkageRuleSet = {
+    fieldSet: { name: "county-pii", version: "3.1.0" },
+    keySet,
+  };
+  const warnings = citationWarnings(terms);
+  expect(warnings[0]).toContain(
+    `its linkage_keys are not drawn from the "${keySet.name}" ` +
+      `${keySet.version} this build ships`,
+  );
+  expect(warnings[0]).not.toContain("this build ships under that citation");
+  expect(warnings[0]).not.toContain('"county-pii" 3.1.0 this build ships');
 });
 
 test("fields the unresolvable half covers do not decide the resolvable half", () => {
@@ -2509,4 +2653,124 @@ test("a set name carrying control characters is escaped at this sink", () => {
   expect(warnings[0]).toContain("county-pii");
   expect(warnings[0]).not.toContain("\u0007");
   expect(warnings[0]).not.toContain("\n");
+});
+
+test("terms an acceptance stands behind are not addressed to their author", () => {
+  // Neither remedy addressed to an author applies to terms both parties hold:
+  // restoring the cited set's rules would edit an agreement unilaterally, and
+  // the exchange would refuse the result against the partner running the
+  // originals.
+  const drifted = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  const warnings = citationWarnings(drifted, "accepted-with-partner");
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain("its linkage_keys are not drawn from");
+  expect(warnings[0]).not.toContain("rules you author yourself");
+  expect(warnings[0]).not.toContain("restore the rules the cited set declares");
+  expect(warnings[0]).toContain("not yours alone to correct");
+  expect(warnings[0]).toContain("decline to reuse these terms");
+});
+
+test("a drifted citation is reported under either standing", () => {
+  // The claim is reported whoever authored it; only the remedy differs, so the
+  // accepted reading is not a way for a drifted citation to go unmentioned.
+  const drifted = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  for (const standing of ["held-alone", "accepted-with-partner"] as const) {
+    const warnings = citationWarnings(drifted, standing);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(
+      "psilink.yaml: linkage_terms.linkage_rule_set cites",
+    );
+    expect(warnings[0]).toContain(
+      "claims a provenance these rules do not have",
+    );
+  }
+});
+
+test("a config with no drift is silent under either standing", () => {
+  const clean = getDefaultLinkageTerms("Agency A");
+  expect(citationWarnings(clean, "held-alone")).toEqual([]);
+  expect(citationWarnings(clean, "accepted-with-partner")).toEqual([]);
+});
+
+// --- linkageTermsStandingOf --------------------------------------------------
+
+test("the partner-deduplicate record is what marks an accepted config", () => {
+  // `psilink accept` records the invitation's declared cardinality on every
+  // config it writes and every config it reuses, and nothing else writes one, so
+  // its presence -- either value -- is the mark of an acceptance.
+  expect(linkageTermsStandingOf({})).toBe("held-alone");
+  expect(
+    linkageTermsStandingOf({ expectedPartnerDeduplicate: undefined }),
+  ).toBe("held-alone");
+  expect(linkageTermsStandingOf({ expectedPartnerDeduplicate: false })).toBe(
+    "accepted-with-partner",
+  );
+  expect(linkageTermsStandingOf({ expectedPartnerDeduplicate: true })).toBe(
+    "accepted-with-partner",
+  );
+});
+
+test("readConfigLinkageSource reads the terms' standing off the loaded file", () => {
+  const write = (
+    name: string,
+    extra: Partial<ExchangeSpec>,
+  ): ConfigLinkageSource => {
+    const configPath = path.join(dir, name);
+    saveConfig(configPath, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+      ...extra,
+    });
+    const result = readConfigLinkageSource(configPath);
+    if (result.status !== "loaded")
+      throw new Error(`expected ${name} to load, got ${result.status}`);
+    return result.source;
+  };
+  expect(write("held-alone.yaml", {}).linkageTermsStanding).toBe("held-alone");
+  // The record in the snake_case spelling saveConfig serializes it to.
+  expect(
+    write("accepted.yaml", { expectedPartnerDeduplicate: false })
+      .linkageTermsStanding,
+  ).toBe("accepted-with-partner");
+});
+
+// Both spellings are read, and anything other than a boolean reads as no
+// acceptance rather than as an error: the record is machine-written, and the
+// block stays unparsed here exactly as the retain-mode declaration above does.
+test.each([
+  ["a camelCase spelling", "expectedPartnerDeduplicate: true\n", true],
+  ["a key with no value", "expected_partner_deduplicate:\n", false],
+  ["a non-boolean value", "expected_partner_deduplicate: 'true'\n", false],
+])(
+  "readConfigLinkageSource reads an acceptance from %s: %j",
+  (_label, block, accepted) => {
+    const configPath = path.join(dir, "psilink.yaml");
+    const terms = getDefaultLinkageTerms("Agency A");
+    fs.writeFileSync(
+      configPath,
+      `${block}${YAML.stringify({ linkage_terms: terms })}`,
+    );
+    expect(readConfigLinkageSource(configPath)).toMatchObject({
+      status: "loaded",
+      source: {
+        linkageTermsStanding: accepted ? "accepted-with-partner" : "held-alone",
+      },
+    });
+  },
+);
+
+test("the record persistExpectedPartnerDeduplicate writes marks a reused config", () => {
+  // The accept-reuse path leaves the operator's own terms on disk and writes
+  // this record beside them, so a config whose terms an acceptance agreed to
+  // reads as accepted even though nothing rewrote the terms themselves.
+  const configPath = path.join(dir, "reused.yaml");
+  saveConfig(configPath, {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkageTerms: getDefaultLinkageTerms("Agency A"),
+  });
+  persistExpectedPartnerDeduplicate(configPath, true);
+  const result = readConfigLinkageSource(configPath);
+  if (result.status !== "loaded")
+    throw new Error(`expected the config to load, got ${result.status}`);
+  expect(result.source.linkageTermsStanding).toBe("accepted-with-partner");
 });

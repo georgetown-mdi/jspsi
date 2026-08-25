@@ -27,6 +27,7 @@ import type {
 import {
   diffLinkageTerms,
   formatReconcileDiffs,
+  linkageTermsStandingOf,
   persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
   persistOutboundPayloadConsent,
@@ -690,8 +691,16 @@ function reconcileAcceptConfig(params: {
 
   // Reported ahead of the reconciliation below, so a kept config's stale
   // citation reaches the operator whether or not its terms agree with the
-  // invitation's -- it is a claim about this file's own rules either way.
-  warnOnLinkageRuleSetCitationDrift(existing.linkageTerms, configPath, log);
+  // invitation's -- it is a claim about this file's own rules either way. The
+  // standing read here is the file's as it stands, before this acceptance
+  // records itself on it: terms no earlier acceptance stands behind are still
+  // the operator's alone to correct at this point.
+  warnOnLinkageRuleSetCitationDrift(
+    existing.linkageTerms,
+    configPath,
+    log,
+    linkageTermsStandingOf(existing),
+  );
 
   const { conflicts, warnings } = diffLinkageTerms(
     existing.linkageTerms,

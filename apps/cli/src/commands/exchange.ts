@@ -22,6 +22,7 @@ import {
   announceRetainMode,
   assertRetainSweepGuard,
   DEFAULT_CONFIG_PATH,
+  linkageTermsStandingOf,
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
 import { expandTilde } from "../fileUtils";
@@ -401,6 +402,7 @@ export function loadConfig(options: ExchangeOptions): {
     exchangeDataSpec.linkageTerms,
     options.configFile,
     log,
+    linkageTermsStandingOf(exchangeDataSpec),
   );
 
   const connection = applyConnectionOverrides(

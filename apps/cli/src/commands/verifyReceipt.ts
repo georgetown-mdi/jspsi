@@ -776,6 +776,7 @@ function configFileTerms(
     source.source.linkageTerms,
     configFile,
     log,
+    source.source.linkageTermsStanding,
   );
   return source.source.linkageTerms;
 }

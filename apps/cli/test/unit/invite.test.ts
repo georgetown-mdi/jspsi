@@ -1755,6 +1755,7 @@ test("validateInvite: offline config-source refuses an algorithm with no run pat
   vi.mocked(loadConfigLinkageSource).mockReturnValueOnce({
     linkageTerms: { ...defaultTerms(), algorithm: "psi-x" as Algorithm },
     retainsFiles: false,
+    linkageTermsStanding: "held-alone",
   });
   try {
     let thrown: unknown;

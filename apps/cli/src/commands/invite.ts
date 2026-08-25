@@ -561,7 +561,12 @@ export async function validateInvite(params: {
     // The config is the source of the terms this mint carries, so a citation its
     // rules no longer support is reported before the token is built rather than
     // after it has left for the partner.
-    warnOnLinkageRuleSetCitationDrift(configTerms, options.configFile, log);
+    warnOnLinkageRuleSetCitationDrift(
+      configTerms,
+      options.configFile,
+      log,
+      configSource.linkageTermsStanding,
+    );
     // The config is the authoritative terms source here, so --linkage-strategy
     // cannot silently override its linkage_strategy; name it as ignored (like the
     // offline server/options override warnings above) and point at the config
