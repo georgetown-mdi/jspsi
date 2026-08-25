@@ -14,11 +14,14 @@ import type {
 import {
   canonicalString,
   CanonicalEncodingError,
+  clipToRenderedCost,
   DEFAULT_LINKAGE_RULE_SET,
   isDrawnFromLinkageRuleSet,
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
   redactAndSanitizeForDisplay,
+  redactPrivateKeyMaterial,
+  renderedDisplayCost,
   safeParseConnectionConfig,
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
@@ -540,8 +543,9 @@ function renderNames(list: ReadonlyArray<{ name: string }>): string {
  * in a sub-field (a linkage field/key's type/constraints/`swap`, a payload
  * column's description) -- fall back to the full JSON of each value, so the
  * conflict message shows what actually differs instead of two identical-looking
- * summaries. The JSON is raw, not NFC-folded, so the user sees the stored values
- * to edit.
+ * summaries. The JSON is of whatever the caller hands it, not an NFC fold of it,
+ * so the user sees the stored values to edit -- treated where the caller has to
+ * treat them before they are shown (see {@link redactAndFitRuleSetCitation}).
  */
 function disambiguate(
   existingRendered: string,
@@ -572,6 +576,160 @@ function renderStructural(
 }
 
 /**
+ * What one value inside a rule-set citation -- a set's name, or its content
+ * version -- may render to where the citation is composed into a conflict line.
+ *
+ * The schema bounds those values by CODE-POINT COUNT, which is not a display
+ * bound: the boundary expands a code point outside printable ASCII to as many as
+ * ten characters, so a name at the schema's bound can render ten times its
+ * length -- past the whole budget the renderer gives the one link this message
+ * is, taking the conflict lines behind it and the retry step the operator has to
+ * act on. Fitting each value where the citation is composed is the discipline
+ * the SFTP listing guard's directory link applies for the same reason: a value
+ * somebody else chose is bounded at the composition site rather than left to
+ * spend whatever the renderer's own cap allows.
+ *
+ * Sized well above the values a real citation carries -- the built-in's widest
+ * is "baseline-pii" at 12 characters, and a semver is shorter still -- so only
+ * an anomalous value is clipped, and small enough that the four values one side
+ * of the comparison carries leave the message its room (see
+ * {@link RULE_SET_CITATION_SIDE_BUDGET}).
+ */
+const RULE_SET_CITATION_VALUE_BUDGET = 48;
+
+/**
+ * One citation value REDACTED and then fitted to
+ * {@link RULE_SET_CITATION_VALUE_BUDGET}, in that order: the clip appends the
+ * marker that says a value was cut, so a `BEGIN` marker left in the kept prefix
+ * would consume it under the display boundary's fail-closed dangling rule (see
+ * {@link clipToRenderedCost}). What is kept is raw, and is escaped once where
+ * the error is shown.
+ */
+function fitCitationValue(value: string): string {
+  return clipToRenderedCost(
+    redactPrivateKeyMaterial(value),
+    RULE_SET_CITATION_VALUE_BUDGET,
+  );
+}
+
+/**
+ * Render a rule-set citation for a diff line, keys first -- the order core's
+ * mismatch message and the drift warning both render the pair in. Unescaped,
+ * unlike {@link describeRuleSetCitation}, whose sink is a `log.warn`: a diff line
+ * is composed into a {@link UsageError} and escaped once where it is shown.
+ *
+ * Each value is nevertheless redacted and fitted here, because the invitation's
+ * side of the comparison is text the partner chose: the display boundary's
+ * private-key rule is fail-closed past a `BEGIN` marker carrying no `END`, so a
+ * marker planted in a set name would consume the conflict lines and the recovery
+ * step composed after it, and a name at the schema's length would crowd out the
+ * same text without any marker at all. Neither redacting nor fitting is
+ * escaping, so this is not a second escaping altitude (see
+ * {@link redactPrivateKeyMaterial}, which states the composition-site rule this
+ * follows).
+ */
+function renderRuleSetCitation(reference: LinkageRuleSetReference): string {
+  const half = (identity: LinkageSetIdentity): string =>
+    `"${fitCitationValue(identity.name)}" ${fitCitationValue(identity.version)}`;
+  return `${half(reference.keySet)} over ${half(reference.fieldSet)}`;
+}
+
+/**
+ * The same citation with each value redacted and fitted, for
+ * {@link disambiguate}'s full-JSON fallback. The fallback fires when the two
+ * rendered clauses read alike, and it renders the same values, so it takes the
+ * same treatment: rendering them raw there would put back on the message the
+ * marker and the length {@link renderRuleSetCitation} took out of it.
+ */
+function redactAndFitRuleSetCitation(
+  reference: LinkageRuleSetReference,
+): LinkageRuleSetReference {
+  const half = (identity: LinkageSetIdentity): LinkageSetIdentity => ({
+    name: fitCitationValue(identity.name),
+    version: fitCitationValue(identity.version),
+  });
+  return { fieldSet: half(reference.fieldSet), keySet: half(reference.keySet) };
+}
+
+/**
+ * What one side of a citation conflict may render to, whichever form it takes.
+ * Computed by rendering a citation whose every value is at
+ * {@link RULE_SET_CITATION_VALUE_BUDGET}, so it follows a change to the clause's
+ * shape instead of restating one, and the JSON fallback -- whose escaping can
+ * widen a fitted value threefold, a `"` costing one character raw and three
+ * inside a JSON string the boundary escapes again -- is held to the width the
+ * clause form can already reach.
+ *
+ * This bounds the citation's own contribution to the reconcile message. It is
+ * not a bound on the whole message: the conflict lines beside it interpolate
+ * values nothing here fits (a linkage field or key name list, a legal-agreement
+ * reference), and the operator's own config path leads it. What the citation
+ * cannot do is spend the budget those need, which is pinned by a test composing
+ * the accept-shaped message with both sides of the citation at their worst case.
+ */
+const RULE_SET_CITATION_SIDE_BUDGET = renderedDisplayCost(
+  renderRuleSetCitation({
+    fieldSet: {
+      name: "x".repeat(RULE_SET_CITATION_VALUE_BUDGET),
+      version: "x".repeat(RULE_SET_CITATION_VALUE_BUDGET),
+    },
+    keySet: {
+      name: "x".repeat(RULE_SET_CITATION_VALUE_BUDGET),
+      version: "x".repeat(RULE_SET_CITATION_VALUE_BUDGET),
+    },
+  }),
+);
+
+/**
+ * Said of a citation conflict whose two sides render identically because every
+ * value that differs between them was withheld from the display -- redacted as
+ * private-key material, or clipped for length. Fixed first-party text carrying
+ * no bytes from either citation: the pair reaching here is precisely the pair
+ * whose own bytes cannot be shown, so the operator is told that rather than
+ * shown two clauses that read alike.
+ */
+const CITATION_WITHHELD_NOTE =
+  "(these differ only inside text this display withheld: a value redacted as " +
+  "private-key material, or clipped for length)";
+
+/**
+ * The two sides of a `linkage_rule_set` conflict, as a reader can tell them
+ * apart: the clause form where it distinguishes them, {@link disambiguate}'s
+ * full detail where two different citations render the same clause, and
+ * {@link CITATION_WITHHELD_NOTE} where even that is identical -- which is what a
+ * pair differing only inside redacted or clipped text comes to. Each side is
+ * fitted to {@link RULE_SET_CITATION_SIDE_BUDGET} before that last comparison,
+ * so a fallback the fit collapsed is caught by it rather than reported as a
+ * conflict between two identical values.
+ */
+function renderRuleSetCitationConflict(
+  existing: LinkageRuleSetReference,
+  incoming: LinkageRuleSetReference,
+): { existing: string; incoming: string } {
+  const rendered = disambiguate(
+    renderRuleSetCitation(existing),
+    renderRuleSetCitation(incoming),
+    redactAndFitRuleSetCitation(existing),
+    redactAndFitRuleSetCitation(incoming),
+  );
+  const fitted = {
+    existing: clipToRenderedCost(
+      rendered.existing,
+      RULE_SET_CITATION_SIDE_BUDGET,
+    ),
+    incoming: clipToRenderedCost(
+      rendered.incoming,
+      RULE_SET_CITATION_SIDE_BUDGET,
+    ),
+  };
+  if (fitted.existing !== fitted.incoming) return fitted;
+  return {
+    existing: fitted.existing,
+    incoming: `${fitted.incoming} ${CITATION_WITHHELD_NOTE}`,
+  };
+}
+
+/**
  * Compare a pre-existing config's linkage terms against the terms an acceptance
  * would adopt from the invitation, returning the mandatory disagreements that
  * must abort the acceptance and the soft mismatches that only warn.
@@ -580,8 +738,9 @@ function renderStructural(
  * NOT the cross-party {@link validateCompatibility} (which checks that two
  * different parties' terms work together). Reusing the existing config must not
  * silently change what was agreed, so the agreement-defining fields -- version,
- * algorithm, the linkage strategy, linkage fields and keys, legal agreement, and
- * payload -- must match.
+ * algorithm, the linkage strategy, linkage fields and keys, the rule-set
+ * citation (where both sides declare one), legal agreement, and payload -- must
+ * match.
  *
  * The per-party fields are excluded, because each party legitimately holds its
  * own value (per the LinkageTerms consistency model): `identity` (the holding
@@ -596,6 +755,26 @@ function renderStructural(
  * Structural fields are compared by NFC-normalized canonical form: linkage
  * fields order-insensitively (their array order is not significant), linkage
  * keys in place (their order is significant).
+ *
+ * The rule-set citation is compared ONLY where both sides declare one, which is
+ * `validateCompatibility`'s rule for it rather than a second one invented here:
+ * a side declaring none is not held to the other's citation, so a kept config
+ * citing nothing against an invitation that cites (or the reverse) reconciles
+ * cleanly. Where both cite, a difference is a conflict on the same footing as
+ * the other agreement-defining fields -- the exchange would otherwise abort
+ * mid-run on `validateCompatibility`'s "linkage rule set mismatch", after the
+ * reconcile had reported the config as matching.
+ *
+ * The citation is compared by RAW canonical form, NOT the NFC-folded compare the
+ * structural fields beside it use, because that is the predicate
+ * `validateCompatibility` applies to it: core holds two citations to byte-exact
+ * `canonicalString` equality, so a pair of names differing only in normalization
+ * form is a mismatch there. Folding them together here would report such a pair
+ * clean and let the run abort mid-exchange on it -- the failure this comparison
+ * exists to pre-empt, and the partner picks the invitation's spelling. Matching
+ * the gate (both sides declare one) without matching the predicate leaves that
+ * gap open, so the conflict is reported at accept, where the operator can still
+ * settle the spelling with the inviting party.
  */
 export function diffLinkageTerms(
   existing: LinkageTerms,
@@ -626,12 +805,17 @@ export function diffLinkageTerms(
   // depth-bounded upstream (the invitation's params at decode, the config at
   // load), so this backstop is not normally reachable; it stays because nfcDeep
   // is an independent recursion that must not depend on its callers (see nfcDeep).
-  const canonicalDiffers = (a: unknown, b: unknown, label: string): boolean => {
+  const differsUnder = (
+    encode: (value: unknown) => string,
+    a: unknown,
+    b: unknown,
+    label: string,
+  ): boolean => {
     let ca: string;
     let cb: string;
     try {
-      ca = nfcCanonical(a);
-      cb = nfcCanonical(b);
+      ca = encode(a);
+      cb = encode(b);
     } catch (err) {
       if (err instanceof CanonicalEncodingError) {
         warnings.push(
@@ -645,6 +829,13 @@ export function diffLinkageTerms(
     }
     return ca !== cb;
   };
+  const canonicalDiffers = (a: unknown, b: unknown, label: string): boolean =>
+    differsUnder(nfcCanonical, a, b, label);
+  const rawCanonicalDiffers = (
+    a: unknown,
+    b: unknown,
+    label: string,
+  ): boolean => differsUnder(canonicalString, a, b, label);
 
   // version, algorithm, and linkageStrategy are compared by raw equality rather
   // than the nfcCanonical fold used for the user-authored name fields below. All
@@ -695,6 +886,25 @@ export function diffLinkageTerms(
   ) {
     const r = renderStructural(existing.linkageKeys, incoming.linkageKeys);
     add("linkage_keys", r.existing, r.incoming);
+  }
+
+  // Only where BOTH sides cite, and by raw canonical form rather than the NFC
+  // fold the fields and keys above take -- both halves are validateCompatibility's
+  // rule for the citation, per the doc comment above.
+  if (
+    existing.linkageRuleSet !== undefined &&
+    incoming.linkageRuleSet !== undefined &&
+    rawCanonicalDiffers(
+      existing.linkageRuleSet,
+      incoming.linkageRuleSet,
+      "linkage rule set",
+    )
+  ) {
+    const r = renderRuleSetCitationConflict(
+      existing.linkageRuleSet,
+      incoming.linkageRuleSet,
+    );
+    add("linkage_rule_set", r.existing, r.incoming);
   }
 
   const renderAgreement = (la: LinkageTerms["legalAgreement"]): string =>
@@ -1138,6 +1348,14 @@ export interface ConfigLinkageSource {
    * a `webrtc` connection, a channel with no retain mode to declare.
    */
   retainsFiles: boolean;
+  /**
+   * Whether an acceptance stands behind the config's linkage terms, for the
+   * readers that report on the citation those terms carry. Read as the single
+   * presence check {@link linkageTermsStandingOf} describes, at the top-level key
+   * rather than through the spec schema, for the reason `retainsFiles` is read
+   * that way: the rest of the file is deliberately left unparsed here.
+   */
+  linkageTermsStanding: LinkageTermsStanding;
 }
 
 /**
@@ -1300,8 +1518,34 @@ export function readConfigLinkageSource(
       standardization,
       metadata,
       retainsFiles: readRetainFilesDeclaration(obj),
+      linkageTermsStanding: readLinkageTermsStanding(obj),
     },
   };
+}
+
+/**
+ * The standing of a loaded config's terms, read from the presence of a top-level
+ * `expected_partner_deduplicate` at its fixed key so the rest of the file stays
+ * unparsed here (the reason {@link readRetainFilesDeclaration} reads its own key
+ * that way). Both spellings are accepted for the reason the top-level keys above
+ * accept both: `saveConfig` writes snake_case, but a hand-authored config may
+ * carry either.
+ *
+ * Presence alone decides it, on {@link linkageTermsStandingOf}'s rule that the
+ * record says an acceptance happened rather than what was agreed. `psilink
+ * accept` writes only a boolean, so any other value is an operator's edit of a
+ * machine-written record -- but the record still stands there, and reading it as
+ * an acceptance is what points that operator at settling the citation with their
+ * partner rather than at rewriting terms both parties hold. A value the strict
+ * paths refuse is refused there, by core's schema, on the commands that build an
+ * exchange from the file.
+ */
+function readLinkageTermsStanding(
+  obj: Record<string, unknown>,
+): LinkageTermsStanding {
+  const declared =
+    obj["expected_partner_deduplicate"] ?? obj["expectedPartnerDeduplicate"];
+  return declared === undefined ? "held-alone" : "accepted-with-partner";
 }
 
 /**
@@ -1352,8 +1596,9 @@ function readRetainFilesDeclaration(config: Record<string, unknown>): boolean {
  * `invite` builds no connection from the block (the config persists for a later
  * `psilink exchange` to read and validate), so an unfinished one must not block
  * generating an invitation -- {@link readConfigLinkageSource}, which carries the
- * rest of the reading contract, leaves it unvalidated and takes only the single
- * `retain_files` boolean the invitation declares.
+ * rest of the reading contract, leaves it unvalidated and takes from outside the
+ * terms only the `retain_files` boolean the invitation declares and the
+ * `expected_partner_deduplicate` record the terms' standing is read from.
  */
 export function loadConfigLinkageSource(
   configPath: string,
@@ -1372,9 +1617,9 @@ export function loadConfigLinkageSource(
 // --- Rule-set citation drift -------------------------------------------------
 
 /**
- * A rule-set citation as one clause, keys first -- the keys are the specific
- * artifact and the fields the substrate they are built from -- matching the
- * order the invitation display and core's mismatch message render the pair in.
+ * One half of a rule-set citation -- a set's name and content version -- for the
+ * drift warning, which names a half on its own wherever it reports on that half
+ * alone.
  *
  * The names are free text whoever authored the config chose, and a `log.warn` is
  * their sink (a value that never becomes an `Error` is escaped at the call site
@@ -1386,11 +1631,78 @@ export function loadConfigLinkageSource(
  * its own can close the quote early and fake the clause's structure for a
  * skimming reader.
  */
-function describeRuleSetCitation(reference: LinkageRuleSetReference): string {
-  const half = (identity: LinkageSetIdentity): string =>
+function describeRuleSetHalf(identity: LinkageSetIdentity): string {
+  return (
     `"${redactAndSanitizeForDisplay(identity.name)}" ` +
-    `${redactAndSanitizeForDisplay(identity.version)}`;
-  return `${half(reference.keySet)} over ${half(reference.fieldSet)}`;
+    `${redactAndSanitizeForDisplay(identity.version)}`
+  );
+}
+
+/**
+ * A rule-set citation as one clause, keys first -- the keys are the specific
+ * artifact and the fields the substrate they are built from -- matching the
+ * order the invitation display and core's mismatch message render the pair in.
+ */
+function describeRuleSetCitation(reference: LinkageRuleSetReference): string {
+  return (
+    `${describeRuleSetHalf(reference.keySet)} over ` +
+    `${describeRuleSetHalf(reference.fieldSet)}`
+  );
+}
+
+/**
+ * Whether an acceptance stands behind a config's linkage terms, which is what
+ * decides the remedy the drift warning can honestly offer for the citation those
+ * terms carry.
+ *
+ * - `held-alone` -- no acceptance stands behind them, so they bind this party
+ *   only and both remedies are open: drop a citation the rules no longer earn,
+ *   or put the cited set's rules back.
+ * - `accepted-with-partner` -- an acceptance put them under agreement with an
+ *   inviting party, whether by adopting that party's terms verbatim onto a fresh
+ *   config or by reconciling a kept one against the invitation. Editing the
+ *   rules to match the citation would take them out of that agreement, and the
+ *   exchange would refuse them against the partner still running the originals.
+ */
+export type LinkageTermsStanding = "held-alone" | "accepted-with-partner";
+
+/**
+ * What a command can offer its operator besides settling a drifted citation with
+ * the party whose acceptance stands behind the terms. Only the
+ * `accepted-with-partner` reading takes it: terms no acceptance stands behind
+ * are the operator's own either way.
+ *
+ * - `decline-to-reuse` -- the command is putting the agreed terms to use
+ *   (accepting against them, running an exchange on them, verifying a receipt
+ *   with them), so the operator can leave them and start from terms that carry
+ *   no claim they cannot support.
+ * - `author-fresh-terms` -- the command is minting an invitation FROM those
+ *   terms, where declining to reuse them is not the choice on offer: the
+ *   operator is authoring a new document and can author its terms instead of
+ *   carrying the accepted ones onto it.
+ */
+export type CitationDriftAlternative =
+  "decline-to-reuse" | "author-fresh-terms";
+
+/**
+ * Whether an acceptance stands behind a loaded config's linkage terms, read from
+ * `expected_partner_deduplicate`. `psilink accept` records the invitation's
+ * declared partner cardinality on every config it writes AND on every config it
+ * reuses, and nothing else writes one, so its presence is exactly the mark of a
+ * config an acceptance stands behind. That the absent field is the state of a
+ * config no acceptance stands behind is
+ * {@link persistExpectedPartnerDeduplicate}'s own contract, which this reads
+ * rather than restates.
+ *
+ * Both of its values read the same way: the record says an acceptance happened,
+ * not what was agreed.
+ */
+export function linkageTermsStandingOf(
+  spec: Pick<ExchangeSpec, "expectedPartnerDeduplicate">,
+): LinkageTermsStanding {
+  return spec.expectedPartnerDeduplicate === undefined
+    ? "held-alone"
+    : "accepted-with-partner";
 }
 
 /**
@@ -1414,11 +1726,29 @@ function describeRuleSetCitation(reference: LinkageRuleSetReference): string {
  * exchange that follows is the one the declared fields and keys describe either
  * way -- so this reports a claim that has drifted from its rules, and the command
  * proceeds.
+ *
+ * `standing` decides the remedy, because the two cases have different ones to
+ * offer (see {@link LinkageTermsStanding}). Terms an acceptance stands behind are
+ * agreed with the inviting party: telling that operator to restore the cited
+ * set's rules would edit terms both parties already hold, and the exchange would
+ * then abort against the partner that still runs the originals -- so that
+ * reading offers settling the citation with that party, and does not address the
+ * operator as the author of either side. `alternative` names what that operator
+ * can do instead of settling, which is the command's to say rather than this
+ * function's: the wording is one source here, and only the tail varies (see
+ * {@link CitationDriftAlternative}).
+ *
+ * Each drifted half is reported against the set that half cites, never against
+ * "the citation": only a resolvable half is judged, so a citation pairing a
+ * built-in half with a foreign one would otherwise read as though this build
+ * shipped the foreign half too.
  */
 export function warnOnLinkageRuleSetCitationDrift(
   terms: Pick<LinkageTerms, "linkageRuleSet" | "linkageFields" | "linkageKeys">,
   configPath: string,
   log: { warn: (message: string) => void },
+  standing: LinkageTermsStanding,
+  alternative: CitationDriftAlternative,
 ): void {
   const cited = terms.linkageRuleSet;
   if (cited === undefined) return;
@@ -1438,6 +1768,12 @@ export function warnOnLinkageRuleSetCitationDrift(
   // rules for that half) would not guarantee, since a value the canonical encoder
   // rejects fails even against itself.
   const drifted: string[] = [];
+  const reportDrift = (field: string, citedHalf: LinkageSetIdentity): void => {
+    drifted.push(
+      `its ${field} are not drawn from the ` +
+        `${describeRuleSetHalf(citedHalf)} this build ships`,
+    );
+  };
   if (
     namesShippedSet(cited.fieldSet, shipped.reference.fieldSet) &&
     !isDrawnFromLinkageRuleSet(
@@ -1449,7 +1785,7 @@ export function warnOnLinkageRuleSetCitationDrift(
       { linkageFields: terms.linkageFields, linkageKeys: [] },
     )
   )
-    drifted.push("linkage_fields");
+    reportDrift("linkage_fields", cited.fieldSet);
   if (
     namesShippedSet(cited.keySet, shipped.reference.keySet) &&
     !isDrawnFromLinkageRuleSet(
@@ -1457,16 +1793,29 @@ export function warnOnLinkageRuleSetCitationDrift(
       { linkageFields: [], linkageKeys: terms.linkageKeys },
     )
   )
-    drifted.push("linkage_keys");
+    reportDrift("linkage_keys", cited.keySet);
   if (drifted.length === 0) return;
+
+  const consequence =
+    standing === "accepted-with-partner"
+      ? "The citation is recorded in both parties' exchange records, where it " +
+        "claims a provenance these rules do not have. An acceptance stands " +
+        "behind these terms, so they are not yours alone to correct: editing " +
+        "the rules to match the citation would take them out of agreement " +
+        "with the inviting party, and the exchange would refuse them. " +
+        (alternative === "author-fresh-terms"
+          ? "Settle the citation with that party, or author fresh terms for " +
+            "this invitation."
+          : "Settle the citation with that party and accept again, or decline " +
+            "to reuse these terms.")
+      : "The citation travels onto the invitation, the accepting party's " +
+        "terms review, and both parties' exchange records, where it claims a " +
+        "provenance these rules do not have. Omit linkage_rule_set for rules " +
+        "you author yourself, or restore the rules the cited set declares.";
 
   log.warn(
     `${configPath}: linkage_terms.linkage_rule_set cites ` +
-      `${describeRuleSetCitation(cited)}, but its ${drifted.join(" and ")} ` +
-      "are not drawn from the rules this build ships under that citation. The " +
-      "citation travels onto the invitation, the accepting party's terms " +
-      "review, and both parties' exchange records, where it claims a " +
-      "provenance these rules do not have. Omit linkage_rule_set for rules you " +
-      "author yourself, or restore the rules the cited set declares.",
+      `${describeRuleSetCitation(cited)}, but ${drifted.join(", and ")}. ` +
+      consequence,
   );
 }

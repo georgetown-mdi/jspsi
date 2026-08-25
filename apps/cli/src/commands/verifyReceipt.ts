@@ -776,6 +776,8 @@ function configFileTerms(
     source.source.linkageTerms,
     configFile,
     log,
+    source.source.linkageTermsStanding,
+    "decline-to-reuse",
   );
   return source.source.linkageTerms;
 }
