@@ -3,25 +3,32 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-/** A throwaway key pair for a loopback test server, trusted by nobody: clients
- * dial it with `rejectUnauthorized: false`. */
+/** A throwaway key pair for a loopback test server. */
 export interface LoopbackTlsCert {
   key: string;
   cert: string;
 }
 
 /**
- * A self-signed `localhost` certificate for this environment's test HTTPS
- * servers, or `null` where none can be minted -- which a suite needing one skips
- * on rather than reporting the environment as a failure of the code under test.
- * Node has no certificate-issuing API, so minting shells out to `openssl`, making
- * the binary a property of the environment: Windows is left out (it is not a
- * given there, and these suites do not run on it in CI), a minimal container may
- * ship none, and a LibreSSL `openssl` takes the flags below differently.
+ * A self-signed certificate for this environment's loopback test servers, or
+ * `null` where none can be minted -- which a suite needing one skips on rather
+ * than reporting the environment as a failure of the code under test.
  *
- * `null` here is a prerequisite the environment did not supply, declared as one
- * in `test/requireTestPrerequisites.ts`: the run names what it costs, and fails
- * where the environment was supposed to supply it.
+ * Node has no certificate-issuing API, so minting shells out to `openssl`,
+ * making the binary a property of the environment: Windows is left out (it is
+ * not a given there, and these suites do not run on it in CI), a minimal
+ * container may ship none, and a LibreSSL `openssl` takes the flags below
+ * differently.
+ *
+ * `null` here is a prerequisite the environment did not supply. What that costs
+ * is the caller's to declare -- `apps/web/test/requireTestPrerequisites.ts` for
+ * the web signaling suites, the leg's own gate for the CLI's live one-command
+ * acceptance -- so the run names what it lost and fails where the environment
+ * was supposed to supply it.
+ *
+ * The certificate carries both loopback names in its subject alternative name,
+ * so it serves a client that dials `localhost` and one that dials `127.0.0.1`
+ * with verification on and no dependence on how the name resolves.
  */
 export const loopbackTlsCert: LoopbackTlsCert | null =
   process.platform === "win32" ? null : mintLoopbackTlsCert();
@@ -57,6 +64,8 @@ function mintLoopbackTlsCert(): LoopbackTlsCert | null {
         "-nodes",
         "-subj",
         "/CN=localhost",
+        "-addext",
+        "subjectAltName=DNS:localhost,IP:127.0.0.1",
       ],
       { stdio: "pipe" },
     );

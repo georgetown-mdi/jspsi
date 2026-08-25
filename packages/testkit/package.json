@@ -7,6 +7,8 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./loopbackTlsCert": "./src/loopbackTlsCert.ts",
+    "./prerequisiteGate": "./src/prerequisiteGate.ts",
     "./webrtcInboundFrames": "./src/webrtcInboundFrames.ts"
   },
   "dependencies": {

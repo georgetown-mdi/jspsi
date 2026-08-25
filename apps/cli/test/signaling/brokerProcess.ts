@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ChildProcess } from "node:child_process";
+import { stopChild } from "../stopChild";
 
 /**
  * Starts the repository's vendored PeerJS broker as a child PROCESS, so the
@@ -122,23 +122,5 @@ export function startBrokerProcess(): Promise<BrokerProcess> {
     });
     child.once("exit", onExit);
     child.once("error", onError);
-  });
-}
-
-/** Terminate `child` and resolve once it has exited (or is already gone). */
-function stopChild(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null)
-    return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    // A broker holding a live WebSocket does not exit on SIGTERM alone within
-    // its own grace window; SIGKILL is the backstop so a suite never hangs on
-    // teardown.
-    const kill = setTimeout(() => child.kill("SIGKILL"), 2_000);
-    kill.unref();
-    child.once("exit", () => {
-      clearTimeout(kill);
-      resolve();
-    });
-    child.kill("SIGTERM");
   });
 }
