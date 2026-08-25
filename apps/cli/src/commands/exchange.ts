@@ -397,12 +397,11 @@ export function loadConfig(options: ExchangeOptions): {
   } = resolvedSpec;
   log.info("loaded exchange spec from", options.configFile);
 
-  if (exchangeDataSpec.linkageTerms !== undefined)
-    warnOnLinkageRuleSetCitationDrift(
-      exchangeDataSpec.linkageTerms,
-      options.configFile,
-      log,
-    );
+  warnOnLinkageRuleSetCitationDrift(
+    exchangeDataSpec.linkageTerms,
+    options.configFile,
+    log,
+  );
 
   const connection = applyConnectionOverrides(
     baseConn,
