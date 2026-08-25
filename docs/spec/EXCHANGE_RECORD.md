@@ -96,7 +96,7 @@ Four properties fix how the row is read.
 
 **It changes nothing about the run.** The verdict is written after the exchange, from terms both parties already agreed; which fields and keys a run matches on, and what it discloses, are settled entirely by the declared rules. Both parties write it on the same rule -- the inviting party over its own citation, the accepting party over the inviter's citation as adopted -- so the row means the same thing in either record.
 
-**Where it is read.** The record is the only surface that carries it: the web disclosure-accounting screen and the CSV it exports present the citation beside the matching basis, under the caveat above, but not the verdict, so a reader after the writing build's finding on the cited names has only the record to open.
+Besides the record, the verdict is surfaced beside the citation on the pre-consent accept prompt (CLI) and consent review screen (web), before either party commits: [`linkage_terms.linkage_rule_set`](../EXCHANGE_REFERENCE.md#linkage_termslinkage_rule_set) and [the design note behind it](../notes/rule-set-citation-verdict.md) cover where and why. The disclosure accounting is not among those surfaces: it presents the citation under its caveat, not the verdict beside it.
 
 ## Retention and disposition pointer
 

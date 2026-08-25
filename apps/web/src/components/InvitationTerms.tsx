@@ -1324,17 +1324,18 @@ export function InvitationTerms({
             the name before the enumeration it stands for, and meets in the same
             place that the name is the inviting party's word while the keys and
             fields beneath it are what the exchange holds both parties to (the
-            caveat is read from CONSENT_FACTS, so this surface and the CLI accept
-            prompt state it in the same words). Keys before fields, since the key
-            set is the specific artifact and the field set the substrate it is
-            built from. Both names and both versions are partner-controlled text,
-            sanitized by summarizeInvitation and bound in their own Text between
-            fixed chrome -- never joined into the label -- for the reason the
-            allowed-character class below is: a crafted value must not be able to
-            read as system chrome. Within the box, the name is quoted as core's
-            rule-set mismatch message quotes it: a name may carry a space, so an
-            unquoted "hmis-keys 9.9.9" would be indistinguishable from the name
-            plus the schema-constrained semver version beside it. The quoting
+            caveat is read from LINKAGE_RULE_SET_VERDICT_COPY, so this surface
+            and the CLI accept prompt state it in the same words). Keys before
+            fields, since the key set is the specific artifact and the field
+            set the substrate it is built from. Both names and both versions
+            are partner-controlled text, sanitized by summarizeInvitation and
+            bound in their own Text between fixed chrome -- never joined into
+            the label -- for the reason the allowed-character class below is:
+            a crafted value must not be able to read as system chrome. Within
+            the box, the name is quoted as core's rule-set mismatch message
+            quotes it: a name may carry a space, so an unquoted
+            "hmis-keys 9.9.9" would be indistinguishable from the name plus
+            the schema-constrained semver version beside it. The quoting
             shares that message's stated limit -- a name may itself carry a double
             quote -- though each half renders in its own bordered box, which
             confines the misreading.
@@ -1401,7 +1402,7 @@ export function InvitationTerms({
                   <Text
                     key={verdict}
                     size="sm"
-                    fw={verdict === "contradicted" ? 700 : undefined}
+                    fw={verdict === "contradicted" ? 500 : undefined}
                   >
                     {LINKAGE_RULE_SET_VERDICT_COPY[verdict].note}
                   </Text>
