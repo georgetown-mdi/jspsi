@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { ConnectionError, parseBoundedJson } from "@psilink/core";
+import { ConnectionError, parseBoundedJson, UsageError } from "@psilink/core";
 
 /**
  * The PeerJS broker signaling client, written against the broker's WebSocket
@@ -179,6 +179,17 @@ export const BROKER_ADDRESS_REFUSED =
   "the signaling server address is not a valid WebSocket URL; check the " +
   "webrtc connection's `host`, `port`, and `path`";
 
+/**
+ * The same refusal for a location the partner's invitation supplied, where the
+ * operator authored no connection block and has none to check: it names the
+ * source the locator came from and the one remedy that is theirs, a further
+ * invitation. Value-free for the same reason as its sibling above.
+ */
+export const INVITATION_BROKER_ADDRESS_REFUSED =
+  "the coordination server this invitation names is not a valid WebSocket " +
+  "address, so this acceptance cannot dial it; ask the party that sent the " +
+  "invitation for one naming a server it can reach";
+
 /** The refusal a registration URL naming some other authority gets. */
 export const BROKER_AUTHORITY_REFUSED =
   "the signaling server address does not name the configured host, so nothing " +
@@ -196,15 +207,24 @@ export const BROKER_AUTHORITY_REFUSED =
  * so a host carrying one is refused rather than dialed. The port comes from
  * `port` alone.
  *
- * @throws {ConnectionError} of kind `usage` if `host` is not a bare authority.
+ * The refusal is a {@link UsageError} rather than a transport failure, and so
+ * exits 64 wherever it is raised, because it is decided by the location alone:
+ * every retry of the same locator reaches it again, and a 69 would set an
+ * unattended supervisor re-running a run that cannot succeed. `refusal` selects
+ * which wording the caller's own source of the locator warrants.
+ *
+ * @throws {UsageError} if `host` is not a bare authority.
  */
-function brokerAuthority(location: BrokerLocation): URL {
+function brokerAuthority(
+  location: BrokerLocation,
+  refusal: string = BROKER_ADDRESS_REFUSED,
+): URL {
   const scheme = location.secure ? "wss" : "ws";
   let authority: URL;
   try {
     authority = new URL(`${scheme}://${location.host}`);
   } catch {
-    throw new ConnectionError(BROKER_ADDRESS_REFUSED, "usage");
+    throw new UsageError(refusal);
   }
   if (
     authority.username !== "" ||
@@ -214,7 +234,7 @@ function brokerAuthority(location: BrokerLocation): URL {
     authority.search !== "" ||
     authority.hash !== ""
   ) {
-    throw new ConnectionError(BROKER_ADDRESS_REFUSED, "usage");
+    throw new UsageError(refusal);
   }
   authority.port = String(location.port);
   return authority;
@@ -232,15 +252,23 @@ function brokerAuthority(location: BrokerLocation): URL {
  * the configured text would name a server the run never contacted. It carries
  * the port too, unless that is the scheme's default.
  *
- * @throws {ConnectionError} of kind `usage` if `host` is not a bare authority.
+ * @throws {UsageError} if `host` is not a bare authority.
  */
 export function dialedBrokerAuthority(location: BrokerLocation): string {
   return brokerAuthority(location).host;
 }
 
+/** The coordination server a consent surface names, host and port apart. */
+export interface DialedBrokerHostAndPort {
+  /** The parser's host, bracketed where it is an IPv6 literal. */
+  host: string;
+  /** The port the dial uses, resolved even where it is the scheme's default. */
+  port: number;
+}
+
 /**
  * The same dialed authority as {@link dialedBrokerAuthority}, with the port
- * always shown.
+ * always resolved.
  *
  * For the consent surface of an acceptance that dials a partner-supplied
  * locator: the operator is being asked to let this run reach a coordination
@@ -249,10 +277,23 @@ export function dialedBrokerAuthority(location: BrokerLocation): string {
  * be inferred from a scheme it does not carry. The host half is the parser's,
  * for the reason above.
  *
- * @throws {ConnectionError} of kind `usage` if `host` is not a bare authority.
+ * The two are returned apart rather than joined so a display sink escapes the
+ * host ALONE and appends the port outside that escape. An invitation may carry a
+ * host as long as the escape's own display cap admits, so a joined value spends
+ * that whole budget on the host and truncates away the port this resolves --
+ * driven at the longest admissible host in test/unit/accept.test.ts, which holds
+ * it as a check rather than leaving it to prose.
+ *
+ * @throws {UsageError} if `host` is not a bare authority, naming the invitation
+ *   as the locator's source ({@link INVITATION_BROKER_ADDRESS_REFUSED}).
  */
-export function dialedBrokerHostAndPort(location: BrokerLocation): string {
-  return `${brokerAuthority(location).hostname}:${location.port}`;
+export function dialedBrokerHostAndPort(
+  location: BrokerLocation,
+): DialedBrokerHostAndPort {
+  return {
+    host: brokerAuthority(location, INVITATION_BROKER_ADDRESS_REFUSED).hostname,
+    port: location.port,
+  };
 }
 
 /**
@@ -266,6 +307,8 @@ export function dialedBrokerHostAndPort(location: BrokerLocation): string {
  * userinfo, or a different host, in the address that would be dialed.
  *
  * @throws {ConnectionError} of kind `usage` if the address names another host.
+ * @throws {UsageError} if the configured location is not a bare authority (via
+ *   {@link brokerAuthority}, which resolves what the address is compared to).
  * @internal exported for testing
  */
 export function assertDialsConfiguredBroker(
@@ -460,10 +503,11 @@ export function connectToBroker(
     } catch {
       // A WebSocket constructor may throw synchronously on an address it will
       // not dial. Replaced rather than wrapped: the raw error escapes this
-      // module's ConnectionError taxonomy, and its message can embed the URL
-      // (which carries the peer id), so the cause is dropped and the operator is
-      // pointed at the fields they control.
-      reject(new ConnectionError(BROKER_ADDRESS_REFUSED, "usage"));
+      // module's error taxonomy, and its message can embed the URL (which
+      // carries the peer id), so the cause is dropped and the operator is
+      // pointed at the fields they control. One refusal wording carries one exit
+      // code, so this raises the class the authority parse above raises.
+      reject(new UsageError(BROKER_ADDRESS_REFUSED));
       return;
     }
     // Registration and steady state are one socket with two phases; `opened`

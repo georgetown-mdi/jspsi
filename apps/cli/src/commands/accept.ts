@@ -35,7 +35,11 @@ import {
 import { detectFileConflicts } from "../fileUtils";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { decodeAndValidateInvitation } from "../invitationDecode";
-import { consentSurfaceSink, displayInvitation } from "../invitationDisplay";
+import {
+  consentSurfaceSink,
+  displayInvitation,
+  renderDialedBroker,
+} from "../invitationDisplay";
 import {
   assertNoUnknownOptions,
   configureLogging,
@@ -54,7 +58,10 @@ import {
   type RunnableConnectionConfig,
 } from "../connectionFromUrl";
 import { brokerLocationFromConnection } from "../connection/webrtc/weriftPeer";
-import { dialedBrokerHostAndPort } from "../connection/webrtc/brokerClient";
+import {
+  dialedBrokerHostAndPort,
+  type DialedBrokerHostAndPort,
+} from "../connection/webrtc/brokerClient";
 import { withWebRTCPeerRole } from "../webrtcPeerRole";
 import { diffConnectionAgainstTarget } from "../reconcile";
 import {
@@ -151,6 +158,12 @@ export function builder(cmd: Argv): Argv {
  * Offline it is honored only by an acceptance that runs one, which reports it
  * unused otherwise rather than dropping a positional the operator typed.
  *
+ * A positional past the last one each form names is a usage error rather than a
+ * silent drop, checked per form because the two differ in what the same position
+ * means: the third is an OUTPUT_FILE offline and an INPUT_FILE online, so an
+ * operator who reached for the wrong form is told so instead of having a file
+ * they named ignored.
+ *
  * @internal exported for testing
  */
 export function resolveAcceptPositionals(positionals: Array<unknown>):
@@ -180,11 +193,21 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
         "online acceptance requires an invitation and an input file; usage: " +
           "psilink accept URL INVITATION INPUT_FILE [OUTPUT_FILE]",
       );
+    if (positionals.length > 4)
+      throw new UsageError(
+        "online acceptance takes at most four positionals; usage: psilink " +
+          "accept URL INVITATION INPUT_FILE [OUTPUT_FILE]",
+      );
     const output =
       positionals[3] !== undefined ? String(positionals[3]) : undefined;
     return { mode: "online", url: new URL(arg0), invitation, input, output };
   }
 
+  if (positionals.length > 3)
+    throw new UsageError(
+      "offline acceptance takes at most three positionals; usage: psilink " +
+        "accept INVITATION [INPUT_FILE] [OUTPUT_FILE]",
+    );
   return {
     mode: "offline",
     invitation: arg0,
@@ -246,7 +269,7 @@ type AcceptReady = {
        * the confirmation question can name the coordination server this run
        * connects to, which on this path the operator never typed.
        */
-      brokerAuthority: string;
+      brokerAuthority: DialedBrokerHostAndPort;
       dataSpec: ResolvedDataSpec;
       prepared: PreparedExchange;
     }
@@ -896,7 +919,7 @@ export async function handler(argv: Arguments): Promise<void> {
         confirmed = await promptConfirm(
           runsExchangeThrough !== undefined
             ? "Accept this invitation and run the exchange now, through " +
-                `${redactAndSanitizeForDisplay(runsExchangeThrough)}?`
+                `${renderDialedBroker(runsExchangeThrough)}?`
             : "Accept this invitation and write configuration?",
         );
       }

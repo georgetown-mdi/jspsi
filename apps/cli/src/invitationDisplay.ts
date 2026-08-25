@@ -16,6 +16,7 @@ import {
 import { singlePassDisclosureNotice } from "./onlineBootstrap";
 import { writePromptLine } from "./util/cli";
 
+import type { DialedBrokerHostAndPort } from "./connection/webrtc/brokerClient";
 import type {
   ConsentFactId,
   InvitationKeySummary,
@@ -131,6 +132,25 @@ const OUTBOUND_SEND_NO_PAYLOAD =
   "(none) -- the inviting party receives no result, so no payload is sent";
 
 /**
+ * Render the coordination server an acceptance dials, for a line the operator
+ * reads: the partner-supplied host escaped at this sink, the port appended
+ * outside that escape.
+ *
+ * The port is outside because the escape truncates at a cap the host can reach
+ * on its own -- the invitation schema admits a host as long as the whole display
+ * budget -- and the port is what such a line exists to carry beyond the plain
+ * authority. It is safe there: the broker-location resolver refuses a port
+ * outside 1-65535 before a location reaches this, so the unescaped half is an
+ * integer of this side's own rather than anything a partner spelled.
+ *
+ * Shared by the two sinks that name the server, the surface line and the
+ * confirmation question, so neither can escape a joined value and lose the port.
+ */
+export function renderDialedBroker(broker: DialedBrokerHostAndPort): string {
+  return `${redactAndSanitizeForDisplay(broker.host)}:${broker.port}`;
+}
+
+/**
  * State that this acceptance conducts the exchange itself, and where: the one
  * command both writes the configuration and dials, so the operator's answer to
  * the question below is the last checkpoint before their data moves, on a
@@ -148,12 +168,12 @@ const OUTBOUND_SEND_NO_PAYLOAD =
  */
 function logAcceptanceRunsExchange(
   emit: ConsentSurfaceSink,
-  brokerAuthority: string,
+  brokerAuthority: DialedBrokerHostAndPort,
   promptFollows: boolean,
 ): void {
   emit(
     "This acceptance runs the exchange itself, through the coordination " +
-      `server this invitation names: ${redactAndSanitizeForDisplay(brokerAuthority)}`,
+      `server this invitation names: ${renderDialedBroker(brokerAuthority)}`,
   );
   emit(
     promptFollows
@@ -525,7 +545,7 @@ export function displayInvitation(params: {
   ownOutboundSend: ReadonlyArray<string> | undefined;
   emit: ConsentSurfaceSink;
   promptFollows: boolean;
-  runsExchangeThrough?: string;
+  runsExchangeThrough?: DialedBrokerHostAndPort;
 }): void {
   const { token, ownOutboundSend, emit, promptFollows, runsExchangeThrough } =
     params;

@@ -1,14 +1,16 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import { ConnectionError } from "@psilink/core";
+import { ConnectionError, UsageError } from "@psilink/core";
 
 import {
   BROKER_AUTHORITY_REFUSED,
   BROKER_MESSAGE,
+  INVITATION_BROKER_ADDRESS_REFUSED,
   assertDialsConfiguredBroker,
   connectToBroker,
   dialedBrokerHostAndPort,
 } from "../../src/connection/webrtc/brokerClient";
+import { exitCodeForError } from "../../src/util/cli";
 
 import type {
   BrokerClient,
@@ -228,6 +230,10 @@ test("a host that is not a bare authority is refused, opening nothing", async ()
   // second port, and whitespace or an empty value does not parse at all (the
   // connection schema requires a non-empty host, so the last is the fail-closed
   // floor rather than a reachable config).
+  //
+  // The refusal is a UsageError, so the CLI's classification exits 64: the
+  // location alone decides it, and an unattended supervisor told 69 would re-run
+  // a locator that cannot dial for as long as it is willing to retry.
   for (const host of [
     "evil@attacker.example",
     "signal.example/x",
@@ -243,10 +249,10 @@ test("a host that is not a bare authority is refused, opening nothing", async ()
       socketFactory,
     }).then(
       () => undefined,
-      (err: unknown) => err as ConnectionError,
+      (err: unknown) => err,
     );
-    expect(error).toBeInstanceOf(ConnectionError);
-    expect(error?.kind).toBe("usage");
+    expect(error).toBeInstanceOf(UsageError);
+    expect(exitCodeForError(error)).toBe(64);
     expect(sockets).toHaveLength(0);
   }
 });
@@ -279,13 +285,16 @@ test("the consent-surface authority normalizes the host and always shows the por
   // scheme's default, which the authority form drops -- a consent line naming a
   // coordination server states where the dial goes rather than leaving the port
   // to a scheme the line does not carry.
+  // The two are resolved apart so a sink escapes the host alone: joined, a host
+  // at the length an invitation may carry spends the whole display budget and
+  // truncates the port away.
   // Written as escapes because one of the two is invisible in source.
   expect(
     dialedBrokerHostAndPort({
       ...LOCATION,
       host: "PEERS\u3002Example\u200B.ORG",
     }),
-  ).toBe("peers.example.org:9000");
+  ).toEqual({ host: "peers.example.org", port: 9000 });
   for (const [secure, port] of [
     [true, 443],
     [false, 80],
@@ -297,16 +306,25 @@ test("the consent-surface authority normalizes the host and always shows the por
         port,
         secure,
       }),
-    ).toBe(`signal.example:${port}`);
+    ).toEqual({ host: "signal.example", port });
   // An IPv6 literal keeps its brackets, so the port stays readable as a port.
-  expect(dialedBrokerHostAndPort({ ...LOCATION, host: "[::1]" })).toBe(
-    "[::1]:9000",
-  );
+  expect(dialedBrokerHostAndPort({ ...LOCATION, host: "[::1]" })).toEqual({
+    host: "[::1]",
+    port: 9000,
+  });
   // The same refusal the dial makes: a host that could move the authority is not
-  // rendered on a consent surface either.
-  expect(() =>
-    dialedBrokerHostAndPort({ ...LOCATION, host: "signal.example:9000@evil" }),
-  ).toThrow(ConnectionError);
+  // rendered on a consent surface either. It names the invitation the locator
+  // came from rather than a connection block this operator never authored, and
+  // exits 64 as the delimiter refusal ahead of it does.
+  let refusal: unknown;
+  try {
+    dialedBrokerHostAndPort({ ...LOCATION, host: "signal.example:9000@evil" });
+  } catch (err) {
+    refusal = err;
+  }
+  expect(refusal).toBeInstanceOf(UsageError);
+  expect((refusal as Error).message).toBe(INVITATION_BROKER_ADDRESS_REFUSED);
+  expect(exitCodeForError(refusal)).toBe(64);
 });
 
 test("registration resolves only on the server's OPEN, not on the socket opening", async () => {
@@ -604,22 +622,22 @@ test("an abort before registration rejects and closes the socket", async () => {
 test("a host that does not form a valid URL is a usage error, not a raw DOMException", async () => {
   // No socketFactory, so nothing stands between this host and the real
   // `new WebSocket`, which throws a DOMException on it -- an error outside the
-  // ConnectionError taxonomy the rest of the module maintains, carrying an
-  // address that carries the peer id. What this holds is the refusal's shape and
-  // its silence about both values, wherever in the two layers it is raised.
+  // taxonomy the rest of the module maintains, carrying an address that carries
+  // the peer id. What this holds is the refusal's shape and its silence about
+  // both values, wherever in the two layers it is raised.
   const error = await connectToBroker({
     location: { ...LOCATION, host: "bad host" },
     id: LOCAL_ID,
     handlers: { onMessage: () => {}, onClose: () => {} },
   }).then(
     () => undefined,
-    (err: unknown) => err as ConnectionError,
+    (err: unknown) => err,
   );
-  expect(error).toBeInstanceOf(ConnectionError);
-  expect(error?.kind).toBe("usage");
+  expect(error).toBeInstanceOf(UsageError);
+  expect(exitCodeForError(error)).toBe(64);
   // The surfaced error names the operator's own fields and leaks neither the
   // derived id nor the URL that carries it.
-  const rendered = `${error?.message} ${error?.stack ?? ""}`;
+  const rendered = `${(error as Error).message} ${(error as Error).stack ?? ""}`;
   expect(rendered).not.toContain(LOCAL_ID);
   expect(rendered).not.toContain("bad host");
 });

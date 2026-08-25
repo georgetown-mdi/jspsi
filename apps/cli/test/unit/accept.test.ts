@@ -12,9 +12,11 @@ import {
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  DISPLAY_TRUNCATION_MARKER,
   encodeInvitation,
   getDefaultLinkageTerms,
   getLogger,
+  MAX_ENDPOINT_HOST_LENGTH,
   parseExchangeSpec,
   reconcileReceivedPayload,
   sanitizeForDisplay,
@@ -71,6 +73,7 @@ import {
   resolveAcceptPositionals,
   validateAccept,
 } from "../../src/commands/accept";
+import { INVITATION_BROKER_ADDRESS_REFUSED } from "../../src/connection/webrtc/brokerClient";
 import { decodeAndValidateInvitation } from "../../src/invitationDecode";
 import {
   displayInvitation,
@@ -82,7 +85,7 @@ import {
 } from "../../src/onlineBootstrap";
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 import { saveConfig } from "../../src/config";
-import { promptConfirm } from "../../src/util/cli";
+import { exitCodeForError, promptConfirm } from "../../src/util/cli";
 import { captureStdio } from "../loggingTestSupport";
 
 const promptConfirmMock = vi.mocked(promptConfirm);
@@ -191,6 +194,54 @@ test("online acceptance without an input file is a usage error", () => {
   expect(() =>
     resolveAcceptPositionals(["sftp://host/drop", "INVITE"]),
   ).toThrow("requires an invitation and an input file");
+});
+
+test("a positional past the form's last one is a usage error, not a drop", () => {
+  // Each form is checked against its own count: the third positional is the
+  // OUTPUT_FILE offline and the INPUT_FILE online, so an operator who reached
+  // for the wrong form reads that form's usage rather than having the file they
+  // named silently ignored.
+  const offline = (): void => {
+    resolveAcceptPositionals(["INVITE", "input.csv", "out.csv", "extra.csv"]);
+  };
+  expect(offline).toThrow(UsageError);
+  expect(offline).toThrow(
+    "psilink accept INVITATION [INPUT_FILE] [OUTPUT_FILE]",
+  );
+  const online = (): void => {
+    resolveAcceptPositionals([
+      "sftp://host/drop",
+      "INVITE",
+      "input.csv",
+      "out.csv",
+      "extra.csv",
+    ]);
+  };
+  expect(online).toThrow(UsageError);
+  expect(online).toThrow(
+    "psilink accept URL INVITATION INPUT_FILE [OUTPUT_FILE]",
+  );
+  // The classification an unattended caller reads: a positional it typed is its
+  // own to fix, so 64 rather than the transport's 69.
+  let refusal: unknown;
+  try {
+    offline();
+  } catch (err) {
+    refusal = err;
+  }
+  expect(exitCodeForError(refusal)).toBe(64);
+  // The counts each form does accept are untouched.
+  expect(
+    resolveAcceptPositionals(["INVITE", "input.csv", "out.csv"]).mode,
+  ).toBe("offline");
+  expect(
+    resolveAcceptPositionals([
+      "sftp://host/drop",
+      "INVITE",
+      "input.csv",
+      "out.csv",
+    ]).mode,
+  ).toBe("online");
 });
 
 // --- a '-'-leading invitation is taken as the positional, not a flag ---------
@@ -1395,6 +1446,46 @@ test("validateAccept: a partner endpoint the dial would refuse is refused before
           log: silentLog,
         }),
       ).rejects.toBeInstanceOf(UsageError);
+      expect(fs.existsSync(options.configFile)).toBe(false);
+      expect(fs.existsSync(options.keyFile)).toBe(false);
+    }
+  } finally {
+    fs.rmSync(input, { force: true });
+  }
+});
+
+test("validateAccept: a partner endpoint that forms no dialable address is refused as a usage error", async () => {
+  // The shapes the delimiter refusal above does not cover: the endpoint schema
+  // bounds the host by length alone, so one carrying a port or an unterminated
+  // IPv6 bracket arrives and fails the authority parse instead. Deterministic in
+  // the invitation alone, so it exits 64 like its delimiter sibling -- a 69 would
+  // set an unattended supervisor re-running an acceptance that cannot dial -- and
+  // it names the invitation as the locator's source, there being no connection
+  // block on this path the operator could go and check.
+  const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+  try {
+    for (const host of ["peer.example.org:9000", "[::1"]) {
+      const encoded = await encodeInvitation(
+        sampleToken(FUTURE(), { ...WEBRTC_ENDPOINT, host }),
+      );
+      const options = testOptions();
+      let refusal: unknown;
+      try {
+        await validateAccept({
+          resolved: { mode: "offline", invitation: encoded, input },
+          options,
+          log: silentLog,
+        });
+      } catch (err) {
+        refusal = err;
+      }
+      expect(refusal).toBeInstanceOf(UsageError);
+      expect((refusal as Error).message).toBe(
+        INVITATION_BROKER_ADDRESS_REFUSED,
+      );
+      expect(exitCodeForError(refusal)).toBe(64);
+      // The refusal lands before the terms are displayed, so an unusable
+      // endpoint costs neither a confirmation nor a written file.
       expect(fs.existsSync(options.configFile)).toBe(false);
       expect(fs.existsSync(options.keyFile)).toBe(false);
     }
@@ -3918,6 +4009,44 @@ test("handler: the one-command path names the coordination server it will dial b
     expect(runOnlineBootstrapMock).not.toHaveBeenCalled();
     expect(fs.existsSync(fixture.configFile)).toBe(false);
     expect(fs.existsSync(fixture.keyFile)).toBe(false);
+  } finally {
+    runOnlineBootstrapMock.mockReset();
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: the server named on both surfaces keeps its port at any host length", async () => {
+  // The port is the reason this line carries more than the plain authority, and
+  // a host is partner-supplied at up to the length the whole display budget
+  // allows -- so escaping a joined "host:port" would cut away exactly the value
+  // the line exists to add. Driven at the longest host that still resolves to a
+  // dialable authority, on both surfaces that name the server.
+  const fixture = offlineAcceptFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
+  const host = `${"h".repeat(MAX_ENDPOINT_HOST_LENGTH - 5)}.org`;
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(FUTURE(), { ...WEBRTC_ENDPOINT, host }),
+    );
+    let atPrompt: Array<string> | undefined;
+    await runOfflineAcceptCapturingStdio({
+      encoded,
+      fixture,
+      onPrompt: (stderrWrites) => {
+        atPrompt = stderrLines([...stderrWrites]);
+        return false;
+      },
+    });
+    expect(atPrompt).toBeDefined();
+    const beforeThePrompt = atPrompt!.join("\n");
+    expect(beforeThePrompt).toContain(
+      `server this invitation names: ${host}:443`,
+    );
+    expect(beforeThePrompt).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(promptConfirmMock).toHaveBeenCalledWith(
+      `Accept this invitation and run the exchange now, through ${host}:443?`,
+    );
   } finally {
     runOnlineBootstrapMock.mockReset();
     fs.rmSync(fixture.dir, { recursive: true, force: true });
