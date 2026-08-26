@@ -121,7 +121,9 @@ Building that operand is itself inside the fail-closed boundary, because it can
 fail on its own: `process.cwd()` raises `ENOENT` once the working directory has
 been removed and a `chdir` has invalidated Node's cached value, and that is a
 strip which did not run rather than a bare errno escaping past the writers'
-contract.
+contract. Only a relative path reaches for the working directory, so a path that
+is already absolute is stripped without consulting it, and a removed working
+directory cannot refuse that write.
 
 Whether the strip follows a symlink at the path is per call site, and each one
 takes the posture its own write took, so the ACL cleared belongs to the file the
@@ -148,19 +150,22 @@ placeholder.
 
 The refusal names the file and carries the underlying failure as its `cause`, so
 the display sink renders that failure as its own chain link. Which of two
-messages it carries turns on whether `chmod` ran, which `execFileSync` reports by
-setting a numeric `status` only for a child that ran to completion:
+messages it carries turns on whether `chmod` was spawned at all, which
+`execFileSync` reports through the exit status of a child that ran to completion
+and the termination signal of one it killed:
 
 | Failure | Refusal |
 | ------- | ------- |
-| `chmod` ran and exited nonzero (a numeric `status`) | "Could not clear extended ACLs on _file_", followed by the `ls -le` / `chmod -N` remediation |
-| The strip never ran (a spawn errno and a null `status`): no `/bin/chmod`, an exec the OS refused, the 5 s timeout, or a `process.cwd()` that threw before the command line existed | "Could not run the extended-ACL strip on _file_; no content was written" |
+| `chmod` was spawned: it exited nonzero (a numeric `status`), or the 5 s timeout killed it (a termination `signal`, and no status) | "Could not clear extended ACLs on _file_", followed by the `ls -le` / `chmod -N` remediation |
+| The strip never ran, carrying neither a status nor a signal: no `/bin/chmod`, an exec the OS refused, or a `process.cwd()` that threw before the command line existed | "Could not run the extended-ACL strip on _file_; no content was written" |
 
 The split exists because only the first case puts the remedy in the operator's
-hands: the ACL is the obstacle there, while sending them after `ls -le` on a host
-that could not run `chmod` at all points them at something that was never in the
-way. The errno separating the second case's causes rides in on the `cause` rather
-than being enumerated in the message.
+hands: a spawned `chmod -N` may have begun altering an existing destination's
+ACL before it exited or was killed, so the ACL is the obstacle to inspect, while
+sending them after `ls -le` on a host that could not run `chmod` at all points
+them at something that was never in the way. The errno separating the second
+case's causes rides in on the `cause` rather than being enumerated in the
+message.
 
 Off macOS no strip is attempted: on Linux the numeric `chmod` already collapses
 the POSIX ACL mask, and Windows owner-only enforcement is the `icacls`

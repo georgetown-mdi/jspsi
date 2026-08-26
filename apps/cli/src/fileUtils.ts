@@ -236,11 +236,12 @@ function stripExtendedAcls(
     // fail on its own: `process.cwd()` throws `ENOENT` once the working
     // directory has been removed and a `chdir` has invalidated Node's cached
     // value, and that is a strip which did not run -- the refusal below, not a
-    // bare errno escaping past the writers' contract.
-    const cwd = process.cwd();
+    // bare errno escaping past the writers' contract. Only a relative path
+    // reaches for the working directory, so a removed one cannot refuse a strip
+    // whose operand is already absolute.
     const operand = filePath.startsWith("/")
       ? filePath
-      : `${cwd === "/" ? "" : cwd}/${filePath}`;
+      : absolutizeAgainstWorkingDirectory(filePath);
     const args =
       symlinks === "do-not-follow" ? ["-h", "-N", operand] : ["-N", operand];
     execFileSync("/bin/chmod", args, {
@@ -257,23 +258,33 @@ function stripExtendedAcls(
   }
 }
 
-// Which refusal a failed strip carries. `execFileSync` reports a numeric
-// `status` only for a child that ran to completion, so that is what separates a
-// `chmod` which ran and refused -- the only case where the ACL is the obstacle
-// and the `ls -le` / `chmod -N` remedy applies -- from one that never ran: a
-// missing or unexecutable `/bin/chmod`, an exec the OS refused, the 5 s timeout,
-// or a `process.cwd()` that threw before the command line existed. Those all
-// arrive with a spawn errno and a null status, and sending an operator after an
-// ACL that was never in the way is the misdirection this split exists to avoid.
-// The underlying error rides along as the `cause`, which the display sink
-// renders as its own chain link, so the errno that distinguishes them is in
-// front of the operator without this message reproducing it.
+// Prefix the process working directory. The root is the one working directory
+// that already ends in a separator, so its own is dropped rather than emitting a
+// `//name` whose leading double separator POSIX leaves to the implementation.
+function absolutizeAgainstWorkingDirectory(filePath: string): string {
+  const cwd = process.cwd();
+  return `${cwd === "/" ? "" : cwd}/${filePath}`;
+}
+
+// Which refusal a failed strip carries, split on whether `chmod` was spawned at
+// all. `execFileSync` reports a numeric `status` for a child that ran to
+// completion and a termination `signal` for one it killed on the 5 s timeout;
+// either way `chmod -N` may have started clearing the ACL, so the `ls -le` /
+// `chmod -N` remedy is the operator's to apply. A failure carrying neither never
+// reached the ACL -- a missing or unexecutable `/bin/chmod`, an exec the OS
+// refused, or a `process.cwd()` that threw before the command line existed --
+// and sending an operator after an ACL that was never in the way is the
+// misdirection this split exists to avoid. The underlying error rides along as
+// the `cause`, which the display sink renders as its own chain link, so the
+// errno that distinguishes them is in front of the operator without this
+// message reproducing it.
 function aclStripFailureMessage(reportedPath: string, err: unknown): string {
-  const ranAndRefused =
+  const chmodMayHaveRun =
     typeof err === "object" &&
     err !== null &&
-    typeof (err as { status?: unknown }).status === "number";
-  return ranAndRefused
+    (typeof (err as { status?: unknown }).status === "number" ||
+      typeof (err as { signal?: unknown }).signal === "string");
+  return chmodMayHaveRun
     ? `Could not clear extended ACLs on ${reportedPath}; inspect them with ` +
         "`ls -le` and clear them manually with `chmod -N`"
     : `Could not run the extended-ACL strip on ${reportedPath}; no content ` +
