@@ -8,6 +8,7 @@ import {
 import type {
   JobCreateIntent,
   JobExchangeIntent,
+  JobSigningPaths,
   JobZeroSetupIntent,
 } from "./intent";
 import type { JobSftpServerEntry } from "./sftpServer";
@@ -30,10 +31,11 @@ import type { JobSftpServerEntry } from "./sftpServer";
  *   the exchange config the compose functions emit carries the credential only as
  *   an `@path` reference (the secret rides the key file), and the zero-setup
  *   command carries no secret at all.
- * - No container-internal path is ever present: the credential `@path` and every
+ * - No container-internal path is ever present: the credential `@path`, every
  *   filedrop rendezvous mount -- the single shared directory, or both legs of a
- *   split appliance's pair -- are replaced with fixed placeholder tokens before the
- *   template is composed, so the real container path is never emitted.
+ *   split appliance's pair -- and the signing identity file are replaced with fixed
+ *   placeholder tokens before the template is composed, so the real container path
+ *   is never emitted.
  */
 export interface JobHandoff {
   /** The mode the run used: `exchange` (invitation, config-and-key driven) or
@@ -55,6 +57,17 @@ export interface JobHandoff {
    * carries no credential.
    */
   credentialPasted: boolean;
+  /**
+   * Whether the run signed receipts under a long-lived signing identity. True for
+   * a `certificate`-mode exchange, false otherwise (including every zero-setup
+   * run, which composes no config and signs nothing).
+   *
+   * The panel shows the carry-the-identity caveat when true: the signing key is a
+   * file, not a setting, and the recurring run must load THE SAME one -- a fresh
+   * `psilink fingerprint` on the scheduling machine mints a different key with a
+   * different fingerprint, which the partner's pin would then reject.
+   */
+  usedSigningIdentity: boolean;
   /** The portable template itself: the exchange config document (exchange mode) or
    * the zero-setup command tokens (zeroSetup mode). */
   template: JobHandoffTemplate;
@@ -107,6 +120,19 @@ export const HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER =
 export const HANDOFF_INBOUND_DIRECTORY_URL_PLACEHOLDER =
   "file:///path/to/your/inbound-directory";
 
+/**
+ * The placeholder the signing identity file is shown as in the exchange config's
+ * `signing.identity_file`.
+ *
+ * The identity itself is a real file the operator has -- it lives in the mounted
+ * working directory, so it is on their host under a path of their own -- but the
+ * path the appliance loads it by is the CONTAINER's, which their host does not
+ * have. So the template names the file rather than the location, and the panel
+ * says which file to point it at.
+ */
+export const HANDOFF_SIGNING_IDENTITY_PLACEHOLDER =
+  "/path/to/your/signing-identity.json";
+
 /** The input/output positionals the recurring command template names, matching the
  * console's `results.csv` download name so the two flows read consistently. */
 const HANDOFF_INPUT_NAME = "input.csv";
@@ -150,14 +176,34 @@ function placeholderServerEntry(entry: JobSftpServerEntry): JobSftpServerEntry {
 }
 
 /**
+ * The signing paths the TEMPLATE names, as against the ones the live run used.
+ *
+ * The identity is placeholdered: the appliance loads it by a container path the
+ * operator's host does not have (see
+ * {@link HANDOFF_SIGNING_IDENTITY_PLACEHOLDER}).
+ *
+ * The receipt output is OMITTED rather than placeholdered, and that is a
+ * behavioural choice, not a redaction: with the key absent the CLI writes a
+ * timestamped receipt into the run's own working directory, so a schedule
+ * accumulates one receipt per run. Carrying the appliance's single fixed name
+ * over would have each scheduled run overwrite the last run's receipt -- the
+ * opposite of what a non-repudiable audit trail is for. The live run pins the
+ * name because it serves that one file once; a schedule wants the trail.
+ */
+const HANDOFF_SIGNING_PATHS: JobSigningPaths = {
+  identityFile: HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
+};
+
+/**
  * Compose the exchange mode's portable `psilink.yaml` template. It recomposes
  * through the SAME compose functions the live run used, so the linkage terms,
- * metadata, standardization, host, port, username, and fingerprint are byte-for-
- * byte what ran -- only the container paths are substituted first: the sftp arm
- * passes a placeholder-credential server entry, the filedrop arm a placeholder
- * rendezvous path. Recomposing (rather than reading and munging the on-disk file)
- * keeps the container path out by construction and never reads the secret-adjacent
- * config off disk.
+ * metadata, standardization, host, port, username, fingerprint, signing mode,
+ * pinned partner fingerprint, and retention note are byte-for-byte what ran --
+ * only the container paths are substituted first: the sftp arm passes a
+ * placeholder-credential server entry, the filedrop arm a placeholder rendezvous
+ * path, and both pass {@link HANDOFF_SIGNING_PATHS}. Recomposing (rather than
+ * reading and munging the on-disk file) keeps the container path out by
+ * construction and never reads the secret-adjacent config off disk.
  */
 function buildExchangeHandoffTemplate(
   intent: JobExchangeIntent,
@@ -172,6 +218,7 @@ function buildExchangeHandoffTemplate(
       yaml: composeSftpConfigDocument(
         intent,
         placeholderServerEntry(serverEntry),
+        HANDOFF_SIGNING_PATHS,
       ),
     };
   }
@@ -182,8 +229,14 @@ function buildExchangeHandoffTemplate(
           intent,
           HANDOFF_INBOUND_DIRECTORY_PLACEHOLDER,
           HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER,
+          HANDOFF_SIGNING_PATHS,
         )
-      : composeConfigDocument(intent, HANDOFF_SHARED_DIRECTORY_PLACEHOLDER),
+      : composeConfigDocument(
+          intent,
+          HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
+          undefined,
+          HANDOFF_SIGNING_PATHS,
+        ),
   };
 }
 
@@ -277,6 +330,8 @@ export function buildJobHandoff(
     channel: intent.channel,
     usedKeyFile: !zeroSetup,
     credentialPasted: intent.channel === "sftp" && credentialPasted,
+    usedSigningIdentity:
+      intent.mode !== "zeroSetup" && intent.signing?.mode === "certificate",
     template: zeroSetup
       ? buildZeroSetupHandoffTemplate(intent, serverEntry, split)
       : buildExchangeHandoffTemplate(intent, serverEntry, split),

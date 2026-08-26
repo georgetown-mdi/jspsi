@@ -34,8 +34,10 @@ import {
 import { ConnectionTuningCard } from "./ConnectionTuningCard";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
+import { ReceiptsCard } from "./ReceiptsCard";
 import { RunDiagnosticsCard } from "./RunDiagnosticsCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
+import { receiptsProblems } from "./receiptsModel";
 import { runDiagnosticsProblems } from "./runDiagnosticsModel";
 import { splitDirectoryRetainProblem } from "./sftpConnectionChoice";
 import { splitRendezvousRetainProblem } from "./filedropRendezvousChoice";
@@ -52,6 +54,7 @@ import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { OutputDirection } from "@psi/advancedInvite";
+import type { ReceiptsDraft } from "./receiptsModel";
 import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
@@ -97,6 +100,10 @@ export function ReviewCreateSection({
   runDiagnosticsOpen,
   onRunDiagnostics,
   onRunDiagnosticsOpen,
+  receipts,
+  receiptsOpen,
+  onReceipts,
+  onReceiptsOpen,
   onLifetime,
   onDirection,
   onTransport,
@@ -149,6 +156,14 @@ export function ReviewCreateSection({
   runDiagnosticsOpen: boolean;
   onRunDiagnostics: (draft: RunDiagnosticsDraft) => void;
   onRunDiagnosticsOpen: (open: boolean) => void;
+  /** The operator's receipt-signing and retention choices for the same run,
+   * offered on the same transports the three cards above are. */
+  receipts: ReceiptsDraft;
+  /** Whether the receipts disclosure is expanded (held by the host for the same
+   * reason as the three above). */
+  receiptsOpen: boolean;
+  onReceipts: (draft: ReceiptsDraft) => void;
+  onReceiptsOpen: (open: boolean) => void;
   onLifetime: (seconds: number) => void;
   onDirection: (direction: OutputDirection) => void;
   onTransport: (transport: Transport) => void;
@@ -237,6 +252,8 @@ export function ReviewCreateSection({
     connectionTuningProblems(connectionTuning).length > 0;
   const runDiagnosticsBlocked =
     exchangeFilesOffered && runDiagnosticsProblems(runDiagnostics).length > 0;
+  const receiptsBlocked =
+    exchangeFilesOffered && receiptsProblems(receipts).length > 0;
   // The SFTP session mode applies only where a session exists, so the card
   // withholds it on the shared-directory transport.
   const tuningCapabilities =
@@ -269,7 +286,8 @@ export function ReviewCreateSection({
     splitDirectoryProblem === undefined &&
     !exchangeFilesBlocked &&
     !connectionTuningBlocked &&
-    !runDiagnosticsBlocked;
+    !runDiagnosticsBlocked &&
+    !receiptsBlocked;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
   const readiness = useDeferredAnnouncement(
@@ -285,9 +303,11 @@ export function ReviewCreateSection({
               ? "Resolve the connection-tuning settings above before you can create."
               : runDiagnosticsBlocked
                 ? "Resolve the diagnostics-and-recovery settings above before you can create."
-                : problems.length === 0
-                  ? "Ready to create the invitation."
-                  : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
+                : receiptsBlocked
+                  ? "Resolve the receipts-and-record-keeping settings above before you can create."
+                  : problems.length === 0
+                    ? "Ready to create the invitation."
+                    : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
   );
   return (
     <>
@@ -408,6 +428,13 @@ export function ReviewCreateSection({
             onToggleOpen={onRunDiagnosticsOpen}
             onChange={onRunDiagnostics}
           />
+          <ReceiptsCard
+            draft={receipts}
+            identity={editor.draft.identity}
+            open={receiptsOpen}
+            onToggleOpen={onReceiptsOpen}
+            onChange={onReceipts}
+          />
         </>
       )}
       <h2>Exchange proposal</h2>
@@ -490,9 +517,11 @@ export function ReviewCreateSection({
                   ? "Resolve the file-handling settings above to continue."
                   : connectionTuningBlocked
                     ? "Resolve the connection-tuning settings above to continue."
-                    : problems.length === 0
-                      ? "Ready to create."
-                      : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
+                    : receiptsBlocked
+                      ? "Resolve the receipts-and-record-keeping settings above to continue."
+                      : problems.length === 0
+                        ? "Ready to create."
+                        : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
         </p>
       </div>
     </>

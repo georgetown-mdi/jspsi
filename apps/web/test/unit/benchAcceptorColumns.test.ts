@@ -359,6 +359,7 @@ describe("acceptor launch gates", () => {
       exchangeFilesBlocked: false,
       connectionTuningBlocked: false,
       runDiagnosticsBlocked: false,
+      receiptsBlocked: false,
     };
     expect(
       acceptorLaunchBlockedReason(
@@ -395,6 +396,7 @@ describe("acceptor launch gates", () => {
         exchangeFilesBlocked: false,
         connectionTuningBlocked: false,
         runDiagnosticsBlocked: false,
+        receiptsBlocked: false,
       }),
     ).toBe(OFFLINE_EXCHANGE_REASON);
   });
@@ -411,6 +413,7 @@ describe("acceptor launch gates", () => {
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
           runDiagnosticsBlocked: false,
+          receiptsBlocked: false,
         },
       ),
     ).toBe("Set up the SFTP connection above before you can start.");
@@ -432,6 +435,7 @@ describe("acceptor launch gates", () => {
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
           runDiagnosticsBlocked: false,
+          receiptsBlocked: false,
           splitDirectoryProblem: splitRendezvousRetainProblem(
             { configured: true, split: true, locator: "in" },
             false,
@@ -453,6 +457,7 @@ describe("acceptor launch gates", () => {
           exchangeFilesBlocked: true,
           connectionTuningBlocked: false,
           runDiagnosticsBlocked: false,
+          receiptsBlocked: false,
         },
       ),
     ).toBe("Resolve the file-handling settings above before you can start.");
@@ -476,6 +481,7 @@ describe("acceptor launch gates", () => {
           peerTimeout: { magnitude: "soon", unit: "m" },
         }).length > 0,
       runDiagnosticsBlocked: false,
+      receiptsBlocked: false,
     };
     expect(stepBlocks.exchangeFilesBlocked).toBe(false);
     expect(stepBlocks.connectionTuningBlocked).toBe(true);
@@ -511,6 +517,7 @@ describe("acceptor launch gates", () => {
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
           runDiagnosticsBlocked: false,
+          receiptsBlocked: false,
         },
       ),
     );
@@ -532,6 +539,7 @@ describe("acceptor launch gates", () => {
         exchangeFilesBlocked: true,
         connectionTuningBlocked: true,
         runDiagnosticsBlocked: false,
+        receiptsBlocked: false,
       }),
     ).toBe(
       "Set your columns to the missing field types above before you can start.",

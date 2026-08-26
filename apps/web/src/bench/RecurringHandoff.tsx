@@ -109,6 +109,7 @@ function HandoffBody({ handoff }: { handoff: JobHandoff }) {
         <ConfigSteps
           yaml={handoff.template.yaml}
           usedKeyFile={handoff.usedKeyFile}
+          usedSigningIdentity={handoff.usedSigningIdentity}
         />
       ) : (
         <CommandSteps command={runCommand} />
@@ -157,9 +158,11 @@ function HandoffBody({ handoff }: { handoff: JobHandoff }) {
 function ConfigSteps({
   yaml,
   usedKeyFile,
+  usedSigningIdentity,
 }: {
   yaml: string;
   usedKeyFile: boolean;
+  usedSigningIdentity: boolean;
 }) {
   return (
     <ol className={styles.handoffSteps}>
@@ -185,12 +188,35 @@ function ConfigSteps({
           </p>
         </li>
       )}
+      {usedSigningIdentity && (
+        <li>
+          <p className={styles.handoffStepLabel}>
+            Copy your signing identity into that folder
+          </p>
+          <p className={styles.small}>
+            This run signs its receipt with the signing identity in your mounted
+            folder. Copy that file to the scheduling machine, readable only by
+            you (chmod 600 on Linux/macOS), and set signing.identity_file to
+            where you put it -- the path in the configuration above is a
+            placeholder. Copy it; do not run psilink fingerprint there to make a
+            new one. That mints a different key with a different fingerprint,
+            and your partner has pinned the old one.
+          </p>
+        </li>
+      )}
       <li>
         <p className={styles.handoffStepLabel}>Run the exchange</p>
         <HandoffCode
           code="psilink exchange input.csv results.csv"
           ariaLabel="recurring exchange command"
         />
+        {usedSigningIdentity && (
+          <p className={styles.small}>
+            The configuration names no receipt file, so each scheduled run
+            writes its own timestamped receipt into the folder it runs in, and
+            the schedule accumulates a trail rather than overwriting one file.
+          </p>
+        )}
       </li>
     </ol>
   );

@@ -729,14 +729,14 @@ export function VerifyReceiptBench() {
             <TermsInput
               key={`local-terms-${exchangeGeneration}`}
               label="Your linkage terms"
-              description="Paste your exchange config or exported linkage-terms document."
+              description="Paste your exchange config or exported linkage-terms document. Only its linkage_terms are read; nothing else in a config is."
               terms={localTerms}
               onTerms={onLocalTerms}
             />
             <TermsInput
               key={`partner-terms-${exchangeGeneration}`}
               label="Your partner's linkage terms"
-              description="Paste your partner's config or exported terms. The partner's terms are not retained by default; both sides are needed to check the hash."
+              description="Paste your partner's config or exported terms, read the same way. The partner's terms are not retained by default; both sides are needed to check the hash."
               terms={partnerTerms}
               onTerms={onPartnerTerms}
             />

@@ -58,6 +58,7 @@ import type {
 } from "@psi/serverJobExchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
 import type { JobExchangeOptions } from "@jobs/intent";
+import type { ReceiptsIntentFields } from "./receiptsModel";
 import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
@@ -132,6 +133,7 @@ export function acceptorServerJobConfig({
   transport,
   options,
   runDiagnostics,
+  receipts,
 }: {
   token: InvitationToken;
   acceptorName: string;
@@ -145,12 +147,16 @@ export function acceptorServerJobConfig({
   /** The same step's per-run diagnostic and recovery choices, forwarded to the
    * intent unchanged. */
   runDiagnostics?: RunDiagnosticsIntentFields;
+  /** The same step's receipt-signing and retention choices, forwarded to the
+   * intent unchanged. */
+  receipts?: ReceiptsIntentFields;
 }): ServerJobExchangeDriverConfig {
   return {
     transport,
     side: "acceptor",
     ...(options !== undefined ? { options } : {}),
     ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
+    ...(receipts !== undefined ? { receipts } : {}),
     linkageTerms: deriveAcceptedLinkageTerms(token.linkageTerms, acceptorName),
     sharedSecret: token.sharedSecret,
     inputSource,
@@ -213,6 +219,10 @@ export interface AcceptorLaunch {
   /** The same step's per-run diagnostic and recovery choices, fixed into the
    * launch for the same reason and unused on the browser path. */
   runDiagnostics?: RunDiagnosticsIntentFields;
+  /** The same step's receipt-signing and retention choices, fixed into the launch
+   * for the same reason and unused on the browser path, which produces no CLI
+   * config and signs no receipt. */
+  receipts?: ReceiptsIntentFields;
 }
 
 /** Resolve an {@link AcceptorLaunchSource} to the driver's {@link JobInputSource}:
@@ -359,7 +369,7 @@ export function useAcceptorExchange({
 
     const { invitation, acceptorName, rawRows, columns, edits, inputSource } =
       current;
-    const { options, runDiagnostics } = current;
+    const { options, runDiagnostics, receipts } = current;
     const { token, endpoint } = invitation;
     // The bench transport this endpoint runs over, threaded to failureFor so a
     // console mounted-file create rejection (a workFile 400) names the file cause
@@ -464,6 +474,7 @@ export function useAcceptorExchange({
           transport: serverJobTransport,
           ...(options !== undefined ? { options } : {}),
           ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
+          ...(receipts !== undefined ? { receipts } : {}),
         }),
         // Persist the created job's id so a reload or hard tab close can re-attach
         // to the appliance's run, and track it for the deliberate-discard paths.

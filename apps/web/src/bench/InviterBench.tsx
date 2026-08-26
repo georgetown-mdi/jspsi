@@ -60,6 +60,7 @@ import {
   saveRailNote,
   saveTrustFooter,
 } from "./saveExchangeModel";
+import { RECEIPTS_DEFAULT, receiptsIntentFields } from "./receiptsModel";
 import {
   RUN_DIAGNOSTICS_DEFAULT,
   runDiagnosticsAfterRetarget,
@@ -161,6 +162,7 @@ import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
+import type { ReceiptsDraft } from "./receiptsModel";
 import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
 import type { SavedExchange } from "./SaveExchangeSection";
 import type { Section } from "./stepRestore";
@@ -334,6 +336,10 @@ export function InviterBench() {
     RUN_DIAGNOSTICS_DEFAULT,
   );
   const [runDiagnosticsOpen, setRunDiagnosticsOpen] = useState(false);
+  // The operator's receipt-signing and retention choices for the same run, held
+  // beside the three drafts above for the same reasons.
+  const [receipts, setReceipts] = useState<ReceiptsDraft>(RECEIPTS_DEFAULT);
+  const [receiptsOpen, setReceiptsOpen] = useState(false);
   const [demoActive, setDemoActive] = useState(false);
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
 
@@ -430,6 +436,7 @@ export function InviterBench() {
     sftpConfigured,
     options: runOptions,
     runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
+    receipts: receiptsIntentFields(receipts),
   });
 
   // The coverage input, unified across builds: the browser's parsed rows on the
@@ -1311,6 +1318,10 @@ export function InviterBench() {
                 runDiagnosticsOpen={runDiagnosticsOpen}
                 onRunDiagnostics={setRunDiagnostics}
                 onRunDiagnosticsOpen={setRunDiagnosticsOpen}
+                receipts={receipts}
+                receiptsOpen={receiptsOpen}
+                onReceipts={setReceipts}
+                onReceiptsOpen={setReceiptsOpen}
                 onLifetime={(seconds) =>
                   applyEditor(editorWithLifetime(editor, seconds))
                 }

@@ -297,6 +297,9 @@ export interface AcceptorLaunchStepBlocks {
   /** An unconfirmed recovery sweep on the diagnostics-and-recovery card. A third
    * separate card, gated separately for the same reason. */
   runDiagnosticsBlocked: boolean;
+  /** A receipt-signing or retention choice the run itself would refuse. A fourth
+   * separate card, gated separately for the same reason. */
+  receiptsBlocked: boolean;
   /** The requirement a split rendezvous makes of the file-handling choices, in the
    * console's own words, or undefined when it is met. Carried as its own SENTENCE
    * rather than a flag, because the remedy is the one control to turn on and the
@@ -310,6 +313,7 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
   exchangeFilesBlocked: false,
   connectionTuningBlocked: false,
   runDiagnosticsBlocked: false,
+  receiptsBlocked: false,
 };
 
 /**
@@ -394,6 +398,8 @@ export function acceptorLaunchBlockedReason(
     return "Resolve the connection-tuning settings above before you can start.";
   if (stepBlocks.runDiagnosticsBlocked)
     return "Resolve the diagnostics-and-recovery settings above before you can start.";
+  if (stepBlocks.receiptsBlocked)
+    return "Resolve the receipts-and-record-keeping settings above before you can start.";
   return undefined;
 }
 

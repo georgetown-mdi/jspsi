@@ -37,12 +37,19 @@ export async function fetchRecurringHandoff(
 export function parseHandoff(body: unknown): JobHandoff | null {
   if (body === null || typeof body !== "object" || Array.isArray(body))
     return null;
-  const { mode, channel, usedKeyFile, credentialPasted, template } =
-    body as Record<string, unknown>;
+  const {
+    mode,
+    channel,
+    usedKeyFile,
+    credentialPasted,
+    usedSigningIdentity,
+    template,
+  } = body as Record<string, unknown>;
   if (mode !== "exchange" && mode !== "zeroSetup") return null;
   if (channel !== "sftp" && channel !== "filedrop") return null;
   if (typeof usedKeyFile !== "boolean") return null;
   if (typeof credentialPasted !== "boolean") return null;
+  if (typeof usedSigningIdentity !== "boolean") return null;
   const parsedTemplate = parseTemplate(template);
   if (parsedTemplate === null) return null;
   return {
@@ -50,6 +57,7 @@ export function parseHandoff(body: unknown): JobHandoff | null {
     channel,
     usedKeyFile,
     credentialPasted,
+    usedSigningIdentity,
     template: parsedTemplate,
   };
 }

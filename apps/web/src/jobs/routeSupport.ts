@@ -201,6 +201,13 @@ export const MAX_SFTP_AUTHOR_BODY_BYTES = 64 * 1024;
 export const MAX_SFTP_PROBE_BODY_BYTES = 4 * 1024;
 
 /**
+ * The byte cap on a `POST /api/jobs/signing/fingerprint` body: an identity label
+ * and an export toggle, nothing else. Sized like the probe cap -- no path and no
+ * credential is representable -- so an oversized body is a `413` before any parse.
+ */
+export const MAX_SIGNING_FINGERPRINT_BODY_BYTES = 4 * 1024;
+
+/**
  * The outcome of reading a job request body under a byte cap:
  * - `too-large`: the body exceeded the cap (mapped to 413).
  * - `invalid`: the body was absent or was not valid JSON (mapped to 400).

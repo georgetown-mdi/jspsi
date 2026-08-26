@@ -428,6 +428,7 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
       channel: "sftp",
       usedKeyFile: true,
       credentialPasted: false,
+      usedSigningIdentity: false,
       template: { kind: "config", yaml: "connection:\n  channel: sftp\n" },
     });
     expect(parsed?.template.kind).toBe("config");
@@ -442,7 +443,19 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
         channel: "sftp",
         usedKeyFile: true,
         credentialPasted: false,
+        usedSigningIdentity: false,
         template: { kind: "command", argv: [1, 2] },
+      }),
+    ).toBeNull();
+    // A body missing the signing flag is a partial hand-off, not one whose
+    // carry-the-key caveat silently defaults to absent.
+    expect(
+      parseHandoff({
+        mode: "exchange",
+        channel: "sftp",
+        usedKeyFile: true,
+        credentialPasted: false,
+        template: { kind: "config", yaml: "connection:\n" },
       }),
     ).toBeNull();
   });

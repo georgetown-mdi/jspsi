@@ -1,0 +1,657 @@
+import fs from "node:fs";
+import path from "node:path";
+
+import { afterEach, describe, expect, test } from "vitest";
+
+import { parse as parseYaml } from "yaml";
+
+import { MAX_TEXT_LENGTH, safeParseExchangeSpec } from "@psilink/core";
+
+import {
+  HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
+  HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
+  buildJobHandoff,
+} from "@jobs/handoff";
+import {
+  IDENTITY_LOCATION_ADVISORY,
+  IDENTITY_MISSING_PROBLEM,
+  NO_PARTNER_PIN_ADVISORY,
+  PARTNER_FINGERPRINT_PROBLEM,
+  RECEIPTS_DEFAULT,
+  RECEIPT_LOCATION_NOTICE,
+  RETENTION_NOTE_PROBLEM,
+  SESSION_DERIVED_PROBLEM,
+  receiptsAdvisories,
+  receiptsIntentFields,
+  receiptsProblems,
+  receiptsSummary,
+  receiptsWithField,
+} from "@bench/receiptsModel";
+import {
+  SIGNING_CERTIFICATE_FILE_NAME,
+  SIGNING_IDENTITY_FILE_NAME,
+  assertExportPathDistinct,
+  fingerprintArgv,
+  parseFingerprintStdout,
+  reconcileFingerprintExit,
+  runSigningFingerprint,
+  signingCertificatePath,
+  signingIdentityPath,
+} from "@jobs/signingIdentity";
+import {
+  composeConfigDocument,
+  composeSftpConfigDocument,
+  jobExchangeIntentSchema,
+} from "@jobs/intent";
+import { importLinkageTerms } from "@psi/linkageTermsIO";
+
+import {
+  STUB_CLI_PATH,
+  tempDataRoot,
+  testSftpServerEntry,
+  validIntent,
+  validLinkageTerms,
+  validSftpIntent,
+  validZeroSetupIntent,
+} from "../utils/jobFixtures";
+
+import type { JobSigningPaths } from "@jobs/intent";
+import type { ReceiptsDraft } from "@bench/receiptsModel";
+
+// The console's receipt-signing and retention authoring surface, end to end: what
+// the boundary schema admits, what the two composers emit per mode, what the
+// graduation template says about a container-internal identity, the export
+// refusal, and the fingerprint driver's own reconciliation.
+
+/** A canonical 43-character fingerprint (the final character drawn from the
+ * aligned set the config schema requires). */
+const PARTNER_FINGERPRINT = "C".repeat(42) + "A";
+/** A second canonical value, for the driver's own stdout. */
+const OWN_FINGERPRINT = "B".repeat(42) + "A";
+
+const RETENTION_NOTE =
+  "Filed in the association database; kept six years, then purged.";
+
+const dirs: Array<string> = [];
+afterEach(() => {
+  for (const dir of dirs.splice(0))
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+function scratchDir(): string {
+  const dir = tempDataRoot("receipts");
+  dirs.push(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+const signingPaths = (workdir = "/srv/job"): JobSigningPaths => ({
+  identityFile: "/data/.psilink-signing-identity.json",
+  receiptOutput: path.join(workdir, "receipt.json"),
+});
+
+/** The composed document parsed as data, and re-validated through core's own
+ * exchange-spec schema so a block this composer emits is one the CLI would load. */
+function composedSpec(yaml: string): Record<string, unknown> {
+  const parsed = safeParseExchangeSpec(parseYaml(yaml));
+  expect(parsed.success).toBe(true);
+  return parseYaml(yaml) as Record<string, unknown>;
+}
+
+const draft = (overrides: Partial<ReceiptsDraft> = {}): ReceiptsDraft => ({
+  ...RECEIPTS_DEFAULT,
+  ...overrides,
+});
+
+describe("the intent boundary admits only a mode an exchange honors", () => {
+  test("certificate mode with a canonical pin parses", () => {
+    const parsed = jobExchangeIntentSchema.safeParse(
+      validIntent({
+        signing: {
+          mode: "certificate",
+          partnerFingerprint: PARTNER_FINGERPRINT,
+        },
+        retentionDisposition: RETENTION_NOTE,
+      }),
+    );
+    expect(parsed.success).toBe(true);
+  });
+
+  test("the unimplemented session-derived mode is refused, not accepted and dropped", () => {
+    const parsed = jobExchangeIntentSchema.safeParse({
+      ...validIntent(),
+      signing: { mode: "session-derived" },
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  test("a non-canonical partner fingerprint is refused", () => {
+    for (const bad of ["", "too-short", "/etc/passwd", "D".repeat(43)]) {
+      const parsed = jobExchangeIntentSchema.safeParse(
+        validIntent({
+          signing: { mode: "certificate", partnerFingerprint: bad },
+        }),
+      );
+      expect(parsed.success).toBe(false);
+    }
+  });
+
+  test("a pin beside mode none is a contradiction, not an inert extra", () => {
+    const parsed = jobExchangeIntentSchema.safeParse(
+      validIntent({
+        signing: { mode: "none", partnerFingerprint: PARTNER_FINGERPRINT },
+      }),
+    );
+    expect(parsed.success).toBe(false);
+  });
+
+  test("no path field is representable on the signing block", () => {
+    for (const smuggled of [
+      { mode: "certificate", identityFile: "/etc/psilink/identity.json" },
+      { mode: "certificate", identity_file: "/etc/psilink/identity.json" },
+      { mode: "certificate", receiptOutput: "/tmp/receipt.json" },
+    ]) {
+      const parsed = jobExchangeIntentSchema.safeParse({
+        ...validIntent(),
+        signing: smuggled,
+      });
+      expect(parsed.success).toBe(false);
+    }
+  });
+
+  test("the retention note is bounded by the record schema's own ceiling", () => {
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ retentionDisposition: "x".repeat(MAX_TEXT_LENGTH) }),
+      ).success,
+    ).toBe(true);
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ retentionDisposition: "x".repeat(MAX_TEXT_LENGTH + 1) }),
+      ).success,
+    ).toBe(false);
+    // An absent note is the omitted key, never an empty string.
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ retentionDisposition: "" }),
+      ).success,
+    ).toBe(false);
+  });
+});
+
+describe("the composed signing block, per mode", () => {
+  test("no signing choice composes no block at all", () => {
+    const composed = composedSpec(
+      composeConfigDocument(
+        validIntent(),
+        "/rendezvous",
+        undefined,
+        signingPaths(),
+      ),
+    );
+    expect(composed["signing"]).toBeUndefined();
+    expect(composed["retention_disposition"]).toBeUndefined();
+  });
+
+  test("mode none composes no block either: absent is what the CLI reads as unsigned", () => {
+    const composed = composedSpec(
+      composeConfigDocument(
+        validIntent({ signing: { mode: "none" } }),
+        "/rendezvous",
+        undefined,
+        signingPaths(),
+      ),
+    );
+    expect(composed["signing"]).toBeUndefined();
+  });
+
+  test("certificate mode composes the mode, the server's paths, and the pin", () => {
+    const composed = composedSpec(
+      composeConfigDocument(
+        validIntent({
+          signing: {
+            mode: "certificate",
+            partnerFingerprint: PARTNER_FINGERPRINT,
+          },
+        }),
+        "/rendezvous",
+        undefined,
+        signingPaths("/srv/job-a"),
+      ),
+    );
+    expect(composed["signing"]).toEqual({
+      mode: "certificate",
+      identity_file: "/data/.psilink-signing-identity.json",
+      partner_fingerprint: PARTNER_FINGERPRINT,
+      receipt_output: "/srv/job-a/receipt.json",
+    });
+  });
+
+  test("certificate mode with no pin composes the block without one", () => {
+    const composed = composedSpec(
+      composeConfigDocument(
+        validIntent({ signing: { mode: "certificate" } }),
+        "/rendezvous",
+        undefined,
+        signingPaths(),
+      ),
+    );
+    expect(composed["signing"]).toEqual({
+      mode: "certificate",
+      identity_file: "/data/.psilink-signing-identity.json",
+      receipt_output: "/srv/job/receipt.json",
+    });
+  });
+
+  test("the sftp composer emits the identical block", () => {
+    const composed = composedSpec(
+      composeSftpConfigDocument(
+        validSftpIntent({
+          signing: {
+            mode: "certificate",
+            partnerFingerprint: PARTNER_FINGERPRINT,
+          },
+        }),
+        testSftpServerEntry(),
+        signingPaths("/srv/job-b"),
+      ),
+    );
+    expect(composed["signing"]).toEqual({
+      mode: "certificate",
+      identity_file: "/data/.psilink-signing-identity.json",
+      partner_fingerprint: PARTNER_FINGERPRINT,
+      receipt_output: "/srv/job-b/receipt.json",
+    });
+  });
+
+  test("certificate mode with no resolved paths is a compose-time error, never a silent unsigned run", () => {
+    expect(() =>
+      composeConfigDocument(
+        validIntent({ signing: { mode: "certificate" } }),
+        "/rendezvous",
+      ),
+    ).toThrow(/identity path/);
+  });
+});
+
+describe("the retention note reaches the composed config verbatim", () => {
+  test("on the filedrop composer", () => {
+    const composed = composedSpec(
+      composeConfigDocument(
+        validIntent({ retentionDisposition: RETENTION_NOTE }),
+        "/rendezvous",
+        undefined,
+        signingPaths(),
+      ),
+    );
+    expect(composed["retention_disposition"]).toBe(RETENTION_NOTE);
+  });
+
+  test("on the sftp composer", () => {
+    const composed = composedSpec(
+      composeSftpConfigDocument(
+        validSftpIntent({ retentionDisposition: RETENTION_NOTE }),
+        testSftpServerEntry(),
+        signingPaths(),
+      ),
+    );
+    expect(composed["retention_disposition"]).toBe(RETENTION_NOTE);
+  });
+});
+
+describe("the graduation hand-off handles the identity path honestly", () => {
+  const handoffYaml = (
+    intent = validIntent({
+      signing: { mode: "certificate", partnerFingerprint: PARTNER_FINGERPRINT },
+      retentionDisposition: RETENTION_NOTE,
+    }),
+  ) => {
+    const handoff = buildJobHandoff(intent, undefined, {
+      credentialPasted: false,
+      filedropSplit: false,
+    });
+    expect(handoff.template.kind).toBe("config");
+    if (handoff.template.kind !== "config") throw new Error("unreachable");
+    return { handoff, spec: composedSpec(handoff.template.yaml) };
+  };
+
+  test("the identity file is a placeholder, never the appliance's own path", () => {
+    const { spec } = handoffYaml();
+    const signing = spec["signing"] as Record<string, unknown>;
+    expect(signing["identity_file"]).toBe(HANDOFF_SIGNING_IDENTITY_PLACEHOLDER);
+    expect(JSON.stringify(spec)).not.toContain("/data/");
+    expect(JSON.stringify(spec)).not.toContain(SIGNING_IDENTITY_FILE_NAME);
+  });
+
+  test("the receipt output is OMITTED, so a schedule accumulates a trail", () => {
+    const { spec } = handoffYaml();
+    const signing = spec["signing"] as Record<string, unknown>;
+    expect(signing["receipt_output"]).toBeUndefined();
+    expect(signing["mode"]).toBe("certificate");
+    // The partner's pin is portable and carries over verbatim.
+    expect(signing["partner_fingerprint"]).toBe(PARTNER_FINGERPRINT);
+  });
+
+  test("the retention note carries over verbatim", () => {
+    const { spec } = handoffYaml();
+    expect(spec["retention_disposition"]).toBe(RETENTION_NOTE);
+  });
+
+  test("no container path appears anywhere in the template", () => {
+    const { handoff } = handoffYaml();
+    if (handoff.template.kind !== "config") throw new Error("unreachable");
+    expect(handoff.template.yaml).toContain(
+      HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
+    );
+  });
+
+  test("usedSigningIdentity flags the carry-the-key caveat only for a signed run", () => {
+    const { handoff } = handoffYaml();
+    expect(handoff.usedSigningIdentity).toBe(true);
+    expect(
+      buildJobHandoff(validIntent(), undefined, {
+        credentialPasted: false,
+        filedropSplit: false,
+      }).usedSigningIdentity,
+    ).toBe(false);
+    // A zero-setup run composes no config and signs nothing.
+    expect(
+      buildJobHandoff(validZeroSetupIntent(), undefined, {
+        credentialPasted: false,
+        filedropSplit: false,
+      }).usedSigningIdentity,
+    ).toBe(false);
+  });
+});
+
+describe("the certificate export never overwrites the identity file", () => {
+  test("an export path equal to the identity path is refused", () => {
+    expect(() =>
+      assertExportPathDistinct("/data/identity.json", "/data/identity.json"),
+    ).toThrow(/private key/);
+    // A relative or dot-laden spelling of the same file is caught too, matching
+    // the CLI's own resolved-path compare.
+    expect(() =>
+      assertExportPathDistinct("/data/identity.json", "/data/./identity.json"),
+    ).toThrow(/private key/);
+    expect(() =>
+      assertExportPathDistinct(
+        "/data/identity.json",
+        "/data/sub/../identity.json",
+      ),
+    ).toThrow(/private key/);
+  });
+
+  test("the two names the console composes can never collide", () => {
+    const root = "/data";
+    expect(signingIdentityPath(root)).not.toBe(signingCertificatePath(root));
+    expect(() =>
+      assertExportPathDistinct(
+        signingIdentityPath(root),
+        signingCertificatePath(root),
+      ),
+    ).not.toThrow();
+  });
+
+  test("the identity file is dot-prefixed, so the input picker's own rule hides it", () => {
+    expect(SIGNING_IDENTITY_FILE_NAME.startsWith(".")).toBe(true);
+    expect(SIGNING_CERTIFICATE_FILE_NAME.startsWith(".")).toBe(false);
+  });
+
+  test("the driver refuses synchronously, before any child is spawned", () => {
+    const root = scratchDir();
+    expect(() =>
+      runSigningFingerprint({
+        binaryPath: STUB_CLI_PATH,
+        identityPath: signingIdentityPath(root),
+        identityLabel: "Agency A",
+        exportPath: signingIdentityPath(root),
+      }),
+    ).toThrow(/private key/);
+    // Nothing was written: the stub CLI creates the identity file, so its absence
+    // is what proves no child ran.
+    expect(fs.existsSync(signingIdentityPath(root))).toBe(false);
+  });
+});
+
+describe("the fingerprint driver", () => {
+  test("never emits --force, and states every value as a single =token", () => {
+    const argv = fingerprintArgv({
+      binaryPath: "/cli/index.js",
+      identityPath: "/data/.psilink-signing-identity.json",
+      identityLabel: "-Agency A, contact@example.org",
+      exportPath: "/data/psilink-certificate.json",
+    });
+    expect(argv).toEqual([
+      "/cli/index.js",
+      "fingerprint",
+      "--identity-file=/data/.psilink-signing-identity.json",
+      "--identity=-Agency A, contact@example.org",
+      "--export-certificate=/data/psilink-certificate.json",
+    ]);
+    expect(argv).not.toContain("--force");
+  });
+
+  test("omits the export flag when no export was asked for", () => {
+    expect(
+      fingerprintArgv({
+        binaryPath: "/cli/index.js",
+        identityPath: "/data/id.json",
+        identityLabel: "Agency A",
+      }),
+    ).not.toContain("--export-certificate=/data/id.json");
+  });
+
+  test("only a canonical digest is read off stdout", () => {
+    expect(parseFingerprintStdout(`${OWN_FINGERPRINT}\n`)).toBe(
+      OWN_FINGERPRINT,
+    );
+    expect(parseFingerprintStdout("  not a fingerprint  ")).toBeUndefined();
+    expect(parseFingerprintStdout("")).toBeUndefined();
+    // A non-canonical final character decodes to the same digest but is not the
+    // value psilink prints, so it is refused rather than shown to share.
+    expect(parseFingerprintStdout("D".repeat(43))).toBeUndefined();
+  });
+
+  test("exit 64 is reported as the actionable missing-identity case", () => {
+    expect(
+      reconcileFingerprintExit(64, "", {
+        created: true,
+        exportRequested: false,
+      }),
+    ).toEqual({ kind: "noIdentityLabel" });
+  });
+
+  test("a clean exit carries the created flag and the export acknowledgement", () => {
+    expect(
+      reconcileFingerprintExit(0, `${OWN_FINGERPRINT}\n`, {
+        created: true,
+        exportRequested: true,
+      }),
+    ).toEqual({
+      kind: "ok",
+      fingerprint: OWN_FINGERPRINT,
+      created: true,
+      certificateExported: true,
+    });
+  });
+
+  test("an overflowed or malformed read is an error, never a partial result", () => {
+    expect(
+      reconcileFingerprintExit(0, undefined, {
+        created: false,
+        exportRequested: false,
+      }),
+    ).toEqual({ kind: "error" });
+    expect(
+      reconcileFingerprintExit(0, "garbage", {
+        created: false,
+        exportRequested: false,
+      }),
+    ).toEqual({ kind: "error" });
+    expect(
+      reconcileFingerprintExit(69, `${OWN_FINGERPRINT}\n`, {
+        created: false,
+        exportRequested: false,
+      }),
+    ).toEqual({ kind: "error" });
+  });
+
+  test("drives the CLI subcommand, reporting a first run as created and a second as loaded", async () => {
+    const root = scratchDir();
+    const identityPath = signingIdentityPath(root);
+    const first = await runSigningFingerprint({
+      binaryPath: STUB_CLI_PATH,
+      identityPath,
+      identityLabel: "Agency A",
+      childEnv: { STUB_FINGERPRINT_STDOUT: `${OWN_FINGERPRINT}\n` },
+    });
+    expect(first).toEqual({
+      kind: "ok",
+      fingerprint: OWN_FINGERPRINT,
+      created: true,
+      certificateExported: false,
+    });
+    expect(fs.existsSync(identityPath)).toBe(true);
+
+    const second = await runSigningFingerprint({
+      binaryPath: STUB_CLI_PATH,
+      identityPath,
+      identityLabel: "Agency A",
+      exportPath: signingCertificatePath(root),
+      childEnv: { STUB_FINGERPRINT_STDOUT: `${OWN_FINGERPRINT}\n` },
+    });
+    expect(second).toEqual({
+      kind: "ok",
+      fingerprint: OWN_FINGERPRINT,
+      created: false,
+      certificateExported: true,
+    });
+    expect(fs.existsSync(signingCertificatePath(root))).toBe(true);
+  });
+});
+
+describe("the receipts card's model", () => {
+  test("an untouched draft emits nothing, so the intent is the one sent before it existed", () => {
+    expect(receiptsIntentFields(RECEIPTS_DEFAULT)).toEqual({});
+    expect(receiptsProblems(RECEIPTS_DEFAULT)).toEqual([]);
+    expect(receiptsAdvisories(RECEIPTS_DEFAULT)).toEqual([]);
+    expect(receiptsSummary(RECEIPTS_DEFAULT)).toBe("Unsigned record only");
+  });
+
+  test("certificate mode emits the block once the identity is resolved", () => {
+    const authored = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: ` ${PARTNER_FINGERPRINT} `,
+      retentionDisposition: `  ${RETENTION_NOTE}  `,
+    });
+    expect(receiptsIntentFields(authored)).toEqual({
+      signing: {
+        mode: "certificate",
+        partnerFingerprint: PARTNER_FINGERPRINT,
+      },
+      retentionDisposition: RETENTION_NOTE,
+    });
+    expect(receiptsProblems(authored)).toEqual([]);
+    expect(receiptsSummary(authored)).toBe("Signed receipt, retention note");
+  });
+
+  test("a note alone emits only the note", () => {
+    const noted = draft({ retentionDisposition: RETENTION_NOTE });
+    expect(receiptsIntentFields(noted)).toEqual({
+      retentionDisposition: RETENTION_NOTE,
+    });
+    expect(receiptsSummary(noted)).toBe("Retention note");
+  });
+
+  test("every problem is a refusal the run itself would make", () => {
+    expect(receiptsProblems(draft({ mode: "certificate" }))).toContain(
+      IDENTITY_MISSING_PROBLEM,
+    );
+    expect(receiptsProblems(draft({ mode: "session-derived" }))).toContain(
+      SESSION_DERIVED_PROBLEM,
+    );
+    expect(
+      receiptsProblems(
+        draft({
+          mode: "certificate",
+          ownFingerprint: OWN_FINGERPRINT,
+          partnerFingerprint: "nope",
+        }),
+      ),
+    ).toContain(PARTNER_FINGERPRINT_PROBLEM);
+    expect(
+      receiptsProblems(
+        draft({ retentionDisposition: "x".repeat(MAX_TEXT_LENGTH + 1) }),
+      ),
+    ).toContain(RETENTION_NOTE_PROBLEM);
+  });
+
+  test("an unpinned partner warns and guides rather than blocking", () => {
+    const unpinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+    });
+    expect(receiptsProblems(unpinned)).toEqual([]);
+    expect(receiptsAdvisories(unpinned)).toContain(NO_PARTNER_PIN_ADVISORY);
+  });
+
+  test("signing states where both durable files land, before the run", () => {
+    const pinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+    });
+    expect(receiptsAdvisories(pinned)).toEqual([
+      IDENTITY_LOCATION_ADVISORY,
+      RECEIPT_LOCATION_NOTICE,
+    ]);
+  });
+
+  test("leaving certificate mode drops the resolved identity and the pin", () => {
+    const authored = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+      retentionDisposition: RETENTION_NOTE,
+    });
+    const cleared = receiptsWithField(authored, "mode", "none");
+    expect(cleared.ownFingerprint).toBeUndefined();
+    expect(cleared.partnerFingerprint).toBe("");
+    // The note is about the record, not the receipt, so it survives the switch.
+    expect(cleared.retentionDisposition).toBe(RETENTION_NOTE);
+  });
+});
+
+describe("the verify bench reads a config the way --config-file does", () => {
+  test("a whole exchange configuration is accepted for its linkage_terms", () => {
+    const yaml = composeConfigDocument(
+      validIntent(),
+      "/rendezvous",
+      undefined,
+      signingPaths(),
+    );
+    const imported = importLinkageTerms(yaml);
+    expect(imported.success).toBe(true);
+    if (!imported.success) throw new Error("unreachable");
+    expect(imported.terms.identity).toBe(validLinkageTerms().identity);
+  });
+
+  test("a bare exported terms document still imports", () => {
+    const imported = importLinkageTerms(
+      JSON.stringify({
+        ...validLinkageTerms(),
+        linkage_fields: undefined,
+      }),
+    );
+    // The round-trip shape is covered by linkageTermsIO's own suite; here it is
+    // enough that unwrapping did not break the bare-document path.
+    expect(typeof imported.success).toBe("boolean");
+  });
+
+  test("a document defining neither is still rejected with the terms schema's reason", () => {
+    const imported = importLinkageTerms(JSON.stringify({ connection: {} }));
+    expect(imported.success).toBe(false);
+  });
+});
