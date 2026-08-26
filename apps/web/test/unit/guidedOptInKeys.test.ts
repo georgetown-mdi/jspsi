@@ -368,6 +368,109 @@ describe("an offer survives a column edit the way a built-in key does", () => {
       buildAdvancedTerms(edited).linkageKeys.map((k) => k.name),
     ).not.toContain(ZIP_KEY);
   });
+
+  test("takes its cleaning with it when a backbone edit drops it", () => {
+    // The offer is satisfiable only while every element's column supplies its
+    // type, so an edit to a BACKBONE column drops an enabled offer with the
+    // offered type's own column untouched. The cleaning goes with the key, exactly
+    // as turning the key off by hand withdraws it -- otherwise the data-prep
+    // workbench keeps a card for a column no key matches on, over a pipeline the
+    // draft's own terms declare no field for.
+    const on = withKeyEnabled(guidedDraft(), ZIP_KEY);
+    expect(on.standardization.some((t) => t.output === "zip_code")).toBe(true);
+
+    const { metadata } = setColumnType(on.metadata, "dob", "other");
+    const edited = setDraftMetadata(on, metadata, ROWS);
+    expect(offeredKeys(edited)).toEqual([]);
+    expect(edited.standardization.some((t) => t.output === "zip_code")).toBe(
+      false,
+    );
+    expect(edited.standardization.some((t) => t.input === "zip")).toBe(false);
+  });
+});
+
+describe("a key that only borrows an offer's name is not the offer", () => {
+  test("its enabled flag does not carry onto the offered shape", () => {
+    // Reconciliation matches a draft key to an offer through the canonical
+    // encoding, the equality the two parties' terms are compared under, not by
+    // name. Under name equality this single-element key -- enabled, and named
+    // exactly as the offer is -- would hand its flag to the full four-element
+    // offered key, turning on an addition the operator never chose and costing
+    // the emitted terms their citation of the built-in set.
+    const draft = guidedDraft();
+    const forged: AdvancedInviteDraft = {
+      ...draft,
+      keys: draft.keys.map((entry) =>
+        entry.key.name === ZIP_KEY
+          ? {
+              key: { name: ZIP_KEY, elements: [{ field: "zip_code" }] },
+              enabled: true,
+            }
+          : entry,
+      ),
+    };
+
+    const { metadata } = setColumnType(forged.metadata, "phone", "other");
+    const edited = setDraftMetadata(forged, metadata, ROWS);
+    const zip = edited.keys.filter((entry) => entry.key.name === ZIP_KEY);
+    expect(zip).toHaveLength(1);
+    expect(zip[0].key.elements).toHaveLength(4);
+    expect(zip[0].enabled).toBe(false);
+
+    const terms = buildAdvancedTerms(edited);
+    expect(terms.linkageKeys.map((key) => key.name)).not.toContain(ZIP_KEY);
+    expect(terms.linkageRuleSet).toEqual(DEFAULT_LINKAGE_RULE_SET.reference);
+  });
+
+  test("a key that cannot be canonically encoded matches no offer", () => {
+    // An element transform param outside the canonical domain leaves the key
+    // incomparable, which core's own offer comparison answers `false` for. It
+    // must not fall back to the name: an unmatchable key is simply no longer
+    // offered, and the genuine offer arrives fresh at the flag the offer gives it.
+    const draft = guidedDraft();
+    const unencodable: AdvancedInviteDraft = {
+      ...draft,
+      keys: draft.keys.map((entry) =>
+        entry.key.name === ZIP_KEY
+          ? {
+              key: {
+                name: ZIP_KEY,
+                elements: entry.key.elements.map((element) =>
+                  element.field === "zip_code"
+                    ? {
+                        ...element,
+                        transform: [
+                          {
+                            function: "substring" as const,
+                            params: { start: 1, length: 2 ** 53 },
+                          },
+                        ],
+                      }
+                    : element,
+                ),
+              },
+              enabled: true,
+            }
+          : entry,
+      ),
+    };
+    // The premise: this key is genuinely outside the canonical domain, so the
+    // reconciliation is reaching its incomparable branch rather than agreeing
+    // with the offer by accident.
+    expect(() =>
+      canonicalString(
+        unencodable.keys.find((entry) => entry.key.name === ZIP_KEY)?.key,
+      ),
+    ).toThrow();
+
+    const edited = setDraftMetadata(unencodable, unencodable.metadata, ROWS);
+    const zip = edited.keys.filter((entry) => entry.key.name === ZIP_KEY);
+    expect(zip).toHaveLength(1);
+    expect(zip[0].enabled).toBe(false);
+    expect(zip[0].key.elements.every((el) => el.transform === undefined)).toBe(
+      true,
+    );
+  });
 });
 
 describe("turning an offer on and off again", () => {

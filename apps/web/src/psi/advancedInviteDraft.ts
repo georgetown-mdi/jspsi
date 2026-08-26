@@ -352,6 +352,15 @@ export function setDraftMetadataKeepingKeys(
  * opt-in type gains follows the keys the edit leaves enabled; the guided path
  * drives this, the authored key set drives {@link setDraftMetadataKeepingKeys} so
  * the template key reconciliation stays off it.
+ *
+ * The reconciled cleaning then passes through {@link optInCleaningForKeys}, the
+ * same withdrawal {@link draftWithKeyEnabled} runs when the operator turns an offer
+ * off by hand: an edit to a BACKBONE column can drop an enabled offer (the offer is
+ * satisfiable only while every element's column is there), and the offered type's
+ * own column is untouched by that edit, so its cleaning would otherwise outlive the
+ * key that minted it and leave an orphan card in the data-prep workbench. The mint
+ * reconciles such a transformation away before anything persists, so this decides
+ * what the workbench shows rather than what an invitation carries.
  */
 export function setDraftMetadata(
   draft: AdvancedInviteDraft,
@@ -363,18 +372,24 @@ export function setDraftMetadata(
     draft.keys,
     offerableDraftKeys(draft.identity, metadata),
   );
+  const enabledKeys = enabledLinkageKeys(keys);
   return {
     ...draft,
     metadata,
     keys,
-    standardization: reconcileStandardization(
-      draft.standardization,
-      draft.metadata,
+    standardization: optInCleaningForKeys(
+      reconcileStandardization(
+        draft.standardization,
+        draft.metadata,
+        metadata,
+        draft.identity,
+        enabledKeys,
+        rawRows,
+        dateInputFormat,
+      ),
       metadata,
       draft.identity,
-      enabledLinkageKeys(keys),
-      rawRows,
-      dateInputFormat,
+      enabledKeys,
     ),
   };
 }
@@ -543,6 +558,18 @@ function reconcileStandardization(
   return [...kept, ...additions];
 }
 
+/** `key` in the canonical encoding, or `null` when it carries a value outside the
+ * canonical domain (a transform param beyond the safe integer range) and so cannot
+ * be compared -- the same answer core's own offer comparison gives such a key
+ * (`isOptInLinkageKey`): incomparable is not a match. */
+function comparableKeyEncoding(key: LinkageKey): string | null {
+  try {
+    return canonicalString(key);
+  } catch {
+    return null;
+  }
+}
+
 /** Reconcile the draft's keys against a freshly-derived offer
  * ({@link offerableDraftKeys}): keep the order and enabled flag of keys that
  * remain offered (replacing the key object with the fresh template), then append
@@ -550,24 +577,37 @@ function reconcileStandardization(
  * newly-offered opt-in key where the offer places it ({@link placeOfferedKeys}),
  * which is above whichever key it refines wherever the operator has moved that
  * one. Appending an opt-in key instead would land a retype-driven offer below the
- * key it refines, the one position where turning it on buys nothing. */
+ * key it refines, the one position where turning it on buys nothing.
+ *
+ * A draft key is matched to an offer through the canonical encoding, the equality
+ * the two parties' terms are compared under, rather than by NAME. What the match
+ * carries over is the operator's enabled flag onto the offer's own shape, so under
+ * name equality a key that merely borrows an offer's name -- one element of it, or
+ * an unrelated key an imported document declares under that name -- would hand its
+ * enabled flag to the full offered key and turn on an addition the operator never
+ * chose. A key matching no offer is no longer offered and drops, the same as a
+ * built-in key whose columns went away, and the offer itself then arrives fresh at
+ * the flag the offer gives it (off, for an opt-in key). */
 function reconcileKeys(
   prevKeys: Array<DraftKey>,
   offerable: Array<DraftKey>,
 ): Array<DraftKey> {
-  const offerableByName = new Map(
-    offerable.map((entry) => [entry.key.name, entry]),
-  );
-  const kept: Array<DraftKey> = [];
-  const seen = new Set<string>();
-  for (const entry of prevKeys) {
-    const fresh = offerableByName.get(entry.key.name);
-    if (fresh !== undefined) {
-      kept.push({ key: fresh.key, enabled: entry.enabled });
-      seen.add(entry.key.name);
-    }
+  const offerableByEncoding = new Map<string, DraftKey>();
+  for (const entry of offerable) {
+    const encoded = comparableKeyEncoding(entry.key);
+    if (encoded !== null) offerableByEncoding.set(encoded, entry);
   }
-  const fresh = offerable.filter((entry) => !seen.has(entry.key.name));
+  const kept: Array<DraftKey> = [];
+  const matched = new Set<DraftKey>();
+  for (const entry of prevKeys) {
+    const encoded = comparableKeyEncoding(entry.key);
+    const offer =
+      encoded !== null ? offerableByEncoding.get(encoded) : undefined;
+    if (offer === undefined) continue;
+    kept.push({ key: offer.key, enabled: entry.enabled });
+    matched.add(offer);
+  }
+  const fresh = offerable.filter((entry) => !matched.has(entry));
   for (const entry of fresh)
     if (!isOptInLinkageKey(entry.key)) kept.push(entry);
   return placeOfferedKeys(
