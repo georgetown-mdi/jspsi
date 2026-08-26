@@ -82,9 +82,14 @@ export async function createWorkdir(
  * server constant today ({@link JOB_FILE_NAMES} and the signing-identity
  * names), so this can only fail on a caller bug -- which is exactly why it is a
  * check rather than a comment saying so: a name that ever became client-derived,
- * or a constant that grew a separator, is refused here instead of resolving
- * somewhere else on disk. The path is not created, and nothing about the leaf is
- * stat-ed.
+ * or a constant that changed shape, is refused here instead of resolving
+ * somewhere else on disk.
+ *
+ * Containment is the whole property, not the absence of a separator: a name that
+ * resolves to a path under the directory is returned however it is spelled
+ * (`sub/receipt.json` included), and only one resolving outside it -- a `..`
+ * climb, an absolute path, or a sibling sharing the directory's prefix -- is
+ * refused. The path is not created, and nothing about the leaf is stat-ed.
  */
 export function resolveWorkdirFile(
   directory: string,

@@ -234,14 +234,28 @@ export const IDENTITY_REGENERATION_NOTICE =
   "has a new fingerprint, and every partner who pinned the old one must be sent " +
   "the new one before their verification works again.";
 
-/** What the console says about signing without a partner pin: this side still
- * signs and the receipt is still written, but nothing anchors the partner's half
- * of it, so the run cannot verify what the partner presents. */
+/**
+ * What the console says about signing without a partner pin, stated as the run
+ * measurably behaves rather than softened. Core's signature swap runs inside the
+ * exchange, after the payloads have crossed, and an absent pin is a hard refusal
+ * there that terminates the run; every local artifact -- the results and the
+ * exchange record as much as the receipt -- is written only once the exchange has
+ * returned. So the operator's data reaches their partner and the run leaves them
+ * nothing at all, which is a materially worse outcome than a missing receipt and
+ * has to be said in those words. Still an advisory rather than a block: pinning is
+ * half of a two-sided ceremony the operator may legitimately be part-way through
+ * while authoring, and the console guides its own operator instead of stopping
+ * them.
+ */
 export const NO_PARTNER_PIN_ADVISORY =
-  "Without your partner's fingerprint, this exchange cannot verify the " +
-  "certificate they present, so the signature swap fails and no receipt is " +
-  "written. Ask them to run 'psilink fingerprint' and send you the value over a " +
-  "channel you trust -- a phone call, not the same email as the invitation.";
+  "Without your partner's fingerprint this exchange cannot finish, and it fails " +
+  "late rather than early: it runs all the way to the point where the two sides " +
+  "sign -- your data has already gone to your partner by then -- and stops " +
+  "there, because nothing is on file to check the certificate they present " +
+  "against. Nothing is written on this side: no results, no exchange record, and " +
+  "no receipt. Enter their fingerprint before you start the run. Ask them to run " +
+  "'psilink fingerprint' and send you the value over a channel you trust -- a " +
+  "phone call, not the same email as the invitation.";
 
 /**
  * Where the signed receipt lands, and what removes it. The receipt is written

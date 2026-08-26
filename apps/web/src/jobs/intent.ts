@@ -390,10 +390,11 @@ export type JobExchangeSide = "inviter" | "acceptor";
  * - `retentionDisposition` is this party's own free-text retention note, written
  *   into the composed config as a YAML value and from there into THIS party's
  *   exchange record. Bounded by core's `MAX_TEXT_LENGTH` (the record schema's own
- *   ceiling, so a note that passes here cannot fail the record build), refused a
- *   control character other than the tab, LF, and CR a multi-line note carries
- *   (a NUL or an ESC composes into the YAML and lands in the record verbatim),
- *   and never a path, host, credential, or argv fragment.
+ *   ceiling, so a note that passes here cannot fail the record build), held to a
+ *   control-character rule of its own -- every C0 and C1 control and DEL refused
+ *   apart from the tab, LF, and CR a multi-line note carries, since a NUL or an
+ *   ESC composes into the YAML and lands in the record verbatim -- and never a
+ *   path, host, credential, or argv fragment.
  */
 interface JobExchangeIntentBase {
   /**

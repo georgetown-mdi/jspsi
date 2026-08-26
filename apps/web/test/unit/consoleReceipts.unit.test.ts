@@ -434,9 +434,10 @@ describe("the signing artifacts resolve inside the directory that owns them", ()
     }
   });
 
-  test("a separator-bearing name is refused rather than resolved elsewhere", () => {
+  test("a name that escapes the directory is refused rather than resolved elsewhere", () => {
     // The check the three paths compose through, driven with the shapes a
-    // constant that grew a separator would take.
+    // constant that stopped resolving inside its directory would take -- the
+    // last of them a sibling that merely shares the workdir's prefix.
     for (const escape of [
       "../receipt.json",
       "../../etc/passwd",
@@ -445,6 +446,14 @@ describe("the signing artifacts resolve inside the directory that owns them", ()
       "../93b1c0d6-evil/receipt.json",
     ])
       expect(resolveWorkdirFile(workdir, escape)).toBeNull();
+  });
+
+  test("a name that stays inside is kept, separator and all", () => {
+    // Containment is what the check tests, not the absence of a separator: the
+    // docstrings say so, and this is the case that holds them to it.
+    expect(resolveWorkdirFile(workdir, "sub/receipt.json")).toBe(
+      path.resolve(workdir, "sub/receipt.json"),
+    );
   });
 });
 
@@ -669,6 +678,25 @@ describe("the fingerprint driver", () => {
     expect(result).toMatchObject({ kind: "ok", created: true });
     expect(fs.existsSync(signingIdentityPath(unmade))).toBe(true);
   });
+
+  test("a mount that cannot be created resolves as an error, not an unhandled throw", async () => {
+    // The mkdir above runs inside the promise executor, so a failure there --
+    // an operator whose mount path is occupied by a regular file -- would
+    // otherwise reject rather than settle as a result kind, and the endpoint
+    // only reconciles kinds. The one documented rejection is the export-path
+    // caller bug; this is not it.
+    const root = scratchDir();
+    const occupied = path.join(root, "not-a-directory");
+    fs.writeFileSync(occupied, "");
+    await expect(
+      runSigningFingerprint({
+        binaryPath: STUB_CLI_PATH,
+        identityPath: signingIdentityPath(occupied),
+        identityLabel: "Agency A",
+        childEnv: { STUB_FINGERPRINT_STDOUT: `${OWN_FINGERPRINT}\n` },
+      }),
+    ).resolves.toEqual({ kind: "error" });
+  });
 });
 
 describe("the receipts card's model", () => {
@@ -735,6 +763,18 @@ describe("the receipts card's model", () => {
     });
     expect(receiptsProblems(unpinned)).toEqual([]);
     expect(receiptsAdvisories(unpinned)).toContain(NO_PARTNER_PIN_ADVISORY);
+  });
+
+  test("the unpinned advisory names the whole consequence, not just the receipt", () => {
+    // Core refuses an absent pin inside the exchange, after the payloads have
+    // crossed, and every local artifact is written only once the exchange has
+    // returned -- so the run costs the operator their data disclosure and gives
+    // them nothing back. Copy that named only the receipt would understate that,
+    // and the operator reads it while they can still act on it.
+    expect(NO_PARTNER_PIN_ADVISORY).toMatch(/gone to your partner/);
+    expect(NO_PARTNER_PIN_ADVISORY).toMatch(/no results/);
+    expect(NO_PARTNER_PIN_ADVISORY).toMatch(/no exchange record/);
+    expect(NO_PARTNER_PIN_ADVISORY).toMatch(/no receipt/);
   });
 
   test("signing states where both durable files land, before the run", () => {

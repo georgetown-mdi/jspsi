@@ -655,8 +655,8 @@ export class JobManager {
    * see {@link signingIdentityPath}), and the receipt pinned to a fixed name in
    * THIS job's workdir so the appliance can serve it afterwards. Each is composed
    * through its directory's own containment check rather than joined, so a
-   * constant that grew a separator is refused instead of naming a file the
-   * receipt endpoint would then serve from outside the workdir.
+   * constant that stopped resolving inside that directory is refused instead of
+   * naming a file the receipt endpoint would then serve from outside the workdir.
    */
   private signingPathsFor(
     workdir: string,
@@ -1327,8 +1327,8 @@ function liveRecordAvailability(
  * A fixed-name artifact's path inside a job workdir, resolved through the
  * containment check {@link resolveWorkdirFile} applies rather than joined
  * directly. Every name is a server constant, so a null resolution is a caller bug
- * (a name that grew a separator) surfaced as a hard error instead of a path
- * outside the workdir the artifact's endpoint would then serve.
+ * -- a name that stopped resolving inside the workdir -- surfaced as a hard error
+ * instead of a path outside it the artifact's endpoint would then serve.
  */
 function workdirArtifactPath(workdir: string, name: string): string {
   const artifactPath = resolveWorkdirFile(workdir, name);

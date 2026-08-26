@@ -57,9 +57,10 @@ export const SIGNING_CERTIFICATE_FILE_NAME = "psilink-certificate.json";
  * A fixed-name file's absolute path in the appliance's mounted data root,
  * resolved through the same containment check a job artifact's path takes
  * ({@link resolveWorkdirFile}) rather than joined. Both names below are server
- * constants, so a null resolution is a caller bug -- a constant that grew a
- * separator -- refused here instead of naming a file somewhere else on the host
- * that the CLI would then read a private key from or write a certificate over.
+ * constants, so a null resolution is a caller bug -- a constant that stopped
+ * resolving inside the mount -- refused here instead of naming a file somewhere
+ * else on the host that the CLI would then read a private key from or write a
+ * certificate over.
  */
 function mountFilePath(dataRoot: string, name: string): string {
   const filePath = resolveWorkdirFile(dataRoot, name);
