@@ -1179,6 +1179,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       configured: true,
+      sharesDataRoot: false,
       locator: "agency-a-agency-b",
       folderName: "agency-a-agency-b",
     });
@@ -1191,9 +1192,42 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     vi.stubEnv("JOB_RENDEZVOUS_DIR", mount);
     expect(await (await getRendezvous()).json()).toEqual({
       configured: true,
+      // Nested INSIDE the data root rather than holding it: a partner's sync
+      // reaches this folder, not the signing key in the folder above it.
+      sharesDataRoot: false,
       locator: "agency-drop",
       folderName: "agency-drop",
     });
+  });
+
+  test("reports the shared layout when the rendezvous falls back to the data root", async () => {
+    // The single-folder console: only JOB_DATA_ROOT is mounted, so the folder the
+    // partner syncs IS the folder holding this party's signing key. The one fact
+    // the console needs to tell that layout from a provisioned rendezvous.
+    const root = enableJobApi();
+    vi.stubEnv("JOB_RENDEZVOUS_DIR", "");
+    const body = (await (await getRendezvous()).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(body.configured).toBe(true);
+    expect(body.sharesDataRoot).toBe(true);
+    expect(JSON.stringify(body)).not.toContain(root);
+  });
+
+  test("reports the shared layout for a rendezvous mounted ABOVE the data root", async () => {
+    // Not only the fallback: a rendezvous the operator pointed at a folder holding
+    // the data root syncs the key just as the fallback does, so the fact follows
+    // the containment rather than which variable resolved the mount.
+    const root = enableJobApi();
+    vi.stubEnv("JOB_DATA_ROOT", path.join(root, "work"));
+    vi.stubEnv("JOB_RENDEZVOUS_DIR", root);
+    const body = (await (await getRendezvous()).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(body.configured).toBe(true);
+    expect(body.sharesDataRoot).toBe(true);
   });
 
   test("reports a locator with no name where it cannot name the folder", async () => {
@@ -1220,6 +1254,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     // Not merely absent by value: no field carries a path at all.
     expect(Object.keys(JSON.parse(body) as object)).toEqual([
       "configured",
+      "sharesDataRoot",
       "locator",
       "folderName",
     ]);
@@ -1236,6 +1271,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     const body = await (await getRendezvous()).text();
     expect(JSON.parse(body)).toEqual({
       configured: true,
+      sharesDataRoot: false,
       split: true,
       locator: "from-partner",
       folderName: "from-partner",
@@ -1256,6 +1292,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     vi.stubEnv("JOB_RENDEZVOUS_OUTBOUND_NAME", "to-partner");
     expect(await (await getRendezvous()).json()).toEqual({
       configured: true,
+      sharesDataRoot: false,
       locator: "agency-drop",
       folderName: "agency-drop",
     });

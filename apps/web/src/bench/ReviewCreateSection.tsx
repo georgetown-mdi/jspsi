@@ -431,6 +431,7 @@ export function ReviewCreateSection({
           <ReceiptsCard
             draft={receipts}
             identity={editor.draft.identity}
+            rendezvous={rendezvous}
             open={receiptsOpen}
             onToggleOpen={onReceiptsOpen}
             onChange={onReceipts}

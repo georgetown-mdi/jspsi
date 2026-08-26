@@ -696,6 +696,100 @@ describe("the split rendezvous a second mount provisions", () => {
   });
 });
 
+describe("whether a rendezvous leg holds the data root", () => {
+  test("the data-root fallback does: the single-folder console", () => {
+    // The layout the identity-location advisory exists for -- one mount, so the
+    // folder the partner syncs is the folder the signing key is written into.
+    expect(
+      resolveJobRendezvousProvisioning({ JOB_DATA_ROOT: "/data/jobs" })
+        .sharesDataRoot,
+    ).toBe(true);
+  });
+
+  test("a rendezvous with a mount of its own does not", () => {
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: "/data/jobs",
+        JOB_RENDEZVOUS_DIR: "/mnt/share",
+      }).sharesDataRoot,
+    ).toBeUndefined();
+  });
+
+  test("a leg mounted ABOVE the data root does, whichever variable named it", () => {
+    // The fact follows the containment, not the fallback: an operator who pointed
+    // JOB_RENDEZVOUS_DIR at a folder holding the working directory syncs the key
+    // exactly as the fallback does.
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: "/mnt/share/work",
+        JOB_RENDEZVOUS_DIR: "/mnt/share",
+      }).sharesDataRoot,
+    ).toBe(true);
+  });
+
+  test("a leg mounted INSIDE the data root does not", () => {
+    // Directional: the partner's sync reaches that subfolder, not the key sitting
+    // in the folder above it. The overlap warning the job's own preflight raises
+    // is the surface for what a write into it does reach.
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: "/data/jobs",
+        JOB_RENDEZVOUS_DIR: "/data/jobs/share",
+      }).sharesDataRoot,
+    ).toBeUndefined();
+  });
+
+  test("a leg symlinked onto the data root does", () => {
+    const mounts = tempDir("mounts");
+    const work = subDir(mounts, "work");
+    const link = path.join(mounts, "share");
+    fs.symlinkSync(work, link, "dir");
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: work,
+        JOB_RENDEZVOUS_DIR: link,
+      }).sharesDataRoot,
+    ).toBe(true);
+  });
+
+  test("EITHER leg of a split answers for the pair", () => {
+    // Each leg is partner-synced independently, so an outbound leg pointed at the
+    // working directory puts the key where the partner reads just as an inbound
+    // one would.
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: "/data/jobs",
+        JOB_RENDEZVOUS_DIR: "/mnt/from-partner",
+        JOB_RENDEZVOUS_OUTBOUND_DIR: "/data/jobs",
+      }).sharesDataRoot,
+    ).toBe(true);
+  });
+
+  test("a leg whose real path cannot be read counts as holding it", () => {
+    // The symlink that would join the two is exactly what could not be resolved,
+    // and this decides a warn-and-guide advisory, so what cannot be ruled out is
+    // reported rather than dropped.
+    const mounts = tempDir("mounts");
+    const work = subDir(mounts, "work");
+    const share = subDir(mounts, "share");
+    expect(
+      withUnreadableRealpath(share, () =>
+        resolveJobRendezvousProvisioning({
+          JOB_DATA_ROOT: work,
+          JOB_RENDEZVOUS_DIR: share,
+        }),
+      ).sharesDataRoot,
+    ).toBe(true);
+  });
+
+  test("no data root leaves nothing to hold", () => {
+    expect(
+      resolveJobRendezvousProvisioning({ JOB_RENDEZVOUS_DIR: "/mnt/share" })
+        .sharesDataRoot,
+    ).toBeUndefined();
+  });
+});
+
 describe("each leg's preflight names the mount it is about", () => {
   test("a split appliance's notices distinguish the two folders", () => {
     const dataRoot = tempDir("data");

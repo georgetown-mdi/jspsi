@@ -2,6 +2,7 @@ import { FINGERPRINT_REGEX, MAX_TEXT_LENGTH } from "@psilink/core";
 
 import { NOTE_CONTROL_CHAR_PATTERN } from "@psi/retentionNoteShape";
 
+import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { JobSigningChoice } from "@jobs/intent";
 
 /**
@@ -244,6 +245,12 @@ export function receiptsProblems(draft: ReceiptsDraft): Array<string> {
  * split layout that resolves it. Warn and guide throughout: the operator's own
  * machine and the operator's own directory layout, so the practice worth
  * following is stated rather than enforced.
+ *
+ * Raised on that layout ALONE (see {@link receiptsAdvisories}). An appliance whose
+ * rendezvous has a mount of its own has already done what the closing sentence asks
+ * for, and an advisory that fires there too would spend the warning channel on a
+ * hazard that is not live -- which is what makes the same channel's live warnings
+ * worth reading.
  */
 export const IDENTITY_LOCATION_ADVISORY =
   "Your signing key is written into the folder you mounted, beside this " +
@@ -357,13 +364,32 @@ export interface ReceiptsAdvisory {
  * The non-blocking advisories the draft draws. Warn and guide, never a block:
  * every one of these is a legitimate run the command line accepts too. The card
  * groups them by severity, so the order here is the order within a group.
+ *
+ * `rendezvous` is this appliance's own rendezvous report, which decides the one
+ * advisory that is about the DEPLOYMENT rather than the draft
+ * ({@link IDENTITY_LOCATION_ADVISORY}): it is raised only where a rendezvous folder
+ * holds the mounted working directory, the layout in which the partner syncs the
+ * folder the signing key sits in. Withheld only on a report that positively says
+ * otherwise -- an appliance that has not answered yet, or one whose probe failed,
+ * keeps the advisory, since an unread report is not evidence of a separate mount.
+ * The other two advisories are the draft's own and are unchanged by the layout.
  */
 export function receiptsAdvisories(
   draft: ReceiptsDraft,
+  rendezvous: JobRendezvousConfig | undefined,
 ): Array<ReceiptsAdvisory> {
   if (draft.mode !== "certificate") return [];
+  const separatelyMounted =
+    rendezvous?.configured === true && rendezvous.sharesDataRoot === false;
   return [
-    { message: IDENTITY_LOCATION_ADVISORY, severity: "warning" },
+    ...(separatelyMounted
+      ? []
+      : [
+          {
+            message: IDENTITY_LOCATION_ADVISORY,
+            severity: "warning" as const,
+          },
+        ]),
     { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
     ...(draft.partnerFingerprint.trim() === ""
       ? [{ message: NO_PARTNER_PIN_ADVISORY, severity: "warning" as const }]

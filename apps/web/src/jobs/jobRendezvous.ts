@@ -128,6 +128,27 @@ export interface JobRendezvousProvisioning {
    * qualifies rather than replaces.
    */
   unresolvedLegWarning?: string;
+  /**
+   * Whether a rendezvous leg HOLDS the job data root -- the mounted working
+   * directory this party's long-lived signing key, config, input, and results live
+   * in. True on the single-mount console, where the inbound leg falls back to the
+   * data root, and true for any leg an operator pointed at the data root or at a
+   * folder containing it.
+   *
+   * Set only when it is true, so an appliance whose rendezvous is separately
+   * provisioned carries nothing. It is the one fact the console needs to tell the
+   * two layouts apart: where it holds, whatever the partner syncs into that folder
+   * they can also read out of it, so the signing key is a file they reach.
+   * See {@link rendezvousHoldsDataRoot} for how it is decided.
+   */
+  sharesDataRoot?: boolean;
+}
+
+/** The job data root as configured, or undefined when it is unset -- which is the
+ * job API's own feature gate, so on a console that runs at all it resolves. */
+function resolveDataRoot(env: NodeJS.ProcessEnv): string | undefined {
+  const configured = (env[JOB_DATA_ROOT_ENV] ?? "").trim();
+  return configured.length > 0 ? path.resolve(configured) : undefined;
 }
 
 /** The inbound (or single shared) rendezvous mount together with WHERE it came
@@ -142,11 +163,7 @@ function resolveInboundRendezvousMount(env: NodeJS.ProcessEnv): {
   const configured = (env[JOB_RENDEZVOUS_DIR_ENV] ?? "").trim();
   if (configured.length > 0)
     return { dir: path.resolve(configured), fromOwnVariable: true };
-  const dataRoot = (env[JOB_DATA_ROOT_ENV] ?? "").trim();
-  return {
-    dir: dataRoot.length > 0 ? path.resolve(dataRoot) : undefined,
-    fromOwnVariable: false,
-  };
+  return { dir: resolveDataRoot(env), fromOwnVariable: false };
 }
 
 /** Resolve the outbound rendezvous leg from
@@ -320,6 +337,24 @@ function resolvePathForms(dir: string): ResolvedPathForms {
 }
 
 /**
+ * Whether `container` IS `contained` or holds it, in any pairing of the forms the
+ * two resolve to. Directional, unlike {@link pathFormsOverlap}: a question about
+ * what a directory's contents reach -- a file inside the container is a file inside
+ * the contained one only in this direction -- rather than about the two overlapping
+ * at all.
+ */
+function pathFormsContain(
+  container: ResolvedPathForms,
+  contained: ResolvedPathForms,
+): boolean {
+  return container.forms.some((containerForm) =>
+    contained.forms.some((containedForm) =>
+      containsOrEqual(containerForm, containedForm),
+    ),
+  );
+}
+
+/**
  * Whether two directories are one directory, or one is nested inside the other, in
  * ANY pairing of the forms they resolve to. Comparing across forms is what carries
  * the verdict to a symlinked directory without letting an unresolvable one out of
@@ -330,13 +365,7 @@ function pathFormsOverlap(
   first: ResolvedPathForms,
   second: ResolvedPathForms,
 ): boolean {
-  return first.forms.some((firstForm) =>
-    second.forms.some(
-      (secondForm) =>
-        containsOrEqual(firstForm, secondForm) ||
-        containsOrEqual(secondForm, firstForm),
-    ),
-  );
+  return pathFormsContain(first, second) || pathFormsContain(second, first);
 }
 
 /**
@@ -478,10 +507,46 @@ export function rendezvousSplitFaults(
 }
 
 /**
+ * Whether any rendezvous leg holds the job data root, the fact
+ * {@link JobRendezvousProvisioning.sharesDataRoot} carries.
+ *
+ * Every leg is asked, through the shared enumeration ({@link jobRendezvousDirs}),
+ * because a partner writes into one leg of a split as readily as into the single
+ * shared mount. The test is DIRECTIONAL: a leg that holds the data root puts this
+ * party's files where the partner syncs, while a leg mounted INSIDE the data root
+ * does not -- the sync reaches that subfolder, not the key beside it. Each leg is
+ * compared as configured and as its real path (see {@link resolvePathForms}), so a
+ * leg symlinked onto the data root counts exactly as one configured at it does.
+ *
+ * A leg or a data root whose real path cannot be READ counts as holding: the
+ * symlink that would join them is precisely what could not be resolved, and this
+ * decides whether a warn-and-guide advisory is raised, so what cannot be ruled out
+ * is reported rather than dropped. The lexical comparison still decides every leg
+ * that resolves, so the data-root fallback -- where the leg IS the data root -- does
+ * not depend on the filesystem answering at all.
+ */
+function rendezvousHoldsDataRoot(
+  provisioning: JobRendezvousProvisioning,
+  dataRoot: string | undefined,
+): boolean {
+  if (dataRoot === undefined) return false;
+  const dataRootPaths = resolvePathForms(dataRoot);
+  return jobRendezvousDirs(provisioning).some((dir) => {
+    const legPaths = resolvePathForms(dir);
+    return (
+      !legPaths.canonicalized ||
+      !dataRootPaths.canonicalized ||
+      pathFormsContain(legPaths, dataRootPaths)
+    );
+  });
+}
+
+/**
  * Resolve this appliance's whole rendezvous provisioning from the environment: both
- * legs, their names and locators, and the reason a filedrop exchange cannot run when
- * the pair is incoherent. Reads the filesystem once per leg of a split, to resolve
- * each mount's real path for the containment refusal; the memoized entry point is
+ * legs, their names and locators, the reason a filedrop exchange cannot run when the
+ * pair is incoherent, and whether a leg holds the data root. Reads the filesystem
+ * once per leg -- twice for a leg of a split, which the containment refusal resolves
+ * separately -- plus once for the data root; the memoized entry point is
  * {@link useJobRendezvousProvisioning}.
  */
 export function resolveJobRendezvousProvisioning(
@@ -515,6 +580,8 @@ export function resolveJobRendezvousProvisioning(
   if (problem !== undefined) provisioning.problem = problem;
   if (unresolvedLegWarning !== undefined)
     provisioning.unresolvedLegWarning = unresolvedLegWarning;
+  if (rendezvousHoldsDataRoot(provisioning, resolveDataRoot(env)))
+    provisioning.sharesDataRoot = true;
   return provisioning;
 }
 

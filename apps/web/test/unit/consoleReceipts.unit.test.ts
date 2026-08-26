@@ -60,6 +60,7 @@ import {
   validZeroSetupIntent,
 } from "../utils/jobFixtures";
 
+import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { JobSigningPaths } from "@jobs/intent";
 import type { ReceiptsDraft } from "@bench/receiptsModel";
 
@@ -76,6 +77,23 @@ const OWN_FINGERPRINT = "B".repeat(42) + "A";
 
 const RETENTION_NOTE =
   "Filed in the association database; kept six years, then purged.";
+
+/** The single-mount layout the identity-location advisory exists for: the folder
+ * the partner syncs into holds the working directory this party's signing key is
+ * written to. */
+const SHARED_RENDEZVOUS: JobRendezvousConfig = {
+  configured: true,
+  locator: "psilink",
+  folderName: "psilink",
+  sharesDataRoot: true,
+};
+
+/** An appliance whose rendezvous has a mount of its own, where the collision the
+ * advisory names cannot arise. */
+const SEPARATE_RENDEZVOUS: JobRendezvousConfig = {
+  ...SHARED_RENDEZVOUS,
+  sharesDataRoot: false,
+};
 
 const dirs: Array<string> = [];
 afterEach(() => {
@@ -704,7 +722,7 @@ describe("the receipts card's model", () => {
   test("an untouched draft emits nothing, so the intent is the one sent before it existed", () => {
     expect(receiptsIntentFields(RECEIPTS_DEFAULT)).toEqual({});
     expect(receiptsProblems(RECEIPTS_DEFAULT)).toEqual([]);
-    expect(receiptsAdvisories(RECEIPTS_DEFAULT)).toEqual([]);
+    expect(receiptsAdvisories(RECEIPTS_DEFAULT, SHARED_RENDEZVOUS)).toEqual([]);
     expect(receiptsSummary(RECEIPTS_DEFAULT)).toBe("Unsigned record only");
   });
 
@@ -795,7 +813,7 @@ describe("the receipts card's model", () => {
       ownFingerprint: OWN_FINGERPRINT,
     });
     expect(receiptsProblems(unpinned)).toEqual([]);
-    expect(receiptsAdvisories(unpinned)).toContainEqual({
+    expect(receiptsAdvisories(unpinned, SHARED_RENDEZVOUS)).toContainEqual({
       message: NO_PARTNER_PIN_ADVISORY,
       severity: "warning",
     });
@@ -811,12 +829,12 @@ describe("the receipts card's model", () => {
       ownFingerprint: OWN_FINGERPRINT,
     });
     expect(
-      receiptsAdvisories(unpinned)
+      receiptsAdvisories(unpinned, SHARED_RENDEZVOUS)
         .filter((advisory) => advisory.severity === "warning")
         .map((advisory) => advisory.message),
     ).toEqual([IDENTITY_LOCATION_ADVISORY, NO_PARTNER_PIN_ADVISORY]);
     expect(
-      receiptsAdvisories(unpinned)
+      receiptsAdvisories(unpinned, SHARED_RENDEZVOUS)
         .filter((advisory) => advisory.severity === "info")
         .map((advisory) => advisory.message),
     ).toEqual([RECEIPT_LOCATION_NOTICE]);
@@ -853,7 +871,7 @@ describe("the receipts card's model", () => {
       ownFingerprint: OWN_FINGERPRINT,
       partnerFingerprint: PARTNER_FINGERPRINT,
     });
-    expect(receiptsAdvisories(pinned)).toEqual([
+    expect(receiptsAdvisories(pinned, SHARED_RENDEZVOUS)).toEqual([
       { message: IDENTITY_LOCATION_ADVISORY, severity: "warning" },
       { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
     ]);
@@ -869,6 +887,49 @@ describe("the receipts card's model", () => {
       /sign receipts in your name -- for every exchange, with every partner/,
     );
     expect(IDENTITY_LOCATION_ADVISORY).toMatch(/JOB_RENDEZVOUS_DIR/);
+  });
+
+  test("a separately mounted rendezvous withholds the identity advisory", () => {
+    // The remedy the advisory closes on is already in place, so raising it there
+    // would spend the warning channel on a hazard that is not live. Only that one
+    // advisory is about the deployment: the draft's own two are unchanged.
+    const pinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+    });
+    expect(receiptsAdvisories(pinned, SEPARATE_RENDEZVOUS)).toEqual([
+      { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
+    ]);
+    const unpinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+    });
+    expect(receiptsAdvisories(unpinned, SEPARATE_RENDEZVOUS)).toEqual([
+      { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
+      { message: NO_PARTNER_PIN_ADVISORY, severity: "warning" },
+    ]);
+  });
+
+  test("an appliance that has not answered keeps the identity advisory", () => {
+    // An unresolved probe, a failed one, and a report that cannot run a filedrop
+    // exchange as provisioned all leave the layout unknown -- and an unread report
+    // is not evidence of a separate mount, so the advisory stands.
+    const pinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+    });
+    for (const rendezvous of [
+      undefined,
+      { configured: false },
+      { configured: false, sharesDataRoot: false },
+      { configured: true, locator: "psilink" },
+    ])
+      expect(receiptsAdvisories(pinned, rendezvous)).toContainEqual({
+        message: IDENTITY_LOCATION_ADVISORY,
+        severity: "warning",
+      });
   });
 
   test("a blank identity withholds the fingerprint request, with the reason", () => {

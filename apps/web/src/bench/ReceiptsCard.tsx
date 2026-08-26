@@ -31,6 +31,7 @@ import {
 import styles from "./bench.module.css";
 
 import type { ReceiptsDraft, ReceiptsSigningMode } from "./receiptsModel";
+import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { SigningFingerprintOutcome } from "@psi/signingIdentityClient";
 
 /** The three modes the configuration format has, in the order the reference lists
@@ -117,6 +118,7 @@ function fingerprintFailureMessage(
 export function ReceiptsCard({
   draft,
   identity,
+  rendezvous,
   open,
   onToggleOpen,
   onChange,
@@ -127,6 +129,10 @@ export function ReceiptsCard({
    * the certificate against. Blank until the operator states it, which the
    * fingerprint request then reports rather than binding an empty identity. */
   identity: string;
+  /** The appliance's rendezvous report, or undefined before it resolves (or off a
+   * console build). It decides whether the identity-location advisory applies to
+   * this deployment: see {@link receiptsAdvisories}. */
+  rendezvous: JobRendezvousConfig | undefined;
   open: boolean;
   onToggleOpen: (open: boolean) => void;
   onChange: (draft: ReceiptsDraft) => void;
@@ -160,7 +166,7 @@ export function ReceiptsCard({
   const clipboardAvailable =
     typeof navigator !== "undefined" && Boolean(navigator.clipboard);
   const problems = receiptsProblems(draft);
-  const advisories = receiptsAdvisories(draft);
+  const advisories = receiptsAdvisories(draft, rendezvous);
   const warnings = advisories.filter(
     (advisory) => advisory.severity === "warning",
   );
