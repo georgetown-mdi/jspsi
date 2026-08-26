@@ -90,6 +90,138 @@ export function serviceWorkerStringArray(name: string): Array<string> {
   return [...block[1].matchAll(/"([^"]*)"/g)].map((match) => match[1]);
 }
 
+/**
+ * The worker's own `hashedAssetPathsIn`, lifted out of the classic script so a
+ * check can run the shipped extraction over a document a real server rendered.
+ *
+ * The worker exports nothing, so its source is evaluated the way {@link
+ * createServiceWorkerHarness} evaluates it and the function is returned out of
+ * that scope. Only the top-level listener registrations run at evaluation, so
+ * the scope needs nothing past `addEventListener`; `caches` and `fetch` are
+ * reached from the handlers alone, which this never fires.
+ */
+export function serviceWorkerAssetExtractor(): (
+  servedDocument: string,
+) => Array<string> {
+  const evaluate = new Function(
+    "self",
+    "caches",
+    "fetch",
+    `${serviceWorkerSource()}\nreturn hashedAssetPathsIn;`,
+  ) as (
+    scope: unknown,
+    caches: unknown,
+    fetch: unknown,
+  ) => (servedDocument: string) => Array<string>;
+  return evaluate({ addEventListener: () => undefined }, undefined, undefined);
+}
+
+/** The end of the string or template literal opening at `start`, honoring
+ * backslash escapes. A `${...}` substitution is scanned through rather than
+ * parsed, so a nested literal of the same delimiter inside one would end the
+ * scan early -- {@link serviceWorkerSourceRegions} compiles its own result,
+ * which is what catches that. */
+function endOfLiteral(source: string, start: number): number {
+  const quote = source[start];
+  let index = start + 1;
+  while (index < source.length) {
+    const char = source[index];
+    if (char === "\\") {
+      index += 2;
+      continue;
+    }
+    if (char === quote) return index + 1;
+    index += 1;
+  }
+  throw new Error(`serviceWorker.js has an unterminated ${quote} literal`);
+}
+
+/** The worker's source with every comment blanked out, so a guard scanning for a
+ * code reference is neither answered nor tripped by prose. Line structure is
+ * preserved. A regular-expression literal is not recognized, so one carrying a
+ * comment delimiter would be mangled -- see {@link serviceWorkerSourceRegions}
+ * on how that surfaces. */
+function sourceWithoutComments(source: string): string {
+  let output = "";
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (char === "/" && next === "/") {
+      while (index < source.length && source[index] !== "\n") index += 1;
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      const end = source.indexOf("*/", index + 2);
+      if (end === -1)
+        throw new Error("serviceWorker.js has an unterminated block comment");
+      output += source.slice(index, end + 2).replace(/[^\n]/g, "");
+      index = end + 2;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      const literalEnd = endOfLiteral(source, index);
+      output += source.slice(index, literalEnd);
+      index = literalEnd;
+      continue;
+    }
+    output += char;
+    index += 1;
+  }
+  return output;
+}
+
+/** The worker's code split by where it sits: inside one of its top-level
+ * function declarations, or outside all of them. */
+export interface ServiceWorkerSourceRegions {
+  /** The whole source, comments blanked out. Compiling it is how a caller
+   * establishes that the comment strip and the split below read the file rather
+   * than shredding it. */
+  readonly code: string;
+  /** Each top-level function declaration by name, as its own text. */
+  readonly functions: ReadonlyMap<string, string>;
+  /** The code outside those declarations: the constants and the listener
+   * registrations. */
+  readonly outsideFunctions: string;
+}
+
+/**
+ * Split the worker's code the way a guard over "which functions may touch X"
+ * needs it.
+ *
+ * The split is line-oriented, which the file's formatting makes exact: a
+ * top-level function declaration opens a line and its closing brace is the next
+ * line that is a lone `}` at column zero (Prettier formats the file, and CI
+ * enforces that). A body that ever failed to close that way raises here rather
+ * than folding the rest of the file into one region.
+ */
+export function serviceWorkerSourceRegions(): ServiceWorkerSourceRegions {
+  const code = sourceWithoutComments(serviceWorkerSource());
+  const lines = code.split("\n");
+  const functions = new Map<string, string>();
+  const outsideFunctions: Array<string> = [];
+  let index = 0;
+  while (index < lines.length) {
+    const declared = /^(?:async )?function ([A-Za-z0-9_$]+)\(/.exec(
+      lines[index],
+    );
+    if (declared === null) {
+      outsideFunctions.push(lines[index]);
+      index += 1;
+      continue;
+    }
+    let end = index;
+    while (end < lines.length && lines[end] !== "}") end += 1;
+    if (end === lines.length)
+      throw new Error(
+        `serviceWorker.js: ${declared[1]} has no closing brace at column zero`,
+      );
+    functions.set(declared[1], lines.slice(index, end + 1).join("\n"));
+    index = end + 1;
+  }
+  return { code, functions, outsideFunctions: outsideFunctions.join("\n") };
+}
+
 /** How the harness answers one request path. */
 export type RouteHandler = () => Response;
 
