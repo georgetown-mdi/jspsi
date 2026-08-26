@@ -1,10 +1,11 @@
-// The encoder every machine-readable JSON line the CLI writes to stdout is built
-// with. A `--json` form exists so a script can read it, and what a script most
-// often does with a line it cannot classify is print it -- to a terminal, or into
-// a log a human later reads. So the line has to be safe as BYTES, not only valid
-// as JSON: `JSON.stringify` escapes U+0000-U+001F, the quote, and the backslash,
-// which is enough to keep a line one line, but it passes DEL and the C1 range
-// straight through, and a value some untrusted party chose can carry either.
+// The encoder that builds the two machine-readable stdout lines
+// `probe-host-key`'s `--json` form emits (apps/cli/src/commands/probeHostKey.ts:
+// probeJsonLine and probeDiagnosisJsonLine). The probe's excerpt field can carry
+// bytes an untrusted peer chose, so its line has to be safe as BYTES, not only
+// valid as JSON: `JSON.stringify` escapes U+0000-U+001F, the quote, and the
+// backslash, which is enough to keep a line one line, but it passes DEL and the
+// C1 range straight through, and a value some untrusted party chose can carry
+// either.
 //
 // This escapes them the way JSON already escapes a control byte, so the property
 // costs nothing at the consumer: `\uHHHH` is JSON's own escape, and the document
