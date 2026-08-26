@@ -311,6 +311,21 @@ const decisionMessage = z.object({
   abortReasons: abortReasonsField,
 });
 
+/**
+ * Every envelope field each terms-exchange slot admits, read off the schemas
+ * above rather than restated, so a field added to one appears here with no second
+ * edit. The conformance vectors pin the frames each slot actually emits and hold
+ * their union to this, which is what keeps a newly added field from riding the
+ * wire with nothing pinning it.
+ *
+ * @internal exported for the terms-envelope conformance vectors.
+ */
+export const TERMS_ENVELOPE_FIELDS: Readonly<Record<string, Array<string>>> = {
+  "message 1": Object.keys(termsMessage.shape),
+  "message 2": Object.keys(termsWithDecisionMessage.shape),
+  "message 3": Object.keys(decisionMessage.shape),
+};
+
 // The dedicated frame that carries a freshly generated shared secret from the
 // initiator to the responder during a both-parties `--save` bootstrap (see
 // exchangeBootstrapSecret). The token format is pinned to SHARED_SECRET_REGEX -- a
