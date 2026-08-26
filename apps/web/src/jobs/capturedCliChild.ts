@@ -9,10 +9,14 @@ import type { ChildProcess } from "node:child_process";
  * host-key probe ({@link ./sftpProbe}) and the signing-identity fingerprint
  * ({@link ./signingIdentity}). Each is a request-scoped child that prints a
  * single line and exits, so both need the same three controls -- a no-shell argv
- * array, a capped stdout read, and a watchdog that bounds the endpoint's latency
+ * array, a capped stdout read, and a watchdog that bounds the child's lifetime
  * -- and both are reached from an unauthenticated loopback endpoint. Holding them
  * once is what keeps the two from drifting apart: a caller contributes only its
  * argv, its own timeouts, and its own mapping from an outcome to a typed result.
+ * The watchdog bounds the child, not the endpoint's latency: settling waits for
+ * the stdio pipes to close, so a child that handed its stdout to a longer-lived
+ * process it spawned defers settling past the kill. That shape is a stated limit
+ * of this boundary, not one it enforces.
  *
  * `spawn` with an argv ARRAY and `shell: false` is the same allowlisted-argv
  * discipline `runCliChild` uses, so no value a caller composes is ever an
@@ -46,7 +50,8 @@ export type CapturedChildOutcome =
 
 /**
  * Spawn `node argv` for a one-shot CLI child, capture its stdout under
- * {@link CAPTURED_STDOUT_CAP}, and settle once it exits or the watchdog kills it.
+ * {@link CAPTURED_STDOUT_CAP}, and settle once its stdio has closed or the
+ * watchdog kills it.
  *
  * The watchdog SIGTERMs at `sigtermMs` and escalates to SIGKILL after
  * `sigkillGraceMs`, mirroring the cancel-escalation chain in `jobManager.ts`. Both
