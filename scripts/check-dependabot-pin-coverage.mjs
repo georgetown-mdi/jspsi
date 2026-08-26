@@ -12,12 +12,27 @@
 // exclude entry dropped there reads exactly like one that was never needed. So
 // the coupling is a check rather than a habit.
 //
-// The rule:
+// The same silence covers the property every one of those checklists assumes
+// before any of that matters: that the package is pinned to the single version
+// whose internals the premises were read off. A caret slipping into a manifest
+// installs a later one with no pull request for anyone to hold the checklist
+// against. So does a second manifest naming a different exact version: both
+// declarations pin, and both look deliberate, but the checklist was worked
+// through against one of the two internals now installed.
 //
-//   A package named by an "Upgrading ..." heading in
-//   docs/spec/DEPENDENCY_PINS.md must be covered by the `exclude-patterns` of
-//   every npm group in .github/dependabot.yml that would otherwise swallow it
-//   -- a group whose `patterns` match the package without naming it.
+// The rules:
+//
+//   1. A package named by an "Upgrading ..." heading in
+//      docs/spec/DEPENDENCY_PINS.md must be covered by the `exclude-patterns`
+//      of every npm group in .github/dependabot.yml that would otherwise
+//      swallow it -- a group whose `patterns` match the package without naming
+//      it.
+//
+//   2. That package must be declared by at least one manifest in this
+//      workspace, and every manifest declaring it must declare an exact
+//      version.
+//
+//   3. Those declarations must all name the same version.
 //
 // A group that names the package outright in its `patterns` is its deliberate
 // reviewed treatment (`cryptographic`, `webrtc-stack`), not a batch it fell
@@ -35,27 +50,51 @@
 // reading scripts/check-dependabot-ignore-shape.mjs takes of a
 // `dependency-name`, whose matcher this shares.
 //
+// Manifest reading: the root package.json plus every package.json its
+// `workspaces` globs reach. A declaration is a key of `dependencies`,
+// `devDependencies`, `optionalDependencies`, or `peerDependencies`, matched by
+// its exact name -- `@types/ssh2` is a package of its own, reaches no internal,
+// and carries no checklist. Exact means a bare `major.minor.patch`, optionally
+// carrying a prerelease or build suffix, and nothing else: a specifier that
+// pins by another route (a `file:` tarball, a git commit, an `npm:` alias)
+// fails here too, because whether such a route pins is a judgment per
+// dependency rather than a pattern, and a checklist for one wants this rule
+// widened deliberately. The third rule compares those specifiers as text over
+// every declaration found, so two fields of one manifest disagreeing fails it
+// exactly as two manifests do. The workspace set is expanded from those globs
+// here rather than asked of npm; the test holds that expansion to the set npm
+// itself recorded in package-lock.json, so a glob form read differently
+// reddens there instead of silently shrinking the sweep.
+//
 // What this check does not cover:
 //   - Which group a package lands in. Whether a bump belongs in a reviewed
 //     group, and which one, is a judgment about what it must be reviewed
 //     against; a package in no group at all still gets an individual pull
-//     request, which satisfies the rule above. Only the direction that fails
-//     silently -- riding a batch -- is checked.
-//   - Whether Dependabot resolves this config the way the rule reads it. The
-//     pattern and exclude lists are read as text; how the real tool assigns a
-//     package matching several groups is not modelled here, which is why what
-//     is asserted is the belt-and-braces entry the config already writes by
-//     hand rather than a prediction of which pull request a bump lands in.
-//   - Pin exactness. No manifest is read, so whether a package carries an exact
-//     version or a range is outside this, and a comment anywhere calling a
-//     package exact-pinned is not held by it.
+//     request, which satisfies the first rule above. Only the direction that
+//     fails silently -- riding a batch -- is checked.
+//   - Whether Dependabot resolves this config the way the first rule reads
+//     it. The pattern and exclude lists are read as text; how the real tool
+//     assigns a package matching several groups is not modelled here, which is
+//     why what is asserted is the belt-and-braces entry the config already
+//     writes by hand rather than a prediction of which pull request a bump
+//     lands in.
+//   - What is installed. The second and third rules read the specifiers the
+//     manifests declare; package-lock.json and node_modules are read by no
+//     rule, so a lockfile disagreeing with an exact declaration is `npm ci`'s
+//     to catch.
+//   - Whether the version pinned is the one the checklist's premises were read
+//     off. That is what a bump's own review establishes; this holds only that
+//     a single version is named for it to have been read off.
 //   - The docker and github-actions update blocks, whose lists carry different
 //     rationales; scripts/check-dependabot-ignore-shape.mjs owns the
-//     github-actions ignore list.
+//     github-actions ignore list. No rule reaches a pin in another ecosystem:
+//     those carry a heading of another shape, which the extraction never
+//     matches, and no npm manifest declares them.
 //   - Whether a package that ought to carry an upgrade checklist has one. The
-//     read runs from the document to the config and never back.
+//     read runs from the document out to the config and the manifests, and
+//     never back.
 
-import { readFileSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -69,7 +108,19 @@ import { stripFences } from "./lib/markdownFences.mjs";
 
 const PINS_DOC = "docs/spec/DEPENDENCY_PINS.md";
 const CONFIG_FILE = ".github/dependabot.yml";
+const ROOT_MANIFEST = "package.json";
 const ECOSYSTEM = "npm";
+const DEPENDENCY_FIELDS = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies",
+];
+const NUMBER = "(?:0|[1-9]\\d*)";
+const DOTTED_TAIL = "(?:[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)";
+const EXACT_VERSION = new RegExp(
+  `^${NUMBER}\\.${NUMBER}\\.${NUMBER}(?:-${DOTTED_TAIL})?(?:\\+${DOTTED_TAIL})?$`,
+);
 const UPGRADE_HEADING = /^#{2,6}\s+(Upgrading\b.*?)\s*$/;
 const HEADING_NAME_LIST = /\(([^()]*)\)$/;
 const NAME_SEPARATOR = /\s+\/\s+/;
@@ -172,6 +223,82 @@ export function coverageViolations(packages, groups) {
   return [...new Set(messages)];
 }
 
+/**
+ * The manifests of this workspace, as repository-relative paths in sorted
+ * order with the root manifest first, or null when the root manifest declares
+ * its `workspaces` in a shape this does not read. `expand` resolves one glob to
+ * the paths it reaches.
+ */
+export function manifestPaths(rootManifest, expand) {
+  const globs = rootManifest?.workspaces;
+  if (!Array.isArray(globs) || globs.some((glob) => typeof glob !== "string")) {
+    return null;
+  }
+  const reached = globs
+    .flatMap((glob) => expand(`${glob}/${ROOT_MANIFEST}`))
+    .map((path) => path.replaceAll("\\", "/"))
+    .filter((path) => path !== ROOT_MANIFEST);
+  return [ROOT_MANIFEST, ...[...new Set(reached)].sort()];
+}
+
+/**
+ * Every declaration the given `{path, manifest}` pairs make of one of
+ * `packages`, as `{path, field, name, specifier}` in manifest then field order.
+ */
+export function packageDeclarations(packages, manifests) {
+  const wanted = new Set(packages);
+  return manifests.flatMap(({ path, manifest }) =>
+    DEPENDENCY_FIELDS.flatMap((field) =>
+      Object.entries(manifest?.[field] ?? {})
+        .filter(([name]) => wanted.has(name))
+        .map(([name, specifier]) => ({ path, field, name, specifier })),
+    ),
+  );
+}
+
+/**
+ * Every checklist-carrying package this workspace declares at something other
+ * than an exact version, and every one it declares nowhere at all, as message
+ * strings. Empty means each checklist covers a package pinned to one version.
+ */
+export function exactnessViolations(packages, declarations) {
+  const undeclared = packages
+    .filter((name) => !declarations.some((entry) => entry.name === name))
+    .map(
+      (name) =>
+        `${PINS_DOC} carries an "Upgrading ..." checklist for ${name}, but no manifest in this workspace declares it, so no version of it is pinned here for the checklist's premises to rest on. Either the dependency is gone and the checklist goes with it, or its heading misspells the package name.`,
+    );
+  const inexact = declarations
+    .filter(({ specifier }) => !EXACT_VERSION.test(specifier))
+    .map(
+      ({ path, field, name, specifier }) =>
+        `${path} (${field}) declares ${name} as ${JSON.stringify(specifier)}, which is not a bare major.minor.patch version. ${PINS_DOC} carries an "Upgrading ..." checklist for ${name}, whose premises were read off one version's internals; a specifier admitting another lets that one install without the checklist being worked through. Pin the exact version, or retire the checklist if those internals are no longer load-bearing.`,
+    );
+  return [...undeclared, ...inexact];
+}
+
+/**
+ * Every checklist-carrying package this workspace declares at more than one
+ * version, as message strings naming each declaration and its specifier. Empty
+ * means each checklist covers one version wherever the package is declared.
+ */
+export function versionAgreementViolations(packages, declarations) {
+  return packages.flatMap((name) => {
+    const declared = declarations.filter((entry) => entry.name === name);
+    const versions = new Set(declared.map(({ specifier }) => specifier));
+    if (versions.size < 2) return [];
+    const listing = declared
+      .map(
+        ({ path, field, specifier }) =>
+          `${path} (${field}) ${JSON.stringify(specifier)}`,
+      )
+      .join(", ");
+    return [
+      `This workspace declares ${name} at ${versions.size} different versions: ${listing}. ${PINS_DOC} carries an "Upgrading ..." checklist for ${name}, whose premises were read off one version's internals; a manifest naming another installs internals the checklist was never worked through against. Declare one version everywhere, or retire the checklist if those internals are no longer load-bearing.`,
+    ];
+  });
+}
+
 // CLI entry: only runs when invoked directly, so the test can import the pure
 // functions without the process.exit.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -209,8 +336,33 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     for (const violation of violations) console.error(violation);
     process.exit(1);
   }
+  const readJson = (path) =>
+    JSON.parse(readFileSync(resolve(root, path), "utf8"));
+  const paths = manifestPaths(readJson(ROOT_MANIFEST), (glob) =>
+    globSync(glob, { cwd: root }),
+  );
+  if (paths === null) {
+    console.error(
+      `${ROOT_MANIFEST}: no "workspaces" list of globs matched -- either this repository is no longer an npm workspace, in which case reduce this check to the root manifest, or the extraction rotted; fix scripts/check-dependabot-pin-coverage.mjs`,
+    );
+    process.exit(1);
+  }
+  const declarations = packageDeclarations(
+    packages,
+    paths.map((path) => ({ path, manifest: readJson(path) })),
+  );
+  const inexact = exactnessViolations(packages, declarations);
+  if (inexact.length > 0) {
+    for (const violation of inexact) console.error(violation);
+    process.exit(1);
+  }
+  const disagreeing = versionAgreementViolations(packages, declarations);
+  if (disagreeing.length > 0) {
+    for (const violation of disagreeing) console.error(violation);
+    process.exit(1);
+  }
   const count = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
   console.log(
-    `Dependabot checklist-pin coverage check passed: ${count(packages.length, "package")} named by ${count(sections.length, "upgrade checklist")} in ${PINS_DOC}, checked against ${count(groups.length, "npm group")} in ${CONFIG_FILE}.`,
+    `Dependabot checklist-pin coverage check passed: ${count(packages.length, "package")} named by ${count(sections.length, "upgrade checklist")} in ${PINS_DOC}, checked against ${count(groups.length, "npm group")} in ${CONFIG_FILE} and each pinned to one version by ${count(declarations.length, "declaration")} across ${count(paths.length, "manifest")}.`,
   );
 }
