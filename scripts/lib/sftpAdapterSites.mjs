@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import ts from "typescript";
+
+import { descendants, parseFile } from "./typeScriptSources.mjs";
 
 // What counts as a server round trip in the SFTP adapter, and where in the source
 // it sits. Two checks stand on this: the per-attempt tracked() bracket
@@ -57,34 +56,9 @@ const NON_REQUEST_MEMBERS = new Set([
   "destroy",
 ]);
 
-const here = dirname(fileURLToPath(import.meta.url));
-const root = resolve(here, "..", "..");
-
-/** Parse a TypeScript source file with parent pointers, for ancestor walks. */
-export function parseSource(fileName, text) {
-  return ts.createSourceFile(
-    fileName,
-    text,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-}
-
 /** Parse the adapter as this checkout ships it. */
 export function parseAdapter() {
-  return parseSource(ADAPTER, readFileSync(resolve(root, ADAPTER), "utf8"));
-}
-
-/** Every descendant of `node`, in source order. */
-export function descendants(node) {
-  const found = [];
-  const visit = (child) => {
-    found.push(child);
-    ts.forEachChild(child, visit);
-  };
-  ts.forEachChild(node, visit);
-  return found;
+  return parseFile(ADAPTER);
 }
 
 /** Strip the wrappers that carry a value through unchanged. */

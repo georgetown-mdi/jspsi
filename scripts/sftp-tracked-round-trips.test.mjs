@@ -4,13 +4,13 @@ import { describe, expect, it } from "vitest";
 import {
   allowanceFor,
   declarationOf,
-  descendants,
   describeSite,
   isFunctionLike,
   parseAdapter,
   requestIssuingSites,
   unwrap,
 } from "./lib/sftpAdapterSites.mjs";
+import { descendants } from "./lib/typeScriptSources.mjs";
 
 // Every server round trip the SFTP adapter issues must pass through its
 // tracked() bracket, which is where the heartbeat's in-flight state is kept: an

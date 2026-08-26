@@ -1,9 +1,7 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+
+import { parseFile, parseSource } from "./lib/typeScriptSources.mjs";
 
 // The console server declares the CLI's persistence-loss exit code itself
 // rather than importing it -- the CLI is a separate workspace it drives as a
@@ -50,24 +48,6 @@ const CONSTANT = "PERSISTENCE_LOSS_EXIT_CODE";
 /** The declaring modules, repository-relative: the CLI's, then the server's. */
 const CLI_MODULE = "apps/cli/src/eventStream.ts";
 const SERVER_MODULE = "apps/web/src/jobs/cliDriver.ts";
-
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-
-/** Parse source text under the file name a failure will name it by. */
-function parseSource(fileName, text) {
-  return ts.createSourceFile(
-    fileName,
-    text,
-    ts.ScriptTarget.Latest,
-    false,
-    ts.ScriptKind.TS,
-  );
-}
-
-/** Parse a repository-relative source file as this checkout ships it. */
-function parseFile(file) {
-  return parseSource(file, readFileSync(resolve(root, file), "utf8"));
-}
 
 /**
  * What a module declares for the constant: `{file, value}` for a shape this

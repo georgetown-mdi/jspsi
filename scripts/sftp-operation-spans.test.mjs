@@ -3,13 +3,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   allowanceFor,
-  descendants,
   describeSite,
   parseAdapter,
-  parseSource,
   requestIssuingSites,
   unwrap,
 } from "./lib/sftpAdapterSites.mjs";
+import { descendants, parseSource } from "./lib/typeScriptSources.mjs";
 
 // Every data-plane call the SFTP adapter issues to the server must enter through
 // runOperation, which opens the one outstanding-operation span per operation --
