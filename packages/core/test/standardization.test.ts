@@ -18,7 +18,11 @@ import {
   summarizeDatasetConstraintViolations,
   StandardizedField,
   StandardizedDataset,
+  accumulationFateAtCharge,
+  canProduceMultipleValues,
 } from "../src/standardization";
+import * as standardizationModule from "../src/standardization";
+import { ESC, PRINTABLE_ASCII, RLO } from "../src/displayEscapingFixtures";
 import {
   OperatorConfigError,
   StandardizationTermsError,
@@ -2739,13 +2743,16 @@ describe("buildKeyStrings", () => {
   // live: what a duplicate collapses into is never carried into a key string,
   // and what earlier elements retained is still held when a later one runs.
 
-  test("an amplifying step over a split cell refuses as the candidates accumulate", () => {
+  test("an amplifying step over a split cell settles as the candidates accumulate", () => {
     // A cell of 1000 comma-separated tokens, split and then amplified twice: no
     // single candidate the first amplification produces is over the per-value
-    // ceiling, so nothing refuses until the second runs element-wise over all
-    // 1000 of them -- and its outputs accumulate into one set the ceiling reads
-    // only once the last of them exists. The running total refuses on the second
-    // of them instead.
+    // ceiling, so nothing fires until the second runs element-wise over all 1000
+    // of them -- and its outputs accumulate into one set the ceiling reads only
+    // once the last of them exists. The running total settles the row on the
+    // second of them instead. A declared producer is what expanded the values
+    // the amplifier is running over, so the row is dropped for this key even
+    // though the step charging the crossing is the amplifier.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const cell = Array.from({ length: 1000 }, (_unused, i) =>
       String(i).padStart(3, "0"),
     ).join(",");
@@ -2756,7 +2763,7 @@ describe("buildKeyStrings", () => {
         replacement: "x".repeat(MAX_TRANSFORM_PARAM_LENGTH),
       },
     };
-    expect(() =>
+    expect(
       buildKeyStrings(
         amplifyingKey([
           { function: "split_on", params: { delimiter: "," } },
@@ -2768,24 +2775,26 @@ describe("buildKeyStrings", () => {
         false,
         1,
       ),
-    ).toThrow(
-      /accumulated \d+ characters of candidate values from row 0 of this party's data \(linkageKeys\[1\]\.elements\[0\]\)/,
+    ).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /row 0, key "LN\+DOB": accumulates \d+ characters of candidate values as a step runs over the values this key's declared fan-out expands/,
     );
   });
 
-  test("an element transform amplifying each of a field's values refuses as they accumulate", () => {
+  test("an element transform amplifying each of a field's values settles as they accumulate", () => {
     // The element's own accumulation, which no step's candidate set sees: the
     // transform runs once per realized field value, so a step amplifying a short
     // value produces one in-ceiling candidate per call and expands none of them.
-    // The row's fate here is the refusal rather than the drop the assembled
-    // limbs would take for this declared fan-out: which fate a row takes depends
-    // on the whole row's provenance, and the elements after this one have not
-    // run.
+    // The multiplicity it is amplifying is the FIELD's declared `split_on`, so
+    // the row takes that producer's drop here exactly as it would at the
+    // assembled limbs.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const amplify = {
       function: "replace_regex",
       params: { pattern: "a*", replacement: "x".repeat(800) },
     };
-    expect(() =>
+    expect(
       buildKeyStrings(
         amplifyingKey([amplify]),
         makeDataset({
@@ -2798,14 +2807,18 @@ describe("buildKeyStrings", () => {
         false,
         1,
       ),
-    ).toThrow(
-      /accumulated \d+ characters of candidate values from row 0 of this party's data \(linkageKeys\[1\]\.elements\[0\]\)/,
+    ).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /accumulates \d+ characters of candidate values across the key's elements/,
     );
   });
 
-  test("the accumulation refusal echoes no value and leaves the local pipeline alone", () => {
+  test("the accumulation outcome echoes no value and leaves the local pipeline alone", () => {
     const secretCell = "S3CRET0,S3CRET1,S3CRET2";
-    const amplifyingSteps = [
+    // Built fresh per call: the compiled steps capture their fan-out membership,
+    // so a shared array would carry one compilation into the other listing.
+    const amplifyingSteps = () => [
       { function: "split_on", params: { delimiter: "," } },
       {
         function: "replace_regex",
@@ -2816,12 +2829,29 @@ describe("buildKeyStrings", () => {
         params: { pattern: "a*", replacement: "x".repeat(500) },
       },
     ];
-    let raised: UsageError | undefined;
-    try {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    expect(
       buildKeyStrings(
-        amplifyingKey(amplifyingSteps),
+        amplifyingKey(amplifyingSteps()),
         makeDataset({ last_name: secretCell, date_of_birth: "19750716" }),
         0,
+      ),
+    ).toBeNull();
+    expect(warn.mock.calls[0][0]).toContain("characters of candidate values");
+    expect(warn.mock.calls[0][0]).toContain("row 0");
+    expect(warn.mock.calls[0][0]).not.toContain("S3CRET");
+
+    // The same shape refused, which is the other fate this seam takes: the
+    // producer expanding the cell is unlisted, so the crossing ends the
+    // exchange. That message names no value of the row either.
+    let raised: UsageError | undefined;
+    try {
+      withUnlistedFanOutFunctions(() =>
+        buildKeyStrings(
+          amplifyingKey(amplifyingSteps()),
+          makeDataset({ last_name: secretCell, date_of_birth: "19750716" }),
+          0,
+        ),
       );
     } catch (err) {
       raised = err as UsageError;
@@ -2834,7 +2864,7 @@ describe("buildKeyStrings", () => {
     // The bound is the partner-authored path's. The operator's own
     // standardization runs the identical steps over the identical cell without
     // it, past the same total (docs/notes/bound-transformed-value.md).
-    const local = runPipeline(secretCell, amplifyingSteps);
+    const local = runPipeline(secretCell, amplifyingSteps());
     expect(local).toBeInstanceOf(Set);
     expect(
       [...(local as Set<string>)].reduce((sum, v) => sum + v.length, 0),
@@ -2966,11 +2996,10 @@ describe("buildKeyStrings", () => {
   // --- the declared fan-out's fate at the accumulating seam ------------------
   // Dropping an over-bound row is normative for the DECLARED fan-out producers
   // (docs/spec/PROTOCOL.md, Fan-out matching), and the accumulating limb takes
-  // that fate at both its charges: where a listed producer is the step charging
-  // the crossing, and where the row's provenance already carries one at the
-  // aggregate across the key's elements. Every other crossing keeps the refusal:
-  // the amplifier cases above charge theirs from a `replace_regex`, which is not
-  // one.
+  // that fate at both its charges for a key whose multiplicity only they can
+  // realize. The fate is read from the key's compiled steps before any element
+  // runs, so a crossing keeps the refusal where a producer OUTSIDE the list can
+  // expand the key, and where none can expand it at all.
 
   // A cell of distinct single-character tokens, each amplified to 1,939
   // characters and then split on a separator the amplifier itself wrote, keeping
@@ -3027,7 +3056,7 @@ describe("buildKeyStrings", () => {
     ).toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toMatch(
-      /accumulates 4197212 characters of candidate values as a declared fan-out step expands one of its values/,
+      /accumulates 4197212 characters of candidate values as a step runs over the values this key's declared fan-out expands/,
     );
     // Neither the row's own token nor the bytes the transform derived from it.
     expect(warn.mock.calls[0][0]).not.toContain(String.fromCodePoint(0x4e00));
@@ -3180,15 +3209,177 @@ describe("buildKeyStrings", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  test("an aggregate crossing before any element fanned out refuses", () => {
+  test("an aggregate crossing before any element fanned out still drops", () => {
     // The same total from the same producer, charged while the element realizing
-    // the multiplicity is still being built: the row carries no fan-out yet, so
-    // the crossing has no producer to bind the drop to and resolves fail-closed.
+    // the multiplicity is still being built. What binds the drop is the
+    // producer the key DECLARES rather than one the row has been observed to
+    // run, so a crossing this early takes the identical fate -- which is the
+    // whole point of settling it before the elements run.
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-    let raised: unknown;
-    try {
+    const dataset = makeDataset({
+      last_name: ceilingCandidates(1025),
+      date_of_birth: "19750716",
+    });
+    expect(buildKeyStrings(key, dataset, 0, false, 1)).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /accumulates 4198400 characters of candidate values across the key's elements/,
+    );
+    // The row sits out this key's round alone.
+    expect(buildKeyStrings(dobKey, dataset, 0, false, 2)).toEqual(
+      new Set(["19750716"]),
+    );
+  });
+
+  // --- one fate per (row, key), wherever the crossing lands -------------------
+  // The property the pre-run classification buys: for ONE row and ONE key the
+  // fate at an accumulation crossing does not depend on which element the
+  // crossing lands in, nor on the order the partner wrote the elements in.
+  // Splitting the same candidates across the key's elements moves the crossing
+  // from the first element to the last and across the seam between the two
+  // charges; none of that reaches the fate.
+
+  const splitField = (name: string, values: string[]) =>
+    new StandardizedField(
+      name,
+      name,
+      [{ function: "split_on", params: { delimiter: "\\|" } }],
+      [{ [name]: values.join("|") }],
+    );
+
+  const plainField = (name: string, value: string) =>
+    new StandardizedField(name, name, [], [{ [name]: value }]);
+
+  const orderedKey = (...fields: string[]) => ({
+    name: "ordered",
+    elements: fields.map((field) => ({ field })),
+  });
+
+  test("a declared fan-out row takes the drop wherever the crossing lands", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    // 1025 ceiling-sized candidates cross the cap; 513 of them do not, so a key
+    // holding them in one element crosses while that element is still building
+    // and a key splitting them across two crosses at the second.
+    const dataset = new StandardizedDataset([
+      splitField("whole", ceilingCandidates(1025)),
+      splitField("half_one", ceilingCandidates(513)),
+      splitField("half_two", ceilingCandidates(513)),
+      plainField("short_one", "19750716"),
+      plainField("short_two", "19750717"),
+    ]);
+    for (const fields of [
+      ["whole", "short_one"],
+      ["short_one", "whole"],
+      ["short_one", "short_two", "whole"],
+      ["half_one", "half_two"],
+      ["half_two", "half_one"],
+      ["half_one", "short_one", "half_two"],
+    ]) {
+      warn.mockClear();
+      expect(
+        buildKeyStrings(orderedKey(...fields), dataset, 0, false, 1),
+      ).toBeNull();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toMatch(
+        /accumulates \d+ characters of candidate values/,
+      );
+    }
+  });
+
+  test("an unlisted producer's row refuses wherever it sits in the key", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    // The unlisted producer contributes four characters and expands nothing the
+    // crossing is made of: it is the key DECLARING it that fixes the fate, so
+    // the element it sits in -- including one the crossing never reaches --
+    // makes no difference.
+    const dataset = new StandardizedDataset([
+      splitField("half_one", ceilingCandidates(513)),
+      splitField("half_two", ceilingCandidates(513)),
+      withUnlistedFanOutFunctions(() => splitField("unlisted", ["Y", "Z"])),
+    ]);
+    for (const fields of [
+      ["half_one", "half_two", "unlisted"],
+      ["unlisted", "half_one", "half_two"],
+      ["half_one", "unlisted", "half_two"],
+    ]) {
+      warn.mockClear();
+      let raised: unknown;
+      try {
+        buildKeyStrings(orderedKey(...fields), dataset, 0, false, 1);
+      } catch (err) {
+        raised = err;
+      }
+      expect(raised).toBeInstanceOf(UsageError);
+      expect((raised as UsageError).message).toMatch(
+        /accumulated \d+ characters of candidate values from row 0/,
+      );
+      expect(warn).not.toHaveBeenCalled();
+    }
+  });
+
+  test("multiplicity no classified producer accounts for refuses", () => {
+    // The fail-closed backstop under the classification. A step that expands a
+    // value while unlisted cannot reach a key classified for the drop -- the
+    // classification would have refused for it -- so this pairing is what a
+    // Set-returning function left out of the multi-value classification would
+    // produce, and it settles on the refusal rather than dropping a row whose
+    // fan-out nothing declared.
+    expect(accumulationFateAtCharge("drop", true)).toBe("refuse");
+    expect(accumulationFateAtCharge("drop", false)).toBe("drop");
+    expect(accumulationFateAtCharge("refuse", true)).toBe("refuse");
+    expect(accumulationFateAtCharge("refuse", false)).toBe("refuse");
+  });
+
+  test("every declared fan-out producer is classified as expanding a value", () => {
+    // A listed producer the classification does not know can expand leaves its
+    // keys classified as producing no multiplicity at all, which costs them the
+    // drop the width bound specifies for that producer.
+    for (const name of FAN_OUT_FUNCTION_NAMES)
+      expect(canProduceMultipleValues(name)).toBe(true);
+    expect(
+      runPipeline("A,B", [
+        { function: "split_on", params: { delimiter: "," } },
+      ]),
+    ).toBeInstanceOf(Set);
+  });
+
+  test("the accumulation drop signal reaches no caller", () => {
+    // It is a plain Error whose message reports no fault an operator could act
+    // on, raised only to stop an expansion that is already settled. Unexported,
+    // it cannot be caught by type outside the module, and the shapes that raise
+    // it return a dropped row rather than propagating.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    expect(
       buildKeyStrings(
-        key,
+        amplifyingKey(splitRetainingSteps()),
+        makeDataset({
+          last_name: tokenCell(1443),
+          date_of_birth: "19750716",
+        }),
+        0,
+        false,
+        1,
+      ),
+    ).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    const surface: Record<string, unknown> = standardizationModule;
+    expect(
+      Object.entries(surface).flatMap(([name, value]) =>
+        typeof value === "function" ? [name, value.name] : [name],
+      ),
+    ).not.toContain("AccumulatedCandidatesDrop");
+  });
+
+  test("a partner-authored key name is escaped where a drop is warned", () => {
+    // The one partner-authored text on these paths, at the one sink that carries
+    // it: a name carrying CR/LF for log-line spoofing, an ESC that drives ANSI,
+    // and a bidi override reaches the operator escaped rather than raw.
+    const hostileName = `LN${ESC}[31m\r\nDOB${RLO}`;
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    expect(
+      buildKeyStrings(
+        { name: hostileName, elements: key.elements },
         makeDataset({
           last_name: ceilingCandidates(1025),
           date_of_birth: "19750716",
@@ -3196,15 +3387,30 @@ describe("buildKeyStrings", () => {
         0,
         false,
         1,
-      );
-    } catch (err) {
-      raised = err;
-    }
-    expect(raised).toBeInstanceOf(UsageError);
-    expect((raised as UsageError).message).toMatch(
-      /accumulated 4198400 characters of candidate values from row 0 of this party's data \(linkageKeys\[1\]\.elements\[0\]\)/,
+      ),
+    ).toBeNull();
+
+    // The cross-product advisory, the other sink on this path that carries the
+    // name: an unlisted producer's row is not dropped for width, so it is warned
+    // about instead.
+    withUnlistedFanOutFunctions(() =>
+      buildKeyStrings(
+        { name: hostileName, elements: key.elements },
+        makeDataset({
+          last_name: Array.from({ length: 21 }, (_unused, i) => `V${i}`),
+          date_of_birth: "19750716",
+        }),
+        0,
+        false,
+        1,
+      ),
     );
-    expect(warn).not.toHaveBeenCalled();
+
+    expect(warn).toHaveBeenCalledTimes(2);
+    for (const [warned] of warn.mock.calls) {
+      expect(warned).toMatch(PRINTABLE_ASCII);
+      expect(warned).toContain("LN\\x1b[31m\\x0d\\x0aDOB\\u202e");
+    }
   });
 
   // --- the receiver's swapped locators ---------------------------------------
@@ -3235,19 +3441,25 @@ describe("buildKeyStrings", () => {
     );
   });
 
+  // The accumulation locators are observable on the refusing fate alone -- a
+  // dropped row logs the row and the key, never an issue path -- so the two
+  // below drive the multi-value cell through an unlisted producer.
+
   test("a swapped receiver's accumulation refusal names the element declaring the column", () => {
     // No step produced these candidates -- the element declares no transform, so
     // they are the field's own realized values -- which puts the refusal on the
     // same footing as the value-read one above: it names the position whose
     // `field` is the offending column, so sender and receiver name the same
     // position for the same column.
-    const dataset = makeDataset({
-      first_name: "JANE",
-      last_name: Array.from(
-        { length: 1100 },
-        (_unused, i) => `${"A".repeat(4000)}${String(i).padStart(4, "0")}`,
-      ),
-    });
+    const dataset = withUnlistedFanOutFunctions(() =>
+      makeDataset({
+        first_name: "JANE",
+        last_name: Array.from(
+          { length: 1100 },
+          (_unused, i) => `${"A".repeat(4000)}${String(i).padStart(4, "0")}`,
+        ),
+      }),
+    );
     const named =
       /accumulated \d+ characters of candidate values from row 0 of this party's data \(linkageKeys\[3\]\.elements\[1\]\)/;
     expect(() => buildKeyStrings(swapKey(), dataset, 0, false, 3)).toThrow(
@@ -3259,21 +3471,23 @@ describe("buildKeyStrings", () => {
   });
 
   test("a swapped receiver's accumulation refusal names the step that produced the candidates", () => {
-    // The other half: an element transform realized this multiplicity, and the
-    // swap leaves a transform where it is declared, so the refusal names the
-    // element declaring it rather than the one declaring the column it read.
+    // The other half: an element transform amplified each of the field's values,
+    // and the swap leaves a transform where it is declared, so the refusal names
+    // the element declaring it rather than the one declaring the column it read.
     const amplifying = swapKey([
       {
         function: "replace_regex",
         params: { pattern: "a*", replacement: "x".repeat(800) },
       },
     ]);
-    const dataset = makeDataset({
-      first_name: "JANE",
-      last_name: Array.from({ length: 2000 }, (_unused, i) =>
-        String(i).padStart(4, "0"),
-      ),
-    });
+    const dataset = withUnlistedFanOutFunctions(() =>
+      makeDataset({
+        first_name: "JANE",
+        last_name: Array.from({ length: 2000 }, (_unused, i) =>
+          String(i).padStart(4, "0"),
+        ),
+      }),
+    );
     expect(() => buildKeyStrings(amplifying, dataset, 0, true, 3)).toThrow(
       /accumulated \d+ characters of candidate values from row 0 of this party's data \(linkageKeys\[3\]\.elements\[0\]\)/,
     );

@@ -656,6 +656,33 @@ const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
   split_on: splitOnFactory,
 };
 
+// The functions above whose compiled step can return SEVERAL candidates for ONE
+// input value -- the capability, which is separate from
+// FAN_OUT_FUNCTION_NAMES's POLICY question of whether an expansion by that
+// function is a declared fan-out. Capability decides whether a key can produce
+// multiplicity at all, so it is what {@link keyAccumulationFate} classifies from
+// before a row runs, and it must stay a property of the function rather than of
+// the listing: the unit lever that stands `split_on` in for an unlisted producer
+// (`withNoListedFanOutFunctions`) moves the listing alone, and the step it
+// compiles still expands.
+//
+// Hand-listed for the same reason the fan-out list is: whether a factory can
+// return a multi-value `Set` is not derivable from the registry. A Set-returning
+// factory added here without an entry does not fail open -- the step's runtime
+// expansion is recorded as an unlisted producer's, which
+// {@link accumulationFateAtCharge} takes as a classification fault and refuses.
+const MULTI_VALUE_FUNCTION_NAMES: ReadonlySet<string> = new Set(["split_on"]);
+
+/**
+ * @internal exported so the drift test can hold this classification to
+ * {@link FAN_OUT_FUNCTION_NAMES}: a declared fan-out producer that cannot expand
+ * a value classifies a key as producing no multiplicity, which costs the drop
+ * that producer's width bound specifies.
+ */
+export function canProduceMultipleValues(functionName: string): boolean {
+  return MULTI_VALUE_FUNCTION_NAMES.has(functionName);
+}
+
 /**
  * The names of every standardization function the library recognizes, including
  * `coalesce` -- which {@link compileStep} handles specially, outside
@@ -1154,12 +1181,19 @@ export function describeTransformCoercions(
 // --- Step compilation --------------------------------------------------------
 
 // `isListedFanOutFunction` records whether this step's function is one of the
-// declared fan-out producers (FAN_OUT_FUNCTION_NAMES), captured at compile time
-// because the compiled closure no longer carries its name. It is what lets a
-// realization say WHICH producer expanded a value, which the width bound binds on
+// declared fan-out producers (FAN_OUT_FUNCTION_NAMES) and
+// `canProduceMultipleValues` whether it can expand one value at all, both
+// captured at compile time because the compiled closure no longer carries its
+// name. Together they are what lets a key say which producers its steps can
+// expand it with BEFORE any of them runs, which the width bound binds on
 // (buildKeyStrings).
 type CompiledStep =
-  | { kind: "fn"; fn: StandardizingFn; isListedFanOutFunction: boolean }
+  | {
+      kind: "fn";
+      fn: StandardizingFn;
+      isListedFanOutFunction: boolean;
+      canProduceMultipleValues: boolean;
+    }
   | { kind: "coalesce"; default: string | undefined };
 
 function compileStep(step: {
@@ -1192,6 +1226,7 @@ function compileStep(step: {
     kind: "fn",
     fn: factory(params),
     isListedFanOutFunction: isListedFanOutFunction(step.function),
+    canProduceMultipleValues: canProduceMultipleValues(step.function),
   };
 }
 
@@ -1201,6 +1236,32 @@ function compileSteps(
   return steps.map(compileStep);
 }
 
+/**
+ * Where a compiled pipeline can realize multiplicity: through a step that is a
+ * declared fan-out producer, through one that is not, or neither.
+ *
+ * Read from the compiled steps rather than from a realized row, so a key's fate
+ * at the accumulating bound is settled before any of its elements runs
+ * ({@link keyAccumulationFate}).
+ */
+interface MultiplicitySources {
+  readonly listed: boolean;
+  readonly unlisted: boolean;
+}
+
+function pipelineMultiplicitySources(
+  steps: ReadonlyArray<CompiledStep>,
+): MultiplicitySources {
+  let listed = false;
+  let unlisted = false;
+  for (const step of steps) {
+    if (step.kind !== "fn" || !step.canProduceMultipleValues) continue;
+    if (step.isListedFanOutFunction) listed = true;
+    else unlisted = true;
+  }
+  return { listed, unlisted };
+}
+
 // --- Step execution ----------------------------------------------------------
 
 /**
@@ -1208,6 +1269,11 @@ function compileSteps(
  * {@link buildKeyStrings} can bind the width bound's drop to the declared
  * producers alone (docs/spec/PROTOCOL.md, Fan-out matching, whose every rule
  * binds `split_on` and it alone).
+ *
+ * It is an observation of the steps that have already run, so it is what the
+ * ASSEMBLED limbs read -- they run once every element exists -- and it is the
+ * fail-closed backstop the accumulating bound reads beside its own pre-run
+ * classification ({@link accumulationFateAtCharge}).
  */
 interface FanOutProvenance {
   /**
@@ -1288,14 +1354,13 @@ function applyStep(
         site !== undefined &&
         accumulated > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW
       ) {
-        // Which producer is charging the crossing is known here, which is what
-        // binds the declared fan-out's drop to this seam: the step expanding the
-        // value is a listed one, and multiplicity an unlisted producer realized
-        // earlier in the row has already set the provenance, so that case stays
-        // fail-closed on the refusal below.
+        // The key's own fate, decided before any of its elements ran, so which
+        // step happens to be charging the crossing does not move it.
         if (
-          step.isListedFanOutFunction &&
-          provenance?.fromUnlistedFunction === false
+          accumulationFateAtCharge(
+            site.fate,
+            provenance?.fromUnlistedFunction === true,
+          ) === "drop"
         )
           throw new AccumulatedCandidatesDrop(accumulated);
         throw accumulatedCandidatesTooLongRefusal(site, accumulated);
@@ -1386,6 +1451,17 @@ function noRealizedValues(): RealizedFieldValues {
  */
 export class StandardizedField {
   readonly name: string;
+
+  /**
+   * Which producers this field's pipeline can realize several values for one row
+   * with, read from its compiled steps.
+   *
+   * A raw cell is one string, so every value a row realizes beyond the first
+   * comes from a step here -- which is what lets {@link buildKeyStrings} settle
+   * a key's fate at the accumulating bound before it reads a single row.
+   */
+  readonly multiplicitySources: MultiplicitySources;
+
   private readonly inputColumn: string;
   private readonly compiledSteps: CompiledStep[];
   private readonly rawRows: ReadonlyArray<CSVRow>;
@@ -1400,6 +1476,7 @@ export class StandardizedField {
     this.name = name;
     this.inputColumn = inputColumn;
     this.compiledSteps = compileSteps(steps);
+    this.multiplicitySources = pipelineMultiplicitySources(this.compiledSteps);
     this.rawRows = rawRows;
   }
 
@@ -1685,6 +1762,20 @@ const compiledElementTransforms = new WeakMap<
   CompiledStep[]
 >();
 
+// The compiled steps for one element's transform, memoized as above. Reached
+// both by the run and by the pre-run classification below, so the fate a key's
+// crossing takes is read from the same compiled steps that will produce it.
+function compiledElementSteps(
+  steps: TransformStep[] | undefined,
+): CompiledStep[] {
+  if (steps === undefined || steps.length === 0) return [];
+  const memoized = compiledElementTransforms.get(steps);
+  if (memoized !== undefined) return memoized;
+  const compiled = compileSteps(steps);
+  compiledElementTransforms.set(steps, compiled);
+  return compiled;
+}
+
 /**
  * The longest single value a partner-authored key element may read or produce.
  *
@@ -1834,11 +1925,7 @@ function applyElementTransform(
   // No steps: the value passes through unchanged (the empty-pipeline identity),
   // and nothing is compiled or memoized.
   if (steps === undefined || steps.length === 0) return [value];
-  let compiled = compiledElementTransforms.get(steps);
-  if (compiled === undefined) {
-    compiled = compileSteps(steps);
-    compiledElementTransforms.set(steps, compiled);
-  }
+  const compiled = compiledElementSteps(steps);
   let current: FieldValue = value;
   for (const [stepIndex, step] of compiled.entries()) {
     current = applyStep(current, step, provenance, site);
@@ -1990,15 +2077,83 @@ function keyStringLengthCapRefusal(
 }
 
 /**
+ * What one row contributes to a key's round once its candidates cross
+ * {@link MAX_ASSEMBLED_KEY_LENGTH_PER_ROW} as they accumulate: nothing for that
+ * key (`drop`, the exceedance behavior the declared fan-out producers'
+ * width bound specifies, warned and leaving the row eligible for later keys), or
+ * an ended exchange (`refuse`).
+ */
+type AccumulationFate = "drop" | "refuse";
+
+/**
+ * The fate a crossing of this key's accumulating candidates takes, decided from
+ * the compiled steps of the key's elements and of the fields feeding them --
+ * BEFORE any of those elements runs.
+ *
+ * A raw cell is one string and a compiled step is fixed for the whole run, so
+ * every producer that can expand this row is knowable here. That is what makes
+ * the fate a property of the (row, key) pair rather than of the moment the
+ * crossing happens to land: an element order, or a crossing charged while the
+ * expanding element is still being built, cannot move it.
+ *
+ * `refuse` unless every producer that can expand the key is a declared fan-out
+ * producer. A producer outside {@link FAN_OUT_FUNCTION_NAMES} is outside the
+ * width bound's rules (docs/spec/PROTOCOL.md, Fan-out matching) and stays
+ * fail-closed however wide it went, and a key no producer can expand at all
+ * names none to bind the drop to -- the row is one enormous value chain, which
+ * ends the exchange as an over-ceiling value does.
+ *
+ * `swap` exchanges two elements' FIELDS while each keeps its own transforms, so
+ * it re-pairs the producers below without adding or removing one: the sender and
+ * the receiver of a swapped key reach the same verdict, and cannot end one run
+ * with a dropped row and the other with a refusal.
+ */
+function keyAccumulationFate(
+  elements: ReadonlyArray<LinkageKeyElement>,
+  dataset: StandardizedDataset,
+): AccumulationFate {
+  let listedProducer = false;
+  for (const element of elements) {
+    const field = dataset.getField(element.field)?.multiplicitySources;
+    const transform = pipelineMultiplicitySources(
+      compiledElementSteps(element.transform),
+    );
+    if (field?.unlisted === true || transform.unlisted) return "refuse";
+    listedProducer ||= field?.listed === true || transform.listed;
+  }
+  return listedProducer ? "drop" : "refuse";
+}
+
+/**
+ * @internal exported so the fail-closed backstop below is driven by a test of
+ * its own: a correct classification leaves it unreachable, which is what makes
+ * it a check rather than a branch a shape can be written for.
+ *
+ * The fate {@link keyAccumulationFate} settled, unless a step expanded a value
+ * while unlisted -- which under a `drop` classification is a producer that
+ * classification did not see as one at all. That is a fault in the
+ * classification rather than a fate the row earned, so the crossing refuses
+ * rather than dropping a row whose fan-out nothing declared.
+ */
+export function accumulationFateAtCharge(
+  fate: AccumulationFate,
+  unlistedProducerExpandedTheRow: boolean,
+): AccumulationFate {
+  return fate === "drop" && unlistedProducerExpandedTheRow ? "refuse" : fate;
+}
+
+/**
  * The key element whose candidates are accumulating, so the bound applied where
  * they are allocated ({@link applyStep}, and the row's candidate accumulation in
  * {@link buildKeyStrings}) can locate its refusal by the same issue path the
- * per-value ceiling uses. One per (element, row) on the partner-authored path.
+ * per-value ceiling uses, carried with the fate a crossing there takes. One per
+ * (element, row) on the partner-authored path; the fate is the whole key's.
  */
 interface CandidateAccumulationSite {
   readonly keyIndex: number | undefined;
   readonly elementIndex: number;
   readonly rowIndex: number;
+  readonly fate: AccumulationFate;
 }
 
 // The byte limb again, measured while the candidates accumulate rather than on
@@ -2010,14 +2165,10 @@ interface CandidateAccumulationSite {
 // message states the key rather than attributing the whole total to that
 // element.
 //
-// The fate here is the refusal, which is what a crossing no declared fan-out
-// producer accounts for takes: a single-valued step's output, multiplicity from
-// a producer unlisted in FAN_OUT_FUNCTION_NAMES, or a row's aggregate charged
-// before any of its elements fanned out. A crossing a listed producer charges as
-// it expands one value takes {@link AccumulatedCandidatesDrop} instead, and one
-// charged on a row a listed producer has already expanded takes the same drop
-// where the aggregate is charged, both being the fate the width bound specifies
-// for that producer.
+// The fate here is the refusal, which is what a key {@link keyAccumulationFate}
+// classifies `refuse` takes at either of its charges: one carrying a producer
+// unlisted in FAN_OUT_FUNCTION_NAMES, and one no producer can expand at all.
+// A key classified `drop` takes {@link AccumulatedCandidatesDrop} at both.
 function accumulatedCandidatesTooLongRefusal(
   site: CandidateAccumulationSite,
   accumulated: number,
@@ -2037,12 +2188,14 @@ function accumulatedCandidatesTooLongRefusal(
   );
 }
 
-// The drop a listed fan-out producer's own expansion takes when it charges the
-// accumulating total past the cap, raised where the candidates are allocated so
-// the expansion stops at the crossing rather than finishing a row that
-// contributes nothing. It carries the total up to {@link buildKeyStrings}, which
-// owns a row's fate for the key round; nothing outside this module sees it, and
-// it reports no fault of the terms, so it is not a UsageError.
+// The drop a step's own expansion takes when it charges the accumulating total
+// of a key classified `drop` past the cap, raised where the candidates are
+// allocated so the expansion stops at the crossing rather than finishing a row
+// that contributes nothing. It carries the total up to {@link buildKeyStrings},
+// which owns a row's fate for the key round, and it reports no fault of the
+// terms, so it is not a UsageError. That it reaches no operator is pinned by a
+// test rather than asserted here: the class is unexported, and the shapes that
+// raise it return a dropped row rather than propagating.
 class AccumulatedCandidatesDrop extends Error {
   readonly accumulated: number;
 
@@ -2117,10 +2270,16 @@ export function buildKeyStrings(
       ? swapElements(key.elements, key.swap)
       : { elements: key.elements, pair: undefined };
 
+  // What a crossing of the accumulating bound below costs this row, settled
+  // before the first element is read so that neither the element order nor where
+  // the crossing lands can move it.
+  const fate = keyAccumulationFate(elements, dataset);
+
   const elementValues: string[][] = [];
   // Whether any element contributed several candidates before fuzzy expansion --
   // the fan-out signature -- and, with the provenance beside it, what decides
-  // whether an over-width or unassemblable row is dropped or refused below.
+  // whether the row is dropped or refused at the ASSEMBLED limbs, which run once
+  // every element exists and so read what the row actually realized.
   let fansOut = false;
   // Which producer realized that multiplicity, accumulated across the row's
   // elements: the drop binds the DECLARED producers alone (see the drop sites).
@@ -2156,6 +2315,7 @@ export function buildKeyStrings(
           ? columnElementIndex
           : elementIndex,
       rowIndex: index,
+      fate,
     };
 
     // A record contributes each DISTINCT candidate once, so duplicates collapse
@@ -2185,14 +2345,13 @@ export function buildKeyStrings(
         // have.
         for (const candidate of realized)
           rowCandidateCharacters += addCandidate(transformed, candidate);
-        // No single step is expanding this aggregate, so its fate reads the
-        // ROW's provenance as the assembled limbs below do: a listed producer
-        // expanded an element already built, and no unlisted producer expanded
-        // any of them. That provenance is what those elements carry, so a
-        // crossing charged before any of them fanned out names no producer at
-        // all and stays fail-closed on the refusal.
+        // The same key fate the charge inside a step takes, so a row's outcome
+        // does not turn on which of the two the crossing lands at either.
         if (rowCandidateCharacters > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW) {
-          if (fansOut && !provenance.fromUnlistedFunction)
+          if (
+            accumulationFateAtCharge(fate, provenance.fromUnlistedFunction) ===
+            "drop"
+          )
             return dropRowFromKeyRound(
               key,
               index,
@@ -2213,9 +2372,9 @@ export function buildKeyStrings(
         key,
         index,
         `accumulates ${err.accumulated} characters of candidate values as a ` +
-          "declared fan-out step expands one of its values, more than the " +
-          `${MAX_ASSEMBLED_KEY_LENGTH_PER_ROW} characters of key strings this ` +
-          "exchange builds for one row",
+          "step runs over the values this key's declared fan-out expands, " +
+          `more than the ${MAX_ASSEMBLED_KEY_LENGTH_PER_ROW} characters of ` +
+          "key strings this exchange builds for one row",
       );
     }
     if (transformed.size === 0) return null;
