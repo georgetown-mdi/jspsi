@@ -1041,6 +1041,13 @@ export function buildOutputTable(
     }
   }
 
+  if (!partnerPayload.columns.every((column) => typeof column === "string")) {
+    throw new Error(
+      "a partner payload column name is not a string: " +
+        "refusing to write a header of another shape into the result",
+    );
+  }
+
   if (partnerPayload.rowIndices.length !== partnerPayload.rows.length) {
     throw new Error(
       "partner payload rowIndices and rows have different lengths: " +

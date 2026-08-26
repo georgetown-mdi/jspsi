@@ -1927,6 +1927,25 @@ test("buildOutputTable: a partner payload collection that is not an array is ref
   }
 });
 
+test("buildOutputTable: a partner payload column name that is not a string is refused as a shape fault, not a TypeError", () => {
+  // columns passes the array-of-array-methods guards above with a numeric entry,
+  // then quoteCsvField calls `.includes` on it and throws a raw TypeError instead
+  // of the controlled shape refusal.
+  const partnerPayload = {
+    columns: [1],
+    rowIndices: [0],
+    rows: [["Q0"]],
+  } as unknown as PartnerPayload;
+  const refusal = refusalFrom(() =>
+    buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
+  );
+  expect(refusal).toBeInstanceOf(Error);
+  expect(refusal).not.toBeInstanceOf(TypeError);
+  expect((refusal as Error).message).toMatch(
+    /a partner payload column name is not a string/,
+  );
+});
+
 test("buildOutputTable: the width refusal states the declared count in agreement", () => {
   const oneColumn: PartnerPayload = {
     columns: ["partner_id"],
