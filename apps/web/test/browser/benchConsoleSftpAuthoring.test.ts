@@ -312,15 +312,79 @@ function probeAnnouncement(): HTMLElement {
   return page.getByTestId(PROBE_ANNOUNCEMENT_MARKER).element() as HTMLElement;
 }
 
-/** Wait until the announcing region carries `sentence`. The region's text is
- * deferred one commit past the phase that produces it, so the visible outcome
- * reaching the screen does not mean the region has caught up -- a read taken on
- * that cue can still find the in-flight sentence, or nothing at all. Retrying on
- * the region's own text is what makes the read terminal. */
+/** The whole of what the announcing region says in each phase that produces an
+ * outcome. Mirrored from the form's own copy rather than imported from it, so
+ * the containment clause -- the region holds a fixed first-party sentence and
+ * nothing else -- is measured against a literal that a copy change has to be
+ * made against deliberately, instead of against whatever the form now says. */
+const ANNOUNCED_SENTENCE = {
+  probing: "Reading the fingerprint from the server...",
+  presented:
+    "The server presented a fingerprint. Compare it with the value whoever " +
+    "runs the server published.",
+  error: "Reading the fingerprint failed. You can still paste it above.",
+} as const;
+
+/** Assert the announcing region holds exactly `content` and nothing else: the
+ * whole of its text, and no element child to carry what a text sweep would miss
+ * -- a control's value is a property rather than text content, so a region whose
+ * text matches can still hold something unread by that comparison alone. */
+function expectRegionHoldsOnly(region: Element, content: string): void {
+  expect(region.textContent).toBe(content);
+  expect(region.childElementCount).toBe(0);
+}
+
+/** Wait until the announcing region carries `sentence` and nothing besides. The
+ * region's text is deferred one commit past the phase that produces it, so the
+ * visible outcome reaching the screen does not mean the region has caught up --
+ * a read taken on that cue can still find the in-flight sentence, or nothing at
+ * all. Retrying on the region's own text is what makes the read terminal. */
 async function expectAnnounced(sentence: string): Promise<void> {
-  await expect
-    .element(page.getByTestId(PROBE_ANNOUNCEMENT_MARKER))
-    .toHaveTextContent(sentence);
+  await expect.poll(() => probeAnnouncement().textContent).toBe(sentence);
+  expectRegionHoldsOnly(probeAnnouncement(), sentence);
+}
+
+/**
+ * ARIA's global states and properties, written out because nothing in this tree
+ * ships the ARIA vocabulary to derive them from. This is the set the
+ * presentational-role-conflict resolution reads: a `role="presentation"` is
+ * ignored on an element carrying one of these, and NOT on an element carrying
+ * some other `aria-*` attribute, so a premise drawn from the `aria-` prefix
+ * would be looser than the rule it rests on.
+ *
+ * A list that has fallen behind the vocabulary is a list that under-counts, so
+ * an element whose only global attribute is one it is missing fails the premise
+ * rather than passing it silently.
+ */
+const ARIA_GLOBAL_ATTRIBUTES = new Set([
+  "aria-atomic",
+  "aria-busy",
+  "aria-controls",
+  "aria-current",
+  "aria-describedby",
+  "aria-details",
+  "aria-disabled",
+  "aria-dropeffect",
+  "aria-errormessage",
+  "aria-flowto",
+  "aria-grabbed",
+  "aria-haspopup",
+  "aria-hidden",
+  "aria-invalid",
+  "aria-keyshortcuts",
+  "aria-label",
+  "aria-labelledby",
+  "aria-live",
+  "aria-owns",
+  "aria-relevant",
+  "aria-roledescription",
+]);
+
+/** The {@link ARIA_GLOBAL_ATTRIBUTES} `element` carries. */
+function globalAriaAttributesOf(element: Element): Array<string> {
+  return Array.from(element.attributes)
+    .map((attribute) => attribute.name)
+    .filter((name) => ARIA_GLOBAL_ATTRIBUTES.has(name));
 }
 
 /** Everything an assistive technology reads out of a live region: its text, plus
@@ -800,7 +864,7 @@ describe("console SFTP connection authoring", () => {
     // anchor is destroyed for the duration; the settle repairs it rather than
     // moving focus to announce (the polite region does that, below).
     expect(document.activeElement).toBe(trigger.element());
-    await expectAnnounced("Reading the fingerprint failed.");
+    await expectAnnounced(ANNOUNCED_SENTENCE.error);
   });
 
   test("the probe announces from one stable region, and nothing else announces", async () => {
@@ -813,12 +877,13 @@ describe("console SFTP connection authoring", () => {
 
     // Mounted ahead of the outcome and empty before it: a settle reaches
     // assistive tech as a change to a region already being observed, never as a
-    // freshly inserted node.
+    // freshly inserted node. Empty means holding nothing at all, elements
+    // included, which is what the containment clause claims of every phase.
     const region = probeAnnouncement();
     expect(region.getAttribute("role")).toBe("status");
     expect(region.getAttribute("aria-live")).toBe("polite");
     expect(region.getAttribute("aria-atomic")).toBe("true");
-    expect(region.textContent).toBe("");
+    expectRegionHoldsOnly(region, "");
     expect(probeResult().firstElementChild).toBe(region);
 
     await page
@@ -830,7 +895,7 @@ describe("console SFTP connection authoring", () => {
     await flushPendingUpdates();
 
     // The same node, never remounted, carries the console's own sentence.
-    await expectAnnounced("Reading the fingerprint failed.");
+    await expectAnnounced(ANNOUNCED_SENTENCE.error);
     expect(probeAnnouncement()).toBe(region);
     // One channel announces: within the probe result nothing else carries live
     // semantics, and the visible alert is not one (Mantine's Alert defaults to
@@ -841,16 +906,13 @@ describe("console SFTP connection authoring", () => {
     expect(probeResult().querySelector('[role="alert"]')).toBeNull();
     // What the override displaces is the default; the presentational role it
     // names does not itself apply, because ARIA's presentational-role-conflict
-    // resolution ignores it on an element carrying global aria-* attributes --
-    // which Mantine sets on this root. That premise is pinned here so the
-    // reasoning recorded around it cannot outlive it.
+    // resolution ignores it on an element carrying a GLOBAL aria-* state or
+    // property -- which Mantine sets on this root. That premise is pinned here,
+    // against the rule's own set rather than against any aria-* attribute, so
+    // the reasoning recorded around it cannot outlive it.
     const alert = probeResult().querySelector('[role="presentation"]');
-    expect(alert).not.toBeNull();
-    expect(
-      Array.from(alert?.attributes ?? [])
-        .map((attribute) => attribute.name)
-        .filter((name) => name.startsWith("aria-")),
-    ).not.toEqual([]);
+    if (alert === null) throw new Error("The probe failure alert is missing.");
+    expect(globalAriaAttributesOf(alert)).not.toEqual([]);
   });
 
   test("the presented result announces from the same region and is named for the focus it takes", async () => {
@@ -868,7 +930,7 @@ describe("console SFTP connection authoring", () => {
       .toBeInTheDocument();
     await flushPendingUpdates();
 
-    await expectAnnounced("The server presented a fingerprint.");
+    await expectAnnounced(ANNOUNCED_SENTENCE.presented);
     expect(probeAnnouncement()).toBe(region);
     // The presented panel replaces the trigger the operator pressed, so its focus
     // move is repair -- and what focus lands on names itself from its own visible
@@ -913,7 +975,7 @@ describe("console SFTP connection authoring", () => {
     // Their place is kept; the polite region is what tells them the probe
     // settled.
     expect(document.activeElement).toBe(fingerprintField.element());
-    await expectAnnounced("Reading the fingerprint failed.");
+    await expectAnnounced(ANNOUNCED_SENTENCE.error);
   });
 
   test("a second identical failure announces again, transiting the in-flight sentence", async () => {
@@ -938,9 +1000,9 @@ describe("console SFTP connection authoring", () => {
     // region before the failure sentence returns to it.
     for (const gate of gates) {
       await trigger.click();
-      await expectAnnounced("Reading the fingerprint from the server");
+      await expectAnnounced(ANNOUNCED_SENTENCE.probing);
       gate.settle();
-      await expectAnnounced("Reading the fingerprint failed.");
+      await expectAnnounced(ANNOUNCED_SENTENCE.error);
     }
     // Every transit was a change to the node assistive tech is already observing,
     // not a remount.
@@ -970,7 +1032,7 @@ describe("console SFTP connection authoring", () => {
     // the negatives below are measured over a settled region rather than over
     // one that has yet to say anything.
     const region = probeAnnouncement();
-    await expectAnnounced("Reading the fingerprint failed.");
+    await expectAnnounced(ANNOUNCED_SENTENCE.error);
     expect(region.contains(peerBytes)).toBe(false);
     expect(announcedTextOf(region)).not.toContain(excerpt);
     expect(announcedTextOf(region)).not.toContain("Paste this fingerprint");
