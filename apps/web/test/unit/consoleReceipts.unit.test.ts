@@ -762,7 +762,30 @@ describe("the receipts card's model", () => {
       ownFingerprint: OWN_FINGERPRINT,
     });
     expect(receiptsProblems(unpinned)).toEqual([]);
-    expect(receiptsAdvisories(unpinned)).toContain(NO_PARTNER_PIN_ADVISORY);
+    expect(receiptsAdvisories(unpinned)).toContainEqual({
+      message: NO_PARTNER_PIN_ADVISORY,
+      severity: "warning",
+    });
+  });
+
+  test("the unpinned advisory is the only one raised above a notice", () => {
+    // It is what this run costs the operator if they start it as authored, while
+    // the other two say where a file lands; one undifferentiated list would show
+    // them at the same weight.
+    const unpinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+    });
+    expect(
+      receiptsAdvisories(unpinned)
+        .filter((advisory) => advisory.severity === "warning")
+        .map((advisory) => advisory.message),
+    ).toEqual([NO_PARTNER_PIN_ADVISORY]);
+    expect(
+      receiptsAdvisories(unpinned)
+        .filter((advisory) => advisory.severity === "info")
+        .map((advisory) => advisory.message),
+    ).toEqual([IDENTITY_LOCATION_ADVISORY, RECEIPT_LOCATION_NOTICE]);
   });
 
   test("the unpinned advisory names the whole consequence, not just the receipt", () => {
@@ -777,6 +800,19 @@ describe("the receipts card's model", () => {
     expect(NO_PARTNER_PIN_ADVISORY).toMatch(/no receipt/);
   });
 
+  test("the unpinned advisory states the initiator's extra disclosure", () => {
+    // exchangeSignedReceipt has the initiator send its own {certificate,
+    // signature} frame before verifying the partner's, so "nothing is written on
+    // this side" is not the whole cost on the side that sends first: the partner
+    // holds this party's signed receipt when the run stops. Which role this side
+    // takes is not settled while authoring, so the copy is conditional -- and it
+    // still says nothing about what the partner does with what it receives.
+    expect(NO_PARTNER_PIN_ADVISORY).toMatch(/sends its signature first/);
+    expect(NO_PARTNER_PIN_ADVISORY).toMatch(
+      /your partner already has your signed receipt/,
+    );
+  });
+
   test("signing states where both durable files land, before the run", () => {
     const pinned = draft({
       mode: "certificate",
@@ -784,9 +820,21 @@ describe("the receipts card's model", () => {
       partnerFingerprint: PARTNER_FINGERPRINT,
     });
     expect(receiptsAdvisories(pinned)).toEqual([
-      IDENTITY_LOCATION_ADVISORY,
-      RECEIPT_LOCATION_NOTICE,
+      { message: IDENTITY_LOCATION_ADVISORY, severity: "info" },
+      { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
     ]);
+  });
+
+  test("the identity advisory names the single-mount collision at the choice point", () => {
+    // The rendezvous directory falls back to the data root, so a filedrop
+    // exchange on a one-mount console syncs the folder this key is written into.
+    // The operator meets that fact where they choose to sign, not only in the
+    // deployment guide, and it names the remedy the guide documents.
+    expect(IDENTITY_LOCATION_ADVISORY).toMatch(/your partner syncs into/);
+    expect(IDENTITY_LOCATION_ADVISORY).toMatch(
+      /sign receipts in your name -- for every exchange, with every partner/,
+    );
+    expect(IDENTITY_LOCATION_ADVISORY).toMatch(/JOB_RENDEZVOUS_DIR/);
   });
 
   test("a blank identity withholds the fingerprint request, with the reason", () => {

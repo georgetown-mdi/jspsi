@@ -55,7 +55,14 @@ const MODE_CHOICES: ReadonlyArray<{
 ];
 
 /** What the operator is told about a fingerprint attempt that did not produce a
- * value. Each names the remedy, since every one of them is recoverable. */
+ * value. Each names the remedy, since every one of them is recoverable. The
+ * `refused` message carries the whole of the CLI's exit-64 class, which the
+ * discarded stderr leaves unsplittable at the boundary (`runSigningFingerprint`
+ * in `jobs/signingIdentity.ts`); one member of it -- a malformed `psilink.yaml`
+ * in the mount, which the pinned child cwd makes the only config read -- is a
+ * file the partner can write when the mount is also the synced folder, so the
+ * copy sends the operator to read that file rather than to suspect only
+ * themselves. */
 function fingerprintFailureMessage(
   outcome: Exclude<SigningFingerprintOutcome, { kind: "ok" }>,
 ): string {
@@ -63,9 +70,15 @@ function fingerprintFailureMessage(
     case "refused":
       return (
         "Your signing identity could not be created or read in the folder you " +
-        "mounted. Check that the folder is writable and that any signing " +
-        "identity already in it is intact, then try again -- running 'psilink " +
-        "fingerprint' against the same folder prints the reason."
+        "mounted. Check that the folder is writable, that any signing identity " +
+        "already in it is intact, and that any psilink.yaml sitting there is " +
+        "valid YAML -- a malformed one stops this request on its own. If that " +
+        "folder is also the one your partner syncs into, that psilink.yaml may " +
+        "be theirs rather than yours, so read it before assuming your own " +
+        "mistake; it cannot move where your key is written or change whose name " +
+        "it binds, because both are passed explicitly here. Fix what you find " +
+        "and try again -- running 'psilink fingerprint' against the same folder " +
+        "prints the reason."
       );
     case "invalid":
       return outcome.message;
@@ -132,6 +145,10 @@ export function ReceiptsCard({
     typeof navigator !== "undefined" && Boolean(navigator.clipboard);
   const problems = receiptsProblems(draft);
   const advisories = receiptsAdvisories(draft);
+  const warnings = advisories.filter(
+    (advisory) => advisory.severity === "warning",
+  );
+  const notices = advisories.filter((advisory) => advisory.severity === "info");
   const requestProblem = fingerprintRequestProblem(identity);
   const set = <TField extends keyof ReceiptsDraft>(
     field: TField,
@@ -309,15 +326,29 @@ export function ReceiptsCard({
           }
         />
 
-        {advisories.length > 0 && (
+        {warnings.length > 0 && (
+          <Alert
+            color="yellow"
+            icon={<IconAlertTriangle aria-hidden />}
+            title="Before you start this run"
+          >
+            <ul>
+              {warnings.map((advisory) => (
+                <li key={advisory.message}>{advisory.message}</li>
+              ))}
+            </ul>
+          </Alert>
+        )}
+
+        {notices.length > 0 && (
           <Alert
             color="blue"
             icon={<IconInfoCircle aria-hidden />}
             title="Worth knowing about these settings"
           >
             <ul>
-              {advisories.map((advisory) => (
-                <li key={advisory}>{advisory}</li>
+              {notices.map((advisory) => (
+                <li key={advisory.message}>{advisory.message}</li>
               ))}
             </ul>
           </Alert>

@@ -210,15 +210,30 @@ export function receiptsProblems(draft: ReceiptsDraft): Array<string> {
  * What the console says about where the signing identity lands, before the
  * operator asks for one. The console has one mounted working directory and the key
  * must outlive the job, so that folder is the only place it can go -- and it is
- * the folder this exchange's other material is already in. Warn and guide: the
- * operator's own machine, the operator's own folder, and the practice worth
+ * the folder this exchange's other material is already in.
+ *
+ * That folder is the operator's own in every layout but one: the rendezvous
+ * directory falls back to the data root when it is not separately provisioned
+ * (`jobRendezvous.ts`), so on a single-mount appliance a shared-folder exchange
+ * syncs the very folder holding this key -- and its disclosure lets the holder
+ * forge receipts under this party's identity for every exchange, not just the one
+ * the partner shares. The advisory names that collision where the operator
+ * chooses to sign rather than only in the deployment guide, which documents the
+ * split layout that resolves it. Warn and guide throughout: the operator's own
+ * machine and the operator's own directory layout, so the practice worth
  * following is stated rather than enforced.
  */
 export const IDENTITY_LOCATION_ADVISORY =
   "Your signing key is written into the folder you mounted, beside this " +
   "exchange's other files, because it has to outlive the run and be a file you " +
   "still have afterwards. Treat that folder like the results themselves: keep " +
-  "it readable only by you, and do not put it on shared storage.";
+  "it readable only by you, and do not put it on shared storage. A " +
+  "shared-folder exchange can do that for you: where the folder you mounted is " +
+  "also the folder your partner syncs into, your long-lived private key sits " +
+  "where they write, and whoever reads it can sign receipts in your name -- for " +
+  "every exchange, with every partner. Give the synced folder a mount of its " +
+  "own (JOB_RENDEZVOUS_DIR), separate from this one, before you sign an " +
+  "exchange that runs over it.";
 
 /**
  * What the console says about re-keying, so the operator learns it here rather
@@ -242,10 +257,22 @@ export const IDENTITY_REGENERATION_NOTICE =
  * exchange record as much as the receipt -- is written only once the exchange has
  * returned. So the operator's data reaches their partner and the run leaves them
  * nothing at all, which is a materially worse outcome than a missing receipt and
- * has to be said in those words. Still an advisory rather than a block: pinning is
- * half of a two-sided ceremony the operator may legitimately be part-way through
- * while authoring, and the console guides its own operator instead of stopping
- * them.
+ * has to be said in those words.
+ *
+ * Nor is the refusal symmetric across the two sides: the initiator sends its own
+ * `{certificate, signature}` frame BEFORE it verifies the partner's, while the
+ * responder verifies first (`exchangeSignedReceipt` in core), so on the
+ * initiating side the partner holds this party's signed receipt by the time the
+ * run stops. Which role this side takes is not the operator's to choose while
+ * authoring -- a file-sync exchange settles it at rendezvous -- so the copy
+ * states that disclosure conditionally, and says nothing about what the partner
+ * writes down locally, which no party can observe.
+ *
+ * Still an advisory rather than a block: pinning is half of a two-sided ceremony
+ * the operator may legitimately be part-way through while authoring, and the
+ * console guides its own operator instead of stopping them. It is the one
+ * advisory the card raises at `warning` weight, since it is a cost this run
+ * itself will have rather than a fact about where a file lands.
  */
 export const NO_PARTNER_PIN_ADVISORY =
   "Without your partner's fingerprint this exchange cannot finish, and it fails " +
@@ -253,7 +280,10 @@ export const NO_PARTNER_PIN_ADVISORY =
   "sign -- your data has already gone to your partner by then -- and stops " +
   "there, because nothing is on file to check the certificate they present " +
   "against. Nothing is written on this side: no results, no exchange record, and " +
-  "no receipt. Enter their fingerprint before you start the run. Ask them to run " +
+  "no receipt. Which side sends its signature first is settled when the two " +
+  "sides meet, so on a run where this side sends first, your partner already " +
+  "has your signed receipt when it stops. Enter their fingerprint before you " +
+  "start the run. Ask them to run " +
   "'psilink fingerprint' and send you the value over a channel you trust -- a " +
   "phone call, not the same email as the invitation.";
 
@@ -287,16 +317,34 @@ export const RETENTION_NOTE_NOTICE =
   "never a name, an identifier, or any value from the data.";
 
 /**
- * The non-blocking advisories the draft draws. Warn and guide, never a block:
- * every one of these is a legitimate run the command line accepts too.
+ * The weight the card shows one advisory at. Both are warn-and-guide and neither
+ * blocks the run, but they are not the same news: a `warning` is what this run
+ * costs the operator if they start it as authored, while an `info` states where a
+ * file lands and how to look after it. Carried here rather than in the card
+ * because it follows from what the advisory says, not from how it is laid out.
  */
-export function receiptsAdvisories(draft: ReceiptsDraft): Array<string> {
+export type ReceiptsAdvisorySeverity = "warning" | "info";
+
+/** One non-blocking advisory, with the weight it is shown at. */
+export interface ReceiptsAdvisory {
+  message: string;
+  severity: ReceiptsAdvisorySeverity;
+}
+
+/**
+ * The non-blocking advisories the draft draws. Warn and guide, never a block:
+ * every one of these is a legitimate run the command line accepts too. The card
+ * groups them by severity, so the order here is the order within a group.
+ */
+export function receiptsAdvisories(
+  draft: ReceiptsDraft,
+): Array<ReceiptsAdvisory> {
   if (draft.mode !== "certificate") return [];
   return [
-    IDENTITY_LOCATION_ADVISORY,
-    RECEIPT_LOCATION_NOTICE,
+    { message: IDENTITY_LOCATION_ADVISORY, severity: "info" },
+    { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
     ...(draft.partnerFingerprint.trim() === ""
-      ? [NO_PARTNER_PIN_ADVISORY]
+      ? [{ message: NO_PARTNER_PIN_ADVISORY, severity: "warning" as const }]
       : []),
   ];
 }
