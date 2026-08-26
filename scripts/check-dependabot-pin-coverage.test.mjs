@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -7,8 +7,11 @@ import { parse } from "yaml";
 import { coversAction as coversName } from "./check-dependabot-ignore-shape.mjs";
 import {
   coverageViolations,
+  exactnessViolations,
   headingViolations,
+  manifestPaths,
   npmGroups,
+  packageDeclarations,
   upgradeSections,
 } from "./check-dependabot-pin-coverage.mjs";
 
@@ -261,6 +264,174 @@ describe("a checklist package a group would swallow", () => {
   });
 });
 
+describe("finding the manifests to read", () => {
+  const expand = (glob) =>
+    ({
+      "apps/*/package.json": ["apps/cli/package.json", "apps/web/package.json"],
+      "packages/*/package.json": ["packages/core/package.json"],
+    })[glob] ?? [];
+
+  it("puts the root manifest first and sorts what the globs reach", () => {
+    expect(
+      manifestPaths({ workspaces: ["packages/*", "apps/*"] }, expand),
+    ).toEqual([
+      "package.json",
+      "apps/cli/package.json",
+      "apps/web/package.json",
+      "packages/core/package.json",
+    ]);
+  });
+
+  it("normalizes a Windows separator and keeps the root listed once", () => {
+    expect(
+      manifestPaths({ workspaces: ["apps/*", "."] }, (glob) =>
+        glob === "./package.json"
+          ? ["package.json"]
+          : ["apps\\cli\\package.json", "apps\\cli\\package.json"],
+      ),
+    ).toEqual(["package.json", "apps/cli/package.json"]);
+  });
+
+  it("returns null on a workspaces field it cannot read, so the CLI fails closed", () => {
+    expect(manifestPaths({}, expand)).toBeNull();
+    expect(
+      manifestPaths({ workspaces: { packages: ["apps/*"] } }, expand),
+    ).toBeNull();
+    expect(manifestPaths({ workspaces: ["apps/*", 7] }, expand)).toBeNull();
+  });
+});
+
+describe("reading the declarations out of the manifests", () => {
+  const manifests = [
+    {
+      path: "package.json",
+      manifest: { devDependencies: { vitest: "^4.1.9" } },
+    },
+    {
+      path: "apps/cli/package.json",
+      manifest: {
+        dependencies: { ssh2: "1.17.0", loglevel: "^1.9.2" },
+        devDependencies: { "@types/ssh2": "~1.15.5" },
+        optionalDependencies: { werift: "0.24.4" },
+      },
+    },
+  ];
+
+  it("takes every dependency field, carrying the manifest and field", () => {
+    expect(packageDeclarations(["ssh2", "werift"], manifests)).toEqual([
+      {
+        path: "apps/cli/package.json",
+        field: "dependencies",
+        name: "ssh2",
+        specifier: "1.17.0",
+      },
+      {
+        path: "apps/cli/package.json",
+        field: "optionalDependencies",
+        name: "werift",
+        specifier: "0.24.4",
+      },
+    ]);
+  });
+
+  it("matches a package by its whole name, so @types/ssh2 is not ssh2", () => {
+    expect(packageDeclarations(["@types/ssh2"], manifests)).toEqual([
+      {
+        path: "apps/cli/package.json",
+        field: "devDependencies",
+        name: "@types/ssh2",
+        specifier: "~1.15.5",
+      },
+    ]);
+  });
+
+  it("reads a manifest declaring no dependencies at all", () => {
+    expect(
+      packageDeclarations(["ssh2"], [{ path: "packages/x/package.json" }]),
+    ).toEqual([]);
+  });
+});
+
+describe("a checklist package's pin exactness", () => {
+  const declaration = (specifier, name = "werift") => ({
+    path: "apps/cli/package.json",
+    field: "dependencies",
+    name,
+    specifier,
+  });
+
+  it("passes a bare version, with a prerelease or build suffix among them", () => {
+    expect(
+      exactnessViolations(
+        ["werift"],
+        [
+          declaration("0.24.4"),
+          declaration("1.0.0-rc.1"),
+          declaration("1.0.0+20260826"),
+        ],
+      ),
+    ).toEqual([]);
+  });
+
+  it("fails a range, naming the manifest, the field, and the specifier", () => {
+    const violations = exactnessViolations(
+      ["werift"],
+      [declaration("^0.24.4")],
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain(
+      'apps/cli/package.json (dependencies) declares werift as "^0.24.4"',
+    );
+    expect(violations[0]).toContain("not a bare major.minor.patch version");
+  });
+
+  it("fails every other specifier shape, pinning route or not", () => {
+    const specifiers = [
+      "~0.24.4",
+      ">=0.24.4",
+      "0.24.x",
+      "*",
+      "latest",
+      "=0.24.4",
+      "0.24.4 || 0.25.0",
+      "file:../../vendor/werift.tgz",
+      "npm:werift@0.24.4",
+      "github:shinyoshiaki/werift-webrtc#v0.24.4",
+      "",
+    ];
+    expect(
+      exactnessViolations(
+        ["werift"],
+        specifiers.map((specifier) => declaration(specifier)),
+      ),
+    ).toHaveLength(specifiers.length);
+  });
+
+  it("reports each inexact declaration of the same package", () => {
+    expect(
+      exactnessViolations(
+        ["peerjs-js-binarypack"],
+        [
+          declaration("2.1.0", "peerjs-js-binarypack"),
+          { ...declaration("^2.1.0", "peerjs-js-binarypack"), path: "a.json" },
+          { ...declaration("^2.1.0", "peerjs-js-binarypack"), path: "b.json" },
+        ],
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("fails a checklist package no manifest declares", () => {
+    const violations = exactnessViolations(
+      ["werift", "ssh2"],
+      [declaration("0.24.4")],
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain(
+      'carries an "Upgrading ..." checklist for ssh2, but no manifest in this workspace declares it',
+    );
+  });
+});
+
 describe("the real repository configuration", () => {
   const sections = () =>
     upgradeSections(readRepo("docs/spec/DEPENDENCY_PINS.md"));
@@ -268,6 +439,16 @@ describe("the real repository configuration", () => {
     ...new Set(sections().flatMap(({ packages }) => packages)),
   ];
   const groups = () => npmGroups(readRepo(".github/dependabot.yml"));
+  const readJson = (path) => JSON.parse(readRepo(path));
+  const paths = () =>
+    manifestPaths(readJson("package.json"), (glob) =>
+      globSync(glob, { cwd: repoRoot }),
+    );
+  const declarations = () =>
+    packageDeclarations(
+      packages(),
+      paths().map((path) => ({ path, manifest: readJson(path) })),
+    );
 
   it("names its packages in every upgrade-checklist heading", () => {
     expect(sections().length).toBeGreaterThan(0);
@@ -299,6 +480,44 @@ describe("the real repository configuration", () => {
     expect(npmBlock.groups["non-critical"]["exclude-patterns"]).toContain(
       "werift",
     );
+  });
+
+  it("enumerates the manifests npm itself recorded as this workspace's", () => {
+    const lock = JSON.parse(readRepo("package-lock.json"));
+    const recorded = Object.keys(lock.packages)
+      .filter((path) => !path.includes("node_modules/"))
+      .map((path) => (path === "" ? "package.json" : `${path}/package.json`))
+      .sort();
+    expect(recorded.length).toBeGreaterThan(1);
+    expect([...paths()].sort()).toEqual(recorded);
+  });
+
+  it("declares every checklist package at an exact version", () => {
+    expect(exactnessViolations(packages(), declarations())).toEqual([]);
+  });
+
+  it("sweeps declarations in more than one manifest, so the green is not one file's", () => {
+    const swept = declarations();
+    expect(new Set(swept.map(({ name }) => name))).toEqual(new Set(packages()));
+    expect(new Set(swept.map(({ path }) => path)).size).toBeGreaterThan(1);
+  });
+
+  it("reddens on a range where an exact version stands", () => {
+    const [first, ...rest] = declarations();
+    const violations = exactnessViolations(packages(), [
+      { ...first, specifier: `^${first.specifier}` },
+      ...rest,
+    ]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain(first.path);
+  });
+
+  it("leaves the inexact @types siblings of a checklist package alone", () => {
+    const cli = JSON.parse(readRepo("apps/cli/package.json"));
+    expect(cli.devDependencies["@types/ssh2"]).not.toMatch(/^\d/);
+    expect(packages()).toContain("ssh2");
+    expect(packages()).not.toContain("@types/ssh2");
+    expect(declarations().map(({ name }) => name)).not.toContain("@types/ssh2");
   });
 
   it("exits 0 from the CLI entry point", () => {
