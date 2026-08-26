@@ -48,9 +48,10 @@
 // What this check cannot see:
 //   - A wire-format delta no vectors file pins. The single-pass index-table
 //     layouts (fixed-width and ragged), the cascade's per-round mapped-element
-//     and association-table frames, the count-only reply, and the save-bootstrap
-//     secret frame are specified in docs/spec/PROTOCOL.md and pinned by no file
-//     here, so a delta confined to one of them moves no digest. The pin is the
+//     and association-table frames, and the count-only reply are specified in
+//     docs/spec/PROTOCOL.md, and the save-bootstrap secret frame in
+//     docs/SECURITY_DESIGN.md; all are pinned by no file here, so a delta
+//     confined to one of them moves no digest. The pin is the
 //     issue's stated proxy for a wire-format change, not a complete model of the
 //     wire format.
 //   - A frame shape the pinned scenarios do not drive. The terms-envelope
