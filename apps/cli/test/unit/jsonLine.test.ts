@@ -2,10 +2,12 @@ import { describe, expect, test } from "vitest";
 
 import { asciiSafeJsonLine } from "../../src/util/jsonLine";
 
-// The encoder behind every machine-readable line the CLI writes to stdout. What
-// it promises is a pair: the emitted TEXT is printable ASCII throughout, and the
-// document that text parses to is the one `JSON.stringify` alone would have
-// produced -- which is what keeps a consumer's own display escape a single pass.
+// The encoder behind the probe's two machine-readable stdout lines
+// (apps/cli/src/commands/probeHostKey.ts: probeJsonLine and
+// probeDiagnosisJsonLine). What it promises is a pair: the emitted TEXT is
+// printable ASCII throughout, and the document that text parses to is the one
+// `JSON.stringify` alone would have produced -- which is what keeps a
+// consumer's own display escape a single pass.
 //
 // The bytes under test are built by code point rather than written as literals,
 // so this file stays readable ASCII and each case names the byte it drives.

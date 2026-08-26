@@ -106,9 +106,10 @@ test(
 // The bytes the `--json` machine route puts on a caller's stdout, read off a
 // real socket rather than handed to the composer: the peer writes DEL, a C1
 // control, and a PEM private-key marker, and the assertion is on the line the
-// handler would print. Its emission is exactly the handler's -- read the
-// diagnosis off the raised error, compose the line -- so what is driven here is
-// the whole path from the wire to the terminal.
+// handler would print. The handler's two emission steps -- read the diagnosis
+// off the raised error, compose the line -- are re-implemented here rather than
+// invoked through the handler itself, so this drives the wire-to-diagnosis path
+// but not the handler's own gate that decides whether to print at all.
 test(
   "the --json diagnosis line prints as ASCII whatever the peer answered with",
   async () => {
