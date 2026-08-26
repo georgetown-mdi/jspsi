@@ -1878,9 +1878,16 @@ const MAX_ASSEMBLED_KEY_LENGTH_PER_ROW =
 // them apart from the count: fuzzy comparisons, and a standardization or element
 // step that expands one value into several candidates without being a declared
 // fan-out producer (which is what routes it here rather than to the drop).
-function keyStringFanOutCapRefusal(projected: number): UsageError {
+function keyStringFanOutCapRefusal(
+  projected: number,
+  keyIndex: number | undefined,
+): UsageError {
+  const key =
+    keyIndex === undefined
+      ? "a linkage key"
+      : `the linkage key at linkageKeys[${keyIndex}]`;
   return new UsageError(
-    `a linkage key expands one row into ${projected} key strings, above the ` +
+    `${key} expands one row into ${projected} key strings, above the ` +
       `${MAX_KEY_STRINGS_PER_ROW} this exchange builds per row. Every ` +
       "element's candidates multiply across the key, so a key whose elements " +
       "expand -- through fuzzy comparisons declared on several of them, or a " +
@@ -2077,7 +2084,7 @@ export function buildKeyStrings(
   );
   if (projectedKeyStrings > MAX_KEY_STRINGS_PER_ROW) {
     if (!dropsOnExceedance)
-      throw keyStringFanOutCapRefusal(projectedKeyStrings);
+      throw keyStringFanOutCapRefusal(projectedKeyStrings, keyIndex);
     return dropRowFromKeyRound(
       key,
       index,

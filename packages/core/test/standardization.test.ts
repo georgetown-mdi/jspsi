@@ -2405,6 +2405,25 @@ describe("buildKeyStrings", () => {
     );
   });
 
+  test("the same row's fan-out cap refusal locates the offending key", () => {
+    let raised: unknown;
+    try {
+      withUnlistedFanOutFunctions(() => {
+        const dataset = makeDataset({
+          last_name: Array.from({ length: 150_000 }, (_unused, i) => `V${i}`),
+          date_of_birth: "19750716",
+        });
+        return buildKeyStrings(key, dataset, 0, false, 1);
+      });
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as UsageError).message).toMatch(
+      /linkageKeys\[1\] expands one row into 150000 key strings/,
+    );
+  });
+
   // --- the transformed-value ceiling -----------------------------------------
   // One magnitude invariant on the partner-authored path, checked on what an
   // element READS and on what each of its steps PRODUCES. The three
