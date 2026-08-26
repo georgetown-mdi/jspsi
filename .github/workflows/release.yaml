@@ -190,7 +190,7 @@ jobs:
           vuln-type: os
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          trivyignores: .github/trivyignore
+          trivyignores: .github/trivyignore.yaml
           exit-code: "1"
           format: table
           output: trivy-release-image.txt
@@ -206,7 +206,7 @@ jobs:
           vuln-type: os
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          trivyignores: .github/trivyignore
+          trivyignores: .github/trivyignore.yaml
           exit-code: "1"
           format: table
           output: trivy-release-image-fips.txt
@@ -240,7 +240,7 @@ jobs:
           {
             echo "## Release image vulnerability scans"
             echo
-            echo "Fixable HIGH and CRITICAL vulnerabilities in each image's OS package layer, with the exceptions in \`.github/trivyignore\` applied."
+            echo "Fixable HIGH and CRITICAL vulnerabilities in each image's OS package layer, with the exceptions in \`.github/trivyignore.yaml\` applied."
             echo
             report "Default image" "$SCAN_OUTCOME" trivy-release-image.txt
             report "FIPS variant image" "$FIPS_SCAN_OUTCOME" trivy-release-image-fips.txt

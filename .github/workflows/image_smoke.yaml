@@ -53,7 +53,7 @@ on:
       - "test_data/**"
       - ".github/workflows/image_smoke.yaml"
       # The exception list the vulnerability scan below reads.
-      - ".github/trivyignore"
+      - ".github/trivyignore.yaml"
   # Weekly re-run against a refreshed vulnerability database. The base images
   # are pinned by digest, so a vulnerability published against one of them
   # reaches an operator with nothing in this repository changed -- no path above
@@ -726,8 +726,12 @@ jobs:
       #     fixable only. A gate that fires on a vulnerability no bump can
       #     resolve is unactionable and gets switched off, so an unfixable
       #     finding is deliberately invisible here.
-      #   - accepted exceptions are in .github/trivyignore, each id carrying the
-      #     reason it was accepted.
+      #   - accepted exceptions are in .github/trivyignore.yaml, each id
+      #     carrying the reason it was accepted and an expiry date. Trivy
+      #     stops applying an entry on that date and the finding returns
+      #     here, which is the only thing that surfaces a stale
+      #     acceptance: an entry in force keeps this gate green whether
+      #     or not the condition it was written for still holds.
       #
       # A finding is a prompt to bump the pinned base -- the digest in the
       # Dockerfile, and on the variant the Amazon Linux release snapshot its dnf
@@ -758,7 +762,7 @@ jobs:
           vuln-type: os
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          trivyignores: .github/trivyignore
+          trivyignores: .github/trivyignore.yaml
           exit-code: "1"
           format: sarif
           output: trivy-image.sarif

@@ -178,7 +178,7 @@ The file is worth binding at all because the release and smoke builds export eve
 
 **The npm floor.** The install-side policy arrives in npm 11.16.0: that release is the first to define the `strict-allow-scripts` config, ship the preflight, and read `allowScripts` in arborist. Measured against this repo's own tree, 11.16.0 installs clean with the committed map and raises `ESTRICTALLOWSCRIPTS` when a verdict is removed, exactly as 11.17 does. npm 11.15.0 and earlier have none of it, so both are inert there: the map goes unread with no diagnostic at all, and the flag draws only `npm warn Unknown project config "strict-allow-scripts"` (measured on 11.15.0 against this branch's file) -- a warning about the key, never about an install script that ran unreviewed.
 
-The builder's floor is nonetheless 11.17 in intent, for two reasons that are not "anything lower is inert": 11.17 is the npm every matching rule in this section was measured against, and it is the first to run the same preflight from `npm exec`. Nothing in this repo enforces that floor, in the image or outside it. `engines.node` constrains node, not the npm shipped beside it, so an install driven by npm 11.15.0 or earlier runs with the policy silently off wherever that npm comes from -- including a builder whose base digest is re-pinned onto an older node. Which npm the pinned digest bundles is therefore a property of the base image: the one pinned here bundles 11.17.0, measured in a real build. The digest itself is held as a literal in `scripts/dockerfile-freeze.test.mjs`, once per stage, so moving it is an edit to that literal in the same diff rather than a silent re-pin -- what no check reads is which npm the digest moved to bundles.
+The builder's floor is nonetheless 11.17 in intent, for two reasons that are not "anything lower is inert": 11.17 is the npm every matching rule in this section was measured against, and it is the first to run the same preflight from `npm exec`. Nothing in this repo enforces that floor, in the image or outside it. `engines.node` constrains node, not the npm shipped beside it, so an install driven by npm 11.15.0 or earlier runs with the policy silently off wherever that npm comes from -- including a builder whose base digest is re-pinned onto an older node. Which npm the pinned digest bundles is therefore a property of the base image: the one pinned here bundles 11.19.0, measured by running the pinned digest. The digest itself is held as a literal in `scripts/dockerfile-freeze.test.mjs`, once per stage, so moving it is an edit to that literal in the same diff rather than a silent re-pin -- what no check reads is which npm the digest moved to bundles.
 
 The measured bundled-npm claim is about the default `Dockerfile` only (the digest-literal freeze covers both images). The FIPS variant's builder installs no distribution node package: its npm arrives inside the `nodejs.org` tarball named by `ARG NODE_VERSION`, whose bundled npm the build prints (`npm --version`) without asserting. So the npm that variant installs under is a property of that tarball, and nothing checks which version of npm is inside it. Moving `ARG NODE_VERSION` alone does not silently move it, though: no hash is committed for the release an override names, and the bytes it fetches will not match the hash committed for `v26.7.0`, so the override fails the build rather than installing under an unnoticed npm. The floor is unenforced in both builders; what differs is only which artifact decides it.
 
@@ -708,7 +708,7 @@ Two limits sit between a green run there and a bump being proved:
   same scanner ahead of publishing, so nothing unscanned ships. A base bump
   taken in order to clear an OS-layer finding is therefore confirmed at pull
   request time by scanning the built variant by hand -- OS-layer, `vuln`
-  scanner, HIGH and above, fixable only, against `.github/trivyignore` -- and
+  scanner, HIGH and above, fixable only, against `.github/trivyignore.yaml` -- and
   the re-widening to both legs travels in the bump's own diff.
 - **The build is single-arch.** That workflow builds native `amd64` with no
   QEMU, and no release workflow builds this image at all, so the release
@@ -762,7 +762,7 @@ not a defect in the pull request.
 lists `Dockerfile`, so the pull request runs the full matrix: both the
 default and the FIPS legs rebuild, even though only the default base moved.
 The default leg's OS-layer Trivy scan (`vuln`, HIGH/CRITICAL, fixable findings
-only, against `.github/trivyignore`) is not scoped out the way the FIPS leg's
+only, against `.github/trivyignore.yaml`) is not scoped out the way the FIPS leg's
 currently is (see [Bumping the FIPS base image](#bumping-the-fips-base-image)),
 so it runs on this pull request as it does on every other -- a new snapshot
 carrying a fixable OS-layer finding fails the pull request rather than
