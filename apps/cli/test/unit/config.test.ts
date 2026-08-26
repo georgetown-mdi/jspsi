@@ -1901,20 +1901,21 @@ test("diffLinkageTerms: an un-encodable value does not throw and identical terms
 test("diffLinkageTerms: a pathologically deep transform.params is a clean bounded rejection, not a RangeError", () => {
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // nfcDeep's own depth guard, exercised directly. A real invitation's deep params
-  // is rejected earlier, at the decode chokepoint (the camelize fold bounds it --
-  // see the decode-side test in core's invitation.test.ts), so the reconcile does
-  // not see one in practice. This builds the 3000-deep value straight into the
-  // reconcile input (bypassing decode) to pin nfcDeep's backstop: it is an
-  // independent recursion that must reject a deep value itself rather than trust its
-  // caller to have pre-bounded it. Build it iteratively so the test does not recurse.
+  // The reconcile walk's own depth guard, exercised directly. A real invitation's
+  // deep params is rejected earlier, at the decode chokepoint (the camelize fold
+  // bounds it -- see the decode-side test in core's invitation.test.ts), so the
+  // reconcile does not see one in practice. This builds the 3000-deep value
+  // straight into the reconcile input (bypassing decode) to pin that backstop: it
+  // is an independent recursion that must reject a deep value itself rather than
+  // trust its caller to have pre-bounded it. Build it iteratively so the test does
+  // not recurse.
   let deep: Record<string, unknown> = { leaf: "x" };
   for (let i = 0; i < 3000; i++) deep = { a: deep };
   incoming.linkageKeys[0].elements[0].transform = [
     { function: "noop", params: deep },
   ];
   // The depth guard fires as a clean NestingDepthExceededError (a UsageError ->
-  // CLI exit 64) at depth 256, before nfcDeep overflows the call stack with an
+  // CLI exit 64) at depth 256, before the walk overflows the call stack with an
   // unguarded RangeError that would otherwise surface as a generic exit 69.
   expect(() => diffLinkageTerms(existing, incoming)).toThrow(
     NestingDepthExceededError,
@@ -1960,52 +1961,267 @@ test("diffLinkageTerms: a transform.params value difference is a conflict", () =
   expect(conflicts.map((c) => c.field)).toContain("linkage_keys");
 });
 
-test("diffLinkageTerms: NFC-equivalent identifiers are not flagged as differing", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // Rename the first linkage key on both sides to the same logical string in
-  // different Unicode normalization forms: NFC "e-acute" (U+00E9) vs the NFD
-  // decomposition "e" + U+0301. They are canonically equivalent and must not
-  // register as a conflict.
-  existing.linkageKeys[0].name = "cl\u00e9";
-  incoming.linkageKeys[0].name = "cle\u0301";
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  expect(conflicts).toEqual([]);
+test("diffLinkageTerms: each name-carrying field agrees, differs, and refuses a normalization twin", () => {
+  // One logical name in the two Unicode normalization forms -- NFC "e-acute"
+  // (U+00E9) against the NFD decomposition "e" + U+0301 -- carried through each
+  // agreement-defining field that holds authored text (the rule-set citation,
+  // the fifth, has its own pair of tests above). Canonically equivalent and
+  // different bytes, which is the whole of the case: core compares each of these
+  // values byte-exact, so a twin pair aborts the exchange mid-run, and folding
+  // the two forms together here would report the reuse clean and let the run
+  // reach that abort with the partner keeping the invitation's spelling.
+  const composed = "acc\u00e9s";
+  const decomposed = "acce\u0301s";
+  expect(composed).not.toBe(decomposed);
+
+  const vectors: ReadonlyArray<{
+    field: string;
+    coreError: string;
+    withName: (terms: LinkageTerms, value: string) => void;
+  }> = [
+    {
+      field: "linkage_fields",
+      coreError: "linkage fields do not match",
+      withName: (terms, value) => {
+        terms.linkageFields = [
+          ...terms.linkageFields,
+          { ...structuredClone(terms.linkageFields[0]), name: value },
+        ];
+      },
+    },
+    {
+      field: "linkage_keys",
+      coreError: "linkage keys do not match",
+      withName: (terms, value) => {
+        terms.linkageKeys[0].name = value;
+      },
+    },
+    {
+      field: "legal_agreement",
+      coreError: "legal agreement reference mismatch",
+      withName: (terms, value) => {
+        terms.legalAgreement = {
+          reference: value,
+          purpose: "Audit and evaluation of the State tutoring program",
+          expirationDate: "2030-01-01",
+        };
+      },
+    },
+    {
+      field: "payload",
+      coreError: "payload mismatch",
+      withName: (terms, value) => {
+        terms.payload = { send: [{ name: value }], receive: [{ name: value }] };
+      },
+    },
+  ];
+
+  for (const vector of vectors) {
+    const naming = (value: string): LinkageTerms => {
+      const terms = cloneTerms(getDefaultLinkageTerms("Org"));
+      vector.withName(terms, value);
+      return terms;
+    };
+
+    const agreeing = diffLinkageTerms(naming(composed), naming(composed));
+    expect(agreeing.conflicts, vector.field).toEqual([]);
+    expect(agreeing.warnings, vector.field).toEqual([]);
+    // The shape the vector builds is compatible on its own, so a conflict below
+    // is the value the two sides carry rather than the shape around it.
+    expect(
+      validateCompatibility(naming(composed), naming(composed)).errors,
+      vector.field,
+    ).toEqual([]);
+
+    const differing = diffLinkageTerms(naming("alpha-set"), naming("beta-set"));
+    expect(
+      differing.conflicts.map((c) => c.field),
+      vector.field,
+    ).toEqual([vector.field]);
+
+    const existing = naming(composed);
+    const incoming = naming(decomposed);
+    const twins = diffLinkageTerms(existing, incoming);
+    expect(
+      twins.conflicts.map((c) => c.field),
+      vector.field,
+    ).toEqual([vector.field]);
+    // The same pair through core's own comparison, so the parity this compare
+    // exists for is asserted against core rather than restated here.
+    expect(
+      validateCompatibility(existing, incoming).errors.some((e) =>
+        e.includes(vector.coreError),
+      ),
+      vector.field,
+    ).toBe(true);
+  }
 });
 
-test("diffLinkageTerms: NFC-vs-NFD field names that reorder the sort are not a false conflict", () => {
+test("diffLinkageTerms: a normalization twin is shown as the code points that differ", () => {
+  // A twin pair prints the same glyphs, so the two sides of its conflict line
+  // read alike as raw text. They are told apart at the boundary the accept error
+  // crosses, which escapes every code point outside printable ASCII: the
+  // renderers here compose RAW -- escaping belongs to the single sink that shows
+  // the message -- and what the operator reads names the differing code points.
+  const composed = "acc\u00e9s";
+  const decomposed = "acce\u0301s";
+
+  const namingField = (name: string): LinkageTerms => {
+    const terms = cloneTerms(getDefaultLinkageTerms("Org"));
+    terms.linkageFields = [
+      ...terms.linkageFields,
+      { ...structuredClone(terms.linkageFields[0]), name },
+    ];
+    return terms;
+  };
+  const nameTwins = diffLinkageTerms(
+    namingField(composed),
+    namingField(decomposed),
+  );
+  expect(nameTwins.conflicts.map((c) => c.field)).toEqual(["linkage_fields"]);
+  expect(nameTwins.conflicts[0].existing).toContain(composed);
+  expect(nameTwins.conflicts[0].existing).not.toBe(
+    nameTwins.conflicts[0].incoming,
+  );
+  const nameRendered = renderedAcceptReconcileError(nameTwins.conflicts);
+  expect(nameRendered).toContain("acc\\xe9s");
+  expect(nameRendered).toContain("acce\\u0301s");
+  expect(nameRendered).not.toContain(composed);
+  expect(nameRendered).not.toContain(decomposed);
+
+  // The same pair in a payload column's description, where both sides summarize
+  // to the same column names and the diff falls back to the full detail: the
+  // fallback carries the twins to that boundary too, rather than collapsing them.
+  const describing = (description: string): LinkageTerms => {
+    const terms = cloneTerms(getDefaultLinkageTerms("Org"));
+    terms.payload = { send: [{ name: "note", description }] };
+    return terms;
+  };
+  const detailTwins = diffLinkageTerms(
+    describing(composed),
+    describing(decomposed),
+  );
+  expect(detailTwins.conflicts.map((c) => c.field)).toEqual(["payload"]);
+  const detailRendered = renderedAcceptReconcileError(detailTwins.conflicts);
+  expect(detailRendered).toContain("acc\\xe9s");
+  expect(detailRendered).toContain("acce\\u0301s");
+  expect(detailRendered).not.toContain(composed);
+  expect(detailRendered).not.toContain(decomposed);
+
+  // A pair that already differs in printable ASCII is shown as it is stored, so
+  // the operator reads the value to edit rather than an escape of it.
+  const plain = diffLinkageTerms(
+    namingField("alpha_set"),
+    namingField("beta_set"),
+  );
+  expect(plain.conflicts.map((c) => c.field)).toEqual(["linkage_fields"]);
+  const plainRendered = renderedAcceptReconcileError(plain.conflicts);
+  expect(plainRendered).toContain("alpha_set");
+  expect(plainRendered).toContain("beta_set");
+});
+
+test("diffLinkageTerms: each legal-agreement field is a conflict core refuses too", () => {
+  // The agreement is compared here as a whole object and cross-checked field by
+  // field in core, which is what makes the two equally strict on it. The vectors
+  // are keyed by the agreement's own fields, so a field added to it fails to
+  // compile here until that parity is established for it.
+  const agreement = {
+    reference: "MOU-2025-0042",
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2030-01-01",
+  };
+  const vectors: Record<
+    keyof NonNullable<LinkageTerms["legalAgreement"]>,
+    { value: string; coreError: string }
+  > = {
+    reference: {
+      value: "MOU-2025-0043",
+      coreError: "legal agreement reference mismatch",
+    },
+    purpose: {
+      value: "Verification of program enrollment",
+      coreError: "legal agreement purpose mismatch",
+    },
+    expirationDate: {
+      value: "2031-02-02",
+      coreError: "legal agreement expiration date mismatch",
+    },
+  };
+
+  for (const [field, vector] of Object.entries(vectors)) {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    existing.legalAgreement = { ...agreement };
+    incoming.legalAgreement = { ...agreement, [field]: vector.value };
+    expect(
+      diffLinkageTerms(existing, incoming).conflicts.map((c) => c.field),
+      field,
+    ).toEqual(["legal_agreement"]);
+    expect(
+      validateCompatibility(existing, incoming).errors.some((e) =>
+        e.includes(vector.coreError),
+      ),
+      field,
+    ).toBe(true);
+  }
+});
+
+test("diffLinkageTerms: linkage fields are sorted under core's own comparator", () => {
   // Two fields whose normalization form changes their sort order: NFC "\u00c5"
   // (U+00C5) sorts after "B", but its NFD form "A\u030a" begins with "A" and
-  // sorts before "B". If the comparator sorted on the raw name the two sides
-  // would order differently and falsely conflict; the NFC-normalized comparator
-  // must keep them equal.
+  // sorts before "B". The pre-sort exists so a field set's array order is not
+  // significant, and it sorts on the raw name -- the key core sorts by -- so the
+  // two sides reach the byte-exact compare ordered as validateCompatibility
+  // orders them.
   const base = getDefaultLinkageTerms("Org");
   const field = base.linkageFields[0];
-  const existing = cloneTerms(base);
-  const incoming = cloneTerms(base);
-  existing.linkageFields = [
-    { ...structuredClone(field), name: "B" },
-    { ...structuredClone(field), name: "\u00c5" },
-  ];
-  incoming.linkageFields = [
-    { ...structuredClone(field), name: "B" },
-    { ...structuredClone(field), name: "A\u030a" },
-  ];
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  expect(conflicts.map((c) => c.field)).not.toContain("linkage_fields");
-  expect(conflicts).toEqual([]);
+  const named = (...names: string[]): LinkageTerms => {
+    const terms = cloneTerms(base);
+    terms.linkageFields = names.map((name) => ({
+      ...structuredClone(field),
+      name,
+    }));
+    return terms;
+  };
+
+  // The same two names in either array order reconcile clean: the pre-sort is
+  // what makes that order insignificant, and this is a pair whose ordering
+  // depends on which spelling the comparator reads -- the raw "A\u030a" before
+  // "B", the NFC fold's "\u00c5" after it.
+  const reordered = diffLinkageTerms(
+    named("B", "A\u030a"),
+    named("A\u030a", "B"),
+  );
+  expect(reordered.conflicts).toEqual([]);
+  expect(reordered.warnings).toEqual([]);
+
+  // The same names in different normalization forms are a conflict, and core
+  // reaches that verdict on the same pair -- the run would otherwise abort on it
+  // after the reconcile had reported the config as matching.
+  const existing = named("B", "\u00c5");
+  const incoming = named("B", "A\u030a");
+  const twins = diffLinkageTerms(existing, incoming);
+  expect(twins.conflicts.map((c) => c.field)).toEqual(["linkage_fields"]);
+  expect(
+    validateCompatibility(existing, incoming).errors.some((e) =>
+      e.includes("linkage fields do not match"),
+    ),
+  ).toBe(true);
 });
 
 test("diffLinkageTerms: an explicitly-undefined optional is treated as absent", () => {
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
   // An in-process object (unlike a Zod-parsed one) can carry an explicit
-  // `undefined` optional. nfcDeep must drop it rather than feed it to
-  // canonicalString (which rejects undefined and would throw); it must still
-  // compare equal to the side that simply omits `swap`.
+  // `undefined` optional. The reconcile walk must drop it rather than feed it to
+  // canonicalString (which rejects undefined); it must still compare equal to the
+  // side that simply omits `swap`, and reach that verdict as a comparison rather
+  // than as the un-encodable-value warning a rejection would soften to.
   existing.linkageKeys[0].swap = undefined;
   expect(() => diffLinkageTerms(existing, incoming)).not.toThrow();
-  expect(diffLinkageTerms(existing, incoming).conflicts).toEqual([]);
+  const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
+  expect(conflicts).toEqual([]);
+  expect(warnings).toEqual([]);
 });
 
 test("diffLinkageTerms: a payload mismatch is a conflict", () => {
