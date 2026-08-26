@@ -28,9 +28,10 @@ import type { JobSigningChoice } from "@jobs/intent";
  * breaks -- the same treatment the sweep card gives `--force-retain-sweep`. And
  * the identity's LOCATION is not an operator choice: the appliance's one mounted
  * working directory is the only place a long-lived key both survives the job and
- * exists on the operator's own host, so the card states where the file lands and
- * what that means ({@link IDENTITY_LOCATION_ADVISORY}) instead of offering a
- * placement the console could not honour.
+ * exists on the operator's own host, so the card states where the file lands
+ * ({@link IDENTITY_AT_REST_NOTICE}), and what that costs on the layout where the
+ * partner syncs that folder ({@link IDENTITY_SHARED_MOUNT_ADVISORY}), instead of
+ * offering a placement the console could not honour.
  */
 
 /**
@@ -235,34 +236,48 @@ export function receiptsProblems(draft: ReceiptsDraft): Array<string> {
  * must outlive the job, so that folder is the only place it can go -- and it is
  * the folder this exchange's other material is already in.
  *
- * That folder is the operator's own in every layout but one: the rendezvous
- * directory falls back to the data root when it is not separately provisioned
- * (`jobRendezvous.ts`), so on a single-mount appliance a shared-folder exchange
- * syncs the very folder holding this key -- and its disclosure lets the holder
- * forge receipts under this party's identity for every exchange, not just the one
- * the partner shares. The advisory names that collision where the operator
- * chooses to sign rather than only in the deployment guide, which documents the
- * split layout that resolves it. Warn and guide throughout: the operator's own
- * machine and the operator's own directory layout, so the practice worth
- * following is stated rather than enforced.
+ * True on EVERY layout, so it is raised on every one: the key is at rest in a
+ * folder on the operator's own host whatever the rendezvous is provisioned as, and
+ * how that folder is looked after is the operator's to act on. It carries no
+ * hazard this run makes live, which is why it is an `info` beside
+ * {@link RECEIPT_LOCATION_NOTICE} rather than a warning
+ * (see {@link ReceiptsAdvisorySeverity}); the layout-gated hazard is
+ * {@link IDENTITY_SHARED_MOUNT_ADVISORY}, which the same card raises above it
+ * where it applies.
+ */
+export const IDENTITY_AT_REST_NOTICE =
+  "Your signing key is written into the folder you mounted, beside this " +
+  "exchange's other files, because it has to outlive the run and be a file you " +
+  "still have afterwards. Treat that folder like the results themselves: keep " +
+  "it readable only by you, and do not put it on shared storage.";
+
+/**
+ * What the console says where the folder the key is written into is also the folder
+ * the partner syncs: the rendezvous directory falls back to the data root when it is
+ * not separately provisioned (`jobRendezvous.ts`), so on a single-mount appliance a
+ * shared-folder exchange syncs the very folder holding this key -- and its
+ * disclosure lets the holder forge receipts under this party's identity for every
+ * exchange, not just the one the partner shares. The advisory names that collision
+ * where the operator chooses to sign rather than only in the deployment guide, which
+ * documents the split layout that resolves it. Warn and guide: the operator's own
+ * machine and the operator's own directory layout, so the practice worth following
+ * is stated rather than enforced.
  *
  * Raised on that layout ALONE (see {@link receiptsAdvisories}). An appliance whose
  * rendezvous has a mount of its own has already done what the closing sentence asks
  * for, and an advisory that fires there too would spend the warning channel on a
  * hazard that is not live -- which is what makes the same channel's live warnings
- * worth reading.
+ * worth reading. What the key-hygiene half of the news is holds on every layout and
+ * is stated separately ({@link IDENTITY_AT_REST_NOTICE}), so withholding this one
+ * leaves the card saying where the key lands rather than saying nothing about it.
  */
-export const IDENTITY_LOCATION_ADVISORY =
-  "Your signing key is written into the folder you mounted, beside this " +
-  "exchange's other files, because it has to outlive the run and be a file you " +
-  "still have afterwards. Treat that folder like the results themselves: keep " +
-  "it readable only by you, and do not put it on shared storage. A " +
-  "shared-folder exchange can do that for you: where the folder you mounted is " +
-  "also the folder your partner syncs into, your long-lived private key sits " +
-  "where they write, and whoever reads it can sign receipts in your name -- for " +
-  "every exchange, with every partner. Give the synced folder a mount of its " +
-  "own (JOB_RENDEZVOUS_DIR), separate from this one, before you sign an " +
-  "exchange that runs over it.";
+export const IDENTITY_SHARED_MOUNT_ADVISORY =
+  "This appliance rendezvouses out of the folder you mounted, so the folder " +
+  "your signing key sits in is also the folder your partner syncs into: your " +
+  "long-lived private key sits where they write, and whoever reads it can sign " +
+  "receipts in your name -- for every exchange, with every partner. Give the " +
+  "synced folder a mount of its own (JOB_RENDEZVOUS_DIR), separate from this " +
+  "one, before you sign an exchange that runs over it.";
 
 /**
  * What the console says about re-keying, so the operator learns it here rather
@@ -367,12 +382,14 @@ export interface ReceiptsAdvisory {
  *
  * `rendezvous` is this appliance's own rendezvous report, which decides the one
  * advisory that is about the DEPLOYMENT rather than the draft
- * ({@link IDENTITY_LOCATION_ADVISORY}): it is raised only where a rendezvous folder
- * holds the mounted working directory, the layout in which the partner syncs the
- * folder the signing key sits in. Withheld only on a report that positively says
+ * ({@link IDENTITY_SHARED_MOUNT_ADVISORY}): it is raised only where a rendezvous
+ * folder holds the mounted working directory, the layout in which the partner syncs
+ * the folder the signing key sits in. Withheld only on a report that positively says
  * otherwise -- an appliance that has not answered yet, or one whose probe failed,
  * keeps the advisory, since an unread report is not evidence of a separate mount.
- * The other two advisories are the draft's own and are unchanged by the layout.
+ * Everything else here is unchanged by the layout: the draft's own two, and the
+ * at-rest notice about the key file, which is news on every layout and is what a
+ * card on a separately-mounted appliance still says about where the key lands.
  */
 export function receiptsAdvisories(
   draft: ReceiptsDraft,
@@ -386,10 +403,11 @@ export function receiptsAdvisories(
       ? []
       : [
           {
-            message: IDENTITY_LOCATION_ADVISORY,
+            message: IDENTITY_SHARED_MOUNT_ADVISORY,
             severity: "warning" as const,
           },
         ]),
+    { message: IDENTITY_AT_REST_NOTICE, severity: "info" },
     { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
     ...(draft.partnerFingerprint.trim() === ""
       ? [{ message: NO_PARTNER_PIN_ADVISORY, severity: "warning" as const }]

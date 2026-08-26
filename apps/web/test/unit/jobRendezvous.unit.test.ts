@@ -171,6 +171,36 @@ function withUnreadableRealpath<T>(unreadable: string, body: () => T): T {
   }
 }
 
+/**
+ * Run `body` with `alias` reporting the filesystem identity of `target`: two real,
+ * separately resolvable paths whose `(st_dev, st_ino)` pairs are one directory's,
+ * which is what one host directory bind-mounted at two container paths looks like
+ * from inside the container.
+ *
+ * Injected because the shape cannot be built in a unit test: a bind mount takes
+ * privileges the suite does not have, and a hard link to a directory is refused
+ * outright. `realpathSync` is left alone, so the two paths stay as unrelated to each
+ * other as the resolution's path comparisons can see -- the identity is the only
+ * thing that relates them.
+ */
+function withAliasedInode<T>(alias: string, target: string, body: () => T): T {
+  const statSync = fs.statSync;
+  const aliased = path.resolve(alias);
+  const spy = vi
+    .spyOn(fs, "statSync")
+    .mockImplementation((entry: fs.PathLike, options?: fs.StatSyncOptions) =>
+      statSync(
+        path.resolve(String(entry)) === aliased ? target : entry,
+        options,
+      ),
+    );
+  try {
+    return body();
+  } finally {
+    spy.mockRestore();
+  }
+}
+
 afterEach(() => {
   for (const dir of dirs.splice(0))
     fs.rmSync(dir, { recursive: true, force: true });
@@ -780,6 +810,63 @@ describe("whether a rendezvous leg holds the data root", () => {
         }),
       ).sharesDataRoot,
     ).toBe(true);
+  });
+
+  test("a leg bind-mounted onto the data root does, though no path relates them", () => {
+    // One host directory bound in at two container paths: two paths, two real
+    // paths, one directory -- and the partner's sync reaches the signing key
+    // through either. Nothing but the (st_dev, st_ino) identity relates the two,
+    // so a resolution deciding on paths alone would withhold the advisory on
+    // exactly the layout it exists for.
+    const mounts = tempDir("mounts");
+    const work = subDir(mounts, "work");
+    const share = subDir(mounts, "share");
+    const env = { JOB_DATA_ROOT: work, JOB_RENDEZVOUS_DIR: share };
+    expect(
+      withAliasedInode(share, work, () => resolveJobRendezvousProvisioning(env))
+        .sharesDataRoot,
+    ).toBe(true);
+    // Without the aliasing the same two mounts are separate folders, so it is
+    // the identity that decides the case and not the directories it runs on.
+    expect(
+      resolveJobRendezvousProvisioning(env).sharesDataRoot,
+    ).toBeUndefined();
+  });
+
+  test("a leg aliasing a folder that HOLDS the data root does too", () => {
+    // The identity is compared up the data root's whole ancestor chain, because a
+    // leg aliasing the folder the working directory sits in reaches the key just
+    // as one aliasing the working directory does.
+    const mounts = tempDir("mounts");
+    const enclosing = subDir(mounts, "enclosing");
+    const work = subDir(enclosing, "work");
+    const share = subDir(mounts, "share");
+    expect(
+      withAliasedInode(share, enclosing, () =>
+        resolveJobRendezvousProvisioning({
+          JOB_DATA_ROOT: work,
+          JOB_RENDEZVOUS_DIR: share,
+        }),
+      ).sharesDataRoot,
+    ).toBe(true);
+  });
+
+  test("a leg aliasing a folder INSIDE the data root does not", () => {
+    // Directional through the aliased comparison as much as the lexical one: the
+    // partner's sync reaches the subfolder the leg is bound to, not the key in
+    // the folder above it.
+    const mounts = tempDir("mounts");
+    const work = subDir(mounts, "work");
+    const inside = subDir(work, "inside");
+    const share = subDir(mounts, "share");
+    expect(
+      withAliasedInode(share, inside, () =>
+        resolveJobRendezvousProvisioning({
+          JOB_DATA_ROOT: work,
+          JOB_RENDEZVOUS_DIR: share,
+        }),
+      ).sharesDataRoot,
+    ).toBeUndefined();
   });
 
   test("no data root leaves nothing to hold", () => {

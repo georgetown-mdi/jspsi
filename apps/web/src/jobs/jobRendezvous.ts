@@ -507,6 +507,71 @@ export function rendezvousSplitFaults(
 }
 
 /**
+ * A directory's identity as the filesystem knows it -- the `(st_dev, st_ino)` pair
+ * every path for one directory shares, whatever those paths spell -- or why it has
+ * none: a directory that is not there has no identity to compare, while one the
+ * process could not stat has one it cannot read.
+ */
+type DirectoryIdentity =
+  { known: true; key: string } | { known: false; unreadable: boolean };
+
+/**
+ * Read a directory's {@link DirectoryIdentity}. The pair is read as BigInt so an
+ * inode number past a double's exact range compares as the filesystem reports it
+ * rather than as the nearest representable number, and it is read through `stat`
+ * rather than `lstat` so a symlinked path answers for the directory it names.
+ */
+function readDirectoryIdentity(dir: string): DirectoryIdentity {
+  try {
+    const stats = fs.statSync(dir, { bigint: true });
+    return { known: true, key: `${stats.dev}:${stats.ino}` };
+  } catch (error) {
+    return { known: false, unreadable: !isMissingPathError(error) };
+  }
+}
+
+/**
+ * Whether `leg` IS the data root, or a directory holding it, as the FILESYSTEM
+ * knows the three rather than as their paths spell them.
+ *
+ * Aliasing the filesystem does not express as a symlink is invisible to every path
+ * comparison, `realpath` included: the same host directory bind-mounted at two
+ * container paths (`-v /host/psilink:/data` beside `-v /host/psilink:/mnt/share`)
+ * resolves to two distinct real paths, and both name the one directory a partner's
+ * sync writes into. The identity pair is what the two paths still share.
+ *
+ * The data root's whole ancestor chain is walked, not the data root alone, because a
+ * leg aliasing a directory that HOLDS the data root reaches this party's key exactly
+ * as one aliasing the data root does -- the same direction {@link pathFormsContain}
+ * tests, so the aliased comparison stays directional too. Each ancestor is statted
+ * lexically, which needs no realpath of its own: `stat` follows a symlinked ancestor
+ * to the directory it names before reporting the pair.
+ *
+ * A directory the process could not stat counts as holding, the direction an
+ * unreadable real path already fails in: what could not be read is precisely where
+ * the aliasing would sit, and the verdict decides a warn-and-guide advisory. A
+ * directory that is simply absent aliases nothing and counts as nothing.
+ *
+ * What remains invisible is aliasing that neither `realpath` nor this identity walk
+ * can see -- a leg bound onto some directory whose own contents reach the data root
+ * by a route the ancestor chain does not pass through.
+ */
+function legAliasesDataRootChain(leg: string, dataRoot: string): boolean {
+  const legIdentity = readDirectoryIdentity(leg);
+  if (!legIdentity.known) return legIdentity.unreadable;
+  let current = path.resolve(dataRoot);
+  for (;;) {
+    const identity = readDirectoryIdentity(current);
+    if (identity.known) {
+      if (identity.key === legIdentity.key) return true;
+    } else if (identity.unreadable) return true;
+    const parent = path.dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+}
+
+/**
  * Whether any rendezvous leg holds the job data root, the fact
  * {@link JobRendezvousProvisioning.sharesDataRoot} carries.
  *
@@ -516,7 +581,10 @@ export function rendezvousSplitFaults(
  * party's files where the partner syncs, while a leg mounted INSIDE the data root
  * does not -- the sync reaches that subfolder, not the key beside it. Each leg is
  * compared as configured and as its real path (see {@link resolvePathForms}), so a
- * leg symlinked onto the data root counts exactly as one configured at it does.
+ * leg symlinked onto the data root counts exactly as one configured at it does, and
+ * then by filesystem identity (see {@link legAliasesDataRootChain}), which is what
+ * carries the verdict to aliasing no path expresses -- one host directory
+ * bind-mounted at two container paths.
  *
  * A leg or a data root whose real path cannot be READ counts as holding: the
  * symlink that would join them is precisely what could not be resolved, and this
@@ -536,7 +604,8 @@ function rendezvousHoldsDataRoot(
     return (
       !legPaths.canonicalized ||
       !dataRootPaths.canonicalized ||
-      pathFormsContain(legPaths, dataRootPaths)
+      pathFormsContain(legPaths, dataRootPaths) ||
+      legAliasesDataRootChain(dir, dataRoot)
     );
   });
 }
@@ -544,9 +613,10 @@ function rendezvousHoldsDataRoot(
 /**
  * Resolve this appliance's whole rendezvous provisioning from the environment: both
  * legs, their names and locators, the reason a filedrop exchange cannot run when the
- * pair is incoherent, and whether a leg holds the data root. Reads the filesystem
- * once per leg -- twice for a leg of a split, which the containment refusal resolves
- * separately -- plus once for the data root; the memoized entry point is
+ * pair is incoherent, and whether a leg holds the data root. Reads the filesystem --
+ * each leg's real path, the data root's, and the identity of the data root's
+ * ancestors where the paths alone leave the layout open -- for the whole appliance
+ * rather than per exchange; the memoized entry point is
  * {@link useJobRendezvousProvisioning}.
  */
 export function resolveJobRendezvousProvisioning(
