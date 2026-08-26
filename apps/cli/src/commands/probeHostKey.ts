@@ -5,6 +5,7 @@ import {
   HOST_KEY_FINGERPRINT_REGEX,
   UsageError,
   redactAndSanitizeForDisplay,
+  redactPrivateKeyMaterial,
 } from "@psilink/core";
 import type { PresentedHostKey, SFTPConnectionConfig } from "@psilink/core";
 import type { PeerIdentificationDiagnosis } from "../connection/sftpPeerIdentification";
@@ -24,6 +25,7 @@ import {
   parseOrExit,
   singleValue,
 } from "../util/cli";
+import { asciiSafeJsonLine } from "../util/jsonLine";
 
 // `psilink probe-host-key` is the ssh-keyscan analogue: it connects only far
 // enough to read the SFTP server's presented host key, then refuses the
@@ -183,11 +185,13 @@ function assertCanonicalFingerprint(presented: PresentedHostKey): void {
 
 /** The single stdout line the `--json` form emits: snake_case keys, the machine
  * form the console consumes. `keyType` is the server's choice within core's
- * charset and length bound, so it is carried as a JSON string value (JSON
- * encoding escapes any control byte) and re-validated at the console's trust
- * boundary. */
+ * charset and length bound, so it is carried as a JSON string value and
+ * re-validated at the console's trust boundary; the line rides
+ * {@link asciiSafeJsonLine} like every machine line this command emits, so a
+ * bound that ever admitted a byte outside printable ASCII could still not put
+ * one on a terminal. */
 function probeJsonLine(presented: PresentedHostKey): string {
-  return JSON.stringify({
+  return asciiSafeJsonLine({
     fingerprint: presented.fingerprint,
     key_type: presented.keyType,
   });
@@ -200,26 +204,31 @@ function probeJsonLine(presented: PresentedHostKey): string {
  * success line, and `diagnosis` is the discriminant -- the success line carries
  * no such key, so the two shapes can never be read for one another.
  *
- * The excerpt is bytes an untrusted party chose. It is already bounded at
- * composition (see `PEER_EXCERPT_MAX_BYTES` in connection/sftpPeerIdentification)
- * and rides here as a JSON string value, whose encoding escapes U+0000-U+001F
- * along with the quote and the backslash -- which is what keeps the line one
- * line. That is the whole of what the encoding gives: DEL and the C1 range cross
- * unescaped, so it is the consumer that re-validates and escapes the value at
- * its own display boundary.
+ * The excerpt is bytes an untrusted party chose, and it takes the two passes the
+ * human route takes over the same bytes. It is bounded at composition (see
+ * `PEER_EXCERPT_MAX_BYTES` in connection/sftpPeerIdentification), redacted of
+ * private-key material where it is interpolated here exactly as
+ * explainPeerIdentificationFailure redacts it, and emitted through
+ * {@link asciiSafeJsonLine}, which leaves every byte of the LINE printable
+ * ASCII.
+ *
+ * Those escapes are the JSON encoding's own, so what a consumer parses back is
+ * the peer's bytes unchanged: this is not a display boundary, and a consumer
+ * that renders the excerpt to a human still escapes it at that sink, exactly
+ * once (see CONTRIBUTING.md, Operator-facing escaping).
  *
  * @internal exported for testing
  */
 export function probeDiagnosisJsonLine(
   diagnosis: PeerIdentificationDiagnosis,
 ): string {
-  return JSON.stringify(
+  return asciiSafeJsonLine(
     diagnosis.kind === "closed-unanswered"
       ? { diagnosis: "closed_unanswered" }
       : {
           diagnosis: "non_ssh",
           shape: diagnosis.shape,
-          excerpt: diagnosis.excerpt,
+          excerpt: redactPrivateKeyMaterial(diagnosis.excerpt),
         },
   );
 }

@@ -1,6 +1,10 @@
 import { expect, test } from "vitest";
 
-import { probeHostKeyLines } from "../../../src/commands/probeHostKey";
+import {
+  probeDiagnosisJsonLine,
+  probeHostKeyLines,
+} from "../../../src/commands/probeHostKey";
+import { peerIdentificationDiagnosisOf } from "../../../src/connection/sftpPeerIdentification";
 import { establishHostKeyTrust } from "../../../src/hostKeyTrust";
 import {
   countingPeer,
@@ -93,6 +97,56 @@ test(
       expect(peer.accepted().silent).toBe(1);
     } finally {
       process.stdin.isTTY = wasTTY;
+      await peer.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+// The bytes the `--json` machine route puts on a caller's stdout, read off a
+// real socket rather than handed to the composer: the peer writes DEL, a C1
+// control, and a PEM private-key marker, and the assertion is on the line the
+// handler would print. The handler's two emission steps -- read the diagnosis
+// off the raised error, compose the line -- are re-implemented here rather than
+// invoked through the handler itself, so this drives the wire-to-diagnosis path
+// but not the handler's own gate that decides whether to print at all.
+test(
+  "the --json diagnosis line prints as ASCII whatever the peer answered with",
+  async () => {
+    const answer = Buffer.concat([
+      Buffer.from("GET / HTTP/1.0\r\nX-Trap: "),
+      Buffer.from([0x7f, 0x1b, 0x5b, 0x33, 0x31, 0x6d, 0x9b]),
+      Buffer.from("\r\n-----BEGIN RSA PRIVATE KEY-----\r\nMIIEowIBAAKC\r\n"),
+    ]);
+    const peer = await countingPeer((socket) => socket.end(answer));
+    try {
+      const raised = await probeHostKeyLines({
+        sftpUrl: `sftp://${peer.host}:${peer.port}`,
+        connectTimeoutSeconds: 10,
+        json: true,
+        verbosity: -1,
+      }).then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+      const diagnosis = peerIdentificationDiagnosisOf(raised);
+      expect(diagnosis?.kind).toBe("non-ssh");
+      const line = probeDiagnosisJsonLine(diagnosis!);
+
+      // Safe to print as it stands.
+      expect(/^[\x20-\x7e]*$/.test(line)).toBe(true);
+      expect(line).toContain("\\u007f");
+      expect(line).toContain("\\u009b");
+      // Still one line of JSON with the keys and value types it has always had.
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      expect(Object.keys(parsed)).toEqual(["diagnosis", "shape", "excerpt"]);
+      expect(parsed["diagnosis"]).toBe("non_ssh");
+      // The key marker the peer planted is redacted, as it is on the human
+      // route the same run rendered.
+      expect(parsed["excerpt"]).toContain("[redacted private key]");
+      expect(line).not.toContain("MIIEowIBAAKC");
+      expect(displayLinks(raised).join("")).not.toContain("MIIEowIBAAKC");
+    } finally {
       await peer.stop();
     }
   },
