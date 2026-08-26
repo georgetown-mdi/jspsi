@@ -778,12 +778,17 @@ function renderRuleSetCitationConflict(
  * gate (both sides declare a citation) without matching the predicate would
  * leave that gap open on the field the gate was written for.
  *
- * On the legal agreement and the payload this compare is STRICTER than core,
- * which reads only the fields it cross-checks (a payload column's description
- * takes part here and not there), because the question here is whether the
- * document being reused is the one the acceptance adopts. Strictness in that
- * direction only refuses a reuse the operator can still make onto a fresh
- * config; it cannot pass terms the exchange would then refuse.
+ * On the PAYLOAD alone this compare is STRICTER than core, which reads only the
+ * column names its send/receive mirror cross-checks: a column's `description`
+ * takes part in the whole-object compare here and is never read there. On the
+ * legal agreement the two are EQUALLY strict -- the object is compared whole
+ * here, and `validateCompatibility` cross-checks each of its fields, a parity
+ * `test/unit/config.test.ts` holds field by field rather than leaving to this
+ * sentence. The extra strictness on the payload answers the question this
+ * compare asks, which is whether the document being reused is the one the
+ * acceptance adopts; in that direction it only refuses a reuse the operator can
+ * still make onto a fresh config, and it cannot pass terms the exchange would
+ * then refuse.
  */
 export function diffLinkageTerms(
   existing: LinkageTerms,

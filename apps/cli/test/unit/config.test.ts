@@ -2057,6 +2057,115 @@ test("diffLinkageTerms: each name-carrying field agrees, differs, and refuses a 
   }
 });
 
+test("diffLinkageTerms: a normalization twin is shown as the code points that differ", () => {
+  // A twin pair prints the same glyphs, so the two sides of its conflict line
+  // read alike as raw text. They are told apart at the boundary the accept error
+  // crosses, which escapes every code point outside printable ASCII: the
+  // renderers here compose RAW -- escaping belongs to the single sink that shows
+  // the message -- and what the operator reads names the differing code points.
+  const composed = "acc\u00e9s";
+  const decomposed = "acce\u0301s";
+
+  const namingField = (name: string): LinkageTerms => {
+    const terms = cloneTerms(getDefaultLinkageTerms("Org"));
+    terms.linkageFields = [
+      ...terms.linkageFields,
+      { ...structuredClone(terms.linkageFields[0]), name },
+    ];
+    return terms;
+  };
+  const nameTwins = diffLinkageTerms(
+    namingField(composed),
+    namingField(decomposed),
+  );
+  expect(nameTwins.conflicts.map((c) => c.field)).toEqual(["linkage_fields"]);
+  expect(nameTwins.conflicts[0].existing).toContain(composed);
+  expect(nameTwins.conflicts[0].existing).not.toBe(
+    nameTwins.conflicts[0].incoming,
+  );
+  const nameRendered = renderedAcceptReconcileError(nameTwins.conflicts);
+  expect(nameRendered).toContain("acc\\xe9s");
+  expect(nameRendered).toContain("acce\\u0301s");
+  expect(nameRendered).not.toContain(composed);
+  expect(nameRendered).not.toContain(decomposed);
+
+  // The same pair in a payload column's description, where both sides summarize
+  // to the same column names and the diff falls back to the full detail: the
+  // fallback carries the twins to that boundary too, rather than collapsing them.
+  const describing = (description: string): LinkageTerms => {
+    const terms = cloneTerms(getDefaultLinkageTerms("Org"));
+    terms.payload = { send: [{ name: "note", description }] };
+    return terms;
+  };
+  const detailTwins = diffLinkageTerms(
+    describing(composed),
+    describing(decomposed),
+  );
+  expect(detailTwins.conflicts.map((c) => c.field)).toEqual(["payload"]);
+  const detailRendered = renderedAcceptReconcileError(detailTwins.conflicts);
+  expect(detailRendered).toContain("acc\\xe9s");
+  expect(detailRendered).toContain("acce\\u0301s");
+  expect(detailRendered).not.toContain(composed);
+  expect(detailRendered).not.toContain(decomposed);
+
+  // A pair that already differs in printable ASCII is shown as it is stored, so
+  // the operator reads the value to edit rather than an escape of it.
+  const plain = diffLinkageTerms(
+    namingField("alpha_set"),
+    namingField("beta_set"),
+  );
+  expect(plain.conflicts.map((c) => c.field)).toEqual(["linkage_fields"]);
+  const plainRendered = renderedAcceptReconcileError(plain.conflicts);
+  expect(plainRendered).toContain("alpha_set");
+  expect(plainRendered).toContain("beta_set");
+});
+
+test("diffLinkageTerms: each legal-agreement field is a conflict core refuses too", () => {
+  // The agreement is compared here as a whole object and cross-checked field by
+  // field in core, which is what makes the two equally strict on it. The vectors
+  // are keyed by the agreement's own fields, so a field added to it fails to
+  // compile here until that parity is established for it.
+  const agreement = {
+    reference: "MOU-2025-0042",
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2030-01-01",
+  };
+  const vectors: Record<
+    keyof NonNullable<LinkageTerms["legalAgreement"]>,
+    { value: string; coreError: string }
+  > = {
+    reference: {
+      value: "MOU-2025-0043",
+      coreError: "legal agreement reference mismatch",
+    },
+    purpose: {
+      value: "Verification of program enrollment",
+      coreError: "legal agreement purpose mismatch",
+    },
+    expirationDate: {
+      value: "2031-02-02",
+      coreError: "legal agreement expiration date mismatch",
+    },
+  };
+
+  for (const [field, vector] of Object.entries(vectors)) {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    existing.legalAgreement = { ...agreement };
+    incoming.legalAgreement = { ...agreement, [field]: vector.value };
+    expect(
+      diffLinkageTerms(existing, incoming).conflicts.map((c) => c.field),
+      field,
+    ).toEqual(["legal_agreement"]);
+    expect(
+      validateCompatibility(existing, incoming).errors.some((e) =>
+        e.includes(vector.coreError),
+      ),
+      field,
+    ).toBe(true);
+  }
+});
+
 test("diffLinkageTerms: linkage fields are sorted under core's own comparator", () => {
   // Two fields whose normalization form changes their sort order: NFC "\u00c5"
   // (U+00C5) sorts after "B", but its NFD form "A\u030a" begins with "A" and
