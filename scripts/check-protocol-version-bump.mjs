@@ -46,9 +46,11 @@
 // entry is a reviewer's call, not this check's.
 //
 // What this check cannot see:
-//   - A wire-format delta no vectors file pins. The single-pass index-table
-//     layouts (fixed-width and ragged), the cascade's per-round mapped-element
-//     and association-table frames, and the count-only reply are specified in
+//   - A wire-format delta no vectors file pins. The pinned files cover the PSI
+//     engine's bytes, the resolved association mapping, the terms-exchange
+//     envelope, and single-pass message 2's frame layout -- not every frame the
+//     protocol defines. The cascade's per-round mapped-element and
+//     association-table frames and the count-only reply are specified in
 //     docs/spec/PROTOCOL.md, and the save-bootstrap secret frame in
 //     docs/SECURITY_DESIGN.md; all are pinned by no file here, so a delta
 //     confined to one of them moves no digest. The pin is the
@@ -109,6 +111,11 @@ export const PRE_PUBLICATION_RELEASE = "0.1.0";
  * frames the linkage rounds exchange.
  */
 export const COVERED_VECTORS = [
+  {
+    vectors: "index-table-vectors.json",
+    reason:
+      "the wire layout of single-pass message 2 -- the four-part frame's boundaries and the distinct-value index table in both the layouts a sender ships (fixed-width and ragged), which a partner reads from session state with no wire flag.",
+  },
   {
     vectors: "psi-engine-wire-vectors.json",
     reason:
