@@ -1,8 +1,12 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, posix, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+
+import {
+  descendants,
+  parseFile,
+  parseSource,
+  sourceModules,
+} from "./lib/typeScriptSources.mjs";
 
 // Every HTTP method handler of the console's job API calls gateJobRoute, calls
 // it before anything else in its body, and returns the refusal it yields.
@@ -93,48 +97,6 @@ const GATE_MODULE_TAIL = "routeSupport";
 const OUTCOME_TYPE = "GateOutcome";
 const DISCRIMINANT = "kind";
 const REFUSING_KIND = "response";
-
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-
-/** Parse a TypeScript source file with parent pointers, for ancestor walks. */
-function parseSource(fileName, text) {
-  return ts.createSourceFile(
-    fileName,
-    text,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-}
-
-/** Parse a repository-relative source file as this checkout ships it. */
-function parseFile(file) {
-  return parseSource(file, readFileSync(resolve(root, file), "utf8"));
-}
-
-/** Every descendant of `node`, in source order. */
-function descendants(node) {
-  const found = [];
-  const visit = (child) => {
-    found.push(child);
-    ts.forEachChild(child, visit);
-  };
-  ts.forEachChild(node, visit);
-  return found;
-}
-
-/** Every TypeScript source under `dir`, repository-relative and sorted. */
-function routeModules(dir = ROUTES_DIR) {
-  const found = [];
-  for (const entry of readdirSync(resolve(root, dir), {
-    withFileTypes: true,
-  })) {
-    const path = posix.join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...routeModules(path));
-    else if (/\.tsx?$/.test(entry.name)) found.push(path);
-  }
-  return found.sort();
-}
 
 /**
  * The local names a module binds to the gate: the aliases of a `gateJobRoute`
@@ -534,7 +496,7 @@ function unreadableIn(readings) {
   ];
 }
 
-const modules = routeModules();
+const modules = sourceModules(ROUTES_DIR);
 const readings = readRoutes(modules);
 const handlers = allHandlers(readings);
 

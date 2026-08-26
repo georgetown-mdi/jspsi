@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { parseSource, requestIssuingSites } from "./sftpAdapterSites.mjs";
+import { requestIssuingSites } from "./sftpAdapterSites.mjs";
+import { parseSource } from "./typeScriptSources.mjs";
 
 describe("SFTP adapter request-issuing sites", () => {
   it("finds a round trip issued on a local aliasing the client or the wrapper", () => {

@@ -1,8 +1,13 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, posix, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+
+import {
+  descendants,
+  parseFile,
+  parseSource,
+  readSource,
+  sourceModules,
+} from "./lib/typeScriptSources.mjs";
 
 // Every seat hands the failure `failureFor` composed straight to `setFailure`,
 // with nothing of its own added to it.
@@ -65,48 +70,6 @@ const COMPOSER = "failureFor";
 const COMPOSER_MODULE_TAIL = "useInviterExchange";
 const SINK = "setFailure";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-
-/** Parse a TypeScript source file with parent pointers, for ancestor walks. */
-function parseSource(fileName, text) {
-  return ts.createSourceFile(
-    fileName,
-    text,
-    ts.ScriptTarget.Latest,
-    true,
-    fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  );
-}
-
-/** Parse a repository-relative source file as this checkout ships it. */
-function parseFile(file) {
-  return parseSource(file, readFileSync(resolve(root, file), "utf8"));
-}
-
-/** Every descendant of `node`, in source order. */
-function descendants(node) {
-  const found = [];
-  const visit = (child) => {
-    found.push(child);
-    ts.forEachChild(child, visit);
-  };
-  ts.forEachChild(node, visit);
-  return found;
-}
-
-/** Every TypeScript source under `dir`, repository-relative and sorted. */
-function sourceModules(dir) {
-  const found = [];
-  for (const entry of readdirSync(resolve(root, dir), {
-    withFileTypes: true,
-  })) {
-    const path = posix.join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...sourceModules(path));
-    else if (/\.tsx?$/.test(entry.name)) found.push(path);
-  }
-  return found.sort();
-}
-
 /**
  * The modules read: every source in the bench tree, plus any other source in the
  * web app that writes the composer's name at all. A mention that turns out to be
@@ -118,8 +81,7 @@ function modulesToRead() {
   const bench = sourceModules(BENCH_DIR);
   const elsewhere = sourceModules(WEB_SOURCE_DIR).filter(
     (file) =>
-      !file.startsWith(`${BENCH_DIR}/`) &&
-      written.test(readFileSync(resolve(root, file), "utf8")),
+      !file.startsWith(`${BENCH_DIR}/`) && written.test(readSource(file)),
   );
   return [...bench, ...elsewhere].sort();
 }
