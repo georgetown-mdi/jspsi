@@ -1719,7 +1719,7 @@ test("buildOutputTable: throws when a partner payload row is not a row at all", 
   };
   expect(() =>
     buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
-  ).toThrow("one cell per declared column");
+  ).toThrow("not an array of cells");
 });
 
 test("buildOutputTable: the width refusal states the declared count in agreement", () => {

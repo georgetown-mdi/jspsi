@@ -1026,6 +1026,13 @@ export function buildOutputTable(
     );
   }
 
+  if (!partnerPayload.rows.every((row) => Array.isArray(row))) {
+    throw new Error(
+      "a partner payload row is not an array of cells: " +
+        "refusing to read cell values from a non-row value",
+    );
+  }
+
   const columnCount = partnerPayload.columns.length;
   if (!hasOneCellPerColumn(columnCount, partnerPayload.rows)) {
     throw new Error(
