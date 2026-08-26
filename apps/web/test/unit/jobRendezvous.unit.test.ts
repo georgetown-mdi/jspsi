@@ -201,6 +201,41 @@ function withAliasedInode<T>(alias: string, target: string, body: () => T): T {
   }
 }
 
+/**
+ * Run `body` with `fs.statSync` failing `EACCES` for `unreadable` alone -- a
+ * directory the process can name and resolve but not stat, the shape a mount under
+ * an unsearchable parent takes. Every other path stats normally, so the identity
+ * walk still reads the rest of the chain.
+ *
+ * Injected for the reason {@link blockRealpath} is: a suite running as root stats
+ * through a `0000` parent anyway, so a case driven off a real directory mode would
+ * silently stop being exercised on exactly the hosts (containers) the console runs
+ * in. `EACCES` rather than `ENOENT` is the whole point of the case -- a directory
+ * that is not there aliases nothing, while one that could not be read is precisely
+ * where the aliasing would sit.
+ */
+function withUnreadableStat<T>(unreadable: string, body: () => T): T {
+  const statSync = fs.statSync;
+  const blocked = path.resolve(unreadable);
+  const spy = vi
+    .spyOn(fs, "statSync")
+    .mockImplementation((entry: fs.PathLike, options?: fs.StatSyncOptions) => {
+      if (path.resolve(String(entry)) === blocked) {
+        const error: NodeJS.ErrnoException = new Error(
+          "EACCES: permission denied",
+        );
+        error.code = "EACCES";
+        throw error;
+      }
+      return statSync(entry, options);
+    });
+  try {
+    return body();
+  } finally {
+    spy.mockRestore();
+  }
+}
+
 afterEach(() => {
   for (const dir of dirs.splice(0))
     fs.rmSync(dir, { recursive: true, force: true });
@@ -866,6 +901,42 @@ describe("whether a rendezvous leg holds the data root", () => {
           JOB_RENDEZVOUS_DIR: share,
         }),
       ).sharesDataRoot,
+    ).toBeUndefined();
+  });
+
+  test("a leg the console cannot stat counts as holding it", () => {
+    // The identity that would join the two is exactly what could not be read, and
+    // the verdict decides a warn-and-guide advisory, so what cannot be ruled out
+    // is reported rather than dropped. The paths here relate the two not at all,
+    // so it is the unreadable identity carrying the verdict and nothing else.
+    const mounts = tempDir("mounts");
+    const work = subDir(mounts, "work");
+    const share = subDir(mounts, "share");
+    const env = { JOB_DATA_ROOT: work, JOB_RENDEZVOUS_DIR: share };
+    expect(
+      withUnreadableStat(share, () => resolveJobRendezvousProvisioning(env))
+        .sharesDataRoot,
+    ).toBe(true);
+    expect(
+      resolveJobRendezvousProvisioning(env).sharesDataRoot,
+    ).toBeUndefined();
+  });
+
+  test("a data root ancestor the console cannot stat does too", () => {
+    // The same direction from the other side of the comparison: a leg that stats
+    // fine cannot be ruled out against a chain the walk could not finish reading,
+    // and the ancestor that stopped it is one a leg could be bound onto.
+    const mounts = tempDir("mounts");
+    const enclosing = subDir(mounts, "enclosing");
+    const work = subDir(enclosing, "work");
+    const share = subDir(mounts, "share");
+    const env = { JOB_DATA_ROOT: work, JOB_RENDEZVOUS_DIR: share };
+    expect(
+      withUnreadableStat(enclosing, () => resolveJobRendezvousProvisioning(env))
+        .sharesDataRoot,
+    ).toBe(true);
+    expect(
+      resolveJobRendezvousProvisioning(env).sharesDataRoot,
     ).toBeUndefined();
   });
 

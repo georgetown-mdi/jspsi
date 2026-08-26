@@ -526,10 +526,12 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  * - `linkageStrategy` is a closed enum forwarded to the CLI's `--linkage-strategy`.
  * - `identity` is a bounded operator label forwarded to the CLI's `--identity`
  *   (the party name/org/contact string). Bounded by {@link MAX_IDENTITY_LENGTH}
- *   and, being free text rather than a closed enum, additionally forbidden a leading
- *   `-` so a flag-shaped value cannot masquerade as a CLI flag; the driver also
- *   emits it as a single `--identity=<value>` token, which parses a `-`-leading
- *   value verbatim regardless.
+ *   and, being free text rather than a closed enum, held to the shared label
+ *   contract's two shape rules as well: no leading `-`, so a flag-shaped value
+ *   cannot masquerade as a CLI flag -- the driver also emits it as a single
+ *   `--identity=<value>` token, which parses a `-`-leading value verbatim
+ *   regardless -- and no control character, which would otherwise ride the run
+ *   into this party's own disclosure record.
  *
  * Neither is a path, host, or credential, so neither can escape into a file path
  * or a connection field. Exactly one of `inputCsv` or `inputFile` is set (enforced

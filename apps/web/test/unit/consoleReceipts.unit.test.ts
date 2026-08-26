@@ -884,11 +884,22 @@ describe("the receipts card's model", () => {
     // exchange on a one-mount console syncs the folder this key is written into.
     // The operator meets that fact where they choose to sign, not only in the
     // deployment guide, and it names the remedy the guide documents.
-    expect(IDENTITY_SHARED_MOUNT_ADVISORY).toMatch(/your partner syncs into/);
     expect(IDENTITY_SHARED_MOUNT_ADVISORY).toMatch(
       /sign receipts in your name -- for every exchange, with every partner/,
     );
     expect(IDENTITY_SHARED_MOUNT_ADVISORY).toMatch(/JOB_RENDEZVOUS_DIR/);
+  });
+
+  test("the shared-mount advisory holds the sync to the exchange that does it", () => {
+    // The layout is what raises the advisory, but it is a shared-folder exchange
+    // that puts a partner's writes in the mount: an SFTP or WebRTC run out of the
+    // same single mount has nobody syncing into it. Copy stating flatly that the
+    // partner writes there would be untrue on those runs, and an operator who can
+    // see it is untrue of theirs discounts the hazard it names.
+    expect(IDENTITY_SHARED_MOUNT_ADVISORY).toMatch(/a shared-folder exchange/);
+    expect(IDENTITY_SHARED_MOUNT_ADVISORY).toMatch(
+      /On a run like that your long-lived private key sits where your partner/,
+    );
   });
 
   test("the at-rest notice stands on its own, without the collision half", () => {

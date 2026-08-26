@@ -272,12 +272,13 @@ export const IDENTITY_AT_REST_NOTICE =
  * leaves the card saying where the key lands rather than saying nothing about it.
  */
 export const IDENTITY_SHARED_MOUNT_ADVISORY =
-  "This appliance rendezvouses out of the folder you mounted, so the folder " +
-  "your signing key sits in is also the folder your partner syncs into: your " +
-  "long-lived private key sits where they write, and whoever reads it can sign " +
-  "receipts in your name -- for every exchange, with every partner. Give the " +
-  "synced folder a mount of its own (JOB_RENDEZVOUS_DIR), separate from this " +
-  "one, before you sign an exchange that runs over it.";
+  "This appliance rendezvouses out of the folder you mounted, so a " +
+  "shared-folder exchange here syncs the very folder your signing key sits in. " +
+  "On a run like that your long-lived private key sits where your partner " +
+  "writes, and whoever reads it can sign receipts in your name -- for every " +
+  "exchange, with every partner. Give the synced folder a mount of its own " +
+  "(JOB_RENDEZVOUS_DIR), separate from this one, before you sign an exchange " +
+  "that runs over it.";
 
 /**
  * What the console says about re-keying, so the operator learns it here rather
