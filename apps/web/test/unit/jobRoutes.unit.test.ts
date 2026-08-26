@@ -1790,8 +1790,30 @@ describe("POST /api/jobs/sftp/probe reads a host key without authoring", () => {
       password: "@/etc/shadow",
     });
     expect(response.status).toBe(400);
-    // The value is never echoed; the message names a field shape only.
-    expect(await response.text()).not.toContain("shadow");
+    // Neither the value nor the key name is echoed: a key the submitter chose is
+    // their bytes as much as a value is, so the message names a field shape only.
+    const text = await response.text();
+    for (const fragment of ["shadow", "username", "password"])
+      expect(text).not.toContain(fragment);
+  });
+
+  test("an unmodeled key's own spelling never crosses the 400", async () => {
+    // The schema's own unrecognized-key message quotes the submitted spelling,
+    // which is how a key name carrying control bytes would reach the operator's
+    // screen. What the caller has to know is that a key they sent is not modeled,
+    // so a fixed reason crosses instead.
+    seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
+    const response = await postProbe({
+      host: "sftp.example.org",
+      "\u001b[31mprivate_key\u0007": "x",
+    });
+    expect(response.status).toBe(400);
+    const text = await response.text();
+    expect(text).not.toContain("private_key");
+    // Neither the raw control bytes nor their JSON-escaped spelling.
+    for (const fragment of ["\u001b", "\u0007", "\\u001b", "\\u0007"])
+      expect(text).not.toContain(fragment);
+    expect(JSON.parse(text)).toEqual({ error: "body: unrecognized key" });
   });
 
   test("a non-bare host is a 400 naming the field", async () => {

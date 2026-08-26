@@ -10,6 +10,7 @@ import {
 
 import {
   MAX_SIGNING_FINGERPRINT_BODY_BYTES,
+  formatFirstIssue,
   gateJobRoute,
   readJobRequestBody,
 } from "@jobs/routeSupport";
@@ -50,29 +51,6 @@ const fingerprintBodySchema = z.strictObject({
     }),
   exportCertificate: z.boolean().optional(),
 });
-
-/** Format the first zod issue as `<field>: <reason>` -- a field path and a shape
- * reason only, never a submitted value (the `JobApiConfigError` discipline).
- *
- * An unrecognized key is the one issue whose own message quotes a CLIENT-chosen
- * string (`Unrecognized key: "..."`), and a key name is as much the submitter's
- * bytes as a value is, so that reason is replaced with a fixed one. Nothing is
- * lost: the body is `.strictObject`, so what the caller has to know is that a key
- * they sent is not modeled, not which spelling reached the schema. */
-function formatFirstIssue(
-  issues: ReadonlyArray<{
-    code: string;
-    path: ReadonlyArray<PropertyKey>;
-    message: string;
-  }>,
-): string {
-  const issue = issues[0];
-  const field =
-    issue.path.length > 0 ? issue.path.map(String).join(".") : "body";
-  const reason =
-    issue.code === "unrecognized_keys" ? "unrecognized key" : issue.message;
-  return `${field}: ${reason}`;
-}
 
 /**
  * The typed 200 envelope for a fingerprint attempt that RAN. A completed attempt
