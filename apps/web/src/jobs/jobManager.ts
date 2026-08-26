@@ -653,14 +653,17 @@ export class JobManager {
    * Both are server constants: the long-lived identity in the appliance's mounted
    * data root (durable across jobs, and a file the operator has on their host --
    * see {@link signingIdentityPath}), and the receipt pinned to a fixed name in
-   * THIS job's workdir so the appliance can serve it afterwards.
+   * THIS job's workdir so the appliance can serve it afterwards. Each is composed
+   * through its directory's own containment check rather than joined, so a
+   * constant that grew a separator is refused instead of naming a file the
+   * receipt endpoint would then serve from outside the workdir.
    */
   private signingPathsFor(
     workdir: string,
   ): JobSigningPaths & { receiptOutput: string } {
     return {
       identityFile: signingIdentityPath(this.dataRoot),
-      receiptOutput: path.join(workdir, JOB_FILE_NAMES.receipt),
+      receiptOutput: workdirArtifactPath(workdir, JOB_FILE_NAMES.receipt),
     };
   }
 
@@ -727,7 +730,10 @@ export class JobManager {
     const outputPath = path.join(workdir, JOB_FILE_NAMES.output);
     const recordPath = path.join(workdir, JOB_FILE_NAMES.record);
     const keysPath = path.join(workdir, JOB_FILE_NAMES.recordKeys);
-    const logPath = intent.diagnosticRun === true ? jobLogPath(workdir) : null;
+    const logPath =
+      intent.diagnosticRun === true
+        ? workdirArtifactPath(workdir, JOB_FILE_NAMES.log)
+        : null;
     // Only a certificate-mode exchange writes one. A zero-setup run composes no
     // config at all, so it carries no signing block and never signs.
     const receiptPath =
@@ -1318,17 +1324,17 @@ function liveRecordAvailability(
 }
 
 /**
- * The diagnostic log's path inside a job workdir, resolved through the
+ * A fixed-name artifact's path inside a job workdir, resolved through the
  * containment check {@link resolveWorkdirFile} applies rather than joined
- * directly. The name is a server constant, so a null resolution is a caller bug
+ * directly. Every name is a server constant, so a null resolution is a caller bug
  * (a name that grew a separator) surfaced as a hard error instead of a path
- * outside the workdir the log endpoint would then serve.
+ * outside the workdir the artifact's endpoint would then serve.
  */
-function jobLogPath(workdir: string): string {
-  const logPath = resolveWorkdirFile(workdir, JOB_FILE_NAMES.log);
-  if (logPath === null)
-    throw new Error("the job log name did not resolve inside the workdir");
-  return logPath;
+function workdirArtifactPath(workdir: string, name: string): string {
+  const artifactPath = resolveWorkdirFile(workdir, name);
+  if (artifactPath === null)
+    throw new Error(`the job ${name} did not resolve inside the workdir`);
+  return artifactPath;
 }
 
 /** The live view of an in-memory record, mirroring what the routes report. */

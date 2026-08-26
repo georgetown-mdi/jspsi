@@ -390,8 +390,10 @@ export type JobExchangeSide = "inviter" | "acceptor";
  * - `retentionDisposition` is this party's own free-text retention note, written
  *   into the composed config as a YAML value and from there into THIS party's
  *   exchange record. Bounded by core's `MAX_TEXT_LENGTH` (the record schema's own
- *   ceiling, so a note that passes here cannot fail the record build), and never
- *   a path, host, credential, or argv fragment.
+ *   ceiling, so a note that passes here cannot fail the record build), refused a
+ *   control character other than the tab, LF, and CR a multi-line note carries
+ *   (a NUL or an ESC composes into the YAML and lands in the record verbatim),
+ *   and never a path, host, credential, or argv fragment.
  */
 interface JobExchangeIntentBase {
   /**
@@ -689,6 +691,17 @@ const jobRunControlFields = {
   sweepExchangeFiles: z.boolean().optional(),
 };
 
+// C0 and C1 controls plus DEL, minus the three whitespace controls a multi-line
+// note legitimately carries (tab, LF, CR -- the field is authored in a textarea,
+// so the ranges are narrower than the single-segment name rule's in
+// ./workInputName, which admits no whitespace control at all). The note is
+// composed into the YAML verbatim and from there into this party's exchange
+// record, which is kept and read back, so a NUL or an ESC in it is never text
+// the operator meant to write.
+const NOTE_CONTROL_CHAR_PATTERN =
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/;
+
 const jobExchangeIntentCommonFields = {
   ...jobRunControlFields,
   linkageTerms: LinkageTermsSchema,
@@ -710,7 +723,14 @@ const jobExchangeIntentCommonFields = {
   side: z.enum(["inviter", "acceptor"]).optional(),
   eventStream: z.boolean().optional(),
   signing: jobSigningChoiceSchema.optional(),
-  retentionDisposition: z.string().min(1).max(MAX_TEXT_LENGTH).optional(),
+  retentionDisposition: z
+    .string()
+    .min(1)
+    .max(MAX_TEXT_LENGTH)
+    .refine((note) => !NOTE_CONTROL_CHAR_PATTERN.test(note), {
+      message: "retentionDisposition must not contain control characters",
+    })
+    .optional(),
 };
 
 // Intentionally NOT annotated z.ZodType: z.discriminatedUnion requires concrete

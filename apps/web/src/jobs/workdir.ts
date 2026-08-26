@@ -73,22 +73,24 @@ export async function createWorkdir(
 }
 
 /**
- * Resolve a fixed-name file inside a job workdir and verify the resolved path
- * stays strictly under the resolved workdir, returning null when it does not.
+ * Resolve a fixed-name file inside a server-anchored directory -- a job workdir,
+ * or the appliance's mounted data root -- and verify the resolved path stays
+ * strictly under that directory, returning null when it does not.
  *
- * The counterpart of {@link resolveWorkdir} one level down, for the artifacts a
- * route serves out of a workdir rather than writes into it. Every such name is a
- * server constant today ({@link JOB_FILE_NAMES}), so this can only fail on a
- * caller bug -- which is exactly why it is a check rather than a comment saying
- * so: a name that ever became client-derived, or a constant that grew a
- * separator, is refused here instead of resolving somewhere else on disk. The
- * path is not created, and nothing about the leaf is stat-ed.
+ * The counterpart of {@link resolveWorkdir} one level down, for the fixed-name
+ * files the appliance composes inside a directory it owns. Every such name is a
+ * server constant today ({@link JOB_FILE_NAMES} and the signing-identity
+ * names), so this can only fail on a caller bug -- which is exactly why it is a
+ * check rather than a comment saying so: a name that ever became client-derived,
+ * or a constant that grew a separator, is refused here instead of resolving
+ * somewhere else on disk. The path is not created, and nothing about the leaf is
+ * stat-ed.
  */
 export function resolveWorkdirFile(
-  workdir: string,
+  directory: string,
   name: string,
 ): string | null {
-  const root = path.resolve(workdir);
+  const root = path.resolve(directory);
   const filePath = path.resolve(root, name);
   const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
   if (!filePath.startsWith(rootWithSep)) return null;

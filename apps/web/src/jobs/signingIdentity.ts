@@ -1,10 +1,11 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import { spawn } from "node:child_process";
 
 import { FINGERPRINT_REGEX } from "@psilink/core";
 
-import { jobFileExists } from "./workdir";
+import { WORKDIR_MODE, jobFileExists, resolveWorkdirFile } from "./workdir";
 import { sanitizedChildEnv } from "./cliDriver";
 
 import type { ChildProcess } from "node:child_process";
@@ -53,16 +54,31 @@ export const SIGNING_IDENTITY_FILE_NAME = ".psilink-signing-identity.json";
 export const SIGNING_CERTIFICATE_FILE_NAME = "psilink-certificate.json";
 
 /**
+ * A fixed-name file's absolute path in the appliance's mounted data root,
+ * resolved through the same containment check a job artifact's path takes
+ * ({@link resolveWorkdirFile}) rather than joined. Both names below are server
+ * constants, so a null resolution is a caller bug -- a constant that grew a
+ * separator -- refused here instead of naming a file somewhere else on the host
+ * that the CLI would then read a private key from or write a certificate over.
+ */
+function mountFilePath(dataRoot: string, name: string): string {
+  const filePath = resolveWorkdirFile(dataRoot, name);
+  if (filePath === null)
+    throw new Error(`${name} did not resolve inside the mounted data root`);
+  return filePath;
+}
+
+/**
  * The signing identity file's absolute path under `dataRoot`, the appliance's
  * single mounted working directory.
  */
 export function signingIdentityPath(dataRoot: string): string {
-  return path.join(path.resolve(dataRoot), SIGNING_IDENTITY_FILE_NAME);
+  return mountFilePath(dataRoot, SIGNING_IDENTITY_FILE_NAME);
 }
 
 /** The exported certificate's absolute path under the same mount. */
 export function signingCertificatePath(dataRoot: string): string {
-  return path.join(path.resolve(dataRoot), SIGNING_CERTIFICATE_FILE_NAME);
+  return mountFilePath(dataRoot, SIGNING_CERTIFICATE_FILE_NAME);
 }
 
 /**
@@ -74,7 +90,16 @@ export function signingCertificatePath(dataRoot: string): string {
  * composed: writing the public certificate over the identity file would destroy
  * the private key and every pin a partner holds, so "the console never composes
  * such a pair" is encoded as a check that fails rather than as a comment that
- * cannot. Lexical, exactly as the CLI's is.
+ * cannot.
+ *
+ * Lexical, exactly as the CLI's is, and lexical is enough for the reason the CLI
+ * records beside its own copy (`apps/cli/src/commands/fingerprint.ts`, the
+ * `--export-certificate` guard): the export is written with `writeFileAtomic`,
+ * which finishes with `rename()`, and renaming onto a symlink's path replaces the
+ * LINK rather than following it -- so the variant a lexical compare misses, an
+ * export path that merely resolves to the identity file, leaves the private key
+ * intact. What has to be caught is the path that names the identity file itself,
+ * and comparing resolved paths catches every spelling of that.
  */
 export function assertExportPathDistinct(
   identityPath: string,
@@ -117,11 +142,13 @@ const FINGERPRINT_STDOUT_CAP = 4096;
  *   cause -- the endpoint's schema requires a non-empty identity label, and every
  *   path is server-composed -- so what is left are conditions in the appliance's
  *   mounted working directory: an identity file that cannot be read or parsed, a
- *   first-time exclusive create that kept losing a create/delete race, or a failed
- *   certificate-export write. Which of them it was is NOT observable here (stderr
- *   names container paths and is discarded), so the whole class is reported as one
- *   category the operator can act on in their own folder, apart from a generic
- *   failure.
+ *   first-time exclusive create that kept losing a create/delete race, a failed
+ *   certificate-export write, or a malformed `psilink.yaml` sitting in that same
+ *   folder (the child reads its default config there for hints; see
+ *   {@link runSigningFingerprint}). Which of them it was is NOT observable here
+ *   (stderr names container paths and is discarded), so the whole class is
+ *   reported as one category the operator can act on in their own folder, apart
+ *   from a generic failure.
  * - `timeout`: the watchdog killed the child.
  * - `error`: the child exited non-zero for another reason, emitted no valid
  *   fingerprint line, or could not be spawned.
@@ -181,8 +208,11 @@ export function reconcileFingerprintExit(
  * emitted as a single `--flag=value` token so a `-`-leading label cannot be
  * misparsed by yargs as its own flag. There is no `--config-file`: the console
  * composes a config per job, and no job exists at the moment the operator asks
- * for their fingerprint, so nothing is read off disk for hints. There is no
- * `--force`.
+ * for their fingerprint. Omitting it does not mean nothing is read off disk --
+ * the CLI falls back to its default `./psilink.yaml` for identity hints, relative
+ * to the CHILD's working directory -- so what bounds the search is the explicit
+ * `cwd` the spawn pins ({@link runSigningFingerprint}), not this argv. There is
+ * no `--force`.
  *
  * @internal exported for testing
  */
@@ -216,6 +246,18 @@ export function fingerprintArgv(args: {
  * the stderr this boundary discards, and the file's presence is a fact the server
  * owns either way.
  *
+ * The child's working directory is pinned to the directory holding the identity
+ * file -- the appliance's mounted data root -- rather than inherited from the
+ * server. With `--config-file` omitted the CLI reads its default `./psilink.yaml`
+ * for identity hints, resolved against whatever directory the child runs in, so
+ * an inherited cwd would let a document the operator never mounted decide the
+ * outcome (a malformed one exits 64, which this boundary reports as a condition
+ * in the operator's own folder). Pinning it makes the mount the only place that
+ * config can come from, matching where the identity itself lives. The directory
+ * is created if missing on the same owner-only terms a workdir is, because a
+ * spawn cannot start in a directory that does not exist yet while the CLI would
+ * have created the mount for its own write.
+ *
  * @throws {Error} SYNCHRONOUSLY, before any child is spawned, when the export
  *   path names the identity file ({@link assertExportPathDistinct}). Not a
  *   rejection, because it is a caller bug rather than a run outcome, and failing
@@ -235,11 +277,14 @@ export function runSigningFingerprint(args: {
     assertExportPathDistinct(args.identityPath, args.exportPath);
   const created = !jobFileExists(args.identityPath);
   const argv = fingerprintArgv(args);
+  const childCwd = path.dirname(path.resolve(args.identityPath));
 
   return new Promise<SigningFingerprintResult>((resolve) => {
     let child: ChildProcess;
     try {
+      fs.mkdirSync(childCwd, { recursive: true, mode: WORKDIR_MODE });
       child = spawn(process.execPath, argv, {
+        cwd: childCwd,
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
         env: { ...sanitizedChildEnv(), ...args.childEnv },

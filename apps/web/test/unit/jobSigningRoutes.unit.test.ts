@@ -159,31 +159,46 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
   });
 
   test.each([
-    ["an absent identity", {}],
-    ["an empty identity", { identity: "" }],
-    ["a leading-dash identity", { identity: "--force" }],
-    ["an unmodeled key", { identity: "Agency A", identityFile: "/etc/shadow" }],
-    [
-      "a path-shaped extra",
-      {
+    { label: "an absent identity", body: {}, absent: [] },
+    { label: "an empty identity", body: { identity: "" }, absent: [] },
+    {
+      label: "a leading-dash identity",
+      body: { identity: "--force" },
+      absent: ["--force"],
+    },
+    {
+      label: "an unmodeled key",
+      body: { identity: "Agency A", identityFile: "/etc/shadow" },
+      absent: ["identityFile", "shadow"],
+    },
+    {
+      label: "a path-shaped extra",
+      body: {
         identity: "Agency A",
         exportPath: "/data/.psilink-signing-identity.json",
       },
-    ],
-    [
-      "an export toggle that is not a boolean",
-      { identity: "A", exportCertificate: "yes" },
-    ],
-  ])("%s is a 400 naming a field and no value", async (_label, body) => {
-    seedManager();
-    const response = await postFingerprint(body);
-    expect(response.status).toBe(400);
-    const text = await response.text();
-    // The message is a field path and a shape reason; nothing submitted is echoed.
-    expect(text).not.toContain("shadow");
-    expect(text).not.toContain("--force");
-    expect(JSON.parse(text)).toMatchObject({ error: expect.any(String) });
-  });
+      absent: ["exportPath", SIGNING_IDENTITY_FILE_NAME],
+    },
+    {
+      label: "an export toggle that is not a boolean",
+      body: { identity: "A", exportCertificate: "yes" },
+      absent: ["yes"],
+    },
+  ])(
+    "$label is a 400 naming a field and no value",
+    async ({ body, absent }) => {
+      seedManager();
+      const response = await postFingerprint(body);
+      expect(response.status).toBe(400);
+      const text = await response.text();
+      // The message is a field path and a shape reason. Neither a submitted value
+      // nor a client-CHOSEN key name is echoed: an unrecognized key crosses as a
+      // fixed reason, since the key name is the submitter's bytes as much as the
+      // value is.
+      for (const fragment of absent) expect(text).not.toContain(fragment);
+      expect(JSON.parse(text)).toMatchObject({ error: expect.any(String) });
+    },
+  );
 
   test("an over-long identity is a 400 before any child is spawned", async () => {
     const { dataRoot } = seedManager();

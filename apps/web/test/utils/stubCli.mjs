@@ -51,6 +51,10 @@
 //                     created-vs-loaded read of the identity path is exercised
 //                     against a file that really appears. It honors
 //                     STUB_EXIT_CODE, STUB_DELAY_MS, and STUB_IGNORE_SIGTERM.
+//   STUB_CWD_FILE     When set, the child's own process.cwd() is written to this
+//                     path by the `fingerprint` branch, so a test can assert the
+//                     directory the driver spawned the child in -- which is what
+//                     decides whose ./psilink.yaml the real CLI would resolve.
 
 import fs from "node:fs";
 
@@ -100,6 +104,8 @@ if (process.argv[2] === "probe-host-key") {
     process.on("SIGTERM", () => {
       /* swallow: force escalation to SIGKILL */
     });
+  if (process.env.STUB_CWD_FILE !== undefined)
+    fs.writeFileSync(process.env.STUB_CWD_FILE, process.cwd());
   const exitCode = Number.parseInt(process.env.STUB_EXIT_CODE ?? "0", 10);
   if (exitCode === 0) {
     // The real command creates the identity file (and the export) before it

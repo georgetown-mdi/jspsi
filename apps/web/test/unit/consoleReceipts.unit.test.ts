@@ -30,6 +30,12 @@ import {
   receiptsWithField,
 } from "@bench/receiptsModel";
 import {
+  JOB_FILE_NAMES,
+  composeConfigDocument,
+  composeSftpConfigDocument,
+  jobExchangeIntentSchema,
+} from "@jobs/intent";
+import {
   SIGNING_CERTIFICATE_FILE_NAME,
   SIGNING_IDENTITY_FILE_NAME,
   assertExportPathDistinct,
@@ -40,12 +46,8 @@ import {
   signingCertificatePath,
   signingIdentityPath,
 } from "@jobs/signingIdentity";
-import {
-  composeConfigDocument,
-  composeSftpConfigDocument,
-  jobExchangeIntentSchema,
-} from "@jobs/intent";
 import { importLinkageTerms } from "@psi/linkageTermsIO";
+import { resolveWorkdirFile } from "@jobs/workdir";
 
 import {
   STUB_CLI_PATH,
@@ -159,6 +161,41 @@ describe("the intent boundary admits only a mode an exchange honors", () => {
       });
       expect(parsed.success).toBe(false);
     }
+  });
+
+  test("the retention note refuses a control character, keeping the whitespace a note carries", () => {
+    const admits = (note: string): boolean =>
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ retentionDisposition: note }),
+      ).success;
+    // A NUL or an ESC would compose into the YAML and land in the exchange
+    // record verbatim, so the note carries the control-character refusal the
+    // rest of this surface's operator-supplied strings do.
+    for (const code of [0x00, 0x07, 0x0b, 0x0c, 0x1b, 0x7f, 0x9b])
+      expect(
+        admits(`Filed${String.fromCharCode(code)}under the schedule`),
+      ).toBe(false);
+    // The card authors this field in a textarea, so the whitespace controls a
+    // multi-line note carries stay admissible.
+    expect(admits("Filed under the schedule.\nPurged after six years.")).toBe(
+      true,
+    );
+    expect(
+      admits("Filed\tunder the schedule.\r\nPurged after six years."),
+    ).toBe(true);
+  });
+
+  test("an admitted multi-line note round-trips through the composed YAML", () => {
+    const multiline = "Filed under the schedule.\nPurged after six years.";
+    const composed = composedSpec(
+      composeConfigDocument(
+        validIntent({ retentionDisposition: multiline }),
+        "/rendezvous",
+        undefined,
+        signingPaths(),
+      ),
+    );
+    expect(composed["retention_disposition"]).toBe(multiline);
   });
 
   test("the retention note is bounded by the record schema's own ceiling", () => {
@@ -366,6 +403,51 @@ describe("the graduation hand-off handles the identity path honestly", () => {
   });
 });
 
+// Each signing artifact's path is composed from a server constant against a
+// directory the appliance owns, and the receipt's is the one a route then serves
+// out of the job workdir. Each goes through the containment check rather than a
+// join, the way the diagnostic log's path is.
+describe("the signing artifacts resolve inside the directory that owns them", () => {
+  const workdir = "/srv/jobs/93b1c0d6";
+
+  test("the receipt lands directly under the job workdir, the identity under the mount", () => {
+    expect(resolveWorkdirFile(workdir, JOB_FILE_NAMES.receipt)).toBe(
+      path.resolve(workdir, JOB_FILE_NAMES.receipt),
+    );
+    expect(signingIdentityPath("/data")).toBe(
+      path.resolve("/data", SIGNING_IDENTITY_FILE_NAME),
+    );
+    expect(signingCertificatePath("/data")).toBe(
+      path.resolve("/data", SIGNING_CERTIFICATE_FILE_NAME),
+    );
+  });
+
+  test("every constant these paths are built from is a single segment", () => {
+    for (const name of [
+      JOB_FILE_NAMES.receipt,
+      SIGNING_IDENTITY_FILE_NAME,
+      SIGNING_CERTIFICATE_FILE_NAME,
+    ]) {
+      expect(name).toBe(path.basename(name));
+      expect(name.includes("/")).toBe(false);
+      expect(name.includes("\\")).toBe(false);
+    }
+  });
+
+  test("a separator-bearing name is refused rather than resolved elsewhere", () => {
+    // The check the three paths compose through, driven with the shapes a
+    // constant that grew a separator would take.
+    for (const escape of [
+      "../receipt.json",
+      "../../etc/passwd",
+      "sub/../../receipt.json",
+      "/etc/passwd",
+      "../93b1c0d6-evil/receipt.json",
+    ])
+      expect(resolveWorkdirFile(workdir, escape)).toBeNull();
+  });
+});
+
 describe("the certificate export never overwrites the identity file", () => {
   test("an export path equal to the identity path is refused", () => {
     expect(() =>
@@ -432,6 +514,9 @@ describe("the fingerprint driver", () => {
       "--export-certificate=/data/psilink-certificate.json",
     ]);
     expect(argv).not.toContain("--force");
+    // No config file is named, so which document the child could read for hints
+    // is decided by the working directory the spawn pins, not by this argv.
+    expect(argv.some((token) => token.startsWith("--config-file"))).toBe(false);
   });
 
   test("omits the export flag when no export was asked for", () => {
@@ -534,6 +619,55 @@ describe("the fingerprint driver", () => {
       certificateExported: true,
     });
     expect(fs.existsSync(signingCertificatePath(root))).toBe(true);
+  });
+
+  test("runs the child in the mount, so the server's own psilink.yaml is out of reach", async () => {
+    // With --config-file omitted the CLI resolves its default ./psilink.yaml
+    // against the CHILD's working directory, and a malformed one is the exit 64
+    // this endpoint reports as a condition in the operator's folder. What keeps a
+    // document the operator never mounted out of that decision is the explicit
+    // cwd, so the check is on the directory the child actually ran in.
+    const root = scratchDir();
+    const serverCwd = scratchDir();
+    fs.writeFileSync(
+      path.join(serverCwd, "psilink.yaml"),
+      "signing: [ unclosed",
+    );
+    const cwdFile = path.join(root, "child-cwd.txt");
+    const enteredFrom = process.cwd();
+    process.chdir(serverCwd);
+    try {
+      const result = await runSigningFingerprint({
+        binaryPath: STUB_CLI_PATH,
+        identityPath: signingIdentityPath(root),
+        identityLabel: "Agency A",
+        childEnv: {
+          STUB_FINGERPRINT_STDOUT: `${OWN_FINGERPRINT}\n`,
+          STUB_CWD_FILE: cwdFile,
+        },
+      });
+      expect(result).toMatchObject({ kind: "ok" });
+    } finally {
+      process.chdir(enteredFrom);
+    }
+    const childCwd = fs.realpathSync(fs.readFileSync(cwdFile, "utf8"));
+    expect(childCwd).toBe(fs.realpathSync(root));
+    expect(childCwd).not.toBe(fs.realpathSync(serverCwd));
+  });
+
+  test("creates the mount when it does not exist yet, rather than failing to start", async () => {
+    // The identity is the first thing an operator asks for, which can precede
+    // any job -- and a spawn cannot start in a directory that is not there.
+    const root = scratchDir();
+    const unmade = path.join(root, "not-yet");
+    const result = await runSigningFingerprint({
+      binaryPath: STUB_CLI_PATH,
+      identityPath: signingIdentityPath(unmade),
+      identityLabel: "Agency A",
+      childEnv: { STUB_FINGERPRINT_STDOUT: `${OWN_FINGERPRINT}\n` },
+    });
+    expect(result).toMatchObject({ kind: "ok", created: true });
+    expect(fs.existsSync(signingIdentityPath(unmade))).toBe(true);
   });
 });
 

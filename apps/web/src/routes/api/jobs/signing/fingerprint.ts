@@ -40,14 +40,26 @@ const fingerprintBodySchema = z.strictObject({
 });
 
 /** Format the first zod issue as `<field>: <reason>` -- a field path and a shape
- * reason only, never a submitted value (the `JobApiConfigError` discipline). */
+ * reason only, never a submitted value (the `JobApiConfigError` discipline).
+ *
+ * An unrecognized key is the one issue whose own message quotes a CLIENT-chosen
+ * string (`Unrecognized key: "..."`), and a key name is as much the submitter's
+ * bytes as a value is, so that reason is replaced with a fixed one. Nothing is
+ * lost: the body is `.strictObject`, so what the caller has to know is that a key
+ * they sent is not modeled, not which spelling reached the schema. */
 function formatFirstIssue(
-  issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>,
+  issues: ReadonlyArray<{
+    code: string;
+    path: ReadonlyArray<PropertyKey>;
+    message: string;
+  }>,
 ): string {
   const issue = issues[0];
   const field =
     issue.path.length > 0 ? issue.path.map(String).join(".") : "body";
-  return `${field}: ${issue.message}`;
+  const reason =
+    issue.code === "unrecognized_keys" ? "unrecognized key" : issue.message;
+  return `${field}: ${reason}`;
 }
 
 /**
