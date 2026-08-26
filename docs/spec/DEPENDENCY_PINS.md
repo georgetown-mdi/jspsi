@@ -23,10 +23,11 @@ covers, separated by ` / ` (the spaces keep a scoped name's own slash intact).
 them is not held out of the batched dependency groups in
 `.github/dependabot.yml`, so a package that earns a checklist here cannot ride a
 routine batch where the checklist is skimmed rather than worked through. It
-fails on those same names a second way: each must be declared at an exact
+fails on those same names a second way: each must be declared at one exact
 version by every workspace manifest declaring it, so a checklist cannot outlive
-the pin its premises rest on. A new section follows the same heading form; the
-check's header states what else it reads and what it does not.
+the pin its premises rest on, nor cover only one of two versions this workspace
+installs. A new section follows the same heading form; the check's header states
+what else it reads and what it does not.
 
 That form is for npm packages only, because every name in such a heading is read
 as one and looked up in the npm groups. A checklist for a pin in another

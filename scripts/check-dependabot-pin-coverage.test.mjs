@@ -13,6 +13,7 @@ import {
   npmGroups,
   packageDeclarations,
   upgradeSections,
+  versionAgreementViolations,
 } from "./check-dependabot-pin-coverage.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -432,6 +433,90 @@ describe("a checklist package's pin exactness", () => {
   });
 });
 
+describe("a checklist package's one version across the manifests", () => {
+  const declaration = (path, specifier, name = "peerjs-js-binarypack") => ({
+    path,
+    field: "dependencies",
+    name,
+    specifier,
+  });
+
+  it("fails two manifests pinning different versions, listing both", () => {
+    const violations = versionAgreementViolations(
+      ["werift"],
+      [
+        declaration("apps/cli/package.json", "0.24.4", "werift"),
+        declaration("apps/web/package.json", "0.25.0", "werift"),
+      ],
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain(
+      "This workspace declares werift at 2 different versions",
+    );
+    expect(violations[0]).toContain(
+      'apps/cli/package.json (dependencies) "0.24.4"',
+    );
+    expect(violations[0]).toContain(
+      'apps/web/package.json (dependencies) "0.25.0"',
+    );
+  });
+
+  it("passes one version declared by every manifest", () => {
+    expect(
+      versionAgreementViolations(
+        ["peerjs-js-binarypack"],
+        [
+          declaration("apps/cli/package.json", "2.1.0"),
+          declaration("apps/web/package.json", "2.1.0"),
+          declaration("packages/core/package.json", "2.1.0"),
+          declaration("packages/testkit/package.json", "2.1.0"),
+        ],
+      ),
+    ).toEqual([]);
+  });
+
+  it("passes a package one manifest declares, and one none declares", () => {
+    expect(
+      versionAgreementViolations(
+        ["peerjs-js-binarypack", "ssh2"],
+        [declaration("apps/cli/package.json", "2.1.0")],
+      ),
+    ).toEqual([]);
+  });
+
+  it("fails two fields of one manifest disagreeing", () => {
+    const violations = versionAgreementViolations(
+      ["peerjs-js-binarypack"],
+      [
+        declaration("apps/cli/package.json", "2.1.0"),
+        {
+          ...declaration("apps/cli/package.json", "2.0.0"),
+          field: "devDependencies",
+        },
+      ],
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain(
+      'apps/cli/package.json (devDependencies) "2.0.0"',
+    );
+  });
+
+  it("reports one violation per package, not one per disagreeing pair", () => {
+    expect(
+      versionAgreementViolations(
+        ["peerjs-js-binarypack", "werift"],
+        [
+          declaration("a/package.json", "2.1.0"),
+          declaration("b/package.json", "2.2.0"),
+          declaration("c/package.json", "2.3.0"),
+          declaration("a/package.json", "0.24.4", "werift"),
+          declaration("b/package.json", "0.25.0", "werift"),
+        ],
+      ),
+    ).toHaveLength(2);
+  });
+});
+
 describe("the real repository configuration", () => {
   const sections = () =>
     upgradeSections(readRepo("docs/spec/DEPENDENCY_PINS.md"));
@@ -510,6 +595,33 @@ describe("the real repository configuration", () => {
     ]);
     expect(violations).toHaveLength(1);
     expect(violations[0]).toContain(first.path);
+  });
+
+  it("declares every checklist package at one version wherever it appears", () => {
+    expect(versionAgreementViolations(packages(), declarations())).toEqual([]);
+  });
+
+  it("reddens when a package several manifests declare drifts in one", () => {
+    const swept = declarations();
+    const shared = packages().filter(
+      (name) => swept.filter((entry) => entry.name === name).length > 1,
+    );
+    expect(shared.length).toBeGreaterThan(0);
+    for (const name of shared) {
+      const at = swept.findIndex((entry) => entry.name === name);
+      const violations = versionAgreementViolations(
+        packages(),
+        swept.map((entry, index) =>
+          index === at
+            ? { ...entry, specifier: `${entry.specifier}-drift` }
+            : entry,
+        ),
+      );
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain(name);
+      expect(violations[0]).toContain(swept[at].path);
+      expect(violations[0]).toContain(`${swept[at].specifier}-drift`);
+    }
   });
 
   it("leaves the inexact @types siblings of a checklist package alone", () => {
