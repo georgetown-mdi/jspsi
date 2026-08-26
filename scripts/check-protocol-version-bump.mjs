@@ -46,12 +46,21 @@
 // entry is a reviewer's call, not this check's.
 //
 // What this check cannot see:
-//   - A wire-format delta no vectors file pins. The terms-exchange envelope's
-//     field set and the single-pass index-table layouts (fixed-width and ragged)
-//     are specified in docs/spec/PROTOCOL.md and pinned by no file in the
-//     vectors directory, so a delta confined to them moves no digest here. The
-//     pin is the issue's stated proxy for a wire-format change, not a complete
-//     model of the wire format.
+//   - A wire-format delta no vectors file pins. The single-pass index-table
+//     layouts (fixed-width and ragged), the cascade's per-round mapped-element
+//     and association-table frames, and the count-only reply are specified in
+//     docs/spec/PROTOCOL.md, and the save-bootstrap secret frame in
+//     docs/SECURITY_DESIGN.md; all are pinned by no file here, so a delta
+//     confined to one of them moves no digest. The pin is the
+//     issue's stated proxy for a wire-format change, not a complete model of the
+//     wire format.
+//   - A frame shape the pinned scenarios do not drive. The terms-envelope
+//     vectors capture what exchangeTerms and sendAbort EMIT on the scenarios
+//     they run, so a field none of them advertises moves no digest here. That
+//     gap is held shut on the suite's side rather than this one's: it reads the
+//     field set each slot's schema ADMITS out of the source and fails until the
+//     pinned frames' union covers it, so an added field takes a scenario, and a
+//     scenario moves the digest.
 //   - The difference between a wire-format change and a cosmetic one. The digest
 //     is taken over the file's parsed JSON, so reformatting does not move it,
 //     but re-ordering keys or editing a vector's hand-authored name does. Such a
@@ -109,6 +118,11 @@ export const COVERED_VECTORS = [
     vectors: "psi-intersection-vectors.json",
     reason:
       "the resolved intersection membership and the association/permutation mapping back to input rows -- what message 3's association table states and what both parties must resolve identically.",
+  },
+  {
+    vectors: "terms-envelope-vectors.json",
+    reason:
+      "the field set, field order, and values each terms-exchange frame slot carries beside `linkageTerms` -- the record count, the effective key count, the protocol version, the save intent, the payload-intent flag, and the observed host key -- which a partner reads by name on the one round-trip every exchange performs.",
   },
 ];
 

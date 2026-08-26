@@ -189,6 +189,12 @@ export const GENERATED_VECTORS = [
     excuse: EXCUSE_OPENSSL,
   },
   {
+    vectors: "terms-envelope-vectors.json",
+    generator: "generate-terms-envelope-vectors.mjs",
+    writes: "stdout",
+    needsCoreDist: true,
+  },
+  {
     vectors: "transform-regex-divergent-vectors.json",
     generator: "generate-transform-regex-divergent-vectors.mjs",
     writes: "stdout",

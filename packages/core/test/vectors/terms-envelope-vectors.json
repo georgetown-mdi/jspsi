@@ -1,0 +1,329 @@
+{
+  "description": "Known-answer vectors for the terms-exchange message envelope: the field set, field order, and values each frame slot puts on the wire, captured off a real exchangeTerms run rather than authored. Every piece of per-party, per-run role and bounds metadata rides this envelope beside `linkageTerms` -- the record count, the declared effective key count, the protocol version, the save intent, the payload-intent flag, and the observed host key -- and a partner reads each by name, so adding, renaming, dropping, or re-ordering one is a wire-format delta. `linkageTerms` is lifted out of each frame into the `linkageTerms` section below and named per frame by party; the consuming suite rebuilds the full frame from `fields`, `envelope`, and `carriesLinkageTerms`. The terms document's own content is versioned by the operator-authored `linkage_terms.version` rather than by PROTOCOL_VERSION, so what this file pins is the envelope around it. `envelopeFields` is every field each slot ADMITS, read off the schemas; the frames below are what each slot EMITS, and the consuming suite holds their union to it so a field added to a schema cannot ride the wire with no frame pinning it. Replayed by packages/core/test/termsEnvelopeVectors.test.ts; regenerate with generate-terms-envelope-vectors.mjs in this directory.",
+  "protocolVersion": 1,
+  "envelopeFields": {
+    "message 1": [
+      "linkageTerms",
+      "recordCount",
+      "effectiveKeyCount",
+      "protocolVersion",
+      "save",
+      "disclosesPayload",
+      "hostKey"
+    ],
+    "message 2": [
+      "linkageTerms",
+      "decision",
+      "abortReasons",
+      "recordCount",
+      "effectiveKeyCount",
+      "protocolVersion",
+      "save",
+      "disclosesPayload",
+      "hostKey"
+    ],
+    "message 3": ["decision", "abortReasons"]
+  },
+  "frameLayout": "Each frame is `fields` in that exact order. A field named in `fields` other than `linkageTerms` takes its value from `envelope`; `linkageTerms` takes the party named by `carriesLinkageTerms`. A field absent from `fields` is absent from the frame -- omitted, never sent as null.",
+  "linkageTerms": {
+    "partyA": {
+      "version": "1.0.0",
+      "identity": "Party A",
+      "date": "2025-01-01",
+      "algorithm": "psi",
+      "linkageStrategy": "single-pass",
+      "output": {
+        "expectsOutput": true,
+        "shareWithPartner": true
+      },
+      "deduplicate": false,
+      "linkageFields": [
+        {
+          "name": "ssn",
+          "type": "ssn"
+        },
+        {
+          "name": "lastName",
+          "type": "last_name"
+        }
+      ],
+      "linkageKeys": [
+        {
+          "name": "SSN",
+          "elements": [
+            {
+              "field": "ssn"
+            }
+          ]
+        },
+        {
+          "name": "LN",
+          "elements": [
+            {
+              "field": "lastName"
+            }
+          ]
+        }
+      ]
+    },
+    "partyB": {
+      "version": "1.0.0",
+      "identity": "Party B",
+      "date": "2025-01-01",
+      "algorithm": "psi",
+      "linkageStrategy": "single-pass",
+      "output": {
+        "expectsOutput": true,
+        "shareWithPartner": true
+      },
+      "deduplicate": false,
+      "linkageFields": [
+        {
+          "name": "ssn",
+          "type": "ssn"
+        },
+        {
+          "name": "lastName",
+          "type": "last_name"
+        }
+      ],
+      "linkageKeys": [
+        {
+          "name": "SSN",
+          "elements": [
+            {
+              "field": "ssn"
+            }
+          ]
+        },
+        {
+          "name": "LN",
+          "elements": [
+            {
+              "field": "lastName"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "scenarios": [
+    {
+      "name": "every-optional-field-advertised",
+      "description": "Both parties advertise every optional envelope field: save intent, the payload-intent flag, and an observed SFTP host key. This is the widest frame a conforming party emits, so it is the one that names the whole field set a partner decoder reads.",
+      "initiator": {
+        "terms": "partyA",
+        "recordCount": 100,
+        "saveIntent": true,
+        "hostKey": {
+          "fingerprint": "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "keyType": "ssh-ed25519"
+        },
+        "disclosesPayload": true
+      },
+      "responder": {
+        "terms": "partyB",
+        "recordCount": 250,
+        "saveIntent": true,
+        "hostKey": {
+          "fingerprint": "SHA256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "keyType": "ecdsa-sha2-nistp256"
+        },
+        "disclosesPayload": false
+      },
+      "frames": [
+        {
+          "sender": "initiator",
+          "slot": "message 1",
+          "fields": [
+            "linkageTerms",
+            "recordCount",
+            "effectiveKeyCount",
+            "protocolVersion",
+            "save",
+            "disclosesPayload",
+            "hostKey"
+          ],
+          "envelope": {
+            "recordCount": 100,
+            "effectiveKeyCount": 2,
+            "protocolVersion": 1,
+            "save": true,
+            "disclosesPayload": true,
+            "hostKey": {
+              "fingerprint": "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "keyType": "ssh-ed25519"
+            }
+          },
+          "carriesLinkageTerms": "partyA"
+        },
+        {
+          "sender": "responder",
+          "slot": "message 2",
+          "fields": [
+            "linkageTerms",
+            "decision",
+            "recordCount",
+            "effectiveKeyCount",
+            "protocolVersion",
+            "save",
+            "disclosesPayload",
+            "hostKey"
+          ],
+          "envelope": {
+            "decision": "proceed",
+            "recordCount": 250,
+            "effectiveKeyCount": 2,
+            "protocolVersion": 1,
+            "save": true,
+            "disclosesPayload": false,
+            "hostKey": {
+              "fingerprint": "SHA256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "keyType": "ecdsa-sha2-nistp256"
+            }
+          },
+          "carriesLinkageTerms": "partyB"
+        },
+        {
+          "sender": "initiator",
+          "slot": "message 3",
+          "fields": ["decision"],
+          "envelope": {
+            "decision": "proceed"
+          },
+          "carriesLinkageTerms": null
+        }
+      ],
+      "reads": {
+        "initiator": {
+          "partnerIdentity": "Party B",
+          "partnerRecordCount": 250,
+          "partnerEffectiveKeyCount": 2,
+          "partnerSaveIntent": true,
+          "partnerDisclosesPayload": false,
+          "partnerHostKey": {
+            "fingerprint": "SHA256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "keyType": "ecdsa-sha2-nistp256"
+          },
+          "partnerHostKeyMalformed": false
+        },
+        "responder": {
+          "partnerIdentity": "Party A",
+          "partnerRecordCount": 100,
+          "partnerEffectiveKeyCount": 2,
+          "partnerSaveIntent": true,
+          "partnerDisclosesPayload": true,
+          "partnerHostKey": {
+            "fingerprint": "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "keyType": "ssh-ed25519"
+          },
+          "partnerHostKeyMalformed": false
+        }
+      }
+    },
+    {
+      "name": "no-optional-field-advertised",
+      "description": "Neither party passes an optional advertisement, so `save`, `disclosesPayload`, and `hostKey` are OMITTED from the frame rather than sent as null or false. The narrowest conforming frame, and the one that pins which fields are mandatory on each slot.",
+      "initiator": {
+        "terms": "partyA",
+        "recordCount": 7
+      },
+      "responder": {
+        "terms": "partyB",
+        "recordCount": 0
+      },
+      "frames": [
+        {
+          "sender": "initiator",
+          "slot": "message 1",
+          "fields": [
+            "linkageTerms",
+            "recordCount",
+            "effectiveKeyCount",
+            "protocolVersion"
+          ],
+          "envelope": {
+            "recordCount": 7,
+            "effectiveKeyCount": 2,
+            "protocolVersion": 1
+          },
+          "carriesLinkageTerms": "partyA"
+        },
+        {
+          "sender": "responder",
+          "slot": "message 2",
+          "fields": [
+            "linkageTerms",
+            "decision",
+            "recordCount",
+            "effectiveKeyCount",
+            "protocolVersion"
+          ],
+          "envelope": {
+            "decision": "proceed",
+            "recordCount": 0,
+            "effectiveKeyCount": 2,
+            "protocolVersion": 1
+          },
+          "carriesLinkageTerms": "partyB"
+        },
+        {
+          "sender": "initiator",
+          "slot": "message 3",
+          "fields": ["decision"],
+          "envelope": {
+            "decision": "proceed"
+          },
+          "carriesLinkageTerms": null
+        }
+      ],
+      "reads": {
+        "initiator": {
+          "partnerIdentity": "Party B",
+          "partnerRecordCount": 0,
+          "partnerEffectiveKeyCount": 2,
+          "partnerSaveIntent": false,
+          "partnerDisclosesPayload": null,
+          "partnerHostKey": null,
+          "partnerHostKeyMalformed": false
+        },
+        "responder": {
+          "partnerIdentity": "Party A",
+          "partnerRecordCount": 7,
+          "partnerEffectiveKeyCount": 2,
+          "partnerSaveIntent": false,
+          "partnerDisclosesPayload": null,
+          "partnerHostKey": null,
+          "partnerHostKeyMalformed": false
+        }
+      }
+    }
+  ],
+  "abortFrames": [
+    {
+      "name": "responder-abort-message-2",
+      "description": "The responder's message-2 slot doubles as its abort frame, so it carries the terms and the protocol version the initiator reconciles before it reads the decision -- and neither the record count nor any other role metadata, which an abort has no use for.",
+      "sender": "responder",
+      "slot": "message 2",
+      "fields": ["linkageTerms", "decision", "abortReasons", "protocolVersion"],
+      "envelope": {
+        "decision": "abort",
+        "abortReasons": ["a fixed reason, standing in for compatibility copy"],
+        "protocolVersion": 1
+      },
+      "carriesLinkageTerms": "partyB"
+    },
+    {
+      "name": "initiator-abort-message-3",
+      "description": "The initiator's message-3 slot closes an exchange whose versions both parties have already reconciled, so its abort carries the decision and the reasons alone -- no terms, and no version.",
+      "sender": "initiator",
+      "slot": "message 3",
+      "fields": ["decision", "abortReasons"],
+      "envelope": {
+        "decision": "abort",
+        "abortReasons": ["a fixed reason, standing in for compatibility copy"]
+      },
+      "carriesLinkageTerms": null
+    }
+  ]
+}
