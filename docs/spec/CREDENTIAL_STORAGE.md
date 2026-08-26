@@ -104,15 +104,24 @@ intended, so the mode is meant to be the file's whole access story. There is no
 (driven on the real tool, 2026-08-17, recorded on the introducing pull
 request). A relative operand is absolutized by prefixing the process working
 directory and nothing else -- no path join, no normalization, no resolution, so
-no `..` segment is collapsed and no separator is rewritten. The operand is thus
-the writer's own path against the same working directory, and the kernel
-resolves it exactly as it resolved the writer's open, `..` through a symlink
-included; a lexical collapse would instead aim the strip at a different file
-than the one the content lands in. It also begins with `/`, so it cannot land
-in the option position, regardless of how any chmod build parses a dash-leading
-operand. The absolute `/bin/chmod` keeps the resolution off `PATH`, and there is
-no shell -- the operand is a single argument. It is a subprocess rather than a
-syscall because Node's `fs` exposes no ACL API.
+no `..` segment is collapsed and no separator is rewritten. The one exception is
+a working directory of `/`, the only one that already ends in a separator: its
+own trailing separator is dropped, so the prefix emits `/name` rather than a
+`//name` whose leading double separator POSIX leaves to the implementation. The
+operand is thus the writer's own path against the same working directory, and
+the kernel resolves it exactly as it resolved the writer's open, `..` through a
+symlink included; a lexical collapse would instead aim the strip at a different
+file than the one the content lands in. It also begins with `/`, so it cannot
+land in the option position, regardless of how any chmod build parses a
+dash-leading operand. The absolute `/bin/chmod` keeps the resolution off `PATH`,
+and there is no shell -- the operand is a single argument. It is a subprocess
+rather than a syscall because Node's `fs` exposes no ACL API.
+
+Building that operand is itself inside the fail-closed boundary, because it can
+fail on its own: `process.cwd()` raises `ENOENT` once the working directory has
+been removed and a `chdir` has invalidated Node's cached value, and that is a
+strip which did not run rather than a bare errno escaping past the writers'
+contract.
 
 Whether the strip follows a symlink at the path is per call site, and each one
 takes the posture its own write took, so the ACL cleared belongs to the file the
@@ -131,11 +140,27 @@ certificate's public `0644`, because an inherited ACE can grant access (write
 included) that the explicit mode withholds.
 
 A failed strip is fail-closed, exactly as a failed `icacls` narrowing is on
-Windows: no content is written, and the error names the file and the `ls -le` /
-`chmod -N` remediation. The temp-file writers unlink the temp file on the way
-out, so nothing reaches the destination. The streamed CSV aborts before its
-truncate, so an existing destination keeps its rows; only a file that call
-itself created is left behind, empty, mirroring the Windows placeholder.
+Windows: no content is written. The temp-file writers unlink the temp file on the
+way out, so nothing reaches the destination. The streamed CSV aborts before its
+truncate, so an existing destination keeps its rows; only a file that call itself
+created is left behind, empty and already `0600`, mirroring the Windows
+placeholder.
+
+The refusal names the file and carries the underlying failure as its `cause`, so
+the display sink renders that failure as its own chain link. Which of two
+messages it carries turns on whether `chmod` ran, which `execFileSync` reports by
+setting a numeric `status` only for a child that ran to completion:
+
+| Failure | Refusal |
+| ------- | ------- |
+| `chmod` ran and exited nonzero (a numeric `status`) | "Could not clear extended ACLs on _file_", followed by the `ls -le` / `chmod -N` remediation |
+| The strip never ran (a spawn errno and a null `status`): no `/bin/chmod`, an exec the OS refused, the 5 s timeout, or a `process.cwd()` that threw before the command line existed | "Could not run the extended-ACL strip on _file_; no content was written" |
+
+The split exists because only the first case puts the remedy in the operator's
+hands: the ACL is the obstacle there, while sending them after `ls -le` on a host
+that could not run `chmod` at all points them at something that was never in the
+way. The errno separating the second case's causes rides in on the `cause` rather
+than being enumerated in the message.
 
 Off macOS no strip is attempted: on Linux the numeric `chmod` already collapses
 the POSIX ACL mask, and Windows owner-only enforcement is the `icacls`

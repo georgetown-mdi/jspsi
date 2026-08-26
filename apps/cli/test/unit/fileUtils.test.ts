@@ -19,13 +19,17 @@ import {
 // a writer aims its strip at lives in the command line and nowhere else. This
 // records every `execFileSync` argument vector; while `stubbed` is set it also
 // answers the call instead of running it, so the symlink-posture assertions
-// hold on a host whose `chmod` rejects the macOS flags. Unstubbed -- every other
-// test in this file -- it runs the real command, so nothing else changes. A
-// `vi.spyOn` cannot do this: a builtin module's ESM namespace is not
-// configurable, which is why the module is mocked rather than patched.
+// hold on a host whose `chmod` rejects the macOS flags. With `failure` set it
+// throws that value instead, which is how a test puts a specific failure --
+// captured from the runtime, never hand-built -- in front of the writers on a
+// host that cannot produce it. Unstubbed -- every other test in this file -- it
+// runs the real command, so nothing else changes. A `vi.spyOn` cannot do this: a
+// builtin module's ESM namespace is not configurable, which is why the module is
+// mocked rather than patched.
 const execFile = vi.hoisted(() => ({
   commands: [] as string[][],
   stubbed: false,
+  failure: undefined as unknown,
 }));
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -38,6 +42,7 @@ vi.mock("node:child_process", async (importOriginal) => {
       options?: Parameters<typeof actual.execFileSync>[2],
     ) => {
       execFile.commands.push([file, ...args]);
+      if (execFile.failure !== undefined) throw execFile.failure;
       return execFile.stubbed ? "" : actual.execFileSync(file, args, options);
     },
   };
@@ -53,6 +58,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   execFile.commands.length = 0;
   execFile.stubbed = false;
+  execFile.failure = undefined;
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -562,13 +568,76 @@ function withPlatform<T>(platform: string, body: () => T): T {
 const stripFailsHere =
   process.platform !== "darwin" && process.platform !== "win32";
 
+// Either refusal the strip raises, since which one a host produces depends on
+// how its `chmod` fails: GNU `chmod` runs and exits nonzero on `-N`, which is
+// the ACL-remedy message, while a host with no `/bin/chmod` fails the spawn and
+// gets the could-not-run one. The tests below are about what each writer leaves
+// on disk, not about which refusal it carries -- that split is pinned, against
+// failures captured from the runtime, in the reporting suite further down.
+const STRIP_REFUSAL =
+  /Could not (clear extended ACLs|run the extended-ACL strip) on /;
+
+// Run `body` and hand back whatever it threw. `expect(...).toThrow` matches only
+// the message, so a test that asserts on the `cause` a refusal carries needs the
+// thrown value itself.
+function catchThrown(body: () => unknown): unknown {
+  try {
+    body();
+  } catch (thrown) {
+    return thrown;
+  }
+  throw new Error("expected the call to throw");
+}
+
+// What `execFileSync` really throws for `run`, captured from the runtime rather
+// than hand-built: the refusal message keys on the shape Node produces -- a
+// numeric `status` for a child that ran to completion, a spawn errno and a null
+// status for one that never did -- so the shapes under test have to be Node's
+// own rather than this file's model of them.
+function capturedExecFileFailure(
+  run: () => void,
+): NodeJS.ErrnoException & { status?: number | null } {
+  try {
+    run();
+  } catch (thrown) {
+    return thrown as NodeJS.ErrnoException & { status?: number | null };
+  }
+  throw new Error("expected the command to fail");
+}
+
+// A real `/bin/chmod` run that fails by exiting nonzero: the operand names a
+// file that is not there, which no chmod build can act on. This is the shape a
+// macOS `chmod -N` produces when it cannot clear the ACL -- the one case where
+// the ACL itself is the obstacle.
+function capturedChmodRefusal(): NodeJS.ErrnoException & {
+  status?: number | null;
+} {
+  return capturedExecFileFailure(() =>
+    childProcess.execFileSync(
+      "/bin/chmod",
+      ["0600", path.join(dir, "absent")],
+      {
+        stdio: "ignore",
+      },
+    ),
+  );
+}
+
+// Arm the recorder so the strip's `execFileSync` throws `failure` instead of
+// running, putting a writer in front of that exact failure on any host.
+function failAclStripWith(failure: unknown): void {
+  execFile.commands.length = 0;
+  execFile.stubbed = true;
+  execFile.failure = failure;
+}
+
 describe("extended-ACL strip failure", () => {
   test("writeFileOwnerOnly writes nothing and leaves no temp file", () => {
     if (!stripFailsHere) return;
     const dest = path.join(dir, "secret");
     withPlatform("darwin", () => {
       expect(() => writeFileOwnerOnly(dest, "secret-content")).toThrow(
-        /Could not clear extended ACLs/,
+        STRIP_REFUSAL,
       );
     });
     expect(fs.existsSync(dest)).toBe(false);
@@ -580,9 +649,7 @@ describe("extended-ACL strip failure", () => {
     const dest = path.join(dir, "secret");
     writeFileOwnerOnly(dest, "original");
     withPlatform("darwin", () => {
-      expect(() => writeFileOwnerOnly(dest, "rotated")).toThrow(
-        /Could not clear extended ACLs/,
-      );
+      expect(() => writeFileOwnerOnly(dest, "rotated")).toThrow(STRIP_REFUSAL);
     });
     expect(fs.readFileSync(dest, "utf8")).toBe("original");
     expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
@@ -597,7 +664,7 @@ describe("extended-ACL strip failure", () => {
     withPlatform("darwin", () => {
       expect(() =>
         writeFileOwnerOnly(dest, "identity-content", { exclusive: true }),
-      ).toThrow(/Could not clear extended ACLs/);
+      ).toThrow(STRIP_REFUSAL);
     });
     expect(fs.existsSync(dest)).toBe(false);
     expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
@@ -607,9 +674,7 @@ describe("extended-ACL strip failure", () => {
     if (!stripFailsHere) return;
     const dest = path.join(dir, "cert.json");
     withPlatform("darwin", () => {
-      expect(() => writeFileAtomic(dest, "x")).toThrow(
-        /Could not clear extended ACLs/,
-      );
+      expect(() => writeFileAtomic(dest, "x")).toThrow(STRIP_REFUSAL);
     });
     expect(fs.existsSync(dest)).toBe(false);
     expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
@@ -620,17 +685,34 @@ describe("extended-ACL strip failure", () => {
     const p = path.join(dir, "result.csv");
     fs.writeFileSync(p, "original,content\n");
     withPlatform("darwin", () => {
-      expect(() => createOwnerOnlyWriteStream(p)).toThrow(
-        /Could not clear extended ACLs/,
-      );
+      expect(() => createOwnerOnlyWriteStream(p)).toThrow(STRIP_REFUSAL);
     });
     // The strip runs before the truncate, so the operator's existing rows
     // survive a refusal rather than being emptied by a write that never landed.
     expect(fs.readFileSync(p, "utf8")).toBe("original,content\n");
   });
 
+  test("createOwnerOnlyWriteStream leaves a destination it created empty and owner-only", () => {
+    // The other half of the case above: the open creates the destination before
+    // the strip runs, so a refusal cannot leave it untouched -- it leaves it
+    // there. The writer does not delete a path the operator named, mirroring the
+    // Windows branch's placeholder, and the mode is already secured, so what
+    // stays behind is an empty owner-only file rather than a readable one.
+    // Driven from a captured failure rather than the host's own `chmod` so the
+    // shape is pinned on macOS too, where a real strip would succeed.
+    if (process.platform === "win32") return;
+    const p = path.join(dir, "new-result.csv");
+    failAclStripWith(capturedChmodRefusal());
+    withPlatform("darwin", () => {
+      expect(() => createOwnerOnlyWriteStream(p)).toThrow(STRIP_REFUSAL);
+    });
+    expect(fs.existsSync(p)).toBe(true);
+    expect(fs.readFileSync(p, "utf8")).toBe("");
+    expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+  });
+
   test("the same writes succeed on the host's real platform", async () => {
-    // The gate is what separates this from the four refusals above: the same
+    // The gate is what separates this from the refusals above: the same
     // writers on the same host, differing only in what process.platform
     // reports. On Linux -- the production/Docker target -- no strip is
     // attempted and every writer completes.
@@ -646,6 +728,118 @@ describe("extended-ACL strip failure", () => {
     const csv = path.join(dir, "result.csv");
     await writeAndClose(createOwnerOnlyWriteStream(csv), "a,b\n1,2\n");
     expect(fs.readFileSync(csv, "utf8")).toBe("a,b\n1,2\n");
+  });
+});
+
+// --- extended-ACL strip: failure reporting -----------------------------------
+
+// A refusal has to say which of two things went wrong, because only one of them
+// has the operator holding the remedy: a `chmod` that ran and could not clear
+// the ACL is what `ls -le` and `chmod -N` address, while a strip that never ran
+// -- no `/bin/chmod`, an exec the OS refused, the 5 s timeout, a working
+// directory removed underfoot -- would send them after an ACL that was never in
+// the way. Every failure below is captured from the runtime, so what these
+// assertions classify is the shape Node produces rather than a model of it.
+describe("extended-ACL strip failure reporting", () => {
+  test("a chmod that ran and refused keeps the ACL remedy and carries its cause", () => {
+    if (process.platform === "win32") return;
+    const refused = capturedChmodRefusal();
+    // The discriminant: a child that ran to completion reports its exit status.
+    expect(typeof refused.status).toBe("number");
+    failAclStripWith(refused);
+    const dest = path.join(dir, "secret");
+
+    const thrown = catchThrown(() =>
+      withPlatform("darwin", () => writeFileOwnerOnly(dest, "x")),
+    ) as Error;
+
+    expect(thrown.message).toMatch(/^Could not clear extended ACLs on /);
+    expect(thrown.message).toContain(dest);
+    expect(thrown.message).toContain("ls -le");
+    expect(thrown.message).toContain("chmod -N");
+    expect(thrown.cause).toBe(refused);
+  });
+
+  test("a strip that never ran is reported apart from an ACL that resisted clearing", () => {
+    if (process.platform === "win32") return;
+    const unexecutable = path.join(dir, "not-executable");
+    fs.writeFileSync(unexecutable, "", { mode: 0o600 });
+    const failures = {
+      "missing binary": capturedExecFileFailure(() =>
+        childProcess.execFileSync(path.join(dir, "no-such-chmod"), [], {
+          stdio: "ignore",
+        }),
+      ),
+      "exec the OS refused": capturedExecFileFailure(() =>
+        childProcess.execFileSync(unexecutable, [], { stdio: "ignore" }),
+      ),
+      timeout: capturedExecFileFailure(() =>
+        childProcess.execFileSync("/bin/sleep", ["5"], {
+          stdio: "ignore",
+          timeout: 50,
+        }),
+      ),
+    };
+    // Each arrives with its own errno and no exit status, which is what the
+    // refusal reads: the three stay distinguishable to an operator through the
+    // cause, without the message having to enumerate them.
+    expect(
+      new Set(Object.values(failures).map((failure) => failure.code)).size,
+    ).toBe(3);
+
+    for (const [label, failure] of Object.entries(failures)) {
+      expect(failure.status ?? null).toBeNull();
+      failAclStripWith(failure);
+      const dest = path.join(dir, `secret-${label.replace(/\s+/g, "-")}`);
+
+      const thrown = catchThrown(() =>
+        withPlatform("darwin", () => writeFileOwnerOnly(dest, "x")),
+      ) as Error;
+
+      expect(thrown.message).toMatch(
+        /^Could not run the extended-ACL strip on /,
+      );
+      expect(thrown.message).toContain(dest);
+      expect(thrown.message).not.toContain("chmod -N");
+      expect(thrown.cause).toBe(failure);
+      expect(fs.existsSync(dest)).toBe(false);
+    }
+  });
+
+  test("a working directory removed underfoot refuses rather than raising a bare errno", () => {
+    // Building the operand is itself a step that can fail: `process.cwd()`
+    // throws once the working directory is gone. Node caches that value and only
+    // reaches the OS again after a `chdir` invalidates the cache, so the removal
+    // has to land after the chdir and before the strip -- which is where the
+    // stream writer's fchmod sits. The `uv_cwd` assertion is what proves the
+    // window was hit: had the cache still been warm, the strip would have run
+    // and the cause would be a `chmod` failure instead.
+    if (process.platform === "win32") return;
+    const gone = path.join(dir, "gone");
+    fs.mkdirSync(gone);
+    const realFchmod = fs.fchmodSync.bind(fs);
+    vi.spyOn(fs, "fchmodSync").mockImplementationOnce((fd, mode) => {
+      realFchmod(fd, mode);
+      fs.rmSync(gone, { recursive: true });
+    });
+    const previousCwd = process.cwd();
+    let thrown: unknown;
+    process.chdir(gone);
+    try {
+      thrown = catchThrown(() =>
+        withPlatform("darwin", () => createOwnerOnlyWriteStream("result.csv")),
+      );
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    expect((thrown as Error).message).toBe(
+      "Could not run the extended-ACL strip on result.csv; no content was written",
+    );
+    expect((thrown as Error).cause).toBeDefined();
+    expect(((thrown as Error).cause as NodeJS.ErrnoException).syscall).toBe(
+      "uv_cwd",
+    );
   });
 });
 
@@ -725,6 +919,31 @@ describe("extended-ACL strip symlink posture", () => {
     const operand = commands[0][commands[0].length - 1];
     expect(operand.startsWith("/")).toBe(true);
     expect(operand).toBe(expected);
+  });
+
+  test("a working directory of `/` leaves the operand one leading separator", () => {
+    // The root is the one working directory that already ends in a separator, so
+    // the plain prefix would emit `//name` -- a leading `//` POSIX leaves to the
+    // implementation. The prefix drops the root's own separator instead, and
+    // nothing else about the operand changes: the rest of the path is still the
+    // writer's own bytes.
+    if (process.platform === "win32") return;
+    const commands = recordAclStripCommands();
+    // Relative to the root, so the kernel resolves it back into this test's
+    // directory while the writer sees a path it has to absolutize.
+    const relative = `${path.relative("/", dir)}/rooted-secret`;
+    const cwd = process.cwd();
+    process.chdir("/");
+    try {
+      withPlatform("darwin", () => writeFileOwnerOnly(relative, "x"));
+    } finally {
+      process.chdir(cwd);
+    }
+
+    expect(commands).toEqual([
+      ["/bin/chmod", "-h", "-N", `/${relative}.tmp.${process.pid}`],
+    ]);
+    expect(fs.readFileSync(path.join(dir, "rooted-secret"), "utf8")).toBe("x");
   });
 
   test("an operand keeps a `..` segment that only the kernel can resolve", async () => {
