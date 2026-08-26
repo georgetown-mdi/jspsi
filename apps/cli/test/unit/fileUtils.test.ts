@@ -613,9 +613,9 @@ type CapturedExecFileFailure = NodeJS.ErrnoException & {
 // What `execFileSync` really throws for `run`, captured from the runtime rather
 // than hand-built: the refusal message keys on the shape Node produces -- a
 // numeric `status` for a child that ran to completion, a termination signal for
-// one it killed, a spawn errno and neither of those for one that never ran -- so
-// the shapes under test have to be Node's own rather than this file's model of
-// them.
+// one that died on a kill, a spawn errno and neither of those for one that never
+// ran -- so the shapes under test have to be Node's own rather than this file's
+// model of them.
 function capturedExecFileFailure(run: () => void): CapturedExecFileFailure {
   try {
     run();
@@ -818,35 +818,76 @@ describe("extended-ACL strip failure reporting", () => {
     }
   });
 
-  test("a timeout keeps the ACL remedy, since the killed child may have started", () => {
+  test("both timeout shapes keep the ACL remedy and leave the write refused", () => {
     // The 5 s timeout kills a child that was spawned: `chmod -N` may already
     // have altered an existing destination's ACL when the kill lands, so this is
-    // the case where the operator most wants `ls -le` and `chmod -N`. What
-    // separates it from a strip that never ran is the termination signal, not an
-    // exit status -- a killed child has none.
+    // the case where the operator most wants `ls -le` and `chmod -N`. Node
+    // reports that kill in two shapes and the refusal has to read both as a
+    // `chmod` that ran: a child that dies on the signal carries the termination
+    // signal and no exit status, while one that ignores `SIGTERM` outlives the
+    // kill and carries the status it exits with -- `0` among them -- and no
+    // signal. A strip that never ran is what carries neither field.
     if (process.platform === "win32") return;
-    const timedOut = capturedExecFileFailure(() =>
-      childProcess.execFileSync("/bin/sleep", ["5"], {
-        stdio: "ignore",
-        timeout: 50,
-      }),
-    );
-    expect(timedOut.status ?? null).toBeNull();
-    expect(typeof timedOut.signal).toBe("string");
-    failAclStripWith(timedOut);
-    const dest = path.join(dir, "secret");
+    const shapes = {
+      "died on the signal": {
+        binary: "/bin/sleep",
+        failure: capturedExecFileFailure(() =>
+          childProcess.execFileSync("/bin/sleep", ["5"], {
+            stdio: "ignore",
+            timeout: 50,
+          }),
+        ),
+      },
+      "outlived the kill": {
+        binary: "/bin/sh",
+        failure: capturedExecFileFailure(() =>
+          childProcess.execFileSync(
+            "/bin/sh",
+            ["-c", "trap '' TERM; sleep 1"],
+            {
+              stdio: "ignore",
+              timeout: 100,
+            },
+          ),
+        ),
+      },
+    };
+    expect(shapes["died on the signal"].failure.status ?? null).toBeNull();
+    expect(typeof shapes["died on the signal"].failure.signal).toBe("string");
+    // The shape the classification turns on: a status of zero is still a status,
+    // so a `chmod` that outlasted the kill must not read as one that never ran.
+    expect(shapes["outlived the kill"].failure.status).toBe(0);
+    expect(shapes["outlived the kill"].failure.signal ?? null).toBeNull();
 
-    const thrown = catchThrown(() =>
-      withPlatform("darwin", () => writeFileOwnerOnly(dest, "x")),
-    ) as Error;
+    for (const [label, { binary, failure }] of Object.entries(shapes)) {
+      expect(failure.code).toBe("ETIMEDOUT");
+      failAclStripWith(failure);
+      const dest = path.join(dir, `secret-${label.replace(/\s+/g, "-")}`);
 
-    expect(thrown.message).toMatch(/^Could not clear extended ACLs on /);
-    expect(thrown.message).toContain(dest);
-    expect(thrown.message).toContain("ls -le");
-    expect(thrown.cause).toBe(timedOut);
-    // The pointer is about an ACL that may be half-cleared, not about content:
-    // the write is still refused outright.
-    expect(fs.existsSync(dest)).toBe(false);
+      const thrown = catchThrown(() =>
+        withPlatform("darwin", () => writeFileOwnerOnly(dest, "x")),
+      ) as Error;
+
+      expect(thrown.message).toMatch(/^Could not clear extended ACLs on /);
+      expect(thrown.message).toContain(dest);
+      expect(thrown.message).toContain("ls -le");
+      expect(thrown.cause).toBe(failure);
+      // A timeout's cause is Node's spawn-failure text, which names the binary
+      // and no operand -- so unlike the completed-child refusal below, this
+      // route discloses no path beyond the destination the message already
+      // names. The binary is the captured failure's own, standing in for
+      // `/bin/chmod` on a host whose `chmod` cannot be made to hang.
+      expect(sanitizeErrorForDisplay(thrown)).toBe(
+        joinErrorCauseChain([thrown.message, `spawnSync ${binary} ETIMEDOUT`]),
+      );
+      // The pointer is about an ACL that may be half-cleared, not about content:
+      // the write is refused outright, leaving the destination absent and no
+      // temp file behind, the same on-disk state every other refusal leaves.
+      expect(fs.existsSync(dest)).toBe(false);
+      expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual(
+        [],
+      );
+    }
   });
 
   test("a working directory removed underfoot refuses rather than raising a bare errno", () => {

@@ -267,9 +267,12 @@ function absolutizeAgainstWorkingDirectory(filePath: string): string {
 }
 
 // Which refusal a failed strip carries, split on whether `chmod` was spawned at
-// all. `execFileSync` reports a numeric `status` for a child that ran to
-// completion and a termination `signal` for one it killed on the 5 s timeout;
-// either way `chmod -N` may have started clearing the ACL, so the `ls -le` /
+// all. `execFileSync` reports a spawned child through one of two fields: a
+// numeric `status` for one that ran to completion, and a termination `signal`
+// for one that died on a kill. The 5 s timeout produces both shapes -- the
+// signal when the child dies on it, the exit status the child chose (`0`
+// included) when it ignores `SIGTERM` and outlives the kill -- so either field
+// present means `chmod -N` may have started clearing the ACL and the `ls -le` /
 // `chmod -N` remedy is the operator's to apply. A failure carrying neither never
 // reached the ACL -- a missing or unexecutable `/bin/chmod`, an exec the OS
 // refused, or a `process.cwd()` that threw before the command line existed --

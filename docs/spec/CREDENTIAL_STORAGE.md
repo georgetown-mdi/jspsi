@@ -151,21 +151,37 @@ placeholder.
 The refusal names the file and carries the underlying failure as its `cause`, so
 the display sink renders that failure as its own chain link. Which of two
 messages it carries turns on whether `chmod` was spawned at all, which
-`execFileSync` reports through the exit status of a child that ran to completion
-and the termination signal of one it killed:
+`execFileSync` reports through two fields: the exit status of a child that ran
+to completion, and the termination signal of one that died on a kill. A spawned
+child sets one of them whatever else went wrong, so the discriminant is either
+field being present rather than the value in it:
 
 | Failure | Refusal |
 | ------- | ------- |
-| `chmod` was spawned: it exited nonzero (a numeric `status`), or the 5 s timeout killed it (a termination `signal`, and no status) | "Could not clear extended ACLs on _file_", followed by the `ls -le` / `chmod -N` remediation |
+| `chmod` was spawned: it carries an exit status (a numeric `status`, `0` included) or a termination signal (a `signal` string). A nonzero exit is one shape; the 5 s timeout is two more, since the kill leaves a signal and no status on a child that dies on it, but the exit status the child chose and no signal on one that ignores `SIGTERM` and finishes afterwards | "Could not clear extended ACLs on _file_", followed by the `ls -le` / `chmod -N` remediation |
 | The strip never ran, carrying neither a status nor a signal: no `/bin/chmod`, an exec the OS refused, or a `process.cwd()` that threw before the command line existed | "Could not run the extended-ACL strip on _file_; no content was written" |
+
+Those field shapes are captured from `execFileSync` in the CLI unit tests and
+fed to the classifier rather than modeled there, so a runtime that reshaped them
+reddens the suite instead of silently re-routing a refusal.
 
 The split exists because only the first case puts the remedy in the operator's
 hands: a spawned `chmod -N` may have begun altering an existing destination's
-ACL before it exited or was killed, so the ACL is the obstacle to inspect, while
-sending them after `ls -le` on a host that could not run `chmod` at all points
-them at something that was never in the way. The errno separating the second
-case's causes rides in on the `cause` rather than being enumerated in the
-message.
+ACL before it exited, was killed, or outlived the kill, so the ACL is the
+obstacle to inspect, while sending them after `ls -le` on a host that could not
+run `chmod` at all points them at something that was never in the way. The errno
+separating the second case's causes rides in on the `cause` rather than being
+enumerated in the message.
+
+What that `cause` discloses is Node's own text for the failure, in one of two
+forms. A child that ran to completion untimed renders
+`Command failed: /bin/chmod <flags> <operand>`, so the whole command line
+reaches the operator -- and for the temp-file writers the operand is the temp
+path, `<destination>.tmp.<pid>`. A spawn failure and both timeout shapes render
+`spawnSync /bin/chmod <errno>` instead, naming the binary and no operand. The
+temp path is psilink's own construction and holds no content when the strip
+refuses, and the refusal message already names the destination it derives from,
+so what the first form adds beyond the errno is this process's pid.
 
 Off macOS no strip is attempted: on Linux the numeric `chmod` already collapses
 the POSIX ACL mask, and Windows owner-only enforcement is the `icacls`
