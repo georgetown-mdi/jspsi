@@ -17,6 +17,7 @@ import { ReceiptsCard } from "@bench/ReceiptsCard";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
+import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { ReactElement } from "react";
 import type { ReceiptsDraft } from "@bench/receiptsModel";
 
@@ -118,6 +119,15 @@ function stubSigningApi(options: StubOptions = {}): { bodies: Array<string> } {
  * would carry into the run intent as well as on what is rendered. */
 let latestDraft: ReceiptsDraft = RECEIPTS_DEFAULT;
 
+/** The default console layout: one mount, so the rendezvous holds the working
+ * directory and the card's whole advisory set is on show. */
+const SINGLE_MOUNT_RENDEZVOUS: JobRendezvousConfig = {
+  configured: true,
+  locator: "psilink",
+  folderName: "psilink",
+  sharesDataRoot: true,
+};
+
 /**
  * The card wired the way both benches wire it -- `AcceptorBench` directly and
  * `InviterBench` through `ReviewCreateSection` -- with a bare `useState` setter as
@@ -134,6 +144,7 @@ function ReceiptsHarness({ identity }: { identity: string }): ReactElement {
   return createElement(ReceiptsCard, {
     draft,
     identity,
+    rendezvous: SINGLE_MOUNT_RENDEZVOUS,
     open,
     onToggleOpen: setOpen,
     onChange: setDraft,

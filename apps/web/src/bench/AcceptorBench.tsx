@@ -1494,6 +1494,7 @@ export function AcceptorBench() {
                     <ReceiptsCard
                       draft={receipts}
                       identity={committedName}
+                      rendezvous={rendezvous}
                       open={receiptsOpen}
                       onToggleOpen={setReceiptsOpen}
                       onChange={setReceipts}

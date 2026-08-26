@@ -23,7 +23,11 @@ import {
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
-import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
+import {
+  IDENTITY_CONTROL_CHAR_MESSAGE,
+  IDENTITY_CONTROL_CHAR_PATTERN,
+  MAX_IDENTITY_LENGTH,
+} from "@psi/identityLabel";
 
 import { PEER_ID_SHAPE_MESSAGE, isAdmissiblePeerId } from "@psi/peerIdLabel";
 
@@ -522,10 +526,12 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  * - `linkageStrategy` is a closed enum forwarded to the CLI's `--linkage-strategy`.
  * - `identity` is a bounded operator label forwarded to the CLI's `--identity`
  *   (the party name/org/contact string). Bounded by {@link MAX_IDENTITY_LENGTH}
- *   and, being free text rather than a closed enum, additionally forbidden a leading
- *   `-` so a flag-shaped value cannot masquerade as a CLI flag; the driver also
- *   emits it as a single `--identity=<value>` token, which parses a `-`-leading
- *   value verbatim regardless.
+ *   and, being free text rather than a closed enum, held to the shared label
+ *   contract's two shape rules as well: no leading `-`, so a flag-shaped value
+ *   cannot masquerade as a CLI flag -- the driver also emits it as a single
+ *   `--identity=<value>` token, which parses a `-`-leading value verbatim
+ *   regardless -- and no control character, which would otherwise ride the run
+ *   into this party's own disclosure record.
  *
  * Neither is a path, host, or credential, so neither can escape into a file path
  * or a connection field. Exactly one of `inputCsv` or `inputFile` is set (enforced
@@ -821,15 +827,20 @@ const jobZeroSetupIntentCommonFields = {
   inputFile: jobInputFileReferenceSchema.optional(),
   eventStream: z.boolean().optional(),
   linkageStrategy: z.enum(["cascade", "single-pass"]).optional(),
-  // Free text, unlike the closed strategy enum: forbid a leading `-` so a
-  // flag-shaped label (e.g. "--save") cannot be mistaken for a CLI flag. Defense
-  // in depth -- the driver already emits it as a single `--identity=<value>` token,
-  // which parses a `-`-leading value verbatim regardless.
+  // Free text, unlike the closed strategy enum, so it takes the shared label
+  // contract's two shape rules (`@psi/identityLabel`): no leading `-`, so a
+  // flag-shaped label (e.g. "--save") cannot be mistaken for a CLI flag -- defense
+  // in depth, since the driver emits it as a single `--identity=<value>` token,
+  // which parses a `-`-leading value verbatim regardless -- and no control
+  // character, which rides the run into this party's own disclosure record.
   identity: z
     .string()
     .min(1)
     .max(MAX_IDENTITY_LENGTH)
     .regex(/^[^-]/, "identity must not begin with '-'")
+    .refine((label) => !IDENTITY_CONTROL_CHAR_PATTERN.test(label), {
+      message: IDENTITY_CONTROL_CHAR_MESSAGE,
+    })
     .optional(),
 };
 

@@ -88,6 +88,12 @@ function profileErrorReasonOf(body: unknown): JobInputProfileUnavailableReason {
  * (`outboundLocator`/`outboundFolderName`), and requires retain mode. Both locators
  * are present whenever `split` is, since an invitation needs a name for each leg.
  *
+ * `sharesDataRoot` reports the single-mount layout: a rendezvous folder that holds
+ * the mounted working directory, so what the partner syncs into is also where this
+ * party's signing key lives. Absent only where the appliance has not said, which the
+ * surfaces that warn about the key's location read as the shared layout -- the
+ * direction an unanswered probe is safe to fail in.
+ *
  * `problem` is why the appliance cannot run a filedrop exchange as provisioned, in
  * the operator's own terms; it accompanies `configured: false`, so a surface that
  * shows the unavailable state has the remedy to show with it. */
@@ -98,6 +104,7 @@ export interface JobRendezvousConfig {
   folderName?: string;
   outboundLocator?: string;
   outboundFolderName?: string;
+  sharesDataRoot?: boolean;
   problem?: string;
 }
 
@@ -271,6 +278,10 @@ async function probeJobRendezvous(
     return {
       configured: true,
       locator,
+      // Anything but an explicit `false` reads as the shared layout: a body that
+      // does not answer leaves the identity-location warning raised rather than
+      // silently withheld, which is the direction that warning is safe to fail in.
+      sharesDataRoot: body.sharesDataRoot !== false,
       // A malformed name degrades to "the console cannot name the folder", which
       // is the direction the accept kit is safe to fail in.
       ...(typeof folderName === "string" && folderName.length > 0

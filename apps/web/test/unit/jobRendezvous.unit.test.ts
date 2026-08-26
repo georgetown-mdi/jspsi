@@ -171,6 +171,71 @@ function withUnreadableRealpath<T>(unreadable: string, body: () => T): T {
   }
 }
 
+/**
+ * Run `body` with `alias` reporting the filesystem identity of `target`: two real,
+ * separately resolvable paths whose `(st_dev, st_ino)` pairs are one directory's,
+ * which is what one host directory bind-mounted at two container paths looks like
+ * from inside the container.
+ *
+ * Injected because the shape cannot be built in a unit test: a bind mount takes
+ * privileges the suite does not have, and a hard link to a directory is refused
+ * outright. `realpathSync` is left alone, so the two paths stay as unrelated to each
+ * other as the resolution's path comparisons can see -- the identity is the only
+ * thing that relates them.
+ */
+function withAliasedInode<T>(alias: string, target: string, body: () => T): T {
+  const statSync = fs.statSync;
+  const aliased = path.resolve(alias);
+  const spy = vi
+    .spyOn(fs, "statSync")
+    .mockImplementation((entry: fs.PathLike, options?: fs.StatSyncOptions) =>
+      statSync(
+        path.resolve(String(entry)) === aliased ? target : entry,
+        options,
+      ),
+    );
+  try {
+    return body();
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+/**
+ * Run `body` with `fs.statSync` failing `EACCES` for `unreadable` alone -- a
+ * directory the process can name and resolve but not stat, the shape a mount under
+ * an unsearchable parent takes. Every other path stats normally, so the identity
+ * walk still reads the rest of the chain.
+ *
+ * Injected for the reason {@link blockRealpath} is: a suite running as root stats
+ * through a `0000` parent anyway, so a case driven off a real directory mode would
+ * silently stop being exercised on exactly the hosts (containers) the console runs
+ * in. `EACCES` rather than `ENOENT` is the whole point of the case -- a directory
+ * that is not there aliases nothing, while one that could not be read is precisely
+ * where the aliasing would sit.
+ */
+function withUnreadableStat<T>(unreadable: string, body: () => T): T {
+  const statSync = fs.statSync;
+  const blocked = path.resolve(unreadable);
+  const spy = vi
+    .spyOn(fs, "statSync")
+    .mockImplementation((entry: fs.PathLike, options?: fs.StatSyncOptions) => {
+      if (path.resolve(String(entry)) === blocked) {
+        const error: NodeJS.ErrnoException = new Error(
+          "EACCES: permission denied",
+        );
+        error.code = "EACCES";
+        throw error;
+      }
+      return statSync(entry, options);
+    });
+  try {
+    return body();
+  } finally {
+    spy.mockRestore();
+  }
+}
+
 afterEach(() => {
   for (const dir of dirs.splice(0))
     fs.rmSync(dir, { recursive: true, force: true });
@@ -693,6 +758,193 @@ describe("the split rendezvous a second mount provisions", () => {
       path.resolve("/data/jobs"),
       path.resolve("/data/out"),
     ]);
+  });
+});
+
+describe("whether a rendezvous leg holds the data root", () => {
+  test("the data-root fallback does: the single-folder console", () => {
+    // The layout the identity-location advisory exists for -- one mount, so the
+    // folder the partner syncs is the folder the signing key is written into.
+    expect(
+      resolveJobRendezvousProvisioning({ JOB_DATA_ROOT: "/data/jobs" })
+        .sharesDataRoot,
+    ).toBe(true);
+  });
+
+  test("a rendezvous with a mount of its own does not", () => {
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: "/data/jobs",
+        JOB_RENDEZVOUS_DIR: "/mnt/share",
+      }).sharesDataRoot,
+    ).toBeUndefined();
+  });
+
+  test("a leg mounted ABOVE the data root does, whichever variable named it", () => {
+    // The fact follows the containment, not the fallback: an operator who pointed
+    // JOB_RENDEZVOUS_DIR at a folder holding the working directory syncs the key
+    // exactly as the fallback does.
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: "/mnt/share/work",
+        JOB_RENDEZVOUS_DIR: "/mnt/share",
+      }).sharesDataRoot,
+    ).toBe(true);
+  });
+
+  test("a leg mounted INSIDE the data root does not", () => {
+    // Directional: the partner's sync reaches that subfolder, not the key sitting
+    // in the folder above it. The overlap warning the job's own preflight raises
+    // is the surface for what a write into it does reach.
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: "/data/jobs",
+        JOB_RENDEZVOUS_DIR: "/data/jobs/share",
+      }).sharesDataRoot,
+    ).toBeUndefined();
+  });
+
+  test("a leg symlinked onto the data root does", () => {
+    const mounts = tempDir("mounts");
+    const work = subDir(mounts, "work");
+    const link = path.join(mounts, "share");
+    fs.symlinkSync(work, link, "dir");
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: work,
+        JOB_RENDEZVOUS_DIR: link,
+      }).sharesDataRoot,
+    ).toBe(true);
+  });
+
+  test("EITHER leg of a split answers for the pair", () => {
+    // Each leg is partner-synced independently, so an outbound leg pointed at the
+    // working directory puts the key where the partner reads just as an inbound
+    // one would.
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: "/data/jobs",
+        JOB_RENDEZVOUS_DIR: "/mnt/from-partner",
+        JOB_RENDEZVOUS_OUTBOUND_DIR: "/data/jobs",
+      }).sharesDataRoot,
+    ).toBe(true);
+  });
+
+  test("a leg whose real path cannot be read counts as holding it", () => {
+    // The symlink that would join the two is exactly what could not be resolved,
+    // and this decides a warn-and-guide advisory, so what cannot be ruled out is
+    // reported rather than dropped.
+    const mounts = tempDir("mounts");
+    const work = subDir(mounts, "work");
+    const share = subDir(mounts, "share");
+    expect(
+      withUnreadableRealpath(share, () =>
+        resolveJobRendezvousProvisioning({
+          JOB_DATA_ROOT: work,
+          JOB_RENDEZVOUS_DIR: share,
+        }),
+      ).sharesDataRoot,
+    ).toBe(true);
+  });
+
+  test("a leg bind-mounted onto the data root does, though no path relates them", () => {
+    // One host directory bound in at two container paths: two paths, two real
+    // paths, one directory -- and the partner's sync reaches the signing key
+    // through either. Nothing but the (st_dev, st_ino) identity relates the two,
+    // so a resolution deciding on paths alone would withhold the advisory on
+    // exactly the layout it exists for.
+    const mounts = tempDir("mounts");
+    const work = subDir(mounts, "work");
+    const share = subDir(mounts, "share");
+    const env = { JOB_DATA_ROOT: work, JOB_RENDEZVOUS_DIR: share };
+    expect(
+      withAliasedInode(share, work, () => resolveJobRendezvousProvisioning(env))
+        .sharesDataRoot,
+    ).toBe(true);
+    // Without the aliasing the same two mounts are separate folders, so it is
+    // the identity that decides the case and not the directories it runs on.
+    expect(
+      resolveJobRendezvousProvisioning(env).sharesDataRoot,
+    ).toBeUndefined();
+  });
+
+  test("a leg aliasing a folder that HOLDS the data root does too", () => {
+    // The identity is compared up the data root's whole ancestor chain, because a
+    // leg aliasing the folder the working directory sits in reaches the key just
+    // as one aliasing the working directory does.
+    const mounts = tempDir("mounts");
+    const enclosing = subDir(mounts, "enclosing");
+    const work = subDir(enclosing, "work");
+    const share = subDir(mounts, "share");
+    expect(
+      withAliasedInode(share, enclosing, () =>
+        resolveJobRendezvousProvisioning({
+          JOB_DATA_ROOT: work,
+          JOB_RENDEZVOUS_DIR: share,
+        }),
+      ).sharesDataRoot,
+    ).toBe(true);
+  });
+
+  test("a leg aliasing a folder INSIDE the data root does not", () => {
+    // Directional through the aliased comparison as much as the lexical one: the
+    // partner's sync reaches the subfolder the leg is bound to, not the key in
+    // the folder above it.
+    const mounts = tempDir("mounts");
+    const work = subDir(mounts, "work");
+    const inside = subDir(work, "inside");
+    const share = subDir(mounts, "share");
+    expect(
+      withAliasedInode(share, inside, () =>
+        resolveJobRendezvousProvisioning({
+          JOB_DATA_ROOT: work,
+          JOB_RENDEZVOUS_DIR: share,
+        }),
+      ).sharesDataRoot,
+    ).toBeUndefined();
+  });
+
+  test("a leg the console cannot stat counts as holding it", () => {
+    // The identity that would join the two is exactly what could not be read, and
+    // the verdict decides a warn-and-guide advisory, so what cannot be ruled out
+    // is reported rather than dropped. The paths here relate the two not at all,
+    // so it is the unreadable identity carrying the verdict and nothing else.
+    const mounts = tempDir("mounts");
+    const work = subDir(mounts, "work");
+    const share = subDir(mounts, "share");
+    const env = { JOB_DATA_ROOT: work, JOB_RENDEZVOUS_DIR: share };
+    expect(
+      withUnreadableStat(share, () => resolveJobRendezvousProvisioning(env))
+        .sharesDataRoot,
+    ).toBe(true);
+    expect(
+      resolveJobRendezvousProvisioning(env).sharesDataRoot,
+    ).toBeUndefined();
+  });
+
+  test("a data root ancestor the console cannot stat does too", () => {
+    // The same direction from the other side of the comparison: a leg that stats
+    // fine cannot be ruled out against a chain the walk could not finish reading,
+    // and the ancestor that stopped it is one a leg could be bound onto.
+    const mounts = tempDir("mounts");
+    const enclosing = subDir(mounts, "enclosing");
+    const work = subDir(enclosing, "work");
+    const share = subDir(mounts, "share");
+    const env = { JOB_DATA_ROOT: work, JOB_RENDEZVOUS_DIR: share };
+    expect(
+      withUnreadableStat(enclosing, () => resolveJobRendezvousProvisioning(env))
+        .sharesDataRoot,
+    ).toBe(true);
+    expect(
+      resolveJobRendezvousProvisioning(env).sharesDataRoot,
+    ).toBeUndefined();
+  });
+
+  test("no data root leaves nothing to hold", () => {
+    expect(
+      resolveJobRendezvousProvisioning({ JOB_RENDEZVOUS_DIR: "/mnt/share" })
+        .sharesDataRoot,
+    ).toBeUndefined();
   });
 });
 

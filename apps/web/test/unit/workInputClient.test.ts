@@ -371,6 +371,7 @@ describe("fetchJobRendezvous", () => {
       Promise.resolve(
         jsonResponse({
           configured: true,
+          sharesDataRoot: false,
           locator: "study-a",
           folderName: "study-a",
         }),
@@ -378,6 +379,7 @@ describe("fetchJobRendezvous", () => {
     );
     expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
       configured: true,
+      sharesDataRoot: false,
       locator: "study-a",
       folderName: "study-a",
     });
@@ -389,11 +391,16 @@ describe("fetchJobRendezvous", () => {
     // shared folder's own name is missing, which the accept kit degrades on.
     const fetchImpl = vi.fn(() =>
       Promise.resolve(
-        jsonResponse({ configured: true, locator: "rendezvous" }),
+        jsonResponse({
+          configured: true,
+          sharesDataRoot: false,
+          locator: "rendezvous",
+        }),
       ),
     );
     expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
       configured: true,
+      sharesDataRoot: false,
       locator: "rendezvous",
     });
   });
@@ -401,13 +408,37 @@ describe("fetchJobRendezvous", () => {
   test("drops a malformed folder name rather than printing it as one", async () => {
     const fetchImpl = vi.fn(() =>
       Promise.resolve(
-        jsonResponse({ configured: true, locator: "study-a", folderName: 7 }),
+        jsonResponse({
+          configured: true,
+          sharesDataRoot: false,
+          locator: "study-a",
+          folderName: 7,
+        }),
       ),
     );
     expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
       configured: true,
+      sharesDataRoot: false,
       locator: "study-a",
     });
+  });
+
+  test("reads an absent or malformed sharesDataRoot as the shared layout", async () => {
+    // The field decides whether the console warns that the partner syncs the
+    // folder holding this party's signing key, so a body that does not answer
+    // leaves that warning raised rather than silently withheld.
+    for (const body of [
+      { configured: true, locator: "study-a" },
+      { configured: true, locator: "study-a", sharesDataRoot: "no" },
+      { configured: true, locator: "study-a", sharesDataRoot: null },
+    ]) {
+      const fetchImpl = vi.fn(() => Promise.resolve(jsonResponse(body)));
+      expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
+        configured: true,
+        sharesDataRoot: true,
+        locator: "study-a",
+      });
+    }
   });
 
   test("treats a configured body naming no locator as unavailable", async () => {
@@ -444,10 +475,15 @@ describe("fetchJobRendezvous", () => {
       .fn()
       .mockResolvedValueOnce(new Response(null, { status: 503 }))
       .mockResolvedValueOnce(
-        jsonResponse({ configured: true, locator: "study-a" }),
+        jsonResponse({
+          configured: true,
+          sharesDataRoot: false,
+          locator: "study-a",
+        }),
       );
     expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
       configured: true,
+      sharesDataRoot: false,
       locator: "study-a",
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);

@@ -11,8 +11,8 @@ import { useJobRendezvousProvisioning } from "@jobs/jobRendezvous";
  * `gateJobRoute` (404 when the API is disabled, no-store, no CORS).
  *
  * The body is `{ configured, split?, locator?, folderName?, outboundLocator?,
- * outboundFolderName?, problem? }`. `configured` reports the mount alone, as it
- * always has: the rendezvous mount defaults to `JOB_DATA_ROOT` when
+ * outboundFolderName?, sharesDataRoot?, problem? }`. `configured` reports the mount
+ * alone, as it always has: the rendezvous mount defaults to `JOB_DATA_ROOT` when
  * `JOB_RENDEZVOUS_DIR` is unset, so once the job API is enabled the filedrop
  * transport is available.
  *
@@ -21,6 +21,13 @@ import { useJobRendezvousProvisioning } from "@jobs/jobRendezvous";
  * `resolveJobRendezvousFolderName`); `outboundLocator` and `outboundFolderName` are
  * their counterparts for the outbound leg of a split appliance, which reports
  * `split: true`.
+ *
+ * `sharesDataRoot` says whether a rendezvous leg holds the mounted working
+ * directory, so the folder the partner syncs is also the folder this party's
+ * signing key lives in. Always present on a `configured: true` body, and a boolean
+ * ONLY -- never the path that decided it, which stays server-side with the rest of
+ * them. It carries the single-mount layout that the surfaces warning about the key's
+ * location cannot otherwise tell from a separately provisioned rendezvous.
  *
  * `problem` is why a filedrop exchange cannot run as provisioned. It rides a
  * `configured: false` body, because the appliance genuinely cannot run one: it is
@@ -48,6 +55,7 @@ export const Route = createFileRoute("/api/jobs/rendezvous")({
           rendezvous;
         return jobJsonResponse({
           configured: true,
+          sharesDataRoot: rendezvous.sharesDataRoot === true,
           ...(rendezvous.outboundDir === undefined ? {} : { split: true }),
           ...(locator === undefined ? {} : { locator }),
           ...(folderName === undefined ? {} : { folderName }),
