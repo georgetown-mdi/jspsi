@@ -11,6 +11,7 @@ from a direction still open to a decision taken and built.
 | Note | Status |
 | ---- | ------ |
 | [app-shell-service-worker.md](app-shell-service-worker.md) | Decided and built. |
+| [bound-transformed-value.md](bound-transformed-value.md) | Decided and built, by a 3-panelist design panel. |
 | [cli-webrtc-stack.md](cli-webrtc-stack.md) | Decided and built. |
 | [connection-per-poll-sftp.md](connection-per-poll-sftp.md) | Shipped. |
 | [console-announce-and-focus.md](console-announce-and-focus.md) | Decided and built, by a 3-panelist design panel deciding 2-1. |

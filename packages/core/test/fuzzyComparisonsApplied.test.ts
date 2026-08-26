@@ -258,6 +258,33 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
     expect(() => buildKeyStrings(key, dataset, 0)).toThrow(/^(?!.*SECRET).*$/s);
   });
 
+  test("a row whose expansion replicates too many bytes is refused", () => {
+    // The expansion's own input bound (MAX_FUZZY_EXPANSION_INPUT_LENGTH) reaches
+    // only the value a fuzzy element expands, never a sibling element's value --
+    // which every candidate of the product carries a copy of. The key's byte
+    // limb is what bounds those replicated bytes: this row's candidate COUNT is
+    // inside the assembly cap, and its byte total is not.
+    const key: LinkageKey = {
+      name: "wide",
+      elements: [
+        { field: "a" },
+        { field: "b", generateFuzzyComparisons: "edit_distances" },
+        { field: "c", generateFuzzyComparisons: "edit_distances" },
+      ],
+    };
+    const dataset = datasetOf({
+      a: "A".repeat(4096),
+      b: Array.from({ length: 100 }, (_unused, i) =>
+        String.fromCharCode(65 + (i % 26)),
+      ).join(""),
+      c: "ABCDEFGHI",
+    });
+    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(UsageError);
+    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(
+      /assembles \d+ characters of key strings/,
+    );
+  });
+
   test("the cap does not bind on the non-fuzzy path", () => {
     const key: LinkageKey = {
       name: "many",

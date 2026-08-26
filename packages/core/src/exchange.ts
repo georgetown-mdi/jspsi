@@ -1390,7 +1390,8 @@ export async function runExchange(
 
   const isReceiver = resolvedRole === "receiver";
   const linkageKeyIterables = linkageTerms.linkageKeys.map(
-    (key) => new StandardizedKeyIterable(key, dataset, rowCount, isReceiver),
+    (key, keyIndex) =>
+      new StandardizedKeyIterable(key, dataset, rowCount, isReceiver, keyIndex),
   );
 
   // Per-message element-count caps for the PSI decode seams, from authenticated

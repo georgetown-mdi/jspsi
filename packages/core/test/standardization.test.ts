@@ -771,58 +771,25 @@ describe("runPipeline — null-producing functions", () => {
     ).toBe("ABC");
   });
 
-  test("a replacement inside the param bound amplifies past the naive per-position figure (open residual)", () => {
-    // CHARACTERIZATION of an OPEN residual, not a security ceiling. The schema's
-    // string-param bound caps a param's content LENGTH; it does not bound the
-    // value a row derives from that param, and the naive "cell plus one capped
-    // replacement per position" figure is not an upper bound on it
-    // (docs/spec/CHANNEL_SECURITY.md, Unbounded transform-parameter rejection,
-    // carries the measurements and the closer). Every assertion here is a strict
-    // lower bound, so a regex-engine or Unicode-data change cannot satisfy it by
-    // drifting an exact count.
+  test("an amplifying replacement runs unbounded on this party's own standardization", () => {
+    // The scope boundary of the transformed-value ceiling, which binds the
+    // PARTNER-authored element transform (pinned under buildKeyStrings below).
+    // This pipeline is the operator's own local configuration over the
+    // operator's own data, so nothing partner-influenced sizes it and the
+    // ceiling deliberately does not reach it. A strict lower bound, so a
+    // regex-engine or Unicode-data change cannot satisfy it by drifting a count.
     const cell = "1234567890";
-    const naivePerPositionFigure =
-      cell.length + (cell.length + 1) * MAX_TRANSFORM_PARAM_LENGTH;
-    const amplify = (input: string, replacements: string[]) => {
-      const out = runPipeline(
-        input,
-        replacements.map((replacement) => ({
-          function: "replace_regex",
-          params: { pattern: "a*", replacement },
-        })),
-      );
-      expect(typeof out).toBe("string");
-      return (out as string).length;
-    };
-
-    // The replacement is a substitution TEMPLATE: `$'` re-inserts the match's
-    // trailing context, and a pattern matching the empty string matches between
-    // every character, so the transformed value is quadratic in the operator's
-    // own cell rather than linear in it.
     const trailingContext = "$'".repeat(MAX_TRANSFORM_PARAM_LENGTH / 2);
-    expect(trailingContext.length).toBe(MAX_TRANSFORM_PARAM_LENGTH);
-    const amplifiedFromCell = amplify(cell, [trailingContext]);
-    expect(amplifiedFromCell).toBeGreaterThan(naivePerPositionFigure);
-    const longerCell = cell.repeat(20);
-    expect(
-      amplify(longerCell, [trailingContext]) / longerCell.length,
-    ).toBeGreaterThan(amplifiedFromCell / cell.length);
-
-    // Steps compose, so a second in-bound param multiplies the first step's
-    // output rather than the operator's cell.
-    expect(amplify(cell, ["x".repeat(10), trailingContext])).toBeGreaterThan(
-      amplifiedFromCell,
+    const out = runPipeline(cell, [
+      {
+        function: "replace_regex",
+        params: { pattern: "a*", replacement: trailingContext },
+      },
+    ]);
+    expect(typeof out).toBe("string");
+    expect((out as string).length).toBeGreaterThan(
+      cell.length + (cell.length + 1) * MAX_TRANSFORM_PARAM_LENGTH,
     );
-
-    // replaceRegexFactory NFC-normalizes the replacement before substituting it,
-    // and normalization can lengthen it -- U+0344 decomposes to two code units
-    // under NFC -- so even a replacement carrying no substitution sequence
-    // exceeds the naive figure.
-    const combining = String.fromCodePoint(0x0344).repeat(
-      MAX_TRANSFORM_PARAM_LENGTH,
-    );
-    expect(combining.length).toBe(MAX_TRANSFORM_PARAM_LENGTH);
-    expect(amplify(cell, [combining])).toBeGreaterThan(naivePerPositionFigure);
   });
 
   test("replace_regex with a non-string replacement does not throw and falls back to empty", () => {
@@ -2376,12 +2343,13 @@ describe("buildKeyStrings", () => {
     ).toThrow(/turns one value into several candidates/);
   });
 
-  test("a cell above the engine's argument limit refuses on the cap", () => {
-    // The cap is what refuses a cell this wide, at every width. Assembling the
-    // element's candidates one at a time is what keeps that true: a spread passes
-    // them as arguments, which fails between 125,000 and 150,000 of them on this
-    // build's Node (lower wherever the stack is smaller), and the RangeError it
-    // raises reports a fault the row does not have.
+  test("a cell above the engine's argument limit refuses on the value ceiling", () => {
+    // A cell this wide never reaches the element's candidate assembly at all:
+    // the magnitude ceiling refuses the value the element reads, which is what
+    // holds a single cell's realization below the count at which a spread of the
+    // candidates would fail (between 125,000 and 150,000 arguments on this
+    // build's Node, lower wherever the stack is smaller) and raise a RangeError
+    // reporting a fault the row does not have.
     const wideCell = Array.from(
       { length: 150_000 },
       (_unused, i) => `V${i}`,
@@ -2410,8 +2378,237 @@ describe("buildKeyStrings", () => {
     }
     expect(raised).toBeInstanceOf(UsageError);
     expect((raised as UsageError).message).toMatch(
+      /reads a 1088889-character value from row 0/,
+    );
+  });
+
+  test("a row realizing more candidates than a spread accepts refuses on the cap", () => {
+    // The other route to that width, which the value ceiling does not bound: the
+    // candidates come from the FIELD's own realization, one short value each, so
+    // the element reads 150,000 in-ceiling values rather than one wide cell.
+    // Appending them one at a time is what keeps the cap the thing that refuses.
+    let raised: unknown;
+    try {
+      withUnlistedFanOutFunctions(() => {
+        const dataset = makeDataset({
+          last_name: Array.from({ length: 150_000 }, (_unused, i) => `V${i}`),
+          date_of_birth: "19750716",
+        });
+        return buildKeyStrings(key, dataset, 0);
+      });
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as UsageError).message).toMatch(
       /expands one row into 150000 key strings/,
     );
+  });
+
+  // --- the transformed-value ceiling -----------------------------------------
+  // One magnitude invariant on the partner-authored path, checked on what an
+  // element READS and on what each of its steps PRODUCES. The three
+  // amplification shapes measured in docs/spec/CHANNEL_SECURITY.md (Unbounded
+  // transform-parameter rejection) are pinned here as BOUNDED: the schema's
+  // param bound accepts each of these replacements, and none of them assembles.
+
+  const amplifyingKey = (steps: LinkageKeyElement["transform"]) => ({
+    name: "LN+DOB",
+    elements: [
+      { field: "last_name", transform: steps },
+      { field: "date_of_birth" },
+    ],
+  });
+
+  const substitutingReplacement = "$'".repeat(MAX_TRANSFORM_PARAM_LENGTH / 2);
+
+  test("the trailing-context substitution is refused, not assembled", () => {
+    // Quadratic in this party's own cell: `$'` re-inserts the match's trailing
+    // context and `a*` matches between every character. The refusal lands on the
+    // step's output, before anything downstream carries it.
+    const dataset = makeDataset({
+      last_name: "1".repeat(200),
+      date_of_birth: "19750716",
+    });
+    expect(() =>
+      buildKeyStrings(
+        amplifyingKey([
+          {
+            function: "replace_regex",
+            params: { pattern: "a*", replacement: substitutingReplacement },
+          },
+        ]),
+        dataset,
+        0,
+      ),
+    ).toThrow(/transform step produced a \d+-character value/);
+  });
+
+  test("a composed pipeline is refused at the step that crosses the ceiling", () => {
+    // Each step is fed the previous step's output, so checking every step's
+    // output is what keeps every step's INPUT bounded: the first step's 2,210
+    // characters are inside the ceiling and run, and the second crosses it.
+    const dataset = makeDataset({
+      last_name: "1234567890",
+      date_of_birth: "19750716",
+    });
+    const step = {
+      function: "replace_regex",
+      params: { pattern: "a*", replacement: "x".repeat(200) },
+    };
+    expect(() =>
+      buildKeyStrings(amplifyingKey([step, step]), dataset, 0, false, 2),
+    ).toThrow(/linkageKeys\[2\]\.elements\[0\]\.transform\[1\]/);
+  });
+
+  test("an NFC-lengthening replacement is refused", () => {
+    // The shape carrying no substitution sequence at all: replaceRegexFactory
+    // NFC-normalizes the replacement before substituting it, and U+0344
+    // normalizes to two code units, so a 1000-character param substitutes 2000.
+    const combining = String.fromCodePoint(0x0344).repeat(
+      MAX_TRANSFORM_PARAM_LENGTH,
+    );
+    const dataset = makeDataset({
+      last_name: "1234567890",
+      date_of_birth: "19750716",
+    });
+    expect(() =>
+      buildKeyStrings(
+        amplifyingKey([
+          {
+            function: "replace_regex",
+            params: { pattern: "a*", replacement: combining },
+          },
+        ]),
+        dataset,
+        0,
+      ),
+    ).toThrow(/transform step produced a 22010-character value/);
+  });
+
+  test("a value at the ceiling builds; one character over is refused", () => {
+    // The base case, checked before the no-steps early return: an element that
+    // declares no transform at all carries its whole value into the key string,
+    // so the ceiling binds what it reads as well as what a step produces.
+    const atCeiling = "A".repeat(4096);
+    expect(
+      buildKeyStrings(
+        key,
+        makeDataset({ last_name: atCeiling, date_of_birth: "19750716" }),
+        0,
+      ),
+    ).toEqual(new Set([`${atCeiling}19750716`]));
+    expect(() =>
+      buildKeyStrings(
+        key,
+        makeDataset({ last_name: "A".repeat(4097), date_of_birth: "19750716" }),
+        0,
+      ),
+    ).toThrow(/reads a 4097-character value from row 0/);
+  });
+
+  test("the refusal locates element and step by issue path, echoing no value", () => {
+    // The value is this party's own PII and the key's name is partner-authored
+    // free text, so the message carries neither: the issue path locates the
+    // offender, the row index locates the record, and the step's function name
+    // is narrowed to a literal this build recognizes.
+    const cell = `${"S3CRET".repeat(700)}`;
+    const dataset = makeDataset({
+      last_name: cell,
+      date_of_birth: "19750716",
+    });
+    const raise = (transform: LinkageKeyElement["transform"]) => {
+      try {
+        buildKeyStrings(
+          transform === undefined ? key : amplifyingKey(transform),
+          dataset,
+          0,
+          false,
+          2,
+        );
+      } catch (err) {
+        return err as UsageError;
+      }
+      return undefined;
+    };
+
+    const onRead = raise(undefined);
+    expect(onRead).toBeInstanceOf(UsageError);
+    expect(onRead?.message).toContain("linkageKeys[2].elements[0]");
+    expect(onRead?.message).toContain("row 0");
+    expect(onRead?.message).not.toContain("S3CRET");
+
+    const shortDataset = makeDataset({
+      last_name: "S3CRET",
+      date_of_birth: "19750716",
+    });
+    let onStep: UsageError | undefined;
+    try {
+      buildKeyStrings(
+        amplifyingKey([
+          {
+            function: "replace_regex",
+            params: { pattern: "a*", replacement: substitutingReplacement },
+          },
+        ]),
+        shortDataset,
+        0,
+        false,
+        2,
+      );
+    } catch (err) {
+      onStep = err as UsageError;
+    }
+    expect(onStep?.message).toContain(
+      'linkageKeys[2].elements[0].transform[0], "replace_regex"',
+    );
+    expect(onStep?.message).not.toContain("S3CRET");
+  });
+
+  // --- the row's assembled key-string bytes ----------------------------------
+  // The count cap bounds how MANY key strings a row assembles; this limb bounds
+  // what they carry, because every combination replicates each element's whole
+  // value. Both are measured on the projection, before the cross-product is
+  // materialized, and a row takes the same fate from either.
+
+  const wideAndLong = () =>
+    Array.from(
+      { length: 1024 },
+      (_unused, i) => `${"A".repeat(4090)}${String(i).padStart(6, "0")}`,
+    );
+
+  test("a row whose key strings would carry too many bytes is dropped for a declared fan-out", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dataset = makeDataset({
+      last_name: wideAndLong(),
+      date_of_birth: "19750716",
+    });
+    expect(buildKeyStrings(key, dataset, 0)).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /assembles 4202496 characters of key strings/,
+    );
+  });
+
+  test("the same row refuses the run when no declared producer expanded it", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    let raised: unknown;
+    try {
+      withUnlistedFanOutFunctions(() => {
+        const dataset = makeDataset({
+          last_name: wideAndLong(),
+          date_of_birth: "19750716",
+        });
+        return buildKeyStrings(key, dataset, 0, false, 1);
+      });
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as UsageError).message).toMatch(
+      /linkageKeys\[1\] assembles 4202496 characters of key strings/,
+    );
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

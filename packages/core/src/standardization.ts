@@ -1645,6 +1645,118 @@ const compiledElementTransforms = new WeakMap<
   CompiledStep[]
 >();
 
+/**
+ * The longest single value a partner-authored key element may read or produce.
+ *
+ * The partner authors the element transforms and this party runs them over its
+ * own rows, so the SIZE of what a row derives is partner-influenced while the
+ * data is local. The wire schema bounds what the partner may WRITE (a param's
+ * content length, config/linkageTerms.ts) but not what a row DERIVES from it: a
+ * `replace_regex` replacement is a substitution template whose match-context
+ * sequences re-insert the operator's own cell at every match position, and steps
+ * compose, each fed the previous one's output. This ceiling is the bound on the
+ * produced value, applied to what an element READS and to what every step
+ * PRODUCES, so each step's input is bounded as well as its output and a chain
+ * cannot compound past it.
+ *
+ * A legitimate key element is a name, a date, an identifier, or an address --
+ * tens of characters, a few hundred at the outside -- so 4096 is far above any
+ * honest one while holding the derived value to a size the rest of the row
+ * pipeline (`split_on`, the fuzzy expansion, key assembly) can carry. An
+ * over-ceiling value is REFUSED, never truncated: both parties must derive
+ * byte-identical keys, so a unilateral clamp would break matching and surface as
+ * a terms mismatch against the hashed agreement -- the same reason the param
+ * bounds refuse rather than trim. The recorded rationale and the limits this
+ * placement does not reach live in docs/spec/CHANNEL_SECURITY.md.
+ */
+const MAX_TRANSFORMED_VALUE_LENGTH = 4096;
+
+// Every number in the refusals below is a derived integer and the step's
+// function name is narrowed to a fixed literal before it is interpolated, so
+// neither the value (this party's own PII) nor partner free text reaches the
+// message. The key's own `name` is partner-authored, which is why the path
+// locates the element by index rather than naming the key.
+function transformFunctionLabel(functionName: string): string {
+  return STANDARDIZATION_FUNCTION_NAMES.includes(functionName)
+    ? `"${functionName}"`
+    : "a function this build does not recognize";
+}
+
+// The issue path locating an element in the agreed terms. The key index is
+// present on the exchange path, which is the partner-reachable one; a direct
+// caller that builds keys for one key object alone has no position to report, so
+// the path is rooted at the element there.
+function keyElementPath(
+  keyIndex: number | undefined,
+  elementIndex: number,
+): string {
+  const root = keyIndex === undefined ? "" : `linkageKeys[${keyIndex}].`;
+  return `${root}elements[${elementIndex}]`;
+}
+
+function elementValueTooLongRefusal(
+  keyIndex: number | undefined,
+  elementIndex: number,
+  rowIndex: number,
+  length: number,
+): UsageError {
+  return new UsageError(
+    `a linkage key element reads a ${length}-character value from row ` +
+      `${rowIndex} of this party's data ` +
+      `(${keyElementPath(keyIndex, elementIndex)}), longer than the ` +
+      `${MAX_TRANSFORMED_VALUE_LENGTH}-character value an element carries ` +
+      "into a key string. Every element's value is carried into every key " +
+      "string the row builds, and an element transform is free to multiply " +
+      "the value it is handed, so the limit binds what the element reads as " +
+      "well as what each of its steps produces. Neither can be shortened " +
+      "here -- both parties must derive byte-identical keys, so a value " +
+      "trimmed to fit would match nothing and contradict the agreed terms. " +
+      "The exchange is refused instead. Bind the element to a shorter " +
+      "column, or shorten the field in this party's own standardization " +
+      "before the key element reads it.",
+  );
+}
+
+function transformStepValueTooLongRefusal(
+  keyIndex: number | undefined,
+  elementIndex: number,
+  stepIndex: number,
+  functionName: string,
+  rowIndex: number,
+  length: number,
+): UsageError {
+  return new UsageError(
+    "a linkage key element transform step produced a " +
+      `${length}-character value from row ${rowIndex} ` +
+      `(${keyElementPath(keyIndex, elementIndex)}.transform[${stepIndex}], ` +
+      `${transformFunctionLabel(functionName)}), longer than the ` +
+      `${MAX_TRANSFORMED_VALUE_LENGTH}-character value an element carries ` +
+      "into a key string. A step can multiply what it is handed many times " +
+      "over -- a replacement that re-inserts the matched context at every " +
+      "match position, or a chain of steps each feeding the next -- so every " +
+      "step's output is bounded, which is also what keeps the next step's " +
+      "input bounded. The value cannot be shortened here: both parties must " +
+      "derive byte-identical keys. The exchange is refused instead. Remove " +
+      "or narrow that step in the agreed linkage terms, or shorten the field " +
+      "the element reads.",
+  );
+}
+
+// The first value over the ceiling, if any. A step that expands one value into
+// several candidates is measured candidate by candidate, because a candidate is
+// what the next step is handed and what one key string carries; the row's total
+// across the candidates is bounded where the key is assembled (buildKeyStrings).
+function valueOverCeiling(result: FieldValue): number | undefined {
+  if (result === null) return undefined;
+  if (typeof result === "string")
+    return result.length > MAX_TRANSFORMED_VALUE_LENGTH
+      ? result.length
+      : undefined;
+  for (const value of result)
+    if (value.length > MAX_TRANSFORMED_VALUE_LENGTH) return value.length;
+  return undefined;
+}
+
 // One element's candidate values for one row: an element-level fan-out step
 // contributes its candidates to that element's position in the key's
 // cross-product, exactly as a fan-out on the field feeding the element does, so
@@ -1661,7 +1773,20 @@ function applyElementTransform(
   value: string,
   steps: TransformStep[] | undefined,
   provenance: FanOutProvenance,
+  keyIndex: number | undefined,
+  elementIndex: number,
+  rowIndex: number,
 ): string[] {
+  // The magnitude ceiling's base case, ahead of the no-steps early return so it
+  // also binds an element that declares no transform at all and carries a raw
+  // cell straight into the key.
+  if (value.length > MAX_TRANSFORMED_VALUE_LENGTH)
+    throw elementValueTooLongRefusal(
+      keyIndex,
+      elementIndex,
+      rowIndex,
+      value.length,
+    );
   // No steps: the value passes through unchanged (the empty-pipeline identity),
   // and nothing is compiled or memoized.
   if (steps === undefined || steps.length === 0) return [value];
@@ -1671,7 +1796,19 @@ function applyElementTransform(
     compiledElementTransforms.set(steps, compiled);
   }
   let current: FieldValue = value;
-  for (const step of compiled) current = applyStep(current, step, provenance);
+  for (const [stepIndex, step] of compiled.entries()) {
+    current = applyStep(current, step, provenance);
+    const over = valueOverCeiling(current);
+    if (over !== undefined)
+      throw transformStepValueTooLongRefusal(
+        keyIndex,
+        elementIndex,
+        stepIndex,
+        steps[stepIndex].function,
+        rowIndex,
+        over,
+      );
+  }
   return toValueSet(current);
 }
 
@@ -1712,6 +1849,28 @@ function swapElements(
  */
 const MAX_KEY_STRINGS_PER_ROW = 1024;
 
+/**
+ * The hard cap on the total characters one row's key strings may carry for a
+ * single key round -- the byte limb beside {@link MAX_KEY_STRINGS_PER_ROW}'s
+ * count limb.
+ *
+ * The count cap bounds how MANY key strings a row assembles, not how large they
+ * are: every combination concatenates one candidate from each element, so a row
+ * at the count cap replicates each element's value across all of them. A fuzzy
+ * element's own candidates are short ({@link MAX_FUZZY_EXPANSION_INPUT_LENGTH}),
+ * but a non-fuzzy sibling in the same key carries its whole transformed value
+ * into every combination, and that value is partner-influenced in size
+ * ({@link MAX_TRANSFORMED_VALUE_LENGTH}) -- so bytes need a limb of their own.
+ * It is set at the count cap times the per-value ceiling: a row may carry the
+ * equivalent of one ceiling-sized element replicated across the full width the
+ * count cap allows, which is orders of magnitude above any honest row (a wide
+ * fuzzy key over canonical dates and names assembles a few hundred candidates of
+ * a few dozen characters). Measured on the PROJECTED total, before the
+ * cross-product is materialized, for the same reason the count limb is.
+ */
+const MAX_ASSEMBLED_KEY_LENGTH_PER_ROW =
+  MAX_KEY_STRINGS_PER_ROW * MAX_TRANSFORMED_VALUE_LENGTH;
+
 // The value is local row data and the key name is partner-authored free text, so
 // neither is interpolated; the count is a derived integer and names no value.
 //
@@ -1730,6 +1889,31 @@ function keyStringFanOutCapRefusal(projected: number): UsageError {
       "exchange is refused instead. Declare fuzzy comparisons on fewer of the " +
       "key's elements, drop the expanding step from the transforms, or " +
       "shorten the expanded fields with an element transform.",
+  );
+}
+
+// The byte limb's refusal, on the same footing as the count limb's above: the
+// projected total names no value, and the key path locates the offender where
+// the exchange path supplies it.
+function keyStringLengthCapRefusal(
+  projected: number,
+  keyIndex: number | undefined,
+): UsageError {
+  const key =
+    keyIndex === undefined
+      ? "a linkage key"
+      : `the linkage key at linkageKeys[${keyIndex}]`;
+  return new UsageError(
+    `${key} assembles ${projected} characters of key strings for one row, ` +
+      `above the ${MAX_ASSEMBLED_KEY_LENGTH_PER_ROW} this exchange builds ` +
+      "per row. Every combination of the key's elements carries each " +
+      "element's whole value, so a key whose elements expand -- through " +
+      "fuzzy comparisons, or a step that turns one value into several " +
+      "candidates -- replicates those values across the whole cross-product " +
+      "and exhausts memory as it is built. The exchange is refused instead. " +
+      "Declare fuzzy comparisons on fewer of the key's elements, drop the " +
+      "expanding step from the transforms, or shorten the expanded fields " +
+      "with an element transform.",
   );
 }
 
@@ -1769,6 +1953,12 @@ function dropRowFromKeyRound(
  * `isReceiver` controls whether the key's `swap` directive is applied. The
  * receiver builds keys with the named elements swapped; the sender does not.
  *
+ * `keyIndex` is this key's position in the agreed terms' `linkageKeys`, carried
+ * only so a magnitude refusal ({@link MAX_TRANSFORMED_VALUE_LENGTH},
+ * {@link MAX_ASSEMBLED_KEY_LENGTH_PER_ROW}) can locate the offending element by
+ * the same issue path the terms-validation refusals use. A caller that holds one
+ * key alone omits it and the path is rooted at the element.
+ *
  * An element declaring `generateFuzzyComparisons` contributes its whole
  * candidate set to the cross-product rather than a single value, so a fuzzy
  * element multiplies the row's key strings by its candidate count. The expansion
@@ -1784,6 +1974,7 @@ export function buildKeyStrings(
   dataset: StandardizedDataset,
   index: number,
   isReceiver = false,
+  keyIndex?: number,
 ): Set<string> | null {
   const elements =
     isReceiver && key.swap
@@ -1799,7 +1990,7 @@ export function buildKeyStrings(
   // elements: the drop binds the DECLARED producers alone (see the drop sites).
   const provenance: FanOutProvenance = { fromUnlistedFunction: false };
 
-  for (const element of elements) {
+  for (const [elementIndex, element] of elements.entries()) {
     const field = dataset.getField(element.field);
     const raw = field ? field.get(index) : [];
     if (raw.length === 0) return null;
@@ -1807,14 +1998,21 @@ export function buildKeyStrings(
       provenance.fromUnlistedFunction = true;
 
     // Candidates are appended one at a time, never spread into push: a spread
-    // passes them as arguments, and one cell can realize more of them than the
-    // engine accepts (measured between 125,000 and 150,000 here, fewer wherever
-    // the stack is smaller), which raises a RangeError in place of the assembly
-    // cap's refusal below -- fail-closed, but reporting a fault the row does not
-    // have.
+    // passes them as arguments, and a field realizing one candidate per value
+    // can hand this loop more of them than the engine accepts (measured between
+    // 125,000 and 150,000 here, fewer wherever the stack is smaller), which
+    // raises a RangeError in place of the assembly cap's refusal below --
+    // fail-closed, but reporting a fault the row does not have.
     const transformed: string[] = [];
     for (const v of raw) {
-      const realized = applyElementTransform(v, element.transform, provenance);
+      const realized = applyElementTransform(
+        v,
+        element.transform,
+        provenance,
+        keyIndex,
+        elementIndex,
+        index,
+      );
       for (const candidate of realized) transformed.push(candidate);
     }
     if (transformed.length === 0) return null;
@@ -1888,6 +2086,35 @@ export function buildKeyStrings(
     );
   }
 
+  // The byte limb of the same projection, on the counts and candidate lengths
+  // already in hand: each of the projectedKeyStrings combinations carries one
+  // candidate from every element, so element i contributes its whole candidate
+  // total once per combination that selects from it -- the exact assembled
+  // total, without materializing the product the count limb just bounded (which
+  // is what keeps the multiplication small enough to be exact).
+  //
+  // Both limbs take the same fate. Dropping is normative for the declared
+  // fan-out producers, and a row must not take different fates depending on
+  // which limb of one projection fired.
+  const projectedKeyStringLength = elementValues.reduce(
+    (total, values) =>
+      total +
+      (projectedKeyStrings / values.length) *
+        values.reduce((sum, value) => sum + value.length, 0),
+    0,
+  );
+  if (projectedKeyStringLength > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW) {
+    if (!dropsOnExceedance)
+      throw keyStringLengthCapRefusal(projectedKeyStringLength, keyIndex);
+    return dropRowFromKeyRound(
+      key,
+      index,
+      `assembles ${projectedKeyStringLength} characters of key strings, more ` +
+        `than the ${MAX_ASSEMBLED_KEY_LENGTH_PER_ROW} this exchange builds ` +
+        "for one row",
+    );
+  }
+
   // Final NFC pass on the assembled key. Each part is already NFC, but this is
   // the one chokepoint every PSI key string flows through, so it also covers the
   // element-transform path (which assembles keys outside runCompiledPipeline) and
@@ -1949,17 +2176,20 @@ export class StandardizedKeyIterable {
   private readonly key: LinkageKey;
   private readonly dataset: StandardizedDataset;
   private readonly isReceiver: boolean;
+  private readonly keyIndex: number | undefined;
 
   constructor(
     key: LinkageKey,
     dataset: StandardizedDataset,
     rowCount: number,
     isReceiver = false,
+    keyIndex?: number,
   ) {
     this.key = key;
     this.dataset = dataset;
     this.length = rowCount;
     this.isReceiver = isReceiver;
+    this.keyIndex = keyIndex;
 
     return new Proxy(this, {
       get: (target, prop, receiver) => {
@@ -1979,6 +2209,7 @@ export class StandardizedKeyIterable {
       this.dataset,
       index,
       this.isReceiver,
+      this.keyIndex,
     );
     // An empty set is the record-excluded sentinel like `null`, and a singleton
     // is unwrapped, so a set that survives to a consumer always carries two or
