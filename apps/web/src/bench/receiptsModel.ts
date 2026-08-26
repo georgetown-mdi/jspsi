@@ -270,9 +270,9 @@ export const IDENTITY_REGENERATION_NOTICE =
  *
  * Still an advisory rather than a block: pinning is half of a two-sided ceremony
  * the operator may legitimately be part-way through while authoring, and the
- * console guides its own operator instead of stopping them. It is the one
- * advisory the card raises at `warning` weight, since it is a cost this run
- * itself will have rather than a fact about where a file lands.
+ * console guides its own operator instead of stopping them. Raised at
+ * `warning` weight: it names a cost this run itself will incur, not a fact
+ * about where a file lands.
  */
 export const NO_PARTNER_PIN_ADVISORY =
   "Without your partner's fingerprint this exchange cannot finish, and it fails " +
