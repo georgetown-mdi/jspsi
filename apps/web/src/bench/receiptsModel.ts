@@ -1,5 +1,7 @@
 import { FINGERPRINT_REGEX, MAX_TEXT_LENGTH } from "@psilink/core";
 
+import { NOTE_CONTROL_CHAR_PATTERN } from "@psi/retentionNoteShape";
+
 import type { JobSigningChoice } from "@jobs/intent";
 
 /**
@@ -12,7 +14,11 @@ import type { JobSigningChoice } from "@jobs/intent";
  * the run, and the advisories it raises are the tested boundary. The values
  * themselves are core's -- the fingerprint shape and the note's length ceiling are
  * core's exported constants -- so the console can neither drift from the command
- * line nor invent a rule of its own.
+ * line nor invent a rule of its own. The note's control-character refusal is not
+ * core's: it is the console's own job-intent boundary rule
+ * ({@link NOTE_CONTROL_CHAR_PATTERN}, `@psi/retentionNoteShape`), shared with the
+ * server schema that enforces it so this card cannot admit a note the submit
+ * step would still refuse.
  *
  * Two things are deliberately NOT here. Regenerating the signing identity is not
  * offered: a re-key invalidates every fingerprint a partner has pinned, so it
@@ -178,6 +184,17 @@ export const RETENTION_NOTE_PROBLEM =
   `The retention note must be ${MAX_TEXT_LENGTH} characters or fewer. It is ` +
   "recorded verbatim in your exchange record, which caps it at that length.";
 
+/** The problem a retention note carrying a control character reports. A tab,
+ * a line feed, or a carriage return is admissible -- the field is authored in
+ * a textarea -- but any other control byte, a NUL or an ESC among them, is
+ * refused: the appliance composes the note into the exchange config and its
+ * own record verbatim, and neither is a place for a byte the operator did not
+ * mean to write. */
+export const RETENTION_NOTE_CONTROL_CHAR_PROBLEM =
+  "The retention note must not contain a control character (a NUL or an ESC, " +
+  "for instance). A tab, a line break, or a carriage return is fine -- the " +
+  "appliance refuses any other one before the run starts.";
+
 /**
  * Everything wrong with the draft, as messages to show beside the card -- empty
  * when it is admissible. The run is blocked while this is non-empty.
@@ -185,9 +202,12 @@ export const RETENTION_NOTE_PROBLEM =
  * Every entry is a refusal the RUN itself would make: core refuses the
  * unimplemented mode before the exchange starts, the CLI exits 64 on certificate
  * mode with no identity file, and the config schema refuses a non-canonical pin
- * and an over-long note. None of them is a judgement about a value both
- * boundaries accept -- certificate mode with no partner pin is legitimate and
- * draws an advisory, not a block.
+ * and an over-long note. The server's job-intent schema refuses a note carrying
+ * a control character the same way, so that rule is mirrored here too
+ * ({@link NOTE_CONTROL_CHAR_PATTERN}) -- otherwise a pasted control byte would
+ * report no card problem and fail only at submit with a generic message. None
+ * of them is a judgement about a value both boundaries accept -- certificate
+ * mode with no partner pin is legitimate and draws an advisory, not a block.
  */
 export function receiptsProblems(draft: ReceiptsDraft): Array<string> {
   const problems: Array<string> = [];
@@ -201,8 +221,10 @@ export function receiptsProblems(draft: ReceiptsDraft): Array<string> {
     !FINGERPRINT_REGEX.test(pin)
   )
     problems.push(PARTNER_FINGERPRINT_PROBLEM);
-  if (draft.retentionDisposition.trim().length > MAX_TEXT_LENGTH)
-    problems.push(RETENTION_NOTE_PROBLEM);
+  const note = draft.retentionDisposition.trim();
+  if (note.length > MAX_TEXT_LENGTH) problems.push(RETENTION_NOTE_PROBLEM);
+  if (NOTE_CONTROL_CHAR_PATTERN.test(note))
+    problems.push(RETENTION_NOTE_CONTROL_CHAR_PROBLEM);
   return problems;
 }
 

@@ -20,6 +20,7 @@ import {
   PARTNER_FINGERPRINT_PROBLEM,
   RECEIPTS_DEFAULT,
   RECEIPT_LOCATION_NOTICE,
+  RETENTION_NOTE_CONTROL_CHAR_PROBLEM,
   RETENTION_NOTE_PROBLEM,
   SESSION_DERIVED_PROBLEM,
   fingerprintRequestProblem,
@@ -754,6 +755,38 @@ describe("the receipts card's model", () => {
         draft({ retentionDisposition: "x".repeat(MAX_TEXT_LENGTH + 1) }),
       ),
     ).toContain(RETENTION_NOTE_PROBLEM);
+  });
+
+  test("a control character in the retention note is caught on the card, not only at submit", () => {
+    // Mirrors the server's own refusal (NOTE_CONTROL_CHAR_PATTERN in
+    // apps/web/src/jobs/intent.ts, via the shared @psi/retentionNoteShape
+    // pattern): a NUL or an ESC pasted into the note must report a card
+    // problem here, or the operator would see nothing wrong until the run
+    // failed at submit with a generic 400.
+    expect(
+      receiptsProblems(
+        draft({
+          retentionDisposition: `Filed${String.fromCharCode(0x00)}under the schedule`,
+        }),
+      ),
+    ).toContain(RETENTION_NOTE_CONTROL_CHAR_PROBLEM);
+    expect(
+      receiptsProblems(
+        draft({
+          retentionDisposition: `Filed${String.fromCharCode(0x1b)}under the schedule`,
+        }),
+      ),
+    ).toContain(RETENTION_NOTE_CONTROL_CHAR_PROBLEM);
+    // The card authors this field in a textarea, so the whitespace controls a
+    // multi-line note carries -- and that the server admits -- stay clean.
+    expect(
+      receiptsProblems(
+        draft({
+          retentionDisposition:
+            "Filed\tunder the schedule.\r\nPurged after six years.",
+        }),
+      ),
+    ).toEqual([]);
   });
 
   test("an unpinned partner warns and guides rather than blocking", () => {
