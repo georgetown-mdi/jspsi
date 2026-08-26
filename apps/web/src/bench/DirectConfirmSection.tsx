@@ -17,7 +17,10 @@ import { InvitationTerms } from "@components/InvitationTerms";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 import { useOnlineStatus } from "@components/useOnlineStatus";
 
-import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
+import {
+  IDENTITY_CONTROL_CHAR_PATTERN,
+  MAX_IDENTITY_LENGTH,
+} from "@psi/identityLabel";
 import { overlongColumnsAlert } from "@psi/columnNames";
 
 import {
@@ -106,8 +109,10 @@ export function DirectConfirmSection({
   // Client-side guard mirroring the intent schema's identity contract, validated on
   // the value the run actually sends (the trimmed label; a blank field omits identity
   // and runs as the appliance user, so it is not an error). Naming the fault at the
-  // field keeps a leading-dash or over-length label from reaching the server as an
-  // opaque 400 that failureFor would misattribute to the file or SFTP destination.
+  // field keeps a label the schema refuses -- a leading dash, an over-long value, or
+  // a control character -- from reaching the server as an opaque 400 that failureFor
+  // would misattribute to the file or SFTP destination. The rules are the shared
+  // contract's, so this guard cannot come to admit what the schema refuses.
   const trimmedIdentity = identity.trim();
   const identityError =
     trimmedIdentity.length === 0
@@ -116,7 +121,9 @@ export function DirectConfirmSection({
         ? "Identity cannot begin with a dash"
         : trimmedIdentity.length > MAX_IDENTITY_LENGTH
           ? `Identity cannot exceed ${MAX_IDENTITY_LENGTH} characters`
-          : undefined;
+          : IDENTITY_CONTROL_CHAR_PATTERN.test(trimmedIdentity)
+            ? "Identity cannot contain control characters (a line break or a tab, for instance)"
+            : undefined;
 
   return (
     <Stack gap="lg">

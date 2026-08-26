@@ -1399,6 +1399,36 @@ describe("jobZeroSetupIntentSchema is injection-closed and strict", () => {
     ).toBe(true);
   });
 
+  test("rejects an identity label carrying a control character", () => {
+    // The label rides the run into this party's own disclosure record, so a NUL or
+    // an ESC in it is refused at the boundary rather than caught incidentally where
+    // the child is spawned. Single-line, so the whitespace controls the retention
+    // note admits are refused here too.
+    for (const code of [0x00, 0x07, 0x09, 0x0a, 0x0d, 0x1b, 0x7f, 0x9b]) {
+      const identity = `County${String.fromCharCode(code)}Health`;
+      for (const base of [validZeroSetupIntent(), validZeroSetupSftpIntent()]) {
+        const intent = { ...base, identity };
+        expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
+        expect(jobCreateIntentSchema.safeParse(intent).success).toBe(false);
+      }
+    }
+  });
+
+  test("accepts an identity label written in the operator's own script", () => {
+    // The rule bounds control characters, not the operator's alphabet: a label
+    // that cannot be spelled in ASCII is a legitimate party name, and the value
+    // reaches the CLI as one argv token whatever letters it carries.
+    for (const identity of [
+      "Agencia Española de Protección de Datos",
+      "北京市统计局",
+      "Département de la Santé",
+    ])
+      expect(
+        jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ identity }))
+          .success,
+      ).toBe(true);
+  });
+
   test("rejects an unknown channel", () => {
     const intent = { ...validZeroSetupIntent(), channel: "webrtc" };
     expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);

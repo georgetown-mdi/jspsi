@@ -1,10 +1,12 @@
 /**
- * The one contract for a zero-setup exchange's operator `--identity` label, shared
- * by the client-side confirm-screen guard ({@link ../bench/DirectConfirmSection})
- * and the server intent schema ({@link ../jobs/intent}). Extracted so the browser
- * guard and the server validator cannot drift -- a label one accepts, the other must
- * too -- and so the guard does not pull the server-only intent module (and its
- * `node:url` dependency) into the browser bundle for one constant.
+ * The one contract for an operator's `--identity` label, shared by the client-side
+ * confirm-screen guard ({@link ../bench/DirectConfirmSection}), the server intent
+ * schema ({@link ../jobs/intent}), and the signing-fingerprint route
+ * ({@link ../routes/api/jobs/signing/fingerprint}), which binds the label into a
+ * long-lived certificate. Extracted so the browser guard and the server validators
+ * cannot drift -- a label one accepts, the others must too -- and so the guard does
+ * not pull the server-only intent module (and its `node:url` dependency) into the
+ * browser bundle for one constant.
  */
 
 /**
@@ -14,3 +16,29 @@
  * or credential.
  */
 export const MAX_IDENTITY_LENGTH = 1024;
+
+/**
+ * The control characters a label may not carry: C0 (NUL among them), DEL, and the
+ * C1 range -- with NO exception for tab, line feed, or carriage return, which the
+ * retention note's rule ({@link ./retentionNoteShape}) admits because that field is
+ * a textarea a multi-line value is legitimately authored in.
+ *
+ * This label is a single-line value: it rides to the CLI as one
+ * `--identity=<value>` token and is bound into a long-lived certificate the partner
+ * pins and DISPLAYS, kept and read back long after the run, so no control byte in
+ * it is text the operator meant to write. Letters outside ASCII are untouched --
+ * the range stops below U+00A0, so a label written in the operator's own script
+ * stays admissible.
+ */
+export const IDENTITY_CONTROL_CHAR_PATTERN =
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u001f\u007f-\u009f]/;
+
+/**
+ * The reason every boundary reports for a label carrying one, so the surfaces
+ * enforcing the rule say the same thing about the same value. A field path and a
+ * shape reason, never the submitted bytes: the label is the submitter's own text,
+ * and echoing it back is what the job API's error discipline exists to prevent.
+ */
+export const IDENTITY_CONTROL_CHAR_MESSAGE =
+  "identity must not contain control characters";

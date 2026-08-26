@@ -23,7 +23,11 @@ import {
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
-import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
+import {
+  IDENTITY_CONTROL_CHAR_MESSAGE,
+  IDENTITY_CONTROL_CHAR_PATTERN,
+  MAX_IDENTITY_LENGTH,
+} from "@psi/identityLabel";
 
 import { PEER_ID_SHAPE_MESSAGE, isAdmissiblePeerId } from "@psi/peerIdLabel";
 
@@ -821,15 +825,20 @@ const jobZeroSetupIntentCommonFields = {
   inputFile: jobInputFileReferenceSchema.optional(),
   eventStream: z.boolean().optional(),
   linkageStrategy: z.enum(["cascade", "single-pass"]).optional(),
-  // Free text, unlike the closed strategy enum: forbid a leading `-` so a
-  // flag-shaped label (e.g. "--save") cannot be mistaken for a CLI flag. Defense
-  // in depth -- the driver already emits it as a single `--identity=<value>` token,
-  // which parses a `-`-leading value verbatim regardless.
+  // Free text, unlike the closed strategy enum, so it takes the shared label
+  // contract's two shape rules (`@psi/identityLabel`): no leading `-`, so a
+  // flag-shaped label (e.g. "--save") cannot be mistaken for a CLI flag -- defense
+  // in depth, since the driver emits it as a single `--identity=<value>` token,
+  // which parses a `-`-leading value verbatim regardless -- and no control
+  // character, which rides the run into this party's own disclosure record.
   identity: z
     .string()
     .min(1)
     .max(MAX_IDENTITY_LENGTH)
     .regex(/^[^-]/, "identity must not begin with '-'")
+    .refine((label) => !IDENTITY_CONTROL_CHAR_PATTERN.test(label), {
+      message: IDENTITY_CONTROL_CHAR_MESSAGE,
+    })
     .optional(),
 };
 

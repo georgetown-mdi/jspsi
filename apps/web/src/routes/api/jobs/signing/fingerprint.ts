@@ -2,7 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { z } from "zod";
 
-import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
+import {
+  IDENTITY_CONTROL_CHAR_MESSAGE,
+  IDENTITY_CONTROL_CHAR_PATTERN,
+  MAX_IDENTITY_LENGTH,
+} from "@psi/identityLabel";
 
 import {
   MAX_SIGNING_FINGERPRINT_BODY_BYTES,
@@ -24,18 +28,26 @@ import type { SigningFingerprintResult } from "@jobs/signingIdentity";
  * `--force`, and `.strictObject` rejects any unmodeled key -- so the request can
  * only ever say WHOSE identity to mint, never where to read or write.
  *
- * The label is the operator's own `linkage_terms.identity`, bounded by the shared
- * {@link MAX_IDENTITY_LENGTH} and forbidden a leading `-` on the same terms the
- * zero-setup intent's `identity` is: the driver emits it as a single
- * `--identity=<value>` token, which parses a `-`-leading value verbatim anyway, so
- * this is defense in depth rather than the only guard.
+ * The label is the operator's own `linkage_terms.identity`, held to the shared label
+ * contract (`@psi/identityLabel`) on the same terms the zero-setup intent's
+ * `identity` is: bounded by {@link MAX_IDENTITY_LENGTH}, forbidden a leading `-`
+ * -- the driver emits it as a single `--identity=<value>` token, which parses a
+ * `-`-leading value verbatim anyway, so that much is defense in depth -- and
+ * refused any control character. The last is load-bearing here rather than
+ * defensive: what this route binds the label into is a long-lived certificate the
+ * partner pins and displays, and rebinding is the CLI's `psilink fingerprint
+ * --force` and a re-pin by every partner. A NUL would otherwise be caught only
+ * incidentally, where the child is spawned.
  */
 const fingerprintBodySchema = z.strictObject({
   identity: z
     .string()
     .min(1)
     .max(MAX_IDENTITY_LENGTH)
-    .regex(/^[^-]/, "identity must not begin with '-'"),
+    .regex(/^[^-]/, "identity must not begin with '-'")
+    .refine((label) => !IDENTITY_CONTROL_CHAR_PATTERN.test(label), {
+      message: IDENTITY_CONTROL_CHAR_MESSAGE,
+    }),
   exportCertificate: z.boolean().optional(),
 });
 

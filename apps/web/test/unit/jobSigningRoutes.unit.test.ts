@@ -5,19 +5,24 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
 
+import { JOB_FILE_NAMES, jobZeroSetupIntentSchema } from "@jobs/intent";
 import { JobManager, SigningFingerprintBusyError } from "@jobs/jobManager";
 import {
   SIGNING_CERTIFICATE_FILE_NAME,
   SIGNING_IDENTITY_FILE_NAME,
 } from "@jobs/signingIdentity";
-import { JOB_FILE_NAMES } from "@jobs/intent";
 import { MAX_SIGNING_FINGERPRINT_BODY_BYTES } from "@jobs/routeSupport";
 
 import { Route as FingerprintRoute } from "../../src/routes/api/jobs/signing/fingerprint";
 import { Route as JobRoute } from "../../src/routes/api/jobs/$jobId/index";
 import { Route as ReceiptRoute } from "../../src/routes/api/jobs/$jobId/receipt";
 
-import { STUB_CLI_PATH, tempDataRoot, validIntent } from "../utils/jobFixtures";
+import {
+  STUB_CLI_PATH,
+  tempDataRoot,
+  validIntent,
+  validZeroSetupIntent,
+} from "../utils/jobFixtures";
 
 import type { JobCreateIntent } from "@jobs/intent";
 
@@ -199,6 +204,60 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
       expect(JSON.parse(text)).toMatchObject({ error: expect.any(String) });
     },
   );
+
+  test("a control character in the identity is a 400 before any child is spawned", async () => {
+    // What this route binds the label into is a long-lived certificate the partner
+    // pins and displays, and rebinding it costs a `--force` re-key and a re-pin by
+    // every partner -- so a stray byte is caught on the way in. A NUL would
+    // otherwise be refused only incidentally, where the child is spawned.
+    for (const code of [0x00, 0x07, 0x09, 0x0a, 0x0d, 0x1b, 0x7f, 0x9b]) {
+      const { dataRoot } = seedManager();
+      const identity = `Agency${String.fromCharCode(code)}A`;
+      const response = await postFingerprint({ identity });
+      expect(response.status).toBe(400);
+      // A field path and a shape reason: no part of the submitted label crosses.
+      const text = await response.text();
+      expect(text).not.toContain("Agency");
+      expect(JSON.parse(text)).toMatchObject({ error: expect.any(String) });
+      // The stub CLI creates the identity file, so its absence proves no child ran.
+      expect(
+        fs.existsSync(path.join(dataRoot, SIGNING_IDENTITY_FILE_NAME)),
+      ).toBe(false);
+    }
+  });
+
+  test("the zero-setup intent refuses exactly what this route refuses", async () => {
+    // Both boundaries take the label rule from the one shared contract, so neither
+    // can come to admit a label the other refuses -- which is the whole reason the
+    // rule is not spelled twice.
+    seedManager();
+    for (const code of [0x00, 0x09, 0x1b, 0x7f, 0x9b]) {
+      const identity = `Agency${String.fromCharCode(code)}A`;
+      expect((await postFingerprint({ identity })).status).toBe(400);
+      expect(
+        jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ identity }))
+          .success,
+      ).toBe(false);
+    }
+    for (const identity of ["Agency A", "Agencia Española"]) {
+      expect((await postFingerprint({ identity })).status).toBe(200);
+      expect(
+        jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ identity }))
+          .success,
+      ).toBe(true);
+    }
+  });
+
+  test("an identity written in the operator's own script binds normally", async () => {
+    // The rule bounds control characters, not the operator's alphabet. A party
+    // name that cannot be spelled in ASCII reaches the child as one argv token.
+    seedManager();
+    const response = await postFingerprint({
+      identity: "Agencia Española de Protección de Datos",
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "ok" });
+  });
 
   test("an over-long identity is a 400 before any child is spawned", async () => {
     const { dataRoot } = seedManager();
