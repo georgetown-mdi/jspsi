@@ -270,12 +270,12 @@ export const MAX_TRANSFORM_PATTERN_LENGTH = 1000;
  * not the ability to amplify the value a row derives from one: this cap does not
  * bound the transformed value, because a `replace_regex` replacement is a
  * substitution TEMPLATE whose match-context sequences re-insert the operator's
- * own cell at every match position, and transform steps compose. That residual is
- * open; docs/spec/CHANNEL_SECURITY.md (Unbounded transform-parameter rejection)
- * carries the measurements and the closer -- a byte-aware bound on the
- * transformed value, or neutralizing the amplifying sequences in a
- * partner-supplied replacement -- and standardization.test.ts characterizes it as
- * a lower bound.
+ * own cell at every match position, and transform steps compose. The produced
+ * value carries its own ceiling where the row runs, on what a key element reads
+ * and on what each of its steps produces (`MAX_TRANSFORMED_VALUE_LENGTH` in
+ * standardization.ts), so the two bounds are complementary: this one is what the
+ * partner may WRITE, that one what a row may DERIVE. The substitution sequences
+ * keep their wire meaning under it.
  *
  * A DoS ceiling on the partner wire path, not a semantic limit: an in-range value
  * is preserved verbatim, never clamped, since both parties must derive

@@ -1077,14 +1077,16 @@ test("parseLinkageTerms throws on an over-bound param (the initiator/joiner path
   ).toThrow(ZodError);
 });
 
-test("a replacement carrying substitution sequences parses at the bound (open residual)", () => {
-  // The half of the residual that lives on this schema: the bound reads a param's
+test("a replacement carrying substitution sequences parses at the bound", () => {
+  // The schema's half of the magnitude control: this bound reads a param's
   // LENGTH, so a replacement whose every character pair is a `$'` substitution
-  // sequence -- which re-inserts the operator's own cell at each match position,
-  // amplifying the transformed value past any per-position figure (characterized
-  // in standardization.test.ts) -- is accepted like any other 1000-character
-  // string. Neutralizing those sequences is one of the two closers recorded in
-  // docs/spec/CHANNEL_SECURITY.md, Unbounded transform-parameter rejection.
+  // sequence -- which re-inserts the operator's own cell at each match position
+  // -- is accepted like any other 1000-character string, and the sequences keep
+  // their wire meaning. What such a replacement DERIVES per row is bounded where
+  // the row runs, by the ceiling on the produced value (pinned in
+  // standardization.test.ts); neutralizing the sequences here would have been a
+  // wire-semantics change, and is deliberately not the closer taken
+  // (docs/spec/CHANNEL_SECURITY.md, Unbounded transform-parameter rejection).
   const substituting = "$'".repeat(MAX_TRANSFORM_PARAM_LENGTH / 2);
   expect(substituting.length).toBe(MAX_TRANSFORM_PARAM_LENGTH);
   const result = safeParseLinkageTerms(
