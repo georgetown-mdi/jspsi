@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   serviceWorkerSource,
-  serviceWorkerSourceRegions,
+  serviceWorkerSourceModel,
 } from "../utils/serviceWorkerHarness";
 
 // ASSET_CACHE is the worker's one growing cache: the fetch path adds to it on its
@@ -30,10 +30,10 @@ const namedWriters = Object.keys(NAMED_WRITERS).sort();
 
 describe("the asset cache's writers", () => {
   test("are the only functions that reach it", () => {
-    const { functions } = serviceWorkerSourceRegions();
+    const { functions } = serviceWorkerSourceModel();
 
     const reaching = [...functions]
-      .filter(([, body]) => body.includes("ASSET_CACHE"))
+      .filter(([, referenced]) => referenced.has("ASSET_CACHE"))
       .map(([name]) => name)
       .sort();
 
@@ -41,66 +41,73 @@ describe("the asset cache's writers", () => {
   });
 
   test("are the only code that reaches it at all", () => {
-    const { outsideFunctions } = serviceWorkerSourceRegions();
+    const { outsideFunctions } = serviceWorkerSourceModel();
 
     // Outside every function the cache may be named twice: where its name is
     // built, and in the list of caches activate keeps. Anything else out here is
-    // a listener body or another top-level statement touching it directly.
+    // a listener body or another top-level statement touching it directly, and
+    // reports the line it sits on in place of a constant's name.
     const naming = outsideFunctions
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.includes("ASSET_CACHE"));
+      .filter((reference) => reference.name === "ASSET_CACHE")
+      .map((reference) => reference.declaredConst ?? `line ${reference.line}`);
 
-    expect(naming).toHaveLength(2);
-    expect(naming[0]).toMatch(/^const ASSET_CACHE = /);
-    expect(naming[1]).toMatch(/^const CURRENT_CACHES = \[/);
+    expect(naming).toEqual(["ASSET_CACHE", "CURRENT_CACHES"]);
   });
 
   test("cannot be bypassed by writing the cache's name a second time", () => {
-    const { code } = serviceWorkerSourceRegions();
-    const declared = /const ASSET_CACHE = `([^`]*)`;/.exec(code);
-    if (declared === null)
-      throw new Error("serviceWorker.js declares no ASSET_CACHE cache name");
+    const { declaredLiterals, literals } = serviceWorkerSourceModel();
 
     // The literal half of the name, which any second writer naming the cache
     // without the constant would have to repeat.
-    const literal = declared[1].replace("${CACHE_VERSION}", "");
+    const literal = declaredLiterals.get("ASSET_CACHE");
+    if (literal === undefined)
+      throw new Error("serviceWorker.js declares no ASSET_CACHE cache name");
     expect(literal).not.toBe("");
 
-    expect(code.split(literal)).toHaveLength(2);
+    expect(literals.filter((text) => text.includes(literal))).toEqual([
+      literal,
+    ]);
   });
 
   test("each bound what they store", () => {
-    const { functions } = serviceWorkerSourceRegions();
+    const { functions } = serviceWorkerSourceModel();
 
     for (const name of namedWriters) {
-      const body = functions.get(name);
-      if (body === undefined)
+      const referenced = functions.get(name);
+      if (referenced === undefined)
         throw new Error(`serviceWorker.js declares no function ${name}`);
-      expect(body, `${name} (${NAMED_WRITERS[name]})`).toContain("trimCache(");
-      expect(body, `${name} (${NAMED_WRITERS[name]})`).toContain(
-        "MAX_ASSET_ENTRIES",
-      );
+      const writer = `${name} (${NAMED_WRITERS[name]})`;
+      expect([...referenced], writer).toContain("trimCache");
+      expect([...referenced], writer).toContain("MAX_ASSET_ENTRIES");
     }
   });
 
   test("are read out of the worker itself, so none of the above is vacuous", () => {
-    const { code, functions } = serviceWorkerSourceRegions();
+    const { functions, outsideFunctions, cacheOpens } =
+      serviceWorkerSourceModel();
 
-    // The comment strip ran, so the checks above read code rather than prose.
-    expect(serviceWorkerSource()).toContain("/**");
-    expect(code).not.toContain("/**");
-
-    // The split produced compilable code and found more than the writers named
-    // here, so a shredded parse cannot report an empty set of violations.
-    expect(() => new Function(code)).not.toThrow();
+    // The worker is valid JavaScript, so the parse the checks above read is a
+    // complete one rather than what a parser salvaged from a broken file.
+    expect(() => new Function(serviceWorkerSource())).not.toThrow();
     expect(functions.size).toBeGreaterThan(namedWriters.length);
 
     // Every site that opens a cache at all sits inside one of those functions,
     // which is what makes "outside every function" above an exhaustive reading
-    // rather than whatever the split happened to leave over.
-    const opens = (text: string) => text.split("caches.open(").length - 1;
-    expect(opens(code)).toBeGreaterThan(0);
-    expect(opens([...functions.values()].join("\n"))).toBe(opens(code));
+    // rather than whatever the parse happened to leave over.
+    expect(cacheOpens.length).toBeGreaterThan(0);
+    expect(
+      cacheOpens
+        .filter((site) => site.inFunction === undefined)
+        .map((site) => `line ${site.line}`),
+    ).toEqual([]);
+
+    // Prose is not code: the worker's comment on tryCache names
+    // QuotaExceededError, and no reference above is a mention in a comment.
+    expect(serviceWorkerSource()).toContain("QuotaExceededError");
+    const referenced = new Set([
+      ...[...functions.values()].flatMap((names) => [...names]),
+      ...outsideFunctions.map((reference) => reference.name),
+    ]);
+    expect(referenced.has("QuotaExceededError")).toBe(false);
   });
 });

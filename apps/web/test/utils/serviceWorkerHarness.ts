@@ -1,6 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 
+import ts from "typescript";
+
 // Every fake below stands in for an asynchronous platform API, so each returns a
 // promise whether or not its own body has anything to await.
 /* eslint-disable @typescript-eslint/require-await */
@@ -116,110 +118,185 @@ export function serviceWorkerAssetExtractor(): (
   return evaluate({ addEventListener: () => undefined }, undefined, undefined);
 }
 
-/** The end of the string or template literal opening at `start`, honoring
- * backslash escapes. A `${...}` substitution is scanned through rather than
- * parsed, so a nested literal of the same delimiter inside one would end the
- * scan early -- {@link serviceWorkerSourceRegions} compiles its own result,
- * which is what catches that. */
-function endOfLiteral(source: string, start: number): number {
-  const quote = source[start];
-  let index = start + 1;
-  while (index < source.length) {
-    const char = source[index];
-    if (char === "\\") {
-      index += 2;
-      continue;
-    }
-    if (char === quote) return index + 1;
-    index += 1;
-  }
-  throw new Error(`serviceWorker.js has an unterminated ${quote} literal`);
+/** One name the worker's top-level code -- everything outside its function
+ * declarations -- references. */
+export interface TopLevelReference {
+  /** The name referenced. */
+  readonly name: string;
+  /** The top-level `const` whose declaration the reference sits in, which for
+   * the constant's own declaration is that constant. `undefined` for a
+   * reference anywhere else at the top level: a listener body, or a statement
+   * declaring more than one name. */
+  readonly declaredConst: string | undefined;
+  /** The 1-based line of `serviceWorker.js` the reference sits on, so a failure
+   * names where to look. */
+  readonly line: number;
 }
 
-/** The worker's source with every comment blanked out, so a guard scanning for a
- * code reference is neither answered nor tripped by prose. Line structure is
- * preserved. A regular-expression literal is not recognized, so one carrying a
- * comment delimiter would be mangled -- see {@link serviceWorkerSourceRegions}
- * on how that surfaces. */
-function sourceWithoutComments(source: string): string {
-  let output = "";
-  let index = 0;
-  while (index < source.length) {
-    const char = source[index];
-    const next = source[index + 1];
-    if (char === "/" && next === "/") {
-      while (index < source.length && source[index] !== "\n") index += 1;
-      continue;
-    }
-    if (char === "/" && next === "*") {
-      const end = source.indexOf("*/", index + 2);
-      if (end === -1)
-        throw new Error("serviceWorker.js has an unterminated block comment");
-      output += source.slice(index, end + 2).replace(/[^\n]/g, "");
-      index = end + 2;
-      continue;
-    }
-    if (char === '"' || char === "'" || char === "`") {
-      const literalEnd = endOfLiteral(source, index);
-      output += source.slice(index, literalEnd);
-      index = literalEnd;
-      continue;
-    }
-    output += char;
-    index += 1;
-  }
-  return output;
+/** One `caches.open(...)` call in the worker. */
+export interface CacheOpenSite {
+  /** The top-level function declaration the call sits in, or `undefined` for
+   * one in the worker's top-level code. */
+  readonly inFunction: string | undefined;
+  /** The 1-based line of `serviceWorker.js` the call sits on. */
+  readonly line: number;
 }
 
-/** The worker's code split by where it sits: inside one of its top-level
- * function declarations, or outside all of them. */
-export interface ServiceWorkerSourceRegions {
-  /** The whole source, comments blanked out. Compiling it is how a caller
-   * establishes that the comment strip and the split below read the file rather
-   * than shredding it. */
-  readonly code: string;
-  /** Each top-level function declaration by name, as its own text. */
-  readonly functions: ReadonlyMap<string, string>;
-  /** The code outside those declarations: the constants and the listener
-   * registrations. */
-  readonly outsideFunctions: string;
+/** The worker's code as a guard over "which functions may touch X" reads it. */
+export interface ServiceWorkerSourceModel {
+  /** Each top-level function declaration by name, as the set of names its body
+   * references. */
+  readonly functions: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Every name the worker's top-level code references outside those
+   * declarations, in source order. */
+  readonly outsideFunctions: ReadonlyArray<TopLevelReference>;
+  /** The text of every string and template literal in the worker's code, each
+   * `${...}` substitution removed. */
+  readonly literals: ReadonlyArray<string>;
+  /** For each top-level `const` declared as a string or template literal, that
+   * literal's text with its substitutions removed. */
+  readonly declaredLiterals: ReadonlyMap<string, string>;
+  /** Every `caches.open(...)` call, in source order. */
+  readonly cacheOpens: ReadonlyArray<CacheOpenSite>;
+}
+
+/** The text of a string or template literal with every `${...}` substitution
+ * removed, or `undefined` for a node that is neither. */
+function literalTextOf(node: ts.Node): string | undefined {
+  if (ts.isStringLiteralLike(node)) return node.text;
+  if (ts.isTemplateExpression(node))
+    return (
+      node.head.text +
+      node.templateSpans.map((span) => span.literal.text).join("")
+    );
+  return undefined;
+}
+
+/** The one name a top-level statement declares and the literal it is declared
+ * as, or `undefined` for a statement that declares no single name. */
+function topLevelDeclaration(
+  statement: ts.Statement,
+): { name: string; literal: string | undefined } | undefined {
+  if (!ts.isVariableStatement(statement)) return undefined;
+  const declarations = statement.declarationList.declarations;
+  if (declarations.length !== 1) return undefined;
+  const { name, initializer } = declarations[0];
+  if (!ts.isIdentifier(name)) return undefined;
+  return {
+    name: name.text,
+    literal: initializer === undefined ? undefined : literalTextOf(initializer),
+  };
+}
+
+/** Whether `node` is a `caches.open(...)` call -- the one Cache API call that
+ * hands back a cache its caller can write. */
+function isCachesOpen(node: ts.Node): boolean {
+  return (
+    ts.isCallExpression(node) &&
+    ts.isPropertyAccessExpression(node.expression) &&
+    ts.isIdentifier(node.expression.expression) &&
+    node.expression.expression.text === "caches" &&
+    node.expression.name.text === "open"
+  );
 }
 
 /**
- * Split the worker's code the way a guard over "which functions may touch X"
- * needs it.
+ * Parse the worker and report what its code names, where.
  *
- * The split is line-oriented, which the file's formatting makes exact: a
- * top-level function declaration opens a line and its closing brace is the next
- * line that is a lone `}` at column zero (Prettier formats the file, and CI
- * enforces that). A body that ever failed to close that way raises here rather
- * than folding the rest of the file into one region.
+ * A guard over the asset cache's writers has to distinguish a function that
+ * reaches the cache from prose that mentions it, and a listener body reaching it
+ * inline from the constants that name it. That is a question about the worker's
+ * syntax, so it is answered by parsing the shipped file rather than scanning its
+ * text: comments carry no identifiers into a parse, and a function's extent is
+ * its declaration rather than whatever its formatting suggests.
+ *
+ * A reference here is a name the worker's code resolves in scope -- a
+ * declaration's own name included, a property being read off an object (the
+ * `open` of `caches.open`) excluded, since that name resolves against the object
+ * rather than the worker.
  */
-export function serviceWorkerSourceRegions(): ServiceWorkerSourceRegions {
-  const code = sourceWithoutComments(serviceWorkerSource());
-  const lines = code.split("\n");
-  const functions = new Map<string, string>();
-  const outsideFunctions: Array<string> = [];
-  let index = 0;
-  while (index < lines.length) {
-    const declared = /^(?:async )?function ([A-Za-z0-9_$]+)\(/.exec(
-      lines[index],
-    );
-    if (declared === null) {
-      outsideFunctions.push(lines[index]);
-      index += 1;
+export function serviceWorkerSourceModel(): ServiceWorkerSourceModel {
+  const source = ts.createSourceFile(
+    serviceWorkerPath,
+    serviceWorkerSource(),
+    ts.ScriptTarget.ES2022,
+    true,
+    ts.ScriptKind.JS,
+  );
+
+  const functions = new Map<string, ReadonlySet<string>>();
+  const outsideFunctions: Array<TopLevelReference> = [];
+  const literals: Array<string> = [];
+  const declaredLiterals = new Map<string, string>();
+  const cacheOpens: Array<CacheOpenSite> = [];
+
+  const lineOf = (node: ts.Node): number =>
+    ts.getLineAndCharacterOfPosition(source, node.getStart(source)).line + 1;
+
+  const collectLiterals = (node: ts.Node): void => {
+    const text = literalTextOf(node);
+    if (text !== undefined) literals.push(text);
+    ts.forEachChild(node, collectLiterals);
+  };
+  ts.forEachChild(source, collectLiterals);
+
+  const collectReferences = (
+    node: ts.Node,
+    inFunction: string | undefined,
+    record: (identifier: ts.Identifier) => void,
+  ): void => {
+    const descend = (child: ts.Node): void =>
+      collectReferences(child, inFunction, record);
+    if (isCachesOpen(node)) cacheOpens.push({ inFunction, line: lineOf(node) });
+    if (ts.isIdentifier(node)) {
+      record(node);
+      return;
+    }
+    if (ts.isPropertyAccessExpression(node)) {
+      descend(node.expression);
+      return;
+    }
+    if (
+      ts.isPropertyAssignment(node) &&
+      !ts.isComputedPropertyName(node.name)
+    ) {
+      descend(node.initializer);
+      return;
+    }
+    ts.forEachChild(node, descend);
+  };
+
+  for (const statement of source.statements) {
+    const declaredFunction = ts.isFunctionDeclaration(statement)
+      ? statement.name?.text
+      : undefined;
+    if (declaredFunction !== undefined) {
+      const referenced = new Set<string>();
+      collectReferences(statement, declaredFunction, (identifier) =>
+        referenced.add(identifier.text),
+      );
+      functions.set(declaredFunction, referenced);
       continue;
     }
-    let end = index;
-    while (end < lines.length && lines[end] !== "}") end += 1;
-    if (end === lines.length)
-      throw new Error(
-        `serviceWorker.js: ${declared[1]} has no closing brace at column zero`,
-      );
-    functions.set(declared[1], lines.slice(index, end + 1).join("\n"));
-    index = end + 1;
+    const declared = topLevelDeclaration(statement);
+    collectReferences(statement, undefined, (identifier) =>
+      outsideFunctions.push({
+        name: identifier.text,
+        declaredConst: declared?.name,
+        line: lineOf(identifier),
+      }),
+    );
+    if (declared?.literal !== undefined)
+      declaredLiterals.set(declared.name, declared.literal);
   }
-  return { code, functions, outsideFunctions: outsideFunctions.join("\n") };
+
+  return {
+    functions,
+    outsideFunctions,
+    literals,
+    declaredLiterals,
+    cacheOpens,
+  };
 }
 
 /** How the harness answers one request path. */
