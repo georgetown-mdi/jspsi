@@ -473,6 +473,115 @@ describe("a key that only borrows an offer's name is not the offer", () => {
   });
 });
 
+describe("an offer re-added over a key of its own name arrives off", () => {
+  // The encoding match drops a draft key whose shape no offer carries, and the
+  // offer it left unmatched is re-added. A built-in key is offered ON, so a draft
+  // holding an older shape under its name -- one stored before the shape changed
+  // -- would have that key silently arrive enabled, matching on a rule the
+  // operator did not turn on.
+  const BACKBONE_KEY = "LN + FN + DOB";
+  const SWAPPED_KEY = "swap(LN, FN) + DOB";
+
+  /** `draft` with the named key's elements permuted: the offer's own name over a
+   * shape the offer does not match, since element order is cascade-visible and
+   * part of the canonical encoding. */
+  function withPermutedKey(
+    draft: AdvancedInviteDraft,
+    name: string,
+    enabled: boolean,
+  ): AdvancedInviteDraft {
+    return {
+      ...draft,
+      keys: draft.keys.map((entry) =>
+        entry.key.name === name
+          ? {
+              key: {
+                ...entry.key,
+                elements: [...entry.key.elements].reverse(),
+              },
+              enabled,
+            }
+          : entry,
+      ),
+    };
+  }
+
+  /** The offered shape of the named built-in key over {@link COLUMNS}. */
+  const offeredShape = (name: string) =>
+    getDefaultLinkageTerms("Inviter", inferMetadata(COLUMNS)).linkageKeys.find(
+      (key) => key.name === name,
+    )?.elements;
+
+  test("a key the operator turned off does not come back on under its name", () => {
+    const stale = withPermutedKey(guidedDraft(), BACKBONE_KEY, false);
+    const { metadata } = setColumnType(stale.metadata, "phone", "other");
+    const edited = setDraftMetadata(stale, metadata, ROWS);
+
+    const arrived = edited.keys.filter(
+      (entry) => entry.key.name === BACKBONE_KEY,
+    );
+    expect(arrived).toHaveLength(1);
+    // The offer's shape, not the stale one -- the draft key is genuinely dropped.
+    expect(arrived[0].key.elements).toEqual(offeredShape(BACKBONE_KEY));
+    expect(arrived[0].enabled).toBe(false);
+    expect(
+      buildAdvancedTerms(edited).linkageKeys.map((key) => key.name),
+    ).not.toContain(BACKBONE_KEY);
+    // And in the dropped key's own place: cascade order is what each key is left
+    // to claim, so a re-offer appended below the keys it outranks would change
+    // what the operator's other choices match once this one is turned on.
+    expect(positionOf(edited, BACKBONE_KEY)).toBe(
+      positionOf(edited, SWAPPED_KEY) - 1,
+    );
+    expect(edited.keys.map((entry) => entry.key.name)).toEqual(
+      setDraftMetadata(guidedDraft(), metadata, ROWS).keys.map(
+        (entry) => entry.key.name,
+      ),
+    );
+  });
+
+  test("a key the operator had on arrives off as well", () => {
+    // The flag is consent to the key the operator was shown. A shape carrying that
+    // name is a different matching rule, so the choice does not port onto it --
+    // the operator turns the offered rule on themselves.
+    const stale = withPermutedKey(guidedDraft(), BACKBONE_KEY, true);
+    const { metadata } = setColumnType(stale.metadata, "phone", "other");
+    const edited = setDraftMetadata(stale, metadata, ROWS);
+
+    const arrived = edited.keys.filter(
+      (entry) => entry.key.name === BACKBONE_KEY,
+    );
+    expect(arrived).toHaveLength(1);
+    expect(arrived[0].key.elements).toEqual(offeredShape(BACKBONE_KEY));
+    expect(arrived[0].enabled).toBe(false);
+  });
+
+  test("a built-in key no dropped entry names still arrives on", () => {
+    // The other side of the rule: an offer the edit makes offerable for the first
+    // time is not a re-offer, so it arrives at the flag the offer gives it -- the
+    // guided path's built-in keys are on, and a retype that supplies a new type
+    // must not leave the keys it enables silently unmatched.
+    const draft = seedAdvancedInvite(
+      "Inviter",
+      ["first_name", "last_name", "dob", "taxpayer_id"],
+      ROWS,
+    ).draft;
+    const ssnKeys = (keys: AdvancedInviteDraft["keys"]) =>
+      keys.filter((entry) =>
+        entry.key.elements.some((element) => element.field === "ssn"),
+      );
+    expect(ssnKeys(draft.keys)).toEqual([]);
+
+    const edited = setDraftMetadata(
+      draft,
+      setColumnTypeForMatching(draft.metadata, "taxpayer_id", "ssn"),
+      ROWS,
+    );
+    expect(ssnKeys(edited.keys).length).toBeGreaterThan(0);
+    expect(ssnKeys(edited.keys).every((entry) => entry.enabled)).toBe(true);
+  });
+});
+
 describe("turning an offer on and off again", () => {
   test("adds the acceptor's own derivation, then withdraws it", () => {
     const off = guidedDraft();

@@ -4,6 +4,7 @@ import {
   authoredLinkageFields,
   canonicalString,
   columnValues,
+  encodeForComparison,
   getDefaultLinkageTerms,
   getDefaultStandardization,
   inferDateFormat,
@@ -558,18 +559,6 @@ function reconcileStandardization(
   return [...kept, ...additions];
 }
 
-/** `key` in the canonical encoding, or `null` when it carries a value outside the
- * canonical domain (a transform param beyond the safe integer range) and so cannot
- * be compared -- the same answer core's own offer comparison gives such a key
- * (`isOptInLinkageKey`): incomparable is not a match. */
-function comparableKeyEncoding(key: LinkageKey): string | null {
-  try {
-    return canonicalString(key);
-  } catch {
-    return null;
-  }
-}
-
 /** Reconcile the draft's keys against a freshly-derived offer
  * ({@link offerableDraftKeys}): keep the order and enabled flag of keys that
  * remain offered (replacing the key object with the fresh template), then append
@@ -586,28 +575,60 @@ function comparableKeyEncoding(key: LinkageKey): string | null {
  * an unrelated key an imported document declares under that name -- would hand its
  * enabled flag to the full offered key and turn on an addition the operator never
  * chose. A key matching no offer is no longer offered and drops, the same as a
- * built-in key whose columns went away, and the offer itself then arrives fresh at
- * the flag the offer gives it (off, for an opt-in key). */
+ * built-in key whose columns went away.
+ *
+ * An offer left unmatched by such a drop is RE-OFFERED in the dropped entry's own
+ * place and OFF, rather than at the flag and the position the offer gives it,
+ * whenever the dropped entry carried the offer's name. The name is what the
+ * operator saw beside the checkbox, so a key of that name whose shape no longer
+ * matches the offer -- a stored draft carrying an older shape of a built-in key --
+ * is a departure from the offer rather than a fresh one: arriving at the offer's
+ * own flag would turn a built-in key back on over the operator's decision to turn
+ * it off, on a consent surface, and moving it would change what the cascade claims
+ * ahead of the keys below it. An offer no dropped entry named is genuinely new and
+ * arrives at the flag and the place the offer gives it (off, for an opt-in key). */
 function reconcileKeys(
   prevKeys: Array<DraftKey>,
   offerable: Array<DraftKey>,
 ): Array<DraftKey> {
   const offerableByEncoding = new Map<string, DraftKey>();
   for (const entry of offerable) {
-    const encoded = comparableKeyEncoding(entry.key);
+    const encoded = encodeForComparison(entry.key);
     if (encoded !== null) offerableByEncoding.set(encoded, entry);
   }
+  const offerFor = prevKeys.map((entry) => {
+    const encoded = encodeForComparison(entry.key);
+    return encoded === null ? undefined : offerableByEncoding.get(encoded);
+  });
+  const matched = new Set(offerFor.filter((offer) => offer !== undefined));
+  const droppedNames = new Set(
+    prevKeys
+      .filter((_, at) => offerFor[at] === undefined)
+      .map((entry) => entry.key.name),
+  );
+  const reofferByName = new Map(
+    offerable
+      .filter(
+        (entry) => !matched.has(entry) && droppedNames.has(entry.key.name),
+      )
+      .map((entry) => [entry.key.name, entry] as const),
+  );
   const kept: Array<DraftKey> = [];
-  const matched = new Set<DraftKey>();
-  for (const entry of prevKeys) {
-    const encoded = comparableKeyEncoding(entry.key);
-    const offer =
-      encoded !== null ? offerableByEncoding.get(encoded) : undefined;
-    if (offer === undefined) continue;
-    kept.push({ key: offer.key, enabled: entry.enabled });
-    matched.add(offer);
-  }
-  const fresh = offerable.filter((entry) => !matched.has(entry));
+  const reoffered = new Set<DraftKey>();
+  prevKeys.forEach((entry, at) => {
+    const offer = offerFor[at];
+    if (offer !== undefined) {
+      kept.push({ key: offer.key, enabled: entry.enabled });
+      return;
+    }
+    const reoffer = reofferByName.get(entry.key.name);
+    if (reoffer === undefined || reoffered.has(reoffer)) return;
+    reoffered.add(reoffer);
+    kept.push({ key: reoffer.key, enabled: false });
+  });
+  const fresh = offerable.filter(
+    (entry) => !matched.has(entry) && !reoffered.has(entry),
+  );
   for (const entry of fresh)
     if (!isOptInLinkageKey(entry.key)) kept.push(entry);
   return placeOfferedKeys(

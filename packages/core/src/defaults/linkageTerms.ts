@@ -404,7 +404,19 @@ export function isDrawnFromLinkageRuleSet(
   );
 }
 
-function encodeForComparison(value: unknown): string | null {
+/**
+ * `value` in the canonical encoding, the equality the two parties' terms are
+ * compared under, or `null` when it carries a value outside the canonical domain
+ * (a transform param beyond the safe integer range) and so cannot be compared.
+ * Every comparison here reads `null` as no match rather than throwing, the answer
+ * {@link isDrawnFromLinkageRuleSet} and {@link isOptInLinkageKey} give such rules:
+ * the built-in and offered sets carry no such value, so nothing incomparable is
+ * one of them.
+ *
+ * @internal exported for the web editor's key reconciliation, which matches a
+ * draft key to an offer under this same equality.
+ */
+export function encodeForComparison(value: unknown): string | null {
   try {
     return canonicalString(value);
   } catch {

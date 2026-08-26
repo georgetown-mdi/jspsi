@@ -26,6 +26,7 @@ import {
   defaultStandardizationForRows,
   draftFromTerms,
   draftWithFieldAdded,
+  draftWithKeyEnabled,
   gatedActiveSettingMessage,
   importedCitationDropCause,
   importedCitationDropNotice,
@@ -1807,6 +1808,54 @@ describe("draftFromTerms binds an imported field of a type no built-in key uses"
     expect(
       edited.standardization.find((t) => t.output === "date_of_birth")?.input,
     ).toBe("birthday");
+  });
+});
+
+describe("the offered-type withdrawal is the key-reconciling path's alone", () => {
+  // The guided path re-derives the key set, so an edit that drops an enabled offer
+  // withdraws the cleaning that offer minted -- the column keeps a card in the
+  // data-prep workbench otherwise, over a field the draft's terms no longer
+  // declare. The keep-keys path serves an authored or imported key set, whose keys
+  // the edit leaves in place still referencing that field, so the same withdrawal
+  // there would leave the draft's own key unsupplyable.
+  const ZIP_KEY = "LN + FN + DOB + ZIP";
+  const columns = ["ssn", "first_name", "last_name", "dob", "zip"];
+  const rawRows = [
+    {
+      ssn: "900-31-2245",
+      first_name: "Maria",
+      last_name: "Alvarez",
+      dob: "03/07/1988",
+      zip: "60614-1234",
+    },
+  ];
+
+  test("one edit withdraws the offer's cleaning on one path and retains it on the other", () => {
+    const { draft } = seedAdvancedInvite("Org", columns, rawRows);
+    const on = draftWithKeyEnabled(
+      draft,
+      draft.keys.findIndex((entry) => entry.key.name === ZIP_KEY),
+      true,
+    );
+    expect(on.standardization.find((t) => t.output === "zip_code")?.input).toBe(
+      "zip",
+    );
+
+    // A backbone column off matching, with the ZIP column itself untouched: the
+    // offer is no longer satisfiable, but nothing about its own column changed.
+    const metadata = setColumnType(on.metadata, "dob", "other").metadata;
+
+    const guided = setDraftMetadata(on, metadata, rawRows);
+    expect(guided.keys.some((entry) => entry.key.name === ZIP_KEY)).toBe(false);
+    expect(guided.standardization.some((t) => t.output === "zip_code")).toBe(
+      false,
+    );
+
+    const kept = setDraftMetadataKeepingKeys(on, metadata, rawRows);
+    expect(kept.keys).toStrictEqual(on.keys);
+    expect(
+      kept.standardization.find((t) => t.output === "zip_code")?.input,
+    ).toBe("zip");
   });
 });
 
