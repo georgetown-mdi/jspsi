@@ -13,6 +13,8 @@ import { RecurringHandoff } from "@bench/RecurringHandoff";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
+import type { JobHandoff } from "@jobs/handoff";
+
 const JOB_ID = "job-9";
 
 /** A zero-setup (Direct) sftp hand-off: a command template with a placeholder
@@ -22,6 +24,7 @@ const COMMAND_HANDOFF = {
   channel: "sftp",
   usedKeyFile: false,
   credentialPasted: false,
+  usedSigningIdentity: false,
   template: {
     kind: "command",
     argv: [
@@ -34,7 +37,7 @@ const COMMAND_HANDOFF = {
       "results.csv",
     ],
   },
-};
+} satisfies JobHandoff;
 
 /** A zero-setup filedrop hand-off whose `--identity` label carries a space, to
  * exercise the cron (POSIX) vs Windows (cmd) quoting divergence. */
@@ -43,6 +46,7 @@ const SPACED_COMMAND_HANDOFF = {
   channel: "filedrop",
   usedKeyFile: false,
   credentialPasted: false,
+  usedSigningIdentity: false,
   template: {
     kind: "command",
     argv: [
@@ -53,7 +57,7 @@ const SPACED_COMMAND_HANDOFF = {
       "results.csv",
     ],
   },
-};
+} satisfies JobHandoff;
 
 /** An invitation (exchange) sftp hand-off: a config template plus the key-file
  * copy step. */
@@ -62,13 +66,21 @@ const CONFIG_HANDOFF = {
   channel: "sftp",
   usedKeyFile: true,
   credentialPasted: false,
+  usedSigningIdentity: false,
   template: {
     kind: "config",
     yaml:
       "connection:\n  channel: sftp\n  server:\n    host: sftp.example.gov\n" +
       "    password: '@/path/to/your/credential-file'\n",
   },
-};
+} satisfies JobHandoff;
+
+/** The same invitation hand-off for a run that signed its receipts, which adds
+ * the carry-the-identity step and the timestamped-receipt note. */
+const SIGNED_CONFIG_HANDOFF = {
+  ...CONFIG_HANDOFF,
+  usedSigningIdentity: true,
+} satisfies JobHandoff;
 
 /** Stub the same-origin hand-off endpoint at the global fetch seam. A null body
  * makes it 404 (the unavailable case). */
@@ -161,6 +173,25 @@ describe("RecurringHandoff panel", () => {
     expect(text()).toContain(".psilink.key");
     expect(text()).toContain("0 2 * * *");
     expect(text()).toContain("schtasks /Create");
+    // An unsigned run is told nothing about carrying a signing identity.
+    expect(text()).not.toContain("Copy your signing identity");
+  });
+
+  test("adds the carry-the-identity step for a run that signed its receipts", async () => {
+    stubHandoff(SIGNED_CONFIG_HANDOFF);
+    app.render(createElement(RecurringHandoff, { jobId: JOB_ID }));
+
+    await expect
+      .element(page.getByRole("heading", { name: HANDOFF_HEADING }))
+      .toBeInTheDocument();
+
+    const text = () => app.container.textContent;
+    // Copy the identity rather than minting a new one: a fresh key would carry a
+    // fingerprint the partner has not pinned.
+    expect(text()).toContain("Copy your signing identity into that folder");
+    expect(text()).toContain("do not run psilink fingerprint there");
+    // The schedule accumulates a receipt trail rather than overwriting one file.
+    expect(text()).toContain("timestamped receipt");
   });
 
   test("renders nothing when the hand-off is unavailable (non-blocking)", async () => {

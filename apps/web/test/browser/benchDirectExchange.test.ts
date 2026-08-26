@@ -18,6 +18,8 @@ import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousCh
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
+import type { JobHandoff } from "@jobs/handoff";
+
 // The bench components touch the router seam.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -502,11 +504,12 @@ describe("console direct re-attaches on a busy create", () => {
     channel: "sftp",
     usedKeyFile: false,
     credentialPasted: false,
+    usedSigningIdentity: false,
     template: {
       kind: "command",
       argv: ["psilink", "exchange", "clients.csv", "results.csv"],
     },
-  };
+  } satisfies JobHandoff;
 
   test("a 409 at run re-attaches with recovery copy, not the busy alert", async () => {
     // The slot is occupied: the create 409s carrying the live occupant's id.
