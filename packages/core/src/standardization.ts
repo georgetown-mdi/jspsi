@@ -1220,8 +1220,14 @@ function compileStep(step: {
     };
   }
   const factory = STANDARDIZING_FUNCTIONS[step.function];
+  // On the element-transform path the name is partner-authored free text -- the
+  // wire schema types `function` as a bounded string, not as one of the names
+  // this build knows -- so it is narrowed rather than echoed, as the magnitude
+  // refusals narrow theirs.
   if (!factory)
-    throw new Error(`unknown standardization function: "${step.function}"`);
+    throw new Error(
+      `unknown standardization function: ${transformFunctionLabel(step.function)}`,
+    );
   return {
     kind: "fn",
     fn: factory(params),
@@ -2099,14 +2105,19 @@ type AccumulationFate = "drop" | "refuse";
  * `refuse` unless every producer that can expand the key is a declared fan-out
  * producer. A producer outside {@link FAN_OUT_FUNCTION_NAMES} is outside the
  * width bound's rules (docs/spec/PROTOCOL.md, Fan-out matching) and stays
- * fail-closed however wide it went, and a key no producer can expand at all
- * names none to bind the drop to -- the row is one enormous value chain, which
- * ends the exchange as an over-ceiling value does.
+ * fail-closed however wide it went. A key no producer can expand at all names
+ * none to bind a drop to, so it takes that same fail-closed default; what holds
+ * such a key is the per-value ceiling on each of its elements
+ * ({@link MAX_TRANSFORMED_VALUE_LENGTH}) rather than a crossing here.
  *
  * `swap` exchanges two elements' FIELDS while each keeps its own transforms, so
- * it re-pairs the producers below without adding or removing one: the sender and
- * the receiver of a swapped key reach the same verdict, and cannot end one run
- * with a dropped row and the other with a refusal.
+ * it re-pairs the producers below without adding or removing one: over ONE
+ * dataset the sender and the receiver of a swapped key reach the same verdict,
+ * and cannot end one run with a dropped row and the other with a refusal. That
+ * scope is the dataset's, not the exchange's -- each party classifies from its
+ * OWN local standardization's field pipelines, so two partners whose local
+ * configs realize a key's fields differently can classify the same key
+ * differently.
  */
 function keyAccumulationFate(
   elements: ReadonlyArray<LinkageKeyElement>,
@@ -2223,6 +2234,34 @@ function dropRowFromKeyRound(
 }
 
 /**
+ * How one party reads one key, all of it fixed for the whole run: the element
+ * list this party's role selects (the receiver's swapped one for a key declaring
+ * `swap`), the exchanged positions a refusal names, and the fate a crossing of
+ * the accumulating bound settles on ({@link keyAccumulationFate}).
+ *
+ * Nothing here varies with the row, so a caller iterating a key's rows
+ * ({@link StandardizedKeyIterable}) reads it once rather than repeating the walk
+ * over every element's compiled steps per row.
+ */
+interface KeyReadPlan {
+  readonly elements: LinkageKeyElement[];
+  readonly pair: [number, number] | undefined;
+  readonly fate: AccumulationFate;
+}
+
+function planKeyRead(
+  key: LinkageKey,
+  dataset: StandardizedDataset,
+  isReceiver: boolean,
+): KeyReadPlan {
+  const { elements, pair } =
+    isReceiver && key.swap
+      ? swapElements(key.elements, key.swap)
+      : { elements: key.elements, pair: undefined };
+  return { elements, pair, fate: keyAccumulationFate(elements, dataset) };
+}
+
+/**
  * Build the candidate key strings one record contributes to one linkage key
  * round, given a standardized dataset and a row index.
  *
@@ -2265,16 +2304,25 @@ export function buildKeyStrings(
   isReceiver = false,
   keyIndex?: number,
 ): Set<string> | null {
-  const { elements, pair } =
-    isReceiver && key.swap
-      ? swapElements(key.elements, key.swap)
-      : { elements: key.elements, pair: undefined };
+  return buildKeyStringsUnderPlan(
+    key,
+    planKeyRead(key, dataset, isReceiver),
+    dataset,
+    index,
+    keyIndex,
+  );
+}
 
-  // What a crossing of the accumulating bound below costs this row, settled
-  // before the first element is read so that neither the element order nor where
-  // the crossing lands can move it.
-  const fate = keyAccumulationFate(elements, dataset);
-
+// The row build under a plan the caller already holds. Unexported, and the
+// entry point above takes no plan: a caller-supplied fate would be a lever for
+// reading a key this build classifies `refuse` as a `drop` instead.
+function buildKeyStringsUnderPlan(
+  key: LinkageKey,
+  { elements, pair, fate }: KeyReadPlan,
+  dataset: StandardizedDataset,
+  index: number,
+  keyIndex: number | undefined,
+): Set<string> | null {
   const elementValues: string[][] = [];
   // Whether any element contributed several candidates before fuzzy expansion --
   // the fan-out signature -- and, with the provenance beside it, what decides
@@ -2533,6 +2581,10 @@ export class StandardizedKeyIterable {
   private readonly dataset: StandardizedDataset;
   private readonly isReceiver: boolean;
   private readonly keyIndex: number | undefined;
+  // Read at the first row rather than in the constructor, so an element
+  // transform that does not compile refuses from the row read rather than from
+  // the construction of the round's iterables.
+  private plan: KeyReadPlan | undefined;
 
   constructor(
     key: LinkageKey,
@@ -2560,11 +2612,12 @@ export class StandardizedKeyIterable {
   }
 
   private valueAt(index: number): KeyCandidates {
-    const result = buildKeyStrings(
+    this.plan ??= planKeyRead(this.key, this.dataset, this.isReceiver);
+    const result = buildKeyStringsUnderPlan(
       this.key,
+      this.plan,
       this.dataset,
       index,
-      this.isReceiver,
       this.keyIndex,
     );
     // An empty set is the record-excluded sentinel like `null`, and a singleton

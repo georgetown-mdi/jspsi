@@ -318,3 +318,24 @@ describe("StandardizedKeyIterable — field absent from dataset", () => {
     expect(iter.at(1)).toBeUndefined();
   });
 });
+
+describe("StandardizedKeyIterable — an element transform that cannot compile", () => {
+  // The key is read once for the whole run rather than per row, and reading it
+  // compiles every element's transform. That read is deferred to the first row
+  // so terms naming a function this build does not have end the exchange where
+  // the rows are, not where the round's iterables are constructed.
+  const key = {
+    name: "LN",
+    elements: [
+      {
+        field: "lastName",
+        transform: [{ function: "no_such_standardizing_function" }],
+      },
+    ],
+  };
+
+  test("refuses at the first row read rather than at construction", () => {
+    const iter = new StandardizedKeyIterable(key, dataset, rawRows.length);
+    expect(() => iter.at(0)).toThrow("unknown standardization function");
+  });
+});

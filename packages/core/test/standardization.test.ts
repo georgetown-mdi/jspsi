@@ -38,6 +38,7 @@ import { getDefaultStandardization } from "../src/defaults/standardization";
 import { MAX_TRANSFORM_PARAM_LENGTH } from "../src/config/linkageTerms";
 import type {
   LinkageField,
+  LinkageKey,
   LinkageKeyElement,
   LinkageTerms,
 } from "../src/config/linkageTerms";
@@ -889,7 +890,9 @@ describe("runPipeline — null propagation", () => {
 test("unknown function name throws", () => {
   expect(() =>
     runPipeline("x", [{ function: "nonexistent_function" }]),
-  ).toThrow('unknown standardization function: "nonexistent_function"');
+  ).toThrow(
+    "unknown standardization function: a function this build does not recognize",
+  );
 });
 
 // --- runPipeline: fan-out ----------------------------------------------------
@@ -3317,6 +3320,65 @@ describe("buildKeyStrings", () => {
     }
   });
 
+  // The same property with the crossing at the OTHER charge. The cases above
+  // build their multiplicity on the fields, so every crossing lands on the row's
+  // aggregate in buildKeyStrings; an element carrying the expansion in its own
+  // transform crosses inside applyStep instead, while the row's aggregate stays
+  // far below the cap.
+  const inStepElement = (): LinkageKeyElement => ({
+    field: "tokens",
+    transform: splitRetainingSteps(),
+  });
+
+  const permutedKeys = (): LinkageKey[] =>
+    [
+      [inStepElement(), { field: "short_one" }],
+      [{ field: "short_one" }, inStepElement()],
+      [{ field: "short_one" }, inStepElement(), { field: "short_two" }],
+    ].map((elements) => ({ name: "ordered", elements }));
+
+  const inStepDataset = () =>
+    new StandardizedDataset([
+      plainField("tokens", tokenCell(1443)),
+      plainField("short_one", "19750716"),
+      plainField("short_two", "19750717"),
+    ]);
+
+  test("a declared fan-out row drops wherever the expanding element sits", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dataset = inStepDataset();
+    for (const key of permutedKeys()) {
+      warn.mockClear();
+      expect(buildKeyStrings(key, dataset, 0, false, 1)).toBeNull();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toMatch(
+        /accumulates 4197212 characters of candidate values as a step runs over the values this key's declared fan-out expands/,
+      );
+    }
+  });
+
+  test("an unlisted producer's in-step crossing refuses wherever it sits", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    for (const key of permutedKeys()) {
+      warn.mockClear();
+      let raised: unknown;
+      try {
+        // The element's steps compile on their first use, so the listing the
+        // lever moves is the one this key's producer is read against.
+        withUnlistedFanOutFunctions(() =>
+          buildKeyStrings(key, inStepDataset(), 0, false, 1),
+        );
+      } catch (err) {
+        raised = err;
+      }
+      expect(raised).toBeInstanceOf(UsageError);
+      expect((raised as UsageError).message).toMatch(
+        /accumulated 4197212 characters of candidate values from row 0/,
+      );
+      expect(warn).not.toHaveBeenCalled();
+    }
+  });
+
   test("multiplicity no classified producer accounts for refuses", () => {
     // The fail-closed backstop under the classification. A step that expands a
     // value while unlisted cannot reach a key classified for the drop -- the
@@ -3328,6 +3390,55 @@ describe("buildKeyStrings", () => {
     expect(accumulationFateAtCharge("drop", false)).toBe("drop");
     expect(accumulationFateAtCharge("refuse", true)).toBe("refuse");
     expect(accumulationFateAtCharge("refuse", false)).toBe("refuse");
+  });
+
+  test("an unrecognized function name reaches the operator as a literal", () => {
+    // Classifying the key compiles every element's transform before the first
+    // element is read, so terms naming a function this build does not have end
+    // the exchange at the key's first row even where that row realizes no value
+    // for the element declaring it. The name is partner-authored free text on
+    // this path, so it is narrowed to a literal rather than echoed: neither the
+    // control sequence nor the bidi override in the name reaches the operator.
+    const hostileFunction = `nope${ESC}[31m${RLO}evil`;
+    const key = {
+      name: "LN+DOB",
+      elements: [
+        { field: "last_name" },
+        { field: "date_of_birth", transform: [{ function: hostileFunction }] },
+      ],
+    };
+    const rows = [{ last_name: "000", date_of_birth: "19750716" }];
+    const firstElementRealizesNothing = new StandardizedDataset([
+      new StandardizedField(
+        "last_name",
+        "last_name",
+        [{ function: "null_if", params: { value: "000" } }],
+        rows,
+      ),
+      new StandardizedField("date_of_birth", "date_of_birth", [], rows),
+    ]);
+    // The premise: this row is excluded at the first element, so the second
+    // element's transform is one no row runs.
+    expect(
+      buildKeyStrings(
+        { ...key, elements: [key.elements[0], { field: "date_of_birth" }] },
+        firstElementRealizesNothing,
+        0,
+        false,
+        1,
+      ),
+    ).toBeNull();
+    let raised: unknown;
+    try {
+      buildKeyStrings(key, firstElementRealizesNothing, 0, false, 1);
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(Error);
+    const message = (raised as Error).message;
+    expect(message).toContain("unknown standardization function");
+    expect(message).not.toContain("nope");
+    expect(message).toMatch(PRINTABLE_ASCII);
   });
 
   test("every declared fan-out producer is classified as expanding a value", () => {
