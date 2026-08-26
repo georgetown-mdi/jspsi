@@ -667,10 +667,14 @@ const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
 // compiles still expands.
 //
 // Hand-listed for the same reason the fan-out list is: whether a factory can
-// return a multi-value `Set` is not derivable from the registry. A Set-returning
-// factory added here without an entry does not fail open -- the step's runtime
-// expansion is recorded as an unlisted producer's, which
-// {@link accumulationFateAtCharge} takes as a classification fault and refuses.
+// return a multi-value `Set` is not derivable from the registry, so this entry
+// is what the classification's guarantee rests on. The runtime backstop
+// catches a factory added here without an entry only where its expansion lands
+// before the row's crossing -- {@link accumulationFateAtCharge} takes the
+// recorded unlisted expansion as a classification fault and refuses -- while
+// an expansion after a crossing already resolved to a drop is invisible to it,
+// so the backstop narrows the window a missed entry opens rather than closing
+// it.
 const MULTI_VALUE_FUNCTION_NAMES: ReadonlySet<string> = new Set(["split_on"]);
 
 /**
