@@ -2590,9 +2590,14 @@ describe("buildKeyStrings", () => {
   // value. Both are measured on the projection, before the cross-product is
   // materialized, and a row takes the same fate from either.
 
+  // Candidates at the per-value ceiling, and one fewer of them than the count
+  // cap allows: the row RETAINS 4,190,216 characters, inside the per-row total
+  // the accumulation bound holds, and it is the date replicated across all 1023
+  // combinations that takes the ASSEMBLED total past the cap. Which is what puts
+  // this row in the assembled limbs' hands rather than the accumulation bound's.
   const wideAndLong = () =>
     Array.from(
-      { length: 1024 },
+      { length: 1023 },
       (_unused, i) => `${"A".repeat(4090)}${String(i).padStart(6, "0")}`,
     );
 
@@ -2605,7 +2610,7 @@ describe("buildKeyStrings", () => {
     expect(buildKeyStrings(key, dataset, 0)).toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toMatch(
-      /assembles 4202496 characters of key strings/,
+      /assembles 4198392 characters of key strings/,
     );
   });
 
@@ -2625,7 +2630,7 @@ describe("buildKeyStrings", () => {
     }
     expect(raised).toBeInstanceOf(UsageError);
     expect((raised as UsageError).message).toMatch(
-      /linkageKeys\[1\] assembles 4202496 characters of key strings/,
+      /linkageKeys\[1\] assembles 4198392 characters of key strings/,
     );
     expect(warn).not.toHaveBeenCalled();
   });
@@ -2729,7 +2734,10 @@ describe("buildKeyStrings", () => {
   // The same magnitude invariant the limbs above measure on the projection,
   // enforced where the candidates are actually allocated. A projection is only
   // reachable once every candidate exists, so on its own it bounds the assembled
-  // key strings and not the set they are assembled from.
+  // key strings and not the set they are assembled from. The total is the ROW's
+  // and counts what each element RETAINS, so it measures what the row holds
+  // live: what a duplicate collapses into is never carried into a key string,
+  // and what earlier elements retained is still held when a later one runs.
 
   test("an amplifying step over a split cell refuses as the candidates accumulate", () => {
     // A cell of 1000 comma-separated tokens, split and then amplified twice: no
@@ -2833,6 +2841,101 @@ describe("buildKeyStrings", () => {
     ).toBeGreaterThan(4_194_304);
   });
 
+  test("a transform collapsing a multi-value cell to one candidate builds", () => {
+    // The row a per-candidate charge would refuse: a partner-authored transform
+    // that maps every value of the operator's cell to the SAME string. The cell
+    // realizes 2200 values and the element retains one 2000-character candidate,
+    // so the key the row really assembles is a single 2008-character string --
+    // charging each realized candidate would total 4,400,000 and refuse a row
+    // whose live candidate set is one value.
+    const collapsed = "x".repeat(MAX_TRANSFORM_PARAM_LENGTH);
+    const built = buildKeyStrings(
+      amplifyingKey([
+        {
+          function: "replace_regex",
+          params: { pattern: ".*", replacement: collapsed },
+        },
+      ]),
+      makeDataset({
+        last_name: Array.from({ length: 2200 }, (_unused, i) =>
+          String(i).padStart(4, "0"),
+        ),
+        date_of_birth: "19750716",
+      }),
+      0,
+      false,
+      1,
+    );
+    expect(built).toEqual(new Set([`${collapsed.repeat(2)}19750716`]));
+  });
+
+  test("a transform collapsing many long values to a few candidates builds", () => {
+    // The same collapse from the other direction: 2200 DISTINCT in-ceiling
+    // values, each carrying 2000 characters the row would have to hold if they
+    // survived, mapped by a digit-stripping step onto four candidates. The four
+    // are what the row assembles and what the total charges.
+    const stem = (letter: string) => `${letter}${"A".repeat(2000)}`;
+    const built = buildKeyStrings(
+      amplifyingKey([
+        {
+          function: "replace_regex",
+          params: { pattern: "\\d", replacement: "" },
+        },
+      ]),
+      makeDataset({
+        last_name: Array.from(
+          { length: 2200 },
+          (_unused, i) => `${stem("BCDE"[i % 4])}${String(i).padStart(4, "0")}`,
+        ),
+        date_of_birth: "19750716",
+      }),
+      0,
+      false,
+      1,
+    );
+    expect(built).toEqual(
+      new Set([..."BCDE"].map((letter) => `${stem(letter)}19750716`)),
+    );
+  });
+
+  test("elements binding one large field refuse on the row's total, not each element's", () => {
+    // Eleven elements over the same 100-value cell: each retains 409,400
+    // characters, an order of magnitude below the cap, so a total restarted per
+    // element never fires however many elements the key declares (up to
+    // MAX_KEY_ELEMENTS) -- and the row holds every one of them live at once.
+    // The refusal lands on the eleventh, at a total no single element retains.
+    const cell = Array.from(
+      { length: 100 },
+      (_unused, i) => `${"Q".repeat(4084)}S3CRET${String(i).padStart(4, "0")}`,
+    );
+    const manyElements = {
+      name: "LN x11",
+      elements: Array.from({ length: 11 }, () => ({ field: "last_name" })),
+    };
+    let raised: UsageError | undefined;
+    try {
+      buildKeyStrings(
+        manyElements,
+        makeDataset({ last_name: cell }),
+        0,
+        false,
+        1,
+      );
+    } catch (err) {
+      raised = err as UsageError;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect(raised?.message).toMatch(/\(linkageKeys\[1\]\.elements\[10\]\)/);
+    expect(raised?.message).not.toContain("S3CRET");
+    const accumulated = Number(
+      /accumulated (\d+) characters/.exec(raised?.message ?? "")?.[1],
+    );
+    expect(accumulated).toBeGreaterThan(4_194_304);
+    // Above what any one element retains, which is what makes the total the
+    // row's rather than the offending element's.
+    expect(accumulated).toBeGreaterThan(10 * 409_400);
+  });
+
   // --- the receiver's swapped locators ---------------------------------------
   // A key declaring `swap` moves the two named elements' FIELDS on the receiver
   // and leaves their transforms in place, so the position that reads a column
@@ -2858,6 +2961,50 @@ describe("buildKeyStrings", () => {
     // binding the element to a shorter column, has to point at.
     expect(() => buildKeyStrings(swapKey(), dataset, 0, true, 3)).toThrow(
       /linkageKeys\[3\]\.elements\[1\]/,
+    );
+  });
+
+  test("a swapped receiver's accumulation refusal names the element declaring the column", () => {
+    // No step produced these candidates -- the element declares no transform, so
+    // they are the field's own realized values -- which puts the refusal on the
+    // same footing as the value-read one above: it names the position whose
+    // `field` is the offending column, so sender and receiver name the same
+    // position for the same column.
+    const dataset = makeDataset({
+      first_name: "JANE",
+      last_name: Array.from(
+        { length: 1100 },
+        (_unused, i) => `${"A".repeat(4000)}${String(i).padStart(4, "0")}`,
+      ),
+    });
+    const named =
+      /accumulated \d+ characters of candidate values from row 0 of this party's data \(linkageKeys\[3\]\.elements\[1\]\)/;
+    expect(() => buildKeyStrings(swapKey(), dataset, 0, false, 3)).toThrow(
+      named,
+    );
+    expect(() => buildKeyStrings(swapKey(), dataset, 0, true, 3)).toThrow(
+      named,
+    );
+  });
+
+  test("a swapped receiver's accumulation refusal names the step that produced the candidates", () => {
+    // The other half: an element transform realized this multiplicity, and the
+    // swap leaves a transform where it is declared, so the refusal names the
+    // element declaring it rather than the one declaring the column it read.
+    const amplifying = swapKey([
+      {
+        function: "replace_regex",
+        params: { pattern: "a*", replacement: "x".repeat(800) },
+      },
+    ]);
+    const dataset = makeDataset({
+      first_name: "JANE",
+      last_name: Array.from({ length: 2000 }, (_unused, i) =>
+        String(i).padStart(4, "0"),
+      ),
+    });
+    expect(() => buildKeyStrings(amplifying, dataset, 0, true, 3)).toThrow(
+      /accumulated \d+ characters of candidate values from row 0 of this party's data \(linkageKeys\[3\]\.elements\[0\]\)/,
     );
   });
 

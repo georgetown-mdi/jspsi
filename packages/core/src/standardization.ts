@@ -1977,7 +1977,7 @@ function keyStringLengthCapRefusal(
 
 /**
  * The key element whose candidates are accumulating, so the bound applied where
- * they are allocated ({@link applyStep}, and the element's own candidate list in
+ * they are allocated ({@link applyStep}, and the row's candidate accumulation in
  * {@link buildKeyStrings}) can locate its refusal by the same issue path the
  * per-value ceiling uses. One per (element, row) on the partner-authored path.
  */
@@ -1990,7 +1990,11 @@ interface CandidateAccumulationSite {
 // The byte limb again, measured while the candidates accumulate rather than on
 // the finished projection. The row index and the total are derived integers and
 // the path locates the element by index, so the message echoes neither the value
-// nor the partner's free text.
+// nor the partner's free text. The total is whichever accumulation crossed --
+// one step's output set, or the row's retained candidates across the key's
+// elements -- and the path names the element it was accumulating at, so the
+// message states the key rather than attributing the whole total to that
+// element.
 //
 // The fate is the refusal rather than the drop the assembled limbs take for a
 // declared fan-out producer: which fate a row takes depends on the provenance of
@@ -2005,7 +2009,7 @@ function accumulatedCandidatesTooLongRefusal(
   accumulated: number,
 ): UsageError {
   return new UsageError(
-    `a linkage key element accumulated ${accumulated} characters of candidate ` +
+    `a linkage key accumulated ${accumulated} characters of candidate ` +
       `values from row ${site.rowIndex} of this party's data ` +
       `(${keyElementPath(site.keyIndex, site.elementIndex)}), above the ` +
       `${MAX_ASSEMBLED_KEY_LENGTH_PER_ROW} characters of key strings this ` +
@@ -2092,6 +2096,16 @@ export function buildKeyStrings(
   // elements: the drop binds the DECLARED producers alone (see the drop sites).
   const provenance: FanOutProvenance = { fromUnlistedFunction: false };
 
+  // The candidate characters this ROW's elements have retained so far. The
+  // assembled projection below is reachable only once every element's candidates
+  // exist, and an element transform runs once per realized field value, so a
+  // step that amplifies a short value builds one amplified candidate per value
+  // here without ever expanding one of them -- multiplicity the per-value
+  // ceiling does not see. One total across the elements, not one per element:
+  // what the bound holds is the row's live candidate set, and a per-element
+  // total would let the element count (MAX_KEY_ELEMENTS) multiply the cap.
+  let rowCandidateCharacters = 0;
+
   for (const [elementIndex, element] of elements.entries()) {
     const field = dataset.getField(element.field);
     const raw = field ? field.get(index) : [];
@@ -2099,27 +2113,30 @@ export function buildKeyStrings(
     if (field?.fanOutFromUnlistedFunction(index))
       provenance.fromUnlistedFunction = true;
 
-    // Candidates are appended one at a time, never spread into push: a spread
-    // passes them as arguments, and a field realizing one candidate per value
-    // can hand this loop more of them than the engine accepts (measured between
-    // 125,000 and 150,000 here, fewer wherever the stack is smaller), which
-    // raises a RangeError in place of the assembly cap's refusal below --
-    // fail-closed, but reporting a fault the row does not have.
-    //
-    // The element's own accumulation carries the same magnitude bound the steps
-    // inside it do (applyStep): an element transform is run once per realized
-    // field value, so a step that amplifies a short value builds one amplified
-    // candidate per value here without ever expanding one of them, which the
-    // per-value ceiling does not see and the assembled projection below reaches
-    // only once every candidate exists.
+    const columnElementIndex = columnDeclaringElementIndex(pair, elementIndex);
+    // The accumulation refusal names the element whose candidates these are: the
+    // position that declares the steps producing them, or -- where the element
+    // declares no transform and the candidates are the field's own realized
+    // values -- the position that declares the column they were read from, which
+    // on a swapped receiver is the sibling's.
     const site: CandidateAccumulationSite = {
       keyIndex,
-      elementIndex,
+      elementIndex:
+        element.transform === undefined || element.transform.length === 0
+          ? columnElementIndex
+          : elementIndex,
       rowIndex: index,
     };
-    const columnElementIndex = columnDeclaringElementIndex(pair, elementIndex);
-    const transformed: string[] = [];
-    let accumulated = 0;
+
+    // A record contributes each DISTINCT candidate once, so duplicates collapse
+    // as they land rather than multiplying the cross-product the width bound
+    // measures: two raw values can transform to the same string, and two splits
+    // can share a part. Charging the row's total on what the set RETAINS
+    // (addCandidate, the footing the steps inside the element use) is what keeps
+    // a collapsing transform -- every value of a multi-value cell mapped to one
+    // candidate -- from being charged once per value for bytes the row carries
+    // once.
+    const transformed = new Set<string>();
     for (const v of raw) {
       const realized = applyElementTransform(
         v,
@@ -2128,22 +2145,20 @@ export function buildKeyStrings(
         site,
         columnElementIndex,
       );
-      for (const candidate of realized) {
-        transformed.push(candidate);
-        accumulated += candidate.length;
-      }
-      if (accumulated > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW)
-        throw accumulatedCandidatesTooLongRefusal(site, accumulated);
+      // Added one at a time, never spread into a call: a spread passes the
+      // candidates as arguments, and a field realizing one candidate per value
+      // can hand this loop more of them than the engine accepts (measured
+      // between 125,000 and 150,000 here, fewer wherever the stack is smaller),
+      // which raises a RangeError in place of the assembly cap's refusal below
+      // -- fail-closed, but reporting a fault the row does not have.
+      for (const candidate of realized)
+        rowCandidateCharacters += addCandidate(transformed, candidate);
+      if (rowCandidateCharacters > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW)
+        throw accumulatedCandidatesTooLongRefusal(site, rowCandidateCharacters);
     }
-    if (transformed.length === 0) return null;
+    if (transformed.size === 0) return null;
 
-    // A record contributes each DISTINCT candidate once, so duplicates collapse
-    // here rather than multiplying the cross-product the width bound measures:
-    // two raw values can transform to the same string, and two splits can share
-    // a part. The single-candidate case -- every element of a row that does not
-    // fan out -- keeps its array and allocates nothing.
-    const candidates =
-      transformed.length === 1 ? transformed : [...new Set(transformed)];
+    const candidates = [...transformed];
     if (candidates.length > 1) fansOut = true;
 
     // Fuzzy expansion runs AFTER the element transform, on the value that would
