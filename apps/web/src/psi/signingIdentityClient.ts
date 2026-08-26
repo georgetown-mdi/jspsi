@@ -20,8 +20,11 @@ import { isRecord, readJsonOrNull } from "./jobApiBody";
  *   this call minted it, so the card can distinguish "here is your fingerprint"
  *   from "your signing identity was just created". The file names are the mount's,
  *   for copy that tells the operator what to look for and what to send.
- * - `noIdentityLabel`: the appliance had no identity string to bind. The remedy is
- *   the operator's own identity field, so it is named apart from a generic error.
+ * - `refused`: the appliance's own `fingerprint` run refused the request (the
+ *   CLI's exit 64). Every cause reachable through this endpoint lives in the
+ *   operator's mounted folder and none is distinguishable from the appliance
+ *   (`SigningFingerprintResult` states which and why), so it is named apart from a
+ *   generic error to carry copy that points at that folder.
  * - `invalid`: a `400` -- the label was malformed; `message` is the server's
  *   field-path-only reason, safe to surface.
  * - `busy`: a `409` -- a request is already running; the operator can retry.
@@ -37,7 +40,7 @@ export type SigningFingerprintOutcome =
       identityFileName: string;
       certificateFileName?: string;
     }
-  | { kind: "noIdentityLabel" }
+  | { kind: "refused" }
   | { kind: "invalid"; message: string }
   | { kind: "busy" }
   | { kind: "timeout" }
@@ -51,7 +54,7 @@ export type SigningFingerprintOutcome =
 function fingerprintOutcomeOf(body: unknown): SigningFingerprintOutcome {
   if (!isRecord(body)) return { kind: "error" };
   const { status } = body;
-  if (status === "noIdentityLabel") return { kind: "noIdentityLabel" };
+  if (status === "refused") return { kind: "refused" };
   if (status === "timeout") return { kind: "timeout" };
   if (status !== "ok") return { kind: "error" };
   const { fingerprint, created, identityFileName, certificateFileName } = body;

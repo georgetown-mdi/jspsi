@@ -13,6 +13,7 @@ import {
   buildJobHandoff,
 } from "@jobs/handoff";
 import {
+  IDENTITY_LABEL_REQUIRED_REASON,
   IDENTITY_LOCATION_ADVISORY,
   IDENTITY_MISSING_PROBLEM,
   NO_PARTNER_PIN_ADVISORY,
@@ -21,6 +22,7 @@ import {
   RECEIPT_LOCATION_NOTICE,
   RETENTION_NOTE_PROBLEM,
   SESSION_DERIVED_PROBLEM,
+  fingerprintRequestProblem,
   receiptsAdvisories,
   receiptsIntentFields,
   receiptsProblems,
@@ -453,13 +455,17 @@ describe("the fingerprint driver", () => {
     expect(parseFingerprintStdout("D".repeat(43))).toBeUndefined();
   });
 
-  test("exit 64 is reported as the actionable missing-identity case", () => {
+  test("exit 64 is its own actionable category, apart from a generic failure", () => {
+    // Every exit-64 cause reachable from this endpoint sits in the operator's
+    // mounted folder, and the driver cannot tell them apart (stderr is
+    // discarded), so the one thing the category must not do is collapse into the
+    // generic error the copy tells the operator only to retry.
     expect(
       reconcileFingerprintExit(64, "", {
         created: true,
         exportRequested: false,
       }),
-    ).toEqual({ kind: "noIdentityLabel" });
+    ).toEqual({ kind: "refused" });
   });
 
   test("a clean exit carries the created flag and the export acknowledgement", () => {
@@ -607,6 +613,19 @@ describe("the receipts card's model", () => {
       IDENTITY_LOCATION_ADVISORY,
       RECEIPT_LOCATION_NOTICE,
     ]);
+  });
+
+  test("a blank identity withholds the fingerprint request, with the reason", () => {
+    // The one hard precondition the card holds: the appliance's schema requires a
+    // non-empty label, so an ordinary click without one could only ever be a 400
+    // the operator was told nothing actionable by.
+    expect(fingerprintRequestProblem("")).toBe(IDENTITY_LABEL_REQUIRED_REASON);
+    expect(fingerprintRequestProblem("   ")).toBe(
+      IDENTITY_LABEL_REQUIRED_REASON,
+    );
+    expect(
+      fingerprintRequestProblem("Agency A, contact@agency-a.example"),
+    ).toBeUndefined();
   });
 
   test("leaving certificate mode drops the resolved identity and the pin", () => {

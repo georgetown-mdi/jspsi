@@ -56,8 +56,8 @@ function formatFirstIssue(
  * fingerprint, whether the identity was created by this call, and the two mount
  * FILE NAMES the console's copy points the operator at -- names, never paths, so
  * no container location crosses the boundary. Anything else is a category
- * (`noIdentityLabel` / `timeout` / `error`), so the client reads the outcome from
- * the body rather than from the status.
+ * (`refused` / `timeout` / `error`), so the client reads the outcome from the body
+ * rather than from the status.
  */
 function fingerprintEnvelope(
   result: SigningFingerprintResult,

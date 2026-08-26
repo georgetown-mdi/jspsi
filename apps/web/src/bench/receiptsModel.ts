@@ -134,6 +134,30 @@ export const PARTNER_FINGERPRINT_PROBLEM =
   "Your partner's fingerprint must be the 43-character value 'psilink " +
   "fingerprint' prints. Copy it whole, from a channel you trust.";
 
+/**
+ * Why the card withholds the fingerprint request while this exchange states no
+ * identity. The one hard precondition on the whole card, and the only thing here
+ * the console does not merely warn about: the appliance's boundary schema requires
+ * a non-empty label, so a request made without one is a 400 the operator could not
+ * have acted on -- an empty required field, not a choice of theirs to respect.
+ */
+export const IDENTITY_LABEL_REQUIRED_REASON =
+  "Your signing identity is bound to who you are, and this exchange states no " +
+  "name yet. Fill in 'Your name' for this exchange first: it is written into " +
+  "the certificate your partner checks, and a later change does not rebind the " +
+  "key.";
+
+/**
+ * Why a fingerprint cannot be asked for yet, or undefined when it can. Takes the
+ * exchange's `linkage_terms.identity` as the operator has typed it so far, which
+ * is the sole value the request carries.
+ */
+export function fingerprintRequestProblem(
+  identity: string,
+): string | undefined {
+  return identity.trim() === "" ? IDENTITY_LABEL_REQUIRED_REASON : undefined;
+}
+
 /** The problem certificate mode reports before this party's identity exists. */
 export const IDENTITY_MISSING_PROBLEM =
   "Create or show your own fingerprint above before signing receipts. The " +

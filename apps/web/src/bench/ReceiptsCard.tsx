@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import {
   Alert,
@@ -22,6 +22,7 @@ import {
   CERTIFICATE_EXPORT_NOTICE,
   IDENTITY_REGENERATION_NOTICE,
   RETENTION_NOTE_NOTICE,
+  fingerprintRequestProblem,
   receiptsAdvisories,
   receiptsProblems,
   receiptsSummary,
@@ -59,11 +60,12 @@ function fingerprintFailureMessage(
   outcome: Exclude<SigningFingerprintOutcome, { kind: "ok" }>,
 ): string {
   switch (outcome.kind) {
-    case "noIdentityLabel":
+    case "refused":
       return (
-        "Your signing identity is bound to who you are, and this exchange " +
-        "states no identity yet. Fill in your name and organization first, " +
-        "then try again."
+        "Your signing identity could not be created or read in the folder you " +
+        "mounted. Check that the folder is writable and that any signing " +
+        "identity already in it is intact, then try again -- running 'psilink " +
+        "fingerprint' against the same folder prints the reason."
       );
     case "invalid":
       return outcome.message;
@@ -116,6 +118,7 @@ export function ReceiptsCard({
   onToggleOpen: (open: boolean) => void;
   onChange: (draft: ReceiptsDraft) => void;
 }) {
+  const requestProblemId = useId();
   const [resolving, setResolving] = useState(false);
   const [failure, setFailure] = useState<string>();
   const [exportCertificate, setExportCertificate] = useState(false);
@@ -129,6 +132,7 @@ export function ReceiptsCard({
     typeof navigator !== "undefined" && Boolean(navigator.clipboard);
   const problems = receiptsProblems(draft);
   const advisories = receiptsAdvisories(draft);
+  const requestProblem = fingerprintRequestProblem(identity);
   const set = <TField extends keyof ReceiptsDraft>(
     field: TField,
     value: ReceiptsDraft[TField],
@@ -205,6 +209,10 @@ export function ReceiptsCard({
                 <Button
                   size="xs"
                   loading={resolving}
+                  disabled={requestProblem !== undefined}
+                  aria-describedby={
+                    requestProblem === undefined ? undefined : requestProblemId
+                  }
                   onClick={() => void resolveFingerprint()}
                 >
                   {draft.ownFingerprint === undefined
@@ -212,6 +220,11 @@ export function ReceiptsCard({
                     : "Show it again"}
                 </Button>
               </div>
+              {requestProblem !== undefined && (
+                <Text id={requestProblemId} size="xs" c="dimmed">
+                  {requestProblem}
+                </Text>
+              )}
               {draft.ownFingerprint !== undefined && (
                 <>
                   <Group gap="xs" wrap="nowrap" align="center">

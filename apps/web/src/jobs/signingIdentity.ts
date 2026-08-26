@@ -113,9 +113,15 @@ const FINGERPRINT_STDOUT_CAP = 4096;
  *   read; `created` distinguishes the two, so the console can say which happened.
  *   `certificateExported` is true when an export was asked for and the child
  *   exited cleanly, so the copy names a file that is actually there.
- * - `noIdentityLabel`: the CLI refused for want of an identity string to bind
- *   (its exit 64). The operator's own `linkage_terms.identity` is the remedy, so
- *   this is reported apart from a generic failure.
+ * - `refused`: the CLI exited 64, its usage-error code. The request cannot be the
+ *   cause -- the endpoint's schema requires a non-empty identity label, and every
+ *   path is server-composed -- so what is left are conditions in the appliance's
+ *   mounted working directory: an identity file that cannot be read or parsed, a
+ *   first-time exclusive create that kept losing a create/delete race, or a failed
+ *   certificate-export write. Which of them it was is NOT observable here (stderr
+ *   names container paths and is discarded), so the whole class is reported as one
+ *   category the operator can act on in their own folder, apart from a generic
+ *   failure.
  * - `timeout`: the watchdog killed the child.
  * - `error`: the child exited non-zero for another reason, emitted no valid
  *   fingerprint line, or could not be spawned.
@@ -127,7 +133,7 @@ export type SigningFingerprintResult =
       created: boolean;
       certificateExported: boolean;
     }
-  | { kind: "noIdentityLabel" }
+  | { kind: "refused" }
   | { kind: "timeout" }
   | { kind: "error" };
 
@@ -145,10 +151,10 @@ export function parseFingerprintStdout(stdout: string): string | undefined {
 
 /**
  * Reconcile the fingerprint child's exit. Exit 64 is the CLI's usage-error code,
- * and the one usage error this call can provoke is an absent identity string --
- * every other input is a server-composed path -- so it is reported as the
- * actionable `noIdentityLabel` rather than a generic failure. `stdout` is
- * undefined when the read overflowed the cap.
+ * reported as the actionable `refused` rather than a generic failure -- what that
+ * category covers, and why its causes are not told apart, is on
+ * {@link SigningFingerprintResult}. `stdout` is undefined when the read overflowed
+ * the cap.
  *
  * @internal exported for testing
  */
@@ -157,7 +163,7 @@ export function reconcileFingerprintExit(
   stdout: string | undefined,
   context: { created: boolean; exportRequested: boolean },
 ): SigningFingerprintResult {
-  if (code === 64) return { kind: "noIdentityLabel" };
+  if (code === 64) return { kind: "refused" };
   if (code !== 0 || stdout === undefined) return { kind: "error" };
   const fingerprint = parseFingerprintStdout(stdout);
   if (fingerprint === undefined) return { kind: "error" };
