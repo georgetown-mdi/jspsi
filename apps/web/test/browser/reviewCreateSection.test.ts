@@ -12,6 +12,7 @@ import { buildAdvancedTerms, draftFromTerms } from "@psi/advancedInvite";
 
 import { CONNECTION_TUNING_DEFAULT } from "@bench/connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "@bench/exchangeFilesModel";
+import { RECEIPTS_DEFAULT } from "@bench/receiptsModel";
 import { RUN_DIAGNOSTICS_DEFAULT } from "@bench/runDiagnosticsModel";
 import { ReviewCreateSection } from "@bench/ReviewCreateSection";
 
@@ -64,6 +65,10 @@ function render(editor: InviterEditor) {
       runDiagnosticsOpen: false,
       onRunDiagnostics: () => undefined,
       onRunDiagnosticsOpen: () => undefined,
+      receipts: RECEIPTS_DEFAULT,
+      receiptsOpen: false,
+      onReceipts: () => undefined,
+      onReceiptsOpen: () => undefined,
       onLifetime: () => undefined,
       onDirection: () => undefined,
       onTransport: () => undefined,

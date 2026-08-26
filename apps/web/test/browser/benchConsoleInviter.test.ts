@@ -20,6 +20,7 @@ import { createAppMount, flushPendingUpdates } from "./renderApp";
 import { captureDownloads } from "./captureDownloads";
 
 import type { CapturedDownload } from "./captureDownloads";
+import type { JobHandoff } from "@jobs/handoff";
 
 // The bench components touch the router seam.
 vi.mock("@tanstack/react-router", async () =>
@@ -1160,11 +1161,12 @@ describe("console inviter re-attaches on a busy create", () => {
     channel: "sftp",
     usedKeyFile: true,
     credentialPasted: false,
+    usedSigningIdentity: false,
     template: {
       kind: "config",
       yaml: "connection:\n  channel: sftp\n  server:\n    host: sftp.example.gov\n",
     },
-  };
+  } satisfies JobHandoff;
 
   test("a 409 at create re-attaches with recovery-style copy, not the busy alert", async () => {
     // The slot is occupied: the create 409s carrying the live occupant's id.
@@ -1514,11 +1516,12 @@ describe("console inviter recurring hand-off availability", () => {
     channel: "sftp",
     usedKeyFile: true,
     credentialPasted: false,
+    usedSigningIdentity: false,
     template: {
       kind: "config",
       yaml: "connection:\n  channel: sftp\n  server:\n    host: sftp.example.gov\n",
     },
-  };
+  } satisfies JobHandoff;
 
   test("the hand-off is reachable from job creation, collapsed until the run completes", async () => {
     const api = stubJobApi({

@@ -27,6 +27,7 @@ import type {
   InvitationToken,
   LinkageTerms,
 } from "@psilink/core";
+import type { JobHandoff } from "@jobs/handoff";
 
 // This suite exercises the CONSOLE acceptor seat: the honest unsupported-shape
 // gate, the shared-folder confirmation, and the server-job run surface (the
@@ -686,11 +687,12 @@ describe("console acceptor re-attaches on a busy create", () => {
     channel: "filedrop",
     usedKeyFile: true,
     credentialPasted: false,
+    usedSigningIdentity: false,
     template: {
       kind: "config",
       yaml: "connection:\n  channel: filedrop\n  path: /mnt/rendezvous\n",
     },
-  };
+  } satisfies JobHandoff;
 
   test("a 409 at accept re-attaches with recovery copy and shows completion affordances", async () => {
     // The slot is occupied: the accept's create 409s carrying the live occupant's id.

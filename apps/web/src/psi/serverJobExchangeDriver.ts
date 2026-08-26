@@ -20,6 +20,7 @@ import type {
 } from "@jobs/intent";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
+import type { ReceiptsIntentFields } from "@bench/receiptsModel";
 import type { RunDiagnosticsIntentFields } from "@bench/runDiagnosticsModel";
 import type { RunOutputs } from "@bench/runOutputs";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
@@ -101,6 +102,11 @@ export interface ServerJobExchangeDriverConfig {
    * asked for neither, which is the intent every caller sent before the controls
    * existed. */
   runDiagnostics?: RunDiagnosticsIntentFields;
+  /** The operator's receipt-signing and retention choices, forwarded to the intent
+   * unchanged ({@link ReceiptsIntentFields}). Absent for an exchange that signs no
+   * receipt and files no note, which is the intent every caller sent before the
+   * card existed. */
+  receipts?: ReceiptsIntentFields;
   /** Invoked with the created job's id the moment `POST /api/jobs` resolves,
    * before the event stream opens. The seam the console's strand-recovery record
    * is written from ({@link ../psi/consoleJobAttachment}): the job exists on the
@@ -865,6 +871,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     expectedPartnerDeduplicate,
     options,
     runDiagnostics,
+    receipts,
   } = config;
   const shared = {
     side,
@@ -881,6 +888,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
       : {}),
     ...(options !== undefined ? { options } : {}),
     ...runDiagnostics,
+    ...receipts,
     eventStream: true,
   };
   return transport.channel === "sftp"

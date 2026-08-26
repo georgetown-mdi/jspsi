@@ -95,17 +95,44 @@ export function exportLinkageTerms(
 }
 
 /**
+ * The linkage-terms value inside a parsed document: the whole document when it IS
+ * a terms document, or its `linkage_terms` block when it is an exchange
+ * configuration wrapping one.
+ *
+ * The unwrap mirrors the CLI's `readConfigLinkageSource`, both spellings included,
+ * so `--config-file` and this importer read the same file the same way: an
+ * operator holding a `psilink.yaml` -- which is exactly what the console hands
+ * them to graduate with -- pastes it whole rather than hand-extracting a block.
+ * Only that one key is looked at; nothing else in a configuration is parsed here,
+ * so a still-placeholder connection or an unfinished credential neither validates
+ * nor fails.
+ *
+ * A document carrying no such key is passed through unchanged, so a bare terms
+ * document -- and a malformed one, which must still fail with the terms schema's
+ * own message -- is unaffected.
+ */
+function linkageTermsWithin(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const document = raw as Record<string, unknown>;
+  const wrapped = document["linkage_terms"] ?? document["linkageTerms"];
+  return wrapped ?? raw;
+}
+
+/**
  * Parse a JSON or YAML document into validated {@link LinkageTerms}, or return a
- * readable rejection. Format is auto-detected: JSON is tried first (it is the
- * stricter, cheaper parse), then YAML (a superset that also accepts the JSON that
- * slipped through). The parsed value is validated by {@link safeParseLinkageTerms}
- * -- the single source -- which camelizes the snake_case input first, so a
- * document produced by {@link exportLinkageTerms} round-trips.
+ * readable rejection. Accepts either an exported terms document or an exchange
+ * configuration that defines `linkage_terms` (see {@link linkageTermsWithin}).
+ * Format is auto-detected: JSON is tried first (it is the stricter, cheaper
+ * parse), then YAML (a superset that also accepts the JSON that slipped through).
+ * The parsed value is validated by {@link safeParseLinkageTerms} -- the single
+ * source -- which camelizes the snake_case input first, so a document produced by
+ * {@link exportLinkageTerms} round-trips.
  *
  * Bounds, applied before the schema's own: the input is length-capped at
  * {@link MAX_IMPORT_CHARS}; YAML alias expansion is bounded by the `yaml` parser's
  * built-in `maxAliasCount` default (the sensitive-file chokepoint does not raise
  * it), which caps a billion-laughs alias blow-up before the schema's own bounds.
+ * The unwrap runs after those bounds and reads one key, so it widens neither.
  */
 export function importLinkageTerms(text: string): LinkageTermsImportResult {
   if (text.length > MAX_IMPORT_CHARS)
@@ -139,7 +166,7 @@ export function importLinkageTerms(text: string): LinkageTermsImportResult {
     }
   }
 
-  const parsed = safeParseLinkageTerms(raw);
+  const parsed = safeParseLinkageTerms(linkageTermsWithin(raw));
   if (!parsed.success)
     return { success: false, error: readableTermsError(parsed.error) };
 

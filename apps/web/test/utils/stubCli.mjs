@@ -5,8 +5,8 @@
 // through environment variables so a test can drive one binary through many
 // scenarios without a separate script per case.
 //
-// It also emulates the `probe-host-key` subcommand the appliance's SFTP host-key
-// probe driver spawns (a self-contained branch that never touches the exchange
+// It also emulates the `probe-host-key` and `fingerprint` subcommands the
+// appliance spawns (self-contained branches that never touch the exchange
 // emulation).
 //
 // Environment variables (all optional):
@@ -42,6 +42,19 @@
 //                     gets a well-formed probe result. The probe branch honors
 //                     STUB_EXIT_CODE, STUB_DELAY_MS, and STUB_IGNORE_SIGTERM, and
 //                     never runs the exchange emulation.
+//   STUB_FINGERPRINT_STDOUT
+//                     When the `fingerprint` subcommand is invoked, this raw
+//                     string is written to stdout. When unset a default canonical
+//                     fingerprint line is emitted. The branch also CREATES the
+//                     file named by --identity-file (and the one named by
+//                     --export-certificate, when present) so the driver's
+//                     created-vs-loaded read of the identity path is exercised
+//                     against a file that really appears. It honors
+//                     STUB_EXIT_CODE, STUB_DELAY_MS, and STUB_IGNORE_SIGTERM.
+//   STUB_CWD_FILE     When set, the child's own process.cwd() is written to this
+//                     path by the `fingerprint` branch, so a test can assert the
+//                     directory the driver spawned the child in -- which is what
+//                     decides whose ./psilink.yaml the real CLI would resolve.
 
 import fs from "node:fs";
 
@@ -53,6 +66,18 @@ const DEFAULT_PROBE_LINE =
     fingerprint: "SHA256:" + "A".repeat(43),
     key_type: "ssh-ed25519",
   }) + "\n";
+
+// The default fingerprint line emitted when STUB_FINGERPRINT_STDOUT is unset: a
+// canonical 43-character unpadded base64url digest (the final character drawn
+// from the aligned set the config schema requires).
+const DEFAULT_FINGERPRINT_LINE = "B".repeat(42) + "A\n";
+
+/** The value of a single `--flag=value` argv token, or undefined when absent. */
+function flagValue(argv, flag) {
+  const prefix = `${flag}=`;
+  const token = argv.find((candidate) => candidate.startsWith(prefix));
+  return token === undefined ? undefined : token.slice(prefix.length);
+}
 
 if (process.env.STUB_ARGV_FILE !== undefined)
   fs.writeFileSync(process.env.STUB_ARGV_FILE, JSON.stringify(process.argv));
@@ -74,6 +99,30 @@ if (process.argv[2] === "probe-host-key") {
     });
   process.stdout.write(process.env.STUB_PROBE_STDOUT ?? DEFAULT_PROBE_LINE);
   exitAfterDelay(Number.parseInt(process.env.STUB_EXIT_CODE ?? "0", 10));
+} else if (process.argv[2] === "fingerprint") {
+  if (process.env.STUB_IGNORE_SIGTERM === "1")
+    process.on("SIGTERM", () => {
+      /* swallow: force escalation to SIGKILL */
+    });
+  if (process.env.STUB_CWD_FILE !== undefined)
+    fs.writeFileSync(process.env.STUB_CWD_FILE, process.cwd());
+  const exitCode = Number.parseInt(process.env.STUB_EXIT_CODE ?? "0", 10);
+  if (exitCode === 0) {
+    // The real command creates the identity file (and the export) before it
+    // prints, so the stub does too: the driver reads the identity path's presence
+    // BEFORE spawning, and a second invocation must therefore see the file this
+    // one left.
+    const identityFile = flagValue(process.argv, "--identity-file");
+    if (identityFile !== undefined)
+      fs.writeFileSync(identityFile, JSON.stringify({ stub: "identity" }));
+    const exportFile = flagValue(process.argv, "--export-certificate");
+    if (exportFile !== undefined)
+      fs.writeFileSync(exportFile, JSON.stringify({ stub: "certificate" }));
+    process.stdout.write(
+      process.env.STUB_FINGERPRINT_STDOUT ?? DEFAULT_FINGERPRINT_LINE,
+    );
+  }
+  exitAfterDelay(exitCode);
 } else {
   runExchangeStub();
 }

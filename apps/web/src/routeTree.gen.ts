@@ -33,6 +33,7 @@ import { Route as ApiJobsJobIdEventsRouteImport } from './routes/api/jobs/$jobId
 import { Route as ApiJobsJobIdHandoffRouteImport } from './routes/api/jobs/$jobId/handoff'
 import { Route as ApiJobsJobIdKeysRouteImport } from './routes/api/jobs/$jobId/keys'
 import { Route as ApiJobsJobIdLogRouteImport } from './routes/api/jobs/$jobId/log'
+import { Route as ApiJobsJobIdReceiptRouteImport } from './routes/api/jobs/$jobId/receipt'
 import { Route as ApiJobsJobIdRecordRouteImport } from './routes/api/jobs/$jobId/record'
 import { Route as ApiJobsJobIdResultRouteImport } from './routes/api/jobs/$jobId/result'
 import { Route as ApiJobsInputsIndexRouteImport } from './routes/api/jobs/inputs/index'
@@ -40,6 +41,7 @@ import { Route as ApiJobsInputsCoverageRouteImport } from './routes/api/jobs/inp
 import { Route as ApiJobsInputsProfileRouteImport } from './routes/api/jobs/inputs/profile'
 import { Route as ApiJobsSftpIndexRouteImport } from './routes/api/jobs/sftp/index'
 import { Route as ApiJobsSftpProbeRouteImport } from './routes/api/jobs/sftp/probe'
+import { Route as ApiJobsSigningFingerprintRouteImport } from './routes/api/jobs/signing/fingerprint'
 import { Route as ApiPeerjsKeyPeersRouteImport } from './routes/api/peerjs/$key/peers'
 import { Route as ApiJobsMountsSecretsEntriesRouteImport } from './routes/api/jobs/mounts/secrets/entries'
 
@@ -163,6 +165,11 @@ const ApiJobsJobIdLogRoute = ApiJobsJobIdLogRouteImport.update({
   path: '/api/jobs/$jobId/log',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiJobsJobIdReceiptRoute = ApiJobsJobIdReceiptRouteImport.update({
+  id: '/api/jobs/$jobId/receipt',
+  path: '/api/jobs/$jobId/receipt',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiJobsJobIdRecordRoute = ApiJobsJobIdRecordRouteImport.update({
   id: '/api/jobs/$jobId/record',
   path: '/api/jobs/$jobId/record',
@@ -198,6 +205,12 @@ const ApiJobsSftpProbeRoute = ApiJobsSftpProbeRouteImport.update({
   path: '/api/jobs/sftp/probe',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiJobsSigningFingerprintRoute =
+  ApiJobsSigningFingerprintRouteImport.update({
+    id: '/api/jobs/signing/fingerprint',
+    path: '/api/jobs/signing/fingerprint',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPeerjsKeyPeersRoute = ApiPeerjsKeyPeersRouteImport.update({
   id: '/api/peerjs/$key/peers',
   path: '/api/peerjs/$key/peers',
@@ -234,11 +247,13 @@ export interface FileRoutesByFullPath {
   '/api/jobs/$jobId/handoff': typeof ApiJobsJobIdHandoffRoute
   '/api/jobs/$jobId/keys': typeof ApiJobsJobIdKeysRoute
   '/api/jobs/$jobId/log': typeof ApiJobsJobIdLogRoute
+  '/api/jobs/$jobId/receipt': typeof ApiJobsJobIdReceiptRoute
   '/api/jobs/$jobId/record': typeof ApiJobsJobIdRecordRoute
   '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
   '/api/jobs/inputs/coverage': typeof ApiJobsInputsCoverageRoute
   '/api/jobs/inputs/profile': typeof ApiJobsInputsProfileRoute
   '/api/jobs/sftp/probe': typeof ApiJobsSftpProbeRoute
+  '/api/jobs/signing/fingerprint': typeof ApiJobsSigningFingerprintRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/jobs/$jobId/': typeof ApiJobsJobIdIndexRoute
   '/api/jobs/inputs/': typeof ApiJobsInputsIndexRoute
@@ -268,11 +283,13 @@ export interface FileRoutesByTo {
   '/api/jobs/$jobId/handoff': typeof ApiJobsJobIdHandoffRoute
   '/api/jobs/$jobId/keys': typeof ApiJobsJobIdKeysRoute
   '/api/jobs/$jobId/log': typeof ApiJobsJobIdLogRoute
+  '/api/jobs/$jobId/receipt': typeof ApiJobsJobIdReceiptRoute
   '/api/jobs/$jobId/record': typeof ApiJobsJobIdRecordRoute
   '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
   '/api/jobs/inputs/coverage': typeof ApiJobsInputsCoverageRoute
   '/api/jobs/inputs/profile': typeof ApiJobsInputsProfileRoute
   '/api/jobs/sftp/probe': typeof ApiJobsSftpProbeRoute
+  '/api/jobs/signing/fingerprint': typeof ApiJobsSigningFingerprintRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/jobs/$jobId': typeof ApiJobsJobIdIndexRoute
   '/api/jobs/inputs': typeof ApiJobsInputsIndexRoute
@@ -304,11 +321,13 @@ export interface FileRoutesById {
   '/api/jobs/$jobId/handoff': typeof ApiJobsJobIdHandoffRoute
   '/api/jobs/$jobId/keys': typeof ApiJobsJobIdKeysRoute
   '/api/jobs/$jobId/log': typeof ApiJobsJobIdLogRoute
+  '/api/jobs/$jobId/receipt': typeof ApiJobsJobIdReceiptRoute
   '/api/jobs/$jobId/record': typeof ApiJobsJobIdRecordRoute
   '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
   '/api/jobs/inputs/coverage': typeof ApiJobsInputsCoverageRoute
   '/api/jobs/inputs/profile': typeof ApiJobsInputsProfileRoute
   '/api/jobs/sftp/probe': typeof ApiJobsSftpProbeRoute
+  '/api/jobs/signing/fingerprint': typeof ApiJobsSigningFingerprintRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/jobs/$jobId/': typeof ApiJobsJobIdIndexRoute
   '/api/jobs/inputs/': typeof ApiJobsInputsIndexRoute
@@ -341,11 +360,13 @@ export interface FileRouteTypes {
     | '/api/jobs/$jobId/handoff'
     | '/api/jobs/$jobId/keys'
     | '/api/jobs/$jobId/log'
+    | '/api/jobs/$jobId/receipt'
     | '/api/jobs/$jobId/record'
     | '/api/jobs/$jobId/result'
     | '/api/jobs/inputs/coverage'
     | '/api/jobs/inputs/profile'
     | '/api/jobs/sftp/probe'
+    | '/api/jobs/signing/fingerprint'
     | '/api/peerjs/$key/peers'
     | '/api/jobs/$jobId/'
     | '/api/jobs/inputs/'
@@ -375,11 +396,13 @@ export interface FileRouteTypes {
     | '/api/jobs/$jobId/handoff'
     | '/api/jobs/$jobId/keys'
     | '/api/jobs/$jobId/log'
+    | '/api/jobs/$jobId/receipt'
     | '/api/jobs/$jobId/record'
     | '/api/jobs/$jobId/result'
     | '/api/jobs/inputs/coverage'
     | '/api/jobs/inputs/profile'
     | '/api/jobs/sftp/probe'
+    | '/api/jobs/signing/fingerprint'
     | '/api/peerjs/$key/peers'
     | '/api/jobs/$jobId'
     | '/api/jobs/inputs'
@@ -410,11 +433,13 @@ export interface FileRouteTypes {
     | '/api/jobs/$jobId/handoff'
     | '/api/jobs/$jobId/keys'
     | '/api/jobs/$jobId/log'
+    | '/api/jobs/$jobId/receipt'
     | '/api/jobs/$jobId/record'
     | '/api/jobs/$jobId/result'
     | '/api/jobs/inputs/coverage'
     | '/api/jobs/inputs/profile'
     | '/api/jobs/sftp/probe'
+    | '/api/jobs/signing/fingerprint'
     | '/api/peerjs/$key/peers'
     | '/api/jobs/$jobId/'
     | '/api/jobs/inputs/'
@@ -442,11 +467,13 @@ export interface RootRouteChildren {
   ApiJobsJobIdHandoffRoute: typeof ApiJobsJobIdHandoffRoute
   ApiJobsJobIdKeysRoute: typeof ApiJobsJobIdKeysRoute
   ApiJobsJobIdLogRoute: typeof ApiJobsJobIdLogRoute
+  ApiJobsJobIdReceiptRoute: typeof ApiJobsJobIdReceiptRoute
   ApiJobsJobIdRecordRoute: typeof ApiJobsJobIdRecordRoute
   ApiJobsJobIdResultRoute: typeof ApiJobsJobIdResultRoute
   ApiJobsInputsCoverageRoute: typeof ApiJobsInputsCoverageRoute
   ApiJobsInputsProfileRoute: typeof ApiJobsInputsProfileRoute
   ApiJobsSftpProbeRoute: typeof ApiJobsSftpProbeRoute
+  ApiJobsSigningFingerprintRoute: typeof ApiJobsSigningFingerprintRoute
   ApiPeerjsKeyPeersRoute: typeof ApiPeerjsKeyPeersRoute
   ApiJobsJobIdIndexRoute: typeof ApiJobsJobIdIndexRoute
   ApiJobsInputsIndexRoute: typeof ApiJobsInputsIndexRoute
@@ -624,6 +651,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiJobsJobIdLogRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/jobs/$jobId/receipt': {
+      id: '/api/jobs/$jobId/receipt'
+      path: '/api/jobs/$jobId/receipt'
+      fullPath: '/api/jobs/$jobId/receipt'
+      preLoaderRoute: typeof ApiJobsJobIdReceiptRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/jobs/$jobId/record': {
       id: '/api/jobs/$jobId/record'
       path: '/api/jobs/$jobId/record'
@@ -671,6 +705,13 @@ declare module '@tanstack/react-router' {
       path: '/api/jobs/sftp/probe'
       fullPath: '/api/jobs/sftp/probe'
       preLoaderRoute: typeof ApiJobsSftpProbeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/signing/fingerprint': {
+      id: '/api/jobs/signing/fingerprint'
+      path: '/api/jobs/signing/fingerprint'
+      fullPath: '/api/jobs/signing/fingerprint'
+      preLoaderRoute: typeof ApiJobsSigningFingerprintRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/peerjs/$key/peers': {
@@ -728,11 +769,13 @@ const rootRouteChildren: RootRouteChildren = {
   ApiJobsJobIdHandoffRoute: ApiJobsJobIdHandoffRoute,
   ApiJobsJobIdKeysRoute: ApiJobsJobIdKeysRoute,
   ApiJobsJobIdLogRoute: ApiJobsJobIdLogRoute,
+  ApiJobsJobIdReceiptRoute: ApiJobsJobIdReceiptRoute,
   ApiJobsJobIdRecordRoute: ApiJobsJobIdRecordRoute,
   ApiJobsJobIdResultRoute: ApiJobsJobIdResultRoute,
   ApiJobsInputsCoverageRoute: ApiJobsInputsCoverageRoute,
   ApiJobsInputsProfileRoute: ApiJobsInputsProfileRoute,
   ApiJobsSftpProbeRoute: ApiJobsSftpProbeRoute,
+  ApiJobsSigningFingerprintRoute: ApiJobsSigningFingerprintRoute,
   ApiPeerjsKeyPeersRoute: ApiPeerjsKeyPeersRoute,
   ApiJobsJobIdIndexRoute: ApiJobsJobIdIndexRoute,
   ApiJobsInputsIndexRoute: ApiJobsInputsIndexRoute,

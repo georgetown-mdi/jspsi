@@ -6,9 +6,11 @@ import { stringify as stringifyYaml } from "yaml";
 
 import {
   ExchangeSpecSchema,
+  FINGERPRINT_REGEX,
   LinkageTermsSchema,
   MAX_NAME_LENGTH,
   MAX_RECONNECT_ATTEMPTS,
+  MAX_TEXT_LENGTH,
   MAX_TIMEOUT_SECONDS,
   MetadataSchema,
   SHARED_SECRET_REGEX,
@@ -25,6 +27,8 @@ import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
 
 import { PEER_ID_SHAPE_MESSAGE, isAdmissiblePeerId } from "@psi/peerIdLabel";
 
+import { NOTE_CONTROL_CHAR_PATTERN } from "@psi/retentionNoteShape";
+
 import { isAdmissibleInputName } from "./workInputName";
 
 import type {
@@ -34,6 +38,7 @@ import type {
   LinkageTerms,
   Metadata,
   OutboundPayloadConsent,
+  SigningConfig,
   Standardization,
 } from "@psilink/core";
 import type { JobSftpServerEntry } from "./sftpServer";
@@ -213,6 +218,117 @@ export interface JobInputFileReference {
 }
 
 /**
+ * The receipt-signing mode a job may ask for. Deliberately NARROWER than core's
+ * {@link SigningMode}: it ALLOWLISTS the two modes an exchange honors, exactly as
+ * core's own `assertSigningModeImplemented` does, so `session-derived` -- and any
+ * mode later added to core's enum but not yet implemented -- is refused here
+ * rather than accepted into a job whose spawned child then exits 64 on the very
+ * config the job exists to run. The console's own card offers the mode as a
+ * disabled choice with core's reason, the treatment it already gives `psi-c` and
+ * `deduplicate`.
+ */
+export type JobSigningMode = "none" | "certificate";
+
+/**
+ * The receipt-signing choices a client may set on an exchange job: the mode, and
+ * the partner fingerprint to pin under `certificate`.
+ *
+ * The two PATH fields of core's {@link SigningConfig} -- `identity_file` and
+ * `receipt_output` -- are intentionally NOT representable here, for the reason the
+ * connection's directories are not: the server owns every path a job's CLI child
+ * is pointed at. They are supplied at composition from {@link JobSigningPaths}.
+ *
+ * `partnerFingerprint` is the one free-text field, and it is bounded here rather
+ * than merely passed through: core's {@link FINGERPRINT_REGEX} admits exactly a
+ * canonical 43-character unpadded base64url SHA-256 digest, so the value cannot
+ * carry a separator, a path, or a flag-shaped token. It is a public digest of a
+ * public certificate, not a credential.
+ */
+export interface JobSigningChoice {
+  mode: JobSigningMode;
+  partnerFingerprint?: string;
+}
+
+const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
+  .object({
+    mode: z.enum(["none", "certificate"]),
+    partnerFingerprint: z
+      .string()
+      .regex(
+        FINGERPRINT_REGEX,
+        "partnerFingerprint must be an unpadded base64url SHA-256 digest (43 " +
+          "characters), as 'psilink fingerprint' prints it",
+      )
+      .optional(),
+  })
+  .strict()
+  // A pin is meaningful only where a certificate is verified against it, so a
+  // fingerprint arriving beside `mode: none` is a contradiction rather than an
+  // inert extra field: refuse it here instead of composing a config whose pin
+  // nothing reads.
+  .refine(
+    (signing) =>
+      signing.mode === "certificate" ||
+      signing.partnerFingerprint === undefined,
+    {
+      message:
+        "partnerFingerprint is only admissible with signing mode 'certificate'",
+      path: ["partnerFingerprint"],
+    },
+  );
+
+/**
+ * The paths a composed `signing` block names, supplied by the caller rather than
+ * the client. Split from {@link JobSigningChoice} because the two have different
+ * owners and different machines in view: the choice is the operator's, while the
+ * paths belong to whichever machine the composed document is for -- the
+ * appliance's own mount and workdir for a live run, and the operator's host for
+ * the graduation template, which is why the template's caller passes placeholders
+ * instead (see `handoff.ts`).
+ */
+export interface JobSigningPaths {
+  /** Absolute path of the signing identity file the run loads its private key
+   * and certificate from (`signing.identity_file`). */
+  identityFile: string;
+  /**
+   * Absolute path the dual-signed receipt is written to
+   * (`signing.receipt_output`), or undefined to omit the key -- the CLI then
+   * writes a timestamped receipt into the run's working directory, so repeated
+   * runs of one config accumulate an audit trail instead of overwriting one file.
+   */
+  receiptOutput?: string;
+}
+
+/**
+ * The `signing` block a validated intent composes, or undefined when the config
+ * carries none. Only `certificate` composes a block: `none` -- and an intent that
+ * states no choice at all -- is the absent block the CLI already treats as "sign
+ * nothing", so an operator who changed nothing composes the config they composed
+ * before this surface existed.
+ */
+function composedSigning(
+  intent: JobExchangeIntent,
+  paths: JobSigningPaths | undefined,
+): SigningConfig | undefined {
+  if (intent.signing?.mode !== "certificate") return undefined;
+  if (paths === undefined)
+    throw new Error(
+      "certificate-mode signing reached config composition with no identity " +
+        "path resolved",
+    );
+  return {
+    mode: "certificate",
+    identityFile: paths.identityFile,
+    ...(intent.signing.partnerFingerprint !== undefined
+      ? { partnerFingerprint: intent.signing.partnerFingerprint }
+      : {}),
+    ...(paths.receiptOutput !== undefined
+      ? { receiptOutput: paths.receiptOutput }
+      : {}),
+  };
+}
+
+/**
  * Which side of the partnership the submitting party is running. A closed
  * two-value enum -- never a path, host, or credential -- carrying no connection
  * or column material of its own; it selects a composition rule, not a value.
@@ -269,6 +385,18 @@ export type JobExchangeSide = "inviter" | "acceptor";
  * - `diagnosticRun` and `sweepExchangeFiles` are the per-run controls
  *   ({@link jobRunControlFields}): booleans that select a fixed CLI flag and
  *   carry no value of their own.
+ * - `signing` is the receipt-signing choice ({@link JobSigningChoice}): a closed
+ *   two-value mode plus, under `certificate`, a fingerprint held to core's
+ *   canonical 43-character digest shape. Neither the identity file nor the
+ *   receipt output is representable -- the server supplies both paths.
+ * - `retentionDisposition` is this party's own free-text retention note, written
+ *   into the composed config as a YAML value and from there into THIS party's
+ *   exchange record. Bounded by core's `MAX_TEXT_LENGTH` (the record schema's own
+ *   ceiling, so a note that passes here cannot fail the record build), held to a
+ *   control-character rule of its own -- every C0 and C1 control and DEL refused
+ *   apart from the tab, LF, and CR a multi-line note carries, since a NUL or an
+ *   ESC composes into the YAML and lands in the record verbatim -- and never a
+ *   path, host, credential, or argv fragment.
  */
 interface JobExchangeIntentBase {
   /**
@@ -329,6 +457,8 @@ interface JobExchangeIntentBase {
   eventStream?: boolean;
   diagnosticRun?: boolean;
   sweepExchangeFiles?: boolean;
+  signing?: JobSigningChoice;
+  retentionDisposition?: string;
 }
 
 /**
@@ -584,6 +714,15 @@ const jobExchangeIntentCommonFields = {
   expectedPartnerDeduplicate: z.boolean().optional(),
   side: z.enum(["inviter", "acceptor"]).optional(),
   eventStream: z.boolean().optional(),
+  signing: jobSigningChoiceSchema.optional(),
+  retentionDisposition: z
+    .string()
+    .min(1)
+    .max(MAX_TEXT_LENGTH)
+    .refine((note) => !NOTE_CONTROL_CHAR_PATTERN.test(note), {
+      message: "retentionDisposition must not contain control characters",
+    })
+    .optional(),
 };
 
 // Intentionally NOT annotated z.ZodType: z.discriminatedUnion requires concrete
@@ -775,6 +914,12 @@ export const JOB_FILE_NAMES = {
    * Must equal the CLI's `keysPathFor` derivation of the record name (`.json` ->
    * `.keys.json`); a unit test pins this cross-workspace pairing. */
   recordKeys: "record.keys.json",
+  /** The dual-signed receipt a `certificate`-mode run writes, pinned as the
+   * config's `signing.receipt_output` so the appliance knows its path. The CLI's
+   * own default would be a timestamped name this server could not then serve --
+   * the right behaviour for a recurring command line, which accumulates a trail,
+   * and the wrong one for a single job whose artifact is downloaded once. */
+  receipt: "receipt.json",
   /** The CLI's own diagnostic log, written only when the run asked to be a
    * diagnostic one (`--log-file`). A debug-level log can carry partner identity,
    * linkage keys, and data categories, so it stays inside the owner-only workdir
@@ -854,11 +999,18 @@ function outboundPayloadConsentFor(
  * acceptance alone (see {@link outboundPayloadConsentFor}), so the config this
  * composer hands an operator to graduate to cron is one a later unattended run is
  * held to rather than one whose consent gate finds no record.
+ *
+ * `signingPaths` supplies the two paths a `signing` block names, which the intent
+ * cannot carry; it is read only under `certificate` mode and is otherwise
+ * unused, so a caller composing an unsigned exchange may omit it. The
+ * `retention_disposition` note is forwarded verbatim, as the per-party local
+ * value it is.
  */
 export function composeConfigDocument(
   intent: JobFiledropExchangeIntent,
   rendezvousPath: string,
   outboundRendezvousPath?: string,
+  signingPaths?: JobSigningPaths,
 ): string {
   const options = intentOptionsToFileSyncOptions(intent.options);
   const {
@@ -866,8 +1018,10 @@ export function composeConfigDocument(
     standardization,
     expectedPayloadColumns,
     expectedPartnerDeduplicate,
+    retentionDisposition,
   } = intent;
   const outboundPayloadConsent = outboundPayloadConsentFor(intent);
+  const signing = composedSigning(intent, signingPaths);
   const fileInput: ExchangeFileInput = {
     connection: {
       channel: "filedrop",
@@ -887,6 +1041,8 @@ export function composeConfigDocument(
     ...(expectedPartnerDeduplicate !== undefined
       ? { expectedPartnerDeduplicate }
       : {}),
+    ...(signing !== undefined ? { signing } : {}),
+    ...(retentionDisposition !== undefined ? { retentionDisposition } : {}),
   };
   return mintExchangeFile(fileInput);
 }
@@ -907,7 +1063,9 @@ export function composeConfigDocument(
  * YAML values -- the acceptance's `outbound_payload_consent` is derived exactly as
  * it is there (see {@link outboundPayloadConsentFor}), and the tuning `options`
  * are the same numeric/boolean/enum subset, plus the `connectionPerPoll` dialing
- * mode this channel is the only one to admit.
+ * mode this channel is the only one to admit. The `signing` block and the
+ * `retention_disposition` note are composed exactly as they are there, from the
+ * same {@link composedSigning} and the same forwarded value.
  *
  * This path deliberately does NOT use `mintExchangeFile`: its
  * {@link ExchangeFileInput} typing makes credentials unrepresentable, an
@@ -923,6 +1081,7 @@ export function composeConfigDocument(
 export function composeSftpConfigDocument(
   intent: JobSftpExchangeIntent,
   serverEntry: JobSftpServerEntry,
+  signingPaths?: JobSigningPaths,
 ): string {
   const options = intentOptionsToFileSyncOptions(intent.options);
   const {
@@ -930,8 +1089,10 @@ export function composeSftpConfigDocument(
     standardization,
     expectedPayloadColumns,
     expectedPartnerDeduplicate,
+    retentionDisposition,
   } = intent;
   const outboundPayloadConsent = outboundPayloadConsentFor(intent);
+  const signing = composedSigning(intent, signingPaths);
   const assembled: ExchangeSpec = {
     connection: {
       channel: "sftp",
@@ -946,6 +1107,8 @@ export function composeSftpConfigDocument(
     ...(expectedPartnerDeduplicate !== undefined
       ? { expectedPartnerDeduplicate }
       : {}),
+    ...(signing !== undefined ? { signing } : {}),
+    ...(retentionDisposition !== undefined ? { retentionDisposition } : {}),
   };
   const validated = ExchangeSpecSchema.parse(assembled);
   return stringifyYaml(snakeizeKeys(validated));

@@ -62,6 +62,7 @@ import type {
 } from "@psi/serverJobExchangeDriver";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { JobExchangeOptions } from "@jobs/intent";
+import type { ReceiptsIntentFields } from "./receiptsModel";
 import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
 import type { RunOutputs } from "./runOutputs";
 import type { Transport } from "./inviterModel";
@@ -284,6 +285,7 @@ export function inviterServerJobConfig({
   transport,
   options,
   runDiagnostics,
+  receipts,
 }: {
   minted: Pick<
     GeneratedInvitation,
@@ -298,6 +300,9 @@ export function inviterServerJobConfig({
   /** The review step's per-run diagnostic and recovery choices, forwarded to the
    * intent unchanged. */
   runDiagnostics?: RunDiagnosticsIntentFields;
+  /** The review step's receipt-signing and retention choices, forwarded to the
+   * intent unchanged. */
+  receipts?: ReceiptsIntentFields;
 }): ServerJobExchangeDriverConfig {
   return {
     transport,
@@ -311,6 +316,7 @@ export function inviterServerJobConfig({
       : {}),
     ...(options !== undefined ? { options } : {}),
     ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
+    ...(receipts !== undefined ? { receipts } : {}),
   };
 }
 
@@ -336,6 +342,7 @@ export function useInviterExchange({
   sftpConfigured,
   options,
   runDiagnostics,
+  receipts,
 }: {
   invitation: GeneratedInvitation | undefined;
   inviterName: string;
@@ -359,6 +366,10 @@ export function useInviterExchange({
   /** The review step's per-run diagnostic and recovery choices, forwarded to the
    * intent unchanged; unused on the browser path for the same reason. */
   runDiagnostics?: RunDiagnosticsIntentFields;
+  /** The review step's receipt-signing and retention choices, forwarded to the
+   * intent unchanged; unused on the browser path, which produces no CLI config and
+   * signs no receipt. */
+  receipts?: ReceiptsIntentFields;
 }): {
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
@@ -544,6 +555,7 @@ export function useInviterExchange({
           transport,
           ...(options !== undefined ? { options } : {}),
           ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
+          ...(receipts !== undefined ? { receipts } : {}),
         }),
         // Persist the created job's id so a reload or hard tab close can re-attach
         // to the appliance's run, and track it for the deliberate-discard paths.

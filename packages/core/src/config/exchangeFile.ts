@@ -6,6 +6,7 @@ import type { ConnectionConfig, FileSyncOptions } from "./connection.js";
 import type { LinkageTerms } from "./linkageTerms.js";
 import type { Metadata } from "./metadata.js";
 import type { OutboundPayloadConsent } from "./outboundPayloadConsent.js";
+import type { SigningConfig } from "./signing.js";
 import type { Standardization } from "./standardization.js";
 import { snakeizeKeys } from "../utils/camelizeKeys.js";
 import { PLACEHOLDER_SSH_USERNAME } from "./endpointProducer.js";
@@ -146,6 +147,11 @@ export interface ExchangeFileInput {
    * (there is then no declaration to bind).
    */
   expectedPartnerDeduplicate?: boolean;
+  /** See {@link ExchangeSpecAssembly.signing} -- carried verbatim through
+   * {@link mintExchangeFile} on the same no-secret terms. */
+  signing?: SigningConfig;
+  /** See {@link ExchangeSpecAssembly.retentionDisposition}. */
+  retentionDisposition?: string;
 }
 
 /**
@@ -179,6 +185,27 @@ export interface ExchangeSpecAssembly {
   outboundPayloadConsent?: OutboundPayloadConsent;
   /** See {@link ExchangeFileInput.expectedPartnerDeduplicate}. */
   expectedPartnerDeduplicate?: boolean;
+  /**
+   * This party's receipt-signing block: the mode, the local path of its signing
+   * identity file, the partner fingerprint it pins, and where a signed receipt is
+   * written. No secret is representable here -- the signing private key lives in
+   * the identity file the block only NAMES, and the pinned fingerprint is a public
+   * digest of a public certificate (see `config/signing.ts`) -- so admitting it
+   * widens the assembler's no-credential guarantee not at all.
+   *
+   * Every path it carries is the assembling caller's to choose, and the caller
+   * that composes a config for another machine is the one obliged to state a path
+   * that machine has: a container-internal location assembled into a portable
+   * document names nothing on the host that would run it.
+   */
+  signing?: SigningConfig;
+  /**
+   * This party's self-facing retention/disposition note, recorded verbatim in its
+   * own exchange record. Per-party and local: never swapped with the partner,
+   * cross-validated, or folded into the agreed-terms hash. Free operator text,
+   * bounded by the spec schema; omit the field to record no pointer.
+   */
+  retentionDisposition?: string;
 }
 
 /**
@@ -221,6 +248,10 @@ export function assembleExchangeSpec(
       : {}),
     ...(input.expectedPartnerDeduplicate !== undefined
       ? { expectedPartnerDeduplicate: input.expectedPartnerDeduplicate }
+      : {}),
+    ...(input.signing !== undefined ? { signing: input.signing } : {}),
+    ...(input.retentionDisposition !== undefined
+      ? { retentionDisposition: input.retentionDisposition }
       : {}),
   };
   return ExchangeSpecSchema.parse(assembled);

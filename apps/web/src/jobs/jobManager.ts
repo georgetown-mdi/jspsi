@@ -27,6 +27,11 @@ import {
   spawnExchangeJob,
   spawnZeroSetupJob,
 } from "./cliDriver";
+import {
+  runSigningFingerprint,
+  signingCertificatePath,
+  signingIdentityPath,
+} from "./signingIdentity";
 import { buildJobHandoff } from "./handoff";
 import { probeSftpHostKey } from "./sftpProbe";
 import { removeSftpCredentialFile } from "./sftpScratch";
@@ -43,11 +48,13 @@ import type {
   JobCreateIntent,
   JobExchangeIntent,
   JobInputFileReference,
+  JobSigningPaths,
 } from "./intent";
 import type { JobHandoff } from "./handoff";
 import type { JobSftpServerEntry } from "./sftpServer";
 import type { RendezvousLeg } from "./jobRendezvous";
 import type { SftpProbeResult } from "./sftpProbe";
+import type { SigningFingerprintResult } from "./signingIdentity";
 
 /**
  * Thrown by {@link JobManager.createJob} when an sftp intent arrives but no
@@ -96,6 +103,22 @@ export class SftpProbeBusyError extends Error {
   constructor() {
     super("a host-key probe is already running");
     this.name = "SftpProbeBusyError";
+  }
+}
+
+/**
+ * Thrown by {@link JobManager.resolveSigningFingerprint} when a fingerprint child
+ * is already running. Single-flight for a reason the probe's flag is not: two
+ * concurrent runs would both create-or-load the same identity file, and the CLI's
+ * first-time create is exclusive precisely so a race cannot silently discard one
+ * generated key. Refusing the second here keeps the operator from seeing the
+ * losing run's confusing outcome at all. Independent of the exchange slot: this
+ * authors an identity, not a run.
+ */
+export class SigningFingerprintBusyError extends Error {
+  constructor() {
+    super("a signing fingerprint request is already running");
+    this.name = "SigningFingerprintBusyError";
   }
 }
 
@@ -169,12 +192,21 @@ export interface JobView {
   logRequested: boolean;
   /** Whether this run captured a diagnostic log and the file is on disk. */
   logAvailable: boolean;
-  /** The four servable file paths (result, record, keys, log) inside the
-   * workdir. `logPath` is null for a run that captured no log. */
+  /** Whether this run's intent asked for a signed receipt (`certificate` mode),
+   * whether or not the CLI wrote one. It separates a run that will never have a
+   * receipt from one whose receipt has not appeared, exactly as
+   * {@link logRequested} does for the log. */
+  receiptRequested: boolean;
+  /** Whether this run wrote a dual-signed receipt and the file is on disk. */
+  receiptAvailable: boolean;
+  /** The five servable file paths (result, record, keys, log, receipt) inside the
+   * workdir. `logPath` is null for a run that captured no log, `receiptPath` for
+   * one that signed nothing. */
   outputPath: string;
   recordPath: string;
   keysPath: string;
   logPath: string | null;
+  receiptPath: string | null;
 }
 
 /** A job record. Lives in server memory only; never persisted. */
@@ -195,6 +227,13 @@ export interface JobRecord {
    * serve at all rather than a path that happens to name no file.
    */
   logPath: string | null;
+  /**
+   * The dual-signed receipt the CLI was pointed at with `signing.receipt_output`,
+   * or null when this run signed nothing. Set at creation from the intent's
+   * signing mode, so a run that asked for no receipt has no receipt path to serve
+   * at all rather than a path that happens to name no file.
+   */
+  receiptPath: string | null;
   status: JobStatus;
   events: Array<BufferedEvent>;
   /** True once a terminal event has been buffered; the SSE stream closes after it. */
@@ -371,6 +410,12 @@ export class JobManager {
    * both pass; cleared when the child settles. Independent of the exchange slot.
    */
   private probeInFlight = false;
+  /**
+   * Whether a signing-fingerprint child is running. Claimed and cleared exactly as
+   * {@link probeInFlight} is, and for the reason
+   * {@link SigningFingerprintBusyError} states.
+   */
+  private fingerprintInFlight = false;
 
   constructor(options: JobManagerOptions) {
     this.dataRoot = options.dataRoot;
@@ -603,6 +648,64 @@ export class JobManager {
     }
   }
 
+  /**
+   * The absolute paths a `certificate`-mode job's composed `signing` block names.
+   * Both are server constants: the long-lived identity in the appliance's mounted
+   * data root (durable across jobs, and a file the operator has on their host --
+   * see {@link signingIdentityPath}), and the receipt pinned to a fixed name in
+   * THIS job's workdir so the appliance can serve it afterwards. Each is composed
+   * through its directory's own containment check rather than joined, so a
+   * constant that stopped resolving inside that directory is refused instead of
+   * naming a file the receipt endpoint would then serve from outside the workdir.
+   */
+  private signingPathsFor(
+    workdir: string,
+  ): JobSigningPaths & { receiptOutput: string } {
+    return {
+      identityFile: signingIdentityPath(this.dataRoot),
+      receiptOutput: workdirArtifactPath(workdir, JOB_FILE_NAMES.receipt),
+    };
+  }
+
+  /**
+   * Create-or-reuse this party's signing identity and return its fingerprint, by
+   * spawning the CLI's `fingerprint` subcommand against the mounted identity file.
+   * The one path the operator's partner needs before a signed exchange can be
+   * verified, so it is anchored where the CLI anchors it -- at the fingerprint
+   * command -- rather than being generated behind an exchange that has already
+   * started.
+   *
+   * `identityLabel` is the operator's own `linkage_terms.identity`, bound into a
+   * NEW identity and ignored (with the CLI's own warning) when one already exists;
+   * `exportCertificate` additionally writes the PUBLIC certificate to a second
+   * fixed name in the same mount. The manager owns both paths and the binary, so
+   * no request value is ever a path.
+   *
+   * SINGLE-FLIGHT: the flag is claimed synchronously (no await before the
+   * assignment), so a concurrent request is {@link SigningFingerprintBusyError}
+   * (a 409) rather than a second child racing the same file.
+   */
+  async resolveSigningFingerprint(args: {
+    identityLabel: string;
+    exportCertificate: boolean;
+  }): Promise<SigningFingerprintResult> {
+    if (this.fingerprintInFlight) throw new SigningFingerprintBusyError();
+    this.fingerprintInFlight = true;
+    try {
+      return await runSigningFingerprint({
+        binaryPath: this.binaryPath,
+        identityPath: signingIdentityPath(this.dataRoot),
+        identityLabel: args.identityLabel,
+        ...(args.exportCertificate
+          ? { exportPath: signingCertificatePath(this.dataRoot) }
+          : {}),
+        ...(this.childEnv !== undefined ? { childEnv: this.childEnv } : {}),
+      });
+    } finally {
+      this.fingerprintInFlight = false;
+    }
+  }
+
   private async startJobInWorkdir(
     intent: JobCreateIntent,
     id: string,
@@ -627,7 +730,16 @@ export class JobManager {
     const outputPath = path.join(workdir, JOB_FILE_NAMES.output);
     const recordPath = path.join(workdir, JOB_FILE_NAMES.record);
     const keysPath = path.join(workdir, JOB_FILE_NAMES.recordKeys);
-    const logPath = intent.diagnosticRun === true ? jobLogPath(workdir) : null;
+    const logPath =
+      intent.diagnosticRun === true
+        ? workdirArtifactPath(workdir, JOB_FILE_NAMES.log)
+        : null;
+    // Only a certificate-mode exchange writes one. A zero-setup run composes no
+    // config at all, so it carries no signing block and never signs.
+    const receiptPath =
+      intent.mode !== "zeroSetup" && intent.signing?.mode === "certificate"
+        ? this.signingPathsFor(workdir).receiptOutput
+        : null;
 
     const handoff = buildJobHandoff(intent, serverEntry, {
       credentialPasted: this.authoredMaterializedCredentialPath !== undefined,
@@ -641,6 +753,7 @@ export class JobManager {
       recordPath,
       keysPath,
       logPath,
+      receiptPath,
       status: "running",
       events: [],
       terminalEmitted: false,
@@ -718,6 +831,7 @@ export class JobManager {
       this.jobRendezvousDir,
       this.jobRendezvousOutboundDir,
       serverEntry,
+      this.signingPathsFor(workdir),
     );
     const keyDocument = composeKeyFileDocument(intent);
     const configPath = await writeJobFile(
@@ -1210,17 +1324,17 @@ function liveRecordAvailability(
 }
 
 /**
- * The diagnostic log's path inside a job workdir, resolved through the
+ * A fixed-name artifact's path inside a job workdir, resolved through the
  * containment check {@link resolveWorkdirFile} applies rather than joined
- * directly. The name is a server constant, so a null resolution is a caller bug
- * (a name that grew a separator) surfaced as a hard error instead of a path
- * outside the workdir the log endpoint would then serve.
+ * directly. Every name is a server constant, so a null resolution is a caller bug
+ * -- a name that stopped resolving inside the workdir -- surfaced as a hard error
+ * instead of a path outside it the artifact's endpoint would then serve.
  */
-function jobLogPath(workdir: string): string {
-  const logPath = resolveWorkdirFile(workdir, JOB_FILE_NAMES.log);
-  if (logPath === null)
-    throw new Error("the job log name did not resolve inside the workdir");
-  return logPath;
+function workdirArtifactPath(workdir: string, name: string): string {
+  const artifactPath = resolveWorkdirFile(workdir, name);
+  if (artifactPath === null)
+    throw new Error(`the job ${name} did not resolve inside the workdir`);
+  return artifactPath;
 }
 
 /** The live view of an in-memory record, mirroring what the routes report. */
@@ -1241,10 +1355,17 @@ function liveJobView(record: JobRecord): JobView {
     // run that misbehaved, including one still stalled, so it is offered as soon
     // as the CLI has opened the file.
     logAvailable: record.logPath !== null && jobFileExists(record.logPath),
+    // Answered from the receipt path set at creation from the intent, exactly as
+    // the log pair above is: what a client is told about this run's receipt comes
+    // from what the appliance launched.
+    receiptRequested: record.receiptPath !== null,
+    receiptAvailable:
+      record.receiptPath !== null && jobFileExists(record.receiptPath),
     outputPath: record.outputPath,
     recordPath: record.recordPath,
     keysPath: record.keysPath,
     logPath: record.logPath,
+    receiptPath: record.receiptPath,
   };
 }
 
@@ -1260,15 +1381,21 @@ function composeDocumentByChannel(
   rendezvousDir: string | undefined,
   outboundRendezvousDir: string | undefined,
   serverEntry: JobSftpServerEntry | undefined,
+  signingPaths: JobSigningPaths,
 ): string {
   if (intent.channel === "sftp") {
     if (serverEntry === undefined)
       throw new Error("sftp job reached compose without a resolved server");
-    return composeSftpConfigDocument(intent, serverEntry);
+    return composeSftpConfigDocument(intent, serverEntry, signingPaths);
   }
   if (rendezvousDir === undefined)
     throw new Error(
       "filedrop job reached compose without a rendezvous directory",
     );
-  return composeConfigDocument(intent, rendezvousDir, outboundRendezvousDir);
+  return composeConfigDocument(
+    intent,
+    rendezvousDir,
+    outboundRendezvousDir,
+    signingPaths,
+  );
 }

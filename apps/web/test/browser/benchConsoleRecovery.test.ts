@@ -13,6 +13,8 @@ import { InviterBench } from "@bench/InviterBench";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
+import type { JobHandoff } from "@jobs/handoff";
+
 // The bench components touch the router seam.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -60,11 +62,12 @@ const RECOVERY_HANDOFF = {
   channel: "sftp",
   usedKeyFile: true,
   credentialPasted: false,
+  usedSigningIdentity: false,
   template: {
     kind: "config",
     yaml: "connection:\n  channel: sftp\n",
   },
-};
+} satisfies JobHandoff;
 
 /** The same-origin job API stubbed at the global fetch seam, tailored to the
  * recovery panel: the inputs/sftp/rendezvous the idle bench reads, plus the

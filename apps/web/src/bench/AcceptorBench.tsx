@@ -66,6 +66,11 @@ import {
   withConnectionTuning,
 } from "./connectionTuningModel";
 import {
+  RECEIPTS_DEFAULT,
+  receiptsIntentFields,
+  receiptsProblems,
+} from "./receiptsModel";
+import {
   RUN_DIAGNOSTICS_DEFAULT,
   runDiagnosticsAfterRetarget,
   runDiagnosticsIntentFields,
@@ -94,6 +99,7 @@ import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { Ledger } from "./Ledger";
 import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { Problems } from "./Problems";
+import { ReceiptsCard } from "./ReceiptsCard";
 import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
 import { RunDiagnosticsCard } from "./RunDiagnosticsCard";
 import { ServerFilePicker } from "./ServerFilePicker";
@@ -137,6 +143,7 @@ import type { FileRejection } from "@mantine/dropzone";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { RailStep } from "./inviterModel";
+import type { ReceiptsDraft } from "./receiptsModel";
 import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
 import type { SftpConnectionInfo } from "@psi/serverJobExchangeDriver";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
@@ -246,6 +253,8 @@ export function AcceptorBench() {
   // consumed alongside the file-handling draft.
   const [connectionTuning, setConnectionTuning] =
     useState<ConnectionTuningDraft>(CONNECTION_TUNING_DEFAULT);
+  const [receipts, setReceipts] = useState<ReceiptsDraft>(RECEIPTS_DEFAULT);
+  const [receiptsOpen, setReceiptsOpen] = useState(false);
   const [connectionTuningOpen, setConnectionTuningOpen] = useState(false);
   // The operator's per-run diagnostic and recovery choices for the same run, held
   // beside the two drafts above for the same reasons.
@@ -767,6 +776,7 @@ export function AcceptorBench() {
       inputSource,
       ...(options !== undefined ? { options } : {}),
       runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
+      receipts: receiptsIntentFields(receipts),
     };
     // `launched` is the launch key: it is set once, from the same render that
     // fixes the acquired CSV, its input source, the committed name, and the ready
@@ -1481,6 +1491,13 @@ export function AcceptorBench() {
                       onToggleOpen={setRunDiagnosticsOpen}
                       onChange={setRunDiagnostics}
                     />
+                    <ReceiptsCard
+                      draft={receipts}
+                      identity={committedName}
+                      open={receiptsOpen}
+                      onToggleOpen={setReceiptsOpen}
+                      onChange={setReceipts}
+                    />
                   </>
                 ) : undefined
               }
@@ -1496,6 +1513,9 @@ export function AcceptorBench() {
               runDiagnosticsBlocked={
                 acceptServerJob &&
                 runDiagnosticsProblems(runDiagnostics).length > 0
+              }
+              receiptsBlocked={
+                acceptServerJob && receiptsProblems(receipts).length > 0
               }
               splitDirectoryProblem={splitDirectoryProblem}
               onMetadataChange={changeMetadata}
