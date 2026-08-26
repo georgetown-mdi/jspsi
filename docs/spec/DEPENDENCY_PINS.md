@@ -708,8 +708,9 @@ Two limits sit between a green run there and a bump being proved:
   same scanner ahead of publishing, so nothing unscanned ships. A base bump
   taken in order to clear an OS-layer finding is therefore confirmed at pull
   request time by scanning the built variant by hand -- OS-layer, `vuln`
-  scanner, HIGH and above, fixable only, against `.github/trivyignore.yaml` -- and
-  the re-widening to both legs travels in the bump's own diff.
+  scanner, HIGH and above, fixable only, against
+  `.github/trivyignore.yaml` -- and the re-widening to both legs travels in
+  the bump's own diff.
 - **The build is single-arch.** That workflow builds native `amd64` with no
   QEMU, and no release workflow builds this image at all, so the release
   assertion speaks for the `amd64` rootfs at the new digest and not for the
@@ -761,9 +762,10 @@ not a defect in the pull request.
 **What re-proves the result.** `image_smoke.yaml`'s pull-request path filter
 lists `Dockerfile`, so the pull request runs the full matrix: both the
 default and the FIPS legs rebuild, even though only the default base moved.
-The default leg's OS-layer Trivy scan (`vuln`, HIGH/CRITICAL, fixable findings
-only, against `.github/trivyignore.yaml`) is not scoped out the way the FIPS leg's
-currently is (see [Bumping the FIPS base image](#bumping-the-fips-base-image)),
+The default leg's OS-layer Trivy scan (`vuln`, HIGH/CRITICAL, fixable
+findings only, against `.github/trivyignore.yaml`) is not scoped out the way
+the FIPS leg's currently is
+(see [Bumping the FIPS base image](#bumping-the-fips-base-image)),
 so it runs on this pull request as it does on every other -- a new snapshot
 carrying a fixable OS-layer finding fails the pull request rather than
 shipping. The same job also drives the assertions the freeze test cannot
