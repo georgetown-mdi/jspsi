@@ -6,6 +6,7 @@ import { isBareSftpHost } from "@psi/sftpHost";
 
 import {
   MAX_SFTP_PROBE_BODY_BYTES,
+  formatFirstIssue,
   gateJobRoute,
   readJobRequestBody,
 } from "@jobs/routeSupport";
@@ -26,19 +27,6 @@ const probeBodySchema = z.strictObject({
   host: z.string().min(1),
   port: z.int().min(0).max(65535).optional(),
 });
-
-/** Format the first zod issue as `<field>: <reason>` -- a field path and a
- * shape reason only, never a submitted value (the `JobApiConfigError` discipline).
- * The probe body carries no secret, but the discipline keeps the surface uniform. */
-function formatFirstIssue(
-  issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>,
-): string {
-  // A failed zod parse always carries at least one issue.
-  const issue = issues[0];
-  const field =
-    issue.path.length > 0 ? issue.path.map(String).join(".") : "body";
-  return `${field}: ${issue.message}`;
-}
 
 /**
  * The typed 200 envelope for a probe attempt that RAN. A completed attempt is

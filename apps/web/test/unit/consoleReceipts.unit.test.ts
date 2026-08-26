@@ -699,12 +699,40 @@ describe("the fingerprint driver", () => {
     expect(fs.existsSync(signingIdentityPath(unmade))).toBe(true);
   });
 
+  test("an oversized stdout flood is an error, never buffered unbounded", async () => {
+    // The cap belongs to the spawn boundary this driver shares with the host-key
+    // probe, so it is exercised from this side too rather than assumed from the
+    // probe's own case.
+    const root = scratchDir();
+    const result = await runSigningFingerprint({
+      binaryPath: STUB_CLI_PATH,
+      identityPath: signingIdentityPath(root),
+      identityLabel: "Agency A",
+      childEnv: { STUB_FINGERPRINT_STDOUT: "x".repeat(8192) },
+    });
+    expect(result).toEqual({ kind: "error" });
+  });
+
+  test("the watchdog kills a hung child and reports a timeout", async () => {
+    // A child that ignores SIGTERM and would otherwise run for 5s; the watchdog
+    // SIGTERMs at 50ms and SIGKILLs 50ms later, bounding the wait as a timeout.
+    const root = scratchDir();
+    const result = await runSigningFingerprint({
+      binaryPath: STUB_CLI_PATH,
+      identityPath: signingIdentityPath(root),
+      identityLabel: "Agency A",
+      childEnv: { STUB_IGNORE_SIGTERM: "1", STUB_DELAY_MS: "5000" },
+      sigtermMs: 50,
+      sigkillGraceMs: 50,
+    });
+    expect(result).toEqual({ kind: "timeout" });
+  });
+
   test("a mount that cannot be created resolves as an error, not an unhandled throw", async () => {
-    // The mkdir above runs inside the promise executor, so a failure there --
-    // an operator whose mount path is occupied by a regular file -- would
-    // otherwise reject rather than settle as a result kind, and the endpoint
-    // only reconciles kinds. The one documented rejection is the export-path
-    // caller bug; this is not it.
+    // The driver creates the mount itself before it spawns, and a mount path an
+    // operator left occupied by a regular file has to settle as a result kind:
+    // the endpoint only reconciles kinds. The one documented rejection is the
+    // export-path caller bug; this is not it.
     const root = scratchDir();
     const occupied = path.join(root, "not-a-directory");
     fs.writeFileSync(occupied, "");

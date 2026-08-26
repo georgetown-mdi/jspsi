@@ -1,10 +1,6 @@
-import { spawn } from "node:child_process";
-
 import { HOST_KEY_FINGERPRINT_REGEX, sanitizeForDisplay } from "@psilink/core";
 
-import { sanitizedChildEnv } from "./cliDriver";
-
-import type { ChildProcess } from "node:child_process";
+import { runCapturedCliChild } from "./capturedCliChild";
 
 /**
  * The appliance's SFTP host-key probe driver. It spawns the CLI's
@@ -43,7 +39,7 @@ const PROBE_CONNECT_TIMEOUT = `${PROBE_CONNECT_TIMEOUT_MS / 1000}s`;
  * apps/cli/src/connection/sftpPeerIdentification.ts). Mirrored rather than
  * imported -- the CLI is a separate workspace this server drives as a subprocess
  * -- so that the watchdog headroom this file depends on is stated where the
- * watchdog is.
+ * watchdog's budget is.
  *
  * Two unit tests hold the mirror: one reads the CLI's own declaration and fails
  * when the two values part, the other holds this value and the watchdog to the
@@ -60,14 +56,6 @@ export const PROBE_PEER_READ_BUDGET_MS = 2_000;
 export const PROBE_SIGTERM_MS = 15_000;
 /** The grace before the watchdog escalates SIGTERM to SIGKILL. */
 export const PROBE_SIGKILL_GRACE_MS = 5_000;
-
-/**
- * The cap on retained child stdout, in UTF-16 code units. The probe emits ONE
- * short JSON line; anything past a few KiB is a malformed or hostile child, so
- * the read is bounded and an overflow is a probe error rather than unbounded
- * memory growth.
- */
-const PROBE_STDOUT_CAP = 4096;
 
 // The two `key_type` bounds below mirror core's `MAX_KEY_TYPE_BYTES` (64) and
 // `isAcceptedKeyTypeByte` (`[A-Za-z0-9._@-]`), whose record is
@@ -288,17 +276,17 @@ export function parseProbeStdout(stdout: string): SftpProbeResult {
 
 /**
  * Spawn the CLI's `probe-host-key` subcommand and reconcile its outcome. The argv
- * is a fixed template plus the server-built `sftp://` URL, passed as an array with
- * no shell -- exactly the no-shell / allowlisted-argv discipline `runCliChild`
- * uses -- so no value is ever an interpretable token. stdout is capped and parsed;
- * stderr is DISCARDED (drained so the pipe never blocks the child, but never read
- * or forwarded, since it can carry server-controlled bytes). The watchdog bounds
- * the child's lifetime independently of its own connect timeout.
+ * is a fixed template plus the server-built `sftp://` URL; the shared spawn
+ * boundary ({@link runCapturedCliChild}) passes it as an array with no shell, caps
+ * the stdout read, discards stderr (it can carry server-controlled bytes), and
+ * runs the watchdog that bounds the child's lifetime independently of its own
+ * connect timeout. What stays here is the argv, the two budgets, and the mapping
+ * from the child's exit to a typed probe result.
  *
  * The URL build can throw only on a host that never passed the bare-host predicate
  * (a caller bug); it surfaces as a rejected promise the caller maps to a 500.
  */
-export function probeSftpHostKey(args: {
+export async function probeSftpHostKey(args: {
   host: string;
   port?: number;
   binaryPath: string;
@@ -307,83 +295,20 @@ export function probeSftpHostKey(args: {
   sigkillGraceMs?: number;
 }): Promise<SftpProbeResult> {
   const url = buildSftpProbeUrl(args.host, args.port);
-  const argv: Array<string> = [
-    args.binaryPath,
-    "probe-host-key",
-    url,
-    "--json",
-    "--connect-timeout",
-    PROBE_CONNECT_TIMEOUT,
-  ];
-
-  return new Promise<SftpProbeResult>((resolve) => {
-    let child: ChildProcess;
-    try {
-      child = spawn(process.execPath, argv, {
-        stdio: ["ignore", "pipe", "pipe"],
-        shell: false,
-        env: { ...sanitizedChildEnv(), ...args.childEnv },
-      });
-    } catch {
-      resolve({ kind: "error" });
-      return;
-    }
-
-    let stdout = "";
-    let stdoutOverflow = false;
-    const out = child.stdout;
-    if (out !== null) {
-      out.setEncoding("utf8");
-      out.on("data", (chunk: string) => {
-        if (stdoutOverflow) return;
-        stdout += chunk;
-        if (stdout.length > PROBE_STDOUT_CAP) {
-          stdoutOverflow = true;
-          stdout = "";
-        }
-      });
-    }
-    // Discard stderr entirely: it can carry server-controlled bytes and must
-    // never reach the client. Drain it so a chatty child's pipe never fills and
-    // blocks, but never read or forward it.
-    child.stderr?.resume();
-
-    let timedOut = false;
-    let settled = false;
-    const timers: Array<NodeJS.Timeout> = [];
-    const clearTimers = (): void => {
-      for (const timer of timers) clearTimeout(timer);
-    };
-    const settle = (result: SftpProbeResult): void => {
-      if (settled) return;
-      settled = true;
-      clearTimers();
-      resolve(result);
-    };
-
-    // Watchdog: SIGTERM at the budget so latency stays bounded above the child's
-    // own readyTimeout, then SIGKILL if it ignores the term. Mirrors the
-    // cancel-escalation chain in jobManager.ts.
-    const toSigterm = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      const toSigkill = setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null)
-          child.kill("SIGKILL");
-      }, args.sigkillGraceMs ?? PROBE_SIGKILL_GRACE_MS);
-      toSigkill.unref();
-      timers.push(toSigkill);
-    }, args.sigtermMs ?? PROBE_SIGTERM_MS);
-    toSigterm.unref();
-    timers.push(toSigterm);
-
-    child.on("error", () => settle({ kind: "error" }));
-    child.on("close", (code) => {
-      if (timedOut) {
-        settle({ kind: "timeout" });
-        return;
-      }
-      settle(reconcileProbeExit(code, stdoutOverflow ? undefined : stdout));
-    });
+  const outcome = await runCapturedCliChild({
+    argv: [
+      args.binaryPath,
+      "probe-host-key",
+      url,
+      "--json",
+      "--connect-timeout",
+      PROBE_CONNECT_TIMEOUT,
+    ],
+    ...(args.childEnv !== undefined ? { childEnv: args.childEnv } : {}),
+    sigtermMs: args.sigtermMs ?? PROBE_SIGTERM_MS,
+    sigkillGraceMs: args.sigkillGraceMs ?? PROBE_SIGKILL_GRACE_MS,
   });
+  if (outcome.kind === "spawnFailed") return { kind: "error" };
+  if (outcome.kind === "timedOut") return { kind: "timeout" };
+  return reconcileProbeExit(outcome.code, outcome.stdout);
 }

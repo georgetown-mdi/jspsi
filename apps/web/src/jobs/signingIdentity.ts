@@ -1,14 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { spawn } from "node:child_process";
-
 import { FINGERPRINT_REGEX } from "@psilink/core";
 
 import { WORKDIR_MODE, jobFileExists, resolveWorkdirFile } from "./workdir";
-import { sanitizedChildEnv } from "./cliDriver";
-
-import type { ChildProcess } from "node:child_process";
+import { runCapturedCliChild } from "./capturedCliChild";
 
 /**
  * The appliance's signing-identity driver. It spawns the CLI's `fingerprint`
@@ -118,20 +114,13 @@ export function assertExportPathDistinct(
  * The server-side watchdog for a fingerprint child. Key generation and a file
  * write are fast and local -- there is no network leg at all -- so the budget is
  * generous rather than tuned, and its only job is to keep a wedged child from
- * holding the endpoint open. Mirrors the host-key probe's SIGTERM-then-SIGKILL
- * escalation.
+ * holding the endpoint open. The SIGTERM-then-SIGKILL escalation it feeds belongs
+ * to the shared spawn boundary ({@link runCapturedCliChild}); only the budget is
+ * this driver's.
  */
 export const FINGERPRINT_SIGTERM_MS = 15_000;
 /** The grace before the watchdog escalates SIGTERM to SIGKILL. */
 export const FINGERPRINT_SIGKILL_GRACE_MS = 5_000;
-
-/**
- * The cap on retained child stdout, in UTF-16 code units. The command emits ONE
- * short fingerprint line on stdout (every diagnostic goes to stderr), so anything
- * past a few KiB is a malformed or hostile child and the read is bounded rather
- * than left to grow.
- */
-const FINGERPRINT_STDOUT_CAP = 4096;
 
 /**
  * The reconciled outcome of a fingerprint attempt:
@@ -236,11 +225,11 @@ export function fingerprintArgv(args: {
 
 /**
  * Spawn the CLI's `fingerprint` subcommand against the appliance's mounted
- * identity file and reconcile its outcome. The argv is an array with no shell --
- * the same allowlisted-argv discipline `runCliChild` and the host-key probe use
- * -- so no value is ever an interpretable token. stdout is capped and parsed;
- * stderr is DISCARDED (drained so the pipe never blocks the child, but never read
- * or forwarded: it names filesystem paths inside the container).
+ * identity file and reconcile its outcome. The shared spawn boundary
+ * ({@link runCapturedCliChild}) passes the argv as an array with no shell, caps
+ * the stdout read, discards stderr (it names filesystem paths inside the
+ * container), and runs the watchdog. What stays here is the argv, the two
+ * budgets, and the mapping from the child's exit to a typed result.
  *
  * Whether the identity already existed is read HERE, before the child runs,
  * rather than from the child's own "Created"/"Loaded" banner: the banner is on
@@ -277,75 +266,28 @@ export function runSigningFingerprint(args: {
   if (args.exportPath !== undefined)
     assertExportPathDistinct(args.identityPath, args.exportPath);
   const created = !jobFileExists(args.identityPath);
-  const argv = fingerprintArgv(args);
   const childCwd = path.dirname(path.resolve(args.identityPath));
+  try {
+    fs.mkdirSync(childCwd, { recursive: true, mode: WORKDIR_MODE });
+  } catch {
+    // A mount path occupied by a regular file settles as a result kind rather
+    // than rejecting: the endpoint reconciles kinds, and the one rejection this
+    // driver raises is the export-path caller bug above.
+    return Promise.resolve({ kind: "error" });
+  }
 
-  return new Promise<SigningFingerprintResult>((resolve) => {
-    let child: ChildProcess;
-    try {
-      fs.mkdirSync(childCwd, { recursive: true, mode: WORKDIR_MODE });
-      child = spawn(process.execPath, argv, {
-        cwd: childCwd,
-        stdio: ["ignore", "pipe", "pipe"],
-        shell: false,
-        env: { ...sanitizedChildEnv(), ...args.childEnv },
-      });
-    } catch {
-      resolve({ kind: "error" });
-      return;
-    }
-
-    let stdout = "";
-    let stdoutOverflow = false;
-    const out = child.stdout;
-    if (out !== null) {
-      out.setEncoding("utf8");
-      out.on("data", (chunk: string) => {
-        if (stdoutOverflow) return;
-        stdout += chunk;
-        if (stdout.length > FINGERPRINT_STDOUT_CAP) {
-          stdoutOverflow = true;
-          stdout = "";
-        }
-      });
-    }
-    child.stderr?.resume();
-
-    let timedOut = false;
-    let settled = false;
-    const timers: Array<NodeJS.Timeout> = [];
-    const settle = (result: SigningFingerprintResult): void => {
-      if (settled) return;
-      settled = true;
-      for (const timer of timers) clearTimeout(timer);
-      resolve(result);
-    };
-
-    const toSigterm = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      const toSigkill = setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null)
-          child.kill("SIGKILL");
-      }, args.sigkillGraceMs ?? FINGERPRINT_SIGKILL_GRACE_MS);
-      toSigkill.unref();
-      timers.push(toSigkill);
-    }, args.sigtermMs ?? FINGERPRINT_SIGTERM_MS);
-    toSigterm.unref();
-    timers.push(toSigterm);
-
-    child.on("error", () => settle({ kind: "error" }));
-    child.on("close", (code) => {
-      if (timedOut) {
-        settle({ kind: "timeout" });
-        return;
-      }
-      settle(
-        reconcileFingerprintExit(code, stdoutOverflow ? undefined : stdout, {
-          created,
-          exportRequested: args.exportPath !== undefined,
-        }),
-      );
+  return runCapturedCliChild({
+    argv: fingerprintArgv(args),
+    cwd: childCwd,
+    ...(args.childEnv !== undefined ? { childEnv: args.childEnv } : {}),
+    sigtermMs: args.sigtermMs ?? FINGERPRINT_SIGTERM_MS,
+    sigkillGraceMs: args.sigkillGraceMs ?? FINGERPRINT_SIGKILL_GRACE_MS,
+  }).then((outcome): SigningFingerprintResult => {
+    if (outcome.kind === "spawnFailed") return { kind: "error" };
+    if (outcome.kind === "timedOut") return { kind: "timeout" };
+    return reconcileFingerprintExit(outcome.code, outcome.stdout, {
+      created,
+      exportRequested: args.exportPath !== undefined,
     });
   });
 }
