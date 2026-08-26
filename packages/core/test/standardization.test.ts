@@ -2936,6 +2936,164 @@ describe("buildKeyStrings", () => {
     expect(accumulated).toBeGreaterThan(10 * 409_400);
   });
 
+  // --- the declared fan-out's fate at the accumulating seam ------------------
+  // Dropping an over-bound row is normative for the DECLARED fan-out producers
+  // (docs/spec/PROTOCOL.md, Fan-out matching), and the accumulating limb takes
+  // that fate where a listed producer is the step charging the crossing. Every
+  // other crossing keeps the refusal: the amplifier cases above charge theirs
+  // from a `replace_regex`, which is not one.
+
+  // A cell of distinct single-character tokens, each amplified to 1,939
+  // characters and then split on a separator the amplifier itself wrote, keeping
+  // the original -- which is what makes a split RETAIN more than it was handed.
+  // Each candidate charges its own 1,939 characters plus the 969 of the part
+  // carrying its token, 2,908 in all, and the shared prefix and suffix parts
+  // land once for 968 more: at 1,442 tokens the element accumulates exactly
+  // MAX_ASSEMBLED_KEY_LENGTH_PER_ROW, and each further token is 2,908 past it.
+  // The last step collapses every candidate onto one string, so a row that
+  // survives the seam assembles one key string rather than meeting the count cap
+  // -- which is what a row exactly at the cap has to do to be accepted, the cap
+  // being the count cap times the per-value ceiling.
+  const tokenCell = (tokens: number) =>
+    Array.from({ length: tokens }, (_unused, i) =>
+      String.fromCodePoint(0x4e00 + i),
+    ).join(",");
+
+  const collapsedCandidate = "x".repeat(MAX_TRANSFORM_PARAM_LENGTH);
+
+  // Built fresh per call: the compiled steps capture their fan-out membership,
+  // so a shared array would carry one compilation into the other listing.
+  const splitRetainingSteps = () => [
+    { function: "split_on", params: { delimiter: "," } },
+    {
+      function: "replace_regex",
+      params: {
+        pattern: "a*",
+        replacement: `${"y".repeat(484)}Q${"z".repeat(484)}`,
+      },
+    },
+    { function: "split_on", params: { delimiter: "Q", includeOriginal: true } },
+    {
+      function: "replace_regex",
+      params: { pattern: ".*", replacement: collapsedCandidate },
+    },
+  ];
+
+  const dobKey = { name: "DOB", elements: [{ field: "date_of_birth" }] };
+
+  test("a declared fan-out crossing as it expands drops the row for that key", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dataset = makeDataset({
+      last_name: tokenCell(1443),
+      date_of_birth: "19750716",
+    });
+    expect(
+      buildKeyStrings(
+        amplifyingKey(splitRetainingSteps()),
+        dataset,
+        0,
+        false,
+        1,
+      ),
+    ).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /accumulates 4197212 characters of candidate values as a declared fan-out step expands one of its values/,
+    );
+    // Neither the row's own token nor the bytes the transform derived from it.
+    expect(warn.mock.calls[0][0]).not.toContain(String.fromCodePoint(0x4e00));
+    expect(warn.mock.calls[0][0]).not.toContain("y".repeat(10));
+    // The row sits out this key's round alone.
+    expect(buildKeyStrings(dobKey, dataset, 0, false, 2)).toEqual(
+      new Set(["19750716"]),
+    );
+  });
+
+  test("a declared fan-out expansion exactly at the cap builds", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    expect(
+      buildKeyStrings(
+        amplifyingKey(splitRetainingSteps()),
+        makeDataset({
+          last_name: tokenCell(1442),
+          date_of_birth: "19750716",
+        }),
+        0,
+        false,
+        1,
+      ),
+    ).toEqual(new Set([`${collapsedCandidate.repeat(2)}19750716`]));
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("the same crossing from an unlisted producer refuses", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    let raised: unknown;
+    try {
+      withUnlistedFanOutFunctions(() =>
+        buildKeyStrings(
+          amplifyingKey(splitRetainingSteps()),
+          makeDataset({
+            last_name: tokenCell(1443),
+            date_of_birth: "19750716",
+          }),
+          0,
+          false,
+          1,
+        ),
+      );
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as UsageError).message).toMatch(
+      /accumulated 4197212 characters of candidate values from row 0 of this party's data \(linkageKeys\[1\]\.elements\[0\]\)/,
+    );
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("a listed producer's crossing refuses when an unlisted one expanded the row", () => {
+    // The provenance the fate reads is the ROW's rather than the charging step's,
+    // as it is at the assembled limbs. One steps array serves both calls, so the
+    // element's compiled steps and their fan-out membership are identical and the
+    // two fates differ on the row's own provenance alone -- here the field's
+    // standardization, compiled with nothing listed, expanding the row before the
+    // element's declared producers charge anything.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const steps = splitRetainingSteps();
+    const unlistedField = withUnlistedFanOutFunctions(() =>
+      makeDataset({
+        last_name: [tokenCell(1443), "Z"],
+        date_of_birth: "19750716",
+      }),
+    );
+    let raised: unknown;
+    try {
+      buildKeyStrings(amplifyingKey(steps), unlistedField, 0, false, 1);
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as UsageError).message).toMatch(
+      /accumulated 4197212 characters of candidate values from row 0/,
+    );
+    expect(warn).not.toHaveBeenCalled();
+
+    expect(
+      buildKeyStrings(
+        amplifyingKey(steps),
+        makeDataset({
+          last_name: tokenCell(1443),
+          date_of_birth: "19750716",
+        }),
+        0,
+        false,
+        1,
+      ),
+    ).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   // --- the receiver's swapped locators ---------------------------------------
   // A key declaring `swap` moves the two named elements' FIELDS on the receiver
   // and leaves their transforms in place, so the position that reads a column

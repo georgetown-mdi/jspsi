@@ -1284,8 +1284,22 @@ function applyStep(
       } else {
         accumulated += addCandidate(out, r);
       }
-      if (site !== undefined && accumulated > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW)
+      if (
+        site !== undefined &&
+        accumulated > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW
+      ) {
+        // Which producer is charging the crossing is known here, which is what
+        // binds the declared fan-out's drop to this seam: the step expanding the
+        // value is a listed one, and multiplicity an unlisted producer realized
+        // earlier in the row has already set the provenance, so that case stays
+        // fail-closed on the refusal below.
+        if (
+          step.isListedFanOutFunction &&
+          provenance?.fromUnlistedFunction === false
+        )
+          throw new AccumulatedCandidatesDrop(accumulated);
         throw accumulatedCandidatesTooLongRefusal(site, accumulated);
+      }
     }
     return out.size === 0 ? null : out;
   }
@@ -1996,14 +2010,12 @@ interface CandidateAccumulationSite {
 // message states the key rather than attributing the whole total to that
 // element.
 //
-// The fate is the refusal rather than the drop the assembled limbs take for a
-// declared fan-out producer: which fate a row takes depends on the provenance of
-// the WHOLE row's multiplicity, and an element still accumulating is one whose
-// later siblings have not run. Deciding the drop on the provenance so far could
-// narrow a row's linkage for multiplicity an unlisted producer went on to
-// realize, so the partial knowledge resolves fail-closed. The alternative --
-// finishing a row already known to be unassemblable -- is the allocation this
-// bound exists to prevent.
+// The fate here is the refusal, which is what a crossing charged outside a
+// declared fan-out producer's expansion takes: a single-valued step's output,
+// multiplicity from a producer unlisted in FAN_OUT_FUNCTION_NAMES, or the row's
+// aggregate across its elements. A crossing a listed producer charges as it
+// expands one value takes {@link AccumulatedCandidatesDrop} instead, the fate
+// the width bound specifies for that producer.
 function accumulatedCandidatesTooLongRefusal(
   site: CandidateAccumulationSite,
   accumulated: number,
@@ -2021,6 +2033,21 @@ function accumulatedCandidatesTooLongRefusal(
       "exchange is refused instead. Remove or narrow the expanding step in the " +
       "agreed linkage terms, or shorten the field the element reads.",
   );
+}
+
+// The drop a listed fan-out producer's own expansion takes when it charges the
+// accumulating total past the cap, raised where the candidates are allocated so
+// the expansion stops at the crossing rather than finishing a row that
+// contributes nothing. It carries the total up to {@link buildKeyStrings}, which
+// owns a row's fate for the key round; nothing outside this module sees it, and
+// it reports no fault of the terms, so it is not a UsageError.
+class AccumulatedCandidatesDrop extends Error {
+  readonly accumulated: number;
+
+  constructor(accumulated: number) {
+    super("a declared fan-out expansion crossed the row's key-string bound");
+    this.accumulated = accumulated;
+  }
 }
 
 // A record whose candidate set for one key is too wide contributes nothing to
@@ -2047,7 +2074,8 @@ function dropRowFromKeyRound(
  * Returns `null` when the record contributes nothing to the round: an element's
  * field value set is empty (the `NULL`/absent realization), or a candidate set a
  * function in {@link FAN_OUT_FUNCTION_NAMES} expanded exceeds
- * {@link MAX_KEY_CANDIDATES_PER_ROW}, which is dropped the same way and warned.
+ * {@link MAX_KEY_CANDIDATES_PER_ROW} or a magnitude bound on the key strings one
+ * row builds, which is dropped the same way and warned.
  * Otherwise it returns the deduplicated cross-product across the elements'
  * candidate values -- one entry per distinct combination, and a set of more than
  * one entry is a fan-out (docs/spec/PROTOCOL.md, Fan-out matching).
@@ -2137,24 +2165,45 @@ export function buildKeyStrings(
     // candidate -- from being charged once per value for bytes the row carries
     // once.
     const transformed = new Set<string>();
-    for (const v of raw) {
-      const realized = applyElementTransform(
-        v,
-        element.transform,
-        provenance,
-        site,
-        columnElementIndex,
+    try {
+      for (const v of raw) {
+        const realized = applyElementTransform(
+          v,
+          element.transform,
+          provenance,
+          site,
+          columnElementIndex,
+        );
+        // Added one at a time, never spread into a call: a spread passes the
+        // candidates as arguments, and a field realizing one candidate per value
+        // can hand this loop more of them than the engine accepts (measured
+        // between 125,000 and 150,000 here, fewer wherever the stack is
+        // smaller), which raises a RangeError in place of the assembly cap's
+        // refusal below -- fail-closed, but reporting a fault the row does not
+        // have.
+        for (const candidate of realized)
+          rowCandidateCharacters += addCandidate(transformed, candidate);
+        // This charge is the row's aggregate across its elements and the field's
+        // own realized values rather than one producer's expansion, so it names
+        // no producer to bind the declared fan-out's drop to and keeps the
+        // refusal; the drop's seams are that producer's own expansion
+        // (applyStep) and the assembled limbs below.
+        if (rowCandidateCharacters > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW)
+          throw accumulatedCandidatesTooLongRefusal(
+            site,
+            rowCandidateCharacters,
+          );
+      }
+    } catch (err) {
+      if (!(err instanceof AccumulatedCandidatesDrop)) throw err;
+      return dropRowFromKeyRound(
+        key,
+        index,
+        `accumulates ${err.accumulated} characters of candidate values as a ` +
+          "declared fan-out step expands one of its values, more than the " +
+          `${MAX_ASSEMBLED_KEY_LENGTH_PER_ROW} characters of key strings this ` +
+          "exchange builds for one row",
       );
-      // Added one at a time, never spread into a call: a spread passes the
-      // candidates as arguments, and a field realizing one candidate per value
-      // can hand this loop more of them than the engine accepts (measured
-      // between 125,000 and 150,000 here, fewer wherever the stack is smaller),
-      // which raises a RangeError in place of the assembly cap's refusal below
-      // -- fail-closed, but reporting a fault the row does not have.
-      for (const candidate of realized)
-        rowCandidateCharacters += addCandidate(transformed, candidate);
-      if (rowCandidateCharacters > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW)
-        throw accumulatedCandidatesTooLongRefusal(site, rowCandidateCharacters);
     }
     if (transformed.size === 0) return null;
 
