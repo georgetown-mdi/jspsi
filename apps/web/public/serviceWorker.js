@@ -61,7 +61,11 @@ const CACHE_VERSION = "v1";
 /** Holds the one cached navigation document plus {@link STATIC_ASSETS}. */
 const SHELL_CACHE = `psilink-shell-${CACHE_VERSION}`;
 
-/** Holds content-hashed build assets under {@link ASSET_PATH_PREFIX}. */
+/** Holds content-hashed build assets under {@link ASSET_PATH_PREFIX}. It is the
+ * one cache here that grows with use, so every writer of it must also bring it
+ * back within {@link MAX_ASSET_ENTRIES}; the writers are named and held to that
+ * in `apps/web/test/unit/serviceWorkerAssetCache.test.ts`, so a third one cannot
+ * appear unnoticed. */
 const ASSET_CACHE = `psilink-assets-${CACHE_VERSION}`;
 
 /** The caches this worker owns; activate deletes every other cache. */
@@ -413,6 +417,12 @@ async function refreshInBackground(cache, request) {
  * an HTML parser it has no other use for; a path this misses costs nothing
  * beyond a network fetch on first use, and a path it invents fails its
  * individual precache and is skipped.
+ *
+ * Matching NOTHING is the failure that would not announce itself -- the
+ * precache and the warm would both succeed, holding nothing, and installed apps
+ * would stop opening unvisited routes offline. What the pattern reads out of the
+ * markup the build really emits is therefore held against the built server in
+ * `apps/web/test/integration/appShellWarm.test.ts`.
  */
 function hashedAssetPathsIn(servedDocument) {
   const pattern = new RegExp(

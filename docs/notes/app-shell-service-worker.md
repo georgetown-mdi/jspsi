@@ -42,7 +42,7 @@ Precaching all of it at install would charge that 2.7 MB to every visitor, inclu
 - **An installed app** asks the worker, at launch, to cache every route's code. That is the runtime the offline promise is made to, and it pays the 2.7 MB once per deployment.
 - **A tab** fills the rest in through the ordinary cache-first path as the operator visits routes, so a screen opened once online opens offline afterwards. A screen never opened says so, and names the recovery, instead of rendering a bare error.
 
-The route list is hand-written in the worker (`SHELL_ROUTES`), which is exactly the kind of list that goes stale. A unit test reads the route paths out of the route files' own `createFileRoute` calls and fails when one is uncovered, so a new route cannot ship offline-broken unnoticed.
+The route list is hand-written in the worker (`SHELL_ROUTES`), which is exactly the kind of list that goes stale. A unit test reads the route paths out of the route files' own `createFileRoute` calls and fails when one is uncovered, so a new route cannot ship offline-broken unnoticed. What those entries pull out of a real deployment is a second question, and an integration spec answers it against the built server: it runs the worker's own extraction over each warmed route's served document and fails when a route brings back nothing the shell's install-time graph does not already carry.
 
 ### The update path
 
@@ -63,5 +63,7 @@ One load lags a worker-logic change, by construction: the confirming reload's ow
 That benefit is available here without them. The worker fetches the app document at install and reads the asset graph out of it, so the precache is by construction the graph the deployment ships. A path the extraction misses costs one network fetch on first use; a path it invents fails its own precache and is skipped. Neither failure is silent breakage.
 
 Against that, adopting the tooling costs a dependency and its transitive tree on the one surface in the application that intercepts every request the origin makes -- a surface a reviewer should be able to read end to end. The project's dependency policy asks for exactly that conservatism. The worker is a few hundred lines with no imports, its behavior is driven directly in a unit test against a fabricated service-worker global scope, and there is no generated artifact whose contents have to be trusted.
+
+Deriving the graph at install rather than injecting it at build time does couple the worker to the markup Vite and TanStack Start emit, and that is the one place the trade is genuinely worse. One path read wrongly is absorbed, as above; an extraction that stopped matching the emitted preloads altogether would not be, and it would be silent -- install and the warm would both succeed, holding nothing, and the offline promise would narrow to whatever the operator had already visited. A build-time manifest would fail loudly instead. So that failure is not left to the unit suite, which feeds the worker documents this repository writes and would stay green straight through it, but pinned against the production build the app deploys.
 
 The decision would be worth revisiting if the shell's needs grow past caching -- background sync, navigation preload, precise runtime routing across many asset classes -- where re-deriving Workbox's machinery would be the poorer trade.
