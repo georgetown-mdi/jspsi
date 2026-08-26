@@ -2010,12 +2010,14 @@ interface CandidateAccumulationSite {
 // message states the key rather than attributing the whole total to that
 // element.
 //
-// The fate here is the refusal, which is what a crossing charged outside a
-// declared fan-out producer's expansion takes: a single-valued step's output,
-// multiplicity from a producer unlisted in FAN_OUT_FUNCTION_NAMES, or the row's
-// aggregate across its elements. A crossing a listed producer charges as it
-// expands one value takes {@link AccumulatedCandidatesDrop} instead, the fate
-// the width bound specifies for that producer.
+// The fate here is the refusal, which is what a crossing no declared fan-out
+// producer accounts for takes: a single-valued step's output, multiplicity from
+// a producer unlisted in FAN_OUT_FUNCTION_NAMES, or a row's aggregate charged
+// before any of its elements fanned out. A crossing a listed producer charges as
+// it expands one value takes {@link AccumulatedCandidatesDrop} instead, and one
+// charged on a row a listed producer has already expanded takes the same drop
+// where the aggregate is charged, both being the fate the width bound specifies
+// for that producer.
 function accumulatedCandidatesTooLongRefusal(
   site: CandidateAccumulationSite,
   accumulated: number,
@@ -2183,16 +2185,27 @@ export function buildKeyStrings(
         // have.
         for (const candidate of realized)
           rowCandidateCharacters += addCandidate(transformed, candidate);
-        // This charge is the row's aggregate across its elements and the field's
-        // own realized values rather than one producer's expansion, so it names
-        // no producer to bind the declared fan-out's drop to and keeps the
-        // refusal; the drop's seams are that producer's own expansion
-        // (applyStep) and the assembled limbs below.
-        if (rowCandidateCharacters > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW)
+        // No single step is expanding this aggregate, so its fate reads the
+        // ROW's provenance as the assembled limbs below do: a listed producer
+        // expanded an element already built, and no unlisted producer expanded
+        // any of them. That provenance is what those elements carry, so a
+        // crossing charged before any of them fanned out names no producer at
+        // all and stays fail-closed on the refusal.
+        if (rowCandidateCharacters > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW) {
+          if (fansOut && !provenance.fromUnlistedFunction)
+            return dropRowFromKeyRound(
+              key,
+              index,
+              `accumulates ${rowCandidateCharacters} characters of candidate ` +
+                "values across the key's elements, more than the " +
+                `${MAX_ASSEMBLED_KEY_LENGTH_PER_ROW} characters of key ` +
+                "strings this exchange builds for one row",
+            );
           throw accumulatedCandidatesTooLongRefusal(
             site,
             rowCandidateCharacters,
           );
+        }
       }
     } catch (err) {
       if (!(err instanceof AccumulatedCandidatesDrop)) throw err;

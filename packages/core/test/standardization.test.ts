@@ -2898,28 +2898,57 @@ describe("buildKeyStrings", () => {
     );
   });
 
-  test("elements binding one large field refuse on the row's total, not each element's", () => {
-    // Eleven elements over the same 100-value cell: each retains 409,400
-    // characters, an order of magnitude below the cap, so a total restarted per
-    // element never fires however many elements the key declares (up to
-    // MAX_KEY_ELEMENTS) -- and the row holds every one of them live at once.
-    // The refusal lands on the eleventh, at a total no single element retains.
-    const cell = Array.from(
+  // Eleven elements over the same 100-value cell: each retains 409,400
+  // characters, an order of magnitude below the cap, so a total restarted per
+  // element never fires however many elements the key declares (up to
+  // MAX_KEY_ELEMENTS) -- and the row holds every one of them live at once. The
+  // crossing lands on the eleventh, at a total no single element retains.
+  const oneLargeFieldCell = () =>
+    Array.from(
       { length: 100 },
       (_unused, i) => `${"Q".repeat(4084)}S3CRET${String(i).padStart(4, "0")}`,
     );
-    const manyElements = {
-      name: "LN x11",
-      elements: Array.from({ length: 11 }, () => ({ field: "last_name" })),
-    };
-    let raised: UsageError | undefined;
-    try {
+
+  const manyElements = {
+    name: "LN x11",
+    elements: Array.from({ length: 11 }, () => ({ field: "last_name" })),
+  };
+
+  test("elements binding one large field settle on the row's total, not each element's", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    expect(
       buildKeyStrings(
         manyElements,
-        makeDataset({ last_name: cell }),
+        makeDataset({ last_name: oneLargeFieldCell() }),
         0,
         false,
         1,
+      ),
+    ).toBeNull();
+    const dropped = Number(
+      /accumulates (\d+) characters/.exec(warn.mock.calls[0][0])?.[1],
+    );
+    expect(dropped).toBeGreaterThan(4_194_304);
+    // Above what any one element retains, which is what makes the total the
+    // row's rather than the offending element's.
+    expect(dropped).toBeGreaterThan(10 * 409_400);
+    expect(warn.mock.calls[0][0]).not.toContain("S3CRET");
+  });
+
+  test("the same row's refusal names the element it was accumulating at", () => {
+    // The fate the row takes once an unlisted producer realized its
+    // multiplicity, which is where the accumulation refusal's locator is
+    // observable: the drop above logs the row and the key, never an issue path.
+    let raised: UsageError | undefined;
+    try {
+      withUnlistedFanOutFunctions(() =>
+        buildKeyStrings(
+          manyElements,
+          makeDataset({ last_name: oneLargeFieldCell() }),
+          0,
+          false,
+          1,
+        ),
       );
     } catch (err) {
       raised = err as UsageError;
@@ -2931,17 +2960,17 @@ describe("buildKeyStrings", () => {
       /accumulated (\d+) characters/.exec(raised?.message ?? "")?.[1],
     );
     expect(accumulated).toBeGreaterThan(4_194_304);
-    // Above what any one element retains, which is what makes the total the
-    // row's rather than the offending element's.
     expect(accumulated).toBeGreaterThan(10 * 409_400);
   });
 
   // --- the declared fan-out's fate at the accumulating seam ------------------
   // Dropping an over-bound row is normative for the DECLARED fan-out producers
   // (docs/spec/PROTOCOL.md, Fan-out matching), and the accumulating limb takes
-  // that fate where a listed producer is the step charging the crossing. Every
-  // other crossing keeps the refusal: the amplifier cases above charge theirs
-  // from a `replace_regex`, which is not one.
+  // that fate at both its charges: where a listed producer is the step charging
+  // the crossing, and where the row's provenance already carries one at the
+  // aggregate across the key's elements. Every other crossing keeps the refusal:
+  // the amplifier cases above charge theirs from a `replace_regex`, which is not
+  // one.
 
   // A cell of distinct single-character tokens, each amplified to 1,939
   // characters and then split on a separator the amplifier itself wrote, keeping
@@ -3092,6 +3121,90 @@ describe("buildKeyStrings", () => {
       ),
     ).toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  // The row's aggregate charge, which no one step is expanding: distinct
+  // candidates at the per-value ceiling, 1024 of which are exactly
+  // MAX_ASSEMBLED_KEY_LENGTH_PER_ROW, so the 1025th carries the row 4,096
+  // characters past it. Splitting those candidates between the key's two
+  // elements or holding them all in the first is what moves the crossing across
+  // the seam the fate turns on.
+  const ceilingCandidates = (count: number) =>
+    Array.from(
+      { length: count },
+      (_unused, i) => `${"A".repeat(4090)}${String(i).padStart(6, "0")}`,
+    );
+
+  const secondElementPair = () => ["9".repeat(4096), "8".repeat(4096)];
+
+  test("an aggregate crossing on a declared fan-out row drops it for that key", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dataset = makeDataset({
+      last_name: ceilingCandidates(1023),
+      date_of_birth: secondElementPair(),
+    });
+    expect(buildKeyStrings(key, dataset, 0, false, 1)).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /accumulates 4198400 characters of candidate values across the key's elements/,
+    );
+    // The row sits out this key's round alone.
+    expect(buildKeyStrings(dobKey, dataset, 0, false, 2)).toEqual(
+      new Set(secondElementPair()),
+    );
+  });
+
+  test("the same aggregate crossing refuses when an unlisted producer expanded the row", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    let raised: unknown;
+    try {
+      withUnlistedFanOutFunctions(() =>
+        buildKeyStrings(
+          key,
+          makeDataset({
+            last_name: ceilingCandidates(1023),
+            date_of_birth: secondElementPair(),
+          }),
+          0,
+          false,
+          1,
+        ),
+      );
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as UsageError).message).toMatch(
+      /accumulated 4198400 characters of candidate values from row 0 of this party's data \(linkageKeys\[1\]\.elements\[1\]\)/,
+    );
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("an aggregate crossing before any element fanned out refuses", () => {
+    // The same total from the same producer, charged while the element realizing
+    // the multiplicity is still being built: the row carries no fan-out yet, so
+    // the crossing has no producer to bind the drop to and resolves fail-closed.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    let raised: unknown;
+    try {
+      buildKeyStrings(
+        key,
+        makeDataset({
+          last_name: ceilingCandidates(1025),
+          date_of_birth: "19750716",
+        }),
+        0,
+        false,
+        1,
+      );
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as UsageError).message).toMatch(
+      /accumulated 4198400 characters of candidate values from row 0 of this party's data \(linkageKeys\[1\]\.elements\[0\]\)/,
+    );
+    expect(warn).not.toHaveBeenCalled();
   });
 
   // --- the receiver's swapped locators ---------------------------------------
