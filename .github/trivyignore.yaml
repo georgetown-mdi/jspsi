@@ -1,0 +1,47 @@
+# Accepted exceptions to the container image vulnerability scan that
+# .github/workflows/image_smoke.yaml runs on a pull request and
+# .github/workflows/release.yaml runs ahead of a publish.
+#
+# That scan fails on a vulnerability in the image's OS package layer that is
+# HIGH or CRITICAL and has a fix available. An entry here exempts one
+# vulnerability id from it, and is a reviewed decision rather than a way to
+# quiet a build: write the reason it was accepted in `statement`, so a reader
+# can tell an assessed exception from a forgotten one.
+#
+# Every entry carries an `expired_at`. Trivy stops applying an entry on that
+# date and the finding returns, which is the only thing that would ever prompt
+# the entry's removal: while it is in force the gate is green whether or not
+# the condition it was written for still holds, so the weekly scheduled scan in
+# image_smoke.yaml cannot surface a stale acceptance on its own. Expiry turns
+# that silence into a dated re-read -- either the acceptance is renewed with a
+# new date, or the entry comes out.
+#
+# The extension is load-bearing: Trivy picks its parser from it, so this
+# content under an extensionless name parses as a plain list of ids, matches
+# nothing here, and suppresses nothing. Both malformed shapes fail visibly
+# rather than silently widening the exemption -- a body that does not parse as
+# this schema exempts nothing, and an unparseable `expired_at` aborts the scan.
+#
+#   vulnerabilities:
+#     - id: CVE-0000-00000
+#       statement: "why this was accepted"
+#       expired_at: 2026-01-01
+
+vulnerabilities:
+  # Accepted 2026-08-26.
+  - id: CVE-2026-14456
+    statement: >-
+      OpenSSL denial of service via unbounded memory growth in the QUIC
+      server, carried by libcrypto3 and libssl3 at 3.5.7-r0 and fixed at
+      3.5.8-r0. No pin movement reaches it: node:26-alpine, node:26-alpine3.24
+      and node:26.7-alpine all still resolve to the digest already pinned in
+      the Dockerfile, and alpine:3.24 is still the 3.24.1 rootfs that digest
+      was built on, so there is no rebuilt base to bump to. Accepted because
+      the vulnerable path is a QUIC server and neither image role opens one:
+      psilink's transports are SFTP over ssh2, WebRTC data channels, file
+      drop, and the console's localhost HTTP server, and the image's other
+      OpenSSL consumers are the openssl CLI and samba-client. Cleared by
+      bumping the base once the tag is rebuilt -- the bump Dependabot's docker
+      ecosystem opens on its own schedule -- and this entry comes out in that
+      same diff.
+    expired_at: 2026-10-15
