@@ -62,9 +62,10 @@ export interface PartnerPayload {
 // single-issue `every`, so the entire structure yields at most one issue
 // regardless of row OR cell count. A `.max()` is unsafe on either axis: a real
 // exchange has one row per matched record, each as wide as the payload, both
-// legitimately in the millions (MAX_FRAME_SIZE_BYTES bounds them). The predicates
-// mirror `z.string().nullable()` (string-or-null) and the inner `z.array(...)`
-// (Array.isArray) exactly.
+// legitimately in the millions (MAX_FRAME_SIZE_BYTES bounds them). Each predicate
+// stands in for the element schema it replaces -- `z.string().nullable()` for a
+// cell, the inner `z.array(...)` for a row -- and the differential in
+// test/payloadExchange.test.ts is what holds the two to the same accepted set.
 const isPayloadCell = (cell: unknown): boolean =>
   typeof cell === "string" || cell === null;
 const isPayloadRow = (row: unknown): boolean =>
@@ -126,11 +127,12 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
       // issue accumulation at one regardless of count (utils/singleIssueArray.ts)
       // so the burn never happens. A count `.max()` is wrong for `rowIndices`
       // (one per matched record, legitimately in the millions like `rows`) and
-      // unnecessary for `columns`; both predicates mirror their replaced element
-      // schema exactly -- typeof-string for `z.string()`, Number.isSafeInteger
-      // and `>= 0` for `z.number().int().nonnegative()`. `columns` additionally
-      // bounds each NAME's LENGTH to the same MAX_NAME_LENGTH ceiling the
-      // operator's own `terms.payload.receive` names carry: a received column name
+      // unnecessary for `columns`; both predicates stand in for the element schema
+      // they replace -- typeof-string for `z.string()`, Number.isSafeInteger and
+      // `>= 0` for `z.number().int().nonnegative()` -- under the same differential
+      // that covers the `rows` predicates. `columns` additionally bounds each
+      // NAME's LENGTH to the same MAX_NAME_LENGTH ceiling the operator's own
+      // `terms.payload.receive` names carry: a received column name
       // flows verbatim into this party's local exchange-record file (via
       // governance.payloadReceived), and it was bounded that way before it began
       // deriving from the partner's wire message rather than from local terms.
@@ -1003,8 +1005,10 @@ function uniqueColumnName(base: string, taken: ReadonlySet<string>): string {
  * recoverable from the payload values. The remaining columns are the partner's
  * payload columns, each using its original name, prefixed with `their_` only when
  * it collides with our identifier column. All values are RFC 4180 escaped. Null
- * cells in the partner's payload are emitted as empty strings; a row that is not
- * an array, or whose width disagrees with the declared columns, is refused.
+ * cells in the partner's payload are emitted as empty strings; a payload
+ * collection that is not an array, a row that is not an array or whose width
+ * disagrees with the declared columns, and a cell that is neither a string nor
+ * null, are each refused.
  */
 export function buildOutputTable(
   associationTable: AssociationTable,
@@ -1019,6 +1023,24 @@ export function buildOutputTable(
     );
   }
 
+  // Each collection is held to being an array before anything is read from it, so
+  // a caller past the type -- this is an exported entry point whose
+  // PartnerPayload argument no type ties to a parsed frame -- gets the same shape
+  // refusal the malformed rows below get rather than a TypeError from the first
+  // array method that misses.
+  for (const [field, collection] of [
+    ["columns", partnerPayload.columns],
+    ["rowIndices", partnerPayload.rowIndices],
+    ["rows", partnerPayload.rows],
+  ] as const) {
+    if (!Array.isArray(collection)) {
+      throw new Error(
+        `partner payload ${field} is not an array: ` +
+          "refusing to read entries from a value that holds none",
+      );
+    }
+  }
+
   if (partnerPayload.rowIndices.length !== partnerPayload.rows.length) {
     throw new Error(
       "partner payload rowIndices and rows have different lengths: " +
@@ -1026,11 +1048,25 @@ export function buildOutputTable(
     );
   }
 
-  if (!partnerPayload.rows.every((row) => Array.isArray(row))) {
-    throw new Error(
-      "a partner payload row is not an array of cells: " +
-        "refusing to read cell values from a non-row value",
-    );
+  // One pass, refusing a row that is not a row and a cell that is not a cell. The
+  // cell half is what keeps a value of another shape out of the CSV: quoteCsvField
+  // looks for the characters RFC 4180 escapes with `includes`, which an ARRAY
+  // answers by element rather than by substring, so an array cell carrying a
+  // separator reports none and would reach the result unquoted, breaking the row's
+  // framing. isPayloadCell is the wire schema's own cell predicate.
+  for (const row of partnerPayload.rows) {
+    if (!Array.isArray(row)) {
+      throw new Error(
+        "a partner payload row is not an array of cells: " +
+          "refusing to read cell values from a non-row value",
+      );
+    }
+    if (!row.every(isPayloadCell)) {
+      throw new Error(
+        "a partner payload cell is neither a string nor null: " +
+          "refusing to write a value of another shape into the result",
+      );
+    }
   }
 
   const columnCount = partnerPayload.columns.length;

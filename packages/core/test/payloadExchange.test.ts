@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import * as z from "zod";
 
 import {
   preparePayload,
@@ -9,7 +10,10 @@ import {
   reconcileReceivedPayload,
 } from "../src/payloadExchange";
 import { prepareForExchange } from "../src/exchange";
-import { deriveAcceptedLinkageTerms } from "../src/config/linkageTerms";
+import {
+  deriveAcceptedLinkageTerms,
+  MAX_NAME_LENGTH,
+} from "../src/config/linkageTerms";
 import { disclosedColumnNames } from "../src/config/metadata";
 import { OutboundDisclosureRefusalError, UsageError } from "../src/errors";
 
@@ -1223,6 +1227,120 @@ test("exchangePayloads: a columnless frame carrying no rows parses, committing n
   });
 });
 
+// --- the wire schema's element predicates against the schemas they replace ------
+
+// `columns`, `rowIndices` and `rows` are validated by predicates inside a
+// single-issue array (utils/singleIssueArray.ts) rather than by element schemas,
+// which caps issue accumulation on a hostile frame without changing which frames
+// parse. The corpus below is what holds them to that second half: every frame is
+// parsed by the real receive path and by a reference schema written the plain
+// way, and the two verdicts must agree. A frame reaches the schema as parsed
+// JSON, so each is round-tripped through JSON first and only what a JSON body can
+// carry is in scope.
+const referenceFrameSchema = z.object({
+  hasData: z.literal(true),
+  columns: z.array(z.string().min(1).max(MAX_NAME_LENGTH)),
+  rowIndices: z.array(z.number().int().nonnegative()),
+  rows: z.array(z.array(z.string().nullable())),
+});
+
+// One column, one matched row, one cell. Every frame below keeps its collections
+// in agreement whenever its elements are well shaped, so the schema's parity,
+// width and distinctness rules never decide a verdict and the comparison is about
+// element shape alone.
+const frameWith = (overrides: Record<string, unknown>): unknown => ({
+  hasData: true,
+  columns: ["diagnosis"],
+  rowIndices: [0],
+  rows: [["A"]],
+  ...overrides,
+});
+
+const elementShapeCorpus: Array<{ label: string; frame: unknown }> = [
+  { label: "an honest one-column frame", frame: frameWith({}) },
+  { label: "a null cell", frame: frameWith({ rows: [[null]] }) },
+  {
+    label: "a frame carrying nothing",
+    frame: frameWith({ columns: [], rowIndices: [], rows: [] }),
+  },
+  {
+    label: "a column name at the length ceiling",
+    frame: frameWith({ columns: ["x".repeat(MAX_NAME_LENGTH)] }),
+  },
+  { label: "an empty column name", frame: frameWith({ columns: [""] }) },
+  {
+    label: "an overlong column name",
+    frame: frameWith({ columns: ["x".repeat(MAX_NAME_LENGTH + 1)] }),
+  },
+  { label: "a numeric column name", frame: frameWith({ columns: [1] }) },
+  { label: "a null column name", frame: frameWith({ columns: [null] }) },
+  {
+    label: "a columns collection that is not an array",
+    frame: frameWith({ columns: "diagnosis" }),
+  },
+  { label: "a fractional row index", frame: frameWith({ rowIndices: [0.5] }) },
+  { label: "a negative row index", frame: frameWith({ rowIndices: [-1] }) },
+  {
+    label: "a row index past the safe-integer ceiling",
+    frame: frameWith({ rowIndices: [2 ** 53] }),
+  },
+  { label: "a stringified row index", frame: frameWith({ rowIndices: ["0"] }) },
+  {
+    label: "a rowIndices collection that is not an array",
+    frame: frameWith({ rowIndices: 0 }),
+  },
+  { label: "a numeric cell", frame: frameWith({ rows: [[5]] }) },
+  { label: "a boolean cell", frame: frameWith({ rows: [[true]] }) },
+  { label: "an object cell", frame: frameWith({ rows: [[{}]] }) },
+  { label: "an array cell", frame: frameWith({ rows: [[["A"]]] }) },
+  { label: "a string row", frame: frameWith({ rows: ["A"] }) },
+  { label: "a numeric row", frame: frameWith({ rows: [0] }) },
+  { label: "a null row", frame: frameWith({ rows: [null] }) },
+  {
+    label: "an array-like object row",
+    frame: frameWith({ rows: [{ 0: "A", length: 1 }] }),
+  },
+  {
+    label: "a rows collection that is not an array",
+    frame: frameWith({ rows: "A" }),
+  },
+];
+
+/** Whether the receive path accepts `frame` as the partner's payload message. */
+async function parsesOnTheWire(frame: unknown): Promise<boolean> {
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send(frame);
+  return initiatorPromise.then(
+    () => true,
+    () => false,
+  );
+}
+
+test("the wire schema's element predicates accept exactly what the element schemas they replace accept", async () => {
+  const accepted: string[] = [];
+  const refused: string[] = [];
+  for (const { label, frame } of elementShapeCorpus) {
+    const asDelivered: unknown = JSON.parse(JSON.stringify(frame));
+    const wireVerdict = await parsesOnTheWire(asDelivered);
+    const referenceVerdict =
+      referenceFrameSchema.safeParse(asDelivered).success;
+    // Labelled so a divergence names the frame that diverged rather than
+    // reporting a bare boolean mismatch.
+    expect(`${label}: ${String(wireVerdict)}`).toBe(
+      `${label}: ${String(referenceVerdict)}`,
+    );
+    (wireVerdict ? accepted : refused).push(label);
+  }
+  // A corpus that drifted to all-accepting or all-refusing would agree with any
+  // predicate at all, so both verdicts have to be represented.
+  expect(accepted.length).toBeGreaterThan(0);
+  expect(refused.length).toBeGreaterThan(0);
+});
+
 test("exchangePayloads: send rejection rejects the initiator", async () => {
   const sendError = new Error("send failed");
   const conn: MessageConnection = {
@@ -1720,6 +1838,93 @@ test("buildOutputTable: throws when a partner payload row is not a row at all", 
   expect(() =>
     buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
   ).toThrow("not an array of cells");
+});
+
+/** The error `run` threw, failing the test when it threw nothing. */
+function refusalFrom(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (err: unknown) {
+    return err;
+  }
+  throw new Error("expected a refusal, but the call returned");
+}
+
+test("buildOutputTable: an array-valued partner payload cell is refused rather than written unquoted", () => {
+  // quoteCsvField asks its value for the characters RFC 4180 escapes with
+  // `includes`, which an array answers by element: `["a,b"].includes(",")` is
+  // false, so the cell would reach the result unquoted and its own separator
+  // would frame two result fields where the payload declared one value.
+  const partnerPayload: PartnerPayload = {
+    columns: ["notes"],
+    rowIndices: [0],
+    rows: [[["a,b"] as unknown as string]],
+  };
+  expect(() =>
+    buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
+  ).toThrow("neither a string nor null");
+});
+
+test("buildOutputTable: a partner payload cell of any other shape is refused as a shape fault, not a TypeError", () => {
+  // The exported entry point takes a plain PartnerPayload, so a caller past the
+  // type can hand it a cell of any shape at all. Each is refused with the same
+  // class of message the not-a-row and width faults carry.
+  for (const cell of [5, true, {}, ["a"], undefined, Symbol("s")]) {
+    const partnerPayload: PartnerPayload = {
+      columns: ["notes"],
+      rowIndices: [0],
+      rows: [[cell as unknown as string]],
+    };
+    const refusal = refusalFrom(() =>
+      buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
+    );
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal).not.toBeInstanceOf(TypeError);
+    expect((refusal as Error).message).toContain("neither a string nor null");
+  }
+});
+
+test("buildOutputTable: a hole in a partner payload row is emitted as an empty cell", () => {
+  // `Array.prototype.every` skips holes, so a sparse row passes the cell check
+  // exactly as it passes the wire schema's row predicate. No JSON body carries a
+  // hole, so this shape arrives only from a caller past the type, and what it
+  // writes is the empty cell an absent value gets -- neither an unquoted value
+  // nor a TypeError.
+  const sparseRow = new Array<string | null>(1);
+  const partnerPayload: PartnerPayload = {
+    columns: ["notes"],
+    rowIndices: [0],
+    rows: [sparseRow],
+  };
+  const { rows } = buildOutputTable(
+    [[0], [0]],
+    rawRows,
+    metaWithId,
+    partnerPayload,
+  );
+  expect(rows).toEqual([["P0", "0", ""]]);
+});
+
+test("buildOutputTable: a partner payload collection that is not an array is refused as a shape fault, not a TypeError", () => {
+  // Each collection has its length read and is walked, so a non-array value would
+  // otherwise reach the first array method that misses. The values below all
+  // carry a `length` of 1, so nothing downstream catches them either.
+  for (const field of ["columns", "rowIndices", "rows"] as const) {
+    const partnerPayload = {
+      columns: ["notes"],
+      rowIndices: [0],
+      rows: [["Q0"]],
+      [field]: "x",
+    } as unknown as PartnerPayload;
+    const refusal = refusalFrom(() =>
+      buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
+    );
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal).not.toBeInstanceOf(TypeError);
+    expect((refusal as Error).message).toContain(
+      `partner payload ${field} is not an array`,
+    );
+  }
 });
 
 test("buildOutputTable: the width refusal states the declared count in agreement", () => {
