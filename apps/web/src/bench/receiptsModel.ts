@@ -341,7 +341,7 @@ export function receiptsAdvisories(
 ): Array<ReceiptsAdvisory> {
   if (draft.mode !== "certificate") return [];
   return [
-    { message: IDENTITY_LOCATION_ADVISORY, severity: "info" },
+    { message: IDENTITY_LOCATION_ADVISORY, severity: "warning" },
     { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
     ...(draft.partnerFingerprint.trim() === ""
       ? [{ message: NO_PARTNER_PIN_ADVISORY, severity: "warning" as const }]

@@ -768,10 +768,11 @@ describe("the receipts card's model", () => {
     });
   });
 
-  test("the unpinned advisory is the only one raised above a notice", () => {
-    // It is what this run costs the operator if they start it as authored, while
-    // the other two say where a file lands; one undifferentiated list would show
-    // them at the same weight.
+  test("the identity-location and unpinned advisories both raise above a notice", () => {
+    // The identity advisory names a key-disclosure hazard that is live by
+    // default on the single-mount filedrop layout, so it carries the same
+    // warning weight as the unpinned-partner cost. The receipt-location notice
+    // states only where a file lands, so it stays at info.
     const unpinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
@@ -780,12 +781,12 @@ describe("the receipts card's model", () => {
       receiptsAdvisories(unpinned)
         .filter((advisory) => advisory.severity === "warning")
         .map((advisory) => advisory.message),
-    ).toEqual([NO_PARTNER_PIN_ADVISORY]);
+    ).toEqual([IDENTITY_LOCATION_ADVISORY, NO_PARTNER_PIN_ADVISORY]);
     expect(
       receiptsAdvisories(unpinned)
         .filter((advisory) => advisory.severity === "info")
         .map((advisory) => advisory.message),
-    ).toEqual([IDENTITY_LOCATION_ADVISORY, RECEIPT_LOCATION_NOTICE]);
+    ).toEqual([RECEIPT_LOCATION_NOTICE]);
   });
 
   test("the unpinned advisory names the whole consequence, not just the receipt", () => {
@@ -820,7 +821,7 @@ describe("the receipts card's model", () => {
       partnerFingerprint: PARTNER_FINGERPRINT,
     });
     expect(receiptsAdvisories(pinned)).toEqual([
-      { message: IDENTITY_LOCATION_ADVISORY, severity: "info" },
+      { message: IDENTITY_LOCATION_ADVISORY, severity: "warning" },
       { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
     ]);
   });
