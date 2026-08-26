@@ -24,6 +24,8 @@ import {
   tempDataRoot,
 } from "../utils/jobFixtures";
 
+import type { SftpProbeResult } from "@jobs/sftpProbe";
+
 /** The repository root, from this file's place at apps/web/test/unit/. */
 const REPO_ROOT = fileURLToPath(new URL("../../../..", import.meta.url));
 
@@ -337,6 +339,41 @@ describe("an unreachable probe carries the child's diagnosis when it emitted one
         shape: "tls-alert",
         excerpt: "\\x15\\x03\\x03",
       },
+    });
+  });
+
+  // The CLI escapes the bytes it cannot let onto a terminal as JSON's OWN
+  // `\uHHHH`, which is an encoding of the line rather than a sanitization of the
+  // value. So this boundary must see exactly what it saw when the same bytes
+  // crossed raw, and escape them once. Driven end to end through a spawned child
+  // -- the same path a real probe takes -- with the two encodings of one answer,
+  // rather than reasoned about from the encoder's shape.
+  test("a JSON-escaped excerpt and the same bytes raw reach this boundary alike", async () => {
+    const del = String.fromCharCode(0x7f);
+    const c1 = String.fromCharCode(0x9b);
+    const drive = async (line: string): Promise<SftpProbeResult> =>
+      probeSftpHostKey({
+        host: "sftp.example.org",
+        binaryPath: STUB_CLI_PATH,
+        childEnv: { STUB_EXIT_CODE: "69", STUB_PROBE_STDOUT: line + "\n" },
+      });
+
+    const escaped = await drive(
+      '{"diagnosis":"non_ssh","shape":"http","excerpt":"a\\u007fb\\u009bc"}',
+    );
+    const raw = await drive(
+      JSON.stringify({
+        diagnosis: "non_ssh",
+        shape: "http",
+        excerpt: `a${del}b${c1}c`,
+      }),
+    );
+    expect(escaped).toEqual(raw);
+    // Escaped once: a `\xHH` per byte, not a doubled backslash or a surviving
+    // `\u` form.
+    expect(escaped).toEqual({
+      kind: "unreachable",
+      diagnosis: { kind: "nonSsh", shape: "http", excerpt: "a\\x7fb\\x9bc" },
     });
   });
 });

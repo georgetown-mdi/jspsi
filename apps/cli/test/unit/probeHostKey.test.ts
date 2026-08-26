@@ -1,6 +1,12 @@
 import { describe, expect, test } from "vitest";
 import logLibrary from "loglevel";
-import { getLogger, keyTypeFromBlob, UsageError } from "@psilink/core";
+import {
+  getLogger,
+  keyTypeFromBlob,
+  sanitizeErrorForDisplay,
+  sanitizeForDisplay,
+  UsageError,
+} from "@psilink/core";
 import type { PresentedHostKey, SFTPConnectionConfig } from "@psilink/core";
 
 import {
@@ -9,6 +15,7 @@ import {
   probeHostKeyLines,
   type ProbeHostKeyDeps,
 } from "../../src/commands/probeHostKey";
+import { explainPeerIdentificationFailure } from "../../src/connection/sftpPeerIdentification";
 import { configureStderrLogging } from "../../src/util/cli";
 import {
   captureStdio,
@@ -325,5 +332,122 @@ describe("probeHostKeyLines formats and validates the presented key", () => {
     );
     await expect(run).rejects.toThrow(/ECONNREFUSED/);
     await expect(run).rejects.not.toBeInstanceOf(UsageError);
+  });
+});
+
+// What the machine route puts ON A TERMINAL. A `--json` consumer's commonest
+// reflex with a line it did not expect is to print it, so what these assert is
+// the emitted LINE's own bytes rather than only that it parses back. The bytes
+// are built by code point so this file stays readable ASCII.
+describe("the --json lines are safe to print as they stand", () => {
+  const byte = (code: number): string => String.fromCharCode(code);
+  /** DEL and a C1 control: the ranges a JSON encoding leaves raw, both
+   * reachable, since the peer's answer is decoded latin1 byte for byte. */
+  const DEL = byte(0x7f);
+  const C1_CSI = byte(0x9b);
+  const PRINTABLE_ASCII_ONLY = /^[\x20-\x7e]*$/;
+
+  const nonSshLine = (excerpt: string): string =>
+    probeDiagnosisJsonLine({ kind: "non-ssh", shape: "unrecognized", excerpt });
+
+  test("a peer answering with DEL and a C1 byte has both escaped", () => {
+    const line = nonSshLine(`a${DEL}b${C1_CSI}c`);
+    expect(line).toContain("\\u007f");
+    expect(line).toContain("\\u009b");
+    expect(line.includes(DEL)).toBe(false);
+    expect(line.includes(C1_CSI)).toBe(false);
+  });
+
+  test("every byte a latin1-decoded answer can carry leaves the line printable ASCII", () => {
+    const everyByte = Array.from({ length: 256 }, (_, code) => byte(code)).join(
+      "",
+    );
+    expect(PRINTABLE_ASCII_ONLY.test(nonSshLine(everyByte))).toBe(true);
+  });
+
+  test("the success line escapes the server's key type the same way", async () => {
+    const result = await probeHostKeyLines(
+      {
+        sftpUrl: "sftp://sftp.example.org",
+        connectTimeoutSeconds: 10,
+        json: true,
+        verbosity: 0,
+      },
+      makeDeps({ fingerprint: FP, keyType: `ssh-ed25519${DEL}${C1_CSI}` }),
+    );
+    expect(PRINTABLE_ASCII_ONLY.test(result.stdout ?? "")).toBe(true);
+    expect(result.stdout).toContain("\\u007f");
+  });
+
+  test("the line keeps its keys and its value types", () => {
+    const parsed = JSON.parse(nonSshLine(`a${DEL}`)) as Record<string, unknown>;
+    expect(Object.keys(parsed)).toEqual(["diagnosis", "shape", "excerpt"]);
+    expect(typeof parsed["excerpt"]).toBe("string");
+    expect(
+      Object.keys(
+        JSON.parse(
+          probeDiagnosisJsonLine({ kind: "closed-unanswered" }),
+        ) as Record<string, unknown>,
+      ),
+    ).toEqual(["diagnosis"]);
+  });
+
+  // The escapes are the JSON encoding's own, so a consumer parses back the
+  // peer's bytes unchanged and escapes them ONCE at its own display sink. Held
+  // as a check because the console's re-validation sits downstream: escaping
+  // rather than encoding here would arrive there as text its own pass escapes a
+  // second time.
+  test("the parsed excerpt is the peer's own bytes, so a consumer escapes once", () => {
+    const excerpt = `a${DEL}b${C1_CSI}c`;
+    const parsed = JSON.parse(nonSshLine(excerpt)) as { excerpt: string };
+    expect(parsed.excerpt).toBe(excerpt);
+    expect(sanitizeForDisplay(parsed.excerpt)).toBe("a\\x7fb\\x9bc");
+  });
+});
+
+// A peer that answers the port with PEM-shaped bytes. Neither route may be the
+// softer one: the excerpt is redacted where it is interpolated on both.
+describe("private-key material is redacted on both routes", () => {
+  const KEY_BODY = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmU";
+  const WHOLE_BLOCK =
+    "HTTP/1.0 200 OK\r\n\r\n-----BEGIN OPENSSH PRIVATE KEY-----\r\n" +
+    `${KEY_BODY}\r\n-----END OPENSSH PRIVATE KEY-----\r\n`;
+  /** The realistic shape: the excerpt bound cuts the block, leaving a BEGIN
+   * marker with no END, which the redaction's fail-closed dangling rule takes. */
+  const TRUNCATED_BLOCK = `HTTP/1.0 200 OK\r\n\r\n-----BEGIN RSA PRIVATE KEY-----\r\n${KEY_BODY}`;
+
+  const machineExcerpt = (excerpt: string): string =>
+    (
+      JSON.parse(
+        probeDiagnosisJsonLine({ kind: "non-ssh", shape: "http", excerpt }),
+      ) as { excerpt: string }
+    ).excerpt;
+
+  const humanChain = (excerpt: string): string =>
+    sanitizeErrorForDisplay(
+      explainPeerIdentificationFailure(
+        new Error("Connection lost before handshake"),
+        { kind: "non-ssh", shape: "http", excerpt },
+        { host: "sftp.example.org", port: 22 },
+      ),
+    );
+
+  test.each([
+    ["a whole block", WHOLE_BLOCK],
+    ["a block the excerpt bound truncated", TRUNCATED_BLOCK],
+  ])("the machine route redacts %s", (_name, excerpt) => {
+    const redacted = machineExcerpt(excerpt);
+    expect(redacted).toContain("[redacted private key]");
+    expect(redacted).not.toContain(KEY_BODY);
+    expect(redacted).not.toContain("PRIVATE KEY-----");
+  });
+
+  test.each([
+    ["a whole block", WHOLE_BLOCK],
+    ["a block the excerpt bound truncated", TRUNCATED_BLOCK],
+  ])("the human route redacts %s", (_name, excerpt) => {
+    const rendered = humanChain(excerpt);
+    expect(rendered).toContain("[redacted private key]");
+    expect(rendered).not.toContain(KEY_BODY);
   });
 });
