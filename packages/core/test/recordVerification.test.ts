@@ -503,8 +503,9 @@ describe("verifyExchangeRecord checks the recorded result size", () => {
 // The shapes below are hand-built rather than verified out of a record: the
 // guard is exported and takes a plain report, so what it answers for a shape no
 // core-built report reaches -- an empty commitment map, a map carrying no
-// association table -- is part of its contract, and an accusation may not rest
-// on a sweep that passes because there was nothing to sweep.
+// association table, a figure at fault under a verdict that did not fail -- is
+// part of its contract, and an accusation may not rest on a sweep that passes
+// because there was nothing to sweep.
 describe("recordAlterationIsTheOnlyExplanation", () => {
   const onlyTheFigureAtFault: RecordVerificationReport = {
     outcome: "failed",
@@ -550,6 +551,14 @@ describe("recordAlterationIsTheOnlyExplanation", () => {
     label: string;
     report: RecordVerificationReport;
   }> = [
+    {
+      label: "a figure at fault under a verdict that verified",
+      report: { ...onlyTheFigureAtFault, outcome: "verified" },
+    },
+    {
+      label: "a figure at fault under a verdict that is merely incomplete",
+      report: { ...onlyTheFigureAtFault, outcome: "incomplete" },
+    },
     {
       label: "a result size that recounted",
       report: {

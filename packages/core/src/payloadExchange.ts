@@ -99,10 +99,17 @@ const hasDistinctRowIndices = (rowIndices: ReadonlyArray<number>): boolean => {
 // that reads it. preparePayload emits exactly one cell per transmitted column, so
 // no honest frame is narrowed by this. The scan reads only the row lengths the
 // frame already materialized and stops at the first offender.
+//
+// Each row is held to being an array before its width is read: a string carries a
+// `length` of its own, so one spelling the declared count would pass a width
+// comparison alone and hand out its characters as the row's cells. The wire schema
+// refuses a non-array row at parse, but this guard also stands behind an exported
+// entry point whose PartnerPayload argument no type ties to a parsed frame.
 const hasOneCellPerColumn = (
   columnCount: number,
   rows: ReadonlyArray<ReadonlyArray<string | null>>,
-): boolean => rows.every((row) => row.length === columnCount);
+): boolean =>
+  rows.every((row) => Array.isArray(row) && row.length === columnCount);
 
 const payloadWireSchema = z.discriminatedUnion("hasData", [
   z.object({ hasData: z.literal(false) }),
@@ -996,8 +1003,8 @@ function uniqueColumnName(base: string, taken: ReadonlySet<string>): string {
  * recoverable from the payload values. The remaining columns are the partner's
  * payload columns, each using its original name, prefixed with `their_` only when
  * it collides with our identifier column. All values are RFC 4180 escaped. Null
- * cells in the partner's payload are emitted as empty strings; a row whose width
- * disagrees with the declared columns is refused.
+ * cells in the partner's payload are emitted as empty strings; a row that is not
+ * an array, or whose width disagrees with the declared columns, is refused.
  */
 export function buildOutputTable(
   associationTable: AssociationTable,
@@ -1019,12 +1026,18 @@ export function buildOutputTable(
     );
   }
 
-  if (
-    !hasOneCellPerColumn(partnerPayload.columns.length, partnerPayload.rows)
-  ) {
+  if (!partnerPayload.rows.every((row) => Array.isArray(row))) {
+    throw new Error(
+      "a partner payload row is not an array of cells: " +
+        "refusing to read cell values from a non-row value",
+    );
+  }
+
+  const columnCount = partnerPayload.columns.length;
+  if (!hasOneCellPerColumn(columnCount, partnerPayload.rows)) {
     throw new Error(
       "partner payload rows do not carry one cell per declared column: " +
-        `expected ${partnerPayload.columns.length} cells per row`,
+        `expected ${columnCount} cell${columnCount === 1 ? "" : "s"} per row`,
     );
   }
 

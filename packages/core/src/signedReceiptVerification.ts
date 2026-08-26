@@ -814,6 +814,27 @@ function decideParty(
   };
 }
 
+// The anchoring assignment produces the three CertificateAnchorStatus values and
+// nothing else, so a status from outside them anchors nothing and reaches the
+// decision only from a caller that stepped past the type. Every tier of the
+// verdict words the slot from that status -- the verified headline names what
+// anchored each certificate, and the degraded ones still carry the row -- so an
+// unnamed status is a sentence naming an anchor that exists nowhere, whichever
+// tier the run lands on. Refused for the whole decision rather than on the
+// verified arm alone.
+function refuseAnchorOutsideTheUnion(party: SignedReceiptPartyReport): void {
+  if (
+    party.certificateAnchor !== "partner-pin" &&
+    party.certificateAnchor !== "local-identity" &&
+    party.certificateAnchor !== "unanchored"
+  )
+    throw new Error(
+      `a dual-signed record reports the ${party.role}'s certificate anchor ` +
+        `as ${party.certificateAnchor}: the verdict would carry a status no ` +
+        "surface has words for",
+    );
+}
+
 function anchoredSlot(
   party: SignedReceiptPartyReport,
 ): AnchoredCertificateSlot {
@@ -827,19 +848,6 @@ function anchoredSlot(
       `a verified dual-signed record leaves the ${party.role}'s certificate ` +
         "unanchored: the verdict would claim both certificates were anchored " +
         "when one was not",
-    );
-  // The two anchored kinds are the only sources this verification establishes,
-  // so a status outside them anchors nothing at all -- it reaches here only from
-  // a caller that stepped past the type. Naming it would put an anchor that does
-  // not exist under a verified headline on every surface at once.
-  if (
-    party.certificateAnchor !== "partner-pin" &&
-    party.certificateAnchor !== "local-identity"
-  )
-    throw new Error(
-      `a verified dual-signed record reports the ${party.role}'s certificate ` +
-        `anchor as ${party.certificateAnchor}: the verdict would name an ` +
-        "anchor that does not exist",
     );
   return { role: party.role, anchor: party.certificateAnchor };
 }
@@ -976,7 +984,10 @@ function decidedRows(
  * as failed, a run anchoring neither certificate beside a pinned value that
  * reached one, and a local identity reported as matching neither certificate
  * without stating how it reached the verification -- named or resolved being the
- * whole difference between a contradiction and a note.
+ * whole difference between a contradiction and a note. A certificate anchor from
+ * outside the {@link CertificateAnchorStatus} union is refused on the same
+ * footing, whatever the outcome: only a caller past the type can state one, and
+ * no surface has words for it.
  */
 export function decideSignedReceiptVerdict(
   report: DualSignedRecordVerificationReport,
@@ -991,6 +1002,7 @@ export function decideSignedReceiptVerdict(
         "contradicts the record, one resolved without being asked does not",
     );
   const parties = [report.initiator, report.responder];
+  for (const party of parties) refuseAnchorOutsideTheUnion(party);
   const unanchored = parties.filter(
     (party) => party.certificateAnchor === "unanchored",
   );

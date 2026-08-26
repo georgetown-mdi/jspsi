@@ -915,23 +915,28 @@ describe("decideSignedReceiptVerdict", () => {
     ).toThrow(/leaves the responder's certificate unanchored/);
   });
 
-  test("a verified verdict over an anchor outside the union is refused, not named", () => {
-    // The anchoring assignment produces the three statuses the union carries and
-    // nothing else, so a status from outside it reaches the decision only from a
-    // caller that stepped past the type -- where naming it would put an anchor
-    // that exists nowhere under a verified headline.
-    const outsideTheUnion: string = "bogus-anchor";
-    expect(() =>
-      decideSignedReceiptVerdict(
-        handBuiltReport({
-          responder: {
-            ...handBuiltParty("responder"),
-            certificateAnchor: outsideTheUnion as CertificateAnchorStatus,
-          },
-        }),
-      ),
-    ).toThrow(/certificate anchor as bogus-anchor/);
-  });
+  test.each(["verified", "incomplete", "failed"] as const)(
+    "an anchor outside the union is refused under a %s outcome, not named",
+    (outcome) => {
+      // The anchoring assignment produces the three statuses the union carries
+      // and nothing else, so a status from outside it reaches the decision only
+      // from a caller that stepped past the type. Every surface words the slot
+      // from that status, on the degraded headlines as much as the verified one,
+      // so an unnamed status is a sentence naming an anchor that exists nowhere.
+      const outsideTheUnion: string = "bogus-anchor";
+      expect(() =>
+        decideSignedReceiptVerdict(
+          handBuiltReport({
+            outcome,
+            responder: {
+              ...handBuiltParty("responder"),
+              certificateAnchor: outsideTheUnion as CertificateAnchorStatus,
+            },
+          }),
+        ),
+      ).toThrow(/certificate anchor as bogus-anchor/);
+    },
+  );
 
   test("a matched pinned value beside two unanchored slots is refused, not advised on", () => {
     // A pinned value that matched anchors the slot it matched, so a report saying

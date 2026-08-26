@@ -156,11 +156,18 @@ export interface RecordVerificationInputs {
  * for the table the figure counts -- fails this guard instead of passing it on a
  * vacuous sweep: the accusation claims nothing while any element of the record
  * is merely unverified.
+ *
+ * The failed verdict is required of the report itself rather than inherited from
+ * a caller that asked it first: the guard is exported over a plain report, so a
+ * figure at fault under a verdict that verified or is merely incomplete -- a
+ * report core never writes, but one any consumer of the type can hand over --
+ * would otherwise draw the unhedged accusation from a verdict that made none.
  */
 export function recordAlterationIsTheOnlyExplanation(
   report: RecordVerificationReport,
 ): boolean {
   return (
+    report.outcome === "failed" &&
     report.resultSize === "mismatch" &&
     report.termsHash === "verified" &&
     report.commitments.associationTable === "verified" &&

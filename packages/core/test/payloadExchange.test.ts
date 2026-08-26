@@ -1707,6 +1707,41 @@ test("buildOutputTable: throws when a partner payload row is wider than the decl
   ).toThrow("one cell per declared column");
 });
 
+test("buildOutputTable: throws when a partner payload row is not a row at all", () => {
+  // The exported entry point takes a plain PartnerPayload, so a caller past the
+  // type can hand it a string whose LENGTH matches the declared column count.
+  // The width comparison alone admits it, and the cells the result would then
+  // carry are that string's characters, one per column.
+  const partnerPayload: PartnerPayload = {
+    columns: ["partner_id", "notes"],
+    rowIndices: [0],
+    rows: ["Q0" as unknown as Array<string | null>],
+  };
+  expect(() =>
+    buildOutputTable([[0], [0]], rawRows, metaWithId, partnerPayload),
+  ).toThrow("not an array of cells");
+});
+
+test("buildOutputTable: the width refusal states the declared count in agreement", () => {
+  const oneColumn: PartnerPayload = {
+    columns: ["partner_id"],
+    rowIndices: [0],
+    rows: [["Q0", "extra"]],
+  };
+  expect(() =>
+    buildOutputTable([[0], [0]], rawRows, metaWithId, oneColumn),
+  ).toThrow("expected 1 cell per row");
+
+  const twoColumns: PartnerPayload = {
+    columns: ["partner_id", "notes"],
+    rowIndices: [0],
+    rows: [["Q0"]],
+  };
+  expect(() =>
+    buildOutputTable([[0], [0]], rawRows, metaWithId, twoColumns),
+  ).toThrow("expected 2 cells per row");
+});
+
 // --- match multiplicity: payload rows per record, result rows per pair --------
 //
 // Under a deduplicating cardinality one side of the association table repeats a
