@@ -1233,12 +1233,27 @@ function noteFanOutProducer(
     provenance.fromUnlistedFunction = true;
 }
 
+// Add one candidate to a step's accumulating output and report the characters it
+// RETAINED: a duplicate the set collapses retains nothing, so it is not charged
+// to the accumulation bound.
+function addCandidate(out: Set<string>, candidate: string): number {
+  const size = out.size;
+  out.add(candidate);
+  return out.size > size ? candidate.length : 0;
+}
+
 // `coalesce` is the only function that operates on null (or an empty array
 // produced by prior null-filtering). All other functions null-propagate.
+//
+// `site` is supplied on the partner-authored element-transform path alone: the
+// magnitude bound below is the one the agreed terms make necessary, and the
+// operator's own standardization pipeline -- its config and its data both local
+// -- runs without it (docs/notes/bound-transformed-value.md).
 function applyStep(
   current: FieldValue,
   step: CompiledStep,
   provenance?: FanOutProvenance,
+  site?: CandidateAccumulationSite,
 ): FieldValue {
   if (step.kind === "coalesce") {
     if (current === null || (current instanceof Set && current.size === 0)) {
@@ -1251,15 +1266,26 @@ function applyStep(
 
   if (current instanceof Set) {
     const out = new Set<string>();
+    // The row's magnitude invariant, enforced as the candidates are allocated
+    // rather than once they all exist: a step runs element-wise over an expanded
+    // set, so it allocates one output per candidate, and the per-value ceiling
+    // (applyElementTransform) reads the finished set -- by which point a set N
+    // times the ceiling has already been built. Charging each candidate as it
+    // lands holds the accumulated set to the same total the assembled key
+    // strings carry, plus the one candidate being produced when the total
+    // crosses.
+    let accumulated = 0;
     for (const v of current) {
       const r = step.fn(v);
       if (r === null) continue;
       if (r instanceof Set) {
         noteFanOutProducer(r, step.isListedFanOutFunction, provenance);
-        for (const sv of r) out.add(sv);
+        for (const sv of r) accumulated += addCandidate(out, sv);
       } else {
-        out.add(r);
+        accumulated += addCandidate(out, r);
       }
+      if (site !== undefined && accumulated > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW)
+        throw accumulatedCandidatesTooLongRefusal(site, accumulated);
     }
     return out.size === 0 ? null : out;
   }
@@ -1702,8 +1728,8 @@ function elementValueTooLongRefusal(
 ): UsageError {
   return new UsageError(
     `a linkage key element reads a ${length}-character value from row ` +
-      `${rowIndex} of this party's data ` +
-      `(${keyElementPath(keyIndex, elementIndex)}), longer than the ` +
+      `${rowIndex} of this party's data (the column bound at ` +
+      `${keyElementPath(keyIndex, elementIndex)}), longer than the ` +
       `${MAX_TRANSFORMED_VALUE_LENGTH}-character value an element carries ` +
       "into a key string. Every element's value is carried into every key " +
       "string the row builds, and an element transform is free to multiply " +
@@ -1769,22 +1795,26 @@ function valueOverCeiling(result: FieldValue): number | undefined {
 // element-wise across the candidates and drops a candidate a null-producing step
 // filters -- the same execution the field-level pipeline uses, so the two
 // surfaces cannot drift.
+//
+// `site` locates the element the steps are declared at; `columnElementIndex`
+// locates the element that declares the COLUMN this value came from. The two
+// differ only on the receiver of a key whose `swap` moved the fields, where a
+// refusal on the value READ must name the column's own position.
 function applyElementTransform(
   value: string,
   steps: TransformStep[] | undefined,
   provenance: FanOutProvenance,
-  keyIndex: number | undefined,
-  elementIndex: number,
-  rowIndex: number,
+  site: CandidateAccumulationSite,
+  columnElementIndex: number,
 ): string[] {
   // The magnitude ceiling's base case, ahead of the no-steps early return so it
   // also binds an element that declares no transform at all and carries a raw
   // cell straight into the key.
   if (value.length > MAX_TRANSFORMED_VALUE_LENGTH)
     throw elementValueTooLongRefusal(
-      keyIndex,
-      elementIndex,
-      rowIndex,
+      site.keyIndex,
+      columnElementIndex,
+      site.rowIndex,
       value.length,
     );
   // No steps: the value passes through unchanged (the empty-pipeline identity),
@@ -1797,34 +1827,53 @@ function applyElementTransform(
   }
   let current: FieldValue = value;
   for (const [stepIndex, step] of compiled.entries()) {
-    current = applyStep(current, step, provenance);
+    current = applyStep(current, step, provenance, site);
     const over = valueOverCeiling(current);
     if (over !== undefined)
       throw transformStepValueTooLongRefusal(
-        keyIndex,
-        elementIndex,
+        site.keyIndex,
+        site.elementIndex,
         stepIndex,
         steps[stepIndex].function,
-        rowIndex,
+        site.rowIndex,
         over,
       );
   }
   return toValueSet(current);
 }
 
+// The receiver's element list for a key declaring `swap`, paired with the
+// positions whose fields it exchanged. The swap moves the field references and
+// leaves each element's own name and transforms where they are, so on the
+// receiver the position that READS a column and the position that DECLARES it
+// are different ones; `pair` is what lets a refusal name whichever of the two it
+// is about.
 function swapElements(
   elements: LinkageKeyElement[],
   [nameA, nameB]: [string, string],
-): LinkageKeyElement[] {
+): { elements: LinkageKeyElement[]; pair: [number, number] | undefined } {
   const idA = elements.findIndex((e) => (e.name ?? e.field) === nameA);
   const idB = elements.findIndex((e) => (e.name ?? e.field) === nameB);
-  if (idA === -1 || idB === -1) return elements;
-  const swapped = [...elements];
-  // Swap the field references while keeping each element's own name and
-  // transforms.
-  swapped[idA] = { ...elements[idA], field: elements[idB].field };
-  swapped[idB] = { ...elements[idB], field: elements[idA].field };
-  return swapped;
+  if (idA === -1 || idB === -1) return { elements, pair: undefined };
+  const exchanged = [...elements];
+  exchanged[idA] = { ...elements[idA], field: elements[idB].field };
+  exchanged[idB] = { ...elements[idB], field: elements[idA].field };
+  return { elements: exchanged, pair: [idA, idB] };
+}
+
+// The element position that DECLARES the column the element at `elementIndex`
+// reads -- the same position everywhere but the two swapped positions on a
+// receiver, where the value comes from the sibling's declared column while the
+// transform stays the element's own.
+function columnDeclaringElementIndex(
+  pair: [number, number] | undefined,
+  elementIndex: number,
+): number {
+  if (pair === undefined) return elementIndex;
+  const [idA, idB] = pair;
+  if (elementIndex === idA) return idB;
+  if (elementIndex === idB) return idA;
+  return elementIndex;
 }
 
 /**
@@ -1844,8 +1893,10 @@ function swapElements(
  * bounds the COUNT of key strings, not their bytes: a fuzzy element's value is
  * bounded by MAX_FUZZY_EXPANSION_INPUT_LENGTH, but a non-fuzzy element in the
  * same key carries its full local cell, which the product replicates, so the
- * per-row byte total scales with the operator's own longest cell times this
- * cap. The recorded limit lives in docs/spec/CHANNEL_SECURITY.md.
+ * per-row byte total would scale with the operator's own longest cell times
+ * this cap. What holds it is the byte limb beside this one,
+ * {@link MAX_ASSEMBLED_KEY_LENGTH_PER_ROW}, measured on the same projection.
+ * Both are recorded in docs/spec/CHANNEL_SECURITY.md.
  */
 const MAX_KEY_STRINGS_PER_ROW = 1024;
 
@@ -1924,6 +1975,50 @@ function keyStringLengthCapRefusal(
   );
 }
 
+/**
+ * The key element whose candidates are accumulating, so the bound applied where
+ * they are allocated ({@link applyStep}, and the element's own candidate list in
+ * {@link buildKeyStrings}) can locate its refusal by the same issue path the
+ * per-value ceiling uses. One per (element, row) on the partner-authored path.
+ */
+interface CandidateAccumulationSite {
+  readonly keyIndex: number | undefined;
+  readonly elementIndex: number;
+  readonly rowIndex: number;
+}
+
+// The byte limb again, measured while the candidates accumulate rather than on
+// the finished projection. The row index and the total are derived integers and
+// the path locates the element by index, so the message echoes neither the value
+// nor the partner's free text.
+//
+// The fate is the refusal rather than the drop the assembled limbs take for a
+// declared fan-out producer: which fate a row takes depends on the provenance of
+// the WHOLE row's multiplicity, and an element still accumulating is one whose
+// later siblings have not run. Deciding the drop on the provenance so far could
+// narrow a row's linkage for multiplicity an unlisted producer went on to
+// realize, so the partial knowledge resolves fail-closed. The alternative --
+// finishing a row already known to be unassemblable -- is the allocation this
+// bound exists to prevent.
+function accumulatedCandidatesTooLongRefusal(
+  site: CandidateAccumulationSite,
+  accumulated: number,
+): UsageError {
+  return new UsageError(
+    `a linkage key element accumulated ${accumulated} characters of candidate ` +
+      `values from row ${site.rowIndex} of this party's data ` +
+      `(${keyElementPath(site.keyIndex, site.elementIndex)}), above the ` +
+      `${MAX_ASSEMBLED_KEY_LENGTH_PER_ROW} characters of key strings this ` +
+      "exchange builds for one row. A step that expands one value into several " +
+      "candidates hands every later step each of them in turn, so the " +
+      "candidates are allocated one after another and the total is bounded as " +
+      "they accumulate rather than once the whole set exists. Nothing can be " +
+      "shortened to fit: both parties must derive byte-identical keys. The " +
+      "exchange is refused instead. Remove or narrow the expanding step in the " +
+      "agreed linkage terms, or shorten the field the element reads.",
+  );
+}
+
 // A record whose candidate set for one key is too wide contributes nothing to
 // that key's round and stays eligible for later keys, exactly as a record with no
 // value for the key does. The row index and the derived counts name no value; the
@@ -1983,10 +2078,10 @@ export function buildKeyStrings(
   isReceiver = false,
   keyIndex?: number,
 ): Set<string> | null {
-  const elements =
+  const { elements, pair } =
     isReceiver && key.swap
       ? swapElements(key.elements, key.swap)
-      : key.elements;
+      : { elements: key.elements, pair: undefined };
 
   const elementValues: string[][] = [];
   // Whether any element contributed several candidates before fuzzy expansion --
@@ -2010,17 +2105,35 @@ export function buildKeyStrings(
     // 125,000 and 150,000 here, fewer wherever the stack is smaller), which
     // raises a RangeError in place of the assembly cap's refusal below --
     // fail-closed, but reporting a fault the row does not have.
+    //
+    // The element's own accumulation carries the same magnitude bound the steps
+    // inside it do (applyStep): an element transform is run once per realized
+    // field value, so a step that amplifies a short value builds one amplified
+    // candidate per value here without ever expanding one of them, which the
+    // per-value ceiling does not see and the assembled projection below reaches
+    // only once every candidate exists.
+    const site: CandidateAccumulationSite = {
+      keyIndex,
+      elementIndex,
+      rowIndex: index,
+    };
+    const columnElementIndex = columnDeclaringElementIndex(pair, elementIndex);
     const transformed: string[] = [];
+    let accumulated = 0;
     for (const v of raw) {
       const realized = applyElementTransform(
         v,
         element.transform,
         provenance,
-        keyIndex,
-        elementIndex,
-        index,
+        site,
+        columnElementIndex,
       );
-      for (const candidate of realized) transformed.push(candidate);
+      for (const candidate of realized) {
+        transformed.push(candidate);
+        accumulated += candidate.length;
+      }
+      if (accumulated > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW)
+        throw accumulatedCandidatesTooLongRefusal(site, accumulated);
     }
     if (transformed.length === 0) return null;
 

@@ -2629,6 +2629,256 @@ describe("buildKeyStrings", () => {
     );
     expect(warn).not.toHaveBeenCalled();
   });
+
+  // 1024 distinct candidates whose lengths, replicated across the row's key
+  // strings beside the 8-character date, assemble to exactly the byte cap.
+  // `extra` pushes one candidate -- and so the row -- one code unit past it.
+  const atByteCap = (extra = 0) =>
+    Array.from(
+      { length: 1024 },
+      (_unused, i) =>
+        `${"A".repeat(4082 + (i === 0 ? extra : 0))}${String(i).padStart(6, "0")}`,
+    );
+
+  test("a row assembling exactly the byte cap builds", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const built = withUnlistedFanOutFunctions(() =>
+      buildKeyStrings(
+        key,
+        makeDataset({
+          last_name: atByteCap(),
+          date_of_birth: "19750716",
+        }),
+        0,
+        false,
+        1,
+      ),
+    );
+    expect(built?.size).toBe(1024);
+    // The only warning is the candidate cap's advisory, which is not a fate: the
+    // row assembled every one of its key strings.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /cross-product produced 1024 key strings/,
+    );
+  });
+
+  test("one code unit past the byte cap refuses, and drops for a declared fan-out", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    let raised: unknown;
+    try {
+      withUnlistedFanOutFunctions(() =>
+        buildKeyStrings(
+          key,
+          makeDataset({ last_name: atByteCap(1), date_of_birth: "19750716" }),
+          0,
+          false,
+          1,
+        ),
+      );
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as UsageError).message).toMatch(
+      /linkageKeys\[1\] assembles 4194305 characters of key strings/,
+    );
+
+    warn.mockClear();
+    const dataset = makeDataset({
+      last_name: atByteCap(1),
+      date_of_birth: "19750716",
+    });
+    expect(buildKeyStrings(key, dataset, 0)).toBeNull();
+    expect(warn.mock.calls[0][0]).toMatch(
+      /assembles 4194305 characters of key strings/,
+    );
+  });
+
+  test("a row crossing both limbs takes the count limb's fate", () => {
+    // The limbs are checked in order and a row over both is reported by the
+    // count, so an operator reading the refusal is not sent to shorten values on
+    // a row whose combinations are what it has too many of.
+    const wideAndHeavy = () => ({
+      last_name: Array.from({ length: 2000 }, (_unused, i) =>
+        String(i).padStart(4, "0"),
+      ),
+      date_of_birth: "9".repeat(4096),
+    });
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    expect(buildKeyStrings(key, makeDataset(wideAndHeavy()), 0)).toBeNull();
+    expect(warn.mock.calls[0][0]).toMatch(
+      /expands into 2000 key-string combinations/,
+    );
+
+    let raised: unknown;
+    try {
+      withUnlistedFanOutFunctions(() =>
+        buildKeyStrings(key, makeDataset(wideAndHeavy()), 0, false, 1),
+      );
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as UsageError).message).toMatch(
+      /linkageKeys\[1\] expands one row into 2000 key strings/,
+    );
+  });
+
+  // --- the candidates as they accumulate -------------------------------------
+  // The same magnitude invariant the limbs above measure on the projection,
+  // enforced where the candidates are actually allocated. A projection is only
+  // reachable once every candidate exists, so on its own it bounds the assembled
+  // key strings and not the set they are assembled from.
+
+  test("an amplifying step over a split cell refuses as the candidates accumulate", () => {
+    // A cell of 1000 comma-separated tokens, split and then amplified twice: no
+    // single candidate the first amplification produces is over the per-value
+    // ceiling, so nothing refuses until the second runs element-wise over all
+    // 1000 of them -- and its outputs accumulate into one set the ceiling reads
+    // only once the last of them exists. The running total refuses on the second
+    // of them instead.
+    const cell = Array.from({ length: 1000 }, (_unused, i) =>
+      String(i).padStart(3, "0"),
+    ).join(",");
+    const amplify = {
+      function: "replace_regex",
+      params: {
+        pattern: "a*",
+        replacement: "x".repeat(MAX_TRANSFORM_PARAM_LENGTH),
+      },
+    };
+    expect(() =>
+      buildKeyStrings(
+        amplifyingKey([
+          { function: "split_on", params: { delimiter: "," } },
+          amplify,
+          amplify,
+        ]),
+        makeDataset({ last_name: cell, date_of_birth: "19750716" }),
+        0,
+        false,
+        1,
+      ),
+    ).toThrow(
+      /accumulated \d+ characters of candidate values from row 0 of this party's data \(linkageKeys\[1\]\.elements\[0\]\)/,
+    );
+  });
+
+  test("an element transform amplifying each of a field's values refuses as they accumulate", () => {
+    // The element's own accumulation, which no step's candidate set sees: the
+    // transform runs once per realized field value, so a step amplifying a short
+    // value produces one in-ceiling candidate per call and expands none of them.
+    // The row's fate here is the refusal rather than the drop the assembled
+    // limbs would take for this declared fan-out: which fate a row takes depends
+    // on the whole row's provenance, and the elements after this one have not
+    // run.
+    const amplify = {
+      function: "replace_regex",
+      params: { pattern: "a*", replacement: "x".repeat(800) },
+    };
+    expect(() =>
+      buildKeyStrings(
+        amplifyingKey([amplify]),
+        makeDataset({
+          last_name: Array.from({ length: 2000 }, (_unused, i) =>
+            String(i).padStart(4, "0"),
+          ),
+          date_of_birth: "19750716",
+        }),
+        0,
+        false,
+        1,
+      ),
+    ).toThrow(
+      /accumulated \d+ characters of candidate values from row 0 of this party's data \(linkageKeys\[1\]\.elements\[0\]\)/,
+    );
+  });
+
+  test("the accumulation refusal echoes no value and leaves the local pipeline alone", () => {
+    const secretCell = "S3CRET0,S3CRET1,S3CRET2";
+    const amplifyingSteps = [
+      { function: "split_on", params: { delimiter: "," } },
+      {
+        function: "replace_regex",
+        params: { pattern: "a*", replacement: "x".repeat(500) },
+      },
+      {
+        function: "replace_regex",
+        params: { pattern: "a*", replacement: "x".repeat(500) },
+      },
+    ];
+    let raised: UsageError | undefined;
+    try {
+      buildKeyStrings(
+        amplifyingKey(amplifyingSteps),
+        makeDataset({ last_name: secretCell, date_of_birth: "19750716" }),
+        0,
+      );
+    } catch (err) {
+      raised = err as UsageError;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect(raised?.message).toContain("characters of candidate values");
+    expect(raised?.message).toContain("row 0");
+    expect(raised?.message).not.toContain("S3CRET");
+
+    // The bound is the partner-authored path's. The operator's own
+    // standardization runs the identical steps over the identical cell without
+    // it, past the same total (docs/notes/bound-transformed-value.md).
+    const local = runPipeline(secretCell, amplifyingSteps);
+    expect(local).toBeInstanceOf(Set);
+    expect(
+      [...(local as Set<string>)].reduce((sum, v) => sum + v.length, 0),
+    ).toBeGreaterThan(4_194_304);
+  });
+
+  // --- the receiver's swapped locators ---------------------------------------
+  // A key declaring `swap` moves the two named elements' FIELDS on the receiver
+  // and leaves their transforms in place, so the position that reads a column
+  // and the position that declares it are different ones there.
+
+  const swapKey = (transform?: LinkageKeyElement["transform"]) => ({
+    name: "FN+LN swapped",
+    elements: [{ field: "first_name", transform }, { field: "last_name" }],
+    swap: ["first_name", "last_name"] as [string, string],
+  });
+
+  test("a swapped receiver's read refusal names the element declaring the column", () => {
+    const dataset = makeDataset({
+      first_name: "JANE",
+      last_name: "A".repeat(4097),
+    });
+    // The sender reads last_name at its own declared position.
+    expect(() => buildKeyStrings(swapKey(), dataset, 0, false, 3)).toThrow(
+      /linkageKeys\[3\]\.elements\[1\]/,
+    );
+    // The receiver reads it at elements[0], but elements[1] is the position
+    // whose `field` names the column -- which is what the refusal's remedy,
+    // binding the element to a shorter column, has to point at.
+    expect(() => buildKeyStrings(swapKey(), dataset, 0, true, 3)).toThrow(
+      /linkageKeys\[3\]\.elements\[1\]/,
+    );
+  });
+
+  test("a swapped receiver's step refusal names the element declaring the step", () => {
+    // The swap does not move a transform, so the step's position is the
+    // element's own on both sides -- only the column it is fed changes.
+    const dataset = makeDataset({
+      first_name: "J",
+      last_name: "S".repeat(200),
+    });
+    const amplifying = swapKey([
+      {
+        function: "replace_regex",
+        params: { pattern: "a*", replacement: substitutingReplacement },
+      },
+    ]);
+    expect(buildKeyStrings(amplifying, dataset, 0, false, 3)).not.toBeNull();
+    expect(() => buildKeyStrings(amplifying, dataset, 0, true, 3)).toThrow(
+      /linkageKeys\[3\]\.elements\[0\]\.transform\[0\]/,
+    );
+  });
 });
 
 // --- FAN_OUT_FUNCTION_NAMES --------------------------------------------------
