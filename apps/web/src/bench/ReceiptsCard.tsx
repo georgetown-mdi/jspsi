@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import {
   Alert,
@@ -138,6 +138,22 @@ export function ReceiptsCard({
   const [exportedName, setExportedName] = useState<string>();
   const [identityFileName, setIdentityFileName] = useState<string>();
   const [justCreated, setJustCreated] = useState(false);
+  // The draft as of this render, so a resolved fingerprint merges into whatever
+  // the operator has by the time it lands rather than into the draft captured
+  // when they pressed the button: `onChange` replaces the whole draft, and the
+  // request spawns a real process on the appliance, so an edit made while it
+  // runs would otherwise be undone by the resolution. The synchronous handlers
+  // below read the closure instead, which holds the same value there and does
+  // not depend on when this assignment ran.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  // Bumped on every new request AND on every mode change, so a fingerprint that
+  // resolves after the operator left certificate mode is discarded: leaving the
+  // mode drops the resolved fingerprint (`receiptsWithField`) precisely so a
+  // return re-asks the appliance, and a late resolution must not put one back.
+  // The host-key probe's staleness guard has the same shape (`runProbe` in
+  // `SftpAuthoringForm.tsx`).
+  const seqRef = useRef(0);
   // Defence in depth for a non-secure origin, where the clipboard API is absent
   // and the value is still selectable by hand. The typings promise it is always
   // there, which is why the check is deliberate rather than redundant.
@@ -155,13 +171,26 @@ export function ReceiptsCard({
     value: ReceiptsDraft[TField],
   ): void => onChange(receiptsWithField(draft, field, value));
 
+  // The request state is about one visit to certificate mode, so leaving the
+  // mode ends it: a failure the operator left behind must not re-render as news
+  // on their next visit, and a request still in flight is disowned here rather
+  // than left to settle a button into a permanent loading state.
+  useEffect(() => {
+    seqRef.current += 1;
+    setResolving(false);
+    setFailure(undefined);
+  }, [draft.mode]);
+
   async function resolveFingerprint(): Promise<void> {
+    const seq = (seqRef.current += 1);
     setResolving(true);
     setFailure(undefined);
     const outcome = await resolveSigningFingerprint(
       identity.trim(),
       exportCertificate,
     );
+    // Discard a superseded result: the mode changed, or a newer request started.
+    if (seqRef.current !== seq) return;
     setResolving(false);
     if (outcome.kind !== "ok") {
       setFailure(fingerprintFailureMessage(outcome));
@@ -170,7 +199,13 @@ export function ReceiptsCard({
     setIdentityFileName(outcome.identityFileName);
     setExportedName(outcome.certificateFileName);
     setJustCreated(outcome.created);
-    set("ownFingerprint", outcome.fingerprint);
+    onChange(
+      receiptsWithField(
+        draftRef.current,
+        "ownFingerprint",
+        outcome.fingerprint,
+      ),
+    );
   }
 
   return (
