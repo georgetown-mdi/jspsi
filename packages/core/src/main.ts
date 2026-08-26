@@ -59,8 +59,8 @@ export { snakeizeKey } from "./utils/camelizeKeys";
 // normalizes transform.params through this bounded camelizeKeys chokepoint (the
 // camelize pre-pass in config/invitation.ts), so a pathologically deep params is
 // rejected at decode like it is on every other parse path; the CLI's
-// invitation-vs-config reconcile (apps/cli/src/config.ts, nfcDeep) keeps its own
-// depth guard as a backstop for that independent recursive walk. See
+// invitation-vs-config reconcile (apps/cli/src/config.ts, withoutUndefinedDeep)
+// keeps its own depth guard as a backstop for that independent recursive walk. See
 // docs/spec/CHANNEL_SECURITY.md.
 export {
   MAX_NESTING_DEPTH,

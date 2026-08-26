@@ -472,54 +472,53 @@ export interface ReconcileDiff {
 export const RECONCILE_UNSET = "(unset)";
 
 /**
- * Recursively NFC-normalize every string in a JSON-like value, preserving its
- * structure. Two Unicode-equivalent strings authored in different normalization
- * forms then compare equal -- consistent with core's NFC handling in
- * standardization -- so a hand-edited config is not falsely flagged as differing
- * from an invitation whose strings arrived in another form.
- *
- * Keys whose value is `undefined` are dropped, so an explicit `undefined` (which
- * an in-process object built by spread may carry, unlike a Zod-parsed one where
+ * Recursively drop every key whose value is `undefined` from a JSON-like value,
+ * preserving the rest of its structure. An explicit `undefined` (which an
+ * in-process object built by spread may carry, unlike a Zod-parsed one where
  * absent optionals are simply omitted) is treated as absent rather than handed
  * to {@link canonicalString}, which rejects it. Two values that differ only in
  * an absent vs explicitly-`undefined` optional therefore compare equal, matching
  * how the schema treats them.
  *
+ * Strings are carried through untouched, normalization form included: the
+ * equality this feeds is byte-exact, because that is the predicate core holds
+ * the same values to (see {@link diffLinkageTerms}).
+ *
  * `depth` bounds the native recursion at the same {@link MAX_NESTING_DEPTH} the
- * camelize chokepoint applies on every linkage-terms parse path. Both sides now
+ * camelize chokepoint applies on every linkage-terms parse path. Both sides
  * reach this walk already depth-bounded: the invitation decode path normalizes
  * `transform.params` through the bounded `camelizeKeys` chokepoint (core's
  * invitation decode pre-pass), so a partner-controlled one-key-per-level
  * `params` is rejected at decode before it could reach here, and the
  * existing-config side is bounded the same way at load. This guard is the
- * reconcile walk's own backstop, kept because `nfcDeep` is an independent
+ * reconcile walk's own backstop, kept because the walk is an independent
  * recursion that must not rely on every caller having pre-bounded its input: an
- * unguarded deep value would overflow this walk with a `RangeError` the command
+ * unguarded deep value would overflow it with a `RangeError` the command
  * boundary maps to a generic internal-error exit (69), whereas rejecting at 256
  * yields a clean, terminal {@link NestingDepthExceededError} (a `UsageError`, CLI
  * exit 64) long before the overflow, with headroom far above any real config (the
  * deepest schema path is under a dozen levels, and `params` legitimately holds
  * shallow scalars). See docs/spec/CHANNEL_SECURITY.md.
  */
-function nfcDeep(value: unknown, depth = 0): unknown {
+function withoutUndefinedDeep(value: unknown, depth = 0): unknown {
   if (depth >= MAX_NESTING_DEPTH) throw new NestingDepthExceededError();
-  if (typeof value === "string") return value.normalize("NFC");
-  if (Array.isArray(value)) return value.map((v) => nfcDeep(v, depth + 1));
+  if (Array.isArray(value))
+    return value.map((v) => withoutUndefinedDeep(v, depth + 1));
   if (value !== null && typeof value === "object")
     return Object.fromEntries(
       Object.entries(value)
         .filter(([, v]) => v !== undefined)
-        .map(([k, v]) => [k, nfcDeep(v, depth + 1)]),
+        .map(([k, v]) => [k, withoutUndefinedDeep(v, depth + 1)]),
     );
   return value;
 }
 
 /**
- * Canonical (RFC 8785) encoding of a value after NFC-normalizing its strings,
- * for an order-stable, Unicode-insensitive structural equality check. The
- * canonical encoder sorts object keys, so property-insertion order does not
- * affect the result; array order is preserved, so the caller pre-sorts any list
- * whose order is not significant.
+ * Canonical (RFC 8785) encoding of a value for the reconcile's structural
+ * equality check, byte-exact over the strings inside it. The canonical encoder
+ * sorts object keys, so property-insertion order does not affect the result;
+ * array order is preserved, so the caller pre-sorts any list whose order is not
+ * significant.
  *
  * No key-casing fold is applied: `transform.params` keys (the only ones whose
  * form could vary) are normalized to camelCase upstream on every parse path that
@@ -527,8 +526,8 @@ function nfcDeep(value: unknown, depth = 0): unknown {
  * adopted terms at decode (core's invitation decode pre-pass) -- so both sides
  * reach this compare in the one camelCase form.
  */
-function nfcCanonical(value: unknown): string {
-  return canonicalString(nfcDeep(value));
+function reconcileCanonical(value: unknown): string {
+  return canonicalString(withoutUndefinedDeep(value));
 }
 
 /** Render the identifiers of a list of named entries (linkage fields/keys,
@@ -543,9 +542,10 @@ function renderNames(list: ReadonlyArray<{ name: string }>): string {
  * in a sub-field (a linkage field/key's type/constraints/`swap`, a payload
  * column's description) -- fall back to the full JSON of each value, so the
  * conflict message shows what actually differs instead of two identical-looking
- * summaries. The JSON is of whatever the caller hands it, not an NFC fold of it,
- * so the user sees the stored values to edit -- treated where the caller has to
- * treat them before they are shown (see {@link redactAndFitRuleSetCitation}).
+ * summaries. The JSON is of whatever the caller hands it, not the form the
+ * comparison encoded, so the user sees the stored values to edit -- treated
+ * where the caller has to treat them before they are shown (see
+ * {@link redactAndFitRuleSetCitation}).
  */
 function disambiguate(
   existingRendered: string,
@@ -752,9 +752,9 @@ function renderRuleSetCitationConflict(
  * choices -- would falsely reject a valid existing config; genuine output
  * incompatibility is caught against the live partner at exchange time. `date` is
  * soft (a mismatch warns rather than aborts, matching `validateCompatibility`).
- * Structural fields are compared by NFC-normalized canonical form: linkage
- * fields order-insensitively (their array order is not significant), linkage
- * keys in place (their order is significant).
+ * Ordering follows what each structural field's own order means: linkage fields
+ * are pre-sorted by name on both sides (their array order is not significant),
+ * linkage keys are compared in place (their order is).
  *
  * The rule-set citation is compared ONLY where both sides declare one, which is
  * `validateCompatibility`'s rule for it rather than a second one invented here:
@@ -765,16 +765,25 @@ function renderRuleSetCitationConflict(
  * mid-run on `validateCompatibility`'s "linkage rule set mismatch", after the
  * reconcile had reported the config as matching.
  *
- * The citation is compared by RAW canonical form, NOT the NFC-folded compare the
- * structural fields beside it use, because that is the predicate
- * `validateCompatibility` applies to it: core holds two citations to byte-exact
- * `canonicalString` equality, so a pair of names differing only in normalization
- * form is a mismatch there. Folding them together here would report such a pair
- * clean and let the run abort mid-exchange on it -- the failure this comparison
- * exists to pre-empt, and the partner picks the invitation's spelling. Matching
- * the gate (both sides declare one) without matching the predicate leaves that
- * gap open, so the conflict is reported at accept, where the operator can still
- * settle the spelling with the inviting party.
+ * Every value compared here is compared BYTE-EXACT, by canonical form or (for a
+ * schema-constrained scalar) by string equality, because that is the predicate
+ * `validateCompatibility` applies to the same values: core holds linkage fields,
+ * linkage keys, and the citation to `canonicalString` equality and the legal
+ * agreement and payload column names to string equality, so a pair differing
+ * only in Unicode normalization form is a mismatch on every one of them.
+ * Folding two such values together here would report the reuse clean and then
+ * abort every run mid-exchange on it, with the partner keeping the invitation's
+ * spelling. Reported at accept instead, the operator can still settle the
+ * spelling with the inviting party, or accept onto a fresh config. Matching the
+ * gate (both sides declare a citation) without matching the predicate would
+ * leave that gap open on the field the gate was written for.
+ *
+ * On the legal agreement and the payload this compare is STRICTER than core,
+ * which reads only the fields it cross-checks (a payload column's description
+ * takes part here and not there), because the question here is whether the
+ * document being reused is the one the acceptance adopts. Strictness in that
+ * direction only refuses a reuse the operator can still make onto a fresh
+ * config; it cannot pass terms the exchange would then refuse.
  */
 export function diffLinkageTerms(
   existing: LinkageTerms,
@@ -797,25 +806,21 @@ export function diffLinkageTerms(
   // and surfaces an un-encodable value as a hard error there, so reuse stays
   // backstopped.
   //
-  // Only CanonicalEncodingError is softened to a warning. nfcDeep's own depth
-  // guard can also throw NestingDepthExceededError, and that is deliberately left
-  // to propagate as the terminal exit-64 usage error established
+  // Only CanonicalEncodingError is softened to a warning. The undefined-pruning
+  // walk's own depth guard can also throw NestingDepthExceededError, and that is
+  // deliberately left to propagate as the terminal exit-64 usage error established
   // for a pathological token -- a too-deep structure is rejected, not
-  // reconciled-and-deferred the way an un-encodable value is. Both sides are now
+  // reconciled-and-deferred the way an un-encodable value is. Both sides are
   // depth-bounded upstream (the invitation's params at decode, the config at
-  // load), so this backstop is not normally reachable; it stays because nfcDeep
-  // is an independent recursion that must not depend on its callers (see nfcDeep).
-  const differsUnder = (
-    encode: (value: unknown) => string,
-    a: unknown,
-    b: unknown,
-    label: string,
-  ): boolean => {
+  // load), so this backstop is not normally reachable; it stays because
+  // withoutUndefinedDeep is an independent recursion that must not depend on its
+  // callers (see withoutUndefinedDeep).
+  const canonicalDiffers = (a: unknown, b: unknown, label: string): boolean => {
     let ca: string;
     let cb: string;
     try {
-      ca = encode(a);
-      cb = encode(b);
+      ca = reconcileCanonical(a);
+      cb = reconcileCanonical(b);
     } catch (err) {
       if (err instanceof CanonicalEncodingError) {
         warnings.push(
@@ -829,23 +834,16 @@ export function diffLinkageTerms(
     }
     return ca !== cb;
   };
-  const canonicalDiffers = (a: unknown, b: unknown, label: string): boolean =>
-    differsUnder(nfcCanonical, a, b, label);
-  const rawCanonicalDiffers = (
-    a: unknown,
-    b: unknown,
-    label: string,
-  ): boolean => differsUnder(canonicalString, a, b, label);
 
-  // version, algorithm, and linkageStrategy are compared by raw equality rather
-  // than the nfcCanonical fold used for the user-authored name fields below. All
-  // three are schema-constrained to ASCII -- version to a semver string
+  // version, algorithm, and linkageStrategy are compared by string equality
+  // rather than through the canonical encoder used below. All three are
+  // schema-constrained scalars -- version to a semver string
   // (/^\d+\.\d+\.\d+$/), algorithm to a fixed enum ("psi" | "psi-c"), and
-  // linkageStrategy to a fixed enum ("cascade" | "single-pass") -- so none can
-  // ever differ by Unicode normalization form, and the NFC fold would be a no-op.
-  // (Semver range matching, as opposed to exact equality, is a cross-cutting
-  // concern that belongs in core's validateCompatibility, which also compares
-  // version exactly.)
+  // linkageStrategy to a fixed enum ("cascade" | "single-pass") -- so the
+  // encoding of each is the string itself, and this is the byte-exact equality
+  // core's validateCompatibility compares them by. (Semver range matching, as
+  // opposed to exact equality, is a cross-cutting concern that belongs in core's
+  // validateCompatibility, which also compares version exactly.)
   if (existing.version !== incoming.version)
     add("version", existing.version, incoming.version);
   if (existing.algorithm !== incoming.algorithm)
@@ -864,16 +862,13 @@ export function diffLinkageTerms(
     add("linkage_strategy", existing.linkageStrategy, incoming.linkageStrategy);
 
   // Sort linkage fields by name (their order is not significant) before the
-  // canonical compare; compare linkage keys in place (their order is). Sort on
-  // the NFC-normalized name so the order agrees with the NFC fold the canonical
-  // compare applies -- otherwise two field sets equal up to normalization could
-  // sort differently (e.g. one party authored a name in NFD, the other in NFC)
-  // and register as a false conflict.
-  const byName = (a: { name: string }, b: { name: string }): number => {
-    const x = a.name.normalize("NFC");
-    const y = b.name.normalize("NFC");
-    return x < y ? -1 : x > y ? 1 : 0;
-  };
+  // canonical compare; compare linkage keys in place (their order is). The
+  // comparator is core's own -- the raw name, ordered by UTF-16 code unit, not
+  // localeCompare -- so the two sides reach the byte-exact compare below in the
+  // order validateCompatibility would put them in, and a field set that agrees
+  // there agrees here rather than differing over which side sorted how.
+  const byName = (a: { name: string }, b: { name: string }): number =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
   const existingFields = [...existing.linkageFields].sort(byName);
   const incomingFields = [...incoming.linkageFields].sort(byName);
   if (canonicalDiffers(existingFields, incomingFields, "linkage fields")) {
@@ -888,13 +883,12 @@ export function diffLinkageTerms(
     add("linkage_keys", r.existing, r.incoming);
   }
 
-  // Only where BOTH sides cite, and by raw canonical form rather than the NFC
-  // fold the fields and keys above take -- both halves are validateCompatibility's
-  // rule for the citation, per the doc comment above.
+  // Only where BOTH sides cite, which is validateCompatibility's own gate for
+  // the citation rather than a second rule invented here (see the doc comment).
   if (
     existing.linkageRuleSet !== undefined &&
     incoming.linkageRuleSet !== undefined &&
-    rawCanonicalDiffers(
+    canonicalDiffers(
       existing.linkageRuleSet,
       incoming.linkageRuleSet,
       "linkage rule set",
@@ -1626,10 +1620,10 @@ export function loadConfigLinkageSource(
  * that shows it), so each is escaped here. Each name is quoted, as core's
  * rule-set mismatch message quotes it: a name may carry a space, so an unquoted
  * one reading `hmis-keys 9.9.9` would be indistinguishable from the name plus
- * the version beside it. The quoting shares that message's stated limit --
- * sanitization preserves printable ASCII, so a name carrying a double quote of
- * its own can close the quote early and fake the clause's structure for a
- * skimming reader.
+ * the version beside it. The quoting is plain, not the doubling grammar core
+ * delimits that message's values with, and sanitization preserves printable
+ * ASCII -- so a name carrying a double quote of its own can close the quote
+ * early here and fake the clause's structure for a skimming reader.
  */
 function describeRuleSetHalf(identity: LinkageSetIdentity): string {
   return (
