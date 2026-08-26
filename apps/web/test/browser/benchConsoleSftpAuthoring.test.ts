@@ -312,6 +312,17 @@ function probeAnnouncement(): HTMLElement {
   return page.getByTestId(PROBE_ANNOUNCEMENT_MARKER).element() as HTMLElement;
 }
 
+/** Wait until the announcing region carries `sentence`. The region's text is
+ * deferred one commit past the phase that produces it, so the visible outcome
+ * reaching the screen does not mean the region has caught up -- a read taken on
+ * that cue can still find the in-flight sentence, or nothing at all. Retrying on
+ * the region's own text is what makes the read terminal. */
+async function expectAnnounced(sentence: string): Promise<void> {
+  await expect
+    .element(page.getByTestId(PROBE_ANNOUNCEMENT_MARKER))
+    .toHaveTextContent(sentence);
+}
+
 /** Everything an assistive technology reads out of a live region: its text, plus
  * the value of any form control inside it -- a control's value is a property,
  * not text content, so a text-only sweep would call a region holding one empty.
@@ -789,9 +800,7 @@ describe("console SFTP connection authoring", () => {
     // anchor is destroyed for the duration; the settle repairs it rather than
     // moving focus to announce (the polite region does that, below).
     expect(document.activeElement).toBe(trigger.element());
-    expect(probeAnnouncement().textContent).toContain(
-      "Reading the fingerprint failed.",
-    );
+    await expectAnnounced("Reading the fingerprint failed.");
   });
 
   test("the probe announces from one stable region, and nothing else announces", async () => {
@@ -821,8 +830,8 @@ describe("console SFTP connection authoring", () => {
     await flushPendingUpdates();
 
     // The same node, never remounted, carries the console's own sentence.
+    await expectAnnounced("Reading the fingerprint failed.");
     expect(probeAnnouncement()).toBe(region);
-    expect(region.textContent).toContain("Reading the fingerprint failed.");
     // One channel announces: within the probe result nothing else carries live
     // semantics, and the visible alert is not one (Mantine's Alert defaults to
     // role="alert", so this also holds the explicit override in place).
@@ -859,8 +868,8 @@ describe("console SFTP connection authoring", () => {
       .toBeInTheDocument();
     await flushPendingUpdates();
 
+    await expectAnnounced("The server presented a fingerprint.");
     expect(probeAnnouncement()).toBe(region);
-    expect(region.textContent).toContain("The server presented a fingerprint.");
     // The presented panel replaces the trigger the operator pressed, so its focus
     // move is repair -- and what focus lands on names itself from its own visible
     // lead line rather than being an anonymous div.
@@ -904,9 +913,7 @@ describe("console SFTP connection authoring", () => {
     // Their place is kept; the polite region is what tells them the probe
     // settled.
     expect(document.activeElement).toBe(fingerprintField.element());
-    expect(probeAnnouncement().textContent).toContain(
-      "Reading the fingerprint failed.",
-    );
+    await expectAnnounced("Reading the fingerprint failed.");
   });
 
   test("a second identical failure announces again, transiting the in-flight sentence", async () => {
@@ -920,7 +927,6 @@ describe("console SFTP connection authoring", () => {
     await openFormForProbe();
 
     const region = probeAnnouncement();
-    const announced = page.getByTestId(PROBE_ANNOUNCEMENT_MARKER);
     const trigger = page.getByRole("button", {
       name: "Read the fingerprint from the server",
     });
@@ -932,13 +938,9 @@ describe("console SFTP connection authoring", () => {
     // region before the failure sentence returns to it.
     for (const gate of gates) {
       await trigger.click();
-      await expect
-        .element(announced)
-        .toHaveTextContent("Reading the fingerprint from the server");
+      await expectAnnounced("Reading the fingerprint from the server");
       gate.settle();
-      await expect
-        .element(announced)
-        .toHaveTextContent("Reading the fingerprint failed.");
+      await expectAnnounced("Reading the fingerprint failed.");
     }
     // Every transit was a change to the node assistive tech is already observing,
     // not a remount.
@@ -963,15 +965,17 @@ describe("console SFTP connection authoring", () => {
     expect(rendered.fontFamily).toContain("monospace");
 
     // Containment: the announced region is a sibling of the field, not its
-    // ancestor, so nothing a peer chose is in the run that is read out.
+    // ancestor, so nothing a peer chose is in the run that is read out. What it
+    // carries instead is the console's own settle sentence, waited for first so
+    // the negatives below are measured over a settled region rather than over
+    // one that has yet to say anything.
     const region = probeAnnouncement();
+    await expectAnnounced("Reading the fingerprint failed.");
     expect(region.contains(peerBytes)).toBe(false);
     expect(announcedTextOf(region)).not.toContain(excerpt);
     expect(announcedTextOf(region)).not.toContain("Paste this fingerprint");
-    // What the announcement carries instead is the console's own settle
-    // sentence, and the diagnosis plus the recovery step stay on the visible
-    // result, ahead of the peer's bytes (terminality, below).
-    expect(region.textContent).toContain("Reading the fingerprint failed.");
+    // The diagnosis plus the recovery step stay on the visible result, ahead of
+    // the peer's bytes (terminality, below).
     const result = probeResult();
     expect(result.textContent).toContain("The first bytes it sent are shown");
     expect(result.textContent).toContain(
