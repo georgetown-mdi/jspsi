@@ -382,6 +382,13 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
   });
 });
 
+/** A canonical 43-character fingerprint (the final character drawn from the
+ * aligned set the config schema requires), for the certificate-mode default
+ * {@link createSettledJob} composes -- a pin is required to compose a
+ * certificate-mode config at all, so a job this suite settles needs one on file
+ * whether or not the test asserts anything about it. */
+const PARTNER_FINGERPRINT = "C".repeat(42) + "A";
+
 /**
  * Create a certificate-mode job on a freshly seeded manager and resolve its id
  * once the run has settled, so the receipt route sees a job whose child is done.
@@ -389,7 +396,7 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
 async function createSettledJob(
   stubEnv: NodeJS.ProcessEnv = {},
   intent: JobCreateIntent = validIntent({
-    signing: { mode: "certificate" },
+    signing: { mode: "certificate", partnerFingerprint: PARTNER_FINGERPRINT },
   }),
 ): Promise<{ manager: JobManager; id: string }> {
   const { manager } = seedManager({ STUB_OUTPUT_FILE: "id\n1\n", ...stubEnv });

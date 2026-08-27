@@ -17,7 +17,8 @@ import {
   IDENTITY_LABEL_REQUIRED_REASON,
   IDENTITY_MISSING_PROBLEM,
   IDENTITY_SHARED_MOUNT_ADVISORY,
-  NO_PARTNER_PIN_ADVISORY,
+  IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN,
+  NO_PARTNER_PIN_PROBLEM,
   PARTNER_FINGERPRINT_PROBLEM,
   RECEIPTS_DEFAULT,
   RECEIPT_LOCATION_NOTICE,
@@ -35,6 +36,7 @@ import {
   JOB_FILE_NAMES,
   composeConfigDocument,
   composeSftpConfigDocument,
+  jobCreateIntentSchema,
   jobExchangeIntentSchema,
 } from "@jobs/intent";
 import {
@@ -81,12 +83,22 @@ const RETENTION_NOTE =
 
 /** The single-mount layout the identity-location advisory exists for: the folder
  * the partner syncs into holds the working directory this party's signing key is
- * written to. */
+ * written to, positively established by the walk (a lexical or filesystem
+ * match), so the advisory states it as fact. */
 const SHARED_RENDEZVOUS: JobRendezvousConfig = {
   configured: true,
   locator: "psilink",
   folderName: "psilink",
   sharesDataRoot: true,
+  sharesDataRootUncertain: false,
+};
+
+/** The same single-mount layout, but where the walk could not rule it out rather
+ * than positively establishing it -- an unresolved real path in the comparison --
+ * so the advisory hedges instead of asserting. */
+const UNCERTAIN_SHARED_RENDEZVOUS: JobRendezvousConfig = {
+  ...SHARED_RENDEZVOUS,
+  sharesDataRootUncertain: true,
 };
 
 /** An appliance whose rendezvous has a mount of its own, where the collision the
@@ -94,6 +106,7 @@ const SHARED_RENDEZVOUS: JobRendezvousConfig = {
 const SEPARATE_RENDEZVOUS: JobRendezvousConfig = {
   ...SHARED_RENDEZVOUS,
   sharesDataRoot: false,
+  sharesDataRootUncertain: false,
 };
 
 const dirs: Array<string> = [];
@@ -167,6 +180,32 @@ describe("the intent boundary admits only a mode an exchange honors", () => {
       }),
     );
     expect(parsed.success).toBe(false);
+  });
+
+  test("certificate mode with no pin is refused, on both channels and the create union", () => {
+    // The run this job would spawn cannot finish: core refuses an unpinned
+    // certificate-mode config before any connection is opened, having reached the
+    // refusal only inside the exchange -- after this party's payload crossed --
+    // if it started. Refusing at job creation is what keeps the workdir, the
+    // child, and that disclosure from happening at all.
+    for (const intent of [
+      validIntent({ signing: { mode: "certificate" } }),
+      validSftpIntent({ signing: { mode: "certificate" } }),
+    ])
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    // The create route parses the mode-discriminated union, not the exchange
+    // schema directly, so the rule is asserted where the 400 is actually decided.
+    const parsed = jobCreateIntentSchema.safeParse(
+      validIntent({ signing: { mode: "certificate" } }),
+    );
+    expect(parsed.success).toBe(false);
+    if (parsed.success) throw new Error("unreachable");
+    // The issue names the field the operator has to fill, rather than failing the
+    // whole signing block anonymously.
+    expect(parsed.error.issues.map((issue) => issue.path)).toContainEqual([
+      "signing",
+      "partnerFingerprint",
+    ]);
   });
 
   test("no path field is representable on the signing block", () => {
@@ -286,22 +325,6 @@ describe("the composed signing block, per mode", () => {
     });
   });
 
-  test("certificate mode with no pin composes the block without one", () => {
-    const composed = composedSpec(
-      composeConfigDocument(
-        validIntent({ signing: { mode: "certificate" } }),
-        "/rendezvous",
-        undefined,
-        signingPaths(),
-      ),
-    );
-    expect(composed["signing"]).toEqual({
-      mode: "certificate",
-      identity_file: "/data/.psilink-signing-identity.json",
-      receipt_output: "/srv/job/receipt.json",
-    });
-  });
-
   test("the sftp composer emits the identical block", () => {
     const composed = composedSpec(
       composeSftpConfigDocument(
@@ -330,6 +353,30 @@ describe("the composed signing block, per mode", () => {
         "/rendezvous",
       ),
     ).toThrow(/identity path/);
+  });
+
+  test("certificate mode with no pinned fingerprint is a compose-time error too", () => {
+    // jobSigningChoiceSchema's refine guarantees a validated certificate intent
+    // always carries partnerFingerprint, so an intent missing it is reachable
+    // here only by bypassing the schema -- exactly what this hand-built intent
+    // does. The guard is what turns that impossible state into a loud failure
+    // at compose time rather than a config the spawned child would refuse
+    // minutes later with a bare exit 64.
+    expect(() =>
+      composeConfigDocument(
+        validIntent({ signing: { mode: "certificate" } }),
+        "/rendezvous",
+        undefined,
+        signingPaths(),
+      ),
+    ).toThrow(/partner fingerprint/);
+    expect(() =>
+      composeSftpConfigDocument(
+        validSftpIntent({ signing: { mode: "certificate" } }),
+        testSftpServerEntry(),
+        signingPaths(),
+      ),
+    ).toThrow(/partner fingerprint/);
   });
 });
 
@@ -836,62 +883,113 @@ describe("the receipts card's model", () => {
     ).toEqual([]);
   });
 
-  test("an unpinned partner warns and guides rather than blocking", () => {
+  test("an unpinned partner blocks the run, as the run itself would", () => {
+    // Core refuses this configuration before any connection is opened
+    // (assertCertificateModePinsPartner) and the appliance's job schema refuses
+    // the intent at create time, so the card reports it as a problem rather than
+    // an advisory: nothing about the partner or the network could make such a run
+    // finish, and warning-and-proceeding would spend the operator's disclosure on
+    // a run that ends with nothing written on this side.
     const unpinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
     });
-    expect(receiptsProblems(unpinned)).toEqual([]);
-    expect(receiptsAdvisories(unpinned, SHARED_RENDEZVOUS)).toContainEqual({
-      message: NO_PARTNER_PIN_ADVISORY,
-      severity: "warning",
-    });
+    expect(receiptsProblems(unpinned)).toContain(NO_PARTNER_PIN_PROBLEM);
+    expect(
+      receiptsAdvisories(unpinned, SHARED_RENDEZVOUS).map(
+        (advisory) => advisory.message,
+      ),
+    ).not.toContain(NO_PARTNER_PIN_PROBLEM);
   });
 
-  test("the shared-mount and unpinned advisories both raise above the notices", () => {
-    // The shared-mount advisory names a key-disclosure hazard that is live by
-    // default on the single-mount filedrop layout, so it carries the same
-    // warning weight as the unpinned-partner cost. The two notices state only
-    // where a file lands and how to look after it, so they stay at info.
+  test("authoring stays open while the pin is missing", () => {
+    // The block is on STARTING a run, not on the draft: the mode stays selected,
+    // the resolved own fingerprint stays put (it is what the operator sends the
+    // partner to get theirs), and the emitted intent is still the certificate
+    // block the appliance schema will judge. An operator part-way through the
+    // two-sided ceremony keeps everything they have authored.
     const unpinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
+      retentionDisposition: RETENTION_NOTE,
+    });
+    expect(receiptsIntentFields(unpinned)).toEqual({
+      signing: { mode: "certificate" },
+      retentionDisposition: RETENTION_NOTE,
+    });
+    expect(receiptsSummary(unpinned)).toBe("Signed receipt, retention note");
+    expect(fingerprintRequestProblem("Agency A")).toBeUndefined();
+  });
+
+  test("the shared-mount advisory raises above the notices", () => {
+    // It names a key-disclosure hazard that is live by default on the
+    // single-mount filedrop layout, so it carries warning weight. The two notices
+    // state only where a file lands and how to look after it, so they stay at
+    // info.
+    const pinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
     });
     expect(
-      receiptsAdvisories(unpinned, SHARED_RENDEZVOUS)
+      receiptsAdvisories(pinned, SHARED_RENDEZVOUS)
         .filter((advisory) => advisory.severity === "warning")
         .map((advisory) => advisory.message),
-    ).toEqual([IDENTITY_SHARED_MOUNT_ADVISORY, NO_PARTNER_PIN_ADVISORY]);
+    ).toEqual([IDENTITY_SHARED_MOUNT_ADVISORY]);
     expect(
-      receiptsAdvisories(unpinned, SHARED_RENDEZVOUS)
+      receiptsAdvisories(pinned, SHARED_RENDEZVOUS)
         .filter((advisory) => advisory.severity === "info")
         .map((advisory) => advisory.message),
     ).toEqual([IDENTITY_AT_REST_NOTICE, RECEIPT_LOCATION_NOTICE]);
   });
 
-  test("the unpinned advisory names the whole consequence, not just the receipt", () => {
-    // Core refuses an absent pin inside the exchange, after the payloads have
-    // crossed, and every local artifact is written only once the exchange has
-    // returned -- so the run costs the operator their data disclosure and gives
-    // them nothing back. Copy that named only the receipt would understate that,
-    // and the operator reads it while they can still act on it.
-    expect(NO_PARTNER_PIN_ADVISORY).toMatch(/gone to your partner/);
-    expect(NO_PARTNER_PIN_ADVISORY).toMatch(/no results/);
-    expect(NO_PARTNER_PIN_ADVISORY).toMatch(/no exchange record/);
-    expect(NO_PARTNER_PIN_ADVISORY).toMatch(/no receipt/);
+  test("an unresolved shared-mount comparison raises the hedged variant", () => {
+    // The walk defaulted to "holds" rather than matching it, so the copy must
+    // not assert the layout as fact.
+    const pinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+    });
+    expect(
+      receiptsAdvisories(pinned, UNCERTAIN_SHARED_RENDEZVOUS)
+        .filter((advisory) => advisory.severity === "warning")
+        .map((advisory) => advisory.message),
+    ).toEqual([IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN]);
   });
 
-  test("the unpinned advisory states the initiator's extra disclosure", () => {
+  test("the unpinned problem names the whole consequence, not just the receipt", () => {
+    // Core refuses an absent pin inside the exchange, after the payloads have
+    // crossed, and every local artifact is written only once the exchange has
+    // returned -- so a run started that way would cost the operator their data
+    // disclosure and give them nothing back. That is why the card refuses it, and
+    // copy that named only the receipt would understate what is being refused.
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/gone to your partner/);
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/no results/);
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/no exchange record/);
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/no receipt/);
+  });
+
+  test("the unpinned problem states the initiator's extra disclosure", () => {
     // exchangeSignedReceipt has the initiator send its own {certificate,
     // signature} frame before verifying the partner's, so "nothing is written on
     // this side" is not the whole cost on the side that sends first: the partner
-    // holds this party's signed receipt when the run stops. Which role this side
-    // takes is not settled while authoring, so the copy is conditional -- and it
-    // still says nothing about what the partner does with what it receives.
-    expect(NO_PARTNER_PIN_ADVISORY).toMatch(/sends its signature first/);
-    expect(NO_PARTNER_PIN_ADVISORY).toMatch(
-      /your partner already has your signed receipt/,
+    // would hold this party's signed receipt when the run stopped. Which role this
+    // side takes is not settled while authoring, so the copy is conditional -- and
+    // it still says nothing about what the partner does with what it receives.
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/sends its signature first/);
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(
+      /your partner would already have your signed receipt/,
     );
+  });
+
+  test("the unpinned problem names the exit for an operator without the pin yet", () => {
+    // Pinning is half of a two-sided ceremony, so the refusal has to leave a way
+    // to exchange today: run unsigned now, and switch once the fingerprint
+    // arrives. Copy that only refused would push an operator toward abandoning
+    // the receipt or waiting on the partner with nothing to do.
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/choose 'No receipt' now/);
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/psilink fingerprint/);
   });
 
   test("signing states where both durable files land, before the run", () => {
@@ -907,27 +1005,59 @@ describe("the receipts card's model", () => {
     ]);
   });
 
-  test("the shared-mount advisory names the collision at the choice point", () => {
+  test("both shared-mount advisory variants name the collision at the choice point", () => {
     // The rendezvous directory falls back to the data root, so a filedrop
     // exchange on a one-mount console syncs the folder this key is written into.
     // The operator meets that fact where they choose to sign, not only in the
-    // deployment guide, and it names the remedy the guide documents.
-    expect(IDENTITY_SHARED_MOUNT_ADVISORY).toMatch(
-      /sign receipts in your name -- for every exchange, with every partner/,
-    );
-    expect(IDENTITY_SHARED_MOUNT_ADVISORY).toMatch(/JOB_RENDEZVOUS_DIR/);
+    // deployment guide, and it names the remedy the guide documents -- true of
+    // both the established and hedged copy, which differ only in the opening
+    // sentence.
+    for (const advisory of [
+      IDENTITY_SHARED_MOUNT_ADVISORY,
+      IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN,
+    ]) {
+      expect(advisory).toMatch(
+        /sign receipts in your name -- for every exchange, with every partner/,
+      );
+      expect(advisory).toMatch(/JOB_RENDEZVOUS_DIR/);
+    }
   });
 
-  test("the shared-mount advisory holds the sync to the exchange that does it", () => {
+  test("both shared-mount advisory variants hold the sync to the exchange that does it", () => {
     // The layout is what raises the advisory, but it is a shared-folder exchange
     // that puts a partner's writes in the mount: an SFTP or WebRTC run out of the
     // same single mount has nobody syncing into it. Copy stating flatly that the
     // partner writes there would be untrue on those runs, and an operator who can
     // see it is untrue of theirs discounts the hazard it names.
-    expect(IDENTITY_SHARED_MOUNT_ADVISORY).toMatch(/a shared-folder exchange/);
+    for (const advisory of [
+      IDENTITY_SHARED_MOUNT_ADVISORY,
+      IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN,
+    ]) {
+      expect(advisory).toMatch(/a shared-folder exchange/);
+      expect(advisory).toMatch(
+        /On a run like that your long-lived private key sits where your partner/,
+      );
+    }
+  });
+
+  test("the shared-mount advisory states the layout as established fact", () => {
+    // Raised only where the report positively determined the layout (a lexical
+    // or filesystem match), so it is not telling the operator something the walk
+    // did not find.
+    expect(IDENTITY_SHARED_MOUNT_ADVISORY).not.toMatch(/cannot rule out/);
     expect(IDENTITY_SHARED_MOUNT_ADVISORY).toMatch(
-      /On a run like that your long-lived private key sits where your partner/,
+      /This appliance rendezvouses out of the folder you mounted/,
     );
+  });
+
+  test("the uncertain shared-mount advisory states the layout as unruled-out, not established", () => {
+    // Raised on the report's fail-closed cases: a leg or a data root whose real
+    // path cannot be read counts as holding (jobRendezvous.ts), and an appliance
+    // that has not answered keeps the advisory (the case below). Neither case
+    // established the layout, so copy asserting it flatly would be telling the
+    // operator something the walk did not find -- which an operator who checks
+    // and finds otherwise learns to discount.
+    expect(IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN).toMatch(/cannot rule out/);
   });
 
   test("the receipt notice names where the download appears, not this screen", () => {
@@ -971,21 +1101,13 @@ describe("the receipts card's model", () => {
       { message: IDENTITY_AT_REST_NOTICE, severity: "info" },
       { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
     ]);
-    const unpinned = draft({
-      mode: "certificate",
-      ownFingerprint: OWN_FINGERPRINT,
-    });
-    expect(receiptsAdvisories(unpinned, SEPARATE_RENDEZVOUS)).toEqual([
-      { message: IDENTITY_AT_REST_NOTICE, severity: "info" },
-      { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
-      { message: NO_PARTNER_PIN_ADVISORY, severity: "warning" },
-    ]);
   });
 
-  test("an appliance that has not answered keeps the shared-mount advisory", () => {
+  test("an appliance that has not answered keeps the hedged shared-mount advisory", () => {
     // An unresolved probe, a failed one, and a report that cannot run a filedrop
     // exchange as provisioned all leave the layout unknown -- and an unread report
-    // is not evidence of a separate mount, so the advisory stands.
+    // is not evidence of a separate mount, so the advisory stands, and in the
+    // hedged form: none of these established the layout.
     const pinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
@@ -998,7 +1120,7 @@ describe("the receipts card's model", () => {
       { configured: true, locator: "psilink" },
     ])
       expect(receiptsAdvisories(pinned, rendezvous)).toContainEqual({
-        message: IDENTITY_SHARED_MOUNT_ADVISORY,
+        message: IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN,
         severity: "warning",
       });
   });

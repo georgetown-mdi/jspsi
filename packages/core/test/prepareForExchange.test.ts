@@ -4,8 +4,13 @@ import {
   prepareForExchange,
   runExchange,
   assertAlgorithmImplemented,
+  assertCertificateModePinsPartner,
   assertSigningModeImplemented,
 } from "../src/exchange";
+import {
+  assertPartnerCertificateTrusted,
+  generateSigningIdentity,
+} from "../src/signingIdentity";
 import {
   OperatorConfigError,
   StandardizationTermsError,
@@ -723,6 +728,10 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
 
 // --- An unimplemented signing mode fails closed before connecting -------------
 
+// A canonical partner pin: 43 unpadded base64url characters whose last is in the
+// canonical final-character set, so it is a value SigningConfigSchema admits.
+const partnerFingerprint = "iWD-ZB69Oz6gOpaX_OoC7sD8ohIZj2lETC9qbl-IbPg";
+
 describe("prepareForExchange: an unimplemented signing mode is refused", () => {
   const prepareWithSigning = (signing?: SigningConfig) =>
     prepareForExchange(
@@ -750,12 +759,100 @@ describe("prepareForExchange: an unimplemented signing mode is refused", () => {
     const prepared = prepareWithSigning({
       mode: "certificate",
       identityFile: "~/.psilink/signing-identity.json",
+      partnerFingerprint,
     });
     expect(prepared.rowCount).toBe(1);
   });
 
   test("mode: none prepares normally", () => {
     expect(prepareWithSigning({ mode: "none" }).rowCount).toBe(1);
+  });
+});
+
+// --- Certificate mode with no partner pin fails closed before connecting -----
+
+describe("prepareForExchange: certificate mode with no partner pin is refused", () => {
+  const prepareWithSigning = (signing?: SigningConfig) =>
+    prepareForExchange(
+      { linkageTerms: terms, metadata, signing },
+      "Tester",
+      rawRows,
+      columns,
+    );
+
+  test("an unpinned certificate-mode block is refused before connecting", () => {
+    // The signature swap runs after the payloads have crossed and rejects any
+    // certificate presented against an absent pin, so the run would disclose this
+    // party's data and then terminate with nothing written locally. An
+    // OperatorConfigError for the reason the unimplemented-mode sibling is one:
+    // the signing block is only ever this party's own config (and the CLI still
+    // exits 64 through the base class).
+    expect(() => prepareWithSigning({ mode: "certificate" })).toThrow(
+      OperatorConfigError,
+    );
+    expect(() => prepareWithSigning({ mode: "certificate" })).toThrow(
+      /signing\.partner_fingerprint/,
+    );
+  });
+
+  test("an empty pin is refused as no pin at all", () => {
+    expect(() =>
+      prepareWithSigning({ mode: "certificate", partnerFingerprint: "" }),
+    ).toThrow(OperatorConfigError);
+  });
+
+  test("mode: none and an absent block need no pin", () => {
+    expect(prepareWithSigning({ mode: "none" }).rowCount).toBe(1);
+    expect(prepareWithSigning(undefined).rowCount).toBe(1);
+  });
+});
+
+// --- assertCertificateModePinsPartner (the shared guard) ---------------------
+
+describe("assertCertificateModePinsPartner", () => {
+  test("refuses certificate mode with no pin", () => {
+    expect(() =>
+      assertCertificateModePinsPartner({ mode: "certificate" }),
+    ).toThrow(OperatorConfigError);
+  });
+
+  test("passes certificate mode with a pin", () => {
+    expect(() =>
+      assertCertificateModePinsPartner({
+        mode: "certificate",
+        partnerFingerprint,
+      }),
+    ).not.toThrow();
+  });
+
+  test("passes every mode that verifies no partner certificate", () => {
+    expect(() =>
+      assertCertificateModePinsPartner({ mode: "none" }),
+    ).not.toThrow();
+    expect(() =>
+      assertCertificateModePinsPartner({ mode: "session-derived" }),
+    ).not.toThrow();
+    expect(() => assertCertificateModePinsPartner(undefined)).not.toThrow();
+  });
+
+  test("refuses exactly what the verification-time refusal refuses", async () => {
+    // The gate exists to refuse, before any payload crosses, the runs the
+    // signature swap would refuse after one has. Both read partnerPinIsPresent,
+    // and this holds the two to the same answer over the pin values a config can
+    // carry -- a gate reading a narrower condition would admit a run that cannot
+    // finish.
+    const { certificate } = await generateSigningIdentity("Partner");
+    for (const pin of [undefined, ""]) {
+      expect(() =>
+        assertCertificateModePinsPartner({
+          mode: "certificate",
+          ...(pin !== undefined ? { partnerFingerprint: pin } : {}),
+        }),
+      ).toThrow(OperatorConfigError);
+      await expect(
+        assertPartnerCertificateTrusted(certificate, pin),
+      ).rejects.toThrow(/no pinned partner fingerprint/);
+    }
   });
 });
 

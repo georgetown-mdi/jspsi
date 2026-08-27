@@ -108,13 +108,39 @@ const SigningConfigSchema: z.ZodType<SigningConfig> = z.object({
 
 /**
  * Schema for the optional `signing` block, exported so {@link ExchangeSpecSchema}
- * can embed it. Field-shape validation only: cross-field requirements (e.g. that
+ * can embed it. Field-shape validation only: cross-field requirements (that
  * certificate mode needs a pinned partner fingerprint before a partner
- * certificate can be verified) are enforced at the verification call site so
- * generating an identity and printing its fingerprint do not require the
- * partner's fingerprint to exist yet.
+ * certificate can be verified) are enforced at the pre-exchange gate and again at
+ * the verification call site, so a partially-authored config -- no partner
+ * fingerprint yet -- still parses wherever this schema is used. A reader that
+ * needs only `identity_file`, such as `psilink fingerprint`, reads it from the
+ * raw config text rather than through this schema, so it never needs the
+ * partner's fingerprint to exist.
  */
 export { SigningConfigSchema };
+
+/**
+ * Whether a partner certificate fingerprint is pinned at all. Its absence is the
+ * one state in which no presented partner certificate can be trusted, whatever
+ * that certificate carries.
+ *
+ * Held here, beside the field, because two refusals turn on it and they must
+ * refuse the same set: the verification-time rejection of a certificate
+ * presented against no pin (`assertPartnerCertificateTrusted`), and the
+ * pre-exchange gate that refuses such a run before any payload crosses
+ * (`assertCertificateModePinsPartner`). A gate reading a narrower condition than
+ * the runtime's would admit exactly the runs that cannot finish.
+ *
+ * An empty string counts as no pin alongside `undefined`: the schema's
+ * {@link FINGERPRINT_REGEX} cannot produce one, so it arrives only from a
+ * {@link SigningConfig} assembled in code, where it is a pin nobody set rather
+ * than a value that could ever match a digest.
+ */
+export function partnerPinIsPresent(
+  pinnedFingerprint: string | undefined,
+): pinnedFingerprint is string {
+  return pinnedFingerprint !== undefined && pinnedFingerprint.length > 0;
+}
 
 /**
  * Parse and validate a raw value as a {@link SigningConfig}. Snake_case keys are

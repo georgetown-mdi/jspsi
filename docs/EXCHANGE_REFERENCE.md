@@ -965,7 +965,7 @@ Optional. Configures signing of exchange receipts and the trust in the partner's
 *Type:* string (`none` | `session-derived` | `certificate`)  
 *Required:* yes, when a `signing` block is present
 
-The receipt signing mode. `none` signs no receipt (only the unsigned self-attested record is produced). `session-derived` is a MAC under the shared key-exchange session key -- tamper-evident but not non-repudiation and not third-party verifiable; it is not yet implemented, and a configuration selecting it is refused as a configuration error before the exchange runs rather than left to complete unsigned. `certificate` signs with this party's long-lived signing identity and is the only mode that yields third-party-verifiable non-repudiation. Under `certificate` mode an authenticated CLI exchange produces a dual-signed receipt: both parties sign the same terms and data-flow facts and swap signatures over the connection, each verifying the partner's pinned certificate before its signature (see [PROTOCOL.md](spec/PROTOCOL.md#the-signed-receipt-step)). A stored dual-signed receipt is verified again later with [`psilink verify-receipt`](CLI.md#verifying-the-signed-record).
+The receipt signing mode. `none` signs no receipt (only the unsigned self-attested record is produced). `session-derived` is a MAC under the shared key-exchange session key -- tamper-evident but not non-repudiation and not third-party verifiable; it is not yet implemented, and a configuration selecting it is refused as a configuration error before the exchange runs rather than left to complete unsigned. `certificate` signs with this party's long-lived signing identity and is the only mode that yields third-party-verifiable non-repudiation; it requires `signing.partner_fingerprint`, and a block that omits it is refused before the exchange runs for the same reason. Under `certificate` mode an authenticated CLI exchange produces a dual-signed receipt: both parties sign the same terms and data-flow facts and swap signatures over the connection, each verifying the partner's pinned certificate before its signature (see [PROTOCOL.md](spec/PROTOCOL.md#the-signed-receipt-step)). A stored dual-signed receipt is verified again later with [`psilink verify-receipt`](CLI.md#verifying-the-signed-record).
 
 ### `signing.identity_file`
 
@@ -977,9 +977,11 @@ Path to this party's signing identity file (the P-256 private key plus its self-
 ### `signing.partner_fingerprint`
 
 *Type:* string (43-character unpadded base64url SHA-256)  
-*Required:* no (but required, in practice, to verify a partner under `certificate` mode)
+*Required:* yes under `certificate` mode; not otherwise
 
-The partner's pinned certificate fingerprint, obtained from the partner via `psilink fingerprint` and a trusted out-of-band channel. A presented partner certificate is trusted only if its self-signature verifies and its fingerprint matches this value; an absent or mismatched value rejects the partner's certificate (and therefore any receipt it carries) with a clear error. The fingerprint is not secret, but the channel that carries it must be authentic. It stays valid until the partner deliberately regenerates its identity.
+The partner's pinned certificate fingerprint, obtained from the partner via `psilink fingerprint` and a trusted out-of-band channel. A presented partner certificate is trusted only if its self-signature verifies and its fingerprint matches this value; a mismatched value rejects the partner's certificate (and therefore any receipt it carries) with a clear error. The fingerprint is not secret, but the channel that carries it must be authentic. It stays valid until the partner deliberately regenerates its identity.
+
+Certificate mode with no pin is refused as a configuration error before the exchange runs (exit 64), because such a run cannot finish: the two parties swap signatures after their data has already crossed, and a partner certificate presented with nothing to check it against is rejected there -- leaving the exchange terminated with no result, no record, and no receipt on this side. Run `mode: none` until the partner's fingerprint is in hand. The requirement is not part of the `signing` block's schema, so a partially-authored config -- no partner fingerprint yet -- still parses wherever the schema is used; `psilink fingerprint` needs only `identity_file`, which it reads from the raw config text rather than through the schema.
 
 ```yaml
 signing:

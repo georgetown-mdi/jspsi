@@ -246,7 +246,9 @@ export type JobSigningMode = "none" | "certificate";
  * than merely passed through: core's {@link FINGERPRINT_REGEX} admits exactly a
  * canonical 43-character unpadded base64url SHA-256 digest, so the value cannot
  * carry a separator, a path, or a flag-shaped token. It is a public digest of a
- * public certificate, not a credential.
+ * public certificate, not a credential. It is REQUIRED under `certificate` (see
+ * {@link jobSigningChoiceSchema}), the one cross-field rule this boundary keeps
+ * beyond field shape.
  */
 export interface JobSigningChoice {
   mode: JobSigningMode;
@@ -279,6 +281,25 @@ const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
         "partnerFingerprint is only admissible with signing mode 'certificate'",
       path: ["partnerFingerprint"],
     },
+  )
+  // And the converse: certificate mode REQUIRES one, matching core's own
+  // pre-exchange gate (`assertCertificateModePinsPartner`). Without a pin the
+  // spawned child refuses the very config the job exists to run -- and the
+  // refusal it would otherwise reach is the one inside the exchange, after this
+  // party's payload has crossed. Refusing at create time is what keeps that
+  // disclosure from happening for a run that could never finish; authoring is
+  // untouched, since a draft is not a job.
+  .refine(
+    (signing) =>
+      signing.mode !== "certificate" ||
+      signing.partnerFingerprint !== undefined,
+    {
+      message:
+        "partnerFingerprint is required with signing mode 'certificate': an " +
+        "exchange that signs receipts cannot verify the partner's certificate " +
+        "without a pinned fingerprint, and is refused before it runs",
+      path: ["partnerFingerprint"],
+    },
   );
 
 /**
@@ -309,6 +330,14 @@ export interface JobSigningPaths {
  * states no choice at all -- is the absent block the CLI already treats as "sign
  * nothing", so an operator who changed nothing composes the config they composed
  * before this surface existed.
+ *
+ * Both throws below guard an impossible state on a schema-validated intent rather
+ * than a live branch: `jobSigningChoiceSchema`'s refine requires a certificate
+ * intent to carry `partnerFingerprint`, so composing one without it is a
+ * programming error -- a caller reaching this function with a hand-built intent
+ * that bypassed the schema -- not a shape a validated job ever has. Throwing here
+ * turns that into a loud failure at compose time rather than a config the CLI
+ * child would refuse minutes later with a bare exit 64.
  */
 function composedSigning(
   intent: JobExchangeIntent,
@@ -320,12 +349,15 @@ function composedSigning(
       "certificate-mode signing reached config composition with no identity " +
         "path resolved",
     );
+  if (intent.signing.partnerFingerprint === undefined)
+    throw new Error(
+      "certificate-mode signing reached config composition with no partner " +
+        "fingerprint pinned",
+    );
   return {
     mode: "certificate",
     identityFile: paths.identityFile,
-    ...(intent.signing.partnerFingerprint !== undefined
-      ? { partnerFingerprint: intent.signing.partnerFingerprint }
-      : {}),
+    partnerFingerprint: intent.signing.partnerFingerprint,
     ...(paths.receiptOutput !== undefined
       ? { receiptOutput: paths.receiptOutput }
       : {}),
@@ -390,8 +422,8 @@ export type JobExchangeSide = "inviter" | "acceptor";
  *   ({@link jobRunControlFields}): booleans that select a fixed CLI flag and
  *   carry no value of their own.
  * - `signing` is the receipt-signing choice ({@link JobSigningChoice}): a closed
- *   two-value mode plus, under `certificate`, a fingerprint held to core's
- *   canonical 43-character digest shape. Neither the identity file nor the
+ *   two-value mode plus, under `certificate`, a required fingerprint held to
+ *   core's canonical 43-character digest shape. Neither the identity file nor the
  *   receipt output is representable -- the server supplies both paths.
  * - `retentionDisposition` is this party's own free-text retention note, written
  *   into the composed config as a YAML value and from there into THIS party's
@@ -811,9 +843,11 @@ export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
     message: "exactly one of inputCsv or inputFile must be set",
   });
 
-// The identity-label contract (the cap and the leading-dash rule) lives in the
-// browser-safe @psi/identityLabel module so the confirm-screen guard shares one
-// authority with this schema; re-exported here to preserve its public entry point.
+// The identity-label contract -- the length cap and the control-character rule --
+// lives in the browser-safe @psi/identityLabel module, so the confirm-screen
+// guard, this schema, and the signing-fingerprint route all read one authority
+// (each schema states the leading-dash rule itself, the contract's shape rule
+// with no shared constant). Re-exported here to preserve its public entry point.
 export { MAX_IDENTITY_LENGTH };
 
 // The zero-setup common fields carry NONE of the exchange mode's credential or
