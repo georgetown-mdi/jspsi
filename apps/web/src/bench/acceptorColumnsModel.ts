@@ -1,6 +1,6 @@
 import {
-  assessLinkageSatisfiability,
   countOnlyTransmitsColumn,
+  decideLinkageTermsVerdict,
   inferMetadata,
   overlongDisclosedColumnPositions,
   sanitizeForDisplay,
@@ -35,7 +35,6 @@ import type {
 } from "@psilink/core";
 
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
-import type { AlertContent } from "@components/csvIntake";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
@@ -45,7 +44,7 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
  * of the component so the verdict, mapper, cleaning-attention, launch-payload,
  * and gate logic are the one
  * tested boundary and React stays thin. No I/O and no state; every consent/verdict
- * semantic re-surfaces the existing logic layer ({@link assessLinkageSatisfiability},
+ * semantic re-surfaces the existing logic layer ({@link decideLinkageTermsVerdict},
  * {@link normalizeForEditor}/{@link inferMetadata}, {@link defaultStandardizationForRows},
  * the override-layering helpers, {@link isStepValid}, {@link hasMultipleIdentifiers}),
  * never a re-derivation.
@@ -192,30 +191,39 @@ export interface AcceptorVerdictViewModel {
   announcement: string;
   /** Shape-satisfiable keys whose declared cleaning can never produce a value (a
    * self-defeating rule in the adopted terms). A count only -- never the
-   * partner-controlled key names. Warns, never blocks. */
+   * partner-controlled key names. */
   deadKeyCount: number;
+  /** Whether this file may be run under the adopted terms at all: core's own
+   * grading, which the launch gate reads rather than re-deriving a threshold from
+   * the counts above. `false` on any shortfall -- an unproducible key, a dead one,
+   * or terms declaring none. */
+  fullySatisfied: boolean;
 }
 
 /**
- * The live linkage-satisfiability verdict over the EDITED `{ metadata, standardization }`.
- * Re-surfaces {@link assessLinkageSatisfiability} against the adopted terms -- never
+ * The live linkage-terms verdict over the EDITED `{ metadata, standardization }`.
+ * Re-surfaces {@link decideLinkageTermsVerdict} against the adopted terms -- never
  * a re-derivation -- and maps its result to the mockup's exact copy and the spoken
  * announcement. Blocked when no key can match, partial when some but not all can,
  * all-clear when every key is covered.
+ *
+ * The three display kinds are a reading of coverage, not the launch decision: the
+ * gate is `fullySatisfied`, core's own, which an all-clear coverage reading can
+ * still fail when a covered key's declared cleaning drops every record.
  */
 export function acceptorVerdict(
   columns: Array<string>,
   linkageTerms: LinkageTerms,
   editorState: { metadata: Metadata; standardization: Standardization },
 ): AcceptorVerdictViewModel {
-  const verdict = assessLinkageSatisfiability(
+  const verdict = decideLinkageTermsVerdict(
     columns,
     linkageTerms,
     editorState.standardization,
     editorState.metadata,
   );
   const totalKeys = linkageTerms.linkageKeys.length;
-  const satisfiable = verdict.satisfiableKeyCount;
+  const satisfiable = verdict.keys.length - verdict.unsatisfiableKeys.length;
   const blocked = satisfiable === 0;
   const partial = satisfiable > 0 && satisfiable < totalKeys;
   const kind: AcceptorVerdictKind = blocked
@@ -240,6 +248,7 @@ export function acceptorVerdict(
     totalKeys,
     announcement,
     deadKeyCount: verdict.deadKeys.length,
+    fullySatisfied: verdict.fullySatisfied,
   };
 }
 
@@ -261,14 +270,14 @@ export function acceptorUnsatisfiedTypes(
   linkageTerms: LinkageTerms,
   editorState: { metadata: Metadata; standardization: Standardization },
 ): Array<AcceptorUnsatisfiedType> {
-  const verdict = assessLinkageSatisfiability(
+  const verdict = decideLinkageTermsVerdict(
     columns,
     linkageTerms,
     editorState.standardization,
     editorState.metadata,
   );
   const seen = new Map<LinkageField["type"], string>();
-  for (const field of verdict.unsatisfied)
+  for (const field of verdict.unsatisfiedFields)
     seen.set(field.type, SEMANTIC_TYPE_LABELS[field.type]);
   return [...seen.entries()].map(([type, label]) => ({ type, label }));
 }
@@ -320,7 +329,8 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  * The launch gate, expressed as the sentence the step shows beside the disabled
  * button and points its `aria-describedby` at -- `undefined` exactly when nothing
  * blocks, which is what the step disables on. Ported from the legacy editor's
- * predicate: no key can match (`satisfiableKeyCount === 0`), OR a count-only
+ * predicate and widened to core's own grading: the file cannot be run under the
+ * adopted terms (`verdict.fullySatisfied` is false), OR a count-only
  * invitation meets a marked column ({@link countOnlyTransmitsColumn}) -- an
  * arrangement the algorithm forecloses whatever the declaration says -- OR the
  * marked columns disagree with the payload set the invitation declares for this
@@ -330,8 +340,14 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  * ({@link acceptorOverlongDisclosedColumns}) -- a name the partner's parse refuses
  * once the frame is already sent -- OR the metadata carries more than one identifier
  * column, OR an authored cleaning step is invalid/mid-edit, OR one of the step's own
- * blocks. Partial coverage does NOT gate here -- it threads an advisory of the
- * refusal the run boundary raises instead.
+ * blocks.
+ *
+ * The linkage clause is three sentences over one gate, because the three shortfalls
+ * have three different remedies: missing coverage is remapped in the quick-fix
+ * mapper above, partial coverage is remapped there or settled with the partner, and
+ * a dead key is the partner's to correct -- it came with the invitation and no edit
+ * on this screen clears it. Each states the remedy in the words of the notice it
+ * sits under, and none names a partner-controlled key.
  *
  * The gate and the explanation are ONE derivation rather than two that agree, so a
  * state that disables the button while telling a screen-reader operator nothing is
@@ -359,8 +375,20 @@ export function acceptorLaunchBlockedReason(
   stepBlocks: AcceptorLaunchStepBlocks = NO_STEP_BLOCKS,
 ): string | undefined {
   if (stepBlocks.offline) return OFFLINE_EXCHANGE_REASON;
-  if (verdict.satisfiableKeyCount === 0)
-    return "Set your columns to the missing field types above before you can start.";
+  if (!verdict.fullySatisfied) {
+    if (verdict.satisfiableKeyCount === 0)
+      return "Set your columns to the missing field types above before you can start.";
+    if (verdict.satisfiableKeyCount < verdict.totalKeys)
+      return (
+        "Cover the remaining agreed linkage keys above before you can start, " +
+        "or agree terms with your partner over the keys both files can supply."
+      );
+    return (
+      "Ask your partner for a corrected invitation before you can start: " +
+      "cleaning declared in the agreed terms drops every record for a key, so " +
+      "it can never match."
+    );
+  }
   // A count-only invitation answers the payload question outright, ahead of the
   // declaration conflict below: the algorithm carries no data column in either
   // direction whichever party the terms entitle to the count, so a marked column
@@ -416,36 +444,24 @@ export function acceptorStandardizationValid(
 }
 
 /**
- * The launch payload: the edited `{ metadata, standardization }` (the exact shape
- * {@link AcceptorDataEdits} expects), plus an optional partial-coverage advisory the
- * run package surfaces. The pair is the SAME one the verdict consumed, so the gate
- * and the run cannot disagree. The warning is present only when coverage is partial,
- * and it is advance notice of a refusal rather than of a narrowed run: an exchange
- * runs the keys both parties agreed on, so the run boundary refuses an input short
- * of any one of them.
+ * The launch payload: the edited `{ metadata, standardization }`, the exact shape
+ * {@link AcceptorDataEdits} expects. The pair is the SAME one the verdict consumed,
+ * so the gate and the run cannot disagree.
+ *
+ * It carries no coverage advisory: partial coverage stops the launch
+ * ({@link acceptorLaunchBlockedReason}), so an exchange that reaches this payload is
+ * one whose every agreed key the file can produce, and there is nothing left to warn
+ * the run surface about.
  */
-export function acceptorLaunchPayload(
-  verdict: AcceptorVerdictViewModel,
-  editorState: { metadata: Metadata; standardization: Standardization },
-): { edits: AcceptorDataEdits; warning?: AlertContent } {
-  const warning: AlertContent | undefined =
-    verdict.kind === "partial"
-      ? {
-          title: "Not every agreed key is covered",
-          message:
-            `This file covers ${verdict.satisfiableKeyCount} of the ${verdict.totalKeys} agreed linkage ` +
-            "keys. An exchange runs the keys both parties agreed on, so it will " +
-            "refuse to run on these terms with this file. Use a file that covers " +
-            "every agreed key, or agree terms with your partner over the keys " +
-            "both files can supply.",
-        }
-      : undefined;
+export function acceptorLaunchPayload(editorState: {
+  metadata: Metadata;
+  standardization: Standardization;
+}): { edits: AcceptorDataEdits } {
   return {
     edits: {
       metadata: editorState.metadata,
       standardization: editorState.standardization,
     },
-    warning,
   };
 }
 
@@ -669,8 +685,9 @@ export function acceptorHasIdentifierConflict(metadata: Metadata): boolean {
  * placeholder until there is a REASON to review cleaning -- a silent-empty field (a transform
  * that drops every row), a dead key (a self-defeating adopted rule), or an
  * invalid/mid-edit step -- then it shows an amber attention value naming the failing
- * field count. Warns via colour; never blocks (except through the standardization
- * gate a mid-edit step already trips).
+ * field count. The attention value itself decides nothing: what closes the launch is
+ * the standardization gate a mid-edit step trips, and the linkage verdict a dead key
+ * fails.
  *
  * `rates` is the host's full-CSV coverage (null before the first sweep settles); a
  * pending sweep contributes no silent-empty count -- attention is computed only

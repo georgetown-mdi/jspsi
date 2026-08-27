@@ -394,10 +394,10 @@ already defines:
   nag.
 - **This needs you: the input file is missing or was rejected.** A benign
   pre-run input failure on an unattended run -- the handle's file gone at run
-  start, or a refresh the column-shape guard rejects -- means no scheduled run
-  can succeed until the operator re-points the handle or drops a conforming
-  file, so it is actionable at its moment (see [The input file each
-  run](#the-input-file-each-run)).
+  start, or a refresh that cannot satisfy the standing terms -- means no
+  scheduled run can succeed until the operator re-points the handle, drops a
+  conforming file, or settles new terms with the partner, so it is actionable at
+  its moment (see [The input file each run](#the-input-file-each-run)).
 - **This needs you: what this run would send is not what was agreed.** A
   pre-connection disclosure refusal on an unattended run -- the input file this
   period discloses a different set of columns than the exchange recorded agreeing
@@ -499,11 +499,20 @@ the run window (see
 [SECURITY_DESIGN.md](SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)).
 
 On every path -- unattended, one-action, or re-selection -- the app rejects an
-input file whose columns cannot satisfy the standing terms: the record's
-document carries the agreed terms' column shape, so a malformed or drifted
-refresh is rejected as a benign pre-run problem, never silently linked -- a
-cheap guard that catches the wrong-dataset case, though not a same-shaped
-wrong file.
+input file that cannot satisfy the standing terms: the record's document carries
+the agreed terms, and the guard holds the file to the same rule the run boundary
+does -- every declared linkage key satisfiable, none declaring cleaning that
+drops every record -- so a malformed or drifted refresh is rejected as a benign
+pre-run problem, never silently linked. It catches the wrong-dataset case, though
+not a same-shaped wrong file.
+
+That shortfall is a state of its own on the run surface, held apart from the file
+that could not be read: the same file falls the same way short of the same keys
+however many times it runs, so the surface states the condition and names the two
+ways forward -- a file covering every agreed key, or terms settled with the
+partner over the keys both files can supply -- rather than offering the run again
+as though it might pass. The copy names no key or field: the shortfall's detail is
+partner-authored.
 
 ## The durability and crash-consistency contract
 

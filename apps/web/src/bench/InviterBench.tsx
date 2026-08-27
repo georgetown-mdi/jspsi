@@ -216,7 +216,7 @@ function invitationFileAlert(failure: InvitationFileFailure): AlertContent {
     case "overlong":
       return overlongColumnsAlert(failure.positions);
     case "unlinkable":
-      return unlinkableFileAlert(failure.unsatisfied);
+      return unlinkableFileAlert(failure.refusal);
   }
 }
 

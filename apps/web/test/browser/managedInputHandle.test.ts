@@ -7,6 +7,7 @@ import {
   connectionFromLocator,
   generateSharedSecret,
   getDefaultLinkageTerms,
+  inferMetadata,
 } from "@psilink/core";
 
 import {
@@ -52,7 +53,14 @@ const webrtcLocator: WebRTCExchangeLocator = {
   path: "/api/",
 };
 
-const linkageTerms = getDefaultLinkageTerms("County Health Dept");
+// The standing terms an exchange over CONFORMING_HEADER's columns agreed: derived
+// WITH that metadata, so the declared keys are the ones those columns support. The
+// guard holds an input to every declared key, so terms derived without metadata
+// (which keep the whole built-in set) would refuse the conforming file too.
+const linkageTerms = getDefaultLinkageTerms(
+  "County Health Dept",
+  inferMetadata(["ssn", "first_name", "last_name", "date_of_birth"]),
+);
 
 /** The standing exchange-file document a managed record persists. */
 function standingExchangeFile(): ExchangeSpec {

@@ -47,9 +47,10 @@ import type { Algorithm, LinkageStrategy, LinkageTerms } from "@psilink/core";
 import type { AdvancedInviteDraft } from "@psi/advancedInvite";
 
 /** The guided-list badge copy and CSS class for each per-key verdict
- * ({@link KeyVerdict}). A dead key warns ("won't match", amber) rather than
- * blocking: its columns resolve but a self-defeating transform would run it to
- * a silent empty result, so the author is nudged to fix the terms. */
+ * ({@link KeyVerdict}). A dead key reads amber ("won't match") rather than red:
+ * its columns resolve, so the remedy is the transform rather than the file. It
+ * closes Generate as an unsatisfiable key does -- an exchange runs every key its
+ * terms declare, and this one can never match. */
 const KEY_VERDICT_BADGES: Record<
   KeyVerdict,
   {

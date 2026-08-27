@@ -55,9 +55,13 @@ import type { ManagedLocalState } from "@psi/managedLocalState";
  *   run: the run's own input decides the set, so neither retrying the connection nor
  *   re-minting the secret changes the outcome. Deliberately not `"retry"`, so a
  *   surface never offers the run again as though the same input could pass.
+ * - `"restate"` -- what this exchange matches on must be settled again, or the
+ *   input replaced: the file cannot supply every agreed linkage key, and the same
+ *   file refuses identically however many times it runs. Deliberately not
+ *   `"retry"`, for the reason `"reconfirm"` is not.
  * - `"none"` -- nothing to recover (informational; e.g. a missed window). */
 export type ManagedRunRecovery =
-  "reinvite" | "retry" | "wait" | "confirm" | "reconfirm" | "none";
+  "reinvite" | "retry" | "wait" | "confirm" | "reconfirm" | "restate" | "none";
 
 /** A classified launch state, ready to render: the state's kind (the pre-connection
  * benign states plus the derived tiers), its plain copy, and the recovery affordance
@@ -119,6 +123,25 @@ const INPUT_FAILURE: ManagedRunFailure = {
     "have the columns this exchange needs. Check that the file is in place " +
     "and matches the agreed terms, then try again.",
   recovery: "retry",
+};
+
+/** The benign linkage-shortfall state: the file was read, and it cannot supply
+ * every linkage key the standing terms declare, so the run stopped before
+ * connecting. Fixed and non-oracular like the input state's -- the shortfall names
+ * partner-authored keys and fields, and the copy states the condition instead. It
+ * is deliberately not the retry state: the same file refuses identically, so the
+ * only ways forward are a conforming file or terms settled with the partner. */
+const TERMS_SHORTFALL_FAILURE: ManagedRunFailure = {
+  kind: "input",
+  title: "Your input file cannot match on everything this exchange agreed to",
+  message:
+    "This run stopped before connecting because your input file cannot supply " +
+    "every linkage key this exchange agreed to match on, and nothing left this " +
+    "device. Running it again with the same file stops the same way - this is " +
+    "not a connection problem. Run it with a file that covers every agreed key, " +
+    "or set the exchange up again with your partner over the keys both your " +
+    "files can supply.",
+  recovery: "restate",
 };
 
 /** The benign disclosure-refusal state: a send-side gate refused before connecting
@@ -242,7 +265,7 @@ function tierFailure(
 /**
  * Classify a launch failure into the surface's {@link ManagedRunFailure}. The
  * pre-connection benign states are read through {@link benignRerunOutcome} (the single
- * place the three benign checks live), each with its own plain copy -- the expiry state
+ * place the benign checks live), each with its own plain copy -- the expiry state
  * names the lapsed instant the error carries, the one non-fixed value, which is the
  * record's own local `expires`, never partner-influenced. Any other failure -- a
  * handshake failed closed, a persist failure, a transport drop -- is tiered from the
@@ -263,6 +286,7 @@ export function classifyManagedRunFailure(
     return expiredFailure(error.expires);
   if (benign === "already-running") return ALREADY_RUNNING_FAILURE;
   if (benign === "input") return INPUT_FAILURE;
+  if (benign === "terms-shortfall") return TERMS_SHORTFALL_FAILURE;
   return tierFailure(deriveManagedFailureTier(record, local, now), record);
 }
 
@@ -283,12 +307,14 @@ export function managedRunFailureFromRecord(
   return tierFailure(tier, record);
 }
 
-/** Whether a classified failure is retryable in place (the input and transport states
- * -- fix the file or retry the connection). The expired, storage, imported, and
- * unexplained states are not retried in place: their recovery is re-invite (directly,
- * or through the confirmation gate); a consent refusal is not retried either, because
- * the same input settles the same disclosure however many times it runs; and an
- * in-progress run elsewhere is not this run's to retry until it finishes. */
+/** Whether a classified failure is retryable in place (the input-acquisition and
+ * transport states -- put the file back or retry the connection). The expired,
+ * storage, imported, and unexplained states are not retried in place: their recovery
+ * is re-invite (directly, or through the confirmation gate); a consent refusal and a
+ * linkage shortfall are not retried either, because the same input settles the same
+ * disclosure and falls the same way short of the same keys however many times it
+ * runs; and an in-progress run elsewhere is not this run's to retry until it
+ * finishes. */
 export function managedRunRetryable(failure: ManagedRunFailure): boolean {
   return failure.recovery === "retry";
 }

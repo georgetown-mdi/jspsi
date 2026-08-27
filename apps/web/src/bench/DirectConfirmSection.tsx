@@ -120,8 +120,10 @@ export function DirectConfirmSection({
   // promise the partner is there (see @utils/networkStatus).
   const online = useOnlineStatus();
 
-  const linkable = preview.satisfiableKeyCount > 0;
-  const unlinkable = unlinkableFileAlert(preview.unsatisfied);
+  const unlinkable =
+    preview.refusal === undefined
+      ? undefined
+      : unlinkableFileAlert(preview.refusal);
 
   // A column this file sends whose name is too long to carry. The appliance would
   // refuse the run at data preparation, so it is refused here where the operator can
@@ -229,7 +231,7 @@ export function DirectConfirmSection({
       )}
 
       <section aria-label="Inferred terms">
-        {linkable ? (
+        {unlinkable === undefined ? (
           <InvitationTerms
             linkageTerms={preview.linkageTerms}
             perspective="proposing"
@@ -299,7 +301,7 @@ export function DirectConfirmSection({
             onClick={onRun}
             disabled={
               !affirmed ||
-              !linkable ||
+              unlinkable !== undefined ||
               overlongAlert !== undefined ||
               running ||
               identityError !== undefined ||

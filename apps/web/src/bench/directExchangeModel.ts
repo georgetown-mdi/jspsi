@@ -1,5 +1,6 @@
 import {
   assessLinkageSatisfiability,
+  decideLinkageTermsVerdict,
   getDefaultLinkageTerms,
   inferMetadata,
   overlongDisclosedColumnPositions,
@@ -10,12 +11,11 @@ import {
   payloadSendForMetadata,
 } from "@psi/metadataEditing";
 
-import type {
-  LinkageField,
-  LinkageStrategy,
-  LinkageTerms,
-  Metadata,
-} from "@psilink/core";
+import { linkageRefusalFor } from "@psi/linkageRefusal";
+
+import type { LinkageStrategy, LinkageTerms, Metadata } from "@psilink/core";
+
+import type { LinkageRefusal } from "@psi/linkageRefusal";
 
 /**
  * The pure model behind the console "Direct exchange" bench: the symmetric spine's
@@ -152,9 +152,9 @@ export function directServerBlockedReason(
 /** The browser-side preview of the terms this file is EXPECTED to produce at run
  * time, computed from its columns exactly as the CLI's zero-setup command does
  * (`inferMetadata` -> `getDefaultLinkageTerms`), plus the disclosed payload set the
- * inferred metadata sends and the satisfiability verdict. Read-only display -- the
- * CLI re-infers over the real file at run time, and a file edited between preview
- * and run desyncs, caught by the runtime two-party terms check. */
+ * inferred metadata sends and the linkage-terms refusal, if any. Read-only display
+ * -- the CLI re-infers over the real file at run time, and a file edited between
+ * preview and run desyncs, caught by the runtime two-party terms check. */
 export interface DirectTermsPreview {
   /** The inferred linkage terms, with `payload.send` authored from the disclosed
    * columns so the terms display honestly reflects what leaves the machine (the
@@ -172,12 +172,10 @@ export interface DirectTermsPreview {
    * instead. This spine has no disclosure control -- the inferred metadata sends
    * every non-linkage column -- so the remedy is a shorter header. */
   overlongDisclosedColumns: Array<number>;
-  /** The count of default linkage keys the columns can satisfy; zero means the
-   * file backs no match and the exchange would run to a silent empty result. */
-  satisfiableKeyCount: number;
-  /** The default linkage fields the columns cannot produce, to name the missing
-   * field types when the file is unlinkable. */
-  unsatisfied: Array<LinkageField>;
+  /** Why this file cannot be run under the previewed terms, or `undefined` when it
+   * can. Derived from the same verdict the run boundary enforces, over the very
+   * terms shown above, so the screen refuses exactly the files the run would. */
+  refusal?: LinkageRefusal;
 }
 
 /**
@@ -194,6 +192,13 @@ export interface DirectTermsPreview {
  * `prepareForExchange` authored -- so a run set to single-pass previews the terms
  * it runs, disclosure note and all, rather than the cascade it does not.
  *
+ * The refusal grades the PREVIEWED terms with the inferred metadata and no
+ * authored standardization, the same three inputs `prepareForExchange` grades on
+ * this spine, so the screen refuses exactly what the run would. The unsatisfied
+ * set it names when the narrowing leaves no key is assessed against the FULL
+ * default terms instead: the narrowed set no longer declares the dropped fields,
+ * and those field types are what a conforming file would carry.
+ *
  * `inferMetadata` throws on an empty column name; the picker's commit refuses a
  * blank header before the preview is computed, so callers pass only named columns.
  */
@@ -209,16 +214,16 @@ export function previewInferredTerms(
   };
   const payload = payloadSendForMetadata(metadata);
   if (payload !== undefined) linkageTerms.payload = payload;
-  const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
-    columns,
-    getDefaultLinkageTerms(identity),
+  const refusal = linkageRefusalFor(
+    decideLinkageTermsVerdict(columns, linkageTerms, undefined, metadata),
+    assessLinkageSatisfiability(columns, getDefaultLinkageTerms(identity))
+      .unsatisfied,
   );
   return {
     linkageTerms,
     metadata,
     disclosedPayloadColumns: disclosedColumnNames(metadata),
     overlongDisclosedColumns: overlongDisclosedColumnPositions(metadata),
-    satisfiableKeyCount,
-    unsatisfied,
+    ...(refusal !== undefined && { refusal }),
   };
 }

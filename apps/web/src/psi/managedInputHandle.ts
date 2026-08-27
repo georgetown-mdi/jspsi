@@ -11,10 +11,10 @@
  * docs/MANAGED_EXCHANGE.md, "The input file each run", and
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `inputFileHandle` row).
  *
- * The pure column-shape guard and the input-rejection classification are in
+ * The pure standing-terms guard and the input-rejection classification are in
  * {@link ./managedInputGuard.ts}; this module composes them with the platform reads
  * so a run-start acquisition failure (missing file, gone permission, no handle
- * where one is required) or a column-shape rejection each surfaces as the same
+ * where one is required) or a linkage shortfall each surfaces as the same
  * benign {@link ManagedInputError}, before any connection, on every run path.
  *
  * The permission layer is a non-standard File System Access extension
@@ -281,8 +281,8 @@ export async function acquireManagedInput(
  * step, the guard every run path applies before any connection. Reads the input
  * through {@link acquireManagedInput} (missing file, gone permission, and
  * unreadable file all surface as a benign `"acquire"` rejection), then rejects an
- * input whose columns cannot satisfy the standing terms' column shape as a benign
- * `"columns"` rejection ({@link assessManagedInputColumns}) -- never silently
+ * input that cannot satisfy every linkage key the standing terms declare as a
+ * benign `"columns"` rejection ({@link assessManagedInputColumns}) -- never silently
  * linked, never routed through desync/attack framing. Returns the read `File` and
  * its columns when the input is accepted, for the runner to feed the exchange.
  *

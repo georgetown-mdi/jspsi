@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { Alert, Button } from "@mantine/core";
-import { IconAlertTriangle } from "@tabler/icons-react";
+import { Button } from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 
 import { invitationUsable } from "./inviterModel";
@@ -28,7 +27,6 @@ import { reattachedRunState } from "./reattachedRunState";
 import styles from "./bench.module.css";
 
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
-import type { AlertContent } from "@components/csvIntake";
 import type { ExchangeRun } from "./exchangeRun";
 import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
 import type { RunFailure } from "./useInviterExchange";
@@ -41,11 +39,9 @@ import type { RunOutputs } from "./runOutputs";
  * opens at the running screen and settles at the completion panel. The status
  * panel spans both from one stable mount so its live region persists.
  *
- * The partial-coverage advisory the confirm-columns step raised surfaces here as
- * an amber alert (this run column's half of that advisory; the work column's
- * Problems block carries the other half). The run's own non-fatal warnings --
- * the appliance's rendezvous preflight among them -- surface separately through
- * the shared {@link RunWarningsAlert}, which a failure does not clear.
+ * The run's own non-fatal warnings -- the appliance's rendezvous preflight among
+ * them -- surface through the shared {@link RunWarningsAlert}, which a failure
+ * does not clear.
  *
  * A failed run renders the failure vocabulary's alert for its category, each
  * with its one concrete way forward -- an acceptor seat cannot mint, so every
@@ -58,7 +54,6 @@ export function AcceptorExchangeSection({
   run,
   outputs,
   failure,
-  warning,
   runWarnings,
   serverJob,
   jobId,
@@ -72,14 +67,10 @@ export function AcceptorExchangeSection({
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
-  /** The confirm-columns step's partial-coverage advisory, kept visible through
-   * the run and cleared on a failure. Authored by this seat before the run, so
-   * distinct from `runWarnings`, which the run itself raises. */
-  warning: AlertContent | undefined;
   /** The run's accumulated non-fatal warnings (the driver's `onWarning` slot),
-   * rendered through the shared alert as the inviter seat renders them. Unlike
-   * the coverage advisory above these survive a failure: a preflight warning the
-   * failure may have followed from must not vanish with the run. */
+   * rendered through the shared alert as the inviter seat renders them. These
+   * survive a failure: a preflight warning the failure may have followed from must
+   * not vanish with the run. */
   runWarnings: ReadonlyArray<string>;
   /** Whether this accept executes on the console appliance (a server-job run)
    * rather than in this browser. On the appliance the CLI child conducts the
@@ -224,19 +215,6 @@ export function AcceptorExchangeSection({
             </Button>
           )}
         </FailureAlert>
-      )}
-      {/* The confirm-columns partial-coverage advisory, kept visible through the
-          run and cleared by the hook on a failure so it cannot read as the
-          cause. */}
-      {warning !== undefined && failure === undefined && (
-        <Alert
-          color="yellow"
-          icon={<IconAlertTriangle aria-hidden />}
-          title={warning.title}
-          mb="md"
-        >
-          {warning.message}
-        </Alert>
       )}
       {/* The appliance conducts this accept and the tab only watches it: leaving
           does not stop the run, and the recovery panel is the way back. The callout

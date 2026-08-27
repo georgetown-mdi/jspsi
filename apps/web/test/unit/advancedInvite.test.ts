@@ -713,6 +713,27 @@ describe("validateAdvancedInvite", () => {
     expect(result.errors.keys).toBeDefined();
   });
 
+  test("(c) blocks Generate when only SOME enabled keys are column-satisfiable", () => {
+    // An exchange runs every key its terms declare, so an editor that minted here
+    // would hand out an invitation the inviter's own run refuses -- after the
+    // partner has accepted it. The keys the columns DO cover are what a per-key
+    // threshold would have passed on.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const result = validateAdvancedInvite(
+      draft,
+      { ...seed, columns: PARTIAL_COLUMNS },
+      NOW,
+    );
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.keys).toContain(
+      "These terms cannot be run against your file",
+    );
+    // The shortfall wording is core's shared fragment, counts only.
+    expect(result.errors.keys).toContain(
+      "cannot be produced from this input's columns",
+    );
+  });
+
   test("(c) blocks Generate on an incomplete legal agreement, per field", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const result = validateAdvancedInvite(

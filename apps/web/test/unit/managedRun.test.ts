@@ -103,7 +103,7 @@ describe("runManagedRerun: pre-connection expiry", () => {
 });
 
 describe("benignRerunOutcome", () => {
-  test("classifies the three benign pre-connection states", () => {
+  test("classifies the benign pre-connection states", () => {
     expect(
       benignRerunOutcome(
         new ManagedExchangeExpiredError("2026-07-01T00:00:00Z"),
@@ -350,11 +350,28 @@ describe("a run refused for terms this file cannot satisfy", () => {
       "this input cannot satisfy every linkage key the agreed terms declare",
     );
 
-  test("is a benign pre-connection input state, not a transport drop", () => {
-    // It comes out of the pre-connection prepare, so no connection was attempted
-    // and the remedy is the same one the input state names: a file matching the
-    // agreed terms.
-    expect(benignRerunOutcome(refusal())).toBe("input");
+  test("is a benign pre-connection state of its own, not a transport drop", () => {
+    // It comes out of the pre-connection prepare, so no connection was attempted --
+    // and it is held apart from the acquisition failure, which putting the file back
+    // clears: this one reproduces on every run from the same file, so the surface it
+    // reaches must not offer the run again as though it might pass.
+    expect(benignRerunOutcome(refusal())).toBe("terms-shortfall");
+  });
+
+  test("the input guard's own column rejection reaches the same state", () => {
+    // The guard grades ahead of the prepare, on the same rule, so its rejection and
+    // core's refusal are one state rather than two the surface must reconcile.
+    expect(
+      benignRerunOutcome(
+        new ManagedInputError({ reason: "columns", unsatisfied: [] }),
+      ),
+    ).toBe("terms-shortfall");
+    // An acquisition failure stays the retryable input state.
+    expect(
+      benignRerunOutcome(
+        new ManagedInputError({ reason: "acquire", cause: new Error("gone") }),
+      ),
+    ).toBe("input");
   });
 
   test("records the input tier so a scheduled run does not repeat it as a drop", () => {

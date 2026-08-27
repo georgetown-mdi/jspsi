@@ -98,7 +98,6 @@ import { ConnectionTuningCard } from "./ConnectionTuningCard";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { Ledger } from "./Ledger";
 import { ManageExchangeOffer } from "./ManageExchangeOffer";
-import { Problems } from "./Problems";
 import { ReceiptsCard } from "./ReceiptsCard";
 import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
 import { RunDiagnosticsCard } from "./RunDiagnosticsCard";
@@ -182,13 +181,11 @@ function isAcceptorStep(value: string): value is AcceptorStep {
   return value in ACCEPTOR_STEP_SET;
 }
 
-/** The exchange the acceptor launched: the assembled per-party edits and the
- * optional partial-coverage advisory the run surface carries forward. Drives
+/** The exchange the acceptor launched: the assembled per-party edits. Drives
  * the acceptor's run surface ({@link AcceptorExchangeSection}); the run hook
  * keys on the derived launch object, so a fresh launch restarts the run. */
 interface AcceptorLaunched {
   edits: AcceptorDataEdits;
-  warning?: AlertContent;
 }
 
 /** The async decode's outcome: pending while it runs, an error message on a bad
@@ -903,16 +900,6 @@ export function AcceptorBench() {
       <TopBar navLabel="Accept an invitation" steps={spineSteps} />
     );
 
-  // The confirm-columns partial-coverage advisory surfaces in the work
-  // column's Problems block as well as its own amber alert, while the run
-  // has not failed (a failure clears it so it cannot read as the cause).
-  const launchedProblems =
-    step === "launched" &&
-    launched?.warning !== undefined &&
-    failure === undefined
-      ? [{ label: launched.warning.title }]
-      : [];
-
   // The ledger settles once the exchange completes: the tag names who it was
   // agreed with, the rows relabel past tense with the actual outcome, and the
   // footer states the file never left. Until then it mirrors the partner's
@@ -1028,7 +1015,7 @@ export function AcceptorBench() {
     // exchange must not start until the operator has authored a connection (with
     // the required host-key fingerprint) to the partner-named server.
     if (sftpConnectionMissing) return;
-    setLaunched(acceptorLaunchPayload(verdict, editorState));
+    setLaunched(acceptorLaunchPayload(editorState));
     goToStep("launched");
   };
 
@@ -1146,7 +1133,6 @@ export function AcceptorBench() {
   return (
     <BenchShell topBar={ready ? topBar : undefined} ledger={ledger}>
       <div ref={stepHeadingRef}>
-        <Problems problems={launchedProblems} />
         {/* The console's idle entry state (no token accepted yet -- the review
             step, before consent and file): a way back to an exchange still running
             from a prior visit. Renders nothing when there is none to recover. */}
@@ -1560,7 +1546,6 @@ export function AcceptorBench() {
               run={run}
               outputs={outputs}
               failure={failure}
-              warning={launched?.warning}
               runWarnings={runWarnings}
               serverJob={acceptServerJob}
               jobId={jobId}

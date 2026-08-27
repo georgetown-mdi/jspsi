@@ -1296,10 +1296,19 @@ describe("per-key dead-key verdict on the authoring surface", () => {
       expect(verdict(index)).toBe(index === 0 ? "dead" : "satisfiable");
   });
 
-  test("a dead key does not block the mint gate (warn-only)", () => {
+  test("a dead key blocks the mint gate, in core's own words", () => {
     const editor = editorFromCsv("Dana", csv);
     const dead = withDeadDobKey(editor, 0);
-    // The block gate is unchanged: a dead key warns but never hard-blocks Create.
-    expect(reviewValidation(dead).canGenerate).toBe(true);
+    // An exchange runs every key its terms declare, so a key that can never match
+    // is refused at the run boundary -- and therefore at the mint, before a partner
+    // has accepted an invitation the inviter's own run would then refuse.
+    const validation = reviewValidation(dead);
+    expect(validation.canGenerate).toBe(false);
+    expect(validation.errors.keys).toContain(
+      "These terms cannot be run against your file",
+    );
+    // The shortfall fragment is core's, so the editor and the refusal that follows
+    // cannot describe one fault in two ways. Counts only, no key names.
+    expect(validation.errors.keys).toContain("drops every record");
   });
 });
