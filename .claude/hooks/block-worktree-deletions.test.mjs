@@ -355,6 +355,13 @@ describe("block-worktree-deletions hook", () => {
     // A refusal a handed-over session meets has to carry the procedure that
     // clears the file without a deletion, or the session has nothing to do next.
     expect(handedRefusal).toContain("stash push -u -- <path>");
+    // The advice is scoped to the reader's own case, not offered blanket: it
+    // names the handed-tree condition under which the stash route applies and
+    // says plainly that another session's tree gets no cleanup of any kind.
+    expect(handedRefusal).toContain("was handed");
+    expect(handedRefusal).toContain(
+      "not handed is another live session's workplace",
+    );
 
     expectBlocked([`rm ${SIBLING}/probe.test.ts`], handed);
 

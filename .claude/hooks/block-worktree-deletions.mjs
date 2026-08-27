@@ -267,10 +267,13 @@ function block(reason) {
       "deleting one destroys it unrecoverably -- there is no branch, stash, or reflog " +
       "behind it. Leave another session's tree alone, and retire a finished tree with " +
       "`git worktree remove <path>` (no --force), which refuses while the tree still has " +
-      "uncommitted work. A tree handed to a session is not a tree it owns, so an untracked " +
-      "leftover in one is cleared without a deletion: `git -C <tree> stash push -u -- <path>` " +
-      "takes that path off disk, keeps its content in the repository's stash, and leaves the " +
-      "tree retirable by that plain remove. If the path is not a registered worktree at all, say so to the " +
+      "uncommitted work. Only in a tree this session was handed -- pointed at by its own " +
+      "spawn brief, the fix-round shape -- is an untracked leftover cleared without a " +
+      "deletion: `git -C <tree> stash push -u -- <path>` takes that path off disk, keeps " +
+      "its content in the repository's stash, and leaves the tree retirable by that plain " +
+      "remove. A tree this session was not handed is another live session's workplace: a " +
+      "stash there rips files out from under its owner mid-run, so it gets no cleanup of " +
+      "any kind. If the path is not a registered worktree at all, say so to the " +
       "maintainer rather than deleting it some other way. This hook reads a plain command " +
       "line and nothing more -- the limits listed in its header are real, so rephrasing " +
       "around this refusal defeats it and destroys the tree anyway.\n",
