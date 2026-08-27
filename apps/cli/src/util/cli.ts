@@ -5,6 +5,7 @@ import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
 
 import {
+  ConnectionError,
   getDiagnosticSink,
   getLogger,
   InternalConsistencyError,
@@ -251,16 +252,25 @@ export const INTERNAL_FAULT_EXIT_CODE = 70;
 
 /**
  * The process exit code a caught command error reports: EX_USAGE (64) for a
- * {@link UsageError}, {@link INTERNAL_FAULT_EXIT_CODE} (70) for an
- * {@link InternalConsistencyError}, otherwise the error's OWN numeric `exitCode`
- * when it carries one, else EX_UNAVAILABLE (69). The single classification every
- * error->exit boundary of an exchange-running command reads, so an error that
- * classified itself more precisely than "the transport failed" is delivered
- * identically whichever command caught it.
+ * {@link UsageError} or a {@link ConnectionError} of kind `usage`,
+ * {@link INTERNAL_FAULT_EXIT_CODE} (70) for an {@link InternalConsistencyError},
+ * otherwise the error's OWN numeric `exitCode` when it carries one, else
+ * EX_UNAVAILABLE (69). The single classification every error->exit boundary of an
+ * exchange-running command reads, so an error that classified itself more
+ * precisely than "the transport failed" is delivered identically whichever
+ * command caught it.
  *
- * The two typed rungs read core's error taxonomy rather than a property, so the
- * class an error was raised as is what its exit code follows, and core carries no
- * CLI exit code of its own.
+ * The typed rungs read core's error taxonomy rather than a property, so the class
+ * an error was raised as is what its exit code follows, and core carries no CLI
+ * exit code of its own. A {@link ConnectionError} is the one class whose taxonomy
+ * is a FIELD rather than a subclass -- its `kind` -- so that field is read here,
+ * at the same altitude, rather than being left to the 69 default. The remedy for
+ * a `usage` kind is a caller, protocol, or terms correction that a re-run cannot
+ * supply: 69 tells an unattended supervisor to retry, and each retry re-fires the
+ * same deterministic refusal after conducting another whole exchange. The other
+ * kinds keep 69: `transport` and `closed` are availability conditions a retry can
+ * clear, `security` and `protocol` are observable in the terminal event's
+ * category rather than in the exit code (see docs/spec/CLI_EVENTS.md).
  *
  * The own-`exitCode` rung is load-bearing in both directions. `openInputSource`
  * and `buildDataSpec` throw plain `Error`s carrying `exitCode`, so a missing
@@ -273,6 +283,7 @@ export const INTERNAL_FAULT_EXIT_CODE = 70;
  */
 export function exitCodeForError(err: unknown): number {
   if (err instanceof UsageError) return 64;
+  if (err instanceof ConnectionError && err.kind === "usage") return 64;
   if (err instanceof InternalConsistencyError) return INTERNAL_FAULT_EXIT_CODE;
   const own = (err as { exitCode?: unknown } | null | undefined)?.exitCode;
   return typeof own === "number" ? own : 69;

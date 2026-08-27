@@ -221,6 +221,38 @@ export class StandardizationTermsError extends OperatorConfigError {
 }
 
 /**
+ * The refusal for a standardization step naming a function this build does not
+ * recognize, raised where the step is COMPILED rather than where a
+ * configuration is validated: the agreed terms' linkage-key element transforms
+ * (compiled as a key's fate is classified, before its first row is read), a
+ * party's own standardization pipeline, and the public `runPipeline` entry
+ * point. It is the compile-time counterpart of
+ * {@link StandardizationTermsError}, which covers the same fault where an
+ * AUTHORED standardization is validated against its own terms, before an
+ * exchange runs.
+ *
+ * A {@link UsageError} subclass, so the CLI's error->exit boundary classifies it
+ * as a configuration error (exit 64) rather than the 69 that invites an
+ * unattended supervisor to retry: an element the agreed terms declare and this
+ * build cannot run is a fault in the terms, deterministic in them, and every
+ * retry reaches the same refusal (see docs/spec/CHANNEL_SECURITY.md).
+ *
+ * Deliberately NOT an {@link OperatorConfigError}, unlike its authored-config
+ * counterpart: an element transform is adopted verbatim from the partner's
+ * invitation on the accept path, so this refusal is not always about the
+ * operator's own content, and its message stays swallowed by the web's generic
+ * alert. The raise site narrows the offending name to a literal this build
+ * recognizes before interpolating it, so no partner free text reaches the
+ * message either way.
+ */
+export class UnknownStandardizationFunctionError extends UsageError {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnknownStandardizationFunctionError";
+  }
+}
+
+/**
  * A {@link UsageError} subclass marking a bilateral-mode mismatch detected at
  * rendezvous: the peer advertised a `lockless_rendezvous` or `retain_files`
  * setting in its hello payload that differs from this party's. These flags are
@@ -576,9 +608,9 @@ export class ConnectionClosedError extends Error {
  * as `{ cause }`. As a `ConnectionError("transport")` it survives both intact and
  * arrives top-level, so the catch's echo gate (which must not write a marker in
  * response to a `PeerAbortError`, or the waiting party would reflect one back)
- * recognizes it, and -- because it is NOT a {@link UsageError} -- the CLI's
- * `instanceof UsageError ? 64 : 69` exit-code check yields 69 (the exchange
- * failed because the peer died), not the 64 reserved for local misconfiguration.
+ * recognizes it, and -- being neither a {@link UsageError} nor a
+ * `ConnectionError` of kind `usage` -- the CLI's exit-code check yields 69 (the
+ * exchange failed because the peer died), not the 64 both of those reach.
  *
  * It carries no partner-controlled bytes: the marker token never decodes to
  * display text and the message is fixed, so the display-boundary sanitizer is

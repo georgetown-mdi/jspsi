@@ -1488,7 +1488,7 @@ export class FileSyncRendezvous {
       await deps.client().safeDelete(helloPath);
       if (!deps.options().retainFiles) deps.responsibleFiles.delete(helloName);
       deps.resetSessionState();
-      throw new Error(
+      throw new UsageError(
         `peer id '${redactPrivateKeyMaterial(peerId)}' and this party's id ` +
           `'${deps.id()}' share a prefix at a '-' boundary; ids must not be ` +
           "prefix-extensions of each other (e.g. 'site' / 'site-2')",

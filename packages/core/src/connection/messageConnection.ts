@@ -10,7 +10,11 @@ import type { Connection } from "../types";
  *   silently retried; surface it loudly as possible tampering.
  * - `usage`: the connection was misconfigured or used incorrectly (e.g. a send
  *   after close, a path shared by another session). The caller must fix
- *   something before retrying.
+ *   something before retrying. This is the one kind the CLI's error->exit
+ *   boundary reads, mapping it to 64 (EX_USAGE) alongside `UsageError`
+ *   rather than to the 69 every other kind takes: the fault is deterministic in
+ *   what the caller supplied, so the 69 that tells an unattended supervisor to
+ *   retry would turn one refusal into a loop of whole exchanges.
  * - `protocol`: the peer violated the message protocol (e.g. sent out of turn).
  * - `closed`: a parked operation was cancelled by a deliberate local
  *   {@link MessageConnection.close} (e.g. a signal-driven shutdown). Nothing
