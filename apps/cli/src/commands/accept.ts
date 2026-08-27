@@ -34,7 +34,12 @@ import {
   type ReconcileDiff,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
-import { resolveIdentity } from "../partyIdentity";
+import {
+  ACCEPT_IDENTITY_QUESTION,
+  askIdentityAtPrompt,
+  identityFromFlagOrPrompt,
+  resolveIdentity,
+} from "../partyIdentity";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { decodeAndValidateInvitation } from "../invitationDecode";
 import {
@@ -291,6 +296,14 @@ type AcceptReady = {
  * decode before the connection/input work so the `decode -> myTerms ->
  * buildDataSpec` dependency stays ordered.
  *
+ * The one question it can ask is `askIdentity`, and only where the caller
+ * supplied it: the label is an input to everything below it -- the derived
+ * terms, the data spec, the satisfiability check, the prepared exchange -- so it
+ * cannot be collected later, at the confirmation prompt, without validating the
+ * acceptance twice. It is asked after the invitation has decoded and validated
+ * and after the key-file conflict gate, so nobody types a name for an
+ * acceptance that was never going to proceed.
+ *
  * @internal exported for testing
  */
 export async function validateAccept(params: {
@@ -306,8 +319,22 @@ export async function validateAccept(params: {
    * behavior.
    */
   consentToTerms?: boolean;
+  /**
+   * Ask the operator for this party's identity, where `options.identity` carries
+   * none and this acceptance is going to write the configuration that remembers
+   * the answer. Omitted for a run with no terminal to ask at, and for one whose
+   * stdin the input CSV holds -- both of which then take the standing
+   * no-identity refusal rather than blocking on a read no one answers.
+   */
+  askIdentity?: () => Promise<string>;
 }): Promise<AcceptReady> {
-  const { resolved, options, log, consentToTerms = false } = params;
+  const {
+    resolved,
+    options,
+    log,
+    consentToTerms = false,
+    askIdentity,
+  } = params;
 
   // Validate (checksum, schema, expiry) first, so the user is never prompted for
   // an invalid invitation. A pre-existing key file remains a hard conflict on
@@ -320,7 +347,20 @@ export async function validateAccept(params: {
     ["key"],
   );
 
-  const myIdentity = resolveIdentity(options.identity);
+  // A configuration already at the path is either kept as it stands or aborts
+  // the acceptance below, and neither writes one -- so there is nowhere for an
+  // answer to be remembered, and the label a later run sends is that file's own.
+  // Asking there would collect a value this command has no place to put. The
+  // same lstat reconcileAcceptConfig gates reuse on, read here because the
+  // question comes before the terms the reconcile compares.
+  const willWriteConfig =
+    detectFileConflicts([options.configFile]).length === 0;
+  const myIdentity = resolveIdentity(
+    await identityFromFlagOrPrompt(
+      options.identity,
+      willWriteConfig ? askIdentity : undefined,
+    ),
+  );
   // Adopt the invitation's agreed linkage fields/keys/algorithm, but record this
   // party's own identity (the invitation's identity is the inviter's) and MIRROR
   // the output direction rather than copying it: validateCompatibility compares
@@ -842,6 +882,19 @@ export async function handler(argv: Arguments): Promise<void> {
         options,
         consentToTerms,
         log,
+        // The identity question is asked exactly where the consent question is:
+        // at a terminal, and only where --consent-to-terms has not declared the
+        // run unattended. That is the same resolution the `-` CSV takes rather
+        // than a rule of its own -- with the consent prompt running, stdin is
+        // this session's; with it skipped, stdin may be the CSV and nothing
+        // here may read it. Both questions then belong to one interactive
+        // session, this one asking who the operator is before the terms they
+        // answer for are shown.
+        ...(process.stdin.isTTY === true && !consentToTerms
+          ? {
+              askIdentity: () => askIdentityAtPrompt(ACCEPT_IDENTITY_QUESTION),
+            }
+          : {}),
       });
 
       // The acceptor's own outbound-send set: the columns this party will disclose

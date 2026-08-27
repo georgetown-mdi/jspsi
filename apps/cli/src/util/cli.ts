@@ -876,12 +876,19 @@ export function writePromptLine(line: string): void {
 }
 
 /**
- * Prompt the user to confirm on the terminal, returning true only on an
- * explicit yes. Anything else (including EOF or a non-interactive stdin)
- * defaults to no. Prompts on stderr so stdout stays reserved for exchange
- * results.
+ * Ask `question` on the prompt stream and resolve to the line the user typed,
+ * raw -- neither trimmed nor interpreted, since what a blank or padded answer
+ * means belongs to the caller that asked. EOF and a non-interactive stdin both
+ * resolve to the empty string, the same "nothing was answered" every caller of
+ * {@link promptConfirm} reads as a decline.
+ *
+ * The one place a question is asked: {@link promptConfirm} is this with a y/N
+ * suffix and its answer interpreted, so `process.stdin` is read through one
+ * readline interface at a time and every question goes to {@link promptStream}
+ * (stderr), leaving stdout reserved for a command's result data. stdin is
+ * single-use, so a command whose input CSV is `-` must not reach either of them.
  */
-export async function promptConfirm(question: string): Promise<boolean> {
+export async function promptFreeText(question: string): Promise<string> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: promptStream,
@@ -890,16 +897,28 @@ export async function promptConfirm(question: string): Promise<boolean> {
     // `rl.question()` never settles when stdin reaches EOF (a closed or
     // piped-empty stdin) -- a long-standing readline/promises behavior
     // (nodejs/node#53497). Race it against the interface's "close" event (which
-    // does fire on EOF) so a closed stdin deterministically resolves to "no"
-    // instead of leaving the promise pending -- which today exits silently via
-    // event-loop drain and would deadlock outright if any handle were open here.
-    const answer = await new Promise<string>((resolve) => {
+    // does fire on EOF) so a closed stdin deterministically resolves to the
+    // empty answer instead of leaving the promise pending -- which today exits
+    // silently via event-loop drain and would deadlock outright if any handle
+    // were open here.
+    return await new Promise<string>((resolve) => {
       rl.once("close", () => resolve(""));
-      void rl.question(`${question} [y/N] `).then(resolve, () => resolve(""));
+      void rl.question(`${question} `).then(resolve, () => resolve(""));
     });
-    const normalized = answer.trim().toLowerCase();
-    return normalized === "y" || normalized === "yes";
   } finally {
     rl.close();
   }
+}
+
+/**
+ * Prompt the user to confirm on the terminal, returning true only on an
+ * explicit yes. Anything else (including EOF or a non-interactive stdin)
+ * defaults to no. Prompts on stderr so stdout stays reserved for exchange
+ * results.
+ */
+export async function promptConfirm(question: string): Promise<boolean> {
+  const normalized = (await promptFreeText(`${question} [y/N]`))
+    .trim()
+    .toLowerCase();
+  return normalized === "y" || normalized === "yes";
 }
