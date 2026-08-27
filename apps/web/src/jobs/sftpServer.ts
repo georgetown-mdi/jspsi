@@ -559,8 +559,7 @@ function camelizeEntryKeys(
     );
     if (camelKey in camelized)
       throw new JobApiConfigError(
-        `server sets the key "${camelKey}" twice (a snake_case and ` +
-          "a camelCase spelling of the same field)",
+        "server entry sets a key twice after camelization",
       );
     camelized[camelKey] = value;
   }
