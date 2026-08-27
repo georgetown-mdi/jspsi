@@ -1,5 +1,9 @@
+import {
+  LinkageTermsUnsatisfiableError,
+  generateSharedSecret,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 import { describe, expect, test } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   classifyManagedRunFailure,
@@ -69,11 +73,11 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     expect(failure.message).not.toMatch(/attack|tamper|impersonat/i);
   });
 
-  test("an input problem is the benign input state, naming no partner-influenced detail", () => {
+  test("an unreadable input is the benign input state, retried in place", () => {
     const failure = classifyManagedRunFailure(
       new ManagedInputError({
-        reason: "columns",
-        unsatisfied: [{ name: "ssn", type: "ssn" }],
+        reason: "acquire",
+        cause: new Error("NotFoundError"),
       }),
       record(),
       undefined,
@@ -81,7 +85,33 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     );
     expect(failure.kind).toBe("input");
     expect(failure.recovery).toBe("retry");
-    expect(failure.message).not.toMatch(/ssn/);
+    expect(failure.message).not.toMatch(/NotFound/);
+  });
+
+  test("a linkage shortfall is not offered as a retry, and names no agreed key", () => {
+    // The same file falls the same way short of the same keys however many times it
+    // runs, so the surface must not offer the run again as though it might pass --
+    // and the shortfall's detail is partner-authored, so the copy states the
+    // condition instead of echoing it.
+    for (const error of [
+      new ManagedInputError({
+        reason: "columns",
+        unsatisfied: [{ name: "ssn", type: "ssn" }],
+      }),
+      new LinkageTermsUnsatisfiableError("refused at the run boundary"),
+    ]) {
+      const failure = classifyManagedRunFailure(
+        error,
+        record(),
+        undefined,
+        NOW,
+      );
+      expect(failure.kind).toBe("input");
+      expect(failure.recovery).toBe("restate");
+      expect(managedRunRetryable(failure)).toBe(false);
+      expect(failure.message).not.toMatch(/ssn/);
+      expect(failure.message).toMatch(/every linkage key/);
+    }
   });
 
   test("a run in progress elsewhere is the benign already-running state", () => {

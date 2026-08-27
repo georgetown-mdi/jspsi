@@ -713,6 +713,73 @@ describe("validateAdvancedInvite", () => {
     expect(result.errors.keys).toBeDefined();
   });
 
+  test("(c) blocks Generate when only SOME enabled keys are column-satisfiable", () => {
+    // An exchange runs every key its terms declare, so an editor that minted here
+    // would hand out an invitation the inviter's own run refuses -- after the
+    // partner has accepted it. The keys the columns DO cover are what a per-key
+    // threshold would have passed on.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const result = validateAdvancedInvite(
+      draft,
+      { ...seed, columns: PARTIAL_COLUMNS },
+      NOW,
+    );
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.keys).toContain(
+      "These terms cannot be run against your file",
+    );
+    // The shortfall wording is core's shared fragment, counts only.
+    expect(result.errors.keys).toContain(
+      "cannot be produced from this input's columns",
+    );
+  });
+
+  test("(c) blocks Generate on a dead-key-only shortfall with the cleaning remedy", () => {
+    // Shape-satisfiable and still refused: every element field resolves, but the
+    // key's declared parse_date can never yield a value. The columns are fine, so
+    // the remedy is the cleaning rather than the column mapping -- the split the
+    // acceptor's launch gate keeps.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const onlyDobKey = onlyKeyEnabled(draft, "SSN + LN + DOB");
+    const deadDraft = {
+      ...onlyDobKey,
+      keys: onlyDobKey.keys.map((entry) =>
+        entry.key.name === "SSN + LN + DOB"
+          ? {
+              ...entry,
+              key: {
+                ...entry.key,
+                elements: entry.key.elements.map((element) =>
+                  element.field === "date_of_birth"
+                    ? {
+                        ...element,
+                        transform: [
+                          {
+                            function: "parse_date",
+                            params: { inputFormat: "MM/DD" },
+                          },
+                        ],
+                      }
+                    : element,
+                ),
+              },
+            }
+          : entry,
+      ),
+    };
+    const result = validateAdvancedInvite(deadDraft, seed, NOW);
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.keys).toContain(
+      "the cleaning declared for the one agreed linkage key drops every record",
+    );
+    expect(result.errors.keys).toContain(
+      'Review the cleaning on the keys badged "won\'t match"',
+    );
+    // The column-mapping remedy would misdirect here: the columns produce every
+    // field this key references.
+    expect(result.errors.keys).not.toContain("map a column to");
+  });
+
   test("(c) blocks Generate on an incomplete legal agreement, per field", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const result = validateAdvancedInvite(

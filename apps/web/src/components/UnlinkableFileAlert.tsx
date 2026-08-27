@@ -1,46 +1,71 @@
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay, summarizeLinkageShortfall } from "@psilink/core";
 
 import type { LinkageField } from "@psilink/core";
 
 import type { AlertContent } from "@components/csvIntake";
+import type { LinkageRefusal } from "@psi/linkageRefusal";
+
+/** The missing field types, as a parenthesised trailing fragment, or the empty
+ * string for an empty list. The names and types are terms content -- partner-
+ * authored wherever the terms arrived with an invitation -- so each is escaped at
+ * this sink. */
+function missingFieldsDetail(fields: ReadonlyArray<LinkageField>): string {
+  if (fields.length === 0) return "";
+  return (
+    " (missing: " +
+    fields
+      .map(
+        (f) => `${sanitizeForDisplay(f.name)} (${sanitizeForDisplay(f.type)})`,
+      )
+      .join(", ") +
+    ")"
+  );
+}
 
 /**
- * The operator-facing alert for a file whose columns satisfy zero default linkage
- * keys, shared by the inviter bench's create and save-exchange-file gates so the
- * wording cannot drift: each renders it from an {@link InvitationFileError}
- * zero-satisfiable-keys failure raised by the mint-time re-parse. When every
- * default key references at least one field
- * type the file lacks, no match is possible and the exchange would yield a result
- * byte-indistinguishable from a legitimately empty intersection, so both gates
- * refuse the file EARLY with this shared message rather than running it.
+ * The operator-facing alert for a file that cannot satisfy the linkage terms its
+ * run would be held to, shared by the direct-exchange confirm screen and both
+ * inviter mint gates so the wording cannot drift: each renders it from the
+ * {@link LinkageRefusal} its own verdict carried, and the mint gates from the one
+ * an {@link InvitationFileError} raised at the mint-time re-check.
  *
- * `unsatisfied` is the missing linkage fields from {@link assessLinkageSatisfiability}
- * (equivalently an {@link InvitationFileError}'s failure detail). The field names
- * and types are default-derived, not partner-controlled, but are sanitized anyway
- * for parity with the surfaces that do surface partner content. The detail is
- * omitted when the list is empty (it should always be populated on this path). The
- * return shape is the structural {@link AlertContent} (`{ title, message }`) both
- * callers assign into their error state and render through the shared alert slot.
+ * Total over {@link LinkageRefusal}, which exists only for a verdict that refuses,
+ * so a seat holding a refusal always has copy for it and a seat holding none shows
+ * nothing.
+ *
+ * The shortfall sentence is core's {@link summarizeLinkageShortfall} -- the same
+ * fragment the run-boundary refusal states -- so the advance notice and the refusal
+ * that follows it cannot describe one fault in two ways. It carries fixed copy and
+ * counts only: a linkage KEY's name is never surfaced. The unproducible FIELDS are,
+ * as the missing-types guidance every seat gives, escaped at this sink.
+ *
+ * The first-party copy around it presupposes no partner and no agreement already
+ * struck -- it names the terms and the files on both sides -- so it reads the same
+ * for a seat minting terms from the operator's own columns and one held to terms an
+ * invitation carried.
+ *
+ * The return shape is the structural {@link AlertContent} (`{ title, message }`)
+ * every caller assigns into its error state and renders through the shared alert
+ * slot.
  */
-export function unlinkableFileAlert(
-  unsatisfied: ReadonlyArray<LinkageField>,
-): AlertContent {
-  const detail =
-    unsatisfied.length > 0
-      ? " (missing: " +
-        unsatisfied
-          .map(
-            (f) =>
-              `${sanitizeForDisplay(f.name)} (${sanitizeForDisplay(f.type)})`,
-          )
-          .join(", ") +
-        ")"
-      : "";
+export function unlinkableFileAlert(refusal: LinkageRefusal): AlertContent {
+  if (refusal.kind === "no-linkable-key")
+    return {
+      title: "This file cannot be linked",
+      message:
+        "Your CSV cannot satisfy any default linkage key" +
+        missingFieldsDetail(refusal.missingFields) +
+        ". No matches would be possible. Choose a file that includes columns " +
+        "for the required field types (for example name, date of birth, or SSN).",
+    };
   return {
-    title: "This file cannot be linked",
+    title: "This file cannot satisfy the linkage terms",
     message:
-      `Your CSV cannot satisfy any default linkage key${detail}. No ` +
-      "matches would be possible. Choose a file that includes columns for " +
-      "the required field types (for example name, date of birth, or SSN).",
+      "An exchange runs every linkage key its terms declare, and " +
+      `${summarizeLinkageShortfall(refusal.verdict)}` +
+      missingFieldsDetail(refusal.verdict.unsatisfiedFields) +
+      ". It would be refused before any data left this device. Choose a file " +
+      "that satisfies every linkage key in the terms, or set terms that " +
+      "declare only the keys the files on both sides can supply.",
   };
 }

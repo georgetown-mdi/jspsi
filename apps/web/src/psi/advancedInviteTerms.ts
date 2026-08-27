@@ -1,8 +1,8 @@
 import {
   APPLIED_SETTINGS,
   DEFAULT_LINKAGE_RULE_SET,
-  assessLinkageSatisfiability,
   authoredLinkageFields,
+  decideLinkageTermsVerdict,
   getDefaultLinkageTerms,
   isDrawnFromLinkageRuleSet,
   linkageRuleSetReferenceFor,
@@ -17,6 +17,7 @@ import type {
   ExchangeDataSpec,
   LinkageField,
   LinkageKey,
+  LinkageKeyFitness,
   LinkageRuleSetReference,
   LinkageTerms,
   Metadata,
@@ -497,35 +498,42 @@ export function inviterExchangeDataSpec(
 }
 
 /**
- * The authored field names the operator's columns can actually PRODUCE -- the
- * satisfiability universe a key's badge is judged against. Derived from the
- * authored fields (not the one-field-per-type default) and resolved through
- * the given standardization -- the same inputs the Generate gate uses -- so an
- * authored same-typed second field (e.g. first_name_2) reads as satisfiable.
- * The probe restates the authored fields onto default terms; only its
- * linkageFields are read (resolveFieldColumns ignores linkageKeys), and the
- * identity is a constant because it never affects the field or key set.
+ * The terms core grades a draft's authoring surface against: the AUTHORED fields
+ * (not the one-field-per-type default) restated onto default terms, with the keys
+ * the caller asks about. An authored same-typed second field (e.g. first_name_2) is
+ * therefore judged on its own binding rather than the type's first match, which is
+ * what the Generate gate grades on too. The identity is a constant because it never
+ * affects the field or key set.
  */
-export function producibleFieldNames(
+function authoringProbeTerms(
+  metadata: Metadata,
+  standardization: Standardization,
+  linkageKeys: ReadonlyArray<LinkageKey>,
+): LinkageTerms {
+  return {
+    ...getDefaultLinkageTerms("", metadata),
+    linkageFields: authoredLinkageFields(metadata, standardization),
+    linkageKeys: [...linkageKeys],
+  };
+}
+
+/**
+ * How each of a draft's authored keys fares against the operator's columns, in
+ * declaration order -- the per-key badge verdict, taken from core's own
+ * classification ({@link decideLinkageTermsVerdict}) rather than re-derived, so a
+ * badge cannot come to read `satisfiable` for a key the Generate gate, the mint,
+ * and the run boundary all refuse.
+ */
+export function gradeAuthoredKeys(
   metadata: Metadata,
   standardization: Standardization,
   columns: ReadonlyArray<string>,
-): Set<string> {
-  const fields = authoredLinkageFields(metadata, standardization);
-  const probe: LinkageTerms = {
-    ...getDefaultLinkageTerms("", metadata),
-    linkageFields: fields,
-  };
-  const { unsatisfied } = assessLinkageSatisfiability(
+  linkageKeys: ReadonlyArray<LinkageKey>,
+): Array<LinkageKeyFitness> {
+  return decideLinkageTermsVerdict(
     [...columns],
-    probe,
+    authoringProbeTerms(metadata, standardization, linkageKeys),
     standardization,
     metadata,
-  );
-  const unsatisfiedNames = new Set(unsatisfied.map((field) => field.name));
-  return new Set(
-    fields
-      .map((field) => field.name)
-      .filter((name) => !unsatisfiedNames.has(name)),
-  );
+  ).keys.map((graded) => graded.fitness);
 }

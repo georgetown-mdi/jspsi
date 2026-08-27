@@ -742,15 +742,19 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     expect(announcement.element().getAttribute("aria-live")).toBe("polite");
   });
 
-  test("a partially-covered file warns with the N-of-M copy and still enables launch", async () => {
+  test("a partially-covered file shows the N-of-M copy and blocks launch", async () => {
     await reachColumns("first_name,notes\nAlice,vip\n");
     await expect
       .element(page.getByText("1 of 2 keys can match"))
       .toBeInTheDocument();
-    // Partial coverage warns, never blocks.
+    // An exchange runs every agreed key, so the run boundary refuses this file --
+    // and the launch says so here, where the operator can still act on it.
     await expect
       .element(page.getByRole("button", { name: "Start the exchange" }))
-      .toBeEnabled();
+      .toBeDisabled();
+    await expect
+      .element(page.getByTestId("launch-blocked-reason"))
+      .toHaveTextContent("Cover the remaining agreed linkage keys above");
   });
 
   test("a fully-covered file is all-clear with the exact body copy and no mapper", async () => {
@@ -2242,10 +2246,9 @@ describe("acceptor bench: run and completion", () => {
     expect(another?.getAttribute("href")).toBe("/quick");
   });
 
-  test("the partial-coverage advisory shows in Problems and the work column", async () => {
-    // A partially-covered file (only first_name recognized) raises the
-    // partial-coverage advisory at launch, which the run surfaces in both the
-    // work column's Problems block and its own amber alert.
+  test("a partially-covered file never reaches the run at all", async () => {
+    // A partially-covered file never reaches a run: the launch gate refuses it at
+    // this seat, so nothing starts and there is no run surface to warn on.
     window.location.hash = await encodeRunToken();
     app.render(createElement(AcceptorBench));
     await expect
@@ -2269,23 +2272,9 @@ describe("acceptor bench: run and completion", () => {
     await expect
       .element(page.getByText("1 of 2 keys can match"))
       .toBeInTheDocument();
-    await userEvent.click(
-      page.getByRole("button", { name: "Start the exchange" }),
-    );
-    await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
-
-    // The advisory shows in BOTH the work column's Problems block (the short
-    // label) and its own amber alert (the fuller message) -- scope each query
-    // rather than match globally (Playwright strict mode rejects the
-    // ambiguity).
-    await vi.waitFor(() => {
-      const problems = document.querySelector('section[aria-label="Problems"]');
-      expect(problems?.textContent).toContain(
-        "Not every agreed key is covered",
-      );
-    });
-    const work = document.querySelector("main") as Element;
-    expect(work.textContent).toContain("Not every agreed key is covered");
-    expect(work.textContent).toContain("refuse to run on these terms");
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeDisabled();
+    expect(lifecycleHarness.calls).toHaveLength(0);
   });
 });

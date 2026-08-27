@@ -51,8 +51,8 @@ import type { KeyVerdict } from "@bench/inviterModel";
 
 /** The expert-editor badge copy and Mantine color for each per-key verdict
  * ({@link KeyVerdict}), reading consistently with the guided list. A dead key is
- * warn-only (amber "won't match"): its columns resolve, but a self-defeating
- * transform would run the key to a silent empty result. */
+ * amber rather than red ("won't match") because its columns do resolve and the
+ * remedy is the transform, not the file -- it closes Generate all the same. */
 const KEY_VERDICT_BADGES: Record<
   KeyVerdict,
   { label: string; color: string; ariaLabel: string }

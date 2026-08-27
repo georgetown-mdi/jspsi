@@ -357,6 +357,86 @@ describe("generateInvitation", () => {
     ).rejects.toBeInstanceOf(InvitationFileError);
   });
 
+  test("fails closed when the file covers only SOME of the authored keys", async () => {
+    // The mint is held to the rule the inviter's own run is: every declared key.
+    // Minting here would seal a token the partner accepts and the inviter's own run
+    // then refuses -- discovered after the accept, when the terms are already
+    // settled. The full default set needs ssn4; PARTIAL_CSV covers everything else.
+    const full = getDefaultLinkageTerms(
+      "Org",
+      inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"]),
+    );
+    const error = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream(PARTIAL_CSV),
+      location,
+      linkageTerms: full,
+    }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(InvitationFileError);
+    const failure = (error as InvitationFileError).failure;
+    expect(failure.kind).toBe("unlinkable");
+    if (failure.kind !== "unlinkable") throw new Error("unreachable");
+    expect(failure.refusal.kind).toBe("shortfall");
+    if (failure.refusal.kind !== "shortfall") throw new Error("unreachable");
+    // The base message is the log line for every "unlinkable" refusal, so it must
+    // hold for a file that satisfies some keys, not only one that satisfies none.
+    expect((error as InvitationFileError).message).toBe(
+      "invitation file cannot satisfy the linkage terms",
+    );
+    // Some keys ARE producible, which is exactly what a per-key threshold would
+    // have passed on.
+    expect(failure.refusal.verdict.unsatisfiableKeys.length).toBeGreaterThan(0);
+    expect(
+      failure.refusal.verdict.keys.length -
+        failure.refusal.verdict.unsatisfiableKeys.length,
+    ).toBeGreaterThan(0);
+  });
+
+  test("fails closed on an authored key whose cleaning drops every record", async () => {
+    // Shape-satisfiable and still dead: the columns are all present, but the
+    // declared parse_date can never yield a value, so the key contributes nothing.
+    // Its remedy is a correction to the terms, not a different file, and the mint
+    // says so before a partner has accepted anything.
+    const base = getDefaultLinkageTerms(
+      "Org",
+      inferMetadata(["first_name", "last_name", "dob"]),
+    );
+    const deadTerms = {
+      ...base,
+      linkageFields: [{ name: "dob", type: "date_of_birth" as const }],
+      linkageKeys: [
+        {
+          name: "dob-only",
+          elements: [
+            {
+              field: "dob",
+              transform: [
+                { function: "parse_date", params: { inputFormat: "MM/DD" } },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const error = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream("first_name,last_name,dob\nAlice,Smith,1990-01-02\n"),
+      location,
+      linkageTerms: deadTerms,
+    }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(InvitationFileError);
+    const failure = (error as InvitationFileError).failure;
+    expect(failure.kind).toBe("unlinkable");
+    if (failure.kind !== "unlinkable") throw new Error("unreachable");
+    expect(failure.refusal.kind).toBe("shortfall");
+    if (failure.refusal.kind !== "shortfall") throw new Error("unreachable");
+    expect(failure.refusal.verdict.deadKeys.map((key) => key.name)).toEqual([
+      "dob-only",
+    ]);
+  });
+
   test("rejects an unnamed column header early as an unnameable InvitationFileError", async () => {
     // A trailing comma in the header yields an unnamed ("") column. The quick path
     // must reject it early as a typed, user-actionable InvitationFileError (kind
@@ -877,8 +957,8 @@ describe("generateInvitation fail-closed before mint", () => {
 
   test("rejects a file that satisfies zero linkage keys, naming the missing fields", async () => {
     // A CSV with no linkage-typed columns: every default key references a field
-    // it cannot produce, so no key survives -- the same satisfiableKeyCount === 0
-    // block the acceptor pre-flight enforces.
+    // it cannot produce, so the derivation narrows the built-in set all the way to
+    // no key -- the refusal core's own verdict raises for terms declaring none.
     const err: unknown = await generateInvitation({
       inviterName: "County Health Dept",
       file: csvStream("notes\nhello\n"),
@@ -889,9 +969,12 @@ describe("generateInvitation fail-closed before mint", () => {
     const failure = (err as InvitationFileError).failure;
     expect(failure.kind).toBe("unlinkable");
     if (failure.kind !== "unlinkable") throw new Error("unreachable");
+    expect(failure.refusal.kind).toBe("no-linkable-key");
+    if (failure.refusal.kind !== "no-linkable-key")
+      throw new Error("unreachable");
     // It names the default field types the file lacks (assessed against the full
     // defaults, which the filtered embed terms no longer declare).
-    const missingTypes = failure.unsatisfied.map((f) => f.type);
+    const missingTypes = failure.refusal.missingFields.map((f) => f.type);
     expect(missingTypes).toContain("ssn");
     expect(missingTypes).toContain("first_name");
     expect(missingTypes).toContain("date_of_birth");
@@ -899,10 +982,10 @@ describe("generateInvitation fail-closed before mint", () => {
 
   test("rejects a column-less file, not fooled by the empty-metadata all-keys fallback", async () => {
     // The subtle case the block must catch: with no columns, getDefaultLinkageTerms
-    // falls back to ALL keys (its metadata is empty), so the embedded set's key
-    // count is non-zero -- but the satisfiability detector counts zero producible
-    // keys, and that is what the block gates on. So an empty CSV is refused, and
-    // every default field is named as unproducible.
+    // falls back to ALL keys (its metadata is empty), so the embedded set declares
+    // keys -- and none of them is producible, which core's verdict grades as a
+    // shortfall rather than as terms declaring nothing. So an empty CSV is refused,
+    // and every default field is named as unproducible.
     const err: unknown = await generateInvitation({
       inviterName: "County Health Dept",
       file: csvStream(""),
@@ -913,7 +996,11 @@ describe("generateInvitation fail-closed before mint", () => {
     const failure = (err as InvitationFileError).failure;
     expect(failure.kind).toBe("unlinkable");
     if (failure.kind !== "unlinkable") throw new Error("unreachable");
-    expect(failure.unsatisfied.map((f) => f.type)).toEqual(
+    expect(failure.refusal.kind).toBe("shortfall");
+    if (failure.refusal.kind !== "shortfall") throw new Error("unreachable");
+    expect(
+      failure.refusal.verdict.unsatisfiedFields.map((f) => f.type),
+    ).toEqual(
       expect.arrayContaining([
         "ssn",
         "ssn4",

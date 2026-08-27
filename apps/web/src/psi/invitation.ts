@@ -5,6 +5,7 @@ import {
   assertPayloadSendDisclosed,
   assertStandardizationMatchesTerms,
   assessLinkageSatisfiability,
+  decideLinkageTermsVerdict,
   disclosedColumnNames,
   encodeInvitation,
   generateSharedSecret,
@@ -14,6 +15,7 @@ import {
 } from "@psilink/core";
 
 import { emptyColumnPositions } from "./columnNames";
+import { linkageRefusalFor } from "./linkageRefusal";
 import { loadCSVFileOffMainThread } from "./csvParseController";
 import { payloadSendForMetadata } from "./metadataEditing";
 import { standardizationForTerms } from "./advancedInviteTerms";
@@ -23,13 +25,14 @@ import type {
   ConnectionEndpoint,
   FileDropEndpoint,
   InvitationToken,
-  LinkageField,
   LinkageTerms,
   Metadata,
   SFTPEndpoint,
   Standardization,
   WebRTCEndpoint,
 } from "@psilink/core";
+
+import type { LinkageRefusal } from "./linkageRefusal";
 
 /**
  * The CSV input {@link generateInvitation} parses: exactly what
@@ -184,13 +187,13 @@ export type InvitationFileFailure =
       cause: unknown;
     }
   | {
-      /** The file's columns satisfy none of the default linkage keys, so no
-       * exchange could ever match -- the same zero-key condition the acceptor's
-       * pre-flight blocks on (`satisfiableKeyCount === 0`). */
+      /** The file cannot satisfy every linkage key the minted terms declare, so
+       * the exchange the token sets up would be refused at its own run boundary --
+       * after the partner has accepted. The same rule every console pre-launch seat
+       * and core's `assertLinkageTermsSatisfiable` hold the input to. */
       kind: "unlinkable";
-      /** The default linkage fields the file cannot produce, so the caller can
-       * name the missing field types to the inviter. */
-      unsatisfied: Array<LinkageField>;
+      /** Why, in the shape the operator-facing alert is total over. */
+      refusal: LinkageRefusal;
     }
   | {
       /** The CSV header carries one or more empty (zero-length) column names -- a
@@ -232,7 +235,7 @@ export class InvitationFileError extends Error {
       failure.kind === "unreadable"
         ? "invitation file could not be read"
         : failure.kind === "unlinkable"
-          ? "invitation file satisfies no linkage keys"
+          ? "invitation file cannot satisfy the linkage terms"
           : failure.kind === "overlong"
             ? "invitation file sends an over-long column name"
             : "invitation file has an empty column name",
@@ -498,7 +501,7 @@ export async function generateInvitation(params: {
   }
 
   // Refuse an unnamed-column header before any inference or minting. inferMetadata
-  // (the quick path) and assessLinkageSatisfiability below both reject an empty
+  // (the quick path) and the linkage grading below both reject an empty
   // name by throwing a raw UsageError, and the authored path would carry a `""`
   // column into payload.send and bottom out in PayloadColumnSchema's name `.min(1)`
   // ZodError at encode -- both of which the UI flattens into its generic retry
@@ -530,20 +533,21 @@ export async function generateInvitation(params: {
   if (params.linkageTerms !== undefined) {
     linkageTerms = params.linkageTerms;
     // The mint boundary stays fail-closed even though the editor already gates on
-    // satisfiability: a set whose every key references a field the columns cannot
-    // produce would run to the silent empty result the quick path's block exists
-    // to prevent. Assess against the AUTHORED terms themselves (not the full
-    // defaults) so the verdict matches the keys actually embedded; the editor
-    // dropped the unproducible defaults, so a zero here means a genuinely
-    // unlinkable file rather than a filtered-away default.
-    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
+    // satisfiability: a set carrying a key the columns cannot produce, or one whose
+    // cleaning drops every record, mints a token whose own exchange the run
+    // boundary refuses -- after the partner has accepted it. Grade the AUTHORED
+    // terms themselves (not the full defaults) with the authored standardization
+    // and metadata, the three inputs the inviter's own run is graded on, so the
+    // token is refused here exactly when that run would be.
+    const verdict = decideLinkageTermsVerdict(
       columns,
       linkageTerms,
       params.standardization,
       params.metadata,
     );
-    if (satisfiableKeyCount === 0)
-      throw new InvitationFileError({ kind: "unlinkable", unsatisfied });
+    const refusal = linkageRefusalFor(verdict, verdict.unsatisfiedFields);
+    if (refusal !== undefined)
+      throw new InvitationFileError({ kind: "unlinkable", refusal });
     // Reject a payload.send that does not match the disclosed set before the token
     // is minted, so the partner's consent screen never misstates what is sent (a
     // column metadata gates off, or one it transmits but the dictionary omits). The
@@ -566,23 +570,23 @@ export async function generateInvitation(params: {
     disclosureMetadata = metadata;
     linkageTerms = getDefaultLinkageTerms(inviterName, metadata);
 
-    // Block a file that satisfies no linkage key, mirroring the acceptor pre-flight
-    // (FileAcquire): with zero satisfiable keys the exchange would emit no key
-    // strings and yield a silent empty result. Gate on the detector's
-    // satisfiableKeyCount, NOT on linkageTerms.linkageKeys.length: the two agree for
-    // a file with columns, but getDefaultLinkageTerms falls back to ALL keys when
-    // its metadata is empty (a column-less file), so the embedded set's key count
-    // would be non-zero there and miss the block, while the detector counts actual
-    // column producibility and correctly reports zero. Assess against the FULL
-    // default terms (every default field declared) rather than the filtered
-    // `linkageTerms`, so the block can name the field types the file lacks -- the
-    // filtered set no longer declares the dropped fields.
-    const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
-      columns,
-      getDefaultLinkageTerms(inviterName),
+    // Block a file the minted terms cannot be run against, the same rule the
+    // inviter's own run boundary applies. Grade the EMBEDDED terms rather than the
+    // full default set: the derivation narrows the built-in keys to the ones the
+    // columns support, so the full set would refuse every file short of it while
+    // the run is held only to what the token declares. Narrowing all the way to no
+    // key is a refusal in its own right, and a column-less file reaches it the
+    // other way -- getDefaultLinkageTerms falls back to ALL keys on empty metadata,
+    // and none of them is producible. The missing field types the alert names come
+    // from the FULL default terms, since the narrowed set no longer declares the
+    // fields it dropped.
+    const refusal = linkageRefusalFor(
+      decideLinkageTermsVerdict(columns, linkageTerms, undefined, metadata),
+      assessLinkageSatisfiability(columns, getDefaultLinkageTerms(inviterName))
+        .unsatisfied,
     );
-    if (satisfiableKeyCount === 0)
-      throw new InvitationFileError({ kind: "unlinkable", unsatisfied });
+    if (refusal !== undefined)
+      throw new InvitationFileError({ kind: "unlinkable", refusal });
 
     // Author terms.payload.send from the same inferMetadata(columns) the inviter's
     // own exchange falls back to on the quick path, so the declaration equals the

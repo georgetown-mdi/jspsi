@@ -71,7 +71,7 @@ const nameTerms: LinkageTerms = {
 
 // A single date-of-birth key whose adopted cleaning is self-defeating: the
 // parse_date input format omits the year, so the pipeline drops every record no
-// matter the data. assessLinkageSatisfiability reports this as a dead key.
+// matter the data. Core's verdict grades this key dead.
 const deadDobTerms: LinkageTerms = {
   version: "1.0.0",
   identity: "County Health Department",
@@ -150,7 +150,7 @@ describe("acceptor verdict (re-surfaced, not re-derived)", () => {
     expect(verdict.announcement).not.toBe(verdict.title);
   });
 
-  test("a partially-covered file warns with the N-of-M title", () => {
+  test("a partially-covered file reads N-of-M and is not fully satisfied", () => {
     const { editorState } = editorFor(["first_name", "notes"], nameTerms);
     const verdict = acceptorVerdict(
       ["first_name", "notes"],
@@ -162,6 +162,8 @@ describe("acceptor verdict (re-surfaced, not re-derived)", () => {
     expect(verdict.announcement).toBe(
       "1 of 2 linkage keys can be satisfied by your columns.",
     );
+    // The three display kinds read coverage; the launch decision is core's.
+    expect(verdict.fullySatisfied).toBe(false);
   });
 
   test("a fully-covered file is all-clear", () => {
@@ -178,17 +180,19 @@ describe("acceptor verdict (re-surfaced, not re-derived)", () => {
     );
   });
 
-  test("a self-defeating adopted rule surfaces a dead-key count without blocking", () => {
+  test("a self-defeating adopted rule reads all-clear on coverage yet is not satisfied", () => {
     const { editorState } = editorFor(["date_of_birth"], deadDobTerms);
     const verdict = acceptorVerdict(
       ["date_of_birth"],
       deadDobTerms,
       editorState,
     );
-    // The columns are present, so the column-shape verdict passes; the dead rule is
-    // reported separately as a count, never blocking.
+    // The columns are present, so the coverage reading passes and the dead rule is
+    // reported separately as a count -- but the key can never match, so the run
+    // decision does not follow the coverage reading.
     expect(verdict.kind).toBe("allClear");
     expect(verdict.deadKeyCount).toBe(1);
+    expect(verdict.fullySatisfied).toBe(false);
   });
 });
 
@@ -285,7 +289,10 @@ describe("acceptor launch gates", () => {
     ).toBeUndefined();
   });
 
-  test("partial coverage warns but does not disable launch", () => {
+  test("partial coverage disables launch and offers both remedies", () => {
+    // An exchange runs every key both parties agreed on, so covering some of them
+    // is refused at the run boundary -- and therefore here, where the operator can
+    // still remap a column or go back to the partner.
     const { editorState } = editorFor(["first_name", "notes"], nameTerms);
     const verdict = acceptorVerdict(
       ["first_name", "notes"],
@@ -293,9 +300,30 @@ describe("acceptor launch gates", () => {
       editorState,
     );
     expect(verdict.kind).toBe("partial");
+    expect(verdict.fullySatisfied).toBe(false);
+    expect(acceptorLaunchBlockedReason(verdict, editorState, nameTerms)).toBe(
+      "Cover the remaining agreed linkage keys above before you can start, " +
+        "or agree terms with your partner over the keys both files can supply.",
+    );
+  });
+
+  test("a dead key disables launch and sends the operator to the partner", () => {
+    // Every element field resolves, so coverage reads all-clear -- but the agreed
+    // terms declare cleaning that drops every record, which no edit on this screen
+    // clears. The sentence names the one remedy that exists.
+    const columns = ["date_of_birth"];
+    const { editorState } = editorFor(columns, deadDobTerms);
+    const verdict = acceptorVerdict(columns, deadDobTerms, editorState);
+    expect(verdict.kind).toBe("allClear");
+    expect(verdict.deadKeyCount).toBe(1);
+    expect(verdict.fullySatisfied).toBe(false);
     expect(
-      acceptorLaunchBlockedReason(verdict, editorState, nameTerms),
-    ).toBeUndefined();
+      acceptorLaunchBlockedReason(verdict, editorState, deadDobTerms),
+    ).toBe(
+      "Ask your partner for a corrected invitation before you can start: " +
+        "cleaning declared in the agreed terms drops every record for a key, " +
+        "so it can never match.",
+    );
   });
 
   test("two identifier columns disable launch even when the keys are satisfiable, naming the identifier rule", () => {
@@ -684,7 +712,10 @@ describe("the invitation's declared payload set against the marks", () => {
   // A file covering both keys plus one unrecognized column, which infers to role:
   // payload -- so the file discloses exactly one column and every other gate is
   // clear, leaving this comparison as the only thing that can close the launch.
-  const columns = ["first_name", "last_name", "notes"];
+  // `record_id` infers to the identifier role (unsent, unmatched), so marking it
+  // adds a disclosure without costing a key -- which lets the conflict sentences be
+  // pinned at the gate without the linkage clause above them firing too.
+  const columns = ["first_name", "last_name", "notes", "record_id"];
 
   /** Every invitation shape this describe drives, named once. The equivalence
    * test below reads this table rather than a copy of it, so a shape added here
@@ -730,6 +761,8 @@ describe("the invitation's declared payload set against the marks", () => {
       "first_name",
       "payload",
     ).metadata,
+    recordIdAlsoSent: setColumnDisclosure(inferredMarks, "record_id", "payload")
+      .metadata,
   } satisfies Record<string, Metadata>;
 
   /** Whether core itself refuses to run this pair, driven through the real
@@ -837,6 +870,10 @@ describe("the invitation's declared payload set against the marks", () => {
         halfCleared.editorState.metadata,
       )?.sentButNotDeclared,
     ).toEqual(["first_name"]);
+    // Sending a matched column costs the key it matched on, so this state is short
+    // of an agreed key as well as over-disclosing -- and the linkage clause is the
+    // one the operator meets first, at the top of the screen. The remaining mark is
+    // still named by the notice it points at.
     expect(
       acceptorLaunchBlockedReason(
         acceptorVerdict(columns, terms, halfCleared.editorState),
@@ -844,7 +881,8 @@ describe("the invitation's declared payload set against the marks", () => {
         terms,
       ),
     ).toBe(
-      "Resolve the columns your partner will not accept above before you can start.",
+      "Cover the remaining agreed linkage keys above before you can start, " +
+        "or agree terms with your partner over the keys both files can supply.",
     );
 
     const cleared = setColumnDisclosure(partly, "first_name", "match").metadata;
@@ -866,18 +904,18 @@ describe("the invitation's declared payload set against the marks", () => {
     // notice leads with it and the gate re-opens on the edit alone.
     const terms = invitation("acceptsTheDisclosedColumn");
     const marked = editorFor(columns, terms, {
-      metadata: markStates.firstNameAlsoSent,
+      metadata: markStates.recordIdAlsoSent,
     });
     const conflict = acceptorPayloadDeclarationConflict(
       terms,
       marked.editorState.metadata,
     );
     expect(conflict?.kind).toBe("setMismatch");
-    expect(conflict?.sentButNotDeclared).toEqual(["first_name"]);
+    expect(conflict?.sentButNotDeclared).toEqual(["record_id"]);
     expect(conflict?.declaredButNotSent).toEqual([]);
     expect(conflict?.title).toBe("Your partner does not expect this column");
     const verdict = acceptorVerdict(columns, terms, marked.editorState);
-    expect(verdict.satisfiableKeyCount).toBeGreaterThan(0);
+    expect(verdict.fullySatisfied).toBe(true);
     expect(
       acceptorLaunchBlockedReason(verdict, marked.editorState, terms),
     ).toBe(
@@ -886,9 +924,9 @@ describe("the invitation's declared payload set against the marks", () => {
 
     const reMarked = editorFor(columns, terms, {
       metadata: setColumnDisclosure(
-        markStates.firstNameAlsoSent,
-        "first_name",
-        "match",
+        markStates.recordIdAlsoSent,
+        "record_id",
+        "identifier",
       ).metadata,
     });
     expect(
@@ -946,13 +984,20 @@ describe("the invitation's declared payload set against the marks", () => {
     expect(
       acceptorPayloadDeclarationConflict(terms, widened.editorState.metadata),
     ).toBeUndefined();
+    // Widening clears the conflict but does not open the launch here: the column
+    // the partner asked for is one this file matches on, so sending it costs the
+    // key -- an exchange the run boundary refuses. The gate says so rather than
+    // letting the operator launch into that refusal.
     expect(
       acceptorLaunchBlockedReason(
         acceptorVerdict(columns, terms, widened.editorState),
         widened.editorState,
         terms,
       ),
-    ).toBeUndefined();
+    ).toBe(
+      "Cover the remaining agreed linkage keys above before you can start, " +
+        "or agree terms with your partner over the keys both files can supply.",
+    );
   });
 
   test("a declared column the file keeps as its record identifier is offered too, at the cost of the identifier", () => {
@@ -1110,35 +1155,10 @@ describe("the invitation's declared payload set against the marks", () => {
 describe("acceptor launch payload", () => {
   test("carries the same metadata and standardization the verdict consumed", () => {
     const { editorState } = editorFor(["first_name", "last_name"], nameTerms);
-    const verdict = acceptorVerdict(
-      ["first_name", "last_name"],
-      nameTerms,
-      editorState,
-    );
-    const payload = acceptorLaunchPayload(verdict, editorState);
+    const payload = acceptorLaunchPayload(editorState);
     // The gate and the run cannot disagree: identical object references.
     expect(payload.edits.metadata).toBe(editorState.metadata);
     expect(payload.edits.standardization).toBe(editorState.standardization);
-    // A fully-satisfiable file carries no partial-coverage advisory.
-    expect(payload.warning).toBeUndefined();
-  });
-
-  test("threads a partial-coverage advisory when only some keys match", () => {
-    const { editorState } = editorFor(["first_name", "notes"], nameTerms);
-    const verdict = acceptorVerdict(
-      ["first_name", "notes"],
-      nameTerms,
-      editorState,
-    );
-    const payload = acceptorLaunchPayload(verdict, editorState);
-    expect(payload.warning?.title).toBe("Not every agreed key is covered");
-    // The advisory names the coverage AND the consequence: the run boundary
-    // refuses an input short of any agreed key, so copy promising the covered
-    // keys still run would send the operator into a refusal it denied.
-    expect(payload.warning?.message).toContain(
-      "covers 1 of the 2 agreed linkage keys",
-    );
-    expect(payload.warning?.message).toContain("refuse to run on these terms");
   });
 });
 

@@ -330,27 +330,35 @@ export function rerunFailureLastRun(
 }
 
 /** The benign, pre-connection outcomes of a launch a surface classifies without
- * attack framing: a lapsed bound, an input problem, or a run already in progress
- * elsewhere. */
-export type BenignRerunOutcome = "expired" | "input" | "already-running";
+ * attack framing: a lapsed bound, an unusable input, an input the standing terms
+ * cannot be run against, or a run already in progress elsewhere. */
+export type BenignRerunOutcome =
+  "expired" | "input" | "terms-shortfall" | "already-running";
 
 /** Classify a launch failure into the benign pre-connection outcome it carries,
- * or `undefined` for a failure that is not one of the three benign states (a
- * handshake failure, a storage failure, a data-exchange drop) -- which the caller
- * surfaces through the existing generic path. Keeps the three benign-state checks
- * in one place so a surface cannot mis-order or omit one.
+ * or `undefined` for a failure that is not one of these states (a handshake
+ * failure, a storage failure, a data-exchange drop) -- which the caller surfaces
+ * through the existing generic path. Keeps the benign-state checks in one place so
+ * a surface cannot mis-order or omit one.
  *
- * Two error types carry the `"input"` state: the input guard's own rejection, and
- * core's refusal of a file that cannot supply every linkage key the standing terms
- * declare (raised from the pre-connection prepare, which the input phase runs).
- * Both are read before any connection and both are fixed by supplying a file that
- * matches the agreed terms, which is what the state's copy names. */
+ * The two input states are split by what the operator can do about them, since
+ * both are read before any connection and only one is worth offering the run again
+ * for. `"input"` is the acquisition failure -- the file is missing, moved, or
+ * unreadable -- which putting the file back clears. `"terms-shortfall"` is the file
+ * that cannot supply every linkage key the standing terms declare, raised either by
+ * the input guard's own grading or by core's refusal inside the pre-connection
+ * prepare: the same file refuses identically every time, so its remedy is a
+ * conforming file or terms settled with the partner, never a retry. Both record the
+ * same `"input"` bookkeeping tier, which carries no such distinction -- so a
+ * revisit reads the generic input copy where a live launch reads the specific one.
+ */
 export function benignRerunOutcome(
   error: unknown,
 ): BenignRerunOutcome | undefined {
   if (error instanceof ManagedExchangeExpiredError) return "expired";
-  if (error instanceof ManagedInputError) return "input";
-  if (error instanceof LinkageTermsUnsatisfiableError) return "input";
+  if (error instanceof ManagedInputError)
+    return error.rejection.reason === "columns" ? "terms-shortfall" : "input";
+  if (error instanceof LinkageTermsUnsatisfiableError) return "terms-shortfall";
   if (error instanceof ManagedExchangeLockUnavailableError)
     return "already-running";
   return undefined;

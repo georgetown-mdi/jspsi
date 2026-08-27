@@ -2,6 +2,7 @@ import {
   assembleExchangeSpec,
   connectionFromLocator,
   getDefaultLinkageTerms,
+  inferMetadata,
 } from "@psilink/core";
 import { describe, expect, test } from "vitest";
 
@@ -26,20 +27,24 @@ const webrtcLocator: WebRTCExchangeLocator = {
   path: "/api/",
 };
 
+const standingColumns = ["ssn", "first_name", "last_name", "date_of_birth"];
+
 /** A managed exchange-file document whose standing terms are the metadata-aware
- * defaults for a PII column set, so a conforming input satisfies at least one key
- * and a drifted one satisfies none -- the same document the record persists. */
+ * defaults for {@link standingColumns} -- the terms an exchange over that file
+ * agreed -- so a conforming input satisfies every declared key and a drifted one
+ * falls short of at least one. The same document the record persists. */
 function standingExchangeFile(): ExchangeSpec {
   return assembleExchangeSpec({
     connection: connectionFromLocator(webrtcLocator),
-    linkageTerms: getDefaultLinkageTerms("County Health Dept"),
+    linkageTerms: getDefaultLinkageTerms(
+      "County Health Dept",
+      inferMetadata(standingColumns),
+    ),
   });
 }
 
-const standingColumns = ["ssn", "first_name", "last_name", "date_of_birth"];
-
-describe("assessManagedInputColumns: the column-shape guard", () => {
-  test("accepts columns that satisfy at least one standing linkage key", () => {
+describe("assessManagedInputColumns: the standing-terms guard", () => {
+  test("accepts columns that satisfy every standing linkage key", () => {
     expect(
       assessManagedInputColumns(standingExchangeFile(), standingColumns),
     ).toBeUndefined();
@@ -61,16 +66,19 @@ describe("assessManagedInputColumns: the column-shape guard", () => {
     expect(rejection?.reason).toBe("columns");
   });
 
-  test("a partial-but-sufficient column set is accepted (shape, not exact match)", () => {
-    // A file missing SSN but carrying name + DOB still satisfies a name-only key,
-    // so the shape guard accepts it -- it blocks only the no-key-can-match case.
-    expect(
-      assessManagedInputColumns(standingExchangeFile(), [
-        "first_name",
-        "last_name",
-        "date_of_birth",
-      ]),
-    ).toBeUndefined();
+  test("rejects a file short of one agreed key, not only the no-key case", () => {
+    // A file that dropped its SSN column still satisfies the name-and-DOB keys, and
+    // the run boundary refuses it all the same: an exchange runs every key both
+    // parties agreed on. The guard holds that rule rather than a looser one it
+    // would then be overruled on, before any connection.
+    const rejection = assessManagedInputColumns(standingExchangeFile(), [
+      "first_name",
+      "last_name",
+      "date_of_birth",
+    ]);
+    expect(rejection?.reason).toBe("columns");
+    if (rejection?.reason === "columns")
+      expect(rejection.unsatisfied.map((field) => field.type)).toContain("ssn");
   });
 });
 
@@ -99,7 +107,7 @@ describe("ManagedInputError", () => {
     // The message names no field, so a partner-influenced field name cannot leak
     // through a generic error surface.
     expect(error.message).toBe(
-      "managed exchange input satisfies no standing linkage keys",
+      "managed exchange input cannot satisfy the standing linkage terms",
     );
   });
 });

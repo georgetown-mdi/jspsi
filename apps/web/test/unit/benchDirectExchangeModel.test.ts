@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   MAX_NAME_LENGTH,
+  decideLinkageTermsVerdict,
   getDefaultLinkageTerms,
   inferMetadata,
 } from "@psilink/core";
@@ -54,7 +55,7 @@ describe("previewInferredTerms", () => {
     expect(preview.linkageTerms.linkageKeys).toEqual(core.linkageKeys);
     expect(preview.linkageTerms.linkageFields).toEqual(core.linkageFields);
     expect(preview.linkageTerms.identity).toBe("County Health");
-    expect(preview.satisfiableKeyCount).toBeGreaterThan(0);
+    expect(preview.refusal).toBeUndefined();
   });
 
   test("disclosed columns match core's disclosure predicate and back the display send", () => {
@@ -115,13 +116,47 @@ describe("previewInferredTerms", () => {
   });
 
   test("a file with no matchable columns is unlinkable and names the missing fields", () => {
+    // The inference narrows the built-in key set to the keys these columns
+    // support, which is none -- so the terms the run would be held to declare no
+    // key at all, and the missing field types come from the unnarrowed set.
     const preview = previewInferredTerms(
       ["notes", "comment"],
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
     );
-    expect(preview.satisfiableKeyCount).toBe(0);
-    expect(preview.unsatisfied.length).toBeGreaterThan(0);
+    expect(preview.linkageTerms.linkageKeys).toEqual([]);
+    expect(preview.refusal?.kind).toBe("no-linkable-key");
+    if (preview.refusal?.kind !== "no-linkable-key")
+      throw new Error("expected a no-linkable-key refusal");
+    expect(preview.refusal.missingFields.length).toBeGreaterThan(0);
+  });
+
+  test("the refusal grades the previewed terms, not the unnarrowed default set", () => {
+    // A file carrying only some of the built-in set's field types satisfies the
+    // NARROWED terms it would actually run under, so it is not refused -- grading
+    // the full set instead would refuse nearly every real file.
+    const preview = previewInferredTerms(
+      ["first_name", "last_name", "date_of_birth"],
+      "x",
+      DIRECT_LINKAGE_STRATEGY_DEFAULT,
+    );
+    expect(preview.refusal).toBeUndefined();
+    expect(
+      decideLinkageTermsVerdict(
+        ["first_name", "last_name", "date_of_birth"],
+        preview.linkageTerms,
+        undefined,
+        preview.metadata,
+      ).fullySatisfied,
+    ).toBe(true);
+    // The unnarrowed set declares fields this file cannot produce, so a seat
+    // grading it would have blocked.
+    expect(
+      decideLinkageTermsVerdict(
+        ["first_name", "last_name", "date_of_birth"],
+        getDefaultLinkageTerms("x"),
+      ).fullySatisfied,
+    ).toBe(false);
   });
 
   test("the spine walks file -> server -> confirm -> run", () => {

@@ -6,12 +6,13 @@ import {
   MAX_INVITATION_LIFETIME_SECONDS,
   UsageError,
   assertDeduplicateImplemented,
-  assessLinkageSatisfiability,
   canonicalString,
   countOnlyShapeViolation,
   countOnlyTransmitsColumn,
+  decideLinkageTermsVerdict,
   disclosedColumnNames,
   safeParseLinkageTerms,
+  summarizeLinkageShortfall,
 } from "@psilink/core";
 
 import {
@@ -30,6 +31,7 @@ import type {
   CSVRow,
   CountOnlyShapeViolation,
   LinkageTerms,
+  LinkageTermsVerdict,
 } from "@psilink/core";
 
 import type { ImportedCitationDropCause } from "./advancedInviteTerms";
@@ -156,6 +158,29 @@ const DEDUPLICATE_STRATEGY_MESSAGE =
   "The linkage strategy this invitation names cannot run a deduplicating " +
   'match. Choose another Linkage strategy, or clear "Allow several of your ' +
   'records to match one partner record".';
+
+/**
+ * What to do about a linkage shortfall, chosen by which shortfall holds -- the
+ * split the acceptor's launch gate keeps (`acceptorLaunchBlockedReason`), and for
+ * the same reason: a key the columns cannot produce is cleared at the column
+ * mapping, while a key whose declared cleaning drops every record has columns that
+ * already resolve, so pointing at the mapping would name a control that cannot
+ * clear it. An unsatisfiable key takes precedence where both hold, as it does
+ * there, since it is the shortfall the operator's own columns settle.
+ *
+ * The dead case points at the badge rather than the key, for the reason
+ * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field: an imported document's key names
+ * are partner-influenceable, and the key list carries the badge beside this
+ * message.
+ */
+function shortfallRemedy(verdict: LinkageTermsVerdict): string {
+  if (verdict.unsatisfiableKeys.length > 0)
+    return (
+      "Turn off the keys your columns cannot produce, or map a column to " +
+      "every field they need."
+    );
+  return 'Review the cleaning on the keys badged "won\'t match", or turn them off.';
+}
 
 /**
  * Validate a draft for the Generate gate. The core schema
@@ -295,27 +320,32 @@ export function validateAdvancedInvite(
     errors.legalExpiration = "The expiration date cannot be in the past.";
   }
 
-  // Satisfiability is over column shape, not the schema: a key all of whose
-  // fields the columns can produce is satisfiable. Block when none can (the
-  // exchange would emit no key strings and yield a silent empty result), the same
-  // gate generateInvitation and the acceptor pre-flight apply.
+  // The linkage grading: an exchange runs every key its terms declare, so Generate
+  // is refused unless the file can produce all of them and none declares cleaning
+  // that drops every record -- core's `decideLinkageTermsVerdict`, the same verdict
+  // the mint re-checks and the run boundary enforces, so an invitation this editor
+  // hands out is never one the inviter's own run refuses.
   if (enabledKeys.length > 0 && errors.keys === undefined) {
-    // Assess against the draft's edited metadata AND its authored standardization,
+    // Grade against the draft's edited metadata AND its authored standardization,
     // the same binding the inviter's exchange uses (both are threaded into the
     // spec), so the verdict matches the run: a column remap that makes a key
     // offerable is judged satisfiable here exactly when the run can produce it, and
     // two same-typed fields each resolve to their own bound column rather than the
     // type's first-match fallback (which would bind both to one column and mis-judge
     // a key needing the second).
-    const { satisfiableKeyCount } = assessLinkageSatisfiability(
+    const verdict = decideLinkageTermsVerdict(
       seed.columns,
       terms,
       draft.standardization,
       draft.metadata,
     );
-    if (satisfiableKeyCount === 0) {
+    if (!verdict.fullySatisfied) {
+      // The shortfall fragment is core's, the one the run-boundary refusal states,
+      // so the editor cannot describe the fault in words of its own. It carries
+      // counts only; the key names stay off this message.
       errors.keys =
-        "None of the enabled keys can be satisfied by your file's columns.";
+        `These terms cannot be run against your file: ${summarizeLinkageShortfall(verdict)}. ` +
+        shortfallRemedy(verdict);
     }
   }
 

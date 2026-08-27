@@ -3,7 +3,6 @@ import {
   authoredLinkageFields,
   disclosedColumnNames,
   getDefaultLinkageTerms,
-  pipelineAlwaysDrops,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -11,8 +10,8 @@ import {
   draftFromTerms,
   draftWithFieldAdded,
   draftWithKeyEnabled,
+  gradeAuthoredKeys,
   inviterDefaultStandardization,
-  producibleFieldNames,
   seedAdvancedInvite,
   setDraftMetadata,
   setDraftMetadataKeepingKeys,
@@ -44,6 +43,7 @@ import type {
   CSVRow,
   LinkageField,
   LinkageKey,
+  LinkageKeyFitness,
   LinkageStrategy,
   LinkageTerms,
   SemanticType,
@@ -700,41 +700,28 @@ export function declaredFieldsFor(
 }
 
 /**
- * A per-key verdict for the guided list's and expert editor's badges. Three
- * outcomes, because a shape-satisfiable key can still be self-defeating:
- * - `satisfiable`: every element field is producible and no element's transform
- *   is value-killing.
- * - `dead`: the columns can produce every element field (shape passes), but an
- *   element's authored standardization can never yield a value -- a
- *   self-defeating `parse_date` whose input format omits a component the data
- *   carries. The key would run to a silent empty result, so it warns even though
- *   the shape check passes.
- * - `unsatisfiable`: an element references a field the columns cannot produce.
- *
- * `dead` is derived from the authored terms alone (value-independent, via
- * {@link pipelineAlwaysDrops}), consistent with how the shape verdict is
- * computed without data. It matches the acceptor surface, whose `deadKeyCount`
- * counts the same self-defeating keys.
+ * A per-key verdict for the guided list's and expert editor's badges: core's own
+ * {@link LinkageKeyFitness}, so a badge reads what the Generate gate, the mint, and
+ * the run boundary all grade the key at. Its three outcomes -- `satisfiable`,
+ * `unsatisfiable` (an element references a field the columns cannot produce), and
+ * `dead` (the columns produce every element field, but an element's declared
+ * cleaning can never yield a value) -- are documented on core's type.
  */
-export type KeyVerdict = "satisfiable" | "dead" | "unsatisfiable";
+export type KeyVerdict = LinkageKeyFitness;
 
-/** The per-key verdict function behind the Keys tab badges ({@link KeyVerdict}). */
+/** The per-key verdict function behind the Keys tab badges ({@link KeyVerdict}).
+ * Grades every draft key at once, in declaration order, so the badge index is the
+ * draft index. */
 export function keySatisfiabilityFor(
   editor: InviterEditor,
 ): (index: number) => KeyVerdict {
-  const producible = producibleFieldNames(
+  const fitness = gradeAuthoredKeys(
     editor.draft.metadata,
     editor.draft.standardization,
     editor.seed.columns,
+    editor.draft.keys.map((entry) => entry.key),
   );
-  return (index) => {
-    const key = editor.draft.keys[index].key;
-    if (!key.elements.every((element) => producible.has(element.field)))
-      return "unsatisfiable";
-    if (key.elements.some((element) => pipelineAlwaysDrops(element.transform)))
-      return "dead";
-    return "satisfiable";
-  };
+  return (index) => fitness[index];
 }
 
 /** Discard every edit and re-derive the recommended draft from the file,
