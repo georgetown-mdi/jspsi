@@ -44,7 +44,7 @@ describe("setDraftMetadataKeepingKeys", () => {
     expect(kept.standardization.some((t) => t.output === "ssn")).toBe(false);
   });
 
-  test("differs from setDraftMetadata only in that it does not reconcile keys", () => {
+  test("keeps the key set setDraftMetadata re-derives, on the same standardization", () => {
     const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const metadata = retypeSsnToFirstName(draft.metadata);
 
@@ -56,8 +56,10 @@ describe("setDraftMetadataKeepingKeys", () => {
     // preserves the count.
     expect(kept.keys.length).toBe(draft.keys.length);
     expect(reconciled.keys.length).toBeLessThan(draft.keys.length);
-    // Both reconcile the standardization identically -- the difference is purely in
-    // the key handling.
+    // Both run the same standardization reconciliation over the keys they end
+    // with. The key-reconciling path also withdraws the cleaning an opt-in offer
+    // minted for a key it just dropped; no column here is of an opt-in type, so
+    // there is none to withdraw and the two standardizations agree.
     expect(kept.standardization).toStrictEqual(reconciled.standardization);
   });
 });

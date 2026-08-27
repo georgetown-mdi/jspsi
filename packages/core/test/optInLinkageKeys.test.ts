@@ -218,6 +218,85 @@ describe("optInLinkageKeys", () => {
   });
 });
 
+describe("the offer resists mutation", () => {
+  test("an offered key is frozen through its contents, arrays and elements alike", () => {
+    // optInLinkageKeys hands the one declared offer out BY REFERENCE, into an
+    // editor draft and from there into the terms a party generates, so a single
+    // in-place edit would redefine what is offered for the rest of the process --
+    // the same aliasing DEFAULT_LINKAGE_RULE_SET is frozen against. Module code is
+    // strict, so each attempt throws rather than silently failing.
+    const [, , zip] = optInLinkageKeys(EVERY_TYPE);
+    const mutable = zip as {
+      name: string;
+      elements: Array<{
+        field: string;
+        transform?: Array<{
+          function: string;
+          params: { start: number; length: number };
+        }>;
+      }>;
+    };
+
+    expect(() => {
+      mutable.name = "LN + FN + DOB";
+    }).toThrow(TypeError);
+    expect(() => {
+      mutable.elements[0].field = "poisoned";
+    }).toThrow(TypeError);
+    expect(() => {
+      mutable.elements[3].transform = [
+        { function: "substring", params: { start: 1, length: 3 } },
+      ];
+    }).toThrow(TypeError);
+    expect(() => {
+      mutable.elements.push({ field: "ssn" });
+    }).toThrow(TypeError);
+    expect(() => {
+      mutable.elements.reverse();
+    }).toThrow(TypeError);
+  });
+
+  test("the encodings the offer is recognized by are the declared shapes", () => {
+    // isOptInLinkageKey compares against encodings built once at load, so an edit
+    // that landed would leave the key the editor is holding answering `false`:
+    // the outside-the-default-set badge and its departure guidance would drop off
+    // a key that is still an addition to the built-in set. Asserted against
+    // literal shapes as well as the returned objects, which would agree with
+    // themselves however far they had drifted.
+    for (const key of optInLinkageKeys(EVERY_TYPE))
+      expect(isOptInLinkageKey(key)).toBe(true);
+    expect(
+      isOptInLinkageKey({
+        name: "LN + FN + DOB + ZIP",
+        elements: [
+          { field: "last_name" },
+          { field: "first_name" },
+          { field: "date_of_birth" },
+          { field: "zip_code" },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      isOptInLinkageKey({
+        name: "FN + EMAIL",
+        elements: [{ field: "first_name" }, { field: "email_address" }],
+      }),
+    ).toBe(true);
+  });
+
+  test("the offered list is the caller's own, so a caller can still build on it", () => {
+    // The freeze reaches the declared keys, not the array optInLinkageKeys
+    // returns: its callers place the offers among their own entries.
+    const offered = optInLinkageKeys(EVERY_TYPE);
+    expect(() => offered.reverse()).not.toThrow();
+    expect(optInLinkageKeys(EVERY_TYPE).map((key) => key.name)).toEqual([
+      "LN + FN + DOB + PHONE",
+      "FN + EMAIL",
+      "LN + FN + DOB + ZIP",
+    ]);
+  });
+});
+
 describe("isOptInLinkageKey", () => {
   test("holds for every key optInLinkageKeys offers", () => {
     const offered = optInLinkageKeys(EVERY_TYPE);

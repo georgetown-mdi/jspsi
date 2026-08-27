@@ -404,7 +404,19 @@ export function isDrawnFromLinkageRuleSet(
   );
 }
 
-function encodeForComparison(value: unknown): string | null {
+/**
+ * `value` in the canonical encoding, the equality the two parties' terms are
+ * compared under, or `null` when it carries a value outside the canonical domain
+ * (a transform param beyond the safe integer range) and so cannot be compared.
+ * Every comparison here reads `null` as no match rather than throwing, the answer
+ * {@link isDrawnFromLinkageRuleSet} and {@link isOptInLinkageKey} give such rules:
+ * the built-in and offered sets carry no such value, so nothing incomparable is
+ * one of them.
+ *
+ * @internal exported for the web editor's key reconciliation, which matches a
+ * draft key to an offer under this same equality.
+ */
+export function encodeForComparison(value: unknown): string | null {
   try {
     return canonicalString(value);
   } catch {
@@ -693,31 +705,41 @@ export type OptInLinkageFieldType = (typeof OPT_IN_LINKAGE_FIELD_TYPES)[number];
  * One key per type is the whole offer. Any other combination is a rule with
  * precision and recall consequences nothing here has settled, which is what the
  * expert key editor is for.
+ *
+ * Frozen through every level, for the reason {@link DEFAULT_LINKAGE_RULE_SET} is:
+ * {@link optInLinkageKeys} hands these objects out BY REFERENCE, into an editor
+ * draft and from there into the terms a party generates, so a single in-place
+ * edit of a name or an element would redefine what is offered for the rest of the
+ * process. It would also desync {@link OPT_IN_LINKAGE_KEY_ENCODINGS}, encoded once
+ * at load: {@link isOptInLinkageKey} would then answer `false` for the very key
+ * the editor is holding, dropping the outside-the-default-set badge and the
+ * departure guidance from a key that is still an addition to the built-in set.
  */
-const OPT_IN_LINKAGE_KEYS: Record<OptInLinkageFieldType, LinkageKey> = {
-  phone_number: {
-    name: "LN + FN + DOB + PHONE",
-    elements: [
-      { field: "last_name" },
-      { field: "first_name" },
-      { field: "date_of_birth" },
-      { field: "phone_number" },
-    ],
-  },
-  email_address: {
-    name: "FN + EMAIL",
-    elements: [{ field: "first_name" }, { field: "email_address" }],
-  },
-  zip_code: {
-    name: "LN + FN + DOB + ZIP",
-    elements: [
-      { field: "last_name" },
-      { field: "first_name" },
-      { field: "date_of_birth" },
-      { field: "zip_code" },
-    ],
-  },
-};
+const OPT_IN_LINKAGE_KEYS: Record<OptInLinkageFieldType, LinkageKey> =
+  frozenThroughContents({
+    phone_number: {
+      name: "LN + FN + DOB + PHONE",
+      elements: [
+        { field: "last_name" },
+        { field: "first_name" },
+        { field: "date_of_birth" },
+        { field: "phone_number" },
+      ],
+    },
+    email_address: {
+      name: "FN + EMAIL",
+      elements: [{ field: "first_name" }, { field: "email_address" }],
+    },
+    zip_code: {
+      name: "LN + FN + DOB + ZIP",
+      elements: [
+        { field: "last_name" },
+        { field: "first_name" },
+        { field: "date_of_birth" },
+        { field: "zip_code" },
+      ],
+    },
+  });
 
 /**
  * The opt-in keys `metadata` can supply, in {@link OPT_IN_LINKAGE_FIELD_TYPES}
