@@ -73,12 +73,14 @@ A semver string identifying the schema of the linkage aggreement. Two versions a
 ### `linkage_terms.identity`
 
 *Type:* string  
-*Required:* yes  
+*Required:* no  
 *Consistency:* none
 
 A free-text string identifying the party holding these terms. It is self-asserted: a party writes whatever string it likes and the protocol does nothing to vouch for it (hence `Consistency: none`). It is recorded, alongside the partner's, in the unsigned self-attested exchange record produced after every successful exchange (see [Exchange record format](spec/EXCHANGE_RECORD.md)), where it is an unverified label. Parties may format this however they wish; common contents include name, organization, and contact information.
 
-Under `certificate` signing mode this otherwise-free-text field is effectively pinned: it must match the identity bound into the party's signing certificate, or the partner rejects the receipt. The two commands that resolve an identity for an exchange warn on a mismatch -- [`psilink fingerprint`](CLI.md#signing-identity-fingerprint) whether it binds the certificate or only reads an existing one, and [`psilink exchange`](CLI.md#signing-identity-and-the-agreed-terms) before the exchange proceeds -- so editing this field away from the bound identity surfaces locally rather than at the partner's exchange. See [Signing](#signing).
+Omit the field to run unnamed. psilink supplies no label of its own -- not the account it runs as, not a placeholder -- so terms carrying no identity send none, the record omits its field rather than writing a stand-in, and every surface that shows a party name shows an absence marker in its place. Present, the value must be non-empty and within the length cap; an empty string is refused rather than read as an omission. The two commands that author a durable partnership, [`psilink invite`](CLI.md#offline-invitation) and [`psilink accept`](CLI.md#offline-acceptance), require a name at their own interface, so a configuration written by an acceptance always carries one.
+
+Under `certificate` signing mode this otherwise-free-text field is effectively pinned: it must match the identity bound into the party's signing certificate, or the partner rejects the receipt. A signed receipt therefore requires both parties to be named -- a certificate is trusted by the identity its holder used in the agreed terms, and an unnamed party has none for it to be authorized against -- so a run with signing configured refuses the receipt step rather than producing one nobody can verify. The two commands that resolve an identity for an exchange warn on a mismatch -- [`psilink fingerprint`](CLI.md#signing-identity-fingerprint) whether it binds the certificate or only reads an existing one, and [`psilink exchange`](CLI.md#signing-identity-and-the-agreed-terms) before the exchange proceeds -- so editing this field away from the bound identity surfaces locally rather than at the partner's exchange. See [Signing](#signing).
 
 ```yaml
 linkage_terms:
