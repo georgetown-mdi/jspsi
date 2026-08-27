@@ -269,34 +269,6 @@ export async function readJobRequestBody(
 }
 
 /**
- * Format a rejected body's first schema issue as `<field>: <reason>` for a job
- * route's 400 -- a field path and a shape reason only, never a byte the submitter
- * chose (the `JobApiConfigError` discipline). The routes that answer a rejected
- * body with a message share it, so one cannot come to echo more than another.
- *
- * An unrecognized key is the one issue whose own message quotes a CLIENT-chosen
- * string (`Unrecognized keys: "..."`), and a key name is as much the submitter's
- * bytes as a value is, so that reason is replaced with a fixed one. Nothing is
- * lost: the bodies are `.strictObject`, so what the caller has to know is that a
- * key they sent is not modeled, not which spelling reached the schema.
- */
-export function formatFirstIssue(
-  issues: ReadonlyArray<{
-    code: string;
-    path: ReadonlyArray<PropertyKey>;
-    message: string;
-  }>,
-): string {
-  // A failed zod parse always carries at least one issue.
-  const issue = issues[0];
-  const field =
-    issue.path.length > 0 ? issue.path.map(String).join(".") : "body";
-  const reason =
-    issue.code === "unrecognized_keys" ? "unrecognized key" : issue.message;
-  return `${field}: ${reason}`;
-}
-
-/**
  * Validate a route's job-id parameter. Returns null when the id is malformed, so
  * the caller answers 404 without touching the filesystem. Validating the id
  * shape on every route before any filesystem use is the traversal guard.

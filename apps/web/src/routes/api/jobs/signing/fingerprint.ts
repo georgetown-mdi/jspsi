@@ -10,7 +10,6 @@ import {
 
 import {
   MAX_SIGNING_FINGERPRINT_BODY_BYTES,
-  formatFirstIssue,
   gateJobRoute,
   readJobRequestBody,
 } from "@jobs/routeSupport";
@@ -20,6 +19,7 @@ import {
 } from "@jobs/signingIdentity";
 import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 import { SigningFingerprintBusyError } from "@jobs/jobManager";
+import { formatFirstIssue } from "@jobs/schemaIssueMessage";
 
 import type { SigningFingerprintResult } from "@jobs/signingIdentity";
 
