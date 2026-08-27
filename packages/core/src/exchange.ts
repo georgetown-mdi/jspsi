@@ -1035,9 +1035,23 @@ export function prepareForExchange(
   // single-pass fan-out reaches this gate, whose fan-out remedy is a real one for
   // it.
   //
-  // Every remedy the message names is a configuration the operator can change --
-  // fewer keys, fewer records, smaller batches, one less fan-out -- so it is a
-  // usage fault (CLI exit 64), like the width refusals the single-pass build
+  // An OperatorConfigError, joining the membership rule the front ends key their
+  // actionable config category off -- a decision taken for this check, not for
+  // this file's prepare-time refusals as a class. What it fires on is this party's
+  // OWN record count, whichever seat it holds, and every remedy the message names
+  // is a configuration that party can change: fewer keys, fewer records, smaller
+  // batches, one less fan-out. The message interpolates no name at all -- fixed
+  // prose over two counts and a fixed constant -- so nothing partner-authored
+  // rides it on the accept path, where the agreed key count is adopted from the
+  // invitation. That is what separates it from the prepare-time refusals that stay
+  // plain UsageErrors: assertAlgorithmImplemented and the element-transform arm of
+  // assertFanOutImplemented refuse a value the accept path adopts wholesale and no
+  // local change can fix, and assertLinkageTermsSatisfiable carries the agreed
+  // terms' own field and key names on its cause links. The authoritative
+  // two-party gate is outside the family for a further reason: it fires mid-run,
+  // and its message names the partner's declared sizes beside this party's
+  // (linkViaSinglePassPSI). Through the base class the CLI still classifies this
+  // one as a usage error (exit 64), like the width refusals the single-pass build
   // raises for the same class of over-declared size. Whether to offer the fan-out
   // remedy is read through partyFansOut, the single layout discriminant, so the
   // guidance and the frame layout cannot disagree about whether this party fans
@@ -1046,7 +1060,7 @@ export function prepareForExchange(
     linkageTerms.linkageStrategy === "single-pass" &&
     singlePassDatasetExceedsCap(effectiveKeyCount, rawRows.length)
   ) {
-    throw new UsageError(
+    throw new OperatorConfigError(
       `single-pass linkage cannot carry this dataset: ${rawRows.length} ` +
         `record(s) across ${linkageTerms.linkageKeys.length} linkage key(s) ` +
         "exceed the single-pass ceiling. Reduce the number of linkage keys or " +

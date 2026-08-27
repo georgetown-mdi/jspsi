@@ -138,10 +138,14 @@ function refusalCauseChain(
  *
  * Extend it from -- or raise it directly in -- any check that fails closed on
  * the operator's OWN configuration and whose message names only local content.
- * {@link StandardizationTermsError} is a member by subclass; a check whose
- * refusal meets the contract without needing a narrower type (the
- * standardization arm of `assertFanOutImplemented`) raises the base class
- * directly. The two send-side disclosure refusals
+ * What that content rule excludes is TEXT another party authored, so a refusal
+ * built from fixed prose over counts alone has nothing to exclude, whichever
+ * document the counts were read off. {@link StandardizationTermsError} is a
+ * member by subclass; a check whose refusal meets the contract without needing a
+ * narrower type raises the base class directly -- the standardization arm of
+ * `assertFanOutImplemented`, and `prepareForExchange`'s single-pass ceiling
+ * pre-flight, which fires on this party's own record count and names no field,
+ * key, or column at all. The two send-side disclosure refusals
  * ({@link OutboundDisclosureRefusalError}) are candidates on the same reasoning --
  * each compares this party's own current metadata against its own recorded set, so
  * every name in their messages is local -- but joining is a per-check surfacing
