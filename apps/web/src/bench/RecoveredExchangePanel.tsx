@@ -32,6 +32,7 @@ import {
   recoveredExchangeHeading,
 } from "./BenchRunSurface";
 import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
+import { ReceiptDownload } from "./ReceiptDownload";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { appendSanitizedRunWarning } from "./runWarnings";
@@ -316,6 +317,7 @@ export function RecoveredExchangePanel() {
           )}
         </>
       )}
+      <ReceiptDownload jobId={attachment.jobId} settled={!running} />
       {/* Available for as long as the appliance holds the job, collapsed
           throughout on this compact panel -- the run seats' rule, less the
           expanded completion render this panel has no room for. A stopped

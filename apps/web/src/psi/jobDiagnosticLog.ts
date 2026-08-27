@@ -14,6 +14,8 @@
  * watch ends on an outcome the seat can state.
  */
 
+import { delayUntilAborted } from "@psi/delayUntilAborted";
+
 /** The appliance endpoint the log downloads from. The browser never composes the
  * file's path: the appliance resolves it inside the job's own workdir. */
 export function jobDiagnosticLogUrl(jobId: string): string {
@@ -157,24 +159,4 @@ export async function watchJobDiagnosticLog(
     if (aborted()) return "unavailable";
     await delay(LOG_AVAILABILITY_RETRY_MS, signal);
   }
-}
-
-/** Resolve after `ms`, or promptly when `signal` aborts, so a watch the caller
- * has stopped leaves no timer running behind it. */
-function delayUntilAborted(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (signal.aborted) {
-      resolve();
-      return;
-    }
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }

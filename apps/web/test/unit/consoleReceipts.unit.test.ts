@@ -930,6 +930,21 @@ describe("the receipts card's model", () => {
     );
   });
 
+  test("the receipt notice names where the download appears, not this screen", () => {
+    // It renders on the authoring screens (review & create, and the acceptor
+    // bench) while the download control renders on the run screen once the run
+    // settles -- disjoint surfaces, so copy pointing at "here" would send the
+    // operator looking for a control that is not on the screen they are reading.
+    // That control is offered on any settled run, so the sentence names failure
+    // outright: an operator who reads "once the exchange finishes" as "once it
+    // succeeds" never goes looking after the failed run whose receipt may be the
+    // only artifact left.
+    expect(RECEIPT_LOCATION_NOTICE).toContain(
+      "the run screen offers it as a download once the run finishes or fails",
+    );
+    expect(RECEIPT_LOCATION_NOTICE).not.toMatch(/\bhere\b/);
+  });
+
   test("the at-rest notice stands on its own, without the collision half", () => {
     // It is shown on layouts where the shared-mount advisory is withheld, so it
     // has to read as a whole message: the key-hygiene guidance it carries is true

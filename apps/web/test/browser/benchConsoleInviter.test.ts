@@ -12,6 +12,7 @@ import "@mantine/core/styles.css";
 import { decodeInvitation } from "@psilink/core";
 
 import { InviterBench } from "@bench/InviterBench";
+import { RECEIPT_MISSING_LEAD } from "@bench/ReceiptDownload";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
 import styles from "@bench/bench.module.css";
@@ -84,6 +85,9 @@ interface StubOptions {
   /** The body `GET /api/jobs/:id/handoff` serves (the recurring-run hand-off); a
    * 404 when unset, so the panel renders nothing. */
   handoff?: unknown;
+  /** The receipt pair the job's status route reports. Unset, the status body
+   * carries neither field, which is what a run that signed nothing answers. */
+  receipt?: { requested: boolean; available: boolean };
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. Unmatched URLs fall
@@ -210,7 +214,16 @@ function stubJobApi(options: StubOptions = {}): {
         if ((init?.method ?? "GET") === "DELETE")
           return Promise.resolve(new Response(null, { status: 204 }));
         return Promise.resolve(
-          jsonResponse({ status: jobStatus, recordAvailable: false }),
+          jsonResponse({
+            status: jobStatus,
+            recordAvailable: false,
+            ...(options.receipt !== undefined
+              ? {
+                  receiptRequested: options.receipt.requested,
+                  receiptAvailable: options.receipt.available,
+                }
+              : {}),
+          }),
         );
       }
       if (url === "/api/jobs/job-7/cancel")
@@ -1564,5 +1577,75 @@ describe("console inviter recurring hand-off availability", () => {
         page.getByRole("heading", { name: "Run this exchange on a schedule" }),
       )
       .toBeInTheDocument();
+  });
+});
+
+// The receipt is written once the signature swap completes, before the run's
+// terminal and independently of the local writes that follow it, so the run whose
+// result file was the persistence loss -- an `output` error terminal -- is
+// precisely the run whose receipt may be the only third-party-verifiable artifact
+// left. These pin the offer against that terminal, where a control hung off the
+// completion outputs would render nothing at all.
+describe("console inviter receipt on a failed run", () => {
+  /** Create the invitation, reach the running run, then end it in the CLI's
+   * error terminal for a lost result file. */
+  async function runToOutputFailure(
+    api: ReturnType<typeof stubJobApi>,
+  ): Promise<void> {
+    await reachReviewCreate();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await vi.waitFor(() =>
+      expect(api.captured.some((r) => r.url === "/api/jobs/job-7/events")).toBe(
+        true,
+      ),
+    );
+    api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
+    api.setJobStatus("failed");
+    api.emitEvent({
+      v: 1,
+      type: "error",
+      category: "output",
+      message:
+        "the exchange completed but the result file could not be written",
+    });
+    api.closeEvents();
+    await expect
+      .element(page.getByText("could not be written", { exact: false }))
+      .toBeInTheDocument();
+  }
+
+  test("offers the receipt the appliance holds", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      receipt: { requested: true, available: true },
+    });
+    app.render(createElement(InviterBench));
+    await runToOutputFailure(api);
+
+    // No record built on this run, so the download name falls back to the job
+    // id rather than the download being withheld for want of a stamp.
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: "Download signed receipt (safe to share): psilink-receipt-job-7.json",
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("states a receipt the run asked for and the appliance does not hold", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      receipt: { requested: true, available: false },
+    });
+    app.render(createElement(InviterBench));
+    await runToOutputFailure(api);
+
+    await expect
+      .element(page.getByText(RECEIPT_MISSING_LEAD))
+      .toBeInTheDocument();
+    expect(
+      page.getByRole("link", { name: /Download signed receipt/ }).query(),
+    ).toBeNull();
   });
 });
