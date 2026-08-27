@@ -24,6 +24,13 @@ const ROOT = "/repo/.claude/worktrees";
 const OWN = `${ROOT}/agent-${AGENT_ID}`;
 const SIBLING = `${ROOT}/agent-other`;
 
+// A tree a session was pointed at rather than given, and the id such a session
+// carries: the harness names a tree after an agent only when it gave that agent
+// one, so a spawn briefed to work in an existing tree resolves to a tree that
+// was never created.
+const HANDED = `${ROOT}/agent-handed`;
+const SPAWNED_WITHOUT_A_TREE = "spawned-without-a-tree";
+
 // A real tree on disk for the cases whose verdict depends on what is actually
 // there: a deletion aimed above the worktree root, which names no worktree, and
 // `git clean`, whose target is a directory rather than an argument.
@@ -327,6 +334,96 @@ describe("block-worktree-deletions hook", () => {
     expect(
       verdict("rm -rf node_modules", { cwd: OWN, agentId: null }).stderr,
     ).toContain("owns no agent worktree");
+  });
+
+  // The four cases the ownership model turns on, driven together so the answer
+  // each one ships stands in a single place: the tree this session's agent id
+  // names, a tree it was handed instead, a sibling that is neither, and an event
+  // carrying no agent id at all.
+  it("resolves the four ownership cases from the agent id alone", () => {
+    expectAllowed([`rm ${OWN}/probe.test.ts`, "rm -rf dist"], { cwd: OWN });
+
+    const handed = { cwd: HANDED, agentId: SPAWNED_WITHOUT_A_TREE };
+    expectBlocked(
+      [`rm ${HANDED}/probe.test.ts`, "rm probe.test.ts", `rm -rf ${HANDED}`],
+      handed,
+    );
+    const handedRefusal = verdict(`rm ${HANDED}/probe.test.ts`, handed).stderr;
+    expect(handedRefusal).toContain(
+      `owns only '${ROOT}/agent-${SPAWNED_WITHOUT_A_TREE}'`,
+    );
+    // A refusal a handed-over session meets has to carry the procedure that
+    // clears the file without a deletion, or the session has nothing to do next.
+    expect(handedRefusal).toContain("stash push -u -- <path>");
+    // The advice is scoped to the reader's own case, not offered blanket: it
+    // names the handed-tree condition under which the stash route applies and
+    // says plainly that another session's tree gets no cleanup of any kind.
+    expect(handedRefusal).toContain("was handed");
+    expect(handedRefusal).toContain(
+      "not handed is another live session's workplace",
+    );
+
+    expectBlocked([`rm ${SIBLING}/probe.test.ts`], handed);
+
+    expectBlocked([`rm ${HANDED}/probe.test.ts`, "rm probe.test.ts"], {
+      cwd: HANDED,
+      agentId: null,
+    });
+    expect(
+      verdict("rm probe.test.ts", { cwd: HANDED, agentId: null }).stderr,
+    ).toContain("owns no agent worktree");
+  });
+
+  // The procedure the refusal names is a claim about real git, so every step of
+  // it is driven rather than asserted: an untracked leftover holds the plain
+  // retirement back, the scoped stash takes it off disk without any deletion this
+  // hook refuses, the tree then retires with an ignored leftover still sitting in
+  // it, and the stashed content is still there once the tree is gone. A failure
+  // means git's behavior moved and the header's stated procedure has to move too.
+  it("clears and retires a tree nobody owns by the procedure its refusal names", () => {
+    const { dir, own } = makeRepoWithWorktree();
+    const options = {
+      cwd: dir,
+      projectDir: dir,
+      agentId: SPAWNED_WITHOUT_A_TREE,
+    };
+    const leftover = join(own, "probe.txt");
+    writeFileSync(leftover, "left behind\n");
+    // An exclude in the common directory reaches every worktree of the repo,
+    // which a .gitignore committed after the tree was cut would not.
+    writeFileSync(join(dir, ".git", "info", "exclude"), "build.log\n");
+    writeFileSync(join(own, "build.log"), "ignored output\n");
+
+    expectBlocked(
+      [
+        `rm ${leftover}`,
+        `git -C ${own} clean -fd`,
+        `git worktree remove --force ${own}`,
+      ],
+      options,
+    );
+
+    const held = spawnSync("git", ["worktree", "remove", own], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(held.status).not.toBe(0);
+    expect(held.stderr).toContain("untracked files");
+
+    const stash = `git -C ${own} stash push -u -- probe.txt`;
+    expectAllowed([stash], options);
+    execFileSync("bash", ["-c", stash], { cwd: dir });
+    expect(existsSync(leftover)).toBe(false);
+    expect(existsSync(join(own, "build.log"))).toBe(true);
+
+    execFileSync("git", ["worktree", "remove", own], { cwd: dir });
+    expect(existsSync(own)).toBe(false);
+    expect(
+      execFileSync("git", ["show", "stash@{0}^3:probe.txt"], {
+        cwd: dir,
+        encoding: "utf8",
+      }),
+    ).toContain("left behind");
   });
 
   it("allows the plain `git worktree remove` that retires a finished tree", () => {
