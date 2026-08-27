@@ -65,9 +65,8 @@ export const DEFAULT_PREVIEW_IDENTITY = "you";
  * Why the confirm step will not run without an identity, stated where the
  * disabled Run button is. The label is the one thing the partner reads as this
  * party's name and nothing stands in for it: a zero-setup run carries no terms
- * document, and the CLI's own fallback is the user name of the account it runs
- * as, which an appliance container running under a uid its image does not define
- * has none of.
+ * document, and the CLI refuses a run it cannot name rather than inventing a
+ * label.
  */
 export const DIRECT_IDENTITY_REQUIRED_REASON =
   "Fill in your identity above to run: it is the name your partner sees, and " +

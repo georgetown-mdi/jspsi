@@ -246,9 +246,9 @@ function buildExchangeHandoffTemplate(
  * credential `@path` placeholdered, or the filedrop arm's placeholder `file://`
  * locator), the run's tuning flags, its identity, its linkage-strategy selector
  * when set, and the input/output positionals. The identity is always carried: the
- * graduated command reads no configuration document, and the account a scheduled
- * container runs as may have no user name for the CLI to fall back on. The sftp
- * arm reuses {@link zeroSetupSftpArgv} against a placeholder-credential entry, so
+ * graduated command reads no configuration document to take a label from, and the
+ * CLI refuses a run it cannot name rather than inventing one. The sftp arm reuses
+ * {@link zeroSetupSftpArgv} against a placeholder-credential entry, so
  * the URL, username, and mandatory fingerprint pin are exactly what ran while no
  * credential `@path` is emitted. The tuning flags come from
  * {@link zeroSetupOptionsArgv} -- the same builder the live run's argv uses -- so

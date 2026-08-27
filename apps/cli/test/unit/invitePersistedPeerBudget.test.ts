@@ -103,6 +103,7 @@ async function inviteOnline(
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: [url, input],
       "config-file": configFile,
       "key-file": path.join(dir, ".psilink.key"),

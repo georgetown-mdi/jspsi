@@ -527,9 +527,9 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  *   `--linkage-strategy`.
  * - `identity` is a REQUIRED bounded operator label forwarded to the CLI's
  *   `--identity` (the party name/org/contact string). Required because it is what
- *   the partner reads as this party's name, and the run has nothing to fall back
- *   on: the CLI's own fallback is the user name of the account it runs as, which
- *   an appliance container running under an unmapped uid does not have. Bounded by
+ *   the partner reads as this party's name and nothing stands in for it: a
+ *   zero-setup run carries no terms document to hold one, and the CLI refuses a
+ *   run it cannot name rather than inventing a label. Bounded by
  *   {@link MAX_IDENTITY_LENGTH} and, being free text rather than a closed enum,
  *   held to the shared label contract's two shape rules as well: no leading `-`,
  *   so a flag-shaped value cannot masquerade as a CLI flag -- the driver also
@@ -832,14 +832,14 @@ const jobZeroSetupIntentCommonFields = {
   eventStream: z.boolean().optional(),
   linkageStrategy: z.enum(["cascade", "single-pass"]).optional(),
   // Required, unlike the strategy beside it: the label is what the partner reads
-  // as this party's name, and the CLI has nothing to fall back on when the
-  // appliance container runs under a uid its image does not define. Free text,
-  // unlike the closed strategy enum, so it takes the shared label contract's two
-  // shape rules (`@psi/identityLabel`): no leading `-`, so a flag-shaped label
-  // (e.g. "--save") cannot be mistaken for a CLI flag -- defense in depth, since
-  // the driver emits it as a single `--identity=<value>` token, which parses a
-  // `-`-leading value verbatim regardless -- and no control character, which
-  // rides the run into this party's own disclosure record.
+  // as this party's name, and the CLI refuses a run carrying none rather than
+  // inventing one. Free text, unlike the closed strategy enum, so it takes the
+  // shared label contract's two shape rules (`@psi/identityLabel`): no leading
+  // `-`, so a flag-shaped label (e.g. "--save") cannot be mistaken for a CLI
+  // flag -- defense in depth, since the driver emits it as a single
+  // `--identity=<value>` token, which parses a `-`-leading value verbatim
+  // regardless -- and no control character, which rides the run into this
+  // party's own disclosure record.
   identity: z
     .string()
     .min(1)

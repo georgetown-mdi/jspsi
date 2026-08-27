@@ -155,9 +155,8 @@ export function DirectConfirmSection({
   // An untouched field is not a typing mistake, so it gates the run rather than
   // reddening the input the step opens on. It does gate it: the label is what the
   // partner reads as this party's name, and nothing stands in for it -- a
-  // zero-setup run carries no terms document, and the CLI's own fallback is the
-  // account it runs as, which an appliance container under an unmapped uid does
-  // not have.
+  // zero-setup run carries no terms document, and the CLI refuses a run it cannot
+  // name rather than inventing a label.
   const identityMissing = trimmedIdentity.length === 0;
 
   return (

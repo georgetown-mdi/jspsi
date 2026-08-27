@@ -932,31 +932,14 @@ export async function handler(argv: Arguments): Promise<void> {
 
     announceRetainMode(connection, log);
 
-    // Establish SSH host-key trust before any exchange work: on an unpinned sftp
-    // config this prompts and pins on first interactive use, and fails closed
-    // (no prompt, no auto-accept) on a non-interactive run. It is a no-op for a
-    // pinned config or a non-sftp channel. Runs before dataset prep so a
-    // non-interactive no-pin run fails fast; a UsageError (non-TTY, or a declined
-    // prompt) maps to exit 64, a probe transport failure to 69.
-    try {
-      await establishHostKeyTrust(connection, {
-        verbosity,
-        loggerName: "exchange",
-        // The config is already on disk and exchange does not re-write it, so a
-        // first-use pin is written in place now.
-        persistence: { mode: "write-now", configPath: options.configFile },
-      });
-    } catch (err) {
-      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
-    }
-
     // termsIdentity is the identity this run PUTS IN THE AGREED TERMS, which is
     // what a partner verifies a signed receipt's certificate against. It comes
     // from --identity, else the loaded configuration's linkage_terms.identity,
-    // which ExchangeSpecSchema requires to be non-empty. There is no account-name
-    // fallback for the case ExchangeDataSpec's optional linkageTerms leaves open:
-    // resolveConfiguredIdentity refuses it (exit 64) rather than running under a
-    // label the operator never chose.
+    // which ExchangeSpecSchema requires to be non-empty; the guard behind it
+    // covers the case ExchangeDataSpec's optional linkageTerms leaves open,
+    // refusing (exit 64) rather than running under a label the operator never
+    // chose. Resolved ahead of the host-key trust below so a run that cannot
+    // name this party never writes a first-use pin on its way to finding out.
     let identity: string;
     let termsIdentity: string | undefined;
     if (options.identity) {
@@ -974,6 +957,24 @@ export async function handler(argv: Arguments): Promise<void> {
       } catch (err) {
         exitWithError(log, err, 64);
       }
+    }
+
+    // Establish SSH host-key trust before any exchange work: on an unpinned sftp
+    // config this prompts and pins on first interactive use, and fails closed
+    // (no prompt, no auto-accept) on a non-interactive run. It is a no-op for a
+    // pinned config or a non-sftp channel. Runs before dataset prep so a
+    // non-interactive no-pin run fails fast; a UsageError (non-TTY, or a declined
+    // prompt) maps to exit 64, a probe transport failure to 69.
+    try {
+      await establishHostKeyTrust(connection, {
+        verbosity,
+        loggerName: "exchange",
+        // The config is already on disk and exchange does not re-write it, so a
+        // first-use pin is written in place now.
+        persistence: { mode: "write-now", configPath: options.configFile },
+      });
+    } catch (err) {
+      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
     }
 
     let prepared: PreparedExchange;

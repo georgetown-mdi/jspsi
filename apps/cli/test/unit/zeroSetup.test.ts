@@ -36,7 +36,6 @@ import { PERSISTENCE_LOSS_EXIT_CODE } from "../../src/eventStream";
 import { captureFd3 } from "../eventStreamTestSupport";
 import { captureStdio } from "../loggingTestSupport";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
-import { accountUserName } from "../../src/util/accountUserName";
 import { IDENTITY_REQUIRED } from "../../src/partyIdentity";
 
 // The handler hands the resolved connection to runProtocol; mock it so the happy
@@ -56,16 +55,6 @@ vi.mock("../../src/protocol", async (importActual) => ({
 // reach the runProtocol hand-off without a real probe over the fake URL, and
 // assert the handler wires it with the right persistence mode.
 vi.mock("../../src/hostKeyTrust", () => ({ establishHostKeyTrust: vi.fn() }));
-
-// Wrap the account user-name lookup as a PASSTHROUGH spy: every handler test
-// below that supplies no --identity keeps the real fallback, while the two
-// identity tests replace it with the throw an account with no user-database
-// entry raises.
-vi.mock("../../src/util/accountUserName", async (importActual) => {
-  const actual =
-    await importActual<typeof import("../../src/util/accountUserName")>();
-  return { ...actual, accountUserName: vi.fn(actual.accountUserName) };
-});
 
 let existsSyncSpy: MockInstance;
 
@@ -440,10 +429,12 @@ test("handler: a repeated single-value flag exits 64 naming the flag", async () 
 
 // --- handler: the identity this party puts in the terms ----------------------
 
-test("handler: an account with no user name is refused before the connection", async () => {
+test("handler: a missing or blank --identity is refused before the connection", async () => {
   // The refusal has to reach the operator (it names the flag that resolves it),
   // and it has to land before the first-use host-key prompt: a run that cannot
-  // name this party should not have pinned a key on the way to finding out.
+  // name this party should not have pinned a key on the way to finding out. The
+  // blank values are the scripted `--identity "$ORG"` with ORG unset, which the
+  // gate reads as the flag not being there at all.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
   const stdio = captureStdio();
   const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
@@ -451,30 +442,28 @@ test("handler: an account with no user name is refused before the connection", a
   ) => {
     throw new Error(`exit:${code ?? 0}`);
   }) as never);
-  vi.mocked(establishHostKeyTrust).mockClear();
-  vi.mocked(accountUserName).mockImplementationOnce(() => {
-    throw Object.assign(new Error("uv_os_get_passwd returned ENOENT"), {
-      code: "ERR_SYSTEM_ERROR",
-    });
-  });
   try {
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(
       input,
       "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
     );
-    await expect(
-      handler({
-        _: ["sftp://userb@localhost:2222/drop", input],
-        $0: "psilink",
-        "config-file": path.join(dir, "psilink.yaml"),
-        "key-file": path.join(dir, ".psilink.key"),
-        record: false,
-        "log-level": "error",
-      } as unknown as Arguments),
-    ).rejects.toThrow("exit:64");
-    expect(stdio.stderrWrites.join("")).toContain(IDENTITY_REQUIRED);
-    expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+    for (const identity of [undefined, "", "   "]) {
+      vi.mocked(establishHostKeyTrust).mockClear();
+      await expect(
+        handler({
+          _: ["sftp://userb@localhost:2222/drop", input],
+          $0: "psilink",
+          "config-file": path.join(dir, "psilink.yaml"),
+          "key-file": path.join(dir, ".psilink.key"),
+          ...(identity !== undefined ? { identity } : {}),
+          record: false,
+          "log-level": "error",
+        } as unknown as Arguments),
+      ).rejects.toThrow("exit:64");
+      expect(stdio.stderrWrites.join("")).toContain(IDENTITY_REQUIRED);
+      expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+    }
   } finally {
     stdio.restore();
     exitSpy.mockRestore();
@@ -482,9 +471,10 @@ test("handler: an account with no user name is refused before the connection", a
   }
 });
 
-test("handler: a supplied --identity never consults the account", async () => {
-  // The run gets past the identity gate and fails on its (absent) input file
-  // instead, so the lookup that throws under an unmapped uid is never reached.
+test("handler: a supplied --identity carries the run past the identity gate", async () => {
+  // The run gets past the gate and fails on its (absent) input file instead, so
+  // the refusal above is the identity's doing and not something the fixture
+  // would have failed on anyway.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
   const stdio = captureStdio();
   const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
@@ -492,7 +482,6 @@ test("handler: a supplied --identity never consults the account", async () => {
   ) => {
     throw new Error(`exit:${code ?? 0}`);
   }) as never);
-  vi.mocked(accountUserName).mockClear();
   try {
     await expect(
       handler({
@@ -508,7 +497,7 @@ test("handler: a supplied --identity never consults the account", async () => {
         "log-level": "error",
       } as unknown as Arguments),
     ).rejects.toThrow("exit:69");
-    expect(vi.mocked(accountUserName)).not.toHaveBeenCalled();
+    expect(stdio.stderrWrites.join("")).not.toContain(IDENTITY_REQUIRED);
   } finally {
     stdio.restore();
     exitSpy.mockRestore();

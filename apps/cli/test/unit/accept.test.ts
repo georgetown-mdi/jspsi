@@ -70,15 +70,6 @@ vi.mock("../../src/onlineBootstrap", async () => {
   return { ...actual, runOnlineBootstrap: vi.fn() };
 });
 
-// Wrap the account user-name lookup as a PASSTHROUGH spy: every test below that
-// supplies no --identity keeps the real fallback, while the two identity tests
-// replace it with the throw an account with no user-database entry raises.
-vi.mock("../../src/util/accountUserName", async (importActual) => {
-  const actual =
-    await importActual<typeof import("../../src/util/accountUserName")>();
-  return { ...actual, accountUserName: vi.fn(actual.accountUserName) };
-});
-
 import {
   handler as acceptHandler,
   resolveAcceptPositionals,
@@ -96,7 +87,6 @@ import {
   runOnlineBootstrap,
 } from "../../src/onlineBootstrap";
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
-import { accountUserName } from "../../src/util/accountUserName";
 import { IDENTITY_REQUIRED } from "../../src/partyIdentity";
 import { saveConfig } from "../../src/config";
 import { exitCodeForError, promptConfirm } from "../../src/util/cli";
@@ -109,7 +99,10 @@ silentLog.setLevel("silent");
 
 let optionsCounter = 0;
 // Minimal options pointing config/key at fresh, non-existent temp paths so the
-// conflict gate passes and validateAccept reaches the step under test.
+// conflict gate passes and validateAccept reaches the step under test. The
+// identity is part of that minimum: the acceptor derives terms carrying its own
+// label, and a run without one stops at the identity gate before the step under
+// test.
 function testOptions(
   overrides: Partial<CommonBootstrapOptions> = {},
 ): CommonBootstrapOptions {
@@ -117,6 +110,7 @@ function testOptions(
   return {
     configFile: path.join(tmpdir(), `psilink-accept-test-${id}.yaml`),
     keyFile: path.join(tmpdir(), `psilink-accept-test-${id}.key`),
+    identity: "Agency B",
     record: false,
     eventStream: false,
     logLevel: logLibrary.levels.SILENT,
@@ -322,40 +316,20 @@ test("validateAccept: an invalid invitation is rejected before the prompt", asyn
   ).rejects.toBeInstanceOf(UsageError);
 });
 
-test("validateAccept: an account with no user name is refused, not defaulted", async () => {
+test("validateAccept: a missing or blank --identity is refused", async () => {
   // The acceptor records its OWN identity in the derived terms (the invitation
   // carries the inviter's), so a valid invitation is not a label this party can
-  // borrow: with none supplied and none to read, the acceptance stops.
+  // borrow: with none supplied, the acceptance stops. A blank value -- the
+  // scripted `--identity "$ORG"` with ORG unset -- is none supplied.
   const encoded = await encodeInvitation(sampleToken(FUTURE()));
-  vi.mocked(accountUserName).mockImplementationOnce(() => {
-    throw Object.assign(new Error("uv_os_get_passwd returned ENOENT"), {
-      code: "ERR_SYSTEM_ERROR",
-    });
-  });
-  await expect(
-    validateAccept({
-      resolved: { mode: "offline", invitation: encoded },
-      options: testOptions(),
-      log: silentLog,
-    }),
-  ).rejects.toThrow(IDENTITY_REQUIRED);
-});
-
-test("validateAccept: a supplied --identity never consults the account", async () => {
-  const encoded = await encodeInvitation(sampleToken(FUTURE()));
-  vi.mocked(accountUserName).mockClear();
-  await expect(
-    validateAccept({
-      resolved: {
-        mode: "offline",
-        invitation: encoded,
-        input: "/nonexistent/psilink-input.csv",
-      },
-      options: testOptions({ identity: "Agency B" }),
-      log: silentLog,
-    }),
-  ).rejects.toMatchObject({ exitCode: 69 });
-  expect(vi.mocked(accountUserName)).not.toHaveBeenCalled();
+  for (const identity of [undefined, "", "   "])
+    await expect(
+      validateAccept({
+        resolved: { mode: "offline", invitation: encoded },
+        options: testOptions({ identity }),
+        log: silentLog,
+      }),
+    ).rejects.toThrow(IDENTITY_REQUIRED);
 });
 
 test("validateAccept: a deduplicating invitation leaves this party one-to-one", async () => {
@@ -3602,6 +3576,7 @@ test("handler: a repeated single-value flag is rejected (exit 64) via runOrExit"
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: ["sftp://host/drop", "INVITATION", "input.csv"],
       "server-port": [2222, 2223],
     } as unknown as Arguments);
@@ -3637,6 +3612,7 @@ test("handler: a mistyped --flag exits 64 naming it, before decode/prompt/write"
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: ["--server-usernam", "u", encoded, "input.csv"],
       "config-file": configFile,
       "key-file": keyFile,
@@ -3695,6 +3671,7 @@ test("handler: --consent-to-terms skips the confirmation prompt and writes the c
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: [encoded, input],
       "consent-to-terms": true,
       "config-file": configFile,
@@ -3733,6 +3710,7 @@ test("handler: an accepted webrtc invitation writes role: acceptor into the conf
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: [encoded],
       "consent-to-terms": true,
       "config-file": configFile,
@@ -3778,6 +3756,7 @@ test("handler: a no-input webrtc acceptance points the operator at psilink excha
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: [encoded],
       "consent-to-terms": true,
       "config-file": configFile,
@@ -3825,6 +3804,7 @@ test("handler: a webrtc acceptance given an input file accepts and runs the exch
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: [encoded, input, output],
       "consent-to-terms": true,
       "config-file": configFile,
@@ -3885,6 +3865,7 @@ test("handler: the consent gate stands on the one-command path", async () => {
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: [encoded, input],
       "config-file": configFile,
       "key-file": keyFile,
@@ -3922,6 +3903,7 @@ test("handler: an accepted sftp invitation writes no role", async () => {
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: [encoded, input],
       "consent-to-terms": true,
       "config-file": configFile,
@@ -3975,6 +3957,7 @@ test("handler: a declared inviterRetainsFiles does not reach the acceptor's own 
       await acceptHandler({
         _: [],
         $0: "psilink",
+        identity: "Agency B",
         args: [encoded, input],
         "consent-to-terms": true,
         "config-file": configFile,
@@ -4024,6 +4007,7 @@ test("handler: without --consent-to-terms the prompt runs and a decline writes n
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: [encoded, input],
       "config-file": configFile,
       "key-file": keyFile,
@@ -4160,6 +4144,7 @@ async function runOfflineAcceptCapturingStdio(params: {
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: [encoded, ...(positionals ?? [fixture.input])],
       "config-file": fixture.configFile,
       "key-file": fixture.keyFile,
@@ -4616,6 +4601,7 @@ test("handler: online accept forwards the token's disclosed set to runOnlineBoot
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: ["sftp://host/drop", encoded, input],
       "consent-to-terms": true,
       "config-file": configFile,
@@ -4667,6 +4653,7 @@ test("handler: online accept-reuse forwards the lock-in the kept config must be 
       await acceptHandler({
         _: [],
         $0: "psilink",
+        identity: "Agency B",
         args: ["file:///mnt/share", encoded, input],
         "consent-to-terms": true,
         "config-file": configFile,
@@ -4717,6 +4704,7 @@ async function runOfflineAcceptReuse(params: {
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: params.input !== undefined ? [encoded, params.input] : [encoded],
       "consent-to-terms": true,
       "config-file": params.configFile,
@@ -4881,6 +4869,7 @@ test("handler: offline accept writes the invitation's declared deduplicate to th
       await acceptHandler({
         _: [],
         $0: "psilink",
+        identity: "Agency B",
         args: [encoded, input],
         "consent-to-terms": true,
         "config-file": configFile,
@@ -4957,6 +4946,7 @@ test("handler: online accept forwards the invitation's declared deduplicate to r
       await acceptHandler({
         _: [],
         $0: "psilink",
+        identity: "Agency B",
         args: ["sftp://host/drop", encoded, input],
         "consent-to-terms": true,
         "config-file": configFile,
@@ -5181,6 +5171,7 @@ async function runOfflineAcceptFresh(params: {
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: params.input !== undefined ? [encoded, params.input] : [encoded],
       "consent-to-terms": true,
       "config-file": params.configFile,
@@ -5402,6 +5393,7 @@ test("handler: online accept forwards its own outbound consent to runOnlineBoots
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: ["sftp://host/drop", encoded, input],
       "consent-to-terms": true,
       "config-file": configFile,
@@ -5447,6 +5439,7 @@ test("handler: online accept whose config write failed keeps exit 73 and says so
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: ["sftp://host/drop", encoded, input],
       "consent-to-terms": true,
       "config-file": configFile,
@@ -5498,6 +5491,7 @@ test("handler: a clean config write leaves the exchange's own exit 73 in place",
     await acceptHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency B",
       args: ["sftp://host/drop", encoded, input],
       "consent-to-terms": true,
       "config-file": configFile,

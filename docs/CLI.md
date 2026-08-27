@@ -28,7 +28,9 @@ The threat model behind the rule -- what a substituted configuration can do with
 
 The `--config-file` and `--key-file` arguments are expected to be available for all relevant commands below, and are thus not explicitly listed.
 
-`--identity` supplies this party's label in the linkage terms -- what your partner reads as your name there, in the invitation, and in the exchange record. The commands that author their own terms (`psilink invite`, `psilink accept`, and the zero-setup form) fall back to the user name of the account psilink runs as; `psilink exchange` takes `linkage_terms.identity` from the configuration instead, which `--identity` replaces for that one run. A command left with neither stops with a usage error (exit 64) naming how to supply one, rather than sending a label you did not choose. An account has no user name to fall back on when a container runs under a uid the image does not define, which is what [running the container as your own account](DEPLOYMENT.md#the-user-the-image-runs-as) does.
+`--identity IDENTITY` supplies this party's label in the linkage terms -- what your partner reads as your name there, in the invitation, and in the exchange record. It is required on every command that authors its own terms: `psilink invite`, `psilink accept`, and the zero-setup form. `psilink exchange` takes the label from `linkage_terms.identity` in the configuration instead, and `--identity` replaces it for that one run.
+
+psilink stands in no label of its own. A run that supplies none -- including one whose value is empty or blank, as a scripted `--identity "$ORG"` sends when `ORG` is unset -- stops with a usage error (exit 64) naming the flag, rather than putting a name you did not choose in front of your partner.
 
 A leading `~` (or `~/`) in a local filesystem path -- whether given on the command line or written into the configuration file -- is expanded to the current user's home directory. Which paths are expanded depends on the command:
 
@@ -86,7 +88,7 @@ If a file already exists at the output path, the user is prompted before overwri
 ## Zero-setup exchange
 
 ```sh
-psilink [--save] [--linkage-strategy STRATEGY] [--sweep-exchange-files [--force-retain-sweep]] URL INPUT_FILE [OUTPUT_FILE]
+psilink --identity IDENTITY [--save] [--linkage-strategy STRATEGY] [--sweep-exchange-files [--force-retain-sweep]] URL INPUT_FILE [OUTPUT_FILE]
 ```
 
 Both parties run this command against the same server. Linkage terms, metadata, and data standardizing transformations are inferred from each party's input file; if the inferred terms disagree, the exchange fails with an error. Users are expected to prepare files with matching schemas before running. The server coordinates their connection and the exchange proceeds immediately without any prior configuration. By default, no configuration files are written. This mode is suitable for one-off exchanges and for onboarding sessions where both parties are in direct communication. Security relies on the transport authentication layer and file system controls rather than a pre-shared secret. If there is no end-to-end encryption (e.g. SFTP or file-drop), then implicitly trust is placed in the server administrator.
@@ -107,10 +109,10 @@ For SFTP, SSH credentials must be supplied in the URL or as command-line argumen
 
 ```sh
 # SFTP example
-psilink sftp://user@sftp.example.org/exchanges/drop input.csv output.csv
+psilink --identity "Jane Doe, County Health" sftp://user@sftp.example.org/exchanges/drop input.csv output.csv
 
 # File-drop example (network-mounted folder)
-psilink file:///mnt/sftp-share/drop input.csv output.csv
+psilink --identity "Jane Doe, County Health" file:///mnt/sftp-share/drop input.csv output.csv
 ```
 
 Before running, users are warned about the limitations of the security model, namely that they must trust the server's administrator.
@@ -142,7 +144,7 @@ Invitation strings beginning with `-` may be misinterpreted as option flags by a
 When both parties are not simultaneously available or prefer not to use a coordination server, invite and accept can be performed without any server connection.
 
 ```sh
-psilink invite [--expires-in DURATION] [--linkage-strategy STRATEGY] [INPUT_FILE]
+psilink invite --identity IDENTITY [--expires-in DURATION] [--linkage-strategy STRATEGY] [INPUT_FILE]
 ```
 
 This generates a shared secret, saves the `sharedSecret` and an `expires` field to a key file, prints an invitation string (see [Invitation strings](#invitation-strings)) and instructions for its use, and then exits immediately. The invitation should be forwarded to the user's partner using a trusted out-of-band channel (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)).
@@ -164,7 +166,7 @@ This is distinct from recovering a lost, reset, or compromised key (see [Recover
 ## Offline acceptance
 
 ```sh
-psilink accept INVITATION [INPUT_FILE] [OUTPUT_FILE]
+psilink accept --identity IDENTITY INVITATION [INPUT_FILE] [OUTPUT_FILE]
 ```
 
 The `INVITATION` argument is either a base64url string or an `@path` reference to a file containing one. This command decodes the invitation token, displays what acceptance discloses, and asks you to confirm it. On a yes, configuration and key files are created (with exceptions noted below) and, unless the acceptance runs the exchange itself, you are told to fill in your connection parameters before conducting exchanges; on a no, nothing is written. Coordination with the partner happens out-of-band, for example if the linkage terms are unacceptable or if the invitation expires.
@@ -276,7 +278,7 @@ After an acceptance that writes only a configuration, both parties run `psilink 
 ## Online invitation
 
 ```sh
-psilink invite [--accept-timeout=DURATION] [--expires-in DURATION] [--linkage-strategy STRATEGY] URL INPUT_FILE [OUTPUT_FILE]
+psilink invite --identity IDENTITY [--accept-timeout=DURATION] [--expires-in DURATION] [--linkage-strategy STRATEGY] URL INPUT_FILE [OUTPUT_FILE]
 ```
 
 Similar to [offline invitation](#offline-invitation), this generates a shareable invitation string (see [Invitation strings](#invitation-strings)) then prints it and instructions for the user to forward to their partner by a secure, out-of-band channel. Those instructions include a template for the invocation of `psilink accept` that references the shared server (over WebRTC there is none for the partner to type -- see [Inviting over WebRTC](#inviting-over-webrtc)). The template names the invitation as `<INVITATION>` beside its `<INPUT_FILE>` placeholder rather than carrying it: the invitation encodes the setup shared secret, so its delivery is the stdout line above -- which the operator directs -- while the template is a diagnostic like every other line, routed to stderr or to a `--log-file`. The invitation it prints also embeds a [credential-free connection endpoint](#invitation-strings) derived from the connection this invite is using -- the public locator only (host/port/path, or the split `inbound_path`/`outbound_path` pair), never credentials -- so an acceptor seeds its `connection` block from it and need only supply its own credentials. After printing the invitation information, the program connects to the server and waits for the partner to respond.
@@ -285,7 +287,7 @@ Similar to [offline invitation](#offline-invitation), this generates a shareable
 
 A `ws://` or `wss://` URL invites over the [`webrtc` channel](#webrtc-exchanges): the URL names the PeerJS peer-coordination server the two parties meet through, and the invitation carries that same host, port, and path as its connection endpoint. This is the only way to hand a partner a coordination server other than the one their client defaults to -- a self-hosted deployment, or a fork with a different one built in -- since no printed instruction can put it into their configuration for them.
 
-- **The partner needs no URL, and no second command.** The printed template is `psilink accept <INVITATION> <INPUT_FILE>`, run while this command is still waiting: accepting writes the connection block (coordination server and `role` both) from the endpoint and dials it in the same invocation (see [Accepting and running a WebRTC exchange](#accepting-and-running-a-webrtc-exchange)). The `role` is not carried by the invitation -- each command stamps its own end, `inviter` here and `acceptor` there.
+- **The partner needs no URL, and no second command.** The printed template is `psilink accept --identity "<YOUR NAME, YOUR ORGANIZATION>" <INVITATION> <INPUT_FILE>`, run while this command is still waiting: accepting writes the connection block (coordination server and `role` both) from the endpoint and dials it in the same invocation (see [Accepting and running a WebRTC exchange](#accepting-and-running-a-webrtc-exchange)). The `role` is not carried by the invitation -- each command stamps its own end, `inviter` here and `acceptor` there.
 - **The URL names the location and nothing else.** A `ws://`/`wss://` URL carrying a non-empty user, password, query, or fragment is a usage error (exit 64) rather than a silently dropped component, as is one whose host or path could move the signaling socket elsewhere (an `@`, `?`, `#`, `\`, or space, however it was written) or whose port is not dialable. Every such refusal lands before the invitation is minted, so an unusable URL never costs a printed token. For a coordination server that needs an API key, author `channel: webrtc` with `server.key` in `psilink.yaml` and use [`psilink exchange`](#webrtc-exchanges) instead.
 - **The endpoint names the mount point even when the URL did not.** A bare-host URL such as `wss://peers.example.org` invites on the root path, and the invitation says so rather than leaving the field empty: a partner's client resolves an absent path to its own default, which is not necessarily this one's, and the two would then wait at different sockets until the accept-timeout.
 - **A plaintext (`ws://`) coordination server cannot be conveyed.** A connection endpoint has no `secure` field, so a partner seeded from one dials `wss://` and reaches nothing. The command warns when it emits an endpoint for a `ws://` server, naming the `secure: false` the partner has to add by hand; the invitation and the exchange still proceed.
@@ -318,7 +320,7 @@ If `--key-file` is not used and a key file exists at the default path, the user 
 ## Online acceptance
 
 ```sh
-psilink accept URL INVITATION INPUT_FILE [OUTPUT_FILE]
+psilink accept --identity IDENTITY URL INVITATION INPUT_FILE [OUTPUT_FILE]
 ```
 
 This command is similar to [offline acceptance](#offline-acceptance), however it coordinates with the other party and executes an exchange. It decodes the invitation string and displays the same terms outline [offline acceptance](#offline-acceptance) prints, leading with the columns this party itself will send to the partner for matched records -- its own outbound disclosure. The user can abort or accept. `--consent-to-terms` skips this confirmation for unattended runs exactly as in [offline acceptance](#offline-acceptance), recording advance consent to the invitation's terms before the configuration and key are written and the handshake is run; it applies only to that consent and does not affect [SFTP host-key trust](#sftp-host-key-trust), which has its own non-interactive setup. It also lets `INPUT_FILE` be `-` to read the CSV from stdin. As in offline acceptance, the input is checked against the invitation's linkage terms before any connection: if it can satisfy no key, the command stops with an error and never connects, so the two parties cannot complete a handshake and run an exchange that yields only an empty result indistinguishable from a legitimate non-match; if it can satisfy some but not all keys, a warning names the unsatisfied fields and the exchange proceeds on the keys that remain. Accepting saves the configuration and newly-generated persistent keys on both sides as soon as the handshake succeeds, before the data exchange begins, so a post-handshake failure can be retried with `psilink exchange` without re-inviting (see [Recurring exchange](#recurring-exchange)); the exchange is then conducted and both applications exit when complete.
@@ -588,7 +590,7 @@ When [`authentication.token_max_age_days`](EXCHANGE_REFERENCE.md#authenticationt
 
 If one party fails to write the rotated token to its key file - whether due to a crash, power loss, or a disk error - the two sides will hold different tokens and the next key exchange will fail. Clock skew can produce the same result: if one party's clock lags and a token expires between the key-exchange round-trip messages, that party fails the post-handshake expiry check and discards the new token while the other party saves it successfully. Because there is no way to determine which party holds the newer token, both must reset regardless of which side failed; reusing an older token may also violate key-rotation policies.
 
-To recognize failed rotations, the error messages for exchanges that fail key-exchange authentication instruct users how they can generate and accept new invitation strings, and encourage them to contact their partners out-of-band. Since connection information has already been shared, the recommended commands are `psilink invite URL` followed by `psilink accept URL INVITATION`. The pre-existing `psilink.yaml` configuration file is reused; only the key file needs to be recreated. A party that already holds that configuration and needs only the new secret can instead re-provision offline with [`psilink exchange --invitation`](#provisioning-the-key-file-from-an-invitation), which writes the key file and runs the exchange in one command.
+To recognize failed rotations, the error messages for exchanges that fail key-exchange authentication instruct users how they can generate and accept new invitation strings, and encourage them to contact their partners out-of-band. Since connection information has already been shared, the recommended commands are `psilink invite --identity IDENTITY URL` followed by `psilink accept --identity IDENTITY URL INVITATION`. The pre-existing `psilink.yaml` configuration file is reused; only the key file needs to be recreated. A party that already holds that configuration and needs only the new secret can instead re-provision offline with [`psilink exchange --invitation`](#provisioning-the-key-file-from-an-invitation), which writes the key file and runs the exchange in one command.
 
 ### Token loss
 
@@ -602,7 +604,7 @@ See [Compromise response](SECURITY_DESIGN.md#compromise-response) for the proced
 
 Every command that produces diagnostic output - `init`, `invite`, `accept`, `exchange`, the zero-setup form, `fingerprint`, `probe-host-key`, `doctor`, and `verify-receipt` - accepts `--log-level` and `--log-file`.
 
-psilink follows the standard stream convention: a command's result data goes to `stdout`, and all diagnostic output - every log line, `info` and `debug` included, together with the interactive confirmation prompt - goes to `stderr`. This keeps a piped or redirected result clean. `psilink accept URL INVITATION 2>/dev/null > matched.csv` writes only the matched-records CSV to `matched.csv`, with the invitation-terms display, the "wrote key file" line, the runtime banner, and every other diagnostic sent to `stderr`, where the same run without the redirect still shows them on the terminal. The result on `stdout` is an exchange's CSV output (when no `OUTPUT_FILE` positional is given), the invitation token printed by `invite`, the fingerprint value printed by `fingerprint` -- whose action banner, bound identity, `--force` regeneration warning, and out-of-band sharing instructions are diagnostics on `stderr`, so `FP=$(psilink fingerprint)` captures just the value -- and the verification verdict printed by `verify-receipt` (its exit code, nonzero only on a definite failure, carries the same result for scripts).
+psilink follows the standard stream convention: a command's result data goes to `stdout`, and all diagnostic output - every log line, `info` and `debug` included, together with the interactive confirmation prompt - goes to `stderr`. This keeps a piped or redirected result clean. `psilink accept --identity IDENTITY URL INVITATION 2>/dev/null > matched.csv` writes only the matched-records CSV to `matched.csv`, with the invitation-terms display, the "wrote key file" line, the runtime banner, and every other diagnostic sent to `stderr`, where the same run without the redirect still shows them on the terminal. The result on `stdout` is an exchange's CSV output (when no `OUTPUT_FILE` positional is given), the invitation token printed by `invite`, the fingerprint value printed by `fingerprint` -- whose action banner, bound identity, `--force` regeneration warning, and out-of-band sharing instructions are diagnostics on `stderr`, so `FP=$(psilink fingerprint)` captures just the value -- and the verification verdict printed by `verify-receipt` (its exit code, nonzero only on a definite failure, carries the same result for scripts).
 
 `--log-level <level>` selects the verbosity: `silent`, `error`, `warn`, `info` (the default), `debug`, or `trace`, matched without regard to case. `silent` suppresses all log output. Any other value is a usage error and exits 64, naming the value you gave, on every command that accepts the flag - a typo never quietly leaves the run at the default. The level governs every diagnostic the run emits once logging is set up, including the low-level warnings from data cleaning and file handling, so `silent` keeps them out of the terminal and out of a `--log-file` alike and `debug`/`trace` turn up the rest of the run's detail - except a usage error in the command line itself (reported on `stderr` before either flag takes effect) and the last-resort line for an error no command handler caught (written straight to `stderr` at exit 1); neither is ever routed to a `--log-file`. It does not suppress the linkage terms `accept` shows when it stops to ask you to confirm them: those accompany the question rather than the log, and reach the terminal whatever this is set to (see [Offline acceptance](#offline-acceptance)).
 

@@ -32,6 +32,7 @@ import {
   validInputFileIntent,
   validIntent,
   validSftpIntent,
+  validZeroSetupIntent,
 } from "../utils/jobFixtures";
 
 import type { JobCreateIntent, JobInputFileReference } from "@jobs/intent";
@@ -201,6 +202,34 @@ describe("create validates and never CORS", () => {
       params: {},
     })) as Response;
     expect(response.status).toBe(400);
+  });
+
+  test("a zero-setup intent with no identity is 400 before the manager runs", async () => {
+    // The label is what the partner reads as this party's name and the CLI
+    // stands in none, so the console's own gate is the schema: an intent
+    // carrying none must not reach createJob, which would compose argv, write a
+    // workdir, and spawn a run the CLI would refuse (exit 64) after the fact.
+    // The refusal body is empty by design -- the route discloses nothing about
+    // the intent it read -- so the reason is pinned at the schema
+    // (jobIntent.unit.test.ts) and the ORDERING is pinned here.
+    const root = enableJobApi();
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rvzRoot(),
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]) },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+    const createJob = vi.spyOn(manager, "createJob");
+    const { identity: _omitted, ...withoutIdentity } = validZeroSetupIntent();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(withoutIdentity),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe("");
+    expect(createJob).not.toHaveBeenCalled();
   });
 
   test("no Access-Control-Allow-Origin header is emitted", async () => {

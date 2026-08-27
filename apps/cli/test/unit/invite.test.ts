@@ -56,15 +56,6 @@ vi.mock("../../src/config", async () => {
   };
 });
 
-// Wrap the account user-name lookup as a PASSTHROUGH spy: every test below that
-// supplies no --identity keeps the real fallback, while the two identity tests
-// replace it with the throw an account with no user-database entry raises.
-vi.mock("../../src/util/accountUserName", async (importActual) => {
-  const actual =
-    await importActual<typeof import("../../src/util/accountUserName")>();
-  return { ...actual, accountUserName: vi.fn(actual.accountUserName) };
-});
-
 import {
   handler as inviteHandler,
   offlineAbandonNotice,
@@ -82,7 +73,6 @@ import {
   runOnlineBootstrap,
 } from "../../src/onlineBootstrap";
 import { captureStdio } from "../loggingTestSupport";
-import { accountUserName } from "../../src/util/accountUserName";
 import { IDENTITY_REQUIRED } from "../../src/partyIdentity";
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 
@@ -91,7 +81,9 @@ silentLog.setLevel("silent");
 
 let optionsCounter = 0;
 // Minimal options pointing config/key at fresh, non-existent temp paths so the
-// conflict gate passes and validateInvite reaches the step under test.
+// conflict gate passes and validateInvite reaches the step under test. The
+// identity is part of that minimum: every run mints terms carrying one, and a
+// run without it stops at the identity gate before the step under test.
 function testOptions(
   overrides: Partial<CommonBootstrapOptions> = {},
 ): CommonBootstrapOptions {
@@ -99,6 +91,7 @@ function testOptions(
   return {
     configFile: path.join(tmpdir(), `psilink-invite-test-${id}.yaml`),
     keyFile: path.join(tmpdir(), `psilink-invite-test-${id}.key`),
+    identity: "Agency A",
     record: false,
     eventStream: false,
     logLevel: logLibrary.levels.SILENT,
@@ -201,36 +194,22 @@ test("validateInvite: offline requires an input file", async () => {
   ).rejects.toBeInstanceOf(UsageError);
 });
 
-test("validateInvite: an account with no user name is refused, not defaulted", async () => {
-  // The identity is resolved before anything is read or minted, so this aborts
-  // ahead of the (nonexistent) input file the offline path would otherwise fail
-  // on -- and ahead of the token, whose terms would carry the label.
-  vi.mocked(accountUserName).mockImplementationOnce(() => {
-    throw Object.assign(new Error("uv_os_get_passwd returned ENOENT"), {
-      code: "ERR_SYSTEM_ERROR",
-    });
-  });
-  await expect(
-    validateInvite({
-      resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
-      options: testOptions(),
-      acceptTimeout: 900,
-      log: silentLog,
-    }),
-  ).rejects.toThrow(IDENTITY_REQUIRED);
-});
-
-test("validateInvite: a supplied --identity never consults the account", async () => {
-  vi.mocked(accountUserName).mockClear();
-  await expect(
-    validateInvite({
-      resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
-      options: testOptions({ identity: "Agency A" }),
-      acceptTimeout: 900,
-      log: silentLog,
-    }),
-  ).rejects.toMatchObject({ exitCode: 69 });
-  expect(vi.mocked(accountUserName)).not.toHaveBeenCalled();
+test("validateInvite: a missing or blank --identity is refused", async () => {
+  // The identity is resolved before anything is read or minted, so each of these
+  // aborts ahead of the (nonexistent) input file the offline path would
+  // otherwise fail on -- and ahead of the token, whose terms would carry the
+  // label. The blank cases are the scripted `--identity "$ORG"` with ORG unset;
+  // there is nothing for psilink to stand in, so they refuse exactly as the
+  // absent flag does.
+  for (const identity of [undefined, "", "   "])
+    await expect(
+      validateInvite({
+        resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
+        options: testOptions({ identity }),
+        acceptTimeout: 900,
+        log: silentLog,
+      }),
+    ).rejects.toThrow(IDENTITY_REQUIRED);
 });
 
 test("validateInvite: a non-positive accept-timeout is rejected", async () => {
@@ -641,6 +620,7 @@ test("handler: a webrtc URL the dial would refuse prints no invitation", async (
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: ["wss://peers.example.org/psi%3Fkey=private", input],
       "config-file": options.configFile,
       "key-file": options.keyFile,
@@ -1059,6 +1039,7 @@ test("handler: the offline infer path refuses an over-long disclosed name, writi
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: [input],
       "config-file": options.configFile,
       "key-file": options.keyFile,
@@ -2597,6 +2578,7 @@ test("handler: a repeated --accept-timeout is rejected (exit 64) before validati
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: [input],
       "accept-timeout": [60, 120],
       "config-file": configFile,
@@ -2636,6 +2618,7 @@ test("handler: a bare-integer --accept-timeout is rejected (exit 64) before any 
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: [input],
       "accept-timeout": "60",
       "config-file": configFile,
@@ -2674,6 +2657,7 @@ test("handler: an --accept-timeout above the 7d ceiling is rejected (exit 64) be
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: [input],
       "accept-timeout": overCeiling,
       "config-file": configFile,
@@ -2710,6 +2694,7 @@ test("handler: an unrecognized --linkage-strategy is rejected (exit 64) before a
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: [input],
       "linkage-strategy": "complete",
       "config-file": configFile,
@@ -2749,6 +2734,7 @@ test("handler: a mistyped --flag exits 64 naming it, before any side effect", as
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: ["--server-usernam", "u", input],
       "config-file": configFile,
       "key-file": keyFile,
@@ -2797,6 +2783,7 @@ test("handler: offline-from-config persists the disclosed subset into the reused
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: [],
       "config-file": configPath,
       "key-file": keyPath,
@@ -2846,6 +2833,7 @@ test("handler: offline-from-config removes an acceptor-era outbound consent reco
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: [],
       "config-file": configPath,
       "key-file": keyPath,
@@ -2883,6 +2871,7 @@ test("handler: an offline invitation's placeholder connection carries no role", 
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: [input],
       "config-file": configFile,
       "key-file": keyFile,
@@ -2927,6 +2916,7 @@ test("handler: offline infer-from-input writes the disclosed subset into the fre
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: [input],
       "config-file": configFile,
       "key-file": keyFile,
@@ -2972,6 +2962,7 @@ test("handler: the invitation reaches stdout and never a diagnostic line", async
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: [input],
       "config-file": configFile,
       "key-file": keyFile,
@@ -2992,9 +2983,13 @@ test("handler: the invitation reaches stdout and never a diagnostic line", async
     // The secret itself, not only the whole encoding: a later line carrying the
     // token's fields rather than its string form would pass the check above.
     expect(diagnostics).not.toContain(token.sharedSecret);
-    // The partner still learns what to run, with the invitation named rather
-    // than carried.
-    expect(diagnostics).toContain("psilink accept <INVITATION> <INPUT_FILE>");
+    // The partner still learns what to run -- with the invitation named rather
+    // than carried, and with the identity accepting requires named where they
+    // meet the command.
+    expect(diagnostics).toContain(
+      'psilink accept --identity "<YOUR NAME, YOUR ORGANIZATION>" ' +
+        "<INVITATION> <INPUT_FILE>",
+    );
   } finally {
     restore();
     logSpy.mockRestore();
@@ -3031,6 +3026,7 @@ test("handler: online invite whose config write failed keeps exit 73 and says so
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: ["sftp://host/drop", input],
       "config-file": options.configFile,
       "key-file": options.keyFile,
@@ -3079,6 +3075,7 @@ test("handler: a clean config write leaves the exchange's own exit 73 in place",
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: ["sftp://host/drop", input],
       "config-file": options.configFile,
       "key-file": options.keyFile,
@@ -3117,6 +3114,7 @@ test("handler: online hands the accept budget to the run and reports what was sa
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: ["sftp://host/drop", input],
       "config-file": options.configFile,
       "key-file": options.keyFile,
@@ -3156,6 +3154,7 @@ test("handler: a webrtc online invite reports the webrtc peer-budget defaults, n
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: ["wss://peers.example.org/psi", input],
       "config-file": options.configFile,
       "key-file": options.keyFile,
@@ -3191,6 +3190,7 @@ test("handler: a failed config write reports no saved peer budget", async () => 
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: ["sftp://host/drop", input],
       "config-file": options.configFile,
       "key-file": options.keyFile,
@@ -3226,6 +3226,7 @@ test("handler: a failed config write leaves --peer-timeout's warning unfalsified
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: ["sftp://host/drop", input],
       "config-file": options.configFile,
       "key-file": options.keyFile,
@@ -3264,6 +3265,7 @@ test("handler: a webrtc online invite tells the partner to accept, with no URL a
     await inviteHandler({
       _: [],
       $0: "psilink",
+      identity: "Agency A",
       args: ["wss://peers.example.org/psi", input],
       "config-file": options.configFile,
       "key-file": options.keyFile,
@@ -3273,7 +3275,10 @@ test("handler: a webrtc online invite tells the partner to accept, with no URL a
     const stderr = stdio.stderrWrites.join("");
     expect(exit).not.toHaveBeenCalled();
     expect(stderr).toContain("accepts and runs the exchange with:");
-    expect(stderr).toContain("psilink accept <INVITATION> <INPUT_FILE>");
+    expect(stderr).toContain(
+      'psilink accept --identity "<YOUR NAME, YOUR ORGANIZATION>" ' +
+        "<INVITATION> <INPUT_FILE>",
+    );
     // Matched on the template's own indented command line, so the peer-budget
     // notice's prose mention of the command does not stand in for it.
     expect(stderr).not.toContain("\n  psilink exchange");

@@ -1192,6 +1192,13 @@ export function offlineAbandonNotice(keyPath: string): string {
  */
 const INVITATION_PLACEHOLDER = "<INVITATION>";
 
+/** The identity placeholder the accept templates carry. Accepting requires the
+ * partner's own label -- psilink stands in none -- so the template names the flag
+ * where the partner meets the command, rather than leaving the refusal to teach
+ * it. A placeholder for the same reason `<INPUT_FILE>` is: nobody but the partner
+ * can choose the name their side is known by. */
+const IDENTITY_PLACEHOLDER = '--identity "<YOUR NAME, YOUR ORGANIZATION>"';
+
 /**
  * Print the invitation string (to stdout, so it is captured even at a quiet log
  * level) with the usage instructions for the partner. An online file-sync
@@ -1218,7 +1225,7 @@ function printInvitation(
   console.log(invitation);
   if (online === undefined) {
     log.info(
-      `Your partner accepts with:\n  psilink accept ` +
+      `Your partner accepts with:\n  psilink accept ${IDENTITY_PLACEHOLDER} ` +
         `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nwhere ` +
         `${INVITATION_PLACEHOLDER} is the invitation printed above.`,
     );
@@ -1227,9 +1234,9 @@ function printInvitation(
   if (online.channel === "webrtc") {
     log.info(
       `Your partner accepts and runs the exchange with:\n  psilink accept ` +
-        `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nrun while this command is ` +
-        `still waiting, where ${INVITATION_PLACEHOLDER} is the invitation ` +
-        "printed above.",
+        `${IDENTITY_PLACEHOLDER} ${INVITATION_PLACEHOLDER} <INPUT_FILE>\nrun ` +
+        `while this command is still waiting, where ` +
+        `${INVITATION_PLACEHOLDER} is the invitation printed above.`,
     );
     return;
   }
@@ -1237,8 +1244,8 @@ function printInvitation(
   // supplies their own, and a password must not reach the terminal or logs.
   log.info(
     `Your partner accepts and runs the exchange with:\n  psilink accept ` +
-      `${redactUrlCredentials(online.url)} ${INVITATION_PLACEHOLDER} ` +
-      `<INPUT_FILE>\nwhere ${INVITATION_PLACEHOLDER} is the invitation ` +
-      "printed above.",
+      `${IDENTITY_PLACEHOLDER} ${redactUrlCredentials(online.url)} ` +
+      `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nwhere ` +
+      `${INVITATION_PLACEHOLDER} is the invitation printed above.`,
   );
 }

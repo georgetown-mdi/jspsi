@@ -1232,19 +1232,30 @@ describe("jobZeroSetupIntentSchema accepts the allowed fields", () => {
   });
 
   test("refuses an intent carrying no identity, which the CLI cannot stand in for", () => {
-    // The label is what the partner reads as this party's name, and a zero-setup
-    // run carries no terms document to hold one. The CLI's own fallback -- the
-    // user name of the account it runs as -- is absent in an appliance container
-    // running under a uid its image does not define, so the console supplies the
-    // label or the job does not start.
+    // The label is what the partner reads as this party's name, a zero-setup run
+    // carries no terms document to hold one, and the CLI stands in none of its
+    // own: the console supplies the label or the job does not start.
+    //
+    // The refusal is pinned by its issue PATH, not only by failing: the route's
+    // 400 is empty by design (it discloses nothing about the body it read), so
+    // the schema is the only place the reason is legible, and a later reshape
+    // that moved the field or turned the arm into a whole-object refine would
+    // still fail this parse while leaving the console nothing to point at.
     const { identity: _omitted, ...withoutIdentity } = validZeroSetupIntent();
-    expect(jobZeroSetupIntentSchema.safeParse(withoutIdentity).success).toBe(
-      false,
-    );
-    expect(
-      jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ identity: "" }))
-        .success,
-    ).toBe(false);
+    for (const intent of [
+      withoutIdentity,
+      validZeroSetupIntent({ identity: "" }),
+    ]) {
+      const parsed = jobZeroSetupIntentSchema.safeParse(intent);
+      expect(parsed.success).toBe(false);
+      if (parsed.success) return;
+      expect(
+        parsed.error.issues.some(
+          (issue) =>
+            issue.path.length === 1 && issue.path[0] === ("identity" as const),
+        ),
+      ).toBe(true);
+    }
   });
 
   test("accepts a mounted inputFile reference in place of inputCsv", () => {

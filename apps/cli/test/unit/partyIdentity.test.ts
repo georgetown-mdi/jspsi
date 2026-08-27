@@ -1,15 +1,9 @@
-import { afterEach, expect, test, vi } from "vitest";
-import { sanitizeErrorForDisplay, UsageError } from "@psilink/core";
+import fs from "node:fs";
+import path from "node:path";
 
-// The account lookup is the seam every test here drives: the real call reads the
-// OS user database, so replacing the module (rather than node:os) lets each test
-// state what that read does -- a name, a blank, or the ERR_SYSTEM_ERROR throw an
-// account with no user-database entry produces.
-vi.mock("../../src/util/accountUserName", () => ({
-  accountUserName: vi.fn(),
-}));
+import { expect, test } from "vitest";
+import { UsageError } from "@psilink/core";
 
-import { accountUserName } from "../../src/util/accountUserName";
 import {
   configuredIdentityRequired,
   IDENTITY_REQUIRED,
@@ -17,98 +11,90 @@ import {
   resolveIdentity,
 } from "../../src/partyIdentity";
 
-const lookup = vi.mocked(accountUserName);
-
-/** What `os.userInfo()` throws for a uid with no entry in the user database --
- *  the failure a container run under `--user <uid>:<gid>` produces for a uid the
- *  image does not define. */
-function unmappedUidFailure(): Error {
-  return Object.assign(
-    new Error("uv_os_get_passwd returned ENOENT (no such file or directory)"),
-    { code: "ERR_SYSTEM_ERROR" },
-  );
+/** Every TypeScript source the CLI ships, by name and content, for the
+ * structural check below; a failure then names the file rather than printing
+ * it. */
+function cliSources(): Array<{ name: string; text: string }> {
+  const root = path.join(import.meta.dirname, "..", "..", "src");
+  const names = fs
+    .readdirSync(root, { recursive: true, encoding: "utf8" })
+    .filter((entry) => entry.endsWith(".ts"));
+  if (names.length === 0) throw new Error(`no CLI sources found under ${root}`);
+  return names.map((name) => ({
+    name,
+    text: fs.readFileSync(path.join(root, name), "utf8"),
+  }));
 }
 
-afterEach(() => {
-  lookup.mockReset();
-});
-
-test("a supplied identity is returned without consulting the account", () => {
-  lookup.mockImplementation(() => {
-    throw unmappedUidFailure();
-  });
-  expect(resolveIdentity("Jane Smith, Agency A")).toBe("Jane Smith, Agency A");
-  expect(lookup).not.toHaveBeenCalled();
-});
-
-test("no supplied identity falls back to the account's user name", () => {
-  lookup.mockReturnValue("node");
-  expect(resolveIdentity(undefined)).toBe("node");
-});
-
-test("an account with no user-database entry is refused, not defaulted", () => {
-  const failure = unmappedUidFailure();
-  lookup.mockImplementation(() => {
-    throw failure;
-  });
-  let raised: unknown;
+/** Raise and return what a refusal threw, so each case below asserts on the
+ * error rather than on a rejection shape. */
+function refusalFrom(resolve: () => string): unknown {
   try {
-    resolveIdentity(undefined);
+    resolve();
   } catch (err) {
-    raised = err;
+    return err;
   }
+  throw new Error("expected a refusal, got a resolved identity");
+}
+
+test("a supplied identity is returned, trimmed", () => {
+  expect(resolveIdentity("Jane Smith, Agency A")).toBe("Jane Smith, Agency A");
+  expect(resolveIdentity("  Jane Smith, Agency A  ")).toBe(
+    "Jane Smith, Agency A",
+  );
+});
+
+test("no identity is refused rather than invented", () => {
+  const raised = refusalFrom(() => resolveIdentity(undefined));
   expect(raised).toBeInstanceOf(UsageError);
   expect((raised as Error).message).toBe(IDENTITY_REQUIRED);
-  // The system error is carried rather than swallowed, so the operator still
-  // sees what psilink tried when the refusal is rendered.
-  expect((raised as Error).cause).toBe(failure);
-  expect(sanitizeErrorForDisplay(raised)).toContain("uv_os_get_passwd");
+});
+
+test("a blank --identity is refused exactly as an absent one", () => {
+  // `--identity "$ORG"` with ORG unset is the shape that reaches here blank, and
+  // a run that meant to name this party and did not must not proceed under
+  // something else.
+  for (const blank of ["", " ", "   ", "\t", " \t "]) {
+    const raised = refusalFrom(() => resolveIdentity(blank));
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as Error).message).toBe(IDENTITY_REQUIRED);
+  }
 });
 
 test("the refusal names the flag that supplies an identity", () => {
   // The operator's way out has to be in the message: nothing else on this path
   // tells them the label is theirs to choose.
-  expect(IDENTITY_REQUIRED).toContain("--identity");
+  expect(IDENTITY_REQUIRED).toContain('--identity "name, org, contact"');
 });
 
-test("an account that reports a blank user name is refused with no cause", () => {
-  lookup.mockReturnValue("");
-  let raised: unknown;
-  try {
-    resolveIdentity(undefined);
-  } catch (err) {
-    raised = err;
-  }
-  expect(raised).toBeInstanceOf(UsageError);
-  expect((raised as Error).message).toBe(IDENTITY_REQUIRED);
-  expect((raised as Error).cause).toBeUndefined();
+test("nothing the CLI ships resolves a party name from the account", () => {
+  // The account psilink runs as is not a label the operator chose -- in the
+  // published image it is the image's own -- so the fallback is gone rather than
+  // guarded, and the user-database read that raised the unmapped-uid failure is
+  // gone with it. This is a source check: it holds for every path, including the
+  // ones no test drives, which is what makes "no lookup remains" checkable at
+  // all. It sees only this workspace's own sources, so it says nothing about a
+  // dependency that reads the user database for its own reasons.
+  const offenders = cliSources()
+    .filter((source) => /\buserInfo\b|\baccountUserName\b/.test(source.text))
+    .map((source) => source.name);
+  expect(offenders).toEqual([]);
 });
 
-test("an empty --identity is treated as none supplied", () => {
-  lookup.mockReturnValue("node");
-  expect(resolveIdentity("")).toBe("node");
-});
-
-test("a configured identity is returned without consulting the account", () => {
+test("a configured identity is returned", () => {
   expect(resolveConfiguredIdentity("Test Party", "/work/psilink.yaml")).toBe(
     "Test Party",
   );
-  expect(lookup).not.toHaveBeenCalled();
 });
 
 test("a configuration carrying no identity is refused, naming the file", () => {
-  let raised: unknown;
-  try {
-    resolveConfiguredIdentity(undefined, "/work/psilink.yaml");
-  } catch (err) {
-    raised = err;
-  }
+  const raised = refusalFrom(() =>
+    resolveConfiguredIdentity(undefined, "/work/psilink.yaml"),
+  );
   expect(raised).toBeInstanceOf(UsageError);
   expect((raised as Error).message).toBe(
     configuredIdentityRequired("/work/psilink.yaml"),
   );
   expect((raised as Error).message).toContain("/work/psilink.yaml");
   expect((raised as Error).message).toContain("linkage_terms.identity");
-  // No account fallback on this path at all, so the refusal is the only outcome.
-  expect(lookup).not.toHaveBeenCalled();
 });

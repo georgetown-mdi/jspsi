@@ -499,6 +499,25 @@ function opening(
     "Every command below is a single line, even where it wraps on screen.",
     "On Windows, run the commands from PowerShell, not Command Prompt.",
     "",
+    // Ahead of the engine question, because it qualifies every reader: psilink
+    // names a party only from what the operator gives it, so a command carrying
+    // no name stops. The engine section below is one whole reader class is told
+    // to skip, which is why this cannot live there. The flag SHAPE is shown and
+    // the value is shouted rather than plausible: an unreplaced placeholder
+    // would otherwise reach the partner as this party's name, and no command on
+    // this sheet carries it pre-filled for that reason.
+    ...heading("THE NAME YOUR PARTNER SEES"),
+    "psilink records a name for your side -- what your partner reads as who",
+    "they exchanged with, in the agreed terms and in the record each of you",
+    "keeps. It picks none for you, so add this to the end of every psilink",
+    "command on this sheet:",
+    "",
+    '  --identity "YOUR NAME, YOUR ORGANIZATION"',
+    "",
+    "with both parts replaced by what your partner will recognize -- your",
+    "own name, and the organization you are exchanging on behalf of. Leave",
+    "it off and psilink stops and asks, rather than naming you itself.",
+    "",
     ...heading("WHICH DOCKER DO YOU HAVE?"),
     "  * Docker Desktop, on Windows, macOS, or Linux: nothing to do here.",
     "    Skip to the next section.",
@@ -530,21 +549,6 @@ function opening(
             "the folder holding your CSV file and your own copy of the shared",
             "folder -- and everything it writes stays yours afterwards.",
           ]),
-    "",
-    // The flag's own consequence, stated where the flag is: psilink names this
-    // party from the account it runs as, and running as the reader's own account
-    // is one the image does not define. Reaching accept without a name is a clean
-    // refusal rather than a wrong label, so the cost of omitting this would be a
-    // stop on the sheet's first command -- and a reader numbered 1000, who gets no
-    // refusal, would otherwise send their partner the image's account name.
-    "One thing comes with it. psilink records a name for you -- the one",
-    "your partner sees in the agreed terms -- and takes it from the account",
-    "it runs as, which under this flag is one the container does not know.",
-    "So name yourself, on every command on this sheet, beside the flag:",
-    "",
-    '  --identity "Your name, Your organization"',
-    "",
-    "Without it psilink stops and asks rather than picking a name for you.",
     "",
     "If you cannot change the commands, the other way is to hand a single",
     "folder over to user 1000. From inside the folder that holds your CSV",
