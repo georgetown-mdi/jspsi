@@ -6,9 +6,8 @@
 // every sink that shows a party identity routes through here and shows the same
 // marker, which reads as an absence rather than as a name.
 
-import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
 import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
-import { displayText } from "./utils/sanitizeForDisplay.js";
+import { displayText, sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
 
 import type { Displayable } from "./utils/sanitizeForDisplay.js";
 
