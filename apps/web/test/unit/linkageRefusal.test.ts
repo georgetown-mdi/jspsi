@@ -106,7 +106,12 @@ describe("unlinkableFileAlert", () => {
     expect(alert.message).toContain(
       "the one agreed linkage key cannot be produced from this input's columns",
     );
-    expect(alert.message).toContain("agree terms with your partner");
+    expect(alert.message).toContain(
+      "set terms that declare only the keys the files on both sides can supply",
+    );
+    // The quick mint renders this alert before any invitation exists, so the
+    // first-party copy may not address a partner the operator has not got yet.
+    expect(alert.message).not.toContain("your partner");
     expect(alert.message).not.toContain("partner-key-name");
     // The unsatisfied FIELDS are named, as the missing-types guidance every seat
     // gives -- escaped at this sink, since they are terms content on an accept.

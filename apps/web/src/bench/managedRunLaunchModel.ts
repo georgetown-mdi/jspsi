@@ -43,7 +43,11 @@ import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 import type { ManagedFailureTier } from "@psi/managedFailureTiers";
 import type { ManagedLocalState } from "@psi/managedLocalState";
 
-/** The recovery affordance a surface state offers, deciding what the host renders:
+/** The recovery affordance a surface state offers. It selects the state's copy and
+ * what the host renders below the alert -- the recovery block, and through {@link
+ * managedRunRetryable} whether the saved-exchanges footer stands beside it. It is not
+ * a gate on the run control, which the surface enables from the input source and the
+ * device's connectivity alone.
  *
  * - `"reinvite"` -- fast re-invite is the recovery (a lapsed, desynced, restored, or
  *   persist-failed exchange). The inviter side re-mints from the stored document; the
@@ -53,8 +57,9 @@ import type { ManagedLocalState } from "@psi/managedLocalState";
  * - `"confirm"` -- the Tier-2 out-of-band confirmation and the two-outcome gate.
  * - `"reconfirm"` -- what this exchange sends must be settled again before it can
  *   run: the run's own input decides the set, so neither retrying the connection nor
- *   re-minting the secret changes the outcome. Deliberately not `"retry"`, so a
- *   surface never offers the run again as though the same input could pass.
+ *   re-minting the secret changes the outcome. Deliberately not `"retry"`, so the
+ *   state's copy and the affordances beside it point at settling the disclosure
+ *   rather than at repeating the run.
  * - `"restate"` -- what this exchange matches on must be settled again, or the
  *   input replaced: the file cannot supply every agreed linkage key, and the same
  *   file refuses identically however many times it runs. Deliberately not

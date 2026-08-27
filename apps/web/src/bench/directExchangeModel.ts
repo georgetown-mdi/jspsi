@@ -184,8 +184,7 @@ export interface DirectTermsPreview {
  * infers metadata then default terms) so the preview matches what actually runs;
  * `payload.send` is authored from the inferred metadata's disclosed set the same
  * way the quick-invitation mint does, so the "columns sent" display is honest
- * rather than empty. Satisfiability is assessed against the FULL default terms so
- * the unsatisfied set can name the missing field types.
+ * rather than empty.
  *
  * The operator's selected `linkageStrategy` is applied over the inferred terms,
  * as the CLI's zero-setup command applies `--linkage-strategy` over the terms

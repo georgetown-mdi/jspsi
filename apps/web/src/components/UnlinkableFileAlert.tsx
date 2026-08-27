@@ -39,6 +39,11 @@ function missingFieldsDetail(fields: ReadonlyArray<LinkageField>): string {
  * counts only: a linkage KEY's name is never surfaced. The unproducible FIELDS are,
  * as the missing-types guidance every seat gives, escaped at this sink.
  *
+ * The first-party copy around it presupposes no partner and no agreement already
+ * struck -- it names the terms and the files on both sides -- so it reads the same
+ * for a seat minting terms from the operator's own columns and one held to terms an
+ * invitation carried.
+ *
  * The return shape is the structural {@link AlertContent} (`{ title, message }`)
  * every caller assigns into its error state and renders through the shared alert
  * slot.
@@ -60,7 +65,7 @@ export function unlinkableFileAlert(refusal: LinkageRefusal): AlertContent {
       `${summarizeLinkageShortfall(refusal.verdict)}` +
       missingFieldsDetail(refusal.verdict.unsatisfiedFields) +
       ". It would be refused before any data left this device. Choose a file " +
-      "that satisfies every declared key, or agree terms with your partner " +
-      "over the keys both files can supply.",
+      "that satisfies every linkage key in the terms, or set terms that " +
+      "declare only the keys the files on both sides can supply.",
   };
 }
