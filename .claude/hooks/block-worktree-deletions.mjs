@@ -41,6 +41,38 @@
 // trust. When the id names no tree the session recognises, the refusal says so
 // rather than leaving a fail-closed refusal unexplained.
 //
+// A TREE HANDED TO A SESSION IS NOT A TREE IT OWNS, and that is the model rather
+// than an oversight. A session pointed at an existing tree -- a spawn briefed to
+// work in one, whose own id names a tree that was never created, or a session
+// that entered one -- is refused inside it exactly as it is inside any other tree
+// its id does not name. Recognising the hand-over would need a record of it
+// written by the spawning side and keyed to the session being guarded, and there
+// is no such record to read. The harness records a worktree path only for a spawn
+// it GAVE a tree to, which is the id-named tree above, and records nothing about
+// a tree a spawn was merely pointed at -- re-verify by reading its per-spawn
+// metadata, the `agent-<id>.meta.json` beside the session transcript, where the
+// path is present for an isolated spawn and absent for every other. The spawning
+// call itself carries no identity for the session it creates, so a record keyed
+// to that session cannot be written from there either. And the one thing naming a
+// handed tree is prose in the brief the guarded session carries, which is that
+// session's own claim rather than a record about it. So recognising a hand-over is
+// a mechanism to build rather than a field to read, and none is built here. What
+// the model costs is a session that cannot delete its own leftovers in the tree it
+// was handed, which is why scratch belongs outside the tree and why the procedure
+// below exists for what is already inside one.
+//
+// A TREE NOBODY OWNS IS CLEARED WITHOUT A DELETION. An untracked leftover in one
+// -- a probe, a build artifact, a file a finished or killed session left -- is
+// stashed in place rather than removed: `git -C <tree> stash push -u -- <path>`
+// takes that path off disk while the content stays in the repository's stash,
+// which is shared across worktrees and outlives the tree. That is the answer to
+// both consequences of the ownership model above: it clears the untracked file
+// that holds `require-clean-tree-for-review.mjs`, and it leaves the tree retirable
+// by the plain `git worktree remove` this hook allows, which git holds back while
+// a tree carries modified or untracked files -- an ignored one does not hold it.
+// Every step of that is driven against real git in the test beside this file
+// rather than asserted here.
+//
 // What it deliberately allows:
 //   - anything strictly inside this session's own tree (`rm -rf node_modules`,
 //     `rm dist/bundle.js`) -- ordinary work on a tree the session owns
@@ -235,7 +267,10 @@ function block(reason) {
       "deleting one destroys it unrecoverably -- there is no branch, stash, or reflog " +
       "behind it. Leave another session's tree alone, and retire a finished tree with " +
       "`git worktree remove <path>` (no --force), which refuses while the tree still has " +
-      "uncommitted work. If the path is not a registered worktree at all, say so to the " +
+      "uncommitted work. A tree handed to a session is not a tree it owns, so an untracked " +
+      "leftover in one is cleared without a deletion: `git -C <tree> stash push -u -- <path>` " +
+      "takes that path off disk, keeps its content in the repository's stash, and leaves the " +
+      "tree retirable by that plain remove. If the path is not a registered worktree at all, say so to the " +
       "maintainer rather than deleting it some other way. This hook reads a plain command " +
       "line and nothing more -- the limits listed in its header are real, so rephrasing " +
       "around this refusal defeats it and destroys the tree anyway.\n",
