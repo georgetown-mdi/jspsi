@@ -6,12 +6,12 @@ import { isBareSftpHost } from "@psi/sftpHost";
 
 import {
   MAX_SFTP_PROBE_BODY_BYTES,
-  formatFirstIssue,
   gateJobRoute,
   readJobRequestBody,
 } from "@jobs/routeSupport";
 import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 import { SftpProbeBusyError } from "@jobs/jobManager";
+import { formatFirstIssue } from "@jobs/schemaIssueMessage";
 
 import type { SftpProbeResult } from "@jobs/sftpProbe";
 

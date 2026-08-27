@@ -9,6 +9,7 @@ import {
   readJobRequestBody,
   validateJobIdParam,
 } from "@jobs/routeSupport";
+import { formatFirstIssue, formatIssues } from "@jobs/schemaIssueMessage";
 import { JobManager } from "@jobs/jobManager";
 
 import { Route as CancelRoute } from "../../src/routes/api/jobs/$jobId/cancel";
@@ -1442,6 +1443,11 @@ async function deleteSftp(): Promise<Response> {
   })) as Response;
 }
 
+/** A key no schema models, spelled with the control bytes that make echoing a
+ * caller-chosen name a display hazard, and the value the caller sent beside it. */
+const HOSTILE_KEY = "\u001b[31mremote_host\u0007";
+const HOSTILE_VALUE = "prod_east";
+
 describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
   test("is 404 when the API is disabled", async () => {
     vi.stubEnv("JOB_DATA_ROOT", "");
@@ -1547,6 +1553,53 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(text).toContain("connection.credential");
     expect(text).toContain("secrets mount");
   });
+
+  test.each([
+    {
+      label: "an unmodeled connection key",
+      overrides: (_ref: string) => ({ [HOSTILE_KEY]: HOSTILE_VALUE }),
+      error: "connection: unrecognized key",
+    },
+    {
+      label: "an unmodeled credential key",
+      overrides: (ref: string) => ({
+        credential: {
+          kind: "ref",
+          ref: `@${ref}`,
+          credType: "password",
+          [HOSTILE_KEY]: HOSTILE_VALUE,
+        },
+      }),
+      error: "connection.credential: unrecognized key",
+    },
+  ])(
+    "$label crosses the 400 as a fixed reason, never its own spelling",
+    async ({ overrides, error }) => {
+      // The schema's own unrecognized-key message quotes the submitted spelling,
+      // which is how a key name carrying control bytes would reach the operator's
+      // screen. This route takes the substitution from the same shared formatter
+      // the probe and fingerprint routes do, so a fixed reason crosses instead.
+      enableJobApi();
+      const ref = secretFileOutside();
+      const response = await putSftp(authoredBody(ref, overrides(ref)));
+      expect(response.status).toBe(400);
+      const text = await response.text();
+      // Neither the key's spelling, its value, nor any other submitted byte.
+      for (const fragment of [
+        "remote_host",
+        HOSTILE_VALUE,
+        "authored.partner.example",
+        TEST_HOST_KEY_FINGERPRINT,
+        ref,
+        "\u001b",
+        "\u0007",
+        "\\u001b",
+        "\\u0007",
+      ])
+        expect(text).not.toContain(fragment);
+      expect(JSON.parse(text)).toEqual({ error });
+    },
+  );
 
   test("re-authoring replaces the held connection", async () => {
     enableJobApiWithSftpServer();
@@ -1855,6 +1908,20 @@ describe("POST /api/jobs/sftp/probe reads a host key without authoring", () => {
     seedManagerWithProbe({ STUB_EXIT_CODE: "69" });
     expect((await postProbe({ host: "sftp.example.org" })).status).toBe(200);
     expect(await (await getSftp()).json()).toEqual({ configured: false });
+  });
+});
+
+describe("the shared rejected-body formatter", () => {
+  test("an empty issue list is refused, never read through", () => {
+    // A failed parse reports at least one issue. The guard is what keeps that
+    // premise honest: were it ever false, the formatter says so rather than
+    // reading a property off nothing, so the message -- not a TypeError from the
+    // read -- is what this asserts.
+    expect(() => formatFirstIssue([])).toThrow(/no schema issue/);
+  });
+
+  test("an empty issue list is refused by formatIssues too, never read through", () => {
+    expect(() => formatIssues([], "server")).toThrow(/no schema issue/);
   });
 });
 

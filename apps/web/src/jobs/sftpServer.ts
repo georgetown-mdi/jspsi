@@ -16,6 +16,7 @@ import {
   removeSftpCredentialFile,
 } from "./sftpScratch";
 import { JobApiConfigError } from "./gate";
+import { formatIssues } from "./schemaIssueMessage";
 import { resolveMountFile } from "./mountBrowse";
 
 /**
@@ -292,7 +293,7 @@ function validateServerEntry(
   const camelized = camelizeEntryKeys(rawEntry as Record<string, unknown>);
   const result = jobSftpServerEntrySchema.safeParse(camelized);
   if (!result.success)
-    throw new JobApiConfigError(formatIssues(result.error.issues));
+    throw new JobApiConfigError(formatIssues(result.error.issues, "server"));
   const entry = result.data;
 
   assertBareHost(entry.host);
@@ -558,26 +559,11 @@ function camelizeEntryKeys(
     );
     if (camelKey in camelized)
       throw new JobApiConfigError(
-        `server sets the key "${camelKey}" twice (a snake_case and ` +
-          "a camelCase spelling of the same field)",
+        "server entry sets a key twice after camelization",
       );
     camelized[camelKey] = value;
   }
   return camelized;
-}
-
-/** Format zod issues into one message of `<root>[.<path>]: <reason>`. The zod
- * messages are field-shape reasons, never a submitted value. */
-function formatIssues(
-  issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>,
-  root = "server",
-): string {
-  return issues
-    .map((issue) => {
-      const fieldPath = [root, ...issue.path.map(String)].join(".");
-      return `${fieldPath}: ${issue.message}`;
-    })
-    .join("; ");
 }
 
 /**
@@ -751,5 +737,5 @@ function assertComposesThroughCoreSchema(entry: JobSftpServerEntry): void {
       : {}),
   });
   if (!composed.success)
-    throw new JobApiConfigError(formatIssues(composed.error.issues));
+    throw new JobApiConfigError(formatIssues(composed.error.issues, "server"));
 }
