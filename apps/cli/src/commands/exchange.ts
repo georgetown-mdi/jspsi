@@ -802,9 +802,10 @@ export async function prepareDataset(
  *
  * The identity-file path is the config's `signing.identity_file` (tilde-expanded
  * at use, as `psilink fingerprint` does), falling back to the per-user default.
- * The pinned partner fingerprint is passed through verbatim; when absent the
- * signing step fails closed on verification (no partner certificate can be
- * trusted).
+ * The pinned partner fingerprint is passed through verbatim, and this resolver
+ * states no rule about its absence: a certificate-mode block with no pin is
+ * refused by core's `assertCertificateModePinsPartner` inside
+ * {@link prepareForExchange}, which the handler reaches before this call.
  *
  * `termsIdentity` is this run's `linkage_terms.identity` -- the identity the
  * partner verifies the loaded certificate against -- and a certificate bound to

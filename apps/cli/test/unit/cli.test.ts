@@ -6,11 +6,18 @@ import { Writable } from "node:stream";
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import {
+  buildKeyStrings,
+  ConnectionError,
   InternalConsistencyError,
   loadCSVFile,
   MAX_RECONNECT_ATTEMPTS,
+  PeerAbortError,
+  StandardizedDataset,
+  StandardizedField,
+  UnknownStandardizationFunctionError,
   UsageError,
 } from "@psilink/core";
+import type { ConnectionErrorKind } from "@psilink/core";
 
 import {
   assertNoUnknownOptions,
@@ -451,6 +458,68 @@ test("exitCodeForError: a core InternalConsistencyError is EX_SOFTWARE", () => {
   );
   expect(exitCodeForError(backstop)).toBe(INTERNAL_FAULT_EXIT_CODE);
   expect(INTERNAL_FAULT_EXIT_CODE).toBe(70);
+});
+
+test("exitCodeForError: a ConnectionError is classified by its kind", () => {
+  // ConnectionError is the one class whose taxonomy is a field rather than a
+  // subclass, so the boundary reads that field. The table is keyed by
+  // ConnectionErrorKind, which makes it exhaustive by construction: a kind added
+  // to core's union fails this file's typecheck until it is classified here,
+  // rather than silently taking the 69 default. Pinning every kind -- not only
+  // the one that changed -- means a later re-typing is a failure here rather than
+  // a silent change in what an unattended supervisor is told.
+  const expected: Record<ConnectionErrorKind, number> = {
+    transport: 69,
+    security: 69,
+    usage: 64,
+    protocol: 69,
+    closed: 69,
+  };
+  for (const kind of Object.keys(expected) as ConnectionErrorKind[])
+    expect(exitCodeForError(new ConnectionError("failed", kind)), kind).toBe(
+      expected[kind],
+    );
+});
+
+test("exitCodeForError: a ConnectionError subclass follows its own kind", () => {
+  // The kind is read off the instance, so a subclass carries whatever its
+  // constructor fixed. PeerAbortError fixes `transport` and its class doc rests on
+  // reaching 69: the peer died, which is not the operator's to fix.
+  expect(exitCodeForError(new PeerAbortError())).toBe(69);
+});
+
+test("exitCodeForError: an unrecognized standardization function is EX_USAGE", () => {
+  // The agreed terms declare an element transform this build cannot run. The
+  // refusal fires while the key's fate is classified -- before the first row is
+  // read -- and it is deterministic in the terms, so it must reach 64: a 69 tells
+  // an unattended supervisor to retry, and every retry conducts another whole
+  // exchange ending at the same refusal.
+  const rows = [{ SURNAME: "SMITH" }];
+  const dataset = new StandardizedDataset([
+    new StandardizedField("surname", "SURNAME", [], rows),
+  ]);
+  let refusal: unknown;
+  try {
+    buildKeyStrings(
+      {
+        name: "SURNAME",
+        elements: [
+          { field: "surname", transform: [{ function: "transliterate_han" }] },
+        ],
+      },
+      dataset,
+      0,
+    );
+  } catch (err: unknown) {
+    refusal = err;
+  }
+  expect(refusal).toBeInstanceOf(UnknownStandardizationFunctionError);
+  expect(exitCodeForError(refusal)).toBe(64);
+  // The name is the partner's free text, so the refusal narrows it rather than
+  // echoing it; what the operator is told is that this build does not know it.
+  expect((refusal as Error).message).toBe(
+    "unknown standardization function: a function this build does not recognize",
+  );
 });
 
 // --- exitWithError -----------------------------------------------------------

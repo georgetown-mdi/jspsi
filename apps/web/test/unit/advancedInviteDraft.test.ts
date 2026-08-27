@@ -44,7 +44,7 @@ describe("setDraftMetadataKeepingKeys", () => {
     expect(kept.standardization.some((t) => t.output === "ssn")).toBe(false);
   });
 
-  test("keeps the key set setDraftMetadata re-derives, on the same standardization", () => {
+  test("keeps the keys setDraftMetadata re-derives away, on the same standardization", () => {
     const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const metadata = retypeSsnToFirstName(draft.metadata);
 

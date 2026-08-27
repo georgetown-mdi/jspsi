@@ -158,6 +158,17 @@ jobs:
       # docs/spec/DEPENDENCY_PINS.md.
       - name: brace-expansion override
         run: npm run check:brace-expansion-override
+      # A root overrides block stops npm hoisting a later range bump
+      # incrementally, so a workspace manifest bump can keep the stale hoisted
+      # copy and nest the raised version under the workspace that asked for it.
+      # Nothing at install time reports that split, and what it costs is a bare
+      # exit code 1 naming nothing -- the dev SSR middleware never installs, so
+      # the web integration and browser suites die in their shared globalSetup
+      # with no test failing. This reads the committed lockfile and fails on any
+      # package installed at the top level of both the root node_modules and a
+      # workspace's, naming both entries.
+      - name: Nested root package
+        run: npm run check:nested-root-package
       # apps/web/src/routeTree.gen.ts is generated but checked in, so a fresh
       # clone can typecheck, lint, build, and test the web app with no
       # generation step. The cost is that every web-tooling run rewrites it: a

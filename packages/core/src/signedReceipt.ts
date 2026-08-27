@@ -528,9 +528,10 @@ type ReceiptWireMessage = z.infer<typeof receiptWireSchema>;
  * A dedicated error kind for the receipt step so the CLI can surface a failed
  * partner-signature or fingerprint-pin check as a security event distinct from a
  * plain transport drop. It is a {@link ConnectionError} of kind `"security"` so
- * the CLI's `instanceof UsageError ? 64 : 69` mapping yields 69 (the exchange
- * failed against the peer, not a local misconfiguration) while the `security`
- * kind marks it as a trust-boundary failure a consumer must not silently retry.
+ * the CLI's exit-code mapping yields 69 (the exchange failed against the peer, not
+ * a local misconfiguration; `usage` is the one kind that mapping reads as 64)
+ * while the `security` kind marks it as a trust-boundary failure a consumer must
+ * not silently retry.
  */
 export class ReceiptVerificationError extends ConnectionError {
   constructor(message: string, options?: ErrorOptions) {

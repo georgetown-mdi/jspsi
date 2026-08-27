@@ -765,10 +765,12 @@ describe("whether a rendezvous leg holds the data root", () => {
   test("the data-root fallback does: the single-folder console", () => {
     // The layout the identity-location advisory exists for -- one mount, so the
     // folder the partner syncs is the folder the signing key is written into.
-    expect(
-      resolveJobRendezvousProvisioning({ JOB_DATA_ROOT: "/data/jobs" })
-        .sharesDataRoot,
-    ).toBe(true);
+    // Lexically established, not defaulted, so it carries no uncertainty flag.
+    const provisioning = resolveJobRendezvousProvisioning({
+      JOB_DATA_ROOT: "/data/jobs",
+    });
+    expect(provisioning.sharesDataRoot).toBe(true);
+    expect(provisioning.sharesDataRootUncertain).toBeUndefined();
   });
 
   test("a rendezvous with a mount of its own does not", () => {
@@ -783,13 +785,14 @@ describe("whether a rendezvous leg holds the data root", () => {
   test("a leg mounted ABOVE the data root does, whichever variable named it", () => {
     // The fact follows the containment, not the fallback: an operator who pointed
     // JOB_RENDEZVOUS_DIR at a folder holding the working directory syncs the key
-    // exactly as the fallback does.
-    expect(
-      resolveJobRendezvousProvisioning({
-        JOB_DATA_ROOT: "/mnt/share/work",
-        JOB_RENDEZVOUS_DIR: "/mnt/share",
-      }).sharesDataRoot,
-    ).toBe(true);
+    // exactly as the fallback does. Lexically established, so uncertain stays
+    // absent.
+    const provisioning = resolveJobRendezvousProvisioning({
+      JOB_DATA_ROOT: "/mnt/share/work",
+      JOB_RENDEZVOUS_DIR: "/mnt/share",
+    });
+    expect(provisioning.sharesDataRoot).toBe(true);
+    expect(provisioning.sharesDataRootUncertain).toBeUndefined();
   });
 
   test("a leg mounted INSIDE the data root does not", () => {
@@ -809,42 +812,45 @@ describe("whether a rendezvous leg holds the data root", () => {
     const work = subDir(mounts, "work");
     const link = path.join(mounts, "share");
     fs.symlinkSync(work, link, "dir");
-    expect(
-      resolveJobRendezvousProvisioning({
-        JOB_DATA_ROOT: work,
-        JOB_RENDEZVOUS_DIR: link,
-      }).sharesDataRoot,
-    ).toBe(true);
+    // The real path resolves, so the match is lexical (over the resolved forms)
+    // rather than a default; uncertain stays absent.
+    const provisioning = resolveJobRendezvousProvisioning({
+      JOB_DATA_ROOT: work,
+      JOB_RENDEZVOUS_DIR: link,
+    });
+    expect(provisioning.sharesDataRoot).toBe(true);
+    expect(provisioning.sharesDataRootUncertain).toBeUndefined();
   });
 
   test("EITHER leg of a split answers for the pair", () => {
     // Each leg is partner-synced independently, so an outbound leg pointed at the
     // working directory puts the key where the partner reads just as an inbound
-    // one would.
-    expect(
-      resolveJobRendezvousProvisioning({
-        JOB_DATA_ROOT: "/data/jobs",
-        JOB_RENDEZVOUS_DIR: "/mnt/from-partner",
-        JOB_RENDEZVOUS_OUTBOUND_DIR: "/data/jobs",
-      }).sharesDataRoot,
-    ).toBe(true);
+    // one would. Lexically established, so uncertain stays absent.
+    const provisioning = resolveJobRendezvousProvisioning({
+      JOB_DATA_ROOT: "/data/jobs",
+      JOB_RENDEZVOUS_DIR: "/mnt/from-partner",
+      JOB_RENDEZVOUS_OUTBOUND_DIR: "/data/jobs",
+    });
+    expect(provisioning.sharesDataRoot).toBe(true);
+    expect(provisioning.sharesDataRootUncertain).toBeUndefined();
   });
 
-  test("a leg whose real path cannot be read counts as holding it", () => {
+  test("a leg whose real path cannot be read counts as holding it, uncertainly", () => {
     // The symlink that would join the two is exactly what could not be resolved,
     // and this decides a warn-and-guide advisory, so what cannot be ruled out is
-    // reported rather than dropped.
+    // reported rather than dropped -- and reported as uncertain, since nothing
+    // was actually matched.
     const mounts = tempDir("mounts");
     const work = subDir(mounts, "work");
     const share = subDir(mounts, "share");
-    expect(
-      withUnreadableRealpath(share, () =>
-        resolveJobRendezvousProvisioning({
-          JOB_DATA_ROOT: work,
-          JOB_RENDEZVOUS_DIR: share,
-        }),
-      ).sharesDataRoot,
-    ).toBe(true);
+    const provisioning = withUnreadableRealpath(share, () =>
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: work,
+        JOB_RENDEZVOUS_DIR: share,
+      }),
+    );
+    expect(provisioning.sharesDataRoot).toBe(true);
+    expect(provisioning.sharesDataRootUncertain).toBe(true);
   });
 
   test("a leg bind-mounted onto the data root does, though no path relates them", () => {
@@ -857,10 +863,13 @@ describe("whether a rendezvous leg holds the data root", () => {
     const work = subDir(mounts, "work");
     const share = subDir(mounts, "share");
     const env = { JOB_DATA_ROOT: work, JOB_RENDEZVOUS_DIR: share };
-    expect(
-      withAliasedInode(share, work, () => resolveJobRendezvousProvisioning(env))
-        .sharesDataRoot,
-    ).toBe(true);
+    // The identity actually matched (both stats were readable), so this is
+    // established rather than defaulted: uncertain stays absent.
+    const provisioning = withAliasedInode(share, work, () =>
+      resolveJobRendezvousProvisioning(env),
+    );
+    expect(provisioning.sharesDataRoot).toBe(true);
+    expect(provisioning.sharesDataRootUncertain).toBeUndefined();
     // Without the aliasing the same two mounts are separate folders, so it is
     // the identity that decides the case and not the directories it runs on.
     expect(
@@ -876,14 +885,16 @@ describe("whether a rendezvous leg holds the data root", () => {
     const enclosing = subDir(mounts, "enclosing");
     const work = subDir(enclosing, "work");
     const share = subDir(mounts, "share");
-    expect(
-      withAliasedInode(share, enclosing, () =>
-        resolveJobRendezvousProvisioning({
-          JOB_DATA_ROOT: work,
-          JOB_RENDEZVOUS_DIR: share,
-        }),
-      ).sharesDataRoot,
-    ).toBe(true);
+    // Matched by identity against a readable ancestor, so established rather
+    // than defaulted.
+    const provisioning = withAliasedInode(share, enclosing, () =>
+      resolveJobRendezvousProvisioning({
+        JOB_DATA_ROOT: work,
+        JOB_RENDEZVOUS_DIR: share,
+      }),
+    );
+    expect(provisioning.sharesDataRoot).toBe(true);
+    expect(provisioning.sharesDataRootUncertain).toBeUndefined();
   });
 
   test("a leg aliasing a folder INSIDE the data root does not", () => {
@@ -913,10 +924,13 @@ describe("whether a rendezvous leg holds the data root", () => {
     const work = subDir(mounts, "work");
     const share = subDir(mounts, "share");
     const env = { JOB_DATA_ROOT: work, JOB_RENDEZVOUS_DIR: share };
-    expect(
-      withUnreadableStat(share, () => resolveJobRendezvousProvisioning(env))
-        .sharesDataRoot,
-    ).toBe(true);
+    // Nothing was actually matched -- the identity check could not read the
+    // leg -- so the verdict is uncertain.
+    const provisioning = withUnreadableStat(share, () =>
+      resolveJobRendezvousProvisioning(env),
+    );
+    expect(provisioning.sharesDataRoot).toBe(true);
+    expect(provisioning.sharesDataRootUncertain).toBe(true);
     expect(
       resolveJobRendezvousProvisioning(env).sharesDataRoot,
     ).toBeUndefined();
@@ -931,10 +945,13 @@ describe("whether a rendezvous leg holds the data root", () => {
     const work = subDir(enclosing, "work");
     const share = subDir(mounts, "share");
     const env = { JOB_DATA_ROOT: work, JOB_RENDEZVOUS_DIR: share };
-    expect(
-      withUnreadableStat(enclosing, () => resolveJobRendezvousProvisioning(env))
-        .sharesDataRoot,
-    ).toBe(true);
+    // Same direction: an ancestor the walk could not read leaves nothing
+    // matched, so the verdict is uncertain rather than established.
+    const provisioning = withUnreadableStat(enclosing, () =>
+      resolveJobRendezvousProvisioning(env),
+    );
+    expect(provisioning.sharesDataRoot).toBe(true);
+    expect(provisioning.sharesDataRootUncertain).toBe(true);
     expect(
       resolveJobRendezvousProvisioning(env).sharesDataRoot,
     ).toBeUndefined();

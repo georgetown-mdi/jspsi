@@ -559,6 +559,65 @@ function reconcileStandardization(
   return [...kept, ...additions];
 }
 
+/**
+ * `value` with every explicitly-`undefined` property dropped, recursively, and
+ * every other value returned by reference.
+ *
+ * An optional property set to `undefined` states the same linkage key an absent
+ * one does, and every surface reads the two the same way, but only the absent
+ * form is inside the canonical domain: {@link encodeForComparison} answers `null`
+ * for the explicit form. Unpruned, such a key matches no offer -- so a draft
+ * whose keys all carry the property (a spread of the whole list is all it takes)
+ * would arrive entirely off, the operator's built-in set and their own chosen
+ * offer together.
+ *
+ * Only a plain object or an array is rebuilt, and only where the prune removed
+ * something, so a key outside the canonical domain for any OTHER reason -- a
+ * transform param beyond the safe integer range, a non-plain object, a
+ * symbol-keyed property -- reaches the encoder as it stands and stays
+ * incomparable.
+ */
+function withoutUndefinedProperties(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  if (Array.isArray(value)) {
+    const prunedEntries = value.map(withoutUndefinedProperties);
+    return prunedEntries.some((entry, at) => entry !== value[at])
+      ? prunedEntries
+      : value;
+  }
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  if (Object.getOwnPropertySymbols(value).length > 0) return value;
+  const pruned: Record<string, unknown> = {};
+  let dropped = false;
+  for (const [property, child] of Object.entries(value)) {
+    if (child === undefined) {
+      dropped = true;
+      continue;
+    }
+    const prunedChild = withoutUndefinedProperties(child);
+    dropped ||= prunedChild !== child;
+    pruned[property] = prunedChild;
+  }
+  return dropped ? pruned : value;
+}
+
+/** `key` in the byte form {@link reconcileKeys} matches a draft key to an offer
+ * under: the canonical encoding of the key with its explicitly-`undefined`
+ * optional properties dropped (see {@link withoutUndefinedProperties}), or
+ * `null` when the key cannot be canonically encoded at all. */
+function encodeKeyForComparison(key: LinkageKey): string | null {
+  try {
+    return encodeForComparison(withoutUndefinedProperties(key));
+  } catch {
+    // The prune reads every enumerable property, so a getter that throws escapes
+    // here rather than into the encoder's own boundary guard. A key that cannot
+    // be read is incomparable, the answer encodeForComparison gives a key it
+    // cannot encode.
+    return null;
+  }
+}
+
 /** Reconcile the draft's keys against a freshly-derived offer
  * ({@link offerableDraftKeys}): keep the order and enabled flag of keys that
  * remain offered (replacing the key object with the fresh template), then append
@@ -568,14 +627,15 @@ function reconcileStandardization(
  * one. Appending an opt-in key instead would land a retype-driven offer below the
  * key it refines, the one position where turning it on buys nothing.
  *
- * A draft key is matched to an offer through the canonical encoding, the equality
- * the two parties' terms are compared under, rather than by NAME. What the match
- * carries over is the operator's enabled flag onto the offer's own shape, so under
- * name equality a key that merely borrows an offer's name -- one element of it, or
- * an unrelated key an imported document declares under that name -- would hand its
- * enabled flag to the full offered key and turn on an addition the operator never
- * chose. A key matching no offer is no longer offered and drops, the same as a
- * built-in key whose columns went away.
+ * A draft key is matched to an offer through the canonical encoding
+ * ({@link encodeKeyForComparison}), the equality the two parties' terms are
+ * compared under, rather than by NAME. What the match carries over is the
+ * operator's enabled flag onto the offer's own shape, so under name equality a key
+ * that merely borrows an offer's name -- one element of it, or an unrelated key an
+ * imported document declares under that name -- would hand its enabled flag to the
+ * full offered key and turn on an addition the operator never chose. A key matching
+ * no offer is no longer offered and drops, the same as a built-in key whose columns
+ * went away.
  *
  * An offer left unmatched by such a drop is RE-OFFERED in the dropped entry's own
  * place and OFF, rather than at the flag and the position the offer gives it,
@@ -586,18 +646,27 @@ function reconcileStandardization(
  * own flag would turn a built-in key back on over the operator's decision to turn
  * it off, on a consent surface, and moving it would change what the cascade claims
  * ahead of the keys below it. An offer no dropped entry named is genuinely new and
- * arrives at the flag and the place the offer gives it (off, for an opt-in key). */
+ * arrives at the flag and the place the offer gives it (off, for an opt-in key).
+ *
+ * The dropped entry's place is what an OPT-IN re-offer inherits too. Position is
+ * decided by whether the list already held a key of that name, not by which set
+ * the offer comes from: a list the operator has read and arranged states where its
+ * keys sit, and {@link placeOfferedKeys} chooses a position only for a key that
+ * list did not already hold. So an opt-in offer re-added over an older shape of
+ * itself stays put -- including below the key it refines, where the operator
+ * themselves moved it -- rather than jumping up the cascade on a metadata edit
+ * that changed nothing about it. */
 function reconcileKeys(
   prevKeys: Array<DraftKey>,
   offerable: Array<DraftKey>,
 ): Array<DraftKey> {
   const offerableByEncoding = new Map<string, DraftKey>();
   for (const entry of offerable) {
-    const encoded = encodeForComparison(entry.key);
+    const encoded = encodeKeyForComparison(entry.key);
     if (encoded !== null) offerableByEncoding.set(encoded, entry);
   }
   const offerFor = prevKeys.map((entry) => {
-    const encoded = encodeForComparison(entry.key);
+    const encoded = encodeKeyForComparison(entry.key);
     return encoded === null ? undefined : offerableByEncoding.get(encoded);
   });
   const matched = new Set(offerFor.filter((offer) => offer !== undefined));

@@ -426,7 +426,8 @@ describe("fetchJobRendezvous", () => {
   test("reads an absent or malformed sharesDataRoot as the shared layout", async () => {
     // The field decides whether the console warns that the partner syncs the
     // folder holding this party's signing key, so a body that does not answer
-    // leaves that warning raised rather than silently withheld.
+    // leaves that warning raised rather than silently withheld -- and
+    // uncertain, since nothing was established either.
     for (const body of [
       { configured: true, locator: "study-a" },
       { configured: true, locator: "study-a", sharesDataRoot: "no" },
@@ -436,9 +437,47 @@ describe("fetchJobRendezvous", () => {
       expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
         configured: true,
         sharesDataRoot: true,
+        sharesDataRootUncertain: true,
         locator: "study-a",
       });
     }
+  });
+
+  test("reads an established sharesDataRoot as fact only when the body confirms it", async () => {
+    const established = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({
+          configured: true,
+          locator: "study-a",
+          sharesDataRoot: true,
+          sharesDataRootUncertain: false,
+        }),
+      ),
+    );
+    expect(await fetchJobRendezvous(established, 3, noDelay)).toEqual({
+      configured: true,
+      sharesDataRoot: true,
+      sharesDataRootUncertain: false,
+      locator: "study-a",
+    });
+
+    // A body that says the layout is shared but not that it was established
+    // hedges, on the same fail-safe direction.
+    const unconfirmed = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({
+          configured: true,
+          locator: "study-a",
+          sharesDataRoot: true,
+        }),
+      ),
+    );
+    expect(await fetchJobRendezvous(unconfirmed, 3, noDelay)).toEqual({
+      configured: true,
+      sharesDataRoot: true,
+      sharesDataRootUncertain: true,
+      locator: "study-a",
+    });
   });
 
   test("treats a configured body naming no locator as unavailable", async () => {

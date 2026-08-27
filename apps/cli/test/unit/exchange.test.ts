@@ -34,7 +34,10 @@ import {
 } from "../../src/commands/exchange";
 import { ttyStream, withStdin } from "../stdinStream";
 
-const mockState = vi.hoisted(() => ({ warnings: [] as string[] }));
+const mockState = vi.hoisted(() => ({
+  warnings: [] as string[],
+  errors: [] as string[],
+}));
 
 vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
@@ -44,7 +47,8 @@ vi.mock("@psilink/core", async (importActual) => {
       info: () => {},
       debug: () => {},
       trace: () => {},
-      error: () => {},
+      error: (msg: string, ...args: unknown[]) =>
+        mockState.errors.push([msg, ...args.map(String)].join(" ")),
       warn: (msg: string, ...args: unknown[]) =>
         mockState.warnings.push([msg, ...args.map(String)].join(" ")),
     }),
@@ -126,6 +130,7 @@ beforeEach(() => {
   configFile = path.join(dir, "psilink.yaml");
   keyFile = path.join(dir, ".psilink.key");
   mockState.warnings.length = 0;
+  mockState.errors.length = 0;
 });
 
 afterEach(() => {
@@ -1564,6 +1569,53 @@ test("handler: the prepare-time guard completes before runProtocol on an sftp co
     const [guarded] = vi.mocked(prepareForExchange).mock.invocationCallOrder;
     const [ran] = vi.mocked(runProtocol).mock.invocationCallOrder;
     expect(guarded).toBeLessThan(ran);
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: certificate mode with no partner pin exits 64 before runProtocol", async () => {
+  // The gate is core's alone (assertCertificateModePinsPartner, raised inside
+  // prepareForExchange), so this drives the REAL prepare rather than the
+  // top-of-file stub: what is pinned here is that the one seam is reached on the
+  // CLI's exchange path, ahead of the run that carries credentials, terms, and
+  // data, and that its remedy reaches the operator through the command's own
+  // error sink as a usage error (exit 64) rather than a transport failure.
+  const core =
+    await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalSFTPConfig,
+      signing: { mode: "certificate" },
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+
+  vi.mocked(prepareForExchange).mockImplementationOnce(core.prepareForExchange);
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    const reported = mockState.errors.join("\n");
+    expect(reported).toContain("signing.partner_fingerprint");
+    expect(reported).toContain("psilink fingerprint");
   } finally {
     exitSpy.mockRestore();
   }

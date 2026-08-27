@@ -506,6 +506,23 @@ describe("an offer re-added over a key of its own name arrives off", () => {
     };
   }
 
+  /** `draft` with the named key lifted out of the list and re-inserted directly
+   * below `below` -- for an offer that refines that key, a position the offer's
+   * own placement rule would never choose. */
+  function withKeyBelow(
+    draft: AdvancedInviteDraft,
+    name: string,
+    below: string,
+  ): AdvancedInviteDraft {
+    const rest = draft.keys.filter((entry) => entry.key.name !== name);
+    const moved = draft.keys.filter((entry) => entry.key.name === name);
+    const at = rest.findIndex((entry) => entry.key.name === below);
+    return {
+      ...draft,
+      keys: [...rest.slice(0, at + 1), ...moved, ...rest.slice(at + 1)],
+    };
+  }
+
   /** The offered shape of the named built-in key over {@link COLUMNS}. */
   const offeredShape = (name: string) =>
     getDefaultLinkageTerms("Inviter", inferMetadata(COLUMNS)).linkageKeys.find(
@@ -554,6 +571,52 @@ describe("an offer re-added over a key of its own name arrives off", () => {
     expect(arrived).toHaveLength(1);
     expect(arrived[0].key.elements).toEqual(offeredShape(BACKBONE_KEY));
     expect(arrived[0].enabled).toBe(false);
+    // And in the dropped key's own place, exactly as for a key the operator had
+    // already turned off: the flag is what the shape change costs, never the
+    // position, so what the keys below this one are left to claim is unchanged.
+    expect(positionOf(edited, BACKBONE_KEY)).toBe(
+      positionOf(edited, SWAPPED_KEY) - 1,
+    );
+    expect(edited.keys.map((entry) => entry.key.name)).toEqual(
+      setDraftMetadata(guidedDraft(), metadata, ROWS).keys.map(
+        (entry) => entry.key.name,
+      ),
+    );
+  });
+
+  test("an opt-in offer re-added over its own name keeps that key's place", () => {
+    // Position is decided by whether the list already held a key of that name,
+    // not by which set the offer comes from: the offer's placement rule chooses
+    // for a key the list did not hold, and a key it did hold sits where the
+    // operator's list puts it. Pinned from BELOW the key it refines -- the one
+    // place a fresh offer is never put -- so a re-offer taking the offer's own
+    // position would move it.
+    const stale = withKeyBelow(
+      withPermutedKey(guidedDraft(), ZIP_KEY, false),
+      ZIP_KEY,
+      BACKBONE_KEY,
+    );
+    expect(positionOf(guidedDraft(), ZIP_KEY)).toBeLessThan(
+      positionOf(guidedDraft(), BACKBONE_KEY),
+    );
+    expect(positionOf(stale, ZIP_KEY)).toBe(
+      positionOf(stale, BACKBONE_KEY) + 1,
+    );
+
+    const { metadata } = setColumnType(stale.metadata, "phone", "other");
+    const edited = setDraftMetadata(stale, metadata, ROWS);
+
+    const arrived = edited.keys.filter((entry) => entry.key.name === ZIP_KEY);
+    expect(arrived).toHaveLength(1);
+    // Re-offered, not matched: the offer's own shape, and off as an offer is.
+    expect(arrived[0].key.elements).toEqual(
+      guidedDraft().keys.find((entry) => entry.key.name === ZIP_KEY)?.key
+        .elements,
+    );
+    expect(arrived[0].enabled).toBe(false);
+    expect(positionOf(edited, ZIP_KEY)).toBe(
+      positionOf(edited, BACKBONE_KEY) + 1,
+    );
   });
 
   test("a built-in key no dropped entry names still arrives on", () => {
@@ -579,6 +642,89 @@ describe("an offer re-added over a key of its own name arrives off", () => {
     );
     expect(ssnKeys(edited.keys).length).toBeGreaterThan(0);
     expect(ssnKeys(edited.keys).every((entry) => entry.enabled)).toBe(true);
+  });
+});
+
+describe("a key stating its optional properties as undefined is the same key", () => {
+  /** `draft` with every key's `swap` and every element's `transform` stated
+   * explicitly as `undefined` -- what a spread of a property that is not set
+   * produces. The key says exactly what the offer says and reads the same on the
+   * list, while sitting outside the canonical domain, which rejects an explicit
+   * `undefined` where it accepts an absent property. */
+  function withUndefinedOptionals(
+    draft: AdvancedInviteDraft,
+  ): AdvancedInviteDraft {
+    return {
+      ...draft,
+      keys: draft.keys.map((entry) => ({
+        ...entry,
+        key: {
+          ...entry.key,
+          swap: entry.key.swap,
+          elements: entry.key.elements.map((element) => ({
+            ...element,
+            transform: element.transform,
+          })),
+        },
+      })),
+    };
+  }
+
+  test("it reconciles as the key without the properties does", () => {
+    const on = withKeyEnabled(guidedDraft(), ZIP_KEY);
+    const spread = withUndefinedOptionals(on);
+    // The premise: these keys are genuinely outside the canonical domain, so the
+    // reconciliation is reaching its incomparable branch rather than agreeing
+    // with the offer by accident.
+    expect(() => canonicalString(spread.keys[0].key)).toThrow();
+
+    const { metadata } = setColumnType(on.metadata, "phone", "other");
+    const reconciled = setDraftMetadata(spread, metadata, ROWS);
+    expect(reconciled.keys).toStrictEqual(
+      setDraftMetadata(on, metadata, ROWS).keys,
+    );
+    // The failure this closes: an incomparable key matches no offer, so a draft
+    // whose keys ALL carry the property arrives entirely off -- the built-in set
+    // the operator never touched and the offer they turned on together.
+    expect(reconciled.keys.some((entry) => entry.enabled)).toBe(true);
+    expect(
+      reconciled.keys.find((entry) => entry.key.name === ZIP_KEY)?.enabled,
+    ).toBe(true);
+  });
+
+  test("a defined optional property is still a difference from the offer", () => {
+    // Only the explicit `undefined` is read as the absent property. An element
+    // alias the offer does not carry is a real departure from the offered rule,
+    // so the key is still no offer's: it drops and is re-offered off rather than
+    // handing the operator's flag to a shape they did not choose.
+    const on = withKeyEnabled(guidedDraft(), ZIP_KEY);
+    const aliased: AdvancedInviteDraft = {
+      ...on,
+      keys: on.keys.map((entry) =>
+        entry.key.name === ZIP_KEY
+          ? {
+              ...entry,
+              key: {
+                ...entry.key,
+                elements: entry.key.elements.map((element, at) =>
+                  at === 0 ? { ...element, name: "surname" } : element,
+                ),
+              },
+            }
+          : entry,
+      ),
+    };
+
+    const { metadata } = setColumnType(on.metadata, "phone", "other");
+    const edited = setDraftMetadata(
+      withUndefinedOptionals(aliased),
+      metadata,
+      ROWS,
+    );
+    const zip = edited.keys.filter((entry) => entry.key.name === ZIP_KEY);
+    expect(zip).toHaveLength(1);
+    expect(zip[0].enabled).toBe(false);
+    expect(zip[0].key.elements.every((el) => el.name === undefined)).toBe(true);
   });
 });
 
