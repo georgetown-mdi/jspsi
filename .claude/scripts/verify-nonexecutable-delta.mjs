@@ -82,14 +82,31 @@
 // style, ASI semicolons, trailing commas, and numeric literal form all compare
 // equal. The verdict is "no executable delta", not "the bytes match".
 //
+// Which tree the verdict is about: git runs in the worktree the process was
+// invoked from, never the one holding this file, and the run names that worktree
+// above its verdicts. The two are routinely different -- the primary checkout's
+// copy is called by absolute path while the branch under review sits in a linked
+// worktree -- and every ref short of a full sha is per-worktree, so binding to
+// the script's own location resolves HEAD, HEAD~n and ORIG_HEAD against a tree
+// nobody named and prints a confident verdict for a diff nobody asked about. A
+// full sha is the case that hides it: linked worktrees share one object
+// database, so those two resolve and diff identically from either tree.
+//
+// Commands run at that worktree's top level rather than at the invoking
+// directory, which is measured to matter in both directions: under
+// `diff.relative` a run from a subdirectory drops every changed path outside it
+// and reports a vacuous HOLDS, and the `--raw` paths are root-relative only when
+// the prefix is empty, which is what `git show <ref>:<path>` then reads.
+//
 // Exit codes: 0 the property holds; 1 it is violated or a changed path could not
-// be verified; 2 usage or git error; 3 the verifier failed its own soundness
-// probes. The probes run before every comparison so an attestation proves its
-// soundness on the TypeScript and `yaml` actually installed, rather than
-// trusting that CI ran the test suite at some point.
+// be verified; 2 usage, an invocation from outside a git worktree, or a git
+// error; 3 the verifier failed its own soundness probes. The probes run before
+// every comparison so an attestation proves its soundness on the TypeScript and
+// `yaml` actually installed, rather than trusting that CI ran the test suite at
+// some point.
 
 import { execFileSync } from "node:child_process";
-import { dirname, extname, resolve } from "node:path";
+import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import ts from "typescript";
@@ -544,7 +561,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [attested, head, ...extra] = process.argv.slice(2);
   if (!attested || !head || extra.length > 0) {
     process.stderr.write(
-      "Usage: node .claude/scripts/verify-nonexecutable-delta.mjs <attested-sha> <head-sha>\n",
+      "Usage: node .claude/scripts/verify-nonexecutable-delta.mjs <attested-sha> <head-sha>\n" +
+        "Both refs resolve in the git worktree this is run from, whatever tree holds the script,\n" +
+        "and that worktree is what the verdict is about. A per-worktree ref (HEAD, HEAD~n,\n" +
+        "ORIG_HEAD) means a different commit in each linked tree, so name full shas unless you\n" +
+        "are running inside the tree you mean.\n",
     );
     process.exit(2);
   }
@@ -560,10 +581,23 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(3);
   }
 
-  const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+  let worktree;
+  try {
+    worktree = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  } catch (error) {
+    process.stderr.write(
+      `error: ${process.cwd()} is not inside a git worktree -- this verifier reports on the tree it is run from, so run it inside the one whose refs you are naming (git: ${error.message ?? error})\n`,
+    );
+    process.exit(2);
+  }
+
   const git = (args) =>
     execFileSync("git", args, {
-      cwd: root,
+      cwd: worktree,
       encoding: "utf8",
       maxBuffer: 256 * 1024 * 1024,
     });
@@ -580,6 +614,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   process.stdout.write(
     `soundness probes: ${PROBES.length}/${PROBES.length} passed on typescript ${ts.version}\n`,
   );
+  process.stdout.write(`worktree: ${worktree}\n`);
   process.stdout.write(`changed paths ${attested}..${head}:\n`);
   if (verdicts.length === 0) process.stdout.write("  (none)\n");
   for (const { path, verdict, reason } of verdicts) {
