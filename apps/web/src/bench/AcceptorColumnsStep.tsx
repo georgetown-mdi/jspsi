@@ -50,6 +50,24 @@ import type {
 import type { ReactNode } from "react";
 
 /**
+ * How many of the invitation's declared column names the payload-declaration
+ * conflict notice paints before it stops and counts the rest.
+ *
+ * That list is the partner's, bounded only by core's `MAX_PAYLOAD_ENTRIES` times
+ * the escaped display ceiling each name takes at this sink, so painting it whole
+ * puts around a megabyte of text between the operator and both the metadata grid
+ * they have to edit and the launch control below it -- usability denial on the one
+ * screen that holds the gate. Every remedy the notice states is derived from the
+ * WHOLE set, so what the cap costs is legibility of the tail, never the accuracy of
+ * what the operator is told to do.
+ *
+ * Sized to show a realistic declaration entire -- a payload set is a handful of
+ * columns -- while leaving the flooded case a fixed height. Exported so the check
+ * that holds the notice's rendered size reads the same number the render does.
+ */
+export const MAX_DECLARED_NAMES_SHOWN = 10;
+
+/**
  * The operator's OWN CSV headers as the declaration notice lists them: through the
  * same ColumnName every column-name surface on this screen uses, so a name here
  * reads exactly as it does in the grid row the operator has to change, and one per
@@ -207,6 +225,16 @@ export function AcceptorColumnsStep({
     declarationConflict?.declaredButNotSent.filter((gap) => gap.inFile) ?? [];
   const expectedMissingFromFile =
     declarationConflict?.declaredButNotSent.filter((gap) => !gap.inFile) ?? [];
+  // What the cap leaves out is counted rather than dropped, so the operator is told
+  // how large the list their partner sent is even where the screen cannot hold it.
+  const shownDeclaredGaps =
+    declarationConflict?.declaredButNotSent.slice(
+      0,
+      MAX_DECLARED_NAMES_SHOWN,
+    ) ?? [];
+  const unshownDeclaredCount =
+    (declarationConflict?.declaredButNotSent.length ?? 0) -
+    shownDeclaredGaps.length;
   const overlongDisclosed = acceptorOverlongDisclosedColumns(
     linkageTerms,
     editorState.metadata,
@@ -499,18 +527,22 @@ export function AcceptorColumnsStep({
                     </Text>
                     {/* The invitation's OWN names, which the model has already
                         escaped for this sink -- partner-controlled text, unlike
-                        the operator's headers above. Keyed by position: nothing
-                        stops a declaration naming the same column twice. */}
+                        the operator's headers above, and so also the half this
+                        screen bounds by count. Keyed by position: nothing stops a
+                        declaration naming the same column twice. */}
                     <List size="sm" withPadding listStyleType="circle" my={4}>
-                      {declarationConflict.declaredButNotSent.map(
-                        (gap, index) => (
-                          <List.Item key={index}>
-                            {gap.displayName}
-                            {!gap.inFile && " - not a column in this file"}
-                          </List.Item>
-                        ),
-                      )}
+                      {shownDeclaredGaps.map((gap, index) => (
+                        <List.Item key={index}>
+                          {gap.displayName}
+                          {!gap.inFile && " - not a column in this file"}
+                        </List.Item>
+                      ))}
                     </List>
+                    {unshownDeclaredCount > 0 && (
+                      <Text size="sm" mb={4}>
+                        and {unshownDeclaredCount} more not shown here.
+                      </Text>
+                    )}
                     {/* The remedy here is mostly the partner's: widening the
                         operator's own disclosure to match is offered only where the
                         column exists, and never as the fix. Its cost is stated
