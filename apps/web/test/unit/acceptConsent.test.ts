@@ -1754,10 +1754,7 @@ describe("summarizeInvitation", () => {
     // effect-named rule wins over a directly-named one ...
     expect(
       headerFor([
-        {
-          function: "replace_regex",
-          params: { pattern: "a", replacement: "b" },
-        },
+        { function: "null_if", params: { values: ["x"] } },
         { function: "substring", params: { start: 1, length: 3 } },
       ]),
     ).toBe("last name (partial)");
@@ -1823,6 +1820,126 @@ describe("summarizeInvitation", () => {
     // accent/case folding), not a record-dropping narrower, so it is deliberately
     // routine despite stripping characters (see elementBreadthMarker's doc).
     expect(headerFor([{ function: "remove_affixes" }])).toBe("last name");
+  });
+
+  test("decides 'partial' per value-deriving step before a substring", () => {
+    // "(partial)" claims the slice truncates the acceptor's own identifier, so
+    // each transform that can derive a value before a substring gets a decided,
+    // pinned answer: it keeps "(partial)" where the identifier still composes the
+    // sliced value, and falls through to its own marker where it need not.
+    const slice = { function: "substring", params: { start: 1, length: 3 } };
+
+    // replace_regex composes the value from an arbitrary partner pattern and
+    // replacement, which need share no character with the identifier (`.*`
+    // collapses every value to the replacement), so a determinate "(partial)"
+    // would assert a breadth the terms cannot support -- and assert it in the
+    // reassuring direction. The indeterminate rule is named instead.
+    expect(
+      headerFor([
+        {
+          function: "replace_regex",
+          params: { pattern: "a", replacement: "b" },
+        },
+        slice,
+      ]),
+    ).toBe("last name (pattern replacement)");
+
+    // extract_regex returns a contiguous run of the value's own characters, so a
+    // slice of that run is still part of the identifier whatever the pattern.
+    expect(
+      headerFor([
+        { function: "extract_regex", params: { pattern: "(.*)" } },
+        slice,
+      ]),
+    ).toBe("last name (partial)");
+
+    // parse_date lays the canonical date out from the date's own components, so
+    // slicing it matches on part of the date. Keeping "(partial)" is also what
+    // stops this date-collapsing element from showing no marker at all: a merely
+    // reformatting parse_date earns none of its own.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+        slice,
+      ]),
+    ).toBe("last name (partial)");
+    // A parse_date whose output also drops a component reads "(partial)" from
+    // either rule, so no date-collapsing slice is left unmarked.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY" },
+        },
+        slice,
+      ]),
+    ).toBe("last name (partial)");
+
+    // coalesce substitutes only for an absent value, so a record carrying an
+    // identifier is truncated literally. Its substitution is order-independent,
+    // and both orders are pinned to the same marker so the two cannot drift apart.
+    expect(
+      headerFor([{ function: "coalesce", params: { default: "X" } }, slice]),
+    ).toBe("last name (partial)");
+    expect(
+      headerFor([slice, { function: "coalesce", params: { default: "X" } }]),
+    ).toBe("last name (partial)");
+
+    // split_on never reaches the truncation rule: it is a fan-out, decided above
+    // every breadth marker -- refused under cascade, and named for the candidate
+    // set under the strategy that matches it.
+    const splitThenSlice = [
+      { function: "split_on", params: { delimiter: " " } },
+      slice,
+    ];
+    expect(headerFor(splitThenSlice)).toBe("last name (not supported)");
+    expect(
+      summarizeInvitation(
+        makeToken({
+          linkageStrategy: "single-pass",
+          linkageFields: [{ name: "ln", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [{ field: "ln", transform: splitThenSlice }],
+            },
+          ],
+        }),
+      ).linkageKeys[0].headerFields[0],
+    ).toBe("last name (multiple)");
+
+    // A breaking step AFTER the substring does not suppress it: the literal is
+    // truncated first, so "(partial)" stays faithful.
+    expect(
+      headerFor([
+        slice,
+        {
+          function: "replace_regex",
+          params: { pattern: "a", replacement: "b" },
+        },
+      ]),
+    ).toBe("last name (partial)");
+
+    // Each of these steps standing alone still earns its own marker, so the
+    // compound rule above reaches no element carrying a single transform.
+    expect(headerFor([slice])).toBe("last name (partial)");
+    expect(
+      headerFor([
+        {
+          function: "replace_regex",
+          params: { pattern: "a", replacement: "b" },
+        },
+      ]),
+    ).toBe("last name (pattern replacement)");
+    expect(
+      headerFor([{ function: "extract_regex", params: { pattern: "(.*)" } }]),
+    ).toBe("last name (pattern extraction)");
+    expect(
+      headerFor([{ function: "coalesce", params: { default: "X" } }]),
+    ).toBe("last name (fallback)");
   });
 
   test("classifies every core standardization function as marked or routine", () => {

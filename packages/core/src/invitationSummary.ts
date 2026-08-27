@@ -910,6 +910,21 @@ function declaresFanOut(element: LinkageKeyElement): boolean {
 }
 
 /**
+ * Transform functions that derive a value the acceptor's own identifier need not
+ * compose, so a later `substring` slicing that value is no longer a truncation of
+ * the identifier and earns no "partial" (see {@link elementBreadthMarker}, which
+ * carries the per-function reasoning and why the rest of the value-deriving family
+ * is deliberately absent). Membership is a policy decision about the always-visible
+ * consent marker, not core's runtime behavior; the names are core's own
+ * schema-validated function names, so the marker stays derived from the validated
+ * function set rather than from partner free text.
+ */
+const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
+  "phonetic",
+  "replace_regex",
+]);
+
+/**
  * The terse informative marker for a key element's collapsed-header entry.
  *
  * A rule the exchange refuses outright is named as one ("not supported") and
@@ -949,16 +964,46 @@ function declaresFanOut(element: LinkageKeyElement): boolean {
  * expert-authored rule is what trips those markers.
  *
  * "partial" marks a LITERAL character-truncation, so it fires for a `substring`
- * only where the slice runs on the literal value. A `substring` after a
- * value-recoding `phonetic` step (which replaces the name with a sound-alike
- * code) slices that code, not the name, so it is not flagged "partial" -- the
- * recoding's "sound-alike" is then the dominant, honest effect. This mirrors the
- * detail row's position-aware literal ({@link substringEffect} /
- * {@link summarizeKey}, which render "the first N characters" only for a
- * substring on the unmodified value). A routine normalizer before the substring
- * (case/accents/...) does not recode the value out of literal correspondence, so
- * it keeps "partial"; a `phonetic` AFTER the substring does too, since the
- * literal is truncated first.
+ * only where the slice runs on a value the acceptor's own identifier still
+ * composes. A prior step that derives a value the identifier need not compose
+ * breaks that correspondence, and the substring after it earns no "partial": the
+ * deriving step's own marker is then the dominant, honest one. Two functions break
+ * it ({@link LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS}), and the rest of the
+ * value-deriving family deliberately does not:
+ *
+ * - `phonetic` breaks it. The name is replaced by an opaque sound-alike code, so
+ *   the slice truncates the code rather than the name and "sound-alike" is what
+ *   the element does.
+ * - `replace_regex` breaks it. An arbitrary partner-authored pattern and
+ *   replacement compose the value, which need share no character with the
+ *   identifier -- a `.*` pattern collapses every value to the replacement -- so
+ *   "partial" would assert a determinate breadth the terms cannot support, and on
+ *   a consent surface it would assert the reassuring direction. "pattern
+ *   replacement" names the indeterminate rule instead, exactly as it does for the
+ *   step standing alone. That is the existing precedence applied, not reversed:
+ *   the effect-named rule does not fire, so the directly-named one shows.
+ * - `extract_regex` keeps it. Core's extraction returns a contiguous run of the
+ *   value's own characters, so a slice of that run is still part of the
+ *   identifier and the effect stays determinate whatever the pattern.
+ * - `parse_date` keeps it. The canonical date is laid out from the date's own
+ *   components, so slicing it matches on only part of the date -- the same reading
+ *   the output-drops-a-component branch below gives "partial". Keeping it is also
+ *   what stops a date-collapsing slice from showing NO marker, since a merely
+ *   reformatting `parse_date` earns none of its own.
+ * - `coalesce` keeps it. It substitutes only where the value is absent, so a
+ *   record that carries an identifier is truncated literally, and the substitution
+ *   is order-independent -- suppressing here would mark `[coalesce, substring]`
+ *   and `[substring, coalesce]` differently for the same matching behavior.
+ * - `split_on` never reaches this rule: it is a fan-out, decided above.
+ *
+ * This mirrors the detail row's position-aware literal ({@link substringEffect} /
+ * {@link summarizeKey}, which render "the first N characters" only for a substring
+ * on the unmodified value) at the coarser grain the header claims. The detail
+ * asserts a character POSITION, which any earlier step can shift, so it needs the
+ * first step; the header asserts only that part of the value is matched on, which
+ * survives a position-shifting normalizer. So a routine normalizer before the
+ * substring (case/accents/...) keeps "partial", and a breaking step AFTER the
+ * substring does too, since the literal is truncated first.
  *
  * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
  * header is deliberately terse, so an element carrying more than one rule shows
@@ -1001,13 +1046,17 @@ function elementBreadthMarker(
   const parseDateBreadths = steps.map(parseDateBreadth);
   if (parseDateBreadths.includes("any date")) return displayText`any date`;
   // Effect named where the direction is determinable from the terms. "partial"
-  // is a literal truncation, so a substring counts only where it slices the
-  // literal value -- not after a value-recoding `phonetic` step, where it slices
-  // the sound-alike code and "sound-alike" (below) is the honest dominant effect.
+  // is a literal truncation, so a substring counts only where the value it slices
+  // is still composed of the acceptor's identifier -- not after a step that
+  // derives an unrelated value, whose own marker (below) is then the honest one.
   const truncatesLiteral = steps.some(
     (step, index) =>
       step.function === "substring" &&
-      !steps.slice(0, index).some((prior) => prior.function === "phonetic"),
+      !steps
+        .slice(0, index)
+        .some((prior) =>
+          LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS.has(prior.function),
+        ),
   );
   if (truncatesLiteral) return displayText`partial`;
   if (element.generateFuzzyComparisons !== undefined) return displayText`fuzzy`;
