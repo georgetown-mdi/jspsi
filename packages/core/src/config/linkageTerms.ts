@@ -1076,8 +1076,10 @@ function describeRuleSet(
  * Fields and their consistency requirements:
  * - `version` -- mandatory. Two versions are incompatible if no migration path
  *   exists.
- * - `identity` -- none. Free-text identifying the holding party; recorded in
- *   the exchange record (the disclosure log).
+ * - `identity` -- none, and optional. Free-text identifying the holding party;
+ *   recorded in the exchange record (the disclosure log). A party that supplied
+ *   no name omits it, and every surface reads that absence as a party that did
+ *   not name itself rather than substituting one.
  * - `date` -- soft. A mismatch warns that one party may have a stale copy.
  * - `algorithm` -- mandatory. `psi` reveals matched identifiers; `psi-c` reveals
  *   only the count.
@@ -1124,9 +1126,17 @@ export interface LinkageTerms {
    * Free-text string identifying the party holding these linkage terms (e.g.
    * name organization, contact info). Included verbatim in the exchange
    * record.
-   * Consistency: none -- parties may differ.
+   *
+   * Absent when the party supplied no name: psilink invents none, so nothing
+   * fills the gap and no surface stands a label in it (`partyIdentityDisplay.ts`
+   * carries the marker every surface shows instead). The commands that
+   * author a durable partnership -- `psilink invite` and `psilink accept` --
+   * require one at their own interface, so the field is absent only on a run
+   * that authored its terms without a name.
+   *
+   * Consistency: none -- parties may differ, and either may carry none.
    */
-  identity: string;
+  identity?: string;
   /**
    * Date these linkage terms were last modified (ISO 8601, YYYY-MM-DD).
    * Consistency: soft -- a mismatch warns rather than cancels the exchange.
@@ -1183,7 +1193,10 @@ const LinkageTermsBaseSchema = z.object({
     .string()
     .max(MAX_NAME_LENGTH)
     .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
-  identity: z.string().min(1).max(MAX_TEXT_LENGTH),
+  // Optional, and bounded exactly as before when it is there: a party that names
+  // itself is held to a non-empty, length-capped label, and a party that supplies
+  // none omits the field rather than sending an empty string or a placeholder.
+  identity: z.string().min(1).max(MAX_TEXT_LENGTH).optional(),
   date: z.iso.date(),
   algorithm: AlgorithmSchema,
   linkageStrategy: LinkageStrategySchema.default("cascade"),

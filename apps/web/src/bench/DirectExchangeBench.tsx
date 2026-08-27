@@ -169,7 +169,7 @@ export function DirectExchangeBench() {
   } = useDirectExchange({
     channel: transport,
     inputSource,
-    identity: identity.trim(),
+    ...(identity.trim().length > 0 ? { identity: identity.trim() } : {}),
     ...directLinkageStrategyIntentFields(linkageStrategy),
     options: withConnectionTuning(
       exchangeFilesOptions(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES),

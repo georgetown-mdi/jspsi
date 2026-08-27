@@ -33,9 +33,6 @@ import type { RelayEvent } from "@jobs/cliDriver";
 /** The inline CSV content the reused config carries; the driver maps an `inline`
  * input source to the intent's `inputCsv` arm. */
 const CONFIG_INPUT_CSV = "ssn\n111223333\n";
-/** The label the zero-setup config below carries. The field is required, so a
- * base config without one would not build a valid intent. */
-const CONFIG_IDENTITY = "Fixture Party";
 
 /** The construction-time config every test reuses (a filedrop transport unless
  * a test overrides it); the driver only carries it into the intent, so its
@@ -1349,7 +1346,6 @@ describe("createServerJobZeroSetupDriver intent", () => {
     return {
       transport: { channel: "filedrop" },
       inputSource: { kind: "inline", csv: CONFIG_INPUT_CSV },
-      identity: CONFIG_IDENTITY,
     };
   }
 
@@ -1386,7 +1382,6 @@ describe("createServerJobZeroSetupDriver intent", () => {
     expect(Object.keys(intent).sort()).toEqual([
       "channel",
       "eventStream",
-      "identity",
       "inputCsv",
       "mode",
     ]);
@@ -1407,7 +1402,7 @@ describe("createServerJobZeroSetupDriver intent", () => {
     expect(intent.inputFile).toEqual({ name: "clients.csv" });
   });
 
-  test("forwards the identity and the optional linkageStrategy", async () => {
+  test("forwards the optional identity and linkageStrategy", async () => {
     const { client, createdIntents } = scriptedClient([result(true)]);
     await createServerJobZeroSetupDriver(
       {
@@ -1424,17 +1419,14 @@ describe("createServerJobZeroSetupDriver intent", () => {
     });
   });
 
-  test("carries the identity, and omits linkageStrategy, when the config sets only the label", async () => {
-    // The identity is not omittable: the CLI has no partner-visible label to fall
-    // back on, so every zero-setup intent carries one. The strategy still is --
-    // omitting it selects the CLI's own cascade default.
+  test("omits identity and linkageStrategy when the config sets neither", async () => {
     const { client, createdIntents } = scriptedClient([result(true)]);
     await createServerJobZeroSetupDriver(zeroSetupConfig(), client).run(
       driverEvents(new AbortController().signal),
     );
 
     const intent = createdIntents[0] as Record<string, unknown>;
-    expect(intent.identity).toBe(CONFIG_IDENTITY);
+    expect(intent.identity).toBeUndefined();
     expect(intent.linkageStrategy).toBeUndefined();
   });
 

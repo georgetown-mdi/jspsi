@@ -520,22 +520,18 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  * carries none of the exchange mode's `sharedSecret`, `linkageTerms`, `metadata`,
  * `standardization`, `expectedPayloadColumns`, or `expectedPartnerDeduplicate`
  * -- only an input source, the tuning `options` subset, the `eventStream`
- * toggle, the per-run controls ({@link jobRunControlFields}), and two bounded
- * selectors:
+ * toggle, the per-run controls ({@link jobRunControlFields}),and two optional,
+ * bounded selectors:
  *
- * - `linkageStrategy` is an optional closed enum forwarded to the CLI's
- *   `--linkage-strategy`.
- * - `identity` is a REQUIRED bounded operator label forwarded to the CLI's
- *   `--identity` (the party name/org/contact string). Required because it is what
- *   the partner reads as this party's name and nothing stands in for it: a
- *   zero-setup run carries no terms document to hold one, and the CLI refuses a
- *   run it cannot name rather than inventing a label. Bounded by
- *   {@link MAX_IDENTITY_LENGTH} and, being free text rather than a closed enum,
- *   held to the shared label contract's two shape rules as well: no leading `-`,
- *   so a flag-shaped value cannot masquerade as a CLI flag -- the driver also
- *   emits it as a single `--identity=<value>` token, which parses a `-`-leading
- *   value verbatim regardless -- and no control character, which would otherwise
- *   ride the run into this party's own disclosure record.
+ * - `linkageStrategy` is a closed enum forwarded to the CLI's `--linkage-strategy`.
+ * - `identity` is a bounded operator label forwarded to the CLI's `--identity`
+ *   (the party name/org/contact string). Bounded by {@link MAX_IDENTITY_LENGTH}
+ *   and, being free text rather than a closed enum, held to the shared label
+ *   contract's two shape rules as well: no leading `-`, so a flag-shaped value
+ *   cannot masquerade as a CLI flag -- the driver also emits it as a single
+ *   `--identity=<value>` token, which parses a `-`-leading value verbatim
+ *   regardless -- and no control character, which would otherwise ride the run
+ *   into this party's own disclosure record.
  *
  * Neither is a path, host, or credential, so neither can escape into a file path
  * or a connection field. Exactly one of `inputCsv` or `inputFile` is set (enforced
@@ -550,7 +546,7 @@ interface JobZeroSetupIntentBase {
   diagnosticRun?: boolean;
   sweepExchangeFiles?: boolean;
   linkageStrategy?: JobZeroSetupLinkageStrategy;
-  identity: string;
+  identity?: string;
 }
 
 /**
@@ -831,15 +827,12 @@ const jobZeroSetupIntentCommonFields = {
   inputFile: jobInputFileReferenceSchema.optional(),
   eventStream: z.boolean().optional(),
   linkageStrategy: z.enum(["cascade", "single-pass"]).optional(),
-  // Required, unlike the strategy beside it: the label is what the partner reads
-  // as this party's name, and the CLI refuses a run carrying none rather than
-  // inventing one. Free text, unlike the closed strategy enum, so it takes the
-  // shared label contract's two shape rules (`@psi/identityLabel`): no leading
-  // `-`, so a flag-shaped label (e.g. "--save") cannot be mistaken for a CLI
-  // flag -- defense in depth, since the driver emits it as a single
-  // `--identity=<value>` token, which parses a `-`-leading value verbatim
-  // regardless -- and no control character, which rides the run into this
-  // party's own disclosure record.
+  // Free text, unlike the closed strategy enum, so it takes the shared label
+  // contract's two shape rules (`@psi/identityLabel`): no leading `-`, so a
+  // flag-shaped label (e.g. "--save") cannot be mistaken for a CLI flag -- defense
+  // in depth, since the driver emits it as a single `--identity=<value>` token,
+  // which parses a `-`-leading value verbatim regardless -- and no control
+  // character, which rides the run into this party's own disclosure record.
   identity: z
     .string()
     .min(1)
@@ -847,7 +840,8 @@ const jobZeroSetupIntentCommonFields = {
     .regex(/^[^-]/, "identity must not begin with '-'")
     .refine((label) => !IDENTITY_CONTROL_CHAR_PATTERN.test(label), {
       message: IDENTITY_CONTROL_CHAR_MESSAGE,
-    }),
+    })
+    .optional(),
 };
 
 // Mode-carrying zero-setup arms, each `.strict()` and discriminated on channel.

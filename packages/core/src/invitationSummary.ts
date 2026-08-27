@@ -8,6 +8,7 @@ import {
 } from "./standardization.js";
 import { displayText } from "./utils/sanitizeForDisplay.js";
 import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
+import { redactAndDisplayPartyIdentity } from "./partyIdentityDisplay.js";
 
 import { endpointRequiresRetainedFiles } from "./config/invitation.js";
 import type { InvitationToken } from "./config/invitation.js";
@@ -499,7 +500,9 @@ export interface InvitationFieldSummary {
  * unbranded type does not demand.
  */
 export interface InvitationSummary {
-  /** The inviter's self-asserted identity, sanitized for display. */
+  /** The inviter's self-asserted identity, sanitized for display, or the
+   * absence marker `partyIdentityDisplay.ts` carries where the inviter supplied
+   * none. */
   invitingParty: Displayable;
   /** `psi` reveals matched identifiers; `psi-c` reveals only the count. */
   algorithm: Algorithm;
@@ -1309,7 +1312,7 @@ export function summarizeInvitation(
     deduplicateIsImplementedForStrategy(terms.linkageStrategy);
 
   const summary: InvitationSummary = {
-    invitingParty: redactAndSanitizeForDisplay(terms.identity),
+    invitingParty: redactAndDisplayPartyIdentity(terms.identity),
     algorithm: terms.algorithm,
     linkageStrategy: terms.linkageStrategy,
     inviterReceivesOutput: terms.output.expectsOutput,

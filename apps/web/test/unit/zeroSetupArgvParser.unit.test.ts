@@ -25,7 +25,6 @@ import {
 } from "@jobs/intent";
 
 import {
-  ZERO_SETUP_FIXTURE_IDENTITY,
   awaitJobTerminalState,
   captureExchangeArgv,
   captureZeroSetupArgv,
@@ -597,7 +596,6 @@ describe(
               sweepExchangeFiles: false,
               logFilePath: undefined,
             },
-            identity: ZERO_SETUP_FIXTURE_IDENTITY,
             handlers: {
               onEvent: () => undefined,
               onDegraded: () => undefined,

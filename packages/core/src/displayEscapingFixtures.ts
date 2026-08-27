@@ -54,9 +54,18 @@ export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
  * validation staying in place -- the same reason `summarizeInvitation` routes
  * the dates through the sanitizer.
  */
+/**
+ * @internal
+ *
+ * {@link hostileTerms}' own identity, exported so a display-boundary test can
+ * name the string without reading it back through the terms' optional
+ * `identity`, which types as possibly absent.
+ */
+export const HOSTILE_IDENTITY = `Acme${ESC}[31m${RLO}org`;
+
 export const hostileTerms: LinkageTerms = {
   version: `1.0.0${BEL}`,
-  identity: `Acme${ESC}[31m${RLO}org`,
+  identity: HOSTILE_IDENTITY,
   date: `2026-01-15${BEL}`,
   algorithm: "psi",
   linkageStrategy: "cascade",

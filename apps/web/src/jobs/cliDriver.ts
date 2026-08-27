@@ -253,11 +253,10 @@ export function spawnExchangeJob(args: {
  * `--peer-id`, and the connection-tuning flags -- built server-side by
  * {@link zeroSetupOptionsArgv} from the intent's validated `options`, standing
  * in for the composed config's `options` block a zero-setup run has no document
- * to carry. `identity` -- always present, since the zero-setup intent requires it
- * -- and `linkageStrategy`, when set, are a bounded label and a closed enum,
- * forwarded as single `--identity=<value>` / `--linkage-strategy=<value>` tokens
- * (the `=` form so a `-`-leading value cannot be misparsed by yargs as its own
- * flag).
+ * to carry. `identity` and
+ * `linkageStrategy`, when set, are a bounded label and a closed enum, forwarded
+ * as single `--identity=<value>` / `--linkage-strategy=<value>` tokens (the `=`
+ * form so a `-`-leading value cannot be misparsed by yargs as its own flag).
  *
  * Shares the whole post-spawn tail (fd-3 reader, stderr tail, terminal
  * reconciliation) with {@link spawnExchangeJob} through {@link runCliChild}; the
@@ -274,7 +273,7 @@ export function spawnZeroSetupJob(args: {
   eventStream: boolean;
   /** This run's diagnostic and recovery choices (see {@link CliRunControls}). */
   runControls: CliRunControls;
-  identity: string;
+  identity?: string;
   linkageStrategy?: "cascade" | "single-pass";
   /** See {@link spawnExchangeJob}'s `extraEnv`; identical server-only channel. */
   extraEnv?: NodeJS.ProcessEnv;
@@ -295,7 +294,7 @@ export function spawnZeroSetupJob(args: {
     binaryPath,
     ...connectionArgs,
     ...optionArgs,
-    `--identity=${identity}`,
+    ...(identity !== undefined ? [`--identity=${identity}`] : []),
     ...(linkageStrategy !== undefined
       ? [`--linkage-strategy=${linkageStrategy}`]
       : []),

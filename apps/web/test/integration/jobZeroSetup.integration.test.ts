@@ -100,7 +100,6 @@ describe.skipIf(!hasBuild)(
         mode: "zeroSetup",
         channel: "filedrop",
         inputCsv: SOURCE_CSV,
-        identity: "County Health",
         eventStream: true,
       };
 

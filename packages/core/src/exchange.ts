@@ -63,6 +63,7 @@ import {
   buildReceiptContent,
   deriveReceiptBinder,
   exchangeSignedReceipt,
+  ReceiptVerificationError,
 } from "./signedReceipt.js";
 import { OperatorConfigError, UsageError } from "./errors.js";
 import type { Metadata } from "./config/metadata.js";
@@ -626,7 +627,7 @@ export function resolveLinkageCardinality(
  */
 export function resolveExchangeInputs(
   exchangeDataSpec: ExchangeDataSpec,
-  identity: string,
+  identity: string | undefined,
   columnNames: Array<string>,
 ): { metadata: Metadata; linkageTerms: LinkageTerms } {
   const metadata = exchangeDataSpec.metadata ?? inferMetadata(columnNames);
@@ -664,7 +665,7 @@ export function resolveExchangeInputs(
  */
 export function prepareForExchange(
   exchangeDataSpec: ExchangeDataSpec,
-  identity: string,
+  identity: string | undefined,
   rawRows: Array<CSVRow>,
   columnNames: Array<string>,
 ): PreparedExchange {
@@ -1681,6 +1682,28 @@ export async function runExchange(
   // result, including payloads.
   let signedReceipt: DualSignedRecord | undefined;
   if (signing !== undefined) {
+    // A receipt binds each party's certificate to the identity that party used in
+    // the AGREED TERMS, so a party that named itself none has nothing for a
+    // certificate to be authorized against. Refuse the step rather than reach for
+    // a substitute: the local absence would leave the partner unable to verify
+    // this side's certificate, and the partner's absence would leave the pin
+    // authorizing nothing. Fail closed and name which side is unnamed, before any
+    // certificate or signature crosses the channel.
+    if (
+      linkageTerms.identity === undefined ||
+      partnerTerms.identity === undefined
+    )
+      throw new ReceiptVerificationError(
+        "a signed receipt names both parties, and " +
+          (linkageTerms.identity === undefined
+            ? partnerTerms.identity === undefined
+              ? "neither party's agreed terms carry an identity"
+              : "this party's agreed terms carry none"
+            : "the partner's agreed terms carry none") +
+          ". A certificate is trusted by the identity its holder used in the " +
+          "agreed terms, so an unnamed party cannot present or verify one: set " +
+          "linkage_terms.identity on both sides, or run without receipt signing.",
+      );
     // The receipt content is built from the mutually-verifiable facts directly --
     // the agreed-terms hash and session-keyed MACs of the two directional payloads
     // -- NOT from the salted record commitments (per-party salts are not

@@ -69,7 +69,18 @@ const partyATerms = {
 
 const partyBTerms = { ...partyATerms, identity: "Party B" };
 
-const linkageTerms = { partyA: partyATerms, partyB: partyBTerms };
+// A third fixture carrying no `identity` at all: the field is optional, and a
+// party that supplied no name sends the terms with the key absent rather than
+// empty. Same terms otherwise, so the scenario driving it differs from the
+// others at the identity alone.
+const unnamedPartyTerms = { ...partyATerms };
+delete unnamedPartyTerms.identity;
+
+const linkageTerms = {
+  partyA: partyATerms,
+  partyB: partyBTerms,
+  unnamedParty: unnamedPartyTerms,
+};
 
 // Fixtures for the two fail-soft advertisement fields. The fingerprints are the
 // canonical SHA256 shape at its real length; nothing here is a credential.
@@ -117,6 +128,17 @@ const scenarios = [
       "pins which fields are mandatory on each slot.",
     initiator: { terms: "partyA", recordCount: 7 },
     responder: { terms: "partyB", recordCount: 0 },
+  },
+  {
+    name: "responder-carries-no-identity",
+    description:
+      "The responder's terms carry no `identity` -- the field is optional, and " +
+      "a party that supplied no name omits the key rather than sending an empty " +
+      "string or a stand-in. Pins that the terms slot serializes the absence as " +
+      "an absent key, and that the initiator reads the partner's identity back " +
+      "as absent rather than as a value it invented.",
+    initiator: { terms: "partyA", recordCount: 12 },
+    responder: { terms: "unnamedParty", recordCount: 34 },
   },
 ];
 
@@ -172,17 +194,17 @@ function splitFrame(frame) {
       envelope[field] = frame[field];
       continue;
     }
-    const identity = frame.linkageTerms.identity;
-    carriesLinkageTerms =
-      identity === partyATerms.identity
-        ? "partyA"
-        : identity === partyBTerms.identity
-          ? "partyB"
-          : undefined;
+    // Matched on the whole document rather than on `identity`, which is optional
+    // and absent from one fixture: the terms a frame carries are one of the
+    // fixtures above verbatim, so equality names which.
+    const carried = JSON.stringify(frame.linkageTerms);
+    carriesLinkageTerms = Object.keys(linkageTerms).find(
+      (name) => JSON.stringify(linkageTerms[name]) === carried,
+    );
     if (carriesLinkageTerms === undefined)
       throw new Error(
-        `a captured frame carries linkage terms identified as "${identity}", ` +
-          "which is neither party's fixture; the frame could not be split.",
+        "a captured frame carries linkage terms matching no fixture in this " +
+          "generator; the frame could not be split.",
       );
   }
   return { fields, envelope, carriesLinkageTerms };
@@ -191,7 +213,9 @@ function splitFrame(frame) {
 /** What the terms exchange handed each party back off the partner's envelope. */
 function readBack(result) {
   return {
-    partnerIdentity: result.partnerTerms.identity,
+    // Null rather than undefined so an absent identity survives JSON: the field
+    // is optional, and "the partner named itself none" is what this pins.
+    partnerIdentity: result.partnerTerms.identity ?? null,
     partnerRecordCount: result.partnerRecordCount,
     partnerEffectiveKeyCount: result.partnerEffectiveKeyCount,
     partnerSaveIntent: result.partnerSaveIntent,

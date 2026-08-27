@@ -64,10 +64,10 @@ export function useDirectExchange({
    * mounted-file reference. Undefined until a file is committed; {@link start}
    * refuses to run without it. */
   inputSource: JobInputSource | undefined;
-  /** The operator label threaded to the CLI's `--identity`: what the partner
-   * reads as this party's name, and what attributes the disclosure record. The
-   * confirm step will not run without one, so it arrives non-blank. */
-  identity: string;
+  /** The optional operator label threaded to the CLI's `--identity`, so the
+   * previewed identity and the disclosure record's attribution match the run.
+   * Omitted when blank. */
+  identity?: string;
   /** The optional linkage strategy forwarded to the CLI's `--linkage-strategy`. */
   linkageStrategy?: JobZeroSetupLinkageStrategy;
   /** The agreed-server step's file-handling choices, already resolved through
@@ -166,7 +166,7 @@ export function useDirectExchange({
     const driver = createServerJobZeroSetupDriver({
       transport,
       inputSource,
-      identity,
+      ...(identity !== undefined ? { identity } : {}),
       ...(linkageStrategy !== undefined ? { linkageStrategy } : {}),
       ...(options !== undefined ? { options } : {}),
       ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),

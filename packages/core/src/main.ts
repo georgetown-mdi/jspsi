@@ -191,6 +191,7 @@ export {
 } from "./utils/sshHostKey.js";
 export * from "./exchange";
 export * from "./exchangeRecord";
+export * from "./partyIdentityDisplay";
 export * from "./signedReceipt";
 export * from "./recordVerification";
 export * from "./signedReceiptVerification";

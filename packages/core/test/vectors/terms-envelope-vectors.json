@@ -105,6 +105,45 @@
           ]
         }
       ]
+    },
+    "unnamedParty": {
+      "version": "1.0.0",
+      "date": "2025-01-01",
+      "algorithm": "psi",
+      "linkageStrategy": "single-pass",
+      "output": {
+        "expectsOutput": true,
+        "shareWithPartner": true
+      },
+      "deduplicate": false,
+      "linkageFields": [
+        {
+          "name": "ssn",
+          "type": "ssn"
+        },
+        {
+          "name": "lastName",
+          "type": "last_name"
+        }
+      ],
+      "linkageKeys": [
+        {
+          "name": "SSN",
+          "elements": [
+            {
+              "field": "ssn"
+            }
+          ]
+        },
+        {
+          "name": "LN",
+          "elements": [
+            {
+              "field": "lastName"
+            }
+          ]
+        }
+      ]
     }
   },
   "scenarios": [
@@ -290,6 +329,83 @@
         "responder": {
           "partnerIdentity": "Party A",
           "partnerRecordCount": 7,
+          "partnerEffectiveKeyCount": 2,
+          "partnerSaveIntent": false,
+          "partnerDisclosesPayload": null,
+          "partnerHostKey": null,
+          "partnerHostKeyMalformed": false
+        }
+      }
+    },
+    {
+      "name": "responder-carries-no-identity",
+      "description": "The responder's terms carry no `identity` -- the field is optional, and a party that supplied no name omits the key rather than sending an empty string or a stand-in. Pins that the terms slot serializes the absence as an absent key, and that the initiator reads the partner's identity back as absent rather than as a value it invented.",
+      "initiator": {
+        "terms": "partyA",
+        "recordCount": 12
+      },
+      "responder": {
+        "terms": "unnamedParty",
+        "recordCount": 34
+      },
+      "frames": [
+        {
+          "sender": "initiator",
+          "slot": "message 1",
+          "fields": [
+            "linkageTerms",
+            "recordCount",
+            "effectiveKeyCount",
+            "protocolVersion"
+          ],
+          "envelope": {
+            "recordCount": 12,
+            "effectiveKeyCount": 2,
+            "protocolVersion": 1
+          },
+          "carriesLinkageTerms": "partyA"
+        },
+        {
+          "sender": "responder",
+          "slot": "message 2",
+          "fields": [
+            "linkageTerms",
+            "decision",
+            "recordCount",
+            "effectiveKeyCount",
+            "protocolVersion"
+          ],
+          "envelope": {
+            "decision": "proceed",
+            "recordCount": 34,
+            "effectiveKeyCount": 2,
+            "protocolVersion": 1
+          },
+          "carriesLinkageTerms": "unnamedParty"
+        },
+        {
+          "sender": "initiator",
+          "slot": "message 3",
+          "fields": ["decision"],
+          "envelope": {
+            "decision": "proceed"
+          },
+          "carriesLinkageTerms": null
+        }
+      ],
+      "reads": {
+        "initiator": {
+          "partnerIdentity": null,
+          "partnerRecordCount": 34,
+          "partnerEffectiveKeyCount": 2,
+          "partnerSaveIntent": false,
+          "partnerDisclosesPayload": null,
+          "partnerHostKey": null,
+          "partnerHostKeyMalformed": false
+        },
+        "responder": {
+          "partnerIdentity": "Party A",
+          "partnerRecordCount": 12,
           "partnerEffectiveKeyCount": 2,
           "partnerSaveIntent": false,
           "partnerDisclosesPayload": null,

@@ -244,18 +244,15 @@ function buildExchangeHandoffTemplate(
  * Compose the zero-setup mode's portable command tokens: `psilink` plus the
  * connection portion (the sftp arm's `sftp://` URL and `--server-*` flags with the
  * credential `@path` placeholdered, or the filedrop arm's placeholder `file://`
- * locator), the run's tuning flags, its identity, its linkage-strategy selector
- * when set, and the input/output positionals. The identity is always carried: the
- * graduated command reads no configuration document to take a label from, and the
- * CLI refuses a run it cannot name rather than inventing one. The sftp arm reuses
- * {@link zeroSetupSftpArgv} against a placeholder-credential entry, so
- * the URL, username, and mandatory fingerprint pin are exactly what ran while no
- * credential `@path` is emitted. The tuning flags come from
- * {@link zeroSetupOptionsArgv} -- the same builder the live run's argv uses -- so
- * a retained-transcript run graduates to a recurring command that retains
- * identically, and a run tuned for a slow peer graduates to one tuned the same
- * way; the flags name no path and carry no credential, so they are portable
- * verbatim.
+ * locator), the run's tuning flags, its identity and linkage-strategy
+ * selectors when set, and the input/output positionals. The sftp arm reuses
+ * {@link zeroSetupSftpArgv} against a placeholder-credential entry, so the URL,
+ * username, and mandatory fingerprint pin are exactly what ran while no credential
+ * `@path` is emitted. The tuning flags come from {@link zeroSetupOptionsArgv} --
+ * the same builder the live run's argv uses -- so a retained-transcript run
+ * graduates to a recurring command that retains identically, and a run tuned for
+ * a slow peer graduates to one tuned the same way; the flags name no path and
+ * carry no credential, so they are portable verbatim.
  */
 function buildZeroSetupHandoffTemplate(
   intent: JobZeroSetupIntent,
@@ -284,7 +281,7 @@ function buildZeroSetupHandoffTemplate(
     "psilink",
     ...connectionArgs,
     ...zeroSetupOptionsArgv(intent.options),
-    `--identity=${intent.identity}`,
+    ...(intent.identity !== undefined ? [`--identity=${intent.identity}`] : []),
     ...(intent.linkageStrategy !== undefined
       ? [`--linkage-strategy=${intent.linkageStrategy}`]
       : []),

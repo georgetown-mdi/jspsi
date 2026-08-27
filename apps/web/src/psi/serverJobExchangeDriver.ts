@@ -903,7 +903,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
  * `standardization`, `expectedPayloadColumns`, or
  * `expectedPartnerDeduplicate`), because both parties infer terms from their own
  * files and there is no application-layer encryption to key. It supplies only the channel, the input source, the tuning subset, and
- * the two bounded selectors the zero-setup intent carries. */
+ * the two optional bounded selectors the zero-setup intent carries. */
 export interface ServerJobZeroSetupDriverConfig {
   transport: ServerJobExchangeTransport;
   /** Where the appliance reads this party's input from ({@link JobInputSource}):
@@ -914,11 +914,10 @@ export interface ServerJobZeroSetupDriverConfig {
   /** The operator's per-run diagnostic and recovery choices, exactly as the
    * exchange mode's ({@link RunDiagnosticsIntentFields}). */
   runDiagnostics?: RunDiagnosticsIntentFields;
-  /** The operator label forwarded to the CLI's `--identity`: what the partner
-   * reads as this party's name, and what attributes the disclosure record.
-   * Required, as the intent field it fills is -- a zero-setup run has no terms
-   * document to carry a label, and the CLI refuses rather than inventing one. */
-  identity: string;
+  /** The optional operator label forwarded to the CLI's `--identity`, so the
+   * previewed identity and the disclosure record's attribution match the run.
+   * Omitted when blank -- the CLI then defaults to the appliance user. */
+  identity?: string;
   /** The optional linkage strategy forwarded to the CLI's `--linkage-strategy`
    * (a closed enum); omitted for the cascade default. */
   linkageStrategy?: JobZeroSetupLinkageStrategy;
@@ -946,7 +945,7 @@ function zeroSetupIntentFor(
       : { inputFile: { name: inputSource.name } }),
     ...(options !== undefined ? { options } : {}),
     ...config.runDiagnostics,
-    identity,
+    ...(identity !== undefined ? { identity } : {}),
     ...(linkageStrategy !== undefined ? { linkageStrategy } : {}),
     eventStream: true,
   };
@@ -1029,8 +1028,8 @@ export function createServerJobExchangeDriver(
  * and folds its event stream onto the same lifecycle events the exchange driver
  * does. It carries no shared secret and no linkage terms -- both parties run the
  * CLI's positional `$0` form against the same server, terms inferred from each
- * file -- only the input source, the tuning subset, the required identity, and
- * the optional linkage-strategy selector. The event mapping and cancellation posture are the
+ * file -- only the input source, the tuning subset, and the optional identity /
+ * linkage-strategy selectors. The event mapping and cancellation posture are the
  * exchange driver's exactly, since both share {@link runCreatedJob}.
  */
 export function createServerJobZeroSetupDriver(

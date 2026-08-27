@@ -202,6 +202,65 @@ test("one party without signing config skips the step (no half-signed exchange)"
   await initiator;
 });
 
+test("an unnamed party refuses the receipt step rather than signing", async () => {
+  // A certificate is trusted by the identity its holder used in the AGREED TERMS,
+  // and `linkage_terms.identity` is optional -- so a party that named itself none
+  // has nothing for the pin to authorize. Both sides refuse before any
+  // certificate or signature crosses the channel, and each refusal names the side
+  // that is unnamed rather than reaching for a substitute.
+  const [connInitiator, connResponder] = createMessagePipe();
+  const unnamed = prepareForExchange(
+    { linkageTerms: { ...firstNameTerms, output: both } },
+    undefined,
+    serverRows,
+    ["first_name"],
+  );
+  expect(unnamed.linkageTerms.identity).toBeUndefined();
+
+  const initiator = runExchange(
+    connInitiator,
+    "initiator",
+    prepared("Initiator Co", both, clientRows),
+    {
+      psiLibrary,
+      signingIdentity: identityA,
+      partnerFingerprint: fingerprintB,
+      sessionKey,
+    },
+  );
+  const responder = runExchange(connResponder, "responder", unnamed, {
+    psiLibrary,
+    signingIdentity: identityB,
+    partnerFingerprint: fingerprintA,
+    sessionKey,
+  });
+
+  // Settled together: both sides reject, and awaiting them one after the other
+  // would leave the second rejection unhandled while the first is asserted.
+  const [initiatorOutcome, responderOutcome] = await Promise.allSettled([
+    initiator,
+    responder,
+  ]);
+  expect(initiatorOutcome.status).toBe("rejected");
+  expect(responderOutcome.status).toBe("rejected");
+  expect(
+    String(
+      (initiatorOutcome as PromiseRejectedResult).reason instanceof Error
+        ? ((initiatorOutcome as PromiseRejectedResult).reason as Error).message
+        : "",
+    ),
+  ).toContain("the partner's agreed terms carry none");
+  expect(
+    String(
+      (responderOutcome as PromiseRejectedResult).reason instanceof Error
+        ? ((responderOutcome as PromiseRejectedResult).reason as Error).message
+        : "",
+    ),
+  ).toContain("this party's agreed terms carry none");
+  await connInitiator.close();
+  await connResponder.close();
+});
+
 test("a fingerprint-pin mismatch terminates the exchange fail-closed", async () => {
   // The responder pins the WRONG fingerprint for the initiator, so the initiator's
   // presented certificate fails the pin BEFORE its signature is checked. The
@@ -289,7 +348,13 @@ function heldByInitiator(
   return {
     pinnedFingerprints: [fingerprintB],
     localIdentity: { fingerprint: fingerprintA, source: "named" },
-    expectedIdentities: [record.localIdentity, record.partnerIdentity],
+    // Both parties named themselves in this suite's terms, which is what a run
+    // producing a receipt requires -- runExchange refuses the receipt step when
+    // either side's agreed terms carry no identity.
+    expectedIdentities: [
+      record.localIdentity ?? "",
+      record.partnerIdentity ?? "",
+    ],
     expectedTermsHash: record.termsHash,
     recordReceiptBinder: record.receiptBinder ?? null,
   };

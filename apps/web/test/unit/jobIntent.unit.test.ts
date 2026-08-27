@@ -1222,7 +1222,7 @@ describe("jobZeroSetupIntentSchema accepts the allowed fields", () => {
     ).toBe(true);
   });
 
-  test("accepts the optional linkageStrategy enum and the identity label", () => {
+  test("accepts the optional linkageStrategy enum and identity label", () => {
     for (const linkageStrategy of ["cascade", "single-pass"] as const)
       expect(
         jobZeroSetupIntentSchema.safeParse(
@@ -1231,38 +1231,10 @@ describe("jobZeroSetupIntentSchema accepts the allowed fields", () => {
       ).toBe(true);
   });
 
-  test("refuses an intent carrying no identity, which the CLI cannot stand in for", () => {
-    // The label is what the partner reads as this party's name, a zero-setup run
-    // carries no terms document to hold one, and the CLI stands in none of its
-    // own: the console supplies the label or the job does not start.
-    //
-    // The refusal is pinned by its issue PATH, not only by failing: the route's
-    // 400 is empty by design (it discloses nothing about the body it read), so
-    // the schema is the only place the reason is legible, and a later reshape
-    // that moved the field or turned the arm into a whole-object refine would
-    // still fail this parse while leaving the console nothing to point at.
-    const { identity: _omitted, ...withoutIdentity } = validZeroSetupIntent();
-    for (const intent of [
-      withoutIdentity,
-      validZeroSetupIntent({ identity: "" }),
-    ]) {
-      const parsed = jobZeroSetupIntentSchema.safeParse(intent);
-      expect(parsed.success).toBe(false);
-      if (parsed.success) return;
-      expect(
-        parsed.error.issues.some(
-          (issue) =>
-            issue.path.length === 1 && issue.path[0] === ("identity" as const),
-        ),
-      ).toBe(true);
-    }
-  });
-
   test("accepts a mounted inputFile reference in place of inputCsv", () => {
     const intent = {
       mode: "zeroSetup",
       channel: "filedrop",
-      identity: "county-health",
       inputFile: SAMPLE_INPUT_FILE_REF,
     };
     expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(true);

@@ -2203,6 +2203,44 @@ test("both parties deduplicating is compatible when both expect output", () => {
 // enough that no real configuration hits them (asserted by the boundary-accept
 // cases) but still refuse a token padded to exhaust the recipient.
 
+test("accepts terms carrying no identity, and round-trips the absence", () => {
+  // `identity` is optional: a party that supplied no name sends terms with the
+  // key absent, and nothing downstream substitutes one. Parsing must leave the
+  // field absent rather than materializing an empty string or a default, since
+  // every surface reads that absence as "this party named itself none".
+  const { identity: _unnamed, ...withoutIdentity } = base;
+  const parsed = parseLinkageTerms(withoutIdentity);
+  expect(parsed.identity).toBeUndefined();
+  expect("identity" in parsed).toBe(false);
+  // Round-trip: what the schema emits parses back to the same absence, so the
+  // document a party sends and the one its partner reads agree.
+  const reparsed = parseLinkageTerms(JSON.parse(JSON.stringify(parsed)));
+  expect(reparsed).toEqual(parsed);
+  expect("identity" in reparsed).toBe(false);
+});
+
+test("rejects an empty identity, which is a name nobody chose", () => {
+  // Optional does not mean emptiable: a party either names itself or omits the
+  // field. An empty label would print as a blank where a name belongs.
+  expect(() => parseLinkageTerms({ ...base, identity: "" })).toThrow(ZodError);
+});
+
+test("two parties may differ on whether either is named", () => {
+  // Consistency on `identity` is "none", and that holds across its absence: a
+  // named party and an unnamed one exchange without a compatibility complaint.
+  // A mutually satisfiable pair: `base` withholds its own result, which is an
+  // output mismatch against itself and would mask what this asserts.
+  const mutual = {
+    ...base,
+    output: { expectsOutput: true, shareWithPartner: true },
+  };
+  const named = parseLinkageTerms({ ...mutual, identity: "Party A" });
+  const { identity: _unnamed, ...withoutIdentity } = mutual;
+  const unnamed = parseLinkageTerms(withoutIdentity);
+  expect(validateCompatibility(named, unnamed).errors).toEqual([]);
+  expect(validateCompatibility(unnamed, named).errors).toEqual([]);
+});
+
 test("accepts an identity at exactly the maximum length", () => {
   expect(() =>
     parseLinkageTerms({ ...base, identity: "x".repeat(MAX_TEXT_LENGTH) }),
