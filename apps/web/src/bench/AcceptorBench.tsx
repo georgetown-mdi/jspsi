@@ -1516,7 +1516,8 @@ export function AcceptorBench() {
                 runDiagnosticsProblems(runDiagnostics).length > 0
               }
               receiptsBlocked={
-                acceptServerJob && receiptsProblems(receipts).length > 0
+                acceptServerJob &&
+                receiptsProblems(receipts, committedName).length > 0
               }
               splitDirectoryProblem={splitDirectoryProblem}
               onMetadataChange={changeMetadata}

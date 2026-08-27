@@ -384,6 +384,16 @@ export interface SuppliedVerificationInputs {
    * `linkage_terms`. A run reporting both artifacts prints it once, under the
    * first agreed-terms line it explains. Defaults to carrying it. */
   noteConfigTerms?: boolean;
+  /**
+   * Whether the sources this run DID supply name fewer than two parties, which is
+   * the second reason the identity check can go unperformed. `linkage_terms.identity`
+   * is optional, so a run holding the exchange record -- or both terms documents --
+   * can still have no pair to check the certificates against, and the line then
+   * names that rather than sending the operator after an input they already passed
+   * (or, where nothing is missing, past `termsRemediation`'s refusal to render an
+   * empty one).
+   */
+  unnamedParty?: boolean;
 }
 
 const NOTHING_SUPPLIED: SuppliedVerificationInputs = {
@@ -578,11 +588,22 @@ const RUN_BINDING_WORD: Record<RunBindingStatus, string> = {
     "repeat across every run of this partnership under these terms",
 };
 
+// Why the identity check went unperformed where the sources ARE in hand: the pair
+// it needs is two names, and `linkage_terms.identity` is optional. Stated as the
+// state of this exchange rather than as an input to pass, because there is none --
+// a party that ran unnamed cannot be named after the fact, and the certificate
+// beside it is checked by everything else in this section regardless.
+const UNNAMED_PARTY_IDENTITIES =
+  "not checked (this exchange names fewer than two parties: a certificate is " +
+  "checked against the name its holder used in the agreed terms, and an " +
+  "unnamed party gives it none)";
+
 function assertedIdentityWord(
   status: AssertedIdentityStatus,
   supplied: SuppliedVerificationInputs,
 ): string {
   if (status !== "not-checked") return ASSERTED_IDENTITY_WORD[status];
+  if (supplied.unnamedParty === true) return UNNAMED_PARTY_IDENTITIES;
   return (
     "not checked (no expected identities; pass the exchange record, or " +
     `${termsRemediation(supplied)})`
@@ -921,6 +942,13 @@ function signingIdentityPathFrom(
  * The identities are unordered: no artifact outside the dual-signed record records
  * which party held which handshake role, and the per-signer signature binding is
  * what fixes a certificate to its role.
+ *
+ * The pair is supplied only when BOTH parties are named. `linkage_terms.identity`
+ * is optional, and an unnamed party has nothing a certificate could be authorized
+ * against -- which is why an exchange with one refuses to produce a receipt at all
+ * (core's `runExchange`). A half-pair would anchor one signer and silently leave
+ * the other's identity check reading as performed, so the check is reported as not
+ * performed instead.
  */
 async function signedRecordExpectations(
   record: ExchangeRecord | undefined,
@@ -934,15 +962,26 @@ async function signedRecordExpectations(
 > {
   if (record !== undefined)
     return {
-      expectedIdentities: [record.localIdentity, record.partnerIdentity],
+      ...namedPair(record.localIdentity, record.partnerIdentity),
       expectedTermsHash: record.termsHash,
       recordReceiptBinder: record.receiptBinder ?? null,
     };
   if (localTerms === undefined || partnerTerms === undefined) return {};
   return {
-    expectedIdentities: [localTerms.identity, partnerTerms.identity],
+    ...namedPair(localTerms.identity, partnerTerms.identity),
     expectedTermsHash: await computeTermsHash(localTerms, partnerTerms),
   };
+}
+
+/** The `expectedIdentities` pair, present only where both parties named
+ * themselves; see {@link signedRecordExpectations}. */
+function namedPair(
+  local: string | undefined,
+  partner: string | undefined,
+): Pick<DualSignedRecordVerificationInputs, "expectedIdentities"> {
+  return local === undefined || partner === undefined
+    ? {}
+    : { expectedIdentities: [local, partner] };
 }
 
 /**
@@ -1255,6 +1294,11 @@ export async function handler(argv: Arguments): Promise<void> {
         configFile,
         configFile !== undefined,
       );
+      const expectations = await signedRecordExpectations(
+        artifact.kind === "record" ? artifact.record : undefined,
+        localTerms,
+        partnerTerms,
+      );
       const report = await verifySignedRecord(
         signedRecord,
         {
@@ -1262,11 +1306,7 @@ export async function handler(argv: Arguments): Promise<void> {
             partnerFingerprintArgs,
             signing,
           ),
-          ...(await signedRecordExpectations(
-            artifact.kind === "record" ? artifact.record : undefined,
-            localTerms,
-            partnerTerms,
-          )),
+          ...expectations,
         },
         await chosenLocalIdentity(identityFileArg, signing, log),
         log,
@@ -1277,6 +1317,13 @@ export async function handler(argv: Arguments): Promise<void> {
         // the first agreed-terms line it explains, and a combined run has
         // already printed that line above.
         noteConfigTerms: artifact.kind !== "record",
+        // A source WAS in hand -- both branches of signedRecordExpectations
+        // supply the hash -- and still yielded no identity pair, which is a
+        // party that named itself none rather than an input the operator has
+        // yet to pass.
+        unnamedParty:
+          expectations.expectedTermsHash !== undefined &&
+          expectations.expectedIdentities === undefined,
       });
       lines.push(...rendered.lines);
       exitCode = Math.max(exitCode, rendered.exitCode);

@@ -1,5 +1,4 @@
 import type { Argv, Arguments } from "yargs";
-import { userInfo } from "node:os";
 
 import {
   getLogger,
@@ -16,6 +15,7 @@ import {
   inferMetadata,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
+  redactAndSanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -34,6 +34,7 @@ import {
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
+import { resolveIdentity, resolveInvitationIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
 import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
 import {
@@ -170,7 +171,7 @@ export function resolveInvitePositionals(
     if (input === undefined)
       throw new UsageError(
         "online invitation requires an input file; usage: psilink invite " +
-          "URL INPUT_FILE [OUTPUT_FILE]",
+          "--identity IDENTITY URL INPUT_FILE [OUTPUT_FILE]",
       );
     const output =
       positionals[2] !== undefined ? String(positionals[2]) : undefined;
@@ -270,6 +271,13 @@ type InviteReady =
  * is warned-ignored rather than silently overriding it. Selecting `single-pass`
  * surfaces the disclosure-tradeoff note at this point of selection.
  *
+ * `--identity` follows the same rule, for the same reason: the two paths that
+ * author terms require it (there is no label to mint an invitation under
+ * otherwise), while the config-as-source path takes the label from the config's
+ * own `linkage_terms.identity` and warns that the flag had no effect. Every path
+ * requires one, though: an invitation names its inviter, so a configuration
+ * carrying no identity is refused rather than minted under none.
+ *
  * @internal exported for testing
  */
 export async function validateInvite(params: {
@@ -282,7 +290,6 @@ export async function validateInvite(params: {
 }): Promise<InviteReady> {
   const { resolved, options, acceptTimeout, expiresIn, linkageStrategy, log } =
     params;
-  const identity = options.identity ?? userInfo().username;
   // parseDuration yields whole milliseconds at second granularity (its smallest
   // unit), so dividing by 1000 is exact: the lifetime is always a whole number
   // of seconds, whether defaulted or overridden, and feeds expiresFromNow below.
@@ -308,6 +315,9 @@ export async function validateInvite(params: {
   // both run would read stdin twice and silently yield empty rows the second time.
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;
+    // This path authors its terms from the input file, so the label is the
+    // operator's to supply; refuse before any probe, mint, or write.
+    const identity = resolveIdentity(options.identity);
     // A non-positive accept-timeout is a pure usage error; reject it before any
     // filesystem probe or connection construction. The CLI handler already
     // rejects a non-positive or malformed value when it parses the flag
@@ -580,6 +590,28 @@ export async function validateInvite(params: {
           `linkage_strategy (${configTerms.linkageStrategy}) is used instead. ` +
           `Edit linkage_strategy in ${options.configFile} to change it.`,
       );
+    // The identity is one of those terms, so it is governed by the same rule:
+    // the config supplies the label this invitation is minted under, and a flag
+    // typed here is reported rather than silently dropped. A configuration
+    // carrying none refuses instead -- an invitation names its inviter, and this
+    // path cannot write the label anywhere the partnership's later runs would
+    // read it. A blank flag value is nothing to report -- it is what a scripted
+    // `--identity "$ORG"` sends with ORG unset, and the config would carry this
+    // run either way.
+    const configIdentity = resolveInvitationIdentity(
+      configTerms.identity,
+      options.configFile,
+    );
+    const suppliedIdentity = options.identity?.trim();
+    if (suppliedIdentity)
+      log.warn(
+        `--identity "${redactAndSanitizeForDisplay(suppliedIdentity)}" has no effect ` +
+          "when the linkage terms come from an existing configuration file; " +
+          "the file's linkage_terms.identity " +
+          `("${redactAndSanitizeForDisplay(configIdentity)}") is used instead. ` +
+          "Edit linkage_terms.identity in " +
+          `${redactAndSanitizeForDisplay(options.configFile)} to change it.`,
+      );
     // Config-as-source: the config supplies the linkage terms and persists
     // unchanged. The config read above is the mode discriminator -- it must run
     // first to know a config exists -- but it is a pure read; the only conflict
@@ -753,11 +785,15 @@ export async function validateInvite(params: {
     };
   }
 
-  // No config: infer terms from the input file, then write both files.
+  // No config: infer terms from the input file, then write both files. Nothing
+  // here carries a label, so it is the operator's to supply, refused ahead of
+  // the input read and the token mint below.
+  const identity = resolveIdentity(options.identity);
   if (resolved.input === undefined)
     throw new UsageError(
       "generating an invitation requires an input file or a pre-existing " +
-        "configuration file; usage: psilink invite [INPUT_FILE]",
+        "configuration file; usage: psilink invite --identity IDENTITY " +
+        "[INPUT_FILE]",
     );
   assertNoProvisionConflicts({
     configPath: options.configFile,
@@ -1192,6 +1228,16 @@ export function offlineAbandonNotice(keyPath: string): string {
  */
 const INVITATION_PLACEHOLDER = "<INVITATION>";
 
+/** The identity placeholder the accept templates carry. Accepting requires the
+ * partner's own label -- psilink stands in none -- so the template names the flag
+ * where the partner meets the command, rather than leaving the refusal to teach
+ * it. A placeholder for the same reason `<INPUT_FILE>` is: nobody but the partner
+ * can choose the name their side is known by. Left unquoted like its siblings, so
+ * a partner who pastes the template unreplaced gets a shell redirect error
+ * instead of a run that accepts under the literal placeholder text; the partner
+ * quotes their filled-in value themselves if it contains spaces. */
+const IDENTITY_PLACEHOLDER = "--identity <YOUR NAME, YOUR ORGANIZATION>";
+
 /**
  * Print the invitation string (to stdout, so it is captured even at a quiet log
  * level) with the usage instructions for the partner. An online file-sync
@@ -1218,7 +1264,7 @@ function printInvitation(
   console.log(invitation);
   if (online === undefined) {
     log.info(
-      `Your partner accepts with:\n  psilink accept ` +
+      `Your partner accepts with:\n  psilink accept ${IDENTITY_PLACEHOLDER} ` +
         `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nwhere ` +
         `${INVITATION_PLACEHOLDER} is the invitation printed above.`,
     );
@@ -1227,9 +1273,9 @@ function printInvitation(
   if (online.channel === "webrtc") {
     log.info(
       `Your partner accepts and runs the exchange with:\n  psilink accept ` +
-        `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nrun while this command is ` +
-        `still waiting, where ${INVITATION_PLACEHOLDER} is the invitation ` +
-        "printed above.",
+        `${IDENTITY_PLACEHOLDER} ${INVITATION_PLACEHOLDER} <INPUT_FILE>\nrun ` +
+        `while this command is still waiting, where ` +
+        `${INVITATION_PLACEHOLDER} is the invitation printed above.`,
     );
     return;
   }
@@ -1237,8 +1283,8 @@ function printInvitation(
   // supplies their own, and a password must not reach the terminal or logs.
   log.info(
     `Your partner accepts and runs the exchange with:\n  psilink accept ` +
-      `${redactUrlCredentials(online.url)} ${INVITATION_PLACEHOLDER} ` +
-      `<INPUT_FILE>\nwhere ${INVITATION_PLACEHOLDER} is the invitation ` +
-      "printed above.",
+      `${IDENTITY_PLACEHOLDER} ${redactUrlCredentials(online.url)} ` +
+      `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nwhere ` +
+      `${INVITATION_PLACEHOLDER} is the invitation printed above.`,
   );
 }

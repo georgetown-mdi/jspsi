@@ -3,10 +3,10 @@ import { describe, expect, test } from "vitest";
 import {
   BEL,
   ESC,
+  HOSTILE_IDENTITY,
   PRINTABLE_ASCII,
   RLO,
   hostileSource,
-  hostileTerms,
   hostileVariants,
 } from "../src/displayEscapingFixtures.js";
 import { summarizeInvitation } from "../src/invitationSummary.js";
@@ -96,7 +96,7 @@ function presentPositions(
 
 describe("the display-struct brand", () => {
   test("rejects an un-sanitized string in a display struct", () => {
-    const raw: string = hostileTerms.identity;
+    const raw: string = HOSTILE_IDENTITY;
     const agreement: InvitationLegalAgreementSummary = {
       // @ts-expect-error -- a field filled without the sanitize call
       reference: raw,
@@ -107,7 +107,7 @@ describe("the display-struct brand", () => {
   });
 
   test("rejects an un-sanitized string in each display struct that carries partner text", () => {
-    const raw: string = hostileTerms.identity;
+    const raw: string = HOSTILE_IDENTITY;
     // @ts-expect-error -- the inviter's self-asserted identity
     const invitingParty: InvitationSummary["invitingParty"] = raw;
     // @ts-expect-error -- a linkage key's partner-authored name
@@ -132,7 +132,7 @@ describe("the display-struct brand", () => {
   });
 
   test("accepts a sanitizeForDisplay return value", () => {
-    const sanitized = sanitizeForDisplay(hostileTerms.identity);
+    const sanitized = sanitizeForDisplay(HOSTILE_IDENTITY);
     const invitingParty: InvitationSummary["invitingParty"] = sanitized;
     const agreement: InvitationLegalAgreementSummary = {
       reference: sanitized,

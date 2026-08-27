@@ -59,11 +59,11 @@ Two invitation flows are supported: an offline flow where no server is involved 
 |---|---|
 | Zero-setup exchange (both parties) | `psilink URL input.csv` |
 | Generate a config file for editing | `psilink init [input.csv]` |
-| Start a recurring exchange relationship (offline) | `psilink invite [input.csv]`, then share the invitation string out-of-band |
-| Start a recurring exchange relationship and exchange (server-coordinated) | `psilink invite URL input.csv`, then share the invitation string; the exchange runs on acceptance |
-| Accept an offline invitation | `psilink accept INVITATION [input.csv]` |
-| Accept a WebRTC invitation and exchange | `psilink accept INVITATION input.csv` |
-| Accept a server-coordinated invitation and exchange | `psilink accept URL INVITATION input.csv` |
+| Start a recurring exchange relationship (offline) | `psilink invite --identity IDENTITY [input.csv]`, then share the invitation string out-of-band |
+| Start a recurring exchange relationship and exchange (server-coordinated) | `psilink invite --identity IDENTITY URL input.csv`, then share the invitation string; the exchange runs on acceptance |
+| Accept an offline invitation | `psilink accept --identity IDENTITY INVITATION [input.csv]` |
+| Accept a WebRTC invitation and exchange | `psilink accept --identity IDENTITY INVITATION input.csv` |
+| Accept a server-coordinated invitation and exchange | `psilink accept --identity IDENTITY URL INVITATION input.csv` |
 | Recurring exchange | `psilink exchange input.csv` |
 | Zero-setup exchange, establish recurring relationship (both parties) | `psilink --save URL input.csv` |
 | Re-establish after lost secret | Delete key file on both sides; re-run `psilink invite` and `psilink accept` |

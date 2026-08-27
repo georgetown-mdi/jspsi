@@ -604,7 +604,7 @@ export function linkageRuleSetReferenceFor(
  */
 export function linkageTermsFromRuleSet(
   ruleSet: BuiltInLinkageRuleSet,
-  identity: string,
+  identity: string | undefined,
   metadata?: Metadata,
 ): LinkageTerms {
   let linkageKeys: LinkageKey[];
@@ -631,7 +631,9 @@ export function linkageTermsFromRuleSet(
 
   return {
     version: "1.0.0",
-    identity,
+    // Omitted rather than emptied when the caller has no label: `identity` is
+    // optional in the terms, and a party that supplied none sends none.
+    ...(identity !== undefined && { identity }),
     date: new Date().toISOString().substring(0, 10),
     algorithm: "psi",
     linkageStrategy: "cascade",
@@ -653,7 +655,7 @@ export function linkageTermsFromRuleSet(
  * nothing selects.
  */
 export function getDefaultLinkageTerms(
-  identity: string,
+  identity: string | undefined,
   metadata?: Metadata,
 ): LinkageTerms {
   return linkageTermsFromRuleSet(DEFAULT_LINKAGE_RULE_SET, identity, metadata);

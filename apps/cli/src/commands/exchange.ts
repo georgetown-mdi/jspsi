@@ -1,6 +1,5 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
-import { userInfo } from "node:os";
 
 import {
   parseExchangeSpec,
@@ -35,6 +34,7 @@ import {
   type KeyFile,
   type KeyFileExpiryStatus,
 } from "../keyFile";
+import { optionalIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveReceiptOutput } from "../receiptFile";
 import { warnOnIdentityDivergence } from "../signingIdentityDivergence";
@@ -693,7 +693,7 @@ export interface OutboundConsentContext {
 /** @internal exported for testing */
 export async function prepareDataset(
   exchangeDataSpec: ExchangeDataSpec,
-  identity: string,
+  identity: string | undefined,
   input: string,
   outboundConsent: OutboundConsentContext,
 ): Promise<PreparedExchange> {
@@ -952,29 +952,28 @@ export async function handler(argv: Arguments): Promise<void> {
     }
 
     // termsIdentity is the identity this run PUTS IN THE AGREED TERMS, which is
-    // what a partner verifies a signed receipt's certificate against. On this
-    // path it is always set: loadConfig parses through ExchangeSpecSchema, which
-    // requires linkage_terms, and LinkageTermsSchema requires a non-empty
-    // identity. The fallback below discharges ExchangeDataSpec's optional type,
-    // not a live case.
-    let identity: string;
+    // what a partner verifies a signed receipt's certificate against. It comes
+    // from --identity, else the loaded configuration's linkage_terms.identity,
+    // and is absent when neither names this party: the terms then carry no
+    // identity at all rather than a label the operator never chose. A blank flag
+    // value is what a scripted `--identity "$ORG"` sends with ORG unset, so it
+    // reads as absent and leaves the configuration's own label standing.
     let termsIdentity: string | undefined;
-    if (options.identity) {
-      identity = options.identity;
-      termsIdentity = identity;
+    const flagIdentity = optionalIdentity(options.identity);
+    if (flagIdentity !== undefined) {
+      termsIdentity = flagIdentity;
       if (exchangeDataSpec.linkageTerms)
         exchangeDataSpec.linkageTerms = {
           ...exchangeDataSpec.linkageTerms,
-          identity,
+          identity: flagIdentity,
         };
     } else {
       termsIdentity = exchangeDataSpec.linkageTerms?.identity;
-      identity = termsIdentity ?? userInfo().username;
     }
 
     let prepared: PreparedExchange;
     try {
-      prepared = await prepareDataset(exchangeDataSpec, identity, input, {
+      prepared = await prepareDataset(exchangeDataSpec, termsIdentity, input, {
         configPath: options.configFile,
         logFile,
       });

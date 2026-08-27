@@ -969,7 +969,7 @@ describe("serialize / parse", () => {
 
   test("parseExchangeRecord rejects an unrecognized version", async () => {
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const bumped = { ...record, version: "psilink-exchange-record/v5" };
+    const bumped = { ...record, version: "psilink-exchange-record/v6" };
     expect(() => parseExchangeRecord(bumped)).toThrow();
   });
 

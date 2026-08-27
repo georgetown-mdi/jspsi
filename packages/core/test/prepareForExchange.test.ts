@@ -4,13 +4,16 @@ import {
   prepareForExchange,
   runExchange,
   assertAlgorithmImplemented,
+  assertCertificateModeNamesLocalParty,
   assertCertificateModePinsPartner,
+  assertSignedReceiptNamesBothParties,
   assertSigningModeImplemented,
 } from "../src/exchange";
 import {
   assertPartnerCertificateTrusted,
   generateSigningIdentity,
 } from "../src/signingIdentity";
+import { ReceiptVerificationError } from "../src/signedReceipt";
 import {
   OperatorConfigError,
   StandardizationTermsError,
@@ -853,6 +856,166 @@ describe("assertCertificateModePinsPartner", () => {
         assertPartnerCertificateTrusted(certificate, pin),
       ).rejects.toThrow(/no pinned partner fingerprint/);
     }
+  });
+});
+
+// --- Certificate mode with an unnamed party fails closed before connecting ---
+
+describe("prepareForExchange: certificate mode with no local identity is refused", () => {
+  const { identity: _named, ...unnamedTerms } = terms;
+  const prepareUnnamed = (signing?: SigningConfig) =>
+    prepareForExchange(
+      { linkageTerms: unnamedTerms, metadata, signing },
+      undefined,
+      rawRows,
+      columns,
+    );
+
+  test("an unnamed certificate-mode party is refused before connecting", () => {
+    // A certificate is trusted by the identity its holder used in the agreed
+    // terms, so an unnamed party leaves its partner nothing to check the
+    // certificate against and the signature swap refuses the step -- after the
+    // payloads have crossed. Refused here instead, as the same
+    // OperatorConfigError its pin and signing-mode siblings raise.
+    expect(() =>
+      prepareUnnamed({ mode: "certificate", partnerFingerprint }),
+    ).toThrow(OperatorConfigError);
+    expect(() =>
+      prepareUnnamed({ mode: "certificate", partnerFingerprint }),
+    ).toThrow(/linkage_terms\.identity/);
+  });
+
+  test("a named party under certificate mode prepares normally", () => {
+    const prepared = prepareForExchange(
+      {
+        linkageTerms: terms,
+        metadata,
+        signing: { mode: "certificate", partnerFingerprint },
+      },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.linkageTerms.identity).toBe("Tester");
+  });
+
+  test("an unnamed party runs unsigned: mode none, an absent block, and no block at all", () => {
+    // The gate binds the certificate-signing configuration alone. An unnamed
+    // quick exchange -- the whole point of an optional identity -- is asked
+    // nothing, whether it states mode none or no signing block.
+    expect(prepareUnnamed({ mode: "none" }).rowCount).toBe(1);
+    expect(prepareUnnamed(undefined).rowCount).toBe(1);
+    expect(
+      prepareForExchange({ metadata }, undefined, rawRows, columns).linkageTerms
+        .identity,
+    ).toBeUndefined();
+  });
+});
+
+// --- assertCertificateModeNamesLocalParty (the shared guard) -----------------
+
+describe("assertCertificateModeNamesLocalParty", () => {
+  const { identity: _named, ...unnamedTerms } = terms;
+
+  test("refuses certificate mode over terms carrying no identity", () => {
+    expect(() =>
+      assertCertificateModeNamesLocalParty(
+        { mode: "certificate" },
+        unnamedTerms,
+      ),
+    ).toThrow(OperatorConfigError);
+  });
+
+  test("passes certificate mode over terms that name the party", () => {
+    expect(() =>
+      assertCertificateModeNamesLocalParty({ mode: "certificate" }, terms),
+    ).not.toThrow();
+  });
+
+  test("passes every mode that signs nothing, named or not", () => {
+    expect(() =>
+      assertCertificateModeNamesLocalParty({ mode: "none" }, unnamedTerms),
+    ).not.toThrow();
+    expect(() =>
+      assertCertificateModeNamesLocalParty(
+        { mode: "session-derived" },
+        unnamedTerms,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertCertificateModeNamesLocalParty(undefined, unnamedTerms),
+    ).not.toThrow();
+  });
+
+  test("reads the value the receipt step reads, not the identity argument", () => {
+    // runExchange destructures `linkageTerms` off the PreparedExchange and
+    // refuses the signature swap when its identity is absent, so the gate is held
+    // to that same resolved value: a spec carrying its own terms keeps their
+    // identity whatever the identity argument says. A gate reading the argument
+    // instead would pass a run the swap then refuses after the payloads crossed.
+    const prepared = prepareForExchange(
+      { linkageTerms: unnamedTerms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.linkageTerms.identity).toBeUndefined();
+    expect(() =>
+      assertCertificateModeNamesLocalParty(
+        { mode: "certificate", partnerFingerprint },
+        prepared.linkageTerms,
+      ),
+    ).toThrow(OperatorConfigError);
+  });
+});
+
+// --- assertSignedReceiptNamesBothParties (held at two points in a run) -------
+
+describe("assertSignedReceiptNamesBothParties", () => {
+  const { identity: _named, ...unnamedTerms } = terms;
+  const partnerTerms: LinkageTerms = { ...terms, identity: "Partner Co" };
+
+  test("returns both names when both parties are named", () => {
+    expect(assertSignedReceiptNamesBothParties(terms, partnerTerms)).toEqual({
+      local: "Tester",
+      partner: "Partner Co",
+    });
+  });
+
+  test("names the unnamed side, on each of the three ways a pair can be", () => {
+    // The message is what tells the operator which configuration to change, and
+    // the two sides are not interchangeable: only one of them is theirs to fix.
+    const raised = (local: LinkageTerms, partner: LinkageTerms) => {
+      try {
+        assertSignedReceiptNamesBothParties(local, partner);
+      } catch (err) {
+        return err;
+      }
+      throw new Error("expected a refusal, got a named pair");
+    };
+    expect(raised(terms, unnamedTerms)).toBeInstanceOf(
+      ReceiptVerificationError,
+    );
+    expect((raised(terms, unnamedTerms) as Error).message).toContain(
+      "the partner's agreed terms carry none",
+    );
+    expect((raised(unnamedTerms, partnerTerms) as Error).message).toContain(
+      "this party's agreed terms carry none",
+    );
+    expect((raised(unnamedTerms, unnamedTerms) as Error).message).toContain(
+      "neither party's agreed terms carry an identity",
+    );
+  });
+
+  test("every refusal names the remedy on both sides", () => {
+    for (const pair of [
+      [terms, unnamedTerms],
+      [unnamedTerms, partnerTerms],
+      [unnamedTerms, unnamedTerms],
+    ] as const)
+      expect(() =>
+        assertSignedReceiptNamesBothParties(pair[0], pair[1]),
+      ).toThrow(/linkage_terms\.identity on both sides/);
   });
 });
 

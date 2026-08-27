@@ -15,6 +15,7 @@ import {
   ReceiptVerificationError,
   causeChainSome,
   isPeerWaitTimeout,
+  redactAndDisplayPartyIdentity,
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
   UsageError,
@@ -173,6 +174,28 @@ export const SIGNING_WITHOUT_RECORD_WARNING =
   "exchange record, and the record cannot be reconstructed after the " +
   "exchange. Keep the record (drop --no-record) if you retain receipts as " +
   "evidence, or drop the signing block if you do not.";
+
+/**
+ * What the "terms agreed" line adds when the partner named nobody on a run that
+ * files an exchange record.
+ *
+ * `linkage_terms.identity` is optional, and a record for a partner that supplied
+ * none omits `partnerIdentity` rather than inventing one -- so the record states
+ * every other accounting element (the terms hash, the purpose, the timestamps,
+ * the counts) but not who the other party was. The absence marker on its own
+ * reads as benign, which is exactly wrong for an operator who files these records
+ * toward an accounting of disclosures; naming the consequence at the moment the
+ * terms are agreed is what lets them re-run with a named partner rather than
+ * discover the gap at audit time.
+ *
+ * One sentence, and no advice about whether to proceed: an unnamed partner is the
+ * ordinary shape of a quick, unsigned run, and this fires only where a record is
+ * actually being written. See docs/COMPLIANCE.md (HIPAA considerations).
+ */
+export const UNNAMED_PARTNER_ACCOUNTING_NOTE =
+  "-- this exchange's record will carry no partner name, so an accounting of " +
+  "disclosures drawn from it must take the recipient from your own records of " +
+  "who this exchange was with.";
 
 /**
  * CLI-layer extension of {@link Authentication} that co-locates the path where
@@ -1621,11 +1644,31 @@ export async function runProtocol(
         onProtocolConfirmed: (partnerTerms, resolvedRole) => {
           // identity is partner-controlled free text with no consistency check
           // (a mutually-distrusting party sets it), so escape it before it
-          // reaches the operator's terminal/logs.
-          log.info(
+          // reaches the operator's terminal/logs. A partner that supplied none
+          // is reported as unnamed rather than as an empty line.
+          //
+          // On a run that files a record, that absence carries a consequence the
+          // marker alone does not: the record this exchange writes will carry no
+          // partnerIdentity, so an accounting of disclosures that cites it has to
+          // take the recipient from the operator's own notes. Warn rather than
+          // inform for that one case, and say what follows from it in the same
+          // line -- an unnamed partner is the ordinary shape of a quick run, so
+          // the copy states the consequence and stops there. It also rides the
+          // machine-interface warning event, for the same unattended-supervisor
+          // reason as SIGNING_WITHOUT_RECORD_WARNING: a job runner that discards
+          // stderr on success must still see the one control that catches an
+          // accounting gap before it compounds run after run.
+          const line = [
             "terms agreed, partner identity:",
-            redactAndSanitizeForDisplay(partnerTerms.identity),
-          );
+            redactAndDisplayPartyIdentity(partnerTerms.identity),
+          ] as const;
+          if (
+            recordOutput !== undefined &&
+            partnerTerms.identity === undefined
+          ) {
+            log.warn(...line, UNNAMED_PARTNER_ACCOUNTING_NOTE);
+            emit((e) => e.warning(UNNAMED_PARTNER_ACCOUNTING_NOTE));
+          } else log.info(...line);
           log.info("role:", resolvedRole);
         },
       },

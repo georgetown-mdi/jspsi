@@ -249,6 +249,51 @@ describe("accept kit, the account the container runs as", () => {
     }
   });
 
+  test("the identity the accept command needs is outside the skippable section", () => {
+    // psilink names a party only from what the operator gives it, so every
+    // reader's accept stops without the flag -- not only the Docker Engine
+    // reader who takes --user. The engine section below is one a whole reader
+    // class is told to skip, so the guidance sits ahead of it and ahead of the
+    // first command it qualifies.
+    for (const endpoint of [FILEDROP, SFTP]) {
+      const text = sheet(endpoint);
+      const flag = text.indexOf('--identity "YOUR NAME, YOUR ORGANIZATION"');
+      expect(flag).toBeGreaterThan(-1);
+      expect(flag).toBeLessThan(text.indexOf("WHICH DOCKER DO YOU HAVE?"));
+      expect(flag).toBeLessThan(text.indexOf("docker run"));
+      const section = text
+        .split("THE NAME YOUR PARTNER SEES")[1]
+        .split("WHICH DOCKER DO YOU HAVE?")[0];
+      expect(section).toContain("what your partner reads as who");
+      expect(section).toContain("accepting stops and asks");
+    }
+  });
+
+  test("the identity is scoped to the accept command, not the exchange run", () => {
+    // The exchange steps take the label from the psilink.yaml the accept step
+    // wrote, so an instruction to add the flag to every command on the sheet
+    // would send the reader to type one where it is not needed -- and read as a
+    // refusal the exchange run does not make.
+    for (const endpoint of [FILEDROP, SFTP]) {
+      const section = sheet(endpoint)
+        .split("THE NAME YOUR PARTNER SEES")[1]
+        .split("WHICH DOCKER DO YOU HAVE?")[0];
+      expect(section).toContain("the end of the accept");
+      expect(section).toContain("psilink.yaml");
+      expect(section).toContain("needs no flag");
+      expect(section).not.toContain("every psilink");
+    }
+  });
+
+  test("no copy-pasteable command carries a pre-filled identity", () => {
+    // An unreplaced placeholder inside a command the reader pastes whole would
+    // ship as this party's name. The flag travels as its own line instead, and
+    // the value is shouted so an unreplaced one is unmistakable on both sides.
+    for (const endpoint of [FILEDROP, SFTP])
+      for (const line of sheet(endpoint).split("\n"))
+        if (line.includes("docker run")) expect(line).not.toContain("identity");
+  });
+
   test("the flag's scope names the second folder each channel mounts", () => {
     // Every command carries two mounts, and the chown fallback reaches only
     // the first: the flag is what covers the shared folder (/sync) and the

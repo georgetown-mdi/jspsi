@@ -1,6 +1,5 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
-import { userInfo } from "node:os";
 
 import {
   getLogger,
@@ -25,6 +24,7 @@ import {
 import { openEventStream, reportPersistenceLoss } from "../eventStream";
 import { detectFileConflicts, expandTilde } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
+import { optionalIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveConnectionCredentials } from "../util/atSignRefs";
 import { establishHostKeyTrust } from "../hostKeyTrust";
@@ -279,7 +279,7 @@ export function createConnection(
 }
 
 async function prepareDataset(
-  identity: string,
+  identity: string | undefined,
   input: string,
   linkageStrategy: LinkageStrategy | undefined,
 ): Promise<PreparedExchange> {
@@ -655,8 +655,15 @@ export async function handler(argv: Arguments): Promise<void> {
       // the exchange itself. A missing or unreadable `@path` file is a UsageError
       // here (exit 64), before any credential is sent.
       liveConnection = resolveConnectionCredentials(connection);
-      const identity = options.identity ?? userInfo().username;
-      prepared = await prepareDataset(identity, input, linkageStrategy);
+      // The quick path asks nothing and requires nothing: `--identity` rides
+      // into the terms when it names this party, and the terms carry none when
+      // it does not. A blank value is what a scripted `--identity "$ORG"` sends
+      // with ORG unset, so it reads as absent rather than as an empty label.
+      prepared = await prepareDataset(
+        optionalIdentity(options.identity),
+        input,
+        linkageStrategy,
+      );
     } catch (err) {
       // A bad URL scheme or unsupported channel is a usage error (exit 64);
       // prepareDataset failures carry their own exitCode; otherwise exit 69.

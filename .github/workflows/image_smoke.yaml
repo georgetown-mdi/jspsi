@@ -332,7 +332,7 @@ jobs:
           invite_stderr="$work/invite.stderr"
           invite_status=0
           invitation=$(cli inviter invite input.csv --linkage-strategy single-pass \
-            2>"$invite_stderr") || invite_status=$?
+            --identity "CI Smoke Inviter" 2>"$invite_stderr") || invite_status=$?
           if [ "$invite_status" != 0 ]; then
             echo "invite exited $invite_status" >&2
             echo "it wrote ${#invitation} bytes to stdout, and $(wc -c <"$invite_stderr") bytes over $(wc -l <"$invite_stderr") lines to stderr, withheld here because that stream repeats the invitation" >&2
@@ -341,7 +341,7 @@ jobs:
           repoint inviter
           key_before=$(sudo sha256sum "$work/inviter/.psilink.key" | cut -d " " -f 1)
 
-          cli acceptor accept "$invitation" input.csv --consent-to-terms
+          cli acceptor accept "$invitation" input.csv --consent-to-terms --identity "CI Smoke Acceptor"
           repoint acceptor
 
           inviter_cid=$(docker run -d \
@@ -578,6 +578,11 @@ jobs:
       # SFTP is deliberately not exercised: the variant cannot reach a server
       # offering only curve25519 key exchange, which is a documented limitation
       # rather than a regression (docs/notes/fips-variant-image.md).
+      #
+      # No `--identity` on either party, deliberately: the quick path asks
+      # nothing and requires nothing, so this run is the standing check that it
+      # completes for a party that names itself none. The invite/accept step
+      # above passes one, because those legs do require it.
       - name: Run a full exchange end-to-end in the image
         if: matrix.fips == 'true'
         run: |

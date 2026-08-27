@@ -24,6 +24,7 @@ import {
   BEL,
   COUNT_ONLY_PROBE_TERMS,
   ESC,
+  HOSTILE_IDENTITY,
   PRINTABLE_ASCII,
   RLO,
   consentRepresentationProbes,
@@ -871,8 +872,10 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
     renderTerms(terms, perspective ? { perspective } : undefined);
   }
 
-  const noteText =
-    "Your partner entered this name; psilink has not verified it.";
+  // Read from core rather than transcribed: the note is the consent fact's own
+  // copy, and a literal here would let the screen drift from it while this
+  // suite stayed green.
+  const noteText = CONSENT_FACTS.invitingParty.note;
 
   test("the unverified-identity note appears on the acceptor review screen", async () => {
     render("review");
@@ -2861,7 +2864,7 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
         outboundColumns: [`hea${BEL}der`],
         expires: hostileSource.expires,
       },
-      [hostileTerms.identity, `disclo${RLO}sed`, `hea${BEL}der`],
+      [HOSTILE_IDENTITY, `disclo${RLO}sed`, `hea${BEL}der`],
     );
   });
 });

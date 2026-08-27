@@ -253,7 +253,8 @@ export function ReviewCreateSection({
   const runDiagnosticsBlocked =
     exchangeFilesOffered && runDiagnosticsProblems(runDiagnostics).length > 0;
   const receiptsBlocked =
-    exchangeFilesOffered && receiptsProblems(receipts).length > 0;
+    exchangeFilesOffered &&
+    receiptsProblems(receipts, editor.draft.identity).length > 0;
   // The SFTP session mode applies only where a session exists, so the card
   // withholds it on the shared-directory transport.
   const tuningCapabilities =

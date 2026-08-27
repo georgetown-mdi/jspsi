@@ -165,7 +165,7 @@ export function ReceiptsCard({
   // there, which is why the check is deliberate rather than redundant.
   const clipboardAvailable =
     typeof navigator !== "undefined" && Boolean(navigator.clipboard);
-  const problems = receiptsProblems(draft);
+  const problems = receiptsProblems(draft, identity);
   const advisories = receiptsAdvisories(draft, rendezvous);
   const warnings = advisories.filter(
     (advisory) => advisory.severity === "warning",

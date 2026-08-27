@@ -115,6 +115,11 @@ const minimalLinkageTerms = {
   linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
 };
 
+// A canonical partner pin: 43 unpadded base64url characters, the shape
+// SigningConfigSchema admits, so a certificate-mode config carrying it is held up
+// by whatever else the run refuses rather than by the pin gate.
+const PARTNER_FINGERPRINT = "iWD-ZB69Oz6gOpaX_OoC7sD8ohIZj2lETC9qbl-IbPg";
+
 const minimalSFTPConfig = {
   connection: { channel: "sftp", server: { host: "sftp.example.org" } },
   linkageTerms: minimalLinkageTerms,
@@ -366,10 +371,14 @@ test.each([
 );
 
 // warnOnIdentityDivergence (signingIdentityDivergence.ts) returns silently when
-// termsIdentity is absent or empty. On this path that branch is unreachable only
-// because the schema refuses both shapes below; pin the refusals directly so a
-// schema change that let either through would fail here rather than leave the
-// divergence warning silently vanishing.
+// termsIdentity is absent or empty. Absent is a shape this path reaches: terms
+// may omit the identity, and the silence is right there -- no configured name
+// exists for a certificate to diverge from, and a run that would sign under one
+// is refused outright before it starts (see the certificate-mode gate below).
+// Empty is not, and neither is terms missing altogether: the schema refuses both.
+// Pin all three directly, so a schema change admitting a blank label -- which
+// warnOnIdentityDivergence reads as absence and passes over in silence -- fails
+// here.
 
 test("a config with no linkage_terms is refused, not silently accepted", () => {
   fs.writeFileSync(
@@ -396,6 +405,21 @@ test("a config with an empty linkage_terms.identity is refused, not silently acc
   expect(() => loadConfig(baseOptions())).toThrow(
     "is not a valid exchange spec",
   );
+});
+
+test("a config whose linkage_terms omit the identity loads, carrying none", () => {
+  // The third shape, and the admissible one: the field is optional, so this
+  // config is accepted and its terms carry no identity at all -- which is what
+  // makes warnOnIdentityDivergence's absent branch reachable rather than dead.
+  // Nothing stands a label in it.
+  const { identity: _named, ...unnamedTerms } = minimalLinkageTerms;
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({ ...minimalFiledropConfig, linkageTerms: unnamedTerms }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const loaded = loadConfig(baseOptions());
+  expect(loaded.linkageTerms?.identity).toBeUndefined();
 });
 
 test("a schema-invalid config renders readably, not as a raw ZodError blob", () => {
@@ -1301,6 +1325,107 @@ test("handler compares the signing identity against --identity when it is given"
   expect(warning).toContain('"Overridden Party"');
 });
 
+test("handler takes the run's identity from the configuration", async () => {
+  // The label is the config's when it carries one; an empty string is refused by
+  // the schema (see the empty-identity config case above) rather than reaching
+  // here, and no lookup stands behind either -- partyIdentity.test.ts pins that
+  // across the whole CLI source.
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: new Date(Date.now() + 365 * 86_400_000).toISOString(),
+  });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  vi.mocked(prepareForExchange).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler({
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+  } as unknown as Arguments);
+  expect(vi.mocked(prepareForExchange).mock.calls[0][1]).toBe("Test Party");
+});
+
+test("handler treats a blank --identity as absent, falling back to the config", async () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: new Date(Date.now() + 365 * 86_400_000).toISOString(),
+  });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  vi.mocked(prepareForExchange).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler({
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+    identity: "   ",
+  } as unknown as Arguments);
+  expect(vi.mocked(prepareForExchange).mock.calls[0][1]).toBe("Test Party");
+});
+
+test("handler runs a configuration carrying no identity, sending none", async () => {
+  // `linkage_terms.identity` is optional, so a configuration that names this
+  // party nothing runs -- the terms carry no identity rather than a label the
+  // operator never chose, and nothing is read off the account psilink runs as.
+  const { identity: _dropped, ...unnamedTerms } = minimalLinkageTerms;
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({ ...minimalFiledropConfig, linkageTerms: unnamedTerms }),
+  );
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: new Date(Date.now() + 365 * 86_400_000).toISOString(),
+  });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  vi.mocked(prepareForExchange).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler({
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+  } as unknown as Arguments);
+  expect(vi.mocked(prepareForExchange).mock.calls[0][1]).toBeUndefined();
+});
+
+test("handler trims a supplied --identity before using it", async () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: new Date(Date.now() + 365 * 86_400_000).toISOString(),
+  });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  vi.mocked(prepareForExchange).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler({
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+    identity: " Agency A ",
+  } as unknown as Arguments);
+  expect(vi.mocked(prepareForExchange).mock.calls[0][1]).toBe("Agency A");
+});
+
 // --- handler: --invitation provisioning --------------------------------------
 // These drive the handler's provisioning step, which runs before the key file is
 // read: --invitation decodes an invitation code and writes the composing party's
@@ -1515,6 +1640,96 @@ test("handler: certificate mode with no partner pin exits 64 before runProtocol"
     const reported = mockState.errors.join("\n");
     expect(reported).toContain("signing.partner_fingerprint");
     expect(reported).toContain("psilink fingerprint");
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: certificate mode with an unnamed party exits 64 before runProtocol", async () => {
+  // The sibling of the pin gate above, and pinned the same way: the refusal is
+  // core's alone (assertCertificateModeNamesLocalParty, inside
+  // prepareForExchange), so this drives the REAL prepare rather than the
+  // top-of-file stub. `linkage_terms.identity` is optional, so the terms below
+  // are a shape the schema admits and only the signing configuration makes
+  // unrunnable -- the seam has to be reached on the exchange leg ahead of the run
+  // that carries credentials, terms, and data, and its remedy has to reach the
+  // operator as a usage error (exit 64).
+  const core =
+    await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+  const { identity: _named, ...unnamedTerms } = minimalLinkageTerms;
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalSFTPConfig,
+      linkageTerms: unnamedTerms,
+      signing: { mode: "certificate", partnerFingerprint: PARTNER_FINGERPRINT },
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+
+  vi.mocked(prepareForExchange).mockImplementationOnce(core.prepareForExchange);
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    const reported = mockState.errors.join("\n");
+    expect(reported).toContain("linkage_terms.identity");
+    expect(reported).toContain("--identity");
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: an unnamed party that signs nothing runs unchanged", async () => {
+  // The other half of the gate, and the property the optional identity exists
+  // for: nothing is asked of an unnamed run that configures no receipt. Drives
+  // the same real prepare, so the pass is core's own and not the stub's.
+  const core =
+    await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+  const { identity: _named, ...unnamedTerms } = minimalLinkageTerms;
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({ ...minimalSFTPConfig, linkageTerms: unnamedTerms }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+
+  vi.mocked(prepareForExchange).mockImplementationOnce(core.prepareForExchange);
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await handler({
+      _: [],
+      $0: "psilink",
+      input,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+    } as unknown as Arguments);
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(vi.mocked(runProtocol)).toHaveBeenCalled();
   } finally {
     exitSpy.mockRestore();
   }

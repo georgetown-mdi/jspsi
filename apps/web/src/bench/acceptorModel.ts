@@ -1,6 +1,6 @@
 import {
   disclosedColumnNames,
-  sanitizeForDisplay,
+  displayPartyIdentity,
   summarizeInvitation,
 } from "@psilink/core";
 
@@ -259,9 +259,11 @@ export function acceptorLedgerRows(
 }
 
 /** The invitation heading names the partner: the same sanitized identity the
- * ledger tag uses, so the two surfaces cannot disagree. */
+ * ledger tag uses, so the two surfaces cannot disagree. An invitation whose terms
+ * carry no identity reads as the absence marker rather than as a blank heading --
+ * the inviter named nobody, which is a fact the acceptor is consenting under. */
 export function invitingPartyName(token: InvitationToken): string {
-  return sanitizeForDisplay(token.linkageTerms.identity);
+  return displayPartyIdentity(token.linkageTerms.identity);
 }
 
 /** The completion trust line under the settled ledger for a browser-run accept: the

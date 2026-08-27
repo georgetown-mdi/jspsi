@@ -424,7 +424,9 @@ export type JobExchangeSide = "inviter" | "acceptor";
  * - `signing` is the receipt-signing choice ({@link JobSigningChoice}): a closed
  *   two-value mode plus, under `certificate`, a required fingerprint held to
  *   core's canonical 43-character digest shape. Neither the identity file nor the
- *   receipt output is representable -- the server supplies both paths.
+ *   receipt output is representable -- the server supplies both paths. Under
+ *   `certificate` this intent's own `linkageTerms.identity` is required too, the
+ *   one signing rule that spans two blocks (see {@link jobExchangeIntentSchema}).
  * - `retentionDisposition` is this party's own free-text retention note, written
  *   into the composed config as a YAML value and from there into THIS party's
  *   exchange record. Bounded by core's `MAX_TEXT_LENGTH` (the record schema's own
@@ -822,6 +824,44 @@ function withDefaultExchangeMode(raw: unknown): unknown {
 }
 
 /**
+ * Whether the intent's own terms name this party, where the receipt-signing
+ * choice needs a name. An intent that signs nothing passes whatever its terms
+ * carry: identity is optional everywhere else on this surface. Takes an exchange
+ * intent alone -- a zero-setup one carries neither field, and the create union's
+ * refine selects the arm by its discriminant rather than asking this of it.
+ *
+ * A blank label is absence: it is what a form field left alone submits, and core's
+ * terms schema refuses an empty identity outright, so a value that is only
+ * whitespace could never have reached the agreed terms as a name.
+ *
+ * Applied at BOTH union levels, as {@link hasExactlyOneInputSource} is: the
+ * create route parses {@link jobCreateIntentSchema}'s own mode-discriminated
+ * union rather than {@link jobExchangeIntentSchema}, so a rule stated only on the
+ * latter would leave the 400 undecided where it is actually decided. It cannot
+ * live on the arms themselves -- `z.discriminatedUnion` takes concrete
+ * `ZodObject` members, and a refine wraps one -- nor beside the pin rule in
+ * `jobSigningChoiceSchema`, which sees only the signing block.
+ */
+function certificateModeNamesThisParty(intent: {
+  signing?: JobSigningChoice;
+  linkageTerms: LinkageTerms;
+}): boolean {
+  if (intent.signing?.mode !== "certificate") return true;
+  return (intent.linkageTerms.identity ?? "").trim() !== "";
+}
+
+/** The refusal {@link certificateModeNamesThisParty} carries at both union
+ * levels, stated once so the two cannot drift. */
+const UNNAMED_CERTIFICATE_PARTY_ISSUE = {
+  message:
+    "linkageTerms.identity is required with signing mode 'certificate': a " +
+    "certificate is trusted by the identity its holder used in the agreed " +
+    "terms, so an exchange that names no party cannot sign a receipt, and is " +
+    "refused before it runs",
+  path: ["linkageTerms", "identity"],
+};
+
+/**
  * Zod schema for a single {@link JobExchangeIntent} (the exchange mode alone).
  * Both arms are `.strict()`, so a client cannot smuggle an unmodeled field (a
  * `path`, a `host`, a `server` block, an `@path` credential, or a
@@ -841,7 +881,18 @@ export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
   .preprocess(withDefaultExchangeMode, jobExchangeChannelUnion)
   .refine(hasExactlyOneInputSource, {
     message: "exactly one of inputCsv or inputFile must be set",
-  });
+  })
+  // Certificate mode also requires a NAMED party, matching core's own
+  // pre-exchange gate (`assertCertificateModeNamesLocalParty`). A certificate is
+  // trusted by the identity its holder used in the agreed terms, so a job whose
+  // terms carry none composes a config the spawned child refuses -- and the
+  // refusal it would reach without core's gate is the one inside the exchange,
+  // after this party's payload has crossed. It sits here rather than in
+  // `jobSigningChoiceSchema` beside the pin rule because it spans two blocks:
+  // only the whole intent holds both `signing` and `linkageTerms`. Authoring is
+  // untouched -- a draft is not a job -- and an intent asking for no receipt is
+  // asked for no name.
+  .refine(certificateModeNamesThisParty, UNNAMED_CERTIFICATE_PARTY_ISSUE);
 
 // The identity-label contract -- the length cap and the control-character rule --
 // lives in the browser-safe @psi/identityLabel module, so the confirm-screen
@@ -923,7 +974,10 @@ export const jobZeroSetupIntentSchema: z.ZodType<JobZeroSetupIntent> =
  * leaf arm is `.strict()`, so a `connection`/`server`/`remote` key -- or any other
  * unmodeled field -- fails the parse on either mode, keeping the create surface
  * injection-closed. The exactly-one-input-source rule is enforced once at the
- * union level over the shared `inputCsv`/`inputFile` fields.
+ * union level over the shared `inputCsv`/`inputFile` fields, and the
+ * named-party rule certificate-mode signing needs beside it -- both are
+ * cross-field, so both are restated here rather than inherited from the
+ * per-mode schemas this union does not go through.
  */
 export const jobCreateIntentSchema: z.ZodType<JobCreateIntent> = z
   .preprocess(
@@ -935,7 +989,15 @@ export const jobCreateIntentSchema: z.ZodType<JobCreateIntent> = z
   )
   .refine(hasExactlyOneInputSource, {
     message: "exactly one of inputCsv or inputFile must be set",
-  });
+  })
+  // Only an exchange job signs anything: the zero-setup arms carry no `signing`
+  // block and no `linkageTerms` at all, so the discriminant selects the arm the
+  // rule is about rather than the predicate reading fields off one that has none.
+  .refine(
+    (intent) =>
+      intent.mode !== "exchange" || certificateModeNamesThisParty(intent),
+    UNNAMED_CERTIFICATE_PARTY_ISSUE,
+  );
 
 /**
  * The fixed, server-chosen file names inside a job workdir. The client never

@@ -35,9 +35,15 @@ import type {
   VerificationKeys,
 } from "@psilink/core";
 
+/** Each fixture party's own name, held apart from the terms: `identity` is
+ * optional there, so reading it back would type as possibly absent where these
+ * bind a certificate to a party this suite knows is named. */
+const LOCAL_IDENTITY = "Party A";
+const PARTNER_IDENTITY = "Party B";
+
 const LOCAL_TERMS: LinkageTerms = {
   version: "1.0.0",
-  identity: "Party A",
+  identity: LOCAL_IDENTITY,
   date: "2025-01-01",
   algorithm: "psi",
   linkageStrategy: "cascade",
@@ -46,7 +52,10 @@ const LOCAL_TERMS: LinkageTerms = {
   linkageFields: [{ name: "ssn", type: "ssn" }],
   linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
 };
-const PARTNER_TERMS: LinkageTerms = { ...LOCAL_TERMS, identity: "Party B" };
+const PARTNER_TERMS: LinkageTerms = {
+  ...LOCAL_TERMS,
+  identity: PARTNER_IDENTITY,
+};
 
 const localPayloadSent: CommittedPayload = {
   columns: ["dose"],
@@ -94,8 +103,8 @@ async function buildSignedFixture(record: ExchangeRecord): Promise<{
   ourCertificate: SigningCertificate;
   partnerFingerprint: string;
 }> {
-  const us = await generateSigningIdentity(LOCAL_TERMS.identity);
-  const partner = await generateSigningIdentity(PARTNER_TERMS.identity);
+  const us = await generateSigningIdentity(LOCAL_IDENTITY);
+  const partner = await generateSigningIdentity(PARTNER_IDENTITY);
   const content: ReceiptContent = {
     termsHash: record.termsHash,
     initiatorToResponderPayload: "aTJyUGF5bG9hZA",

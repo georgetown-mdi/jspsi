@@ -53,13 +53,12 @@ export const DIRECT_STEP_ORDER: ReadonlyArray<DirectStep> = [
 ];
 
 /**
- * The identity the preview uses when the operator leaves the optional identity
- * field blank. The real run defaults `--identity` to the appliance user (the
- * container account), which the browser cannot read, so the preview uses this
- * neutral placeholder. It is never displayed: the confirm screen shows the
- * inferred terms under a self-terms ("proposing") framing that does not surface
- * the identity string, and the preview copy states plainly that a blank field
- * runs as the appliance user.
+ * The identity the preview stands the operator's label in for. The preview is
+ * memoized on the committed file rather than rebuilt per keystroke, so it does
+ * not read the identity field at all. That costs nothing: the preview is never
+ * displayed with an identity -- the confirm screen shows the inferred terms under
+ * a self-terms ("proposing") framing that does not surface the identity string --
+ * and a run that leaves the field blank sends no identity rather than a stand-in.
  */
 export const DEFAULT_PREVIEW_IDENTITY = "you";
 

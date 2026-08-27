@@ -632,7 +632,7 @@ async function signedRecordExpectations(
   const { record, localTerms, partnerTerms } = sources;
   if (record !== undefined)
     return {
-      expectedIdentities: [record.localIdentity, record.partnerIdentity],
+      ...namedPair(record.localIdentity, record.partnerIdentity),
       expectedTermsHash: record.termsHash,
       // An explicit null for a record that carries no run binder, so a record of
       // an exchange that produced no receipt is reported as contradicting the
@@ -641,9 +641,26 @@ async function signedRecordExpectations(
     };
   if (localTerms === undefined || partnerTerms === undefined) return {};
   return {
-    expectedIdentities: [localTerms.identity, partnerTerms.identity],
+    ...namedPair(localTerms.identity, partnerTerms.identity),
     expectedTermsHash: await computeTermsHash(localTerms, partnerTerms),
   };
+}
+
+/**
+ * The `expectedIdentities` pair, present only where both parties named
+ * themselves. `linkage_terms.identity` is optional, and an unnamed party has
+ * nothing a certificate could be authorized against -- which is why an exchange
+ * with one produces no receipt at all (core's `runExchange`). A half-pair would
+ * anchor one signer while the other's identity check still read as performed, so
+ * the check is reported as not performed instead.
+ */
+function namedPair(
+  local: string | undefined,
+  partner: string | undefined,
+): Pick<DualSignedRecordVerificationInputs, "expectedIdentities"> {
+  return local === undefined || partner === undefined
+    ? {}
+    : { expectedIdentities: [local, partner] };
 }
 
 /**
@@ -783,11 +800,21 @@ const ASSERTED_IDENTITY_COPY: Record<AssertedIdentityStatus, RowCopy> = {
   mismatch: {
     status: "Does not match an identity expected for this exchange",
   },
+  // Two states reach this row, and the copy has to hold for both: nothing was
+  // loaded to state who the exchange was between, or something was and it names
+  // fewer than two parties -- `linkage_terms.identity` is optional, so a loaded
+  // record or terms document legitimately carries none (see `namedPair`). Naming
+  // only the first would send an operator who already loaded their files back
+  // after them.
   "not-checked": {
     status: "Not checked",
     explanation:
-      "Nothing outside the record states who this exchange was between. " +
-      EXPECTATIONS_REMEDIATION,
+      "This verdict holds no pair of names to check the two certificates " +
+      "against. " +
+      EXPECTATIONS_REMEDIATION +
+      " If you already have, this exchange named fewer than two parties: a " +
+      "party may run unnamed, and an unnamed one gives its certificate no name " +
+      "to be checked against.",
   },
 };
 

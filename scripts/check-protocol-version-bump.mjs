@@ -153,7 +153,7 @@ export const UNCOVERED_VECTORS = [
   {
     vectors: "exchange-record-vectors.json",
     versionedBy:
-      "the record document's own `psilink-exchange-record/v4` discriminant (docs/spec/EXCHANGE_RECORD.md). The record is written locally and never sent to the partner.",
+      "the record document's own `psilink-exchange-record/v5` discriminant (docs/spec/EXCHANGE_RECORD.md). The record is written locally and never sent to the partner.",
   },
   {
     vectors: "kex-vectors.json",

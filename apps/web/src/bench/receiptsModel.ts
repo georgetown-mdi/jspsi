@@ -210,6 +210,34 @@ export function fingerprintRequestProblem(
   return identity.trim() === "" ? IDENTITY_LABEL_REQUIRED_REASON : undefined;
 }
 
+/**
+ * The problem certificate mode reports while this exchange names no party, in the
+ * same terms as {@link NO_PARTNER_PIN_PROBLEM}: a run configured this way cannot
+ * finish. A receipt names both parties, and a certificate is trusted by the
+ * identity its holder used in the AGREED TERMS rather than the one the
+ * certificate carries, so an unnamed party leaves its partner nothing to check
+ * the certificate against -- core refuses such a run before any connection is
+ * opened (`assertCertificateModeNamesLocalParty`), and the appliance's job schema
+ * refuses the intent at create time.
+ *
+ * A block for the same reason the missing pin is one: no partner and no network
+ * state makes the run finish. It is not a re-statement of
+ * {@link IDENTITY_LABEL_REQUIRED_REASON}, which withholds the fingerprint REQUEST
+ * for want of a name to bind; this one holds the RUN, and is reachable with a
+ * fingerprint already in hand -- a name entered, a fingerprint requested, then the
+ * name cleared. The remedy names the field and the unsigned exit, which is what
+ * keeps this a gate on the certificate configuration rather than a name every
+ * exchange must state: authoring stays open, and a draft asking for no receipt is
+ * asked for no name.
+ */
+export const UNNAMED_PARTY_PROBLEM =
+  "Fill in 'Your name' for this exchange before signing receipts. A receipt " +
+  "names both parties, and the certificate you present is trusted by the name " +
+  "you used in the agreed terms -- with none there, your partner has nothing " +
+  "to check it against, and the exchange refuses to start. Name this party in " +
+  "the terms above, or choose 'No receipt' to run unsigned, which asks for no " +
+  "name at all.";
+
 /** The problem certificate mode reports before this party's identity exists. */
 export const IDENTITY_MISSING_PROBLEM =
   "Create or show your own fingerprint above before signing receipts. The " +
@@ -245,11 +273,18 @@ export const RETENTION_NOTE_CONTROL_CHAR_PROBLEM =
  * Everything wrong with the draft, as messages to show beside the card -- empty
  * when it is admissible. The run is blocked while this is non-empty.
  *
+ * `identity` is this exchange's `linkage_terms.identity` as the operator has it
+ * so far -- authored elsewhere on the page, but read here because one refusal
+ * turns on it: certificate mode over an exchange that names no party. It is a
+ * required argument rather than an optional one so a surface that gates a run on
+ * this cannot forget to supply it and silently gate on less.
+ *
  * Every entry is a refusal the RUN itself would make: core refuses the
  * unimplemented mode before the exchange starts, the CLI exits 64 on certificate
  * mode with no identity file, core refuses certificate mode with no partner pin
- * before any connection is opened ({@link NO_PARTNER_PIN_PROBLEM}) and the
- * appliance's job schema refuses that intent at create time, and the config
+ * ({@link NO_PARTNER_PIN_PROBLEM}) and certificate mode over terms that name no
+ * party ({@link UNNAMED_PARTY_PROBLEM}) before any connection is opened -- and
+ * the appliance's job schema refuses both intents at create time -- and the config
  * schema refuses a non-canonical pin and an over-long note. The server's
  * job-intent schema refuses a note carrying a control character the same way, so
  * that rule is mirrored here too ({@link NOTE_CONTROL_CHAR_PATTERN}) --
@@ -258,11 +293,16 @@ export const RETENTION_NOTE_CONTROL_CHAR_PROBLEM =
  * boundaries accept: what the console warns and guides about instead, because
  * the operator may legitimately choose it, is in {@link receiptsAdvisories}.
  */
-export function receiptsProblems(draft: ReceiptsDraft): Array<string> {
+export function receiptsProblems(
+  draft: ReceiptsDraft,
+  identity: string,
+): Array<string> {
   const problems: Array<string> = [];
   if (!HONORED_MODES.has(draft.mode)) problems.push(SESSION_DERIVED_PROBLEM);
   if (draft.mode === "certificate" && draft.ownFingerprint === undefined)
     problems.push(IDENTITY_MISSING_PROBLEM);
+  if (draft.mode === "certificate" && identity.trim() === "")
+    problems.push(UNNAMED_PARTY_PROBLEM);
   const pin = draft.partnerFingerprint.trim();
   if (draft.mode === "certificate" && pin === "")
     problems.push(NO_PARTNER_PIN_PROBLEM);

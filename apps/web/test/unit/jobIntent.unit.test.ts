@@ -669,11 +669,23 @@ describe("jobExchangeIntentSchema rejects injection-shaped intents", () => {
   });
 
   test("rejects linkage terms that fail core's schema", () => {
+    // `identity` is optional in core's terms, but an empty label is not a name a
+    // party can send -- the schema holds a present one to non-empty, and the
+    // console's intent inherits that rather than restating it.
     const intent = {
       ...validIntent(),
-      linkageTerms: { ...validLinkageTerms(), identity: undefined },
+      linkageTerms: { ...validLinkageTerms(), identity: "" },
     };
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("accepts linkage terms carrying no identity at all", () => {
+    // The other side of the same rule: a party that supplied no name omits the
+    // field, and the console composes a configuration that sends none rather
+    // than one naming a party nobody named.
+    const { identity: _unnamed, ...withoutIdentity } = validLinkageTerms();
+    const intent = { ...validIntent(), linkageTerms: withoutIdentity };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(true);
   });
 });
 

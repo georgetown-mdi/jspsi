@@ -19,6 +19,8 @@ import {
 import type {
   ExchangeBootstrapResult,
   FileDropConnectionConfig,
+  LinkageTerms,
+  PreparedExchange,
   SFTPConnectionConfig,
 } from "@psilink/core";
 import {
@@ -422,6 +424,78 @@ test("handler: a repeated single-value flag exits 64 naming the flag", async () 
   } finally {
     errSpy.mockRestore();
     exitSpy.mockRestore();
+  }
+});
+
+// --- handler: the identity this party puts in the terms ----------------------
+
+/** The linkage terms the handler handed runProtocol for this run. */
+async function termsFromZeroSetupRun(
+  dir: string,
+  identity: string | undefined,
+): Promise<LinkageTerms> {
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+  );
+  let prepared: PreparedExchange | undefined;
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    prepared = callArgs[2] as PreparedExchange;
+    return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
+  }) as never);
+
+  await handler({
+    _: ["sftp://userb@localhost:2222/drop", input],
+    $0: "psilink",
+    "config-file": path.join(dir, "psilink.yaml"),
+    "key-file": path.join(dir, ".psilink.key"),
+    ...(identity !== undefined ? { identity } : {}),
+    record: false,
+    "log-level": "silent",
+  } as unknown as Arguments);
+
+  if (prepared === undefined)
+    throw new Error("the run never reached runProtocol");
+  return prepared.linkageTerms;
+}
+
+test("handler: no --identity asks nothing and sends no identity", async () => {
+  // The quick path's whole property: a run given no label completes without a
+  // question and without a stand-in. The terms carry no `identity` key at all --
+  // not the account psilink runs as, not an empty string -- so a partner reads
+  // this party as one that named itself none.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    for (const blank of [undefined, "", "   "]) {
+      const terms = await termsFromZeroSetupRun(dir, blank);
+      expect(terms.identity).toBeUndefined();
+      expect("identity" in terms).toBe(false);
+    }
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: a supplied --identity rides into the terms, trimmed", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    const terms = await termsFromZeroSetupRun(dir, "  Jane Smith, Agency A  ");
+    expect(terms.identity).toBe("Jane Smith, Agency A");
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

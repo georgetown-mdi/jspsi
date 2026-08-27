@@ -68,9 +68,12 @@ import type { Algorithm, AssociationTable } from "./types.js";
  * {@link ExchangeRecordGovernance.linkageRuleSetVerdict}: a record carrying a
  * citation and no verdict beside it would read as a citation this party checked
  * and reached nothing on, where an earlier record's silence meant the writer
- * ran no check at all.
+ * ran no check at all. So do {@link ExchangeRecord.localIdentity} and
+ * {@link ExchangeRecord.partnerIdentity}: absent, each states that the party
+ * supplied no name, where an earlier record could not have been written without
+ * one and its silence would have meant a writer that dropped the field.
  */
-export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v4";
+export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v5";
 
 /** The one recognized format version for v1 {@link VerificationKeys}. */
 export const EXCHANGE_KEYS_VERSION = "psilink-exchange-keys/v1";
@@ -438,10 +441,13 @@ export interface ExchangeRecord {
   createdAt: string;
   /** Base64url SHA-256 over the canonical encoding of both parties' terms. */
   termsHash: string;
-  /** This party's self-asserted identity (from its linkage terms). */
-  localIdentity: string;
-  /** The partner's self-asserted identity (from the terms it sent). */
-  partnerIdentity: string;
+  /** This party's self-asserted identity (from its linkage terms). Absent when
+   * this party supplied none, which is the record stating that rather than
+   * naming a party nobody named. */
+  localIdentity?: string;
+  /** The partner's self-asserted identity (from the terms it sent). Absent when
+   * the partner sent none. */
+  partnerIdentity?: string;
   /** Readable governance metadata (the authority for, and the categories of, the
    * disclosure) that makes this record a standalone disclosure-log entry. */
   governance: ExchangeRecordGovernance;
@@ -720,8 +726,8 @@ const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
   version: z.literal(EXCHANGE_RECORD_VERSION),
   createdAt: createdAtSchema,
   termsHash: base64UrlSchema,
-  localIdentity: identitySchema,
-  partnerIdentity: identitySchema,
+  localIdentity: identitySchema.optional(),
+  partnerIdentity: identitySchema.optional(),
   governance: ExchangeRecordGovernanceSchema,
   recordsExposed: recordsExposedSchema,
   resultSize: resultSizeSchema.optional(),
@@ -1025,8 +1031,14 @@ export async function buildExchangeRecord(
     // at round-trip.
     createdAt: createdAtSchema.parse(inputs.createdAt),
     termsHash,
-    localIdentity: identitySchema.parse(inputs.localTerms.identity),
-    partnerIdentity: identitySchema.parse(inputs.partnerTerms.identity),
+    // Each identity is written only when its party supplied one: an absent field
+    // says the party named itself none, and there is nothing else it could say.
+    ...(inputs.localTerms.identity !== undefined && {
+      localIdentity: identitySchema.parse(inputs.localTerms.identity),
+    }),
+    ...(inputs.partnerTerms.identity !== undefined && {
+      partnerIdentity: identitySchema.parse(inputs.partnerTerms.identity),
+    }),
     // Readable governance metadata. The agreement, algorithm, and matching basis
     // come from this party's agreed terms (already schema-validated, so well-formed
     // by construction); the payload column sets come from the committed payloads, so

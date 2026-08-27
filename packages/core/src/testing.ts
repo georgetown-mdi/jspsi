@@ -20,6 +20,7 @@ export type {
 export {
   BEL,
   ESC,
+  HOSTILE_IDENTITY,
   PRINTABLE_ASCII,
   RLO,
   hostileSource,

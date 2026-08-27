@@ -85,8 +85,13 @@ export const CONSENT_FACTS = {
     basis: "trust-contingent",
     reason:
       "A free-text name the inviter typed, carried in an invitation accepted " +
-      "on a transcription checksum. Nothing authenticates it.",
-    note: "Your partner entered this name; psilink has not verified it.",
+      "on a transcription checksum. Nothing authenticates it, and psilink " +
+      "substitutes nothing for an inviter that typed none -- but the absence " +
+      "marker shown in its place is itself free text an inviter could type, so " +
+      "display does not separate the two cases.",
+    note:
+      "Your partner chose what you see here; psilink has not verified it and " +
+      "adds no name of its own.",
   },
   algorithm: {
     basis: "enforced",

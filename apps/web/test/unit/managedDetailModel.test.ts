@@ -1,5 +1,5 @@
+import { UNNAMED_PARTY_LABEL, getDefaultLinkageTerms } from "@psilink/core";
 import { describe, expect, test } from "vitest";
-import { getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   SIDE_LABELS,
@@ -133,6 +133,22 @@ describe("the configuration rows escape what somebody else authored", () => {
 });
 
 describe("linkageTermsRows renders configuration for both sides", () => {
+  test("an exchange naming nobody reads as unnamed, not as a blank row", () => {
+    // The stored document's `linkage_terms.identity` is optional. The detail
+    // screen states every row it renders, so the one naming this party states its
+    // absence rather than rendering an empty value.
+    const stored = record("inviter");
+    const { identity: _unnamed, ...withoutIdentity } =
+      stored.exchangeFile.linkageTerms;
+    const rows = linkageTermsRows({
+      ...stored.exchangeFile,
+      linkageTerms: withoutIdentity,
+    });
+    const identityRow = rows.find((row) => row.label === "Your identity");
+    expect(identityRow?.value).toBeUndefined();
+    expect(identityRow?.muted).toBe(UNNAMED_PARTY_LABEL);
+  });
+
   test("the inviter's terms render from its own perspective", () => {
     const rows = linkageTermsRows(record("inviter").exchangeFile);
     expect(rows.find((row) => row.label === "Your identity")?.value).toBe(

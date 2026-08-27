@@ -40,11 +40,14 @@ interface CapturedFrame {
   slot: string;
   fields: Array<string>;
   envelope: Record<string, unknown>;
-  carriesLinkageTerms: "partyA" | "partyB" | null;
+  carriesLinkageTerms: LinkageTermsFixture | null;
 }
 
+/** The names the file's `linkageTerms` section keys its fixtures by. */
+type LinkageTermsFixture = "partyA" | "partyB" | "unnamedParty";
+
 interface PartyInputs {
-  terms: "partyA" | "partyB";
+  terms: LinkageTermsFixture;
   recordCount: number;
   saveIntent?: boolean;
   hostKey?: PresentedHostKey;
@@ -53,7 +56,7 @@ interface PartyInputs {
 }
 
 interface ReadBack {
-  partnerIdentity: string;
+  partnerIdentity: string | null;
   partnerRecordCount: number;
   partnerEffectiveKeyCount: number;
   partnerSaveIntent: boolean;
@@ -66,7 +69,7 @@ interface EnvelopeVectors {
   protocolVersion: number;
   /** Every field each slot's schema admits, whether or not a frame sends it. */
   envelopeFields: Record<string, Array<string>>;
-  linkageTerms: Record<"partyA" | "partyB", LinkageTerms>;
+  linkageTerms: Record<LinkageTermsFixture, LinkageTerms>;
   scenarios: Array<{
     name: string;
     description: string;
@@ -97,7 +100,7 @@ function expectedFrame(frame: CapturedFrame): Record<string, unknown> {
   for (const field of frame.fields) {
     rebuilt[field] =
       field === "linkageTerms"
-        ? vectors.linkageTerms[frame.carriesLinkageTerms as "partyA"]
+        ? vectors.linkageTerms[frame.carriesLinkageTerms as LinkageTermsFixture]
         : frame.envelope[field];
   }
   return rebuilt;
@@ -116,7 +119,7 @@ function expectFrame(sent: unknown, frame: CapturedFrame): void {
 
 function readBack(result: TermsExchangeResult): ReadBack {
   return {
-    partnerIdentity: result.partnerTerms.identity,
+    partnerIdentity: result.partnerTerms.identity ?? null,
     partnerRecordCount: result.partnerRecordCount,
     partnerEffectiveKeyCount: result.partnerEffectiveKeyCount,
     partnerSaveIntent: result.partnerSaveIntent,

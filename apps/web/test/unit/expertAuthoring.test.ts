@@ -144,7 +144,7 @@ describe("expert authoring round-trips", () => {
     expect(safeParseLinkageTerms(authored).success).toBe(true);
 
     const { encoded } = await generateInvitation({
-      inviterName: authored.identity,
+      inviterName: d.identity,
       file: csvStream(),
       location,
       linkageTerms: authored,
