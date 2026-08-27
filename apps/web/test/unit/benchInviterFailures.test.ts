@@ -1,15 +1,72 @@
 import { describe, expect, test } from "vitest";
 
-import { LinkageTermsUnsatisfiableError } from "@psilink/core";
+import {
+  LinkageTermsUnsatisfiableError,
+  OperatorConfigError,
+  prepareForExchange,
+} from "@psilink/core";
 
 import { JobApiRequestError } from "@psi/serverJobExchangeDriver";
 import { failureFor } from "@bench/useInviterExchange";
 
+import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
 import type { JobInputSource } from "@psi/serverJobExchangeDriver";
 
 const WORK_FILE: JobInputSource = {
   kind: "workFile",
   name: "clients.csv",
+};
+
+// The single-pass ceiling refusal as core raises it: enough declared linkage keys
+// and records that their product crosses the per-party value-slot budget. The
+// budget itself is core's own constant and not on its public surface, so the
+// fixture is sized past it rather than derived from it -- a raised ceiling stops
+// the refusal firing and fails below rather than passing quietly.
+const CEILING_KEY_COUNT = 30;
+const CEILING_ROW_COUNT = 100_001;
+
+const ceilingRefusal = (): unknown => {
+  const terms: LinkageTerms = {
+    version: "1.0.0",
+    identity: "Tester",
+    date: "2026-01-01",
+    algorithm: "psi",
+    linkageStrategy: "single-pass",
+    output: { expectsOutput: true, shareWithPartner: true },
+    deduplicate: false,
+    linkageFields: [
+      { name: "first_name", type: "first_name" },
+      { name: "last_name", type: "last_name" },
+    ],
+    linkageKeys: Array.from({ length: CEILING_KEY_COUNT }, (_, index) => ({
+      name: `FN_LN_${index}`,
+      elements: [{ field: "first_name" }, { field: "last_name" }],
+    })),
+  };
+  const metadata: Metadata = [
+    {
+      name: "first_name",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    { name: "last_name", type: "last_name", role: "linkage", isPayload: false },
+  ];
+  const rows = new Array<CSVRow>(CEILING_ROW_COUNT).fill({
+    first_name: "Alice",
+    last_name: "Smith",
+  });
+  try {
+    prepareForExchange({ linkageTerms: terms, metadata }, "Tester", rows, [
+      "first_name",
+      "last_name",
+    ]);
+  } catch (err) {
+    return err;
+  }
+  throw new Error(
+    "expected the single-pass ceiling refusal, got a prepared exchange",
+  );
 };
 
 describe("failureFor", () => {
@@ -152,6 +209,25 @@ describe("failureFor", () => {
     expect(
       failureFor("config", new JobApiRequestError(500, "x"), WORK_FILE).title,
     ).toBe("Could not prepare the exchange");
+  });
+
+  test("the prepare-time ceiling refusal reaches the operator with its remedies", () => {
+    // core types the single-pass ceiling pre-flight as an OperatorConfigError, so
+    // this alert surfaces the refusal's own text rather than swallowing it in the
+    // generic exchange copy. Its remedies -- fewer keys or records, smaller
+    // batches -- are the whole value of showing it, and they name only counts and
+    // this party's own configuration. Driven from the refusal core actually
+    // raises, so the alert is checked against the real text rather than a copy of
+    // it that could drift; the other half of the path, a prepare-phase
+    // OperatorConfigError reaching this builder as `config` at all, is pinned in
+    // exchangeLifecycle.test.ts against the same base type.
+    const refusal = ceilingRefusal();
+    expect(refusal).toBeInstanceOf(OperatorConfigError);
+    const failure = failureFor("config", refusal, WORK_FILE);
+    expect(failure.category).toBe("config");
+    expect(failure.title).toBe("Could not prepare the exchange");
+    expect(failure.message).toContain("exceed the single-pass ceiling");
+    expect(failure.message).toContain("split the dataset into smaller batches");
   });
 
   test("a file that cannot supply the agreed keys gets fixed copy and no retry", () => {

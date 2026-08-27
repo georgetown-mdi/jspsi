@@ -15,7 +15,9 @@ import {
 } from "../src/signingIdentity";
 import { ReceiptVerificationError } from "../src/signedReceipt";
 import {
+  LinkageTermsUnsatisfiableError,
   OperatorConfigError,
+  OutboundDisclosureRefusalError,
   StandardizationTermsError,
   UsageError,
 } from "../src/errors";
@@ -27,9 +29,14 @@ import {
   declaredEffectiveKeyCount,
   MAX_KEY_CANDIDATES_PER_ROW,
 } from "../src/fanOutFunctions";
+import {
+  DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
+  MAX_NAME_LENGTH,
+} from "../src/config/linkageTerms";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
+import type { ExchangeDataSpec } from "../src/exchange";
 import type { MessageConnection } from "../src/connection/messageConnection";
 import type { Algorithm } from "../src/types";
 import type { LinkageStrategy, LinkageTerms } from "../src/config/linkageTerms";
@@ -635,8 +642,9 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
         columns,
       );
     // Every remedy the message names is a configuration change, so the class is
-    // the one the CLI maps to EX_USAGE rather than to a transport failure.
-    expect(prepare).toThrow(UsageError);
+    // the one the CLI maps to EX_USAGE rather than to a transport failure -- and,
+    // within it, the member both front ends render to the operator.
+    expect(prepare).toThrow(OperatorConfigError);
     expect(prepare).toThrow(/exceed the single-pass ceiling/);
     expect(prepare).not.toThrow(/removing a fan-out/);
   });
@@ -670,7 +678,7 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
         overCeilingRows,
         columns,
       );
-    expect(prepare).toThrow(UsageError);
+    expect(prepare).toThrow(OperatorConfigError);
     expect(prepare).toThrow(/exceed the single-pass ceiling/);
     expect(prepare).toThrow(/removing a fan-out/);
   });
@@ -692,12 +700,12 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
 
   test("a standardization contradicting its terms is refused ahead of the ceiling", () => {
     // A config with both faults meets the standardization refusal, not the
-    // ceiling. Both are fail-closed prepare-time refusals, so an operator meets
+    // ceiling. Both are fail-closed prepare-time refusals surfaced the same way
+    // (each an OperatorConfigError the front ends render), so an operator meets
     // exactly one of them and the precedence is the decision: the standardization
-    // fault is the better-typed of the two (an OperatorConfigError, which the web
-    // renders as an actionable config alert) and it names a contradiction the
-    // operator must fix at any dataset size, while the ceiling's remedies would
-    // send them to shrink a dataset that is not what stops this run.
+    // fault names a contradiction the operator must fix at any dataset size, while
+    // the ceiling's remedies would send them to shrink a dataset that is not what
+    // stops this run.
     const inconsistentStandardization: Standardization = [
       { output: "not_a_field", input: "first_name" },
     ];
@@ -1053,5 +1061,268 @@ describe("assertSigningModeImplemented", () => {
     expect(() =>
       assertSigningModeImplemented("authority-backed" as SigningMode),
     ).toThrow(OperatorConfigError);
+  });
+});
+
+// --- The class every prepare-time refusal carries ----------------------------
+
+// The base terms with their identity dropped, which is what the receipt-naming
+// gate's local half refuses.
+const { identity: _dropped, ...termsWithoutIdentity } = terms;
+
+// The ledger of what each refusal is TYPED as, in one place, because the type is
+// what decides how it is surfaced: an OperatorConfigError has its message
+// rendered to the operator (the web's actionable config alert, the CLI's `config`
+// event category), while every other class is swallowed by the generic alert.
+// Re-typing a refusal is therefore a surfacing change, and pinning the class per
+// check is what makes such a change a test failure rather than a silent one. The
+// per-check rationale lives at each raise site; this table only records the
+// decisions and holds them still.
+//
+// A row's `spec` reaches its own refusal and no earlier one, so the table also
+// pins the order the refusals stand in.
+const refusalCases: Array<{
+  what: string;
+  spec: ExchangeDataSpec;
+  rows?: Array<CSVRow>;
+  columnNames?: Array<string>;
+  errorClass: new (message: string) => Error;
+  // Whether the operator reads this refusal's own message.
+  messageRendered: boolean;
+  // A fragment only this refusal's message carries, so a row that reaches an
+  // earlier check of the same class fails rather than passing on the type alone.
+  says: RegExp;
+}> = [
+  {
+    what: "an algorithm with no run path",
+    says: /linkage-terms algorithm is not yet implemented/,
+    spec: {
+      linkageTerms: { ...terms, algorithm: unimplementedAlgorithm },
+      metadata,
+    },
+    errorClass: UsageError,
+    messageRendered: false,
+  },
+  {
+    what: "a count-only document outside the shape psi-c admits",
+    says: /must declare exactly one linkage key/,
+    spec: {
+      linkageTerms: {
+        ...terms,
+        algorithm: "psi-c",
+        linkageKeys: [
+          ...terms.linkageKeys,
+          { name: "FN", elements: [{ field: "first_name" }] },
+        ],
+      },
+      metadata,
+    },
+    errorClass: UsageError,
+    messageRendered: false,
+  },
+  {
+    what: "a count-only exchange whose metadata transmits a column",
+    says: /transmits no data columns/,
+    spec: {
+      linkageTerms: { ...terms, algorithm: "psi-c" },
+      metadata: [
+        ...metadata,
+        { name: "note", type: "other", role: "payload", isPayload: true },
+      ],
+    },
+    errorClass: UsageError,
+    messageRendered: false,
+  },
+  {
+    what: "a signing mode with no run path",
+    says: /receipt signing mode is not yet implemented/,
+    spec: {
+      linkageTerms: terms,
+      metadata,
+      signing: { mode: "session-derived" },
+    },
+    errorClass: OperatorConfigError,
+    messageRendered: true,
+  },
+  {
+    what: "certificate mode pinning no partner fingerprint",
+    says: /pins no partner fingerprint/,
+    spec: { linkageTerms: terms, metadata, signing: { mode: "certificate" } },
+    errorClass: OperatorConfigError,
+    messageRendered: true,
+  },
+  {
+    what: "certificate mode naming no local party",
+    says: /names no party/,
+    spec: {
+      linkageTerms: termsWithoutIdentity,
+      metadata,
+      signing: { mode: "certificate", partnerFingerprint },
+    },
+    errorClass: OperatorConfigError,
+    messageRendered: true,
+  },
+  {
+    what: "a payload.send that is not what metadata discloses",
+    says: /payload\.send must name exactly the columns/,
+    spec: {
+      linkageTerms: { ...terms, payload: { send: [{ name: "note" }] } },
+      metadata,
+    },
+    errorClass: UsageError,
+    messageRendered: false,
+  },
+  {
+    what: "a disclosed column whose name is too long to carry",
+    says: /limit on a column name/,
+    spec: {
+      linkageTerms: terms,
+      metadata: [
+        ...metadata,
+        {
+          name: "n".repeat(MAX_NAME_LENGTH + 1),
+          type: "other",
+          role: "payload",
+          isPayload: true,
+        },
+      ],
+    },
+    errorClass: UsageError,
+    messageRendered: false,
+  },
+  {
+    what: "a disclosure that has drifted from this party's own commitment",
+    says: /no longer honor the payload disclosure it committed to/,
+    spec: {
+      linkageTerms: terms,
+      metadata,
+      disclosedPayloadColumns: ["note"],
+    },
+    errorClass: OutboundDisclosureRefusalError,
+    messageRendered: false,
+  },
+  {
+    what: "an outbound payload set this party has not confirmed",
+    says: /has not confirmed which of its own columns it sends/,
+    spec: {
+      linkageTerms: terms,
+      metadata,
+      outboundPayloadConsent: { status: "pending" },
+    },
+    errorClass: OutboundDisclosureRefusalError,
+    messageRendered: false,
+  },
+  {
+    what: "an authored standardization contradicting its own terms",
+    says: /not_a_field/,
+    spec: {
+      linkageTerms: terms,
+      metadata,
+      standardization: [{ output: "not_a_field", input: "first_name" }],
+    },
+    errorClass: StandardizationTermsError,
+    messageRendered: true,
+  },
+  {
+    what: "an input that cannot satisfy every agreed linkage key",
+    says: /cannot satisfy every linkage key/,
+    spec: { linkageTerms: terms, metadata },
+    columnNames: ["first_name"],
+    errorClass: LinkageTermsUnsatisfiableError,
+    messageRendered: false,
+  },
+  {
+    what: "a fan-out declared in this party's own standardization",
+    says: /split_on/,
+    spec: {
+      linkageTerms: terms,
+      metadata,
+      standardization: [
+        {
+          output: "last_name",
+          input: "last_name",
+          steps: [{ function: "split_on", params: { delimiter: "-" } }],
+        },
+      ],
+    },
+    errorClass: OperatorConfigError,
+    messageRendered: true,
+  },
+  {
+    what: "a fan-out declared in a linkage key's element transform",
+    says: /split_on/,
+    spec: {
+      linkageTerms: {
+        ...terms,
+        linkageKeys: [
+          {
+            name: "FN_LN",
+            elements: [
+              { field: "first_name" },
+              {
+                field: "last_name",
+                transform: [
+                  { function: "split_on", params: { delimiter: "-" } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      metadata,
+    },
+    errorClass: UsageError,
+    messageRendered: false,
+  },
+  {
+    what: "a dataset over the single-pass ceiling",
+    says: /exceed the single-pass ceiling/,
+    spec: {
+      linkageTerms: { ...terms, linkageStrategy: "single-pass" },
+      metadata,
+    },
+    rows: new Array<CSVRow>(MAX_SINGLE_PASS_CELLS + 1).fill(rawRows[0]),
+    errorClass: OperatorConfigError,
+    messageRendered: true,
+  },
+];
+
+describe("prepareForExchange: the class every refusal carries", () => {
+  for (const refusal of refusalCases) {
+    test(`${refusal.what} is refused as ${refusal.errorClass.name}`, () => {
+      let thrown: unknown;
+      try {
+        prepareForExchange(
+          refusal.spec,
+          "Tester",
+          refusal.rows ?? rawRows,
+          refusal.columnNames ?? columns,
+        );
+      } catch (err) {
+        thrown = err;
+      }
+      // Every one of them is a configuration error at the CLI's exit boundary
+      // (64, EX_USAGE), whatever a front end surfaces it as.
+      expect(thrown).toBeInstanceOf(UsageError);
+      expect((thrown as Error).message).toMatch(refusal.says);
+      // The exact class, not merely a member of its family: `name` is what each
+      // constructor sets, so a re-typing to a subclass fails here rather than
+      // passing on the base.
+      expect(thrown).toBeInstanceOf(refusal.errorClass);
+      expect((thrown as Error).name).toBe(refusal.errorClass.name);
+      expect(thrown instanceof OperatorConfigError).toBe(
+        refusal.messageRendered,
+      );
+    });
+  }
+
+  test("the deduplicating-strategy refusal is unreachable, so it has no row", () => {
+    // The one prepare-time refusal the table cannot drive: every shipped strategy
+    // matches a deduplicating term, so no spec reaches assertDeduplicateImplemented.
+    // Checked rather than stated, so a strategy that answers otherwise fails here
+    // and is given a row of its own instead of surfacing untyped.
+    expect(
+      Object.values(DEDUPLICATE_IMPLEMENTED_BY_STRATEGY).every(Boolean),
+    ).toBe(true);
   });
 });
