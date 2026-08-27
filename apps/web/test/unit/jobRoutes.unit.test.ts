@@ -9,8 +9,8 @@ import {
   readJobRequestBody,
   validateJobIdParam,
 } from "@jobs/routeSupport";
+import { formatFirstIssue, formatIssues } from "@jobs/schemaIssueMessage";
 import { JobManager } from "@jobs/jobManager";
-import { formatFirstIssue } from "@jobs/schemaIssueMessage";
 
 import { Route as CancelRoute } from "../../src/routes/api/jobs/$jobId/cancel";
 import { Route as CreateRoute } from "../../src/routes/api/jobs/index";
@@ -1918,6 +1918,10 @@ describe("the shared rejected-body formatter", () => {
     // reading a property off nothing, so the message -- not a TypeError from the
     // read -- is what this asserts.
     expect(() => formatFirstIssue([])).toThrow(/no schema issue/);
+  });
+
+  test("an empty issue list is refused by formatIssues too, never read through", () => {
+    expect(() => formatIssues([], "server")).toThrow(/no schema issue/);
   });
 });
 

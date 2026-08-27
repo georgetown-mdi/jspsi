@@ -65,11 +65,16 @@ export function formatFirstIssue(
  * connection is served by seeing each field at fault rather than only the first.
  * `root` names the sub-object the parse ran over (`server`, `connection`,
  * `connection.credential`), which the issue paths are relative to.
+ *
+ * The same impossible-state rule as {@link formatFirstIssue}: an empty list
+ * throws rather than composing a message out of nothing.
  */
 export function formatIssues(
   issues: ReadonlyArray<JobSchemaIssue>,
   root: string,
 ): string {
+  if (issues.length === 0)
+    throw new Error("a rejected body carried no schema issue to format");
   return issues
     .map((issue) => {
       const fieldPath = [root, ...issue.path.map(String)].join(".");
