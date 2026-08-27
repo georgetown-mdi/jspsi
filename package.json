@@ -29,6 +29,7 @@
     "check:dependabot-ignore-shape": "node scripts/check-dependabot-ignore-shape.mjs",
     "check:dependabot-pin-coverage": "node scripts/check-dependabot-pin-coverage.mjs",
     "check:brace-expansion-override": "node scripts/check-brace-expansion-override.mjs",
+    "check:crossws-sbom-block": "node scripts/check-crossws-sbom-block.mjs",
     "check:nested-root-package": "node scripts/check-nested-root-package.mjs",
     "check:deploy-trigger-graph": "node scripts/check-deploy-trigger-graph.mjs",
     "check:routetree": "node scripts/check-routetree-fresh.mjs",

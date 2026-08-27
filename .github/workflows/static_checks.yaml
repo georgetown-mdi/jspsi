@@ -158,6 +158,15 @@ jobs:
       # docs/spec/DEPENDENCY_PINS.md.
       - name: brace-expansion override
         run: npm run check:brace-expansion-override
+      # The release SBOM's crossws workaround (docs/spec/DEPENDENCY_PINS.md,
+      # "The crossws peer conflict blocks the release SBOM") is only justified
+      # while the unflagged step 9 command still refuses. This drives that exact
+      # command -- package-lock-only, so no registry reach -- and fails once it
+      # succeeds while docs/RELEASES.md still prescribes --legacy-peer-deps, so
+      # the flag and both crossws doc sections cannot silently outlive upstream
+      # converging.
+      - name: crossws SBOM block
+        run: npm run check:crossws-sbom-block
       # A root overrides block stops npm hoisting a later range bump
       # incrementally, so a workspace manifest bump can keep the stale hoisted
       # copy and nest the raised version under the workspace that asked for it.
