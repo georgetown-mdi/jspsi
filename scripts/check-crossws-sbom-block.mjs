@@ -19,7 +19,10 @@
 // workaround have drifted out of step. It passes in both states the drift
 // bounds: today's, where the unflagged command still refuses and the flag is
 // justified, and the post-cleanup one, where the unflagged command succeeds
-// and the docs no longer carry the flag.
+// and the docs do not carry the flag. A passing message names only the state
+// it observed: reading an absent flag as "no longer prescribed" would claim a
+// history this check has no way to see, since it cannot tell that state from
+// one where the flag was never adopted.
 //
 // This answers "does npm's own tree-validity check still refuse this command"
 // by running the command, never by modeling npm's peer resolution or hoisting
@@ -38,9 +41,11 @@
 //     the cost is that a *different* new conflict reads as this one still
 //     standing rather than as its own finding.
 //   - It reads docs/RELEASES.md's step 9 section for the literal
-//     `--legacy-peer-deps` token, not the command's full spelling or its
-//     surrounding prose, so a reword of the paragraphs around the command does
-//     not retrigger it -- only adding or removing the flag itself does.
+//     `--legacy-peer-deps` token, not the command's full spelling, so a reword
+//     of the paragraphs around the command does not retrigger it. Any
+//     occurrence in that section counts, the flag's cost note included, so the
+//     flag reads as prescribed until the whole cleanup the failure message
+//     asks for -- flag and cost note together -- is done.
 //   - It evaluates the exact SBOM_ARGS below. A step 9 that changes its scoping
 //     workspaces or its `--omit`/`--sbom-format` flags needs this file's
 //     SBOM_ARGS kept in step, which nothing else enforces.
@@ -147,7 +152,7 @@ export function assess({ unflaggedSucceeded, flagPrescribed }) {
     : "the unflagged release step 9 SBOM command still refuses on the crossws peer conflict";
   const docState = flagPrescribed
     ? `docs/RELEASES.md still prescribes \`${LEGACY_PEER_DEPS_FLAG}\``
-    : `docs/RELEASES.md no longer prescribes \`${LEGACY_PEER_DEPS_FLAG}\``;
+    : `docs/RELEASES.md does not prescribe \`${LEGACY_PEER_DEPS_FLAG}\``;
   return {
     ok: true,
     message: `${commandState[0].toUpperCase()}${commandState.slice(1)}, and ${docState}.`,

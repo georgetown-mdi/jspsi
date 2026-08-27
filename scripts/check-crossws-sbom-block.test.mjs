@@ -10,6 +10,7 @@ import {
   assess,
   checkCrossbomBlock,
   releasesPrescribesFlag,
+  runUnflaggedSbom,
 } from "./check-crossws-sbom-block.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -20,13 +21,23 @@ const readRoot = (name) =>
 const STEP_10_HEADING = "### 10. Publish the GitHub Release";
 
 /** A minimal docs/RELEASES.md whose step 9 section either carries the flag or not. */
-function releasesDoc({ flagged, otherSectionCarriesFlag = false } = {}) {
+function releasesDoc({
+  flagged,
+  otherSectionCarriesFlag = false,
+  costNoteCarriesFlag = false,
+} = {}) {
   const outsideMention = otherSectionCarriesFlag
     ? `it does not need ${LEGACY_PEER_DEPS_FLAG} at all\n\n`
     : "";
   const flagLine = flagged
     ? `npm sbom --omit=dev ${LEGACY_PEER_DEPS_FLAG} -w packages/core -w apps/cli -w apps/web`
     : "npm sbom --omit=dev -w packages/core -w apps/cli -w apps/web";
+  const costNote = costNoteCarriesFlag
+    ? [
+        "",
+        `\`${LEGACY_PEER_DEPS_FLAG}\` costs this invocation's peer checking.`,
+      ]
+    : [];
   return [
     "## Release Checklist",
     "",
@@ -39,6 +50,7 @@ function releasesDoc({ flagged, otherSectionCarriesFlag = false } = {}) {
     "```sh",
     flagLine,
     "```",
+    ...costNote,
     "",
     STEP_10_HEADING,
     "",
@@ -60,6 +72,14 @@ describe("releasesPrescribesFlag", () => {
     // The flag token appears in the doc, but in step 8's prose, not step 9's.
     expect(doc).toContain(LEGACY_PEER_DEPS_FLAG);
     expect(releasesPrescribesFlag(doc)).toBe(false);
+  });
+
+  it("counts a step 9 prose mention, not only the command", () => {
+    // The cleanup the failure message asks for drops the flag and its cost
+    // note together, so a command stripped of the flag while the note still
+    // names it is a half-done cleanup rather than the post-cleanup state.
+    const doc = releasesDoc({ flagged: false, costNoteCarriesFlag: true });
+    expect(releasesPrescribesFlag(doc)).toBe(true);
   });
 
   it("refuses when the step 9 heading itself cannot be found", () => {
@@ -90,7 +110,7 @@ describe("assess", () => {
     const verdict = assess({ unflaggedSucceeded: true, flagPrescribed: false });
     expect(verdict.ok).toBe(true);
     expect(verdict.message).toContain("succeeds");
-    expect(verdict.message).toContain("no longer prescribes");
+    expect(verdict.message).toContain("does not prescribe");
   });
 
   it("refuses when the doc's own anchor cannot be read", () => {
@@ -147,14 +167,19 @@ describe("checkCrossbomBlock, with the npm invocation injected", () => {
 });
 
 describe("the real repository", () => {
-  it("drives the real unflagged command and reaches a verdict", () => {
-    // This runs the actual npm sbom invocation against the committed
-    // lockfile (package-lock-only, confirmed offline in the script's own
-    // header) rather than mocking it, so this test pins the real repository's
-    // current state -- today, still blocked with the flag still prescribed --
-    // while the fixture-driven tests above pin the branch logic itself.
+  it("is blocked with the flag prescribed, and passes on that state", () => {
+    // Drives the actual npm sbom invocation against the committed lockfile
+    // (package-lock-only, confirmed offline in the script's own header)
+    // rather than mocking it. Both facts the verdict rests on are pinned, not
+    // just its `ok`: the check passes in three of the four states, so a bare
+    // pass would hold just as well on a tree the assessment does not describe.
+    expect(releasesPrescribesFlag(readRoot("docs/RELEASES.md"))).toBe(true);
+    expect(() => runUnflaggedSbom(repoRoot)).toThrow();
+
     const verdict = checkCrossbomBlock({ root: repoRoot });
     expect(verdict.ok, verdict.message).toBe(true);
+    expect(verdict.message).toContain("still refuses");
+    expect(verdict.message).toContain("still prescribes");
   });
 
   it("exits 0 from the CLI entry point", () => {
@@ -166,9 +191,20 @@ describe("the real repository", () => {
     expect(output).toContain("crossws SBOM block check passed");
   });
 
-  it("names the exact command docs/RELEASES.md step 9 prescribes", () => {
-    const releases = readRoot("docs/RELEASES.md");
-    expect(releases).toContain(SBOM_ARGS.join(" "));
+  it("names the exact command docs/RELEASES.md step 9 prescribes, less the flag", () => {
+    // Step 9's command is this check's argv with the workaround flag inserted
+    // ahead of the workspace selection; the check drops that one flag and
+    // keeps every other token. Reconstructing it here is what makes a step 9
+    // that changes its scoping or its other flags fail, rather than leaving
+    // SBOM_ARGS evaluating a command nobody runs.
+    const firstWorkspace = SBOM_ARGS.indexOf("-w");
+    expect(firstWorkspace).toBeGreaterThan(-1);
+    const prescribed = [
+      ...SBOM_ARGS.slice(0, firstWorkspace),
+      LEGACY_PEER_DEPS_FLAG,
+      ...SBOM_ARGS.slice(firstWorkspace),
+    ].join(" ");
+    expect(readRoot("docs/RELEASES.md")).toContain(prescribed);
   });
 
   it("is wired as a check script and a CI step", () => {
