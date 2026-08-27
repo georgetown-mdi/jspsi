@@ -17,7 +17,12 @@ import {
   SFTP_CONNECTION_TUNING,
   withConnectionTuning,
 } from "./connectionTuningModel";
-import { DIRECT_STEP_LABELS, DIRECT_STEP_ORDER } from "./directExchangeModel";
+import {
+  DIRECT_LINKAGE_STRATEGY_DEFAULT,
+  DIRECT_STEP_LABELS,
+  DIRECT_STEP_ORDER,
+  directLinkageStrategyIntentFields,
+} from "./directExchangeModel";
 import {
   EXCHANGE_FILES_DEFAULT,
   ZERO_SETUP_EXCHANGE_FILES,
@@ -51,6 +56,7 @@ import type {
 import type { AlertContent } from "@components/csvIntake";
 import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
+import type { LinkageStrategy } from "@psilink/core";
 import type { RailStep } from "./inviterModel";
 import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
@@ -82,6 +88,12 @@ export function DirectExchangeBench() {
   const [sftpInfo, setSftpInfo] = useState<SftpConnectionInfo>();
   const [rendezvous, setRendezvous] = useState<JobRendezvousConfig>();
   const [identity, setIdentity] = useState("");
+  // The strategy the linkage keys run under, agreed out of band like the server
+  // itself: both parties infer their own terms here, so the two must select the
+  // same value or the exchange aborts when they meet.
+  const [linkageStrategy, setLinkageStrategy] = useState<LinkageStrategy>(
+    DIRECT_LINKAGE_STRATEGY_DEFAULT,
+  );
   const [affirmed, setAffirmed] = useState(false);
   // The operator's file-handling choices for this run, authored beside the agreed
   // server (both parties settle these out of band, exactly as they settle the
@@ -158,6 +170,7 @@ export function DirectExchangeBench() {
     channel: transport,
     inputSource,
     ...(identity.trim().length > 0 ? { identity: identity.trim() } : {}),
+    ...directLinkageStrategyIntentFields(linkageStrategy),
     options: withConnectionTuning(
       exchangeFilesOptions(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES),
       connectionTuning,
@@ -336,6 +349,8 @@ export function DirectExchangeBench() {
             profile={consoleSource}
             identity={identity}
             onIdentity={setIdentity}
+            linkageStrategy={linkageStrategy}
+            onLinkageStrategy={setLinkageStrategy}
             affirmed={affirmed}
             onAffirm={setAffirmed}
             onRun={runExchange}

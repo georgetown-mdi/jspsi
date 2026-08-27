@@ -20,6 +20,12 @@ import {
 } from "@psilink/core";
 
 import {
+  LINKAGE_STRATEGY_LABEL,
+  LINKAGE_STRATEGY_OPTION_COPY,
+  SINGLE_PASS_DISCLOSURE_BODY,
+  SINGLE_PASS_DISCLOSURE_TITLE,
+} from "@psi/linkageStrategyChoice";
+import {
   buildAdvancedTerms,
   importedCitationDropNotice,
 } from "@psi/advancedInvite";
@@ -288,7 +294,7 @@ export function KeysTab({
       )}
       <h2>Matching settings</h2>
       <Radio.Group
-        label="Linkage strategy"
+        label={LINKAGE_STRATEGY_LABEL}
         value={editor.draft.linkageStrategy}
         // Parsed rather than trusted so a Radio value literal drifting from
         // the enum throws loudly instead of typechecking clean.
@@ -296,31 +302,27 @@ export function KeysTab({
       >
         <Radio
           value="cascade"
-          label="Cascade"
-          description="Keys run in order; a record matched by an earlier key is settled and never re-exposed to later, broader keys."
+          label={LINKAGE_STRATEGY_OPTION_COPY.cascade.label}
+          description={LINKAGE_STRATEGY_OPTION_COPY.cascade.description}
           mt="xs"
         />
         <Radio
           value="single-pass"
-          label="Single-pass"
-          description="All keys run over all records at once."
+          label={LINKAGE_STRATEGY_OPTION_COPY["single-pass"].label}
+          description={LINKAGE_STRATEGY_OPTION_COPY["single-pass"].description}
           mt="xs"
         />
       </Radio.Group>
       {editor.draft.linkageStrategy === "single-pass" && (
         <Alert
           color="yellow"
-          title="Single-pass widens what one of you can observe"
+          title={SINGLE_PASS_DISCLOSURE_TITLE}
           // Pinned so the consent-critical warning is announced on selection
           // even if Mantine's default role changes.
           role="alert"
           mt="sm"
         >
-          Every record meets every key, so the receiving side observes matches
-          on weaker keys that the cascade would have filtered out. The linked
-          output file is identical either way; the difference is what a partner
-          can observe while matching runs. Choose it only when both of you
-          accept that.
+          {SINGLE_PASS_DISCLOSURE_BODY}
         </Alert>
       )}
       <NativeSelect
