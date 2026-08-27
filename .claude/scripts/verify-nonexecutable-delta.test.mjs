@@ -588,44 +588,68 @@ describe("summarize", () => {
   });
 });
 
+const fixtureDirs = [];
+
+afterEach(() => {
+  while (fixtureDirs.length > 0) {
+    rmSync(fixtureDirs.pop(), { recursive: true, force: true });
+  }
+});
+
+/** A temp directory removed after the test that created it. */
+function makeTempDir(prefix) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  fixtureDirs.push(dir);
+  return dir;
+}
+
+/** Helpers over one working tree, whether a repository's own or linked to it. */
+function treeAt(dir) {
+  const git = (args) =>
+    execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+  return {
+    dir,
+    git,
+    write: (path, text) => {
+      mkdirSync(dirname(join(dir, path)), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    },
+    remove: (path) => rmSync(join(dir, path)),
+    chmod: (path, mode) => chmodSync(join(dir, path), mode),
+    commit: (message) => {
+      git(["add", "-A"]);
+      git(["commit", "-q", "-m", message]);
+      return git(["rev-parse", "HEAD"]).trim();
+    },
+  };
+}
+
+function makeFixture() {
+  const tree = treeAt(makeTempDir("nonexec-delta-"));
+  tree.git(["init", "-q", "-b", "main"]);
+  tree.git(["config", "user.email", "verifier-test@example.invalid"]);
+  tree.git(["config", "user.name", "Verifier Test"]);
+  return {
+    ...tree,
+    // A linked worktree shares the repository's object database and its config,
+    // the identity set above included, while keeping its own HEAD -- the
+    // disagreement the tree-binding cases below need. Both that inheritance and
+    // `worktree add` accepting the existing empty directory `mkdtemp` just made
+    // were measured against real git rather than assumed.
+    addWorktree: (branch) => {
+      const linked = treeAt(makeTempDir("nonexec-delta-linked-"));
+      tree.git(["worktree", "add", "-q", "-b", branch, linked.dir]);
+      return linked;
+    },
+  };
+}
+
 // The `-z` records above are hand-written, which makes them a model of git's
 // output rather than a measurement of it. These drive real git instead, through
 // the same seam the CLI uses. The fixtures build their own repo rather than
 // naming a sha from this one: CI checks out with no `fetch-depth`, and in the
 // resulting shallow clone no historical sha resolves.
 describe("against a real git repository", () => {
-  const dirs = [];
-
-  afterEach(() => {
-    while (dirs.length > 0) {
-      rmSync(dirs.pop(), { recursive: true, force: true });
-    }
-  });
-
-  function makeFixture() {
-    const dir = mkdtempSync(join(tmpdir(), "nonexec-delta-"));
-    dirs.push(dir);
-    const git = (args) =>
-      execFileSync("git", args, { cwd: dir, encoding: "utf8" });
-    git(["init", "-q", "-b", "main"]);
-    git(["config", "user.email", "verifier-test@example.invalid"]);
-    git(["config", "user.name", "Verifier Test"]);
-    return {
-      git,
-      write: (path, text) => {
-        mkdirSync(dirname(join(dir, path)), { recursive: true });
-        writeFileSync(join(dir, path), text);
-      },
-      remove: (path) => rmSync(join(dir, path)),
-      chmod: (path, mode) => chmodSync(join(dir, path), mode),
-      commit: (message) => {
-        git(["add", "-A"]);
-        git(["commit", "-q", "-m", message]);
-        return git(["rev-parse", "HEAD"]).trim();
-      },
-    };
-  }
-
   const byPath = (verdicts) =>
     Object.fromEntries(verdicts.map((v) => [v.path, v.verdict]));
 
@@ -882,37 +906,44 @@ const SCRIPT = fileURLToPath(
   new URL("./verify-nonexecutable-delta.mjs", import.meta.url),
 );
 
+// The verdict is about the tree the process runs in, so every case states its
+// own `cwd`; the default is the directory holding the script, which puts a case
+// that names no tree of its own inside this repository.
+const runScript = (args, cwd = dirname(SCRIPT)) => {
+  try {
+    return {
+      status: 0,
+      stdout: execFileSync(process.execPath, [SCRIPT, ...args], {
+        cwd,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+      stderr: "",
+    };
+  } catch (error) {
+    return {
+      status: error.status,
+      stdout: error.stdout,
+      stderr: error.stderr,
+    };
+  }
+};
+
 // The script as an agent invokes it, so argv handling, the git error path, and
 // the exit codes are exercised rather than assumed. Every case here resolves
 // without repo history, which is what a shallow CI checkout has. Exit 3 stays
 // unreachable from a subprocess -- it needs a TypeScript whose printer fails a
 // probe -- and is covered only by the soundness-probe test above.
 describe("the script as an agent runs it", () => {
-  const runScript = (args) => {
-    try {
-      return {
-        status: 0,
-        stdout: execFileSync(process.execPath, [SCRIPT, ...args], {
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-        }),
-        stderr: "",
-      };
-    } catch (error) {
-      return {
-        status: error.status,
-        stdout: error.stdout,
-        stderr: error.stderr,
-      };
-    }
-  };
-
   it("prints usage and exits 2 unless given exactly two refs", () => {
     for (const args of [[], ["only-one"], ["one", "two", "three"]]) {
       const result = runScript(args);
       expect(result.status).toBe(2);
       expect(result.stderr).toMatch(
         /^Usage: node \.claude\/scripts\/verify-nonexecutable-delta\.mjs /,
+      );
+      expect(result.stderr).toMatch(
+        /resolve in the git worktree this is run from/,
       );
       expect(result.stdout).toBe("");
     }
@@ -933,5 +964,104 @@ describe("the script as an agent runs it", () => {
     );
     expect(result.stdout).toContain("(none)");
     expect(result.stdout).toMatch(/non-executable-delta property: HOLDS/);
+  });
+});
+
+// Which tree a verdict is about, driven rather than modelled: the script sits in
+// this repository throughout, and every case below runs it against a fixture
+// repository somewhere else, so a verdict resolved against the script's own tree
+// names paths none of these fixtures has. The failure they stand against is
+// silent rather than loud, which is why it is pinned at the per-worktree refs: a
+// full sha resolves and diffs identically from either tree, since linked
+// worktrees share one object database, while HEAD, HEAD~n and ORIG_HEAD each
+// mean a different commit per tree.
+describe("the tree a verdict is about", () => {
+  const toplevelOf = (dir) =>
+    execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: dir,
+      encoding: "utf8",
+    }).trim();
+
+  it("reads a per-worktree ref pair in the invoking tree, not the one holding the script", () => {
+    const fixture = makeFixture();
+    fixture.write("src/only.ts", "export const a = 1;\n");
+    fixture.commit("Base");
+    const linked = fixture.addWorktree("side");
+
+    fixture.write("src/only.ts", "// why this is one\nexport const a = 1;\n");
+    fixture.commit("Comment it");
+    linked.write("src/only.ts", "export const a = 2;\n");
+    linked.commit("Change it");
+
+    const fromPrimary = runScript(["HEAD~1", "HEAD"], fixture.dir);
+    expect(fromPrimary.stdout).toMatch(/\[comment-only +\] src\/only\.ts/);
+    expect(fromPrimary.stdout).toMatch(/non-executable-delta property: HOLDS/);
+    expect(fromPrimary.status).toBe(0);
+
+    const fromLinked = runScript(["HEAD~1", "HEAD"], linked.dir);
+    expect(fromLinked.stdout).toMatch(/\[EXECUTABLE DELTA\] src\/only\.ts/);
+    expect(fromLinked.stdout).toMatch(
+      /non-executable-delta property: VIOLATED/,
+    );
+    expect(fromLinked.status).toBe(1);
+  });
+
+  it("names the worktree each verdict is about", () => {
+    const fixture = makeFixture();
+    fixture.write("src/only.ts", "export const a = 1;\n");
+    fixture.commit("Base");
+    const linked = fixture.addWorktree("side");
+    fixture.write("src/only.ts", "export const a = 2;\n");
+    fixture.commit("Change it");
+    linked.write("src/only.ts", "export const a = 3;\n");
+    linked.commit("Change it differently");
+
+    expect(runScript(["HEAD~1", "HEAD"], fixture.dir).stdout).toContain(
+      `worktree: ${toplevelOf(fixture.dir)}`,
+    );
+    expect(runScript(["HEAD~1", "HEAD"], linked.dir).stdout).toContain(
+      `worktree: ${toplevelOf(linked.dir)}`,
+    );
+  });
+
+  it("verdicts the whole tree from a subdirectory, which diff.relative would truncate", () => {
+    const fixture = makeFixture();
+    fixture.write("tools/deep/leaf.ts", "export const leaf = 1;\n");
+    fixture.write("src/changed.ts", "export const a = 1;\n");
+    const attested = fixture.commit("Base");
+    fixture.write("src/changed.ts", "export const a = 2;\n");
+    const head = fixture.commit("Change it");
+    fixture.git(["config", "diff.relative", "true"]);
+
+    // Why the run is anchored at the top level rather than at the invoking
+    // directory, measured rather than assumed: under this setting the diff
+    // reports nothing at all from `tools/deep`, and a run that read it would
+    // hold vacuously over a changed path it never saw.
+    expect(
+      fixture.git([
+        "-C",
+        "tools/deep",
+        "diff",
+        "--raw",
+        "--no-renames",
+        attested,
+        head,
+      ]),
+    ).toBe("");
+
+    const result = runScript([attested, head], join(fixture.dir, "tools/deep"));
+    expect(result.stdout).toContain(`worktree: ${toplevelOf(fixture.dir)}`);
+    expect(result.stdout).toMatch(/\[EXECUTABLE DELTA\] src\/changed\.ts/);
+    expect(result.status).toBe(1);
+  });
+
+  it("exits 2 from outside any worktree rather than falling back to its own", () => {
+    const result = runScript(
+      ["HEAD", "HEAD"],
+      makeTempDir("nonexec-delta-bare-"),
+    );
+    expect(result.status).toBe(2);
+    expect(result.stderr).toMatch(/is not inside a git worktree/);
+    expect(result.stdout).not.toMatch(/HOLDS|VIOLATED/);
   });
 });

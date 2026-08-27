@@ -232,9 +232,14 @@ the DEFAULT here, not the fallback: batch the round's open findings into one fix
 pass, run the verifier
 (`node .claude/scripts/verify-nonexecutable-delta.mjs <attested-sha> <head-sha>`)
 before scheduling anything, and re-attest once for the batch rather than once per
-finding. A fresh full round is what the verifier's answer buys -- it runs when
-the verifier reports an executable delta that the narrowing path does not cover,
-never as the reflex the act of fixing triggers.
+finding. The verdict is about the git worktree the command runs in, which the run
+names in its output -- the primary checkout when the flow's own invocation calls
+the script there by path, while the branch sits in its own worktree. Both shas
+resolve the same from either, since linked worktrees share one object database,
+so name them in full: a per-worktree ref (`HEAD`, `HEAD~n`, `ORIG_HEAD`) means a
+different commit in each tree. A fresh full round is what the verifier's answer
+buys -- it runs when the verifier reports an executable delta that the narrowing
+path does not cover, never as the reflex the act of fixing triggers.
 
 Each path is recorded on the checklist line naming both shas:
 
