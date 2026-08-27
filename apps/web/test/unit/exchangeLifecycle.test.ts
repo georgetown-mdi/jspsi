@@ -4,6 +4,7 @@ import { default as EventEmitter } from "eventemitter3";
 
 import {
   ConnectionError,
+  LinkageTermsUnsatisfiableError,
   OperatorConfigError,
   StandardizationTermsError,
   UsageError,
@@ -412,6 +413,36 @@ describe("runExchangeLifecycle", () => {
     expect(s.onError).toHaveBeenCalledWith({
       category: "config",
       error: expect.any(OperatorConfigError),
+    });
+    expect(s.onResult).not.toHaveBeenCalled();
+    expect(mockedOpen).not.toHaveBeenCalled();
+  });
+
+  test("a prepare-time terms-fitness refusal is 'config', for the affordance", async () => {
+    // prepareForExchange refuses, before any peer connection, a file that cannot
+    // supply every linkage key the agreed terms declare. The same file refuses
+    // identically on every attempt, so it must not land in the retryable generic
+    // alert; it joins `config` for that affordance, and the alert builder gives it
+    // fixed copy of its own rather than surfacing its message (its names are the
+    // agreed terms', partner-authored on every accept path).
+    const acquire: Acquire = () =>
+      Promise.reject(
+        new LinkageTermsUnsatisfiableError(
+          "this input cannot satisfy every linkage key the agreed terms declare",
+        ),
+      );
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "responder",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledWith({
+      category: "config",
+      error: expect.any(LinkageTermsUnsatisfiableError),
     });
     expect(s.onResult).not.toHaveBeenCalled();
     expect(mockedOpen).not.toHaveBeenCalled();

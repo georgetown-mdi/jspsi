@@ -30,6 +30,7 @@
 import {
   ConnectionError,
   InternalConsistencyError,
+  LinkageTermsUnsatisfiableError,
   OutboundDisclosureRefusalError,
 } from "@psilink/core";
 
@@ -271,6 +272,12 @@ export function remapLapsedRunFailure(
  *
  * - {@link ManagedInputError} and {@link RotationPersistError}: recorded
  *   best-effort inside the critical section (the `input` and `storage` tiers).
+ * - A core {@link LinkageTermsUnsatisfiableError}: the same benign `"input"` tier,
+ *   stamped here because the refusal comes out of the pre-connection prepare
+ *   rather than the input guard. This run's file cannot supply every linkage key
+ *   the standing terms declare, which no amount of reconnecting changes, so it
+ *   must not land in the retryable transport bucket where a scheduled run would
+ *   repeat it every cycle.
  * - {@link ManagedExchangeExpiredError} and
  *   {@link ManagedExchangeLockUnavailableError}: deliberately unrecorded -- no
  *   run began, and a lapse is already carried by the record's own `expires`.
@@ -308,6 +315,8 @@ export function rerunFailureLastRun(
     error instanceof RotationPersistError
   )
     return undefined;
+  if (error instanceof LinkageTermsUnsatisfiableError)
+    return failedRun(at, "failed", "input");
   if (error instanceof OutboundDisclosureRefusalError && !dataExchangeStarted)
     return failedRun(at, "failed", "consent");
   if (aborted) return failedRun(at, "failed", "cancelled");
@@ -329,12 +338,19 @@ export type BenignRerunOutcome = "expired" | "input" | "already-running";
  * or `undefined` for a failure that is not one of the three benign states (a
  * handshake failure, a storage failure, a data-exchange drop) -- which the caller
  * surfaces through the existing generic path. Keeps the three benign-state checks
- * in one place so a surface cannot mis-order or omit one. */
+ * in one place so a surface cannot mis-order or omit one.
+ *
+ * Two error types carry the `"input"` state: the input guard's own rejection, and
+ * core's refusal of a file that cannot supply every linkage key the standing terms
+ * declare (raised from the pre-connection prepare, which the input phase runs).
+ * Both are read before any connection and both are fixed by supplying a file that
+ * matches the agreed terms, which is what the state's copy names. */
 export function benignRerunOutcome(
   error: unknown,
 ): BenignRerunOutcome | undefined {
   if (error instanceof ManagedExchangeExpiredError) return "expired";
   if (error instanceof ManagedInputError) return "input";
+  if (error instanceof LinkageTermsUnsatisfiableError) return "input";
   if (error instanceof ManagedExchangeLockUnavailableError)
     return "already-running";
   return undefined;

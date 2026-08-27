@@ -1735,28 +1735,28 @@ test("handler: an unnamed party that signs nothing runs unchanged", async () => 
   }
 });
 
-// --- handler: host-key trust precedes the outbound-consent surface ----------
-// The outbound-consent copy (apps/cli/src/outboundPayloadConsent.ts) promises
-// that nothing this party SENDS precedes the question, not that nothing has
-// connected -- because on an unpinned sftp config the credential-free first-use
-// host-key probe runs ahead of it. That step order is the premise the wording
-// rests on, so the two checks below hold it rather than the comment beside the
-// copy: an edit that reordered the flow would otherwise leave the copy
-// describing an order the handler no longer has, and nothing would catch it.
-// Both stub establishHostKeyTrust (as the whole file does), so what they pin is
-// the order of the two STEPS; that the probe -- the connection the wording
-// concedes -- happens inside the first of them is hostKeyTrust.test.ts's.
+// --- handler: the local preparation precedes host-key trust -----------------
+// An exchange refused from local inputs alone must not have connected to the
+// server first, and on an unpinned sftp config the first-use host-key step is
+// what would connect: its probe opens a real transport. So the preparation that
+// carries those refusals -- the linkage-satisfiability gate and the
+// outbound-consent surface -- runs ahead of that step, and the two checks below
+// hold that order rather than the comments beside either. Both stub
+// establishHostKeyTrust (as the whole file does), so what they pin is the order
+// of the two STEPS; that the probe is what the second one opens is
+// hostKeyTrust.test.ts's.
 
-/** Write the sftp config, key file, and CSV the two ordering checks drive the handler over. */
-function writeSftpExchangeInputs(): string {
+/** Write the sftp config, key file, and CSV the two ordering checks drive the
+ * handler over; the default CSV satisfies the config's lone ssn key. */
+function writeSftpExchangeInputs(csv = "ssn\n123456789\n"): string {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
   saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   const input = path.join(dir, "in.csv");
-  fs.writeFileSync(input, "ssn\n123456789\n");
+  fs.writeFileSync(input, csv);
   return input;
 }
 
-test("handler: host-key trust runs before the outbound-consent surface", async () => {
+test("handler: the outbound-consent surface runs before host-key trust", async () => {
   const input = writeSftpExchangeInputs();
 
   const steps: string[] = [];
@@ -1788,25 +1788,22 @@ test("handler: host-key trust runs before the outbound-consent surface", async (
     expect(exitSpy).not.toHaveBeenCalled();
     // Both steps ran, and in this order: an assertion over one call alone would
     // read a silently skipped step as satisfied.
-    expect(steps).toEqual(["host-key trust", "outbound consent"]);
+    expect(steps).toEqual(["outbound consent", "host-key trust"]);
   } finally {
     exitSpy.mockRestore();
   }
 });
 
-test("handler: a refused host key stops the run before the outbound-consent surface", async () => {
+test("handler: an input that cannot satisfy the agreed terms exits 64 with no host-key probe", async () => {
   // The ordering above is a call order, which a handler that STARTED host-key
-  // trust without awaiting it would satisfy just as well -- and then a refusal
-  // would surface only after the operator had been asked about columns. So the
-  // refusing case is driven too: the run must end at the refusal, exit 64 (the
-  // classification a declined prompt carries), and never reach the question.
-  const input = writeSftpExchangeInputs();
+  // trust without awaiting it would satisfy just as well -- and then the probe
+  // would have connected anyway. So the refusing case is driven too, over the
+  // same unpinned sftp config: a CSV that can produce none of the terms' fields
+  // must end the run at the refusal, exit 64, with the host-key step -- and so
+  // the probe inside it -- never entered.
+  const input = writeSftpExchangeInputs("first_name\nAda\n");
 
   vi.mocked(establishHostKeyTrust).mockClear();
-  vi.mocked(establishHostKeyTrust).mockRejectedValueOnce(
-    new UsageError("the presented host key was not trusted"),
-  );
-  vi.mocked(confirmOutboundPayloadConsent).mockClear();
   vi.mocked(runProtocol).mockReset();
   const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
     code?: number,
@@ -1824,7 +1821,10 @@ test("handler: a refused host key stops the run before the outbound-consent surf
         "log-level": "silent",
       } as unknown as Arguments),
     ).rejects.toThrow("exit:64");
-    expect(vi.mocked(confirmOutboundPayloadConsent)).not.toHaveBeenCalled();
+    expect(mockState.errors.join("\n")).toContain(
+      "cannot satisfy every linkage key the configuration declares",
+    );
+    expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
   } finally {
     exitSpy.mockRestore();
@@ -1866,6 +1866,19 @@ const ssnAndNameDobTerms: LinkageTerms = {
   ],
 };
 
+// The last-name+dob key alone: the terms a last_name+dob CSV satisfies in full,
+// for the tests whose subject is the lock-in rather than coverage.
+const nameDobTerms: LinkageTerms = {
+  ...ssnAndNameDobTerms,
+  linkageFields: [
+    { name: "last_name", type: "last_name" },
+    { name: "dob", type: "date_of_birth" },
+  ],
+  linkageKeys: [
+    { name: "NAME_DOB", elements: [{ field: "last_name" }, { field: "dob" }] },
+  ],
+};
+
 function writeInput(contents: string): string {
   const input = path.join(dir, "in.csv");
   fs.writeFileSync(input, contents);
@@ -1880,7 +1893,7 @@ function consentContext(): { configPath: string; logFile: string | undefined } {
   return { configPath: configFile, logFile: undefined };
 }
 
-test("prepareDataset: blocks (UsageError) naming the field when the CSV satisfies no linkage key", async () => {
+test("prepareDataset: refuses (UsageError) naming the field when the CSV satisfies no linkage key", async () => {
   // A first_name-only CSV cannot produce the ssn field the lone key needs, so the
   // run must stop with a usage error rather than reach a silent empty exchange.
   const input = writeInput("first_name\nAda\n");
@@ -1892,7 +1905,7 @@ test("prepareDataset: blocks (UsageError) naming the field when the CSV satisfie
   ).catch((e: unknown) => e);
   expect(err).toBeInstanceOf(UsageError);
   expect((err as Error).message).toMatch(
-    /cannot satisfy any of the configuration's linkage keys/,
+    /cannot satisfy every linkage key the configuration declares/,
   );
   // The field is named on a labelled link of its own -- terms content is
   // partner-chosen on the sibling accept path -- so it is the rendered chain the
@@ -1902,25 +1915,26 @@ test("prepareDataset: blocks (UsageError) naming the field when the CSV satisfie
   );
 });
 
-test("prepareDataset: warns naming the unsatisfied field and proceeds when only some keys are satisfiable", async () => {
-  // last_name+dob satisfy the NAME_DOB key but not the SSN key, so prepareDataset
-  // warns (naming ssn) and proceeds to prepareForExchange rather than blocking.
+test("prepareDataset: refuses when only some of the committed keys are satisfiable", async () => {
+  // last_name+dob satisfy the NAME_DOB key but not the SSN key. The run would
+  // match on fewer keys than the committed terms declare, so it stops before any
+  // exchange work rather than proceeding on what is left.
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
-  const prepared = await prepareDataset(
+  const err = await prepareDataset(
     { linkageTerms: ssnAndNameDobTerms },
     "Test Party",
     input,
     consentContext(),
+  ).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(UsageError);
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).toContain(
+    "1 of the 2 agreed linkage keys cannot be produced from this input's " +
+      "columns",
   );
-  expect(prepared).toBeDefined();
-  expect(
-    mockState.warnings.some(
-      (m) =>
-        m.includes(
-          "cannot satisfy all of the configuration's linkage fields",
-        ) && m.includes("ssn (ssn)"),
-    ),
-  ).toBe(true);
+  expect(rendered).toContain("unsatisfied field: ssn (ssn)");
+  expect(rendered).toContain("linkage key the CSV cannot produce: SSN");
+  expect(mockState.warnings).toHaveLength(0);
 });
 
 test("prepareDataset: an explicit standardization remap satisfies a field the column type alone would not", async () => {
@@ -1934,7 +1948,9 @@ test("prepareDataset: an explicit standardization remap satisfies a field the co
       input,
       consentContext(),
     ),
-  ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
+  ).rejects.toThrow(
+    /cannot satisfy every linkage key the configuration declares/,
+  );
 
   // ...but a remap binding ssn <- ssn_source makes the field producible, so the
   // same CSV proceeds with no block and no warning. This is the exchange-path
@@ -1974,7 +1990,9 @@ test("prepareDataset: an explicit metadata type satisfies a column whose name do
       input,
       consentContext(),
     ),
-  ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
+  ).rejects.toThrow(
+    /cannot satisfy every linkage key the configuration declares/,
+  );
 
   // ...but the config's explicit metadata types patient_number as ssn, exactly as
   // the exchange will, so the same CSV proceeds with no block and no warning. The
@@ -2018,7 +2036,9 @@ test("prepareDataset: an explicit metadata type that retypes the column away blo
       input,
       consentContext(),
     ),
-  ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
+  ).rejects.toThrow(
+    /cannot satisfy every linkage key the configuration declares/,
+  );
 });
 
 // --- prepareDataset: recurring payload lock-in -------------------------------
@@ -2029,7 +2049,7 @@ test("prepareDataset: a committed payload.receive locks in the expected received
   // transmitted payload matches it exactly (the recurring half of the lock-in).
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const terms: LinkageTerms = {
-    ...ssnAndNameDobTerms,
+    ...nameDobTerms,
     payload: { receive: [{ name: "diagnosis" }, { name: "notes" }] },
   };
   const prepared = await prepareDataset(
@@ -2044,7 +2064,7 @@ test("prepareDataset: a committed payload.receive locks in the expected received
 test("prepareDataset: a config without payload.receive locks in nothing (lazy)", async () => {
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const prepared = await prepareDataset(
-    { linkageTerms: ssnAndNameDobTerms },
+    { linkageTerms: nameDobTerms },
     "Test Party",
     input,
     consentContext(),
@@ -2060,7 +2080,7 @@ test("prepareDataset: the top-level expectedPayloadColumns is the canonical lock
   // advertised no payload.send.
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const terms: LinkageTerms = {
-    ...ssnAndNameDobTerms,
+    ...nameDobTerms,
     payload: { receive: [{ name: "ignored_by_precedence" }] },
   };
   const prepared = await prepareDataset(
@@ -2077,7 +2097,7 @@ test("prepareDataset: an empty expectedPayloadColumns locks in the strict empty 
   // set; it is a strict "receive nothing" lock-in, not the absent/lazy case.
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const prepared = await prepareDataset(
-    { linkageTerms: ssnAndNameDobTerms, expectedPayloadColumns: [] },
+    { linkageTerms: nameDobTerms, expectedPayloadColumns: [] },
     "Test Party",
     input,
     consentContext(),
@@ -2096,7 +2116,7 @@ test("prepareDataset: the config's expectedPartnerDeduplicate is restored onto t
   for (const declared of [false, true]) {
     const prepared = await prepareDataset(
       {
-        linkageTerms: ssnAndNameDobTerms,
+        linkageTerms: nameDobTerms,
         expectedPartnerDeduplicate: declared,
       },
       "Test Party",
@@ -2114,7 +2134,7 @@ test("prepareDataset: a config with no declaration binds nothing (the two-config
   // This party's own linkage_terms.deduplicate is NOT read as a binding.
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const prepared = await prepareDataset(
-    { linkageTerms: { ...ssnAndNameDobTerms, deduplicate: true } },
+    { linkageTerms: { ...nameDobTerms, deduplicate: true } },
     "Test Party",
     input,
     consentContext(),

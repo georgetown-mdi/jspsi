@@ -25,10 +25,9 @@ import { promptConfirm } from "./util/cli";
  * answering it consequential rather than a notice after the fact.
  *
  * It is deliberately a claim about disclosure rather than about connection order:
- * an unpinned SFTP configuration establishes first-use host-key trust over a
- * credential-free probe ahead of this question, so a heading promising that nothing
- * has connected yet would not hold for that configuration. What holds on every
- * configuration is that no credential, terms, or data precede the answer.
+ * where the question sits in a run is the calling command's to place, so what
+ * this copy can promise wherever it is asked is the narrower fact that no
+ * credential, terms, or data precede the answer.
  */
 const OUTBOUND_CONSENT_HEADING =
   "Nothing is sent until you confirm what this exchange will send:";

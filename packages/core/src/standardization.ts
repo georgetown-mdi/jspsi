@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { getLogger } from "./utils/logger.js";
 import {
+  chainDetailCauses,
+  LinkageTermsUnsatisfiableError,
   OperatorConfigError,
   StandardizationTermsError,
   UnknownStandardizationFunctionError,
@@ -2920,19 +2922,18 @@ export function pipelineAlwaysDrops(
 
 /** How an input's columns fare against a set of linkage terms: which fields it
  * cannot produce, how many of the terms' linkage keys remain usable as a result,
- * and which otherwise-usable keys are self-defeating. {@link satisfiableKeyCount}
- * of 0 is the block signal -- every key references at least one unproducible
- * field, so an exchange would emit no key strings and yield a result
- * byte-indistinguishable from a legitimately empty intersection. */
+ * and which otherwise-usable keys are self-defeating. A per-key coverage readout
+ * for a surface that reports it; whether a run may proceed under these terms is
+ * {@link LinkageTermsVerdict.fullySatisfied}, not a threshold read off
+ * {@link satisfiableKeyCount}. */
 export interface LinkageSatisfiability {
   /** The linkage fields the columns cannot produce (see
    * {@link unsatisfiedLinkageFields}); empty when the input satisfies every field. */
   unsatisfied: LinkageField[];
   /** The number of linkage keys all of whose element fields are satisfiable.
-   * Zero means no key can match and the exchange should be blocked rather than
-   * run to a silent empty result. This is the column-SHAPE verdict only -- it does
-   * not subtract {@link deadKeys}, so it stays the count the differential test
-   * pins against the builder's column resolution. */
+   * This is the column-SHAPE verdict only -- it does not subtract
+   * {@link deadKeys}, so it stays the count the differential test pins against the
+   * builder's column resolution. */
   satisfiableKeyCount: number;
   /**
    * Keys the column-shape verdict PASSES (every element field resolves to a
@@ -2944,24 +2945,25 @@ export interface LinkageSatisfiability {
    * dead, so the key would run to a silent empty result. Empty when no
    * shape-satisfiable key is self-defeating. Reported separately rather than
    * folded into {@link satisfiableKeyCount} so the count stays the column-shape
-   * verdict and a caller can warn with the right remedy (fix the terms, not the
-   * CSV); the caller sanitizes the partner-controlled key names itself, as it does
-   * for {@link unsatisfied}. Detection is value-independent only (see
+   * verdict and a surface can label the key with the right remedy (fix the terms,
+   * not the CSV); the caller sanitizes the partner-controlled key names itself, as
+   * it does for {@link unsatisfied}. Detection is value-independent only (see
    * {@link pipelineAlwaysDrops}): a data-dependent all-null collapse is left to
    * the runtime coverage sweep, not reported here. */
   deadKeys: LinkageKey[];
 }
 
 /**
- * Assess whether an input's `columns` can satisfy `terms`, for the satisfiability
- * pre-flight shared by the web acceptor and both CLI real-exchange paths. Combines
- * {@link unsatisfiedLinkageFields} (which fields cannot be produced) with the
- * downstream consequence (how many linkage keys survive): a key is satisfiable
- * only when EVERY element field is producible -- both declared in
+ * Assess whether an input's `columns` can satisfy `terms`, for the surfaces that
+ * report per-key coverage rather than decide whether a run may proceed. A key is
+ * satisfiable only when EVERY element field is producible -- both declared in
  * `linkageFields` and resolvable from the columns -- since a single empty field
- * collapses the whole key for that record. The caller decides policy from the
- * result -- block when {@link LinkageSatisfiability.satisfiableKeyCount} is 0,
- * warn when it is positive but below `linkageKeys.length` -- and owns its own
+ * collapses the whole key for that record.
+ *
+ * This is a projection of {@link decideLinkageTermsVerdict}, which is where the
+ * grading lives and which is what a run is held to: whether the terms may be run
+ * at all is that verdict's `fullySatisfied`, not a threshold read off
+ * {@link LinkageSatisfiability.satisfiableKeyCount} here. Callers own their own
  * message wording and display sanitization.
  *
  * `standardization` and `metadata` are the spec's explicit overrides, forwarded to
@@ -2978,8 +2980,8 @@ export interface LinkageSatisfiability {
  * produce a value (a self-defeating `parse_date` input format) is reported in
  * {@link LinkageSatisfiability.deadKeys}, derivable from the terms without data.
  * That is reported separately, not subtracted from {@link satisfiableKeyCount}:
- * the count stays the column-shape verdict, and the caller warns on `deadKeys`
- * with a terms-fix remedy distinct from the missing-column one.
+ * the count stays the column-shape verdict, and a surface can label a dead key
+ * with the right remedy (fix the terms, not the CSV).
  */
 export function assessLinkageSatisfiability(
   columns: string[],
@@ -2987,57 +2989,276 @@ export function assessLinkageSatisfiability(
   standardization?: Standardization,
   metadata?: ColumnMetadata[],
 ): LinkageSatisfiability {
-  const unsatisfied = unsatisfiedLinkageFields(
+  const verdict = decideLinkageTermsVerdict(
     columns,
     terms,
     standardization,
     metadata,
   );
-  const unsatisfiedNames = new Set(unsatisfied.map((f) => f.name));
+  return {
+    unsatisfied: verdict.unsatisfiedFields,
+    satisfiableKeyCount: verdict.keys.length - verdict.unsatisfiableKeys.length,
+    deadKeys: verdict.deadKeys,
+  };
+}
+
+/**
+ * How one declared linkage key fares against an input's columns:
+ *
+ * - `satisfiable` -- every element field resolves to a present column and no
+ *   element declares cleaning that drops every record, so the key can produce key
+ *   strings from this input.
+ * - `unsatisfiable` -- at least one element field cannot be produced from the
+ *   columns, so the key collapses to nothing for every record.
+ * - `dead` -- every element field resolves, but an element's declared cleaning can
+ *   never produce a value whatever the data (see {@link pipelineAlwaysDrops}), so
+ *   the key passes the column check and still contributes nothing. Its remedy is a
+ *   correction to the terms rather than a different input file, which is why it is
+ *   graded apart from `unsatisfiable`.
+ */
+export type LinkageKeyFitness = "satisfiable" | "unsatisfiable" | "dead";
+
+/** One declared linkage key beside the {@link LinkageKeyFitness} this input gives
+ * it. */
+export interface GradedLinkageKey {
+  /** The declared key, verbatim from the terms. */
+  key: LinkageKey;
+  /** How it fares against the input's columns. */
+  fitness: LinkageKeyFitness;
+}
+
+/**
+ * Whether an input may be run under a set of agreed linkage terms, and everything
+ * a surface needs to say why not. This is the one home of that grading: a run is
+ * refused unless the terms declare at least one linkage key and EVERY declared key
+ * is `satisfiable`.
+ *
+ * All three failing shapes are the same fault -- the run would contribute nothing
+ * for a key both parties agreed to match on -- so they are one rule rather than a
+ * block beside a warning. Terms declaring no key are included because a derivation
+ * can produce them: `linkageTermsFromRuleSet` narrows the built-in set to the keys
+ * the columns support and narrows all the way to none, which a per-key threshold
+ * would pass vacuously.
+ */
+export interface LinkageTermsVerdict {
+  /** Whether the input may be run under these terms: at least one key declared,
+   * and every declared key `satisfiable`. */
+  fullySatisfied: boolean;
+  /** Every declared key with its grade, in declaration order. Empty when the terms
+   * declare no key. */
+  keys: GradedLinkageKey[];
+  /** The declared keys graded `unsatisfiable`, in declaration order. */
+  unsatisfiableKeys: LinkageKey[];
+  /** The declared keys graded `dead`, in declaration order. */
+  deadKeys: LinkageKey[];
+  /** The linkage fields the columns cannot produce (see
+   * {@link unsatisfiedLinkageFields}). Empty when the input satisfies every
+   * declared field -- including when keys are still unsatisfiable, which happens
+   * when a key element references a field the terms never declare. */
+  unsatisfiedFields: LinkageField[];
+}
+
+/**
+ * Grade an input's `columns` against the linkage `terms` an exchange has agreed
+ * to, and decide whether it may run under them. The fail-closed gate in
+ * {@link prepareForExchange} enforces this verdict, and every front end that
+ * checks earlier gives advance notice of the same decision rather than holding a
+ * threshold of its own.
+ *
+ * `standardization` and `metadata` are the spec's explicit overrides, forwarded to
+ * {@link unsatisfiedLinkageFields} so the grade matches an exchange that runs from
+ * them. Pass the AUTHORED pair (both `undefined` where nothing is authored), which
+ * is what a run resolves its own defaults from, so the advance notice and the gate
+ * grade identical inputs.
+ *
+ * The grade is over column SHAPE, not row VALUES, with the one value-independent
+ * exception `dead` covers; see {@link assessLinkageSatisfiability} for that
+ * residual and why it can only over-accept, never wrongly refuse.
+ */
+export function decideLinkageTermsVerdict(
+  columns: string[],
+  terms: LinkageTerms,
+  standardization?: Standardization,
+  metadata?: ColumnMetadata[],
+): LinkageTermsVerdict {
+  const unsatisfiedFields = unsatisfiedLinkageFields(
+    columns,
+    terms,
+    standardization,
+    metadata,
+  );
+  const unsatisfiedNames = new Set(unsatisfiedFields.map((f) => f.name));
   // The set of field names that are BOTH declared and producible. A key element
   // referencing a name absent from this set is unsatisfiable -- whether the field
-  // is declared-but-unproducible (in `unsatisfied`) or not declared at all. The
-  // latter is rejected upstream by LinkageTermsSchema's referential-integrity
+  // is declared-but-unproducible (in `unsatisfiedFields`) or not declared at all.
+  // The latter is rejected upstream by LinkageTermsSchema's referential-integrity
   // refine (a key element `field` must name a declared linkage field), so a
   // schema-validated terms set cannot reach here with an undeclared reference;
   // this filter is kept as defense-in-depth for any terms not built through that
   // schema, since at exchange time an undeclared reference resolves to no values
   // (buildStandardizedDataset only builds declared fields, so getField returns
-  // undefined and the key collapses to null) and counting such a key satisfiable
-  // would let an incoherent terms set defeat the block and run to the
-  // silent-empty result this pre-flight exists to prevent.
+  // undefined and the key collapses to null) and grading such a key satisfiable
+  // would let an incoherent terms set defeat the refusal this grading exists to
+  // raise.
   const producibleNames = new Set(
     terms.linkageFields
       .map((f) => f.name)
       .filter((name) => !unsatisfiedNames.has(name)),
   );
-  const shapeSatisfiableKeys = terms.linkageKeys.filter((k) =>
-    k.elements.every((e) => producibleNames.has(e.field)),
-  );
-  // Among the shape-satisfiable keys, the self-defeating ones: an element whose
-  // transform can never produce a value (a dead `parse_date` input format), so the
-  // key passes the column check yet would run to a silent empty result. Scoped to
-  // shape-satisfiable keys -- a key already excluded from satisfiableKeyCount for a
-  // missing field is surfaced by that count, not double-reported as dead here.
-  //
-  // The scan walks each such key's element transform steps (each parse_date step a
+  // The dead scan walks a key's element transform steps (each parse_date step a
   // parseDateFormat tokenization over a MAX_DATE_FORMAT_LENGTH-bounded format), so
   // its cost is O(total transform steps in `terms`) and needs no separate budget:
   // on the partner-controlled accept path `terms` comes from a decoded invitation
   // already bounded to MAX_ENCODED_INVITATION_LENGTH, so the step total stays small
   // (a packed-to-the-cap hostile token measures single-digit milliseconds); on the
   // operator's own committed-config path the terms are self-authored and drive
-  // strictly heavier per-row compile + RE2 work at exchange time, so this pre-flight
-  // scan is never the dominant cost. parseDateInputDropsEveryRecord never calls
+  // strictly heavier per-row compile + RE2 work at exchange time, so this scan is
+  // never the dominant cost. parseDateInputDropsEveryRecord never calls
   // parseDateFormat on a non-string, so a hostile param shape cannot make it throw.
-  const deadKeys = shapeSatisfiableKeys.filter((k) =>
-    k.elements.some((e) => pipelineAlwaysDrops(e.transform)),
-  );
+  const keys: GradedLinkageKey[] = terms.linkageKeys.map((key) => ({
+    key,
+    fitness: !key.elements.every((e) => producibleNames.has(e.field))
+      ? "unsatisfiable"
+      : key.elements.some((e) => pipelineAlwaysDrops(e.transform))
+        ? "dead"
+        : "satisfiable",
+  }));
+  const withFitness = (fitness: LinkageKeyFitness): LinkageKey[] =>
+    keys.filter((graded) => graded.fitness === fitness).map((g) => g.key);
+  const unsatisfiableKeys = withFitness("unsatisfiable");
+  const deadKeys = withFitness("dead");
   return {
-    unsatisfied,
-    satisfiableKeyCount: shapeSatisfiableKeys.length,
+    fullySatisfied:
+      keys.length > 0 &&
+      unsatisfiableKeys.length === 0 &&
+      deadKeys.length === 0,
+    keys,
+    unsatisfiableKeys,
     deadKeys,
+    unsatisfiedFields,
   };
+}
+
+/**
+ * State, in one sentence fragment, how a verdict falls short of its terms: which
+ * of the declared linkage keys the input's columns cannot produce, and which of
+ * them declare cleaning that drops every record.
+ *
+ * Every surface that refuses on {@link decideLinkageTermsVerdict} phrases the
+ * shortfall through this, so the run-boundary refusal and the pre-flight notice
+ * ahead of it cannot describe the same fault in different words. Each clause
+ * counts against the whole declared set rather than the other clause's remainder,
+ * so a refusal carrying one clause reads as well as one carrying both.
+ *
+ * The fragment is fixed copy and counts only. Names are terms content --
+ * partner-authored on every accept path -- and each caller places them on cause
+ * links of its own.
+ *
+ * Terms declaring no key are not its case and yield nothing: that refusal names
+ * the absent declaration itself, in copy each caller owns.
+ */
+export function summarizeLinkageShortfall(
+  verdict: LinkageTermsVerdict,
+): string {
+  const total = verdict.keys.length;
+  const keysPhrase = (count: number): string =>
+    total === 1
+      ? "the one agreed linkage key"
+      : count === total
+        ? `all ${total} agreed linkage keys`
+        : `${count} of the ${total} agreed linkage keys`;
+  const shortfalls: string[] = [];
+  if (verdict.unsatisfiableKeys.length > 0)
+    shortfalls.push(
+      `${keysPhrase(verdict.unsatisfiableKeys.length)} cannot be produced ` +
+        "from this input's columns",
+    );
+  if (verdict.deadKeys.length > 0)
+    shortfalls.push(
+      `the cleaning declared for ${keysPhrase(verdict.deadKeys.length)} ` +
+        "drops every record",
+    );
+  return shortfalls.join(", and ");
+}
+
+/**
+ * Fail closed, before any credential, terms, or data are sent, on an input that
+ * cannot fully satisfy the agreed linkage terms -- the run-boundary enforcement of
+ * {@link decideLinkageTermsVerdict}, called from {@link prepareForExchange}.
+ *
+ * The terms name the keys both parties consented to match on. A run that
+ * contributes nothing for one of them matches on fewer keys than were agreed while
+ * its exchange record still names every field the terms declare, so the shortfall
+ * is settled with the partner out of band rather than run anyway. The remedy is
+ * therefore stated as new terms or a conforming input, never as a retry: the same
+ * input refuses identically every time.
+ *
+ * The summary carries only fixed copy and counts. The field and key names are
+ * terms content -- partner-authored on every accept path -- so each category rides
+ * a labelled cause link of its own, raw: the display boundary that renders the
+ * chain caps each link independently and is the one altitude that escapes them, so
+ * a name can only ever spend the budget of the link it shares with its own kind,
+ * and the count leads each link so a truncated one still reports how much is
+ * unread.
+ */
+export function assertLinkageTermsSatisfiable(
+  columns: string[],
+  terms: LinkageTerms,
+  standardization?: Standardization,
+  metadata?: ColumnMetadata[],
+): void {
+  const verdict = decideLinkageTermsVerdict(
+    columns,
+    terms,
+    standardization,
+    metadata,
+  );
+  if (verdict.fullySatisfied) return;
+
+  if (verdict.keys.length === 0)
+    throw new LinkageTermsUnsatisfiableError(
+      "the agreed linkage terms declare no linkage key, so this exchange has " +
+        "nothing to match on and would produce a result indistinguishable " +
+        "from an empty intersection. It is refused before any credential, " +
+        "terms, or data are sent. Run it with an input whose columns can " +
+        "supply at least one linkage key, or agree terms declaring one with " +
+        "your partner and run the exchange under those.",
+    );
+
+  const details: string[] = [];
+  if (verdict.unsatisfiedFields.length > 0)
+    details.push(
+      `unsatisfied linkage fields (${verdict.unsatisfiedFields.length}): ` +
+        verdict.unsatisfiedFields
+          .map((field) => `${field.name} (${field.type})`)
+          .join(", "),
+    );
+  if (verdict.deadKeys.length > 0)
+    details.push(
+      `linkage keys whose cleaning drops every record ` +
+        `(${verdict.deadKeys.length}): ` +
+        verdict.deadKeys.map((key) => key.name).join(", "),
+    );
+  if (verdict.unsatisfiableKeys.length > 0)
+    details.push(
+      `linkage keys this input cannot produce ` +
+        `(${verdict.unsatisfiableKeys.length}): ` +
+        verdict.unsatisfiableKeys.map((key) => key.name).join(", "),
+    );
+
+  throw new LinkageTermsUnsatisfiableError(
+    `this input cannot satisfy every linkage key the agreed terms declare: ` +
+      `${summarizeLinkageShortfall(verdict)}. The exchange is refused before any ` +
+      "credential, terms, or data are sent: it would match on fewer keys " +
+      "than both parties agreed to while its exchange record still names " +
+      "every field those terms declare. Settle the shortfall with your " +
+      "partner out of band -- agree terms over the keys and fields both " +
+      "files can supply, and run the exchange under those -- or run it with " +
+      "an input file that satisfies the terms already agreed.",
+    details.length > 0
+      ? { cause: chainDetailCauses(details as [string, ...string[]]) }
+      : undefined,
+  );
 }
 
 // --- Value-level constraints -------------------------------------------------

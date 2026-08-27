@@ -905,9 +905,22 @@ describe("prepareForExchange: certificate mode with no local identity is refused
     // nothing, whether it states mode none or no signing block.
     expect(prepareUnnamed({ mode: "none" }).rowCount).toBe(1);
     expect(prepareUnnamed(undefined).rowCount).toBe(1);
+    // Terms derived from metadata rather than supplied. The default rule set
+    // narrows to the keys the columns support, and every one of them needs an
+    // ssn or date of birth beside the names, so the derivation is given an ssn
+    // column -- without one it narrows to no key, which the terms-fitness gate
+    // refuses.
+    const derivableMetadata: Metadata = [
+      ...metadata,
+      { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    ];
     expect(
-      prepareForExchange({ metadata }, undefined, rawRows, columns).linkageTerms
-        .identity,
+      prepareForExchange(
+        { metadata: derivableMetadata },
+        undefined,
+        [{ ...rawRows[0], ssn: "123456789" }],
+        [...columns, "ssn"],
+      ).linkageTerms.identity,
     ).toBeUndefined();
   });
 });

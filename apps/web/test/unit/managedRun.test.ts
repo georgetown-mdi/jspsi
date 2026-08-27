@@ -1,6 +1,7 @@
 import {
   ConnectionError,
   InternalConsistencyError,
+  LinkageTermsUnsatisfiableError,
   OutboundDisclosureRefusalError,
   generateSharedSecret,
   getDefaultLinkageTerms,
@@ -339,5 +340,38 @@ describe("remapLapsedRunFailure: a bound that lapses mid-run", () => {
 
   test("a record with no bound never re-maps", () => {
     expect(remapLapsedRunFailure(taggedExpiryError(), {}, NOW)).toBeUndefined();
+  });
+});
+
+describe("a run refused for terms this file cannot satisfy", () => {
+  const AT = Date.parse("2026-07-14T12:00:00.000Z");
+  const refusal = () =>
+    new LinkageTermsUnsatisfiableError(
+      "this input cannot satisfy every linkage key the agreed terms declare",
+    );
+
+  test("is a benign pre-connection input state, not a transport drop", () => {
+    // It comes out of the pre-connection prepare, so no connection was attempted
+    // and the remedy is the same one the input state names: a file matching the
+    // agreed terms.
+    expect(benignRerunOutcome(refusal())).toBe("input");
+  });
+
+  test("records the input tier so a scheduled run does not repeat it as a drop", () => {
+    // The transport tier is retried in place; this refusal reproduces on every
+    // run from the same file, so recording it there would loop an unattended run.
+    expect(rerunFailureLastRun(refusal(), AT, false, false)).toEqual({
+      at: new Date(AT).toISOString(),
+      outcome: "failed",
+      failureKind: "input",
+    });
+  });
+
+  test("keeps the input tier even on a cancelled run", () => {
+    // The refusal is a deterministic local state read before the connection, so
+    // it is not a teardown-provoked error the cancellation could explain.
+    expect(rerunFailureLastRun(refusal(), AT, true, false)?.failureKind).toBe(
+      "input",
+    );
   });
 });

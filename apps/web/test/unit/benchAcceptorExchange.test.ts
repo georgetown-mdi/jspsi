@@ -156,13 +156,20 @@ describe("prepareAcceptorExchange", () => {
   test("threads the confirm-columns edits into the prepared metadata", () => {
     // Mark last_name ignored: the edited metadata drives the prepared metadata,
     // proving the confirm-columns edits (not a CSV-inferred default) reach the run.
+    // These terms key on firstName alone, so taking last_name out of linkage costs
+    // no agreed key -- a run that cannot produce one is refused before it prepares.
+    const firstNameOnlyTerms: LinkageTerms = {
+      ...inviterTerms,
+      linkageFields: [{ name: "firstName", type: "first_name" }],
+      linkageKeys: [{ name: "first", elements: [{ field: "firstName" }] }],
+    };
     const edited = seedMetadata.map((column) =>
       column.name === "last_name"
         ? { ...column, role: "ignored" as const }
         : column,
     );
     const prepared = prepareAcceptorExchange({
-      linkageTerms: inviterTerms,
+      linkageTerms: firstNameOnlyTerms,
       acceptorName: "Sam Alvarez",
       edits: editsFor(edited),
       rawRows,

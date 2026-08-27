@@ -299,9 +299,11 @@ export function AcceptorColumnsStep({
               icon={<IconAlertTriangle aria-hidden />}
               title={verdict.title}
             >
-              Some linkage keys cannot be satisfied by your columns and will be
-              inactive for this exchange. The other keys will proceed normally.
-              You can map more columns below to enable additional keys.
+              Some linkage keys cannot be satisfied by your columns, and an
+              exchange runs the keys both parties agreed on -- so it will refuse
+              to run on these terms with this file. Map more columns below to
+              cover the missing keys, or agree terms with your partner over the
+              keys both files can supply.
             </Alert>
           ) : (
             <Alert

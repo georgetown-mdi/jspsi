@@ -16,10 +16,12 @@ import {
   encodeInvitation,
   getDefaultLinkageTerms,
   getLogger,
+  inferMetadata,
   LINKAGE_RULE_SET_VERDICT_COPY,
   MAX_ENDPOINT_HOST_LENGTH,
   parseExchangeSpec,
   reconcileReceivedPayload,
+  sanitizeErrorForDisplay,
   sanitizeForDisplay,
   summarizeInvitation,
   UNRECOGNIZED_TRANSFORM_NOTE,
@@ -133,7 +135,7 @@ function sampleToken(
 ): InvitationToken {
   return {
     version: "1",
-    linkageTerms: getDefaultLinkageTerms("Inviter Org"),
+    linkageTerms: sampleTerms("Inviter Org"),
     sharedSecret: generateSharedSecret(),
     expires,
     connectionEndpoint,
@@ -690,10 +692,10 @@ function writeInputCSV(columns: string[]): string {
   return file;
 }
 
-test("validateAccept: offline blocks (UsageError) when the CSV satisfies no linkage key", async () => {
-  // The default terms (from sampleToken) need ssn/last name/dob/etc.; a CSV with
-  // only first_name can complete no key, so the pre-flight aborts before the
-  // prompt rather than running a silent empty exchange.
+test("validateAccept: offline refuses (UsageError) when the CSV satisfies no linkage key", async () => {
+  // The invitation's terms need first/last name, dob and ssn; a CSV with only
+  // first_name can complete no key, so the pre-flight aborts before the prompt
+  // rather than running an exchange that could only produce an empty result.
   const options = testOptions();
   const input = writeInputCSV(["first_name"]);
   try {
@@ -704,51 +706,44 @@ test("validateAccept: offline blocks (UsageError) when the CSV satisfies no link
         options,
         log: silentLog,
       }),
-    ).rejects.toThrow(/cannot satisfy any of the invitation's linkage keys/);
+    ).rejects.toThrow(
+      /cannot satisfy every linkage key the invitation declares/,
+    );
   } finally {
     fs.rmSync(input, { force: true });
   }
 });
 
-test("validateAccept: offline warns but proceeds when the CSV satisfies only some keys", async () => {
-  // last/first name + dob satisfy the name+dob keys but not the ssn keys, so the
-  // pre-flight warns (naming the unsatisfied fields) and the acceptance proceeds.
-  // The partially satisfiable input resolves a spec exactly as a fully satisfiable
-  // one does -- metadata and standardization inferred and written alongside the
-  // terms, the unsatisfied fields simply carrying no transformation -- which is
-  // what docs/CLI.md states and what the consent display reads its outbound set
-  // off.
+test("validateAccept: offline refuses when the CSV satisfies only some keys", async () => {
+  // last/first name + dob satisfy the name+dob keys but not the ssn keys. The
+  // acceptance is refused -- offline runs no prepare, so this pre-flight is the
+  // only place the refusal lands, and it fires before the prompt and before any
+  // configuration or key file is written. It is a usage error (exit 64) naming
+  // the unsatisfied field and the key it costs.
   const options = testOptions();
   const input = writeInputCSV(["last_name", "first_name", "dob"]);
-  const log = getLogger("accept-partial-test");
-  log.setLevel("silent");
-  const warnSpy = vi.spyOn(log, "warn");
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
-    const ready = await validateAccept({
+    const raised = await validateAccept({
       resolved: { mode: "offline", invitation: encoded, input },
       options,
-      log,
-    });
-    expect(ready.mode).toBe("offline");
-    expect(
-      warnSpy.mock.calls.some(
-        (c) =>
-          typeof c[0] === "string" &&
-          c[0].includes(
-            "cannot satisfy all of the invitation's linkage fields",
-          ),
-      ),
-    ).toBe(true);
-    expect(ready.dataSpec.metadata).toBeDefined();
-    expect(ready.dataSpec.standardization).toBeDefined();
-    // The satisfiable fields are bound; the unsatisfied ssn fields are absent
-    // rather than the whole standardization being withheld.
-    const outputs = (ready.dataSpec.standardization ?? []).map((t) => t.output);
-    expect(outputs).toContain("date_of_birth");
-    expect(outputs).not.toContain("ssn");
+      log: silentLog,
+    }).then(
+      () => {
+        throw new Error("the acceptance should have been refused");
+      },
+      (reason: unknown) => reason,
+    );
+    expect(raised).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(raised);
+    expect(rendered).toContain(
+      "cannot satisfy every linkage key the invitation declares",
+    );
+    expect(rendered).toContain("unsatisfied field: ssn (ssn)");
+    expect(rendered).toContain(
+      "or ask your partner for an invitation with different linkage terms.",
+    );
   } finally {
-    warnSpy.mockRestore();
     fs.rmSync(input, { force: true });
   }
 });
@@ -759,6 +754,15 @@ test("validateAccept: offline warns but proceeds when the CSV satisfies only som
 // disclosed to the partner (inferMetadata gives a recognized linkage alias
 // is_payload: false), so a CSV of these alone sends nothing.
 const LINKAGE_COLUMNS = ["first_name", "last_name", "dob", "ssn"];
+
+// The built-in rule set narrowed to the keys LINKAGE_COLUMNS supports, the way a
+// party's own file narrows it. Every terms fixture in this file uses it, on both
+// sides: an acceptance is refused unless its CSV can satisfy every key the
+// invitation declares, so terms declaring a key no test CSV here carries would
+// refuse every acceptance below.
+function sampleTerms(identity: string): LinkageTerms {
+  return getDefaultLinkageTerms(identity, inferMetadata(LINKAGE_COLUMNS));
+}
 
 // The distinctive clause of the warning under test, kept apart from the remedies
 // and the column list the assertions check separately.
@@ -1580,7 +1584,7 @@ function writeExistingConfig(
       channel: "filedrop",
       path: "/mnt/share",
     },
-    linkageTerms: overrides.terms ?? getDefaultLinkageTerms("Acceptor Org"),
+    linkageTerms: overrides.terms ?? sampleTerms("Acceptor Org"),
   });
 }
 
@@ -1605,7 +1609,7 @@ test("validateAccept: offline reuses a config whose linkage terms match the invi
  *  support the rule-set citation the same terms carry, key order being cascade
  *  order. */
 function termsCitingASetTheyLeft(identity: string): LinkageTerms {
-  const terms = getDefaultLinkageTerms(identity);
+  const terms = sampleTerms(identity);
   const [first, second, ...rest] = terms.linkageKeys;
   return { ...terms, linkageKeys: [second!, first!, ...rest] };
 }
@@ -1674,7 +1678,7 @@ test("validateAccept: a matching config is reconciled but a pre-existing key fil
 
 test("validateAccept: offline fails with a diff when the config's terms disagree", async () => {
   const options = testOptions();
-  const terms = getDefaultLinkageTerms("Acceptor Org");
+  const terms = sampleTerms("Acceptor Org");
   // The invitation's algorithm is the default "psi"; make the config disagree.
   terms.algorithm = "psi-c";
   writeExistingConfig(options.configFile, { terms });
@@ -1803,7 +1807,7 @@ test("validateAccept: online reuse warns (does not abort) on a differing --serve
   // that must warn and apply, not abort.
   saveConfig(configFile, {
     connection: { channel: "sftp", server: { host: "host", port: 22 } },
-    linkageTerms: getDefaultLinkageTerms("Acceptor Org"),
+    linkageTerms: sampleTerms("Acceptor Org"),
   });
   const log = getLogger("accept-port-warn-test");
   log.setLevel("silent");
@@ -2093,7 +2097,7 @@ test("displayInvitation escapes a hostile inviter identity and key names", () =>
   const token: InvitationToken = {
     ...sampleToken(FUTURE()),
     linkageTerms: {
-      ...getDefaultLinkageTerms("Inviter Org"),
+      ...sampleTerms("Inviter Org"),
       identity: "\x1b[31mEVIL\u202e",
       linkageKeys: [{ name: "k\x1b[0m", elements: [{ field: "ssn" }] }],
       // A hostile requested-from-you column name reaches the new "requests from
@@ -3425,7 +3429,7 @@ test("displayInvitation: the decision facts are repeated verbatim immediately be
   // the bytes match.
   const log = getLogger("accept-display-repeat-test");
   log.setLevel("silent");
-  const defaultTerms = getDefaultLinkageTerms("Inviter Org");
+  const defaultTerms = sampleTerms("Inviter Org");
   const cases: Array<{
     linkageTerms: LinkageTerms;
     ownOutboundSend: ReadonlyArray<string> | undefined;
@@ -4553,7 +4557,7 @@ test("handler: hostile terms stay printable ASCII on the prompt's own sink", asy
     const encoded = await encodeInvitation({
       ...sampleToken(FUTURE()),
       linkageTerms: {
-        ...getDefaultLinkageTerms(`Inviter${ESC}[31mOrg${RLO}`),
+        ...sampleTerms(`Inviter${ESC}[31mOrg${RLO}`),
         linkageKeys: [{ name: `ssn${BEL}`, elements: [{ field: "ssn" }] }],
       },
     });
@@ -4999,7 +5003,7 @@ async function reuseLockInWarnings(params: {
   );
   saveConfig(configFile, {
     connection: { channel: "sftp", server: { host: "host" } },
-    linkageTerms: getDefaultLinkageTerms("Acceptor Org"),
+    linkageTerms: sampleTerms("Acceptor Org"),
     ...(recorded !== undefined ? { expectedPayloadColumns: recorded } : {}),
   });
   const log = getLogger(loggerName);
@@ -5320,7 +5324,7 @@ test("handler: the record is removed on reuse only where the kept config does no
   // hygiene rather than left stale.
   const { dir, input, configFile } = fixtureWithPayloadColumn();
   try {
-    const terms = getDefaultLinkageTerms("Acceptor Org");
+    const terms = sampleTerms("Acceptor Org");
     writeExistingConfig(configFile, {
       terms: {
         ...terms,
