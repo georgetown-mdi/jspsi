@@ -1401,6 +1401,76 @@ describe("handler", () => {
     expect(exitCode).toBe(0);
   });
 
+  test("a pair naming only one party leaves BOTH identity checks unperformed", async () => {
+    // `linkage_terms.identity` is optional, and this command reads whatever files
+    // it is handed -- a record of an unnamed run, or a hand-edited terms document
+    // with the field left out. A half-supplied pair is the shape that must not
+    // half-check: expected identities are unordered and matched onto the two
+    // certificates as a bijection, so anchoring one name would leave the other
+    // certificate's check reading as performed against a name nobody supplied.
+    // The verdict says the check was not performed, and names what would supply
+    // it, on both sources.
+    const { identity: _unnamed, ...unnamedPartnerTerms } =
+      baseInputs.partnerTerms;
+    // Built over the half-named pair so the record, its terms hash, and the terms
+    // documents below all agree: identity is the only thing left unchecked.
+    const { recordPath, signedPath, identityPath, pin } =
+      await exchangeArtifacts({ partnerTerms: unnamedPartnerTerms });
+    const recordSourced = await runVerify({
+      record: recordPath,
+      "signed-record": signedPath,
+      "partner-fingerprint": pin,
+      "identity-file": identityPath,
+    });
+    const termsSourced = await runVerify({
+      record: signedPath,
+      "partner-fingerprint": pin,
+      "identity-file": identityPath,
+      "config-file": writeYaml(
+        YAML.stringify({ linkage_terms: baseInputs.localTerms }),
+      ),
+      "partner-terms": writeYaml(
+        YAML.stringify({ linkage_terms: unnamedPartnerTerms }),
+        "partner.yaml",
+      ),
+    });
+    for (const { stdout, exits, exitCode } of [recordSourced, termsSourced]) {
+      expect(exits).toEqual([]);
+      const identityLines = stdout
+        .split("\n")
+        .filter((line) => line.includes("asserted identity:"));
+      expect(identityLines).toHaveLength(2);
+      for (const line of identityLines) {
+        // The cause is the exchange's own state, not an input still to pass:
+        // both sources here were supplied, so directing the operator at the
+        // record or the terms would send them after what they already gave.
+        expect(line).toContain("names fewer than two parties");
+        expect(line).not.toContain("pass the exchange record");
+      }
+      // Unchecked, never a verdict: neither party is reported as matching or as
+      // contradicting a name that was never supplied.
+      expect(stdout).not.toContain("asserted identity: matches");
+      expect(stdout).not.toContain("asserted identity: DOES NOT MATCH");
+      // Short of verified, and nobody is accused: an unperformed check is not a
+      // failure.
+      expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
+      expect(exitCode).toBe(0);
+    }
+
+    // The other cause of an unperformed identity check, so the two are told
+    // apart rather than collapsed into one message: with neither the record nor
+    // both terms in hand there IS an input to pass, and the line names it.
+    const { stdout: unsourced } = await runVerify({
+      record: signedPath,
+      "partner-fingerprint": pin,
+      "identity-file": identityPath,
+    });
+    expect(unsourced).toContain(
+      "asserted identity: not checked (no expected identities; pass the " +
+        "exchange record, or",
+    );
+  });
+
   test("a record from another run of this partnership fails the pairing", async () => {
     // Both artifacts are genuine and the agreed terms are the same, so the run
     // binder is the only thing that separates them -- the failure the pairing

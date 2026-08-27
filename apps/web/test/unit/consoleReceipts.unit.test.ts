@@ -25,6 +25,7 @@ import {
   RETENTION_NOTE_CONTROL_CHAR_PROBLEM,
   RETENTION_NOTE_PROBLEM,
   SESSION_DERIVED_PROBLEM,
+  UNNAMED_PARTY_PROBLEM,
   fingerprintRequestProblem,
   receiptsAdvisories,
   receiptsIntentFields,
@@ -65,6 +66,7 @@ import {
 
 import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { JobSigningPaths } from "@jobs/intent";
+import type { LinkageTerms } from "@psilink/core";
 import type { ReceiptsDraft } from "@bench/receiptsModel";
 
 // The console's receipt-signing and retention authoring surface, end to end: what
@@ -140,6 +142,16 @@ const draft = (overrides: Partial<ReceiptsDraft> = {}): ReceiptsDraft => ({
   ...overrides,
 });
 
+/** The name this exchange states, for the cases that are not about the name. */
+const THIS_PARTY = "Agency A";
+
+/** The card's problems for a draft on an exchange that names this party. The
+ * name is the model's second input and exactly one refusal turns on it, so the
+ * cases below that are about something else read it through here, and the two
+ * that are about the name call the model directly with their own value. */
+const problemsFor = (authored: ReceiptsDraft): Array<string> =>
+  receiptsProblems(authored, THIS_PARTY);
+
 describe("the intent boundary admits only a mode an exchange honors", () => {
   test("certificate mode with a canonical pin parses", () => {
     const parsed = jobExchangeIntentSchema.safeParse(
@@ -206,6 +218,54 @@ describe("the intent boundary admits only a mode an exchange honors", () => {
       "signing",
       "partnerFingerprint",
     ]);
+  });
+
+  test("certificate mode with an unnamed party is refused, on both channels and the create union", () => {
+    // The sibling rule, and the same reasoning: a certificate is trusted by the
+    // identity its holder used in the agreed terms, so a job whose terms name no
+    // party spawns a child that refuses the config -- and without core's gate the
+    // refusal it would reach is the one inside the exchange, after this party's
+    // payload crossed.
+    const unnamedTerms = (): LinkageTerms => {
+      const { identity: _named, ...rest } = validLinkageTerms();
+      return rest;
+    };
+    const signing = {
+      mode: "certificate" as const,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+    };
+    for (const intent of [
+      validIntent({ linkageTerms: unnamedTerms(), signing }),
+      validSftpIntent({ linkageTerms: unnamedTerms(), signing }),
+      // A blank label is absence here too: it is what a form field left alone
+      // submits, and core's own terms schema refuses it outright.
+      validIntent({
+        linkageTerms: { ...validLinkageTerms(), identity: "   " },
+        signing,
+      }),
+    ])
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    const parsed = jobCreateIntentSchema.safeParse(
+      validIntent({ linkageTerms: unnamedTerms(), signing }),
+    );
+    expect(parsed.success).toBe(false);
+    if (parsed.success) throw new Error("unreachable");
+    expect(parsed.error.issues.map((issue) => issue.path)).toContainEqual([
+      "linkageTerms",
+      "identity",
+    ]);
+  });
+
+  test("an unnamed party that asks for no receipt is admitted", () => {
+    // The gate binds the certificate-signing configuration alone: an unnamed
+    // quick exchange is the shape an optional identity exists for, and it must
+    // still create -- with no signing block at all, and with mode none.
+    const { identity: _named, ...unnamedTerms } = validLinkageTerms();
+    for (const intent of [
+      validIntent({ linkageTerms: unnamedTerms }),
+      validIntent({ linkageTerms: unnamedTerms, signing: { mode: "none" } }),
+    ])
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(true);
   });
 
   test("no path field is representable on the signing block", () => {
@@ -797,7 +857,7 @@ describe("the fingerprint driver", () => {
 describe("the receipts card's model", () => {
   test("an untouched draft emits nothing, so the intent is the one sent before it existed", () => {
     expect(receiptsIntentFields(RECEIPTS_DEFAULT)).toEqual({});
-    expect(receiptsProblems(RECEIPTS_DEFAULT)).toEqual([]);
+    expect(problemsFor(RECEIPTS_DEFAULT)).toEqual([]);
     expect(receiptsAdvisories(RECEIPTS_DEFAULT, SHARED_RENDEZVOUS)).toEqual([]);
     expect(receiptsSummary(RECEIPTS_DEFAULT)).toBe("Unsigned record only");
   });
@@ -816,7 +876,7 @@ describe("the receipts card's model", () => {
       },
       retentionDisposition: RETENTION_NOTE,
     });
-    expect(receiptsProblems(authored)).toEqual([]);
+    expect(problemsFor(authored)).toEqual([]);
     expect(receiptsSummary(authored)).toBe("Signed receipt, retention note");
   });
 
@@ -829,14 +889,14 @@ describe("the receipts card's model", () => {
   });
 
   test("every problem is a refusal the run itself would make", () => {
-    expect(receiptsProblems(draft({ mode: "certificate" }))).toContain(
+    expect(problemsFor(draft({ mode: "certificate" }))).toContain(
       IDENTITY_MISSING_PROBLEM,
     );
-    expect(receiptsProblems(draft({ mode: "session-derived" }))).toContain(
+    expect(problemsFor(draft({ mode: "session-derived" }))).toContain(
       SESSION_DERIVED_PROBLEM,
     );
     expect(
-      receiptsProblems(
+      problemsFor(
         draft({
           mode: "certificate",
           ownFingerprint: OWN_FINGERPRINT,
@@ -845,7 +905,7 @@ describe("the receipts card's model", () => {
       ),
     ).toContain(PARTNER_FINGERPRINT_PROBLEM);
     expect(
-      receiptsProblems(
+      problemsFor(
         draft({ retentionDisposition: "x".repeat(MAX_TEXT_LENGTH + 1) }),
       ),
     ).toContain(RETENTION_NOTE_PROBLEM);
@@ -858,14 +918,14 @@ describe("the receipts card's model", () => {
     // problem here, or the operator would see nothing wrong until the run
     // failed at submit with a generic 400.
     expect(
-      receiptsProblems(
+      problemsFor(
         draft({
           retentionDisposition: `Filed${String.fromCharCode(0x00)}under the schedule`,
         }),
       ),
     ).toContain(RETENTION_NOTE_CONTROL_CHAR_PROBLEM);
     expect(
-      receiptsProblems(
+      problemsFor(
         draft({
           retentionDisposition: `Filed${String.fromCharCode(0x1b)}under the schedule`,
         }),
@@ -874,7 +934,7 @@ describe("the receipts card's model", () => {
     // The card authors this field in a textarea, so the whitespace controls a
     // multi-line note carries -- and that the server admits -- stay clean.
     expect(
-      receiptsProblems(
+      problemsFor(
         draft({
           retentionDisposition:
             "Filed\tunder the schedule.\r\nPurged after six years.",
@@ -894,12 +954,56 @@ describe("the receipts card's model", () => {
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
     });
-    expect(receiptsProblems(unpinned)).toContain(NO_PARTNER_PIN_PROBLEM);
+    expect(problemsFor(unpinned)).toContain(NO_PARTNER_PIN_PROBLEM);
     expect(
       receiptsAdvisories(unpinned, SHARED_RENDEZVOUS).map(
         (advisory) => advisory.message,
       ),
     ).not.toContain(NO_PARTNER_PIN_PROBLEM);
+  });
+
+  test("an unnamed party blocks the run, as the run itself would", () => {
+    // Core refuses this configuration before any connection is opened
+    // (assertCertificateModeNamesLocalParty) and the appliance's job schema
+    // refuses the intent at create time: a certificate is trusted by the identity
+    // its holder used in the agreed terms, so an unnamed party has nothing for
+    // the partner to check it against. The card's own fingerprint request is
+    // withheld for want of a name too, but that is a different sink and a
+    // different remedy, and the run gate must not rest on it: a fingerprint
+    // requested under a name since cleared leaves the draft here.
+    const unnamed = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+    });
+    expect(receiptsProblems(unnamed, "")).toContain(UNNAMED_PARTY_PROBLEM);
+    expect(receiptsProblems(unnamed, "   ")).toContain(UNNAMED_PARTY_PROBLEM);
+    expect(receiptsProblems(unnamed, THIS_PARTY)).toEqual([]);
+    expect(
+      receiptsAdvisories(unnamed, SHARED_RENDEZVOUS).map(
+        (advisory) => advisory.message,
+      ),
+    ).not.toContain(UNNAMED_PARTY_PROBLEM);
+  });
+
+  test("an unnamed exchange that signs nothing is asked for no name", () => {
+    // The gate binds the certificate-signing configuration alone. A quick
+    // unsigned exchange states no name and is asked for none -- the whole point
+    // of an optional identity -- so a nameless draft must report no problem at
+    // all in the modes that sign nothing.
+    expect(receiptsProblems(RECEIPTS_DEFAULT, "")).toEqual([]);
+    expect(
+      receiptsProblems(draft({ retentionDisposition: RETENTION_NOTE }), ""),
+    ).toEqual([]);
+  });
+
+  test("the unnamed-party copy names the run's own terms and the unsigned exit", () => {
+    // Same register as the missing-pin block: what the run does (refuses to
+    // start), why (the certificate is trusted by the name in the agreed terms),
+    // and the two ways out -- name the party, or run unsigned.
+    expect(UNNAMED_PARTY_PROBLEM).toMatch(/refuses to start/);
+    expect(UNNAMED_PARTY_PROBLEM).toMatch(/agreed terms/);
+    expect(UNNAMED_PARTY_PROBLEM).toMatch(/No receipt/);
   });
 
   test("authoring stays open while the pin is missing", () => {

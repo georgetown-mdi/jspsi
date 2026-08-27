@@ -543,6 +543,59 @@ export function assertCertificateModePinsPartner(
 }
 
 /**
+ * Refuse a `certificate`-mode exchange whose own agreed terms name no party,
+ * before it runs.
+ *
+ * A receipt names both parties, and a certificate is trusted by the identity its
+ * holder used in the AGREED TERMS rather than the one the certificate carries, so
+ * a party that named itself none has nothing for its partner to authorize the
+ * certificate against: {@link runExchange} refuses the signature swap outright on
+ * such a run. That refusal sits at the last step of an otherwise successful
+ * exchange, so it lands after the payloads have crossed, and every local artifact
+ * -- the result and the exchange record as much as the receipt -- is written only
+ * once the exchange returns. This party's own absence is settled while the
+ * operator is still configuring, so it is refused here instead, before any
+ * credential, terms, or data are sent.
+ *
+ * Held to the RESOLVED local terms rather than to the identity argument
+ * {@link prepareForExchange} takes, because those are what the run puts on the
+ * wire: a spec carrying its own `linkageTerms` keeps their identity whatever that
+ * argument says. The condition is the one the swap reads -- the field absent, on
+ * the same `prepared.linkageTerms` -- so the gate refuses exactly the local half
+ * of what the swap would, no more; a present value is held to non-empty by
+ * {@link LinkageTermsSchema}, so no parsed document reaches either with a blank
+ * label.
+ *
+ * The PARTNER's half stays where it is: their terms arrive at the terms exchange,
+ * so nothing locally knowable settles it now. The refusal in `runExchange`
+ * remains the backstop for both sides.
+ *
+ * An {@link OperatorConfigError}, as its {@link assertCertificateModePinsPartner}
+ * and {@link assertSigningModeImplemented} siblings are: `signing.mode` and this
+ * party's own terms are both this party's own config, so the fault is local and
+ * actionable, surfaced as that category on both front ends (and exit 64 on the
+ * CLI, through the base class).
+ */
+export function assertCertificateModeNamesLocalParty(
+  signing: SigningConfig | undefined,
+  localTerms: LinkageTerms,
+): void {
+  if (signing?.mode !== "certificate") return;
+  if (localTerms.identity !== undefined) return;
+  throw new OperatorConfigError(
+    "this exchange signs receipts (signing.mode: certificate) but names no " +
+      "party, so it cannot finish: a receipt names both parties, and the " +
+      "certificate this party presents is trusted by the identity it used in " +
+      "the agreed terms -- an unnamed party leaves the partner nothing to " +
+      "check that certificate against. The run would stop at the signature " +
+      "swap, after this party's data had crossed, with no result, no exchange " +
+      "record, and no receipt written. Set linkage_terms.identity to this " +
+      "party's name -- or pass --identity, where the interface takes one -- or " +
+      'set signing.mode to "none" to run unsigned.',
+  );
+}
+
+/**
  * The refusal raised when a partner presents a `deduplicate` its invitation did
  * not declare ({@link assertPresentedDeduplicateMatchesInvitation}).
  *
@@ -767,6 +820,13 @@ export function prepareForExchange(
   // party's data and then terminates with nothing written locally. See
   // assertCertificateModePinsPartner.
   assertCertificateModePinsPartner(exchangeDataSpec.signing);
+
+  // And on the same footing when certificate mode names no party: a certificate
+  // is trusted by the identity its holder used in the agreed terms, so the
+  // signature swap refuses an unnamed side -- again after the payloads have
+  // crossed. The local half of that refusal is knowable here. See
+  // assertCertificateModeNamesLocalParty.
+  assertCertificateModeNamesLocalParty(exchangeDataSpec.signing, linkageTerms);
 
   // Reject a payload data dictionary that does not match what metadata transmits.
   // `payload.send` is exchanged, consented to, written into the exchange record,

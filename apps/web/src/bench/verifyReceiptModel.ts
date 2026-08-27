@@ -800,11 +800,21 @@ const ASSERTED_IDENTITY_COPY: Record<AssertedIdentityStatus, RowCopy> = {
   mismatch: {
     status: "Does not match an identity expected for this exchange",
   },
+  // Two states reach this row, and the copy has to hold for both: nothing was
+  // loaded to state who the exchange was between, or something was and it names
+  // fewer than two parties -- `linkage_terms.identity` is optional, so a loaded
+  // record or terms document legitimately carries none (see `namedPair`). Naming
+  // only the first would send an operator who already loaded their files back
+  // after them.
   "not-checked": {
     status: "Not checked",
     explanation:
-      "Nothing outside the record states who this exchange was between. " +
-      EXPECTATIONS_REMEDIATION,
+      "This verdict holds no pair of names to check the two certificates " +
+      "against. " +
+      EXPECTATIONS_REMEDIATION +
+      " If you already have, this exchange named fewer than two parties: a " +
+      "party may run unnamed, and an unnamed one gives its certificate no name " +
+      "to be checked against.",
   },
 };
 

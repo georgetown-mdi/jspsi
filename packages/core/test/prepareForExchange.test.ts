@@ -4,6 +4,7 @@ import {
   prepareForExchange,
   runExchange,
   assertAlgorithmImplemented,
+  assertCertificateModeNamesLocalParty,
   assertCertificateModePinsPartner,
   assertSigningModeImplemented,
 } from "../src/exchange";
@@ -853,6 +854,116 @@ describe("assertCertificateModePinsPartner", () => {
         assertPartnerCertificateTrusted(certificate, pin),
       ).rejects.toThrow(/no pinned partner fingerprint/);
     }
+  });
+});
+
+// --- Certificate mode with an unnamed party fails closed before connecting ---
+
+describe("prepareForExchange: certificate mode with no local identity is refused", () => {
+  const { identity: _named, ...unnamedTerms } = terms;
+  const prepareUnnamed = (signing?: SigningConfig) =>
+    prepareForExchange(
+      { linkageTerms: unnamedTerms, metadata, signing },
+      undefined,
+      rawRows,
+      columns,
+    );
+
+  test("an unnamed certificate-mode party is refused before connecting", () => {
+    // A certificate is trusted by the identity its holder used in the agreed
+    // terms, so an unnamed party leaves its partner nothing to check the
+    // certificate against and the signature swap refuses the step -- after the
+    // payloads have crossed. Refused here instead, as the same
+    // OperatorConfigError its pin and signing-mode siblings raise.
+    expect(() =>
+      prepareUnnamed({ mode: "certificate", partnerFingerprint }),
+    ).toThrow(OperatorConfigError);
+    expect(() =>
+      prepareUnnamed({ mode: "certificate", partnerFingerprint }),
+    ).toThrow(/linkage_terms\.identity/);
+  });
+
+  test("a named party under certificate mode prepares normally", () => {
+    const prepared = prepareForExchange(
+      {
+        linkageTerms: terms,
+        metadata,
+        signing: { mode: "certificate", partnerFingerprint },
+      },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.linkageTerms.identity).toBe("Tester");
+  });
+
+  test("an unnamed party runs unsigned: mode none, an absent block, and no block at all", () => {
+    // The gate binds the certificate-signing configuration alone. An unnamed
+    // quick exchange -- the whole point of an optional identity -- is asked
+    // nothing, whether it states mode none or no signing block.
+    expect(prepareUnnamed({ mode: "none" }).rowCount).toBe(1);
+    expect(prepareUnnamed(undefined).rowCount).toBe(1);
+    expect(
+      prepareForExchange({ metadata }, undefined, rawRows, columns).linkageTerms
+        .identity,
+    ).toBeUndefined();
+  });
+});
+
+// --- assertCertificateModeNamesLocalParty (the shared guard) -----------------
+
+describe("assertCertificateModeNamesLocalParty", () => {
+  const { identity: _named, ...unnamedTerms } = terms;
+
+  test("refuses certificate mode over terms carrying no identity", () => {
+    expect(() =>
+      assertCertificateModeNamesLocalParty(
+        { mode: "certificate" },
+        unnamedTerms,
+      ),
+    ).toThrow(OperatorConfigError);
+  });
+
+  test("passes certificate mode over terms that name the party", () => {
+    expect(() =>
+      assertCertificateModeNamesLocalParty({ mode: "certificate" }, terms),
+    ).not.toThrow();
+  });
+
+  test("passes every mode that signs nothing, named or not", () => {
+    expect(() =>
+      assertCertificateModeNamesLocalParty({ mode: "none" }, unnamedTerms),
+    ).not.toThrow();
+    expect(() =>
+      assertCertificateModeNamesLocalParty(
+        { mode: "session-derived" },
+        unnamedTerms,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertCertificateModeNamesLocalParty(undefined, unnamedTerms),
+    ).not.toThrow();
+  });
+
+  test("reads the value the receipt step reads, not the identity argument", () => {
+    // runExchange destructures `linkageTerms` off the PreparedExchange and
+    // refuses the signature swap when its identity is absent, so the gate is held
+    // to that same resolved value: a spec carrying its own terms keeps their
+    // identity whatever the identity argument says. A gate reading the argument
+    // instead would pass a run the swap then refuses after the payloads crossed.
+    const prepared = prepareForExchange(
+      { linkageTerms: unnamedTerms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.linkageTerms.identity).toBeUndefined();
+    expect(() =>
+      assertCertificateModeNamesLocalParty(
+        { mode: "certificate", partnerFingerprint },
+        prepared.linkageTerms,
+      ),
+    ).toThrow(OperatorConfigError);
   });
 });
 

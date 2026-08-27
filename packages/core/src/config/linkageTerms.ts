@@ -1193,9 +1193,9 @@ const LinkageTermsBaseSchema = z.object({
     .string()
     .max(MAX_NAME_LENGTH)
     .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
-  // Optional, and bounded exactly as before when it is there: a party that names
-  // itself is held to a non-empty, length-capped label, and a party that supplies
-  // none omits the field rather than sending an empty string or a placeholder.
+  // Optional, and bounded where it is present: a party that names itself is held
+  // to a non-empty, length-capped label, and a party that supplies none omits the
+  // field rather than sending an empty string or a placeholder.
   identity: z.string().min(1).max(MAX_TEXT_LENGTH).optional(),
   date: z.iso.date(),
   algorithm: AlgorithmSchema,

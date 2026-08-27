@@ -995,6 +995,55 @@ describe("verifySignedRecord: what the record cannot attest to itself", () => {
     expect(view.guidance).toEqual([]);
   });
 
+  test("a pair naming only one party leaves BOTH identity checks unperformed", async () => {
+    // `linkage_terms.identity` is optional, and this screen takes whatever files
+    // the operator loads -- an exchange record from an unnamed run, or a terms
+    // document with the field left out. A half-supplied pair is the shape that
+    // must not half-check: expected identities are unordered and matched onto the
+    // two certificates as a bijection, so anchoring one name would leave the
+    // other's check reading as performed against a name nobody supplied. Neither
+    // source may reach a verdict on identity at all.
+    const { identity: _unnamedTerms, ...unnamedPartnerTerms } = PARTNER_TERMS;
+    // Built over the half-named pair, so the record, its terms hash, and the
+    // terms below all agree: identity is then the only thing left unchecked.
+    const { record } = await buildExchangeRecord({
+      ...baseInputs,
+      partnerTerms: unnamedPartnerTerms,
+    });
+    expect(record.partnerIdentity).toBeUndefined();
+    expect(record.localIdentity).toBe(LOCAL_IDENTITY);
+    const { signed, ourFingerprint, partnerFingerprint } =
+      await signedFixture(record);
+    for (const sources of [
+      { record },
+      { localTerms: LOCAL_TERMS, partnerTerms: unnamedPartnerTerms },
+    ]) {
+      const report = await verifySignedRecord(
+        signed,
+        {
+          pinnedFingerprint: partnerFingerprint,
+          ownCertificateFingerprint: ourFingerprint,
+        },
+        sources,
+      );
+      expect(report.initiator.assertedIdentity).toBe("not-checked");
+      expect(report.responder.assertedIdentity).toBe("not-checked");
+      // Neither a spurious pass nor a spurious failure: an unperformed check
+      // holds the verdict short of verified and accuses nobody.
+      expect(report.outcome).toBe("incomplete");
+      const view = signedVerdictViewModel(report);
+      for (const party of view.parties) {
+        expect(party.rows[3]?.status).toBe("Not checked");
+        // The row names this cause too: the operator here loaded exactly what
+        // the remediation asks for, so a sentence naming only the missing-input
+        // cause would send them back after files they already have.
+        expect(party.rows[3]?.explanation).toContain(
+          "named fewer than two parties",
+        );
+      }
+    }
+  });
+
   test("an altered receipt content fails the signature it no longer matches", async () => {
     const { record } = await fixtures();
     const { signed, ourFingerprint, partnerFingerprint } =
