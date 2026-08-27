@@ -88,7 +88,10 @@ const NON_ASCII = "\u00E9";
 // number, deliberately not derived from MAX_DECLARED_NAMES_SHOWN: a ceiling that
 // scaled with the cap would hold at any cap, including none, which is the change
 // this check exists to catch. It leaves headroom over what the notice measures
-// today (a few more names' worth) so ordinary copy edits do not trip it, and stays
+// today (roughly 440 characters over the worst measured shape, a flooded
+// declaration that also renders the widening remedy) so small copy edits do not
+// trip it -- and it bounds the partner-driven half only; the notice's other list
+// is the operator's own headers. It stays
 // hundreds of times under the megabyte the same declaration paints uncapped -- the
 // difference between scrolling past the notice to reach the grid and the launch
 // control, and not reaching them.
