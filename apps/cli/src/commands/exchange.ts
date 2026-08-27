@@ -942,8 +942,9 @@ export async function handler(argv: Arguments): Promise<void> {
     // name this party never writes a first-use pin on its way to finding out.
     let identity: string;
     let termsIdentity: string | undefined;
-    if (options.identity) {
-      identity = options.identity;
+    const flagIdentity = options.identity?.trim();
+    if (flagIdentity) {
+      identity = flagIdentity;
       termsIdentity = identity;
       if (exchangeDataSpec.linkageTerms)
         exchangeDataSpec.linkageTerms = {

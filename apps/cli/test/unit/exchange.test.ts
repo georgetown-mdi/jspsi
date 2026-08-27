@@ -1323,6 +1323,52 @@ test("handler takes the run's identity from the configuration", async () => {
   expect(vi.mocked(prepareForExchange).mock.calls[0][1]).toBe("Test Party");
 });
 
+test("handler treats a blank --identity as absent, falling back to the config", async () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: new Date(Date.now() + 365 * 86_400_000).toISOString(),
+  });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  vi.mocked(prepareForExchange).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler({
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+    identity: "   ",
+  } as unknown as Arguments);
+  expect(vi.mocked(prepareForExchange).mock.calls[0][1]).toBe("Test Party");
+});
+
+test("handler trims a supplied --identity before using it", async () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: new Date(Date.now() + 365 * 86_400_000).toISOString(),
+  });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  vi.mocked(prepareForExchange).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler({
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+    identity: " Agency A ",
+  } as unknown as Arguments);
+  expect(vi.mocked(prepareForExchange).mock.calls[0][1]).toBe("Agency A");
+});
+
 // --- handler: --invitation provisioning --------------------------------------
 // These drive the handler's provisioning step, which runs before the key file is
 // read: --invitation decodes an invitation code and writes the composing party's
