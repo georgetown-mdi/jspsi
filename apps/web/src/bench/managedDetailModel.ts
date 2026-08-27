@@ -15,6 +15,7 @@
  */
 
 import {
+  UNNAMED_PARTY_LABEL,
   disclosedColumnNames,
   displayText,
   sanitizeForDisplay,
@@ -76,7 +77,9 @@ export function linkageTermsRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
       : [];
   const keys = terms.linkageKeys.map((key) => sanitizeForDisplay(key.name));
   return [
-    { label: "Your identity", value: sanitizeForDisplay(terms.identity) },
+    terms.identity === undefined
+      ? { label: "Your identity", muted: UNNAMED_PARTY_LABEL }
+      : { label: "Your identity", value: sanitizeForDisplay(terms.identity) },
     keys.length > 0
       ? { label: "Matched on", values: keys }
       : { label: "Matched on", muted: "No keys" },

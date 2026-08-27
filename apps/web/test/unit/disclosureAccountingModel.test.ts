@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   LINKAGE_RULE_SET_VERDICT_COPY,
   RECORDED_LINKAGE_RULE_SET_CAVEAT,
+  UNNAMED_PARTY_LABEL,
 } from "@psilink/core";
 
 import {
@@ -71,6 +72,25 @@ function csvRows(csv: string): Array<string> {
 }
 
 describe("a disclosure's facts", () => {
+  test("name an unnamed partner as unnamed, on screen and in the export", () => {
+    // `linkage_terms.identity` is optional, so a record can name no partner. The
+    // accounting is a compliance reader's artifact: a blank Partner cell would
+    // read as a rendering fault, and a stand-in would assert a party nobody
+    // named. Both the on-screen fact and the exported row say what happened.
+    return disclosureRecord({ partnerIdentity: null }).then((record) => {
+      expect("partnerIdentity" in record).toBe(false);
+      expect(factValues(disclosureFacts(record), "Partner")).toEqual([
+        UNNAMED_PARTY_LABEL,
+      ]);
+      expect(disclosureEntries(accountingOf(record))[0].partner).toBe(
+        UNNAMED_PARTY_LABEL,
+      );
+      expect(disclosureAccountingCsv(accountingOf(record))).toContain(
+        UNNAMED_PARTY_LABEL,
+      );
+    });
+  });
+
   test("state the accounting's fields from the run's own record", async () => {
     const record = await disclosureRecord({
       partnerIdentity: "Riverbend Schools",

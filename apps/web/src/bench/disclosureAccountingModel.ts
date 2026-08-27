@@ -25,6 +25,7 @@
 
 import {
   RECORDED_LINKAGE_RULE_SET_CAVEAT,
+  displayPartyIdentity,
   displayText,
   sanitizeForDisplay,
 } from "@psilink/core";
@@ -225,7 +226,7 @@ export function disclosureFacts(
 ): ReadonlyArray<DisclosureFact> {
   const { governance } = record;
   return [
-    fact("Partner", sanitizeForDisplay(record.partnerIdentity)),
+    fact("Partner", displayPartyIdentity(record.partnerIdentity)),
     optionalFact(
       "Agreement",
       governance.legalAgreement === undefined
@@ -293,7 +294,7 @@ export function disclosureEntries(
       at: record.createdAt,
       bindingNonce: record.bindingNonce,
       when: dateTimeLabel(new Date(record.createdAt)),
-      partner: sanitizeForDisplay(record.partnerIdentity),
+      partner: displayPartyIdentity(record.partnerIdentity),
       facts: disclosureFacts(record),
     }))
     .reverse();

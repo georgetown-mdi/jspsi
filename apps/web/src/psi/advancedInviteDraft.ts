@@ -1050,7 +1050,9 @@ export function draftFromTerms(
   // unsupplyable key is re-enabled or none is supplyable at all.
   const declarable = declarableFieldNames(seed.metadata, standardization);
   const draft: AdvancedInviteDraft = {
-    identity: terms.identity,
+    // An imported document that names nobody seeds an empty name field for the
+    // operator to fill, which is what an unnamed draft is here.
+    identity: terms.identity ?? "",
     lifetimeSeconds,
     outputDirection: directionForOutput(terms.output),
     algorithm: terms.algorithm,

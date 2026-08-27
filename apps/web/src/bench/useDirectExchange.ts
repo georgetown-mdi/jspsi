@@ -64,9 +64,9 @@ export function useDirectExchange({
    * mounted-file reference. Undefined until a file is committed; {@link start}
    * refuses to run without it. */
   inputSource: JobInputSource | undefined;
-  /** The optional operator label threaded to the CLI's `--identity`, so the
-   * previewed identity and the disclosure record's attribution match the run.
-   * Omitted when blank. */
+  /** The optional operator label threaded to the CLI's `--identity`: what the
+   * partner reads as this party's name, and what attributes the disclosure record.
+   * Omitted when blank, which the run carries as an unnamed party. */
   identity?: string;
   /** The optional linkage strategy forwarded to the CLI's `--linkage-strategy`. */
   linkageStrategy?: JobZeroSetupLinkageStrategy;

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 
+import { UNNAMED_PARTY_LABEL } from "@psilink/core";
+
 import {
   ACCEPTOR_SEND_FORWARD_REFERENCE,
   acceptUnsupported,
@@ -184,6 +186,22 @@ describe("acceptor ledger rows", () => {
     expect(tag).not.toContain(RLO);
     expect(tag).toContain("Proposed by ");
     expect(tag).toContain("Okafor");
+  });
+
+  test("an inviter that named itself none is tagged as unnamed", () => {
+    // `linkage_terms.identity` is optional, so an invitation can name nobody. The
+    // ledger tag reads "Proposed by ..." -- left blank it would read as a bug,
+    // and filled in it would assert a party the invitation never named.
+    const { identity: _unnamed, ...withoutIdentity } = baseTerms;
+    const token = makeToken();
+    token.linkageTerms = withoutIdentity;
+    expect(invitingPartyName(token)).toBe(UNNAMED_PARTY_LABEL);
+    expect(acceptorLedgerTag(invitingPartyName(token))).toBe(
+      `Proposed by ${UNNAMED_PARTY_LABEL}`,
+    );
+    expect(acceptorDoneLedgerTag(invitingPartyName(token))).toBe(
+      `Agreed with ${UNNAMED_PARTY_LABEL}`,
+    );
   });
 
   test("per-key matched-on rows are numbered, one entry per key", () => {

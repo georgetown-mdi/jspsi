@@ -914,9 +914,10 @@ export interface ServerJobZeroSetupDriverConfig {
   /** The operator's per-run diagnostic and recovery choices, exactly as the
    * exchange mode's ({@link RunDiagnosticsIntentFields}). */
   runDiagnostics?: RunDiagnosticsIntentFields;
-  /** The optional operator label forwarded to the CLI's `--identity`, so the
-   * previewed identity and the disclosure record's attribution match the run.
-   * Omitted when blank -- the CLI then defaults to the appliance user. */
+  /** The optional operator label forwarded to the CLI's `--identity`: what the
+   * partner reads as this party's name, and what attributes the disclosure record.
+   * Omitted when blank -- the run then names no party, which every surface shows
+   * as an absence rather than filling in. */
   identity?: string;
   /** The optional linkage strategy forwarded to the CLI's `--linkage-strategy`
    * (a closed enum); omitted for the cascade default. */

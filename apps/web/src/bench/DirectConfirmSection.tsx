@@ -136,11 +136,12 @@ export function DirectConfirmSection({
 
   // Client-side guard mirroring the intent schema's identity contract, validated on
   // the value the run actually sends (the trimmed label; a blank field omits identity
-  // and runs as the appliance user, so it is not an error). Naming the fault at the
-  // field keeps a label the schema refuses -- a leading dash, an over-long value, or
-  // a control character -- from reaching the server as an opaque 400 that failureFor
-  // would misattribute to the file or SFTP destination. The rules are the shared
-  // contract's, so this guard cannot come to admit what the schema refuses.
+  // altogether and the run names no party, so it is not an error). Naming the fault
+  // at the field keeps a label the schema refuses -- a leading dash, an over-long
+  // value, or a control character -- from reaching the server as an opaque 400 that
+  // failureFor would misattribute to the file or SFTP destination. The rules are
+  // the shared contract's, so this guard cannot come to admit what the schema
+  // refuses.
   const trimmedIdentity = identity.trim();
   const identityError =
     trimmedIdentity.length === 0
@@ -172,7 +173,7 @@ export function DirectConfirmSection({
 
       <TextInput
         label="Your identity (optional)"
-        description="Names you in the disclosure record and rides the exchange. Leave blank to run as this appliance's user."
+        description="The name your partner sees, and what names you in the disclosure record. Omitted if blank -- your partner and the record then show that no name was given."
         value={identity}
         onChange={(event) => onIdentity(event.currentTarget.value)}
         error={identityError}

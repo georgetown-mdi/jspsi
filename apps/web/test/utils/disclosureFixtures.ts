@@ -64,8 +64,9 @@ const PARTNER_PAYLOAD_RECEIVED: CommittedPayload = {
 /** How a fixture record differs from the standing one. */
 export interface DisclosureRecordOverrides {
   /** The partner's self-asserted identity, as it reaches the record byte-exactly
-   * -- the hook a suite uses to plant partner-controlled text. */
-  partnerIdentity?: string;
+   * -- the hook a suite uses to plant partner-controlled text -- or `null` for a
+   * partner that supplied no name, whose record field is absent. */
+  partnerIdentity?: string | null;
   /** The agreement reference and purpose, or `null` for terms that name no
    * agreement at all. */
   legalAgreement?: LinkageTerms["legalAgreement"] | null;
@@ -97,6 +98,21 @@ const LOCAL_RULE_SET: NonNullable<LinkageTerms["linkageRuleSet"]> = {
   keySet: { name: "hmis-keys", version: "2.1.0" },
 };
 
+/** The partner's terms: the local ones relabelled, or -- for an explicit `null`
+ * -- carrying no identity key at all, the shape a partner that supplied no name
+ * sends. Built by omission rather than by an explicit undefined, which the
+ * canonical encoding the record hashes its terms through rejects. */
+function partnerTermsFor(
+  localTerms: LinkageTerms,
+  partnerIdentity: string | null | undefined,
+): LinkageTerms {
+  if (partnerIdentity === null) {
+    const { identity: _unnamed, ...withoutIdentity } = localTerms;
+    return withoutIdentity;
+  }
+  return { ...localTerms, identity: partnerIdentity ?? "Riverbend Schools" };
+}
+
 /** Build one run's self-attested exchange record. */
 export async function disclosureRecord(
   overrides: DisclosureRecordOverrides = {},
@@ -120,10 +136,7 @@ export async function disclosureRecord(
   };
   const built = await buildExchangeRecord({
     localTerms,
-    partnerTerms: {
-      ...localTerms,
-      identity: overrides.partnerIdentity ?? "Riverbend Schools",
-    },
+    partnerTerms: partnerTermsFor(localTerms, overrides.partnerIdentity),
     recordsExposed: overrides.recordsExposed ?? 2,
     ...(overrides.resultSize === null
       ? {}

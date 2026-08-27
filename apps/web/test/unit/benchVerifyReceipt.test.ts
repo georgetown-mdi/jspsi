@@ -47,9 +47,15 @@ type ExchangeRecordInputs = Parameters<typeof buildExchangeRecord>[0];
 // A small exchange keyed on an identifier column: two parties, one shared
 // payload column each way, and an association table. The re-supply files below
 // reproduce exactly these committed bytes.
+/** Each fixture party's own name, held apart from the terms: `identity` is
+ * optional there, so reading it back would type as possibly absent where these
+ * bind a certificate to a party this suite knows is named. */
+const LOCAL_IDENTITY = "Party A";
+const PARTNER_IDENTITY = "Party B";
+
 const LOCAL_TERMS: LinkageTerms = {
   version: "1.0.0",
-  identity: "Party A",
+  identity: LOCAL_IDENTITY,
   date: "2025-01-01",
   algorithm: "psi",
   linkageStrategy: "cascade",
@@ -58,7 +64,10 @@ const LOCAL_TERMS: LinkageTerms = {
   linkageFields: [{ name: "ssn", type: "ssn" }],
   linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
 };
-const PARTNER_TERMS: LinkageTerms = { ...LOCAL_TERMS, identity: "Party B" };
+const PARTNER_TERMS: LinkageTerms = {
+  ...LOCAL_TERMS,
+  identity: PARTNER_IDENTITY,
+};
 
 const localPayloadSent: CommittedPayload = {
   columns: ["dose"],
@@ -160,7 +169,7 @@ describe("parseRecordDocument", () => {
     expect(parsed.kind).toBe("unrecognized-version");
     if (parsed.kind === "unrecognized-version") {
       expect(parsed.message).toContain("does not recognize");
-      expect(parsed.message).toContain("psilink-exchange-record/v4");
+      expect(parsed.message).toContain("psilink-exchange-record/v5");
     }
   });
 
@@ -509,8 +518,8 @@ async function signedFixture(record: ExchangeRecord): Promise<{
   ourFingerprint: string;
   partnerFingerprint: string;
 }> {
-  const us = await generateSigningIdentity(LOCAL_TERMS.identity);
-  const partner = await generateSigningIdentity(PARTNER_TERMS.identity);
+  const us = await generateSigningIdentity(LOCAL_IDENTITY);
+  const partner = await generateSigningIdentity(PARTNER_IDENTITY);
   const content: ReceiptContent = {
     termsHash: record.termsHash,
     initiatorToResponderPayload: "aTJyUGF5bG9hZA",
@@ -919,7 +928,7 @@ describe("verifySignedRecord: an anchoring value matching neither certificate", 
     const { signed, partnerFingerprint } = await signedFixture(record);
     // The same party, re-keyed since the exchange: the certificate it holds
     // today is neither certificate in this record.
-    const rotated = await generateSigningIdentity(LOCAL_TERMS.identity);
+    const rotated = await generateSigningIdentity(LOCAL_IDENTITY);
     const report = await verifySignedRecord(
       signed,
       {
