@@ -320,15 +320,36 @@ export const IDENTITY_AT_REST_NOTICE =
  * is stated separately ({@link IDENTITY_AT_REST_NOTICE}), so withholding this one
  * leaves the card saying where the key lands rather than saying nothing about it.
  *
- * The copy states an unruled-out layout rather than an established one, because
- * that is what raising it establishes: the report is fail-closed on both halves
- * -- a leg or a data root whose real path cannot be read counts as holding
- * (`jobRendezvous.ts`), and an appliance that has not answered keeps the
- * advisory too -- so the raised case includes layouts the walk could not
- * determine. An operator who checks and finds the folders separate must not have
- * been told flatly that they are not.
+ * Two variants carry this news, chosen by what the rendezvous report established
+ * (see {@link receiptsAdvisories}): this one states the shared layout as fact,
+ * for the case the report positively determined it -- a lexical or filesystem
+ * match ({@link JobRendezvousConfig.sharesDataRootUncertain} false). The report is
+ * fail-closed rather than silent where it could not determine the layout -- a leg
+ * or a data root whose real path cannot be read counts as holding
+ * (`jobRendezvous.ts`), and an appliance that has not answered keeps the advisory
+ * too -- and that case takes {@link IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN}
+ * instead, so an operator who checks and finds the folders separate is never told
+ * flatly that they are not.
  */
 export const IDENTITY_SHARED_MOUNT_ADVISORY =
+  "This appliance rendezvouses out of the folder you mounted, so a " +
+  "shared-folder exchange here syncs the very folder your signing key sits in. " +
+  "On a run like that your long-lived private key sits where your partner " +
+  "writes, and whoever reads it can sign receipts in your name -- for every " +
+  "exchange, with every partner. Give the synced folder a mount of its own " +
+  "(JOB_RENDEZVOUS_DIR), separate from this one, before you sign an exchange " +
+  "that runs over it.";
+
+/**
+ * The hedged sibling of {@link IDENTITY_SHARED_MOUNT_ADVISORY}, raised where the
+ * rendezvous report could not rule out the shared layout rather than positively
+ * establishing it -- an appliance that has not answered, or a comparison the walk
+ * defaulted on rather than matched. States the layout as unruled-out rather than
+ * established, since that is all raising it in this case means: an operator who
+ * checks and finds the folders separate must not have been told flatly that they
+ * are not.
+ */
+export const IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN =
   "psilink cannot rule out that this appliance rendezvouses out of the folder " +
   "you mounted, and on that layout a shared-folder exchange syncs the very " +
   "folder your signing key sits in. On a run like that your long-lived private " +
@@ -414,14 +435,19 @@ export interface ReceiptsAdvisory {
  *
  * `rendezvous` is this appliance's own rendezvous report, which decides the one
  * advisory that is about the DEPLOYMENT rather than the draft
- * ({@link IDENTITY_SHARED_MOUNT_ADVISORY}): it is raised only where a rendezvous
+ * ({@link IDENTITY_SHARED_MOUNT_ADVISORY} / {@link
+ * IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN}): it is raised only where a rendezvous
  * folder holds the mounted working directory, the layout in which the partner syncs
  * the folder the signing key sits in. Withheld only on a report that positively says
  * otherwise -- an appliance that has not answered yet, or one whose probe failed,
  * keeps the advisory, since an unread report is not evidence of a separate mount.
- * The two notices are unchanged by the layout: where the receipt lands, and the
- * at-rest notice about the key file, which is news on every layout and is what a
- * card on a separately-mounted appliance still says about where the key lands.
+ * Which of the two messages is shown follows the same report: the established
+ * variant only where the report positively determined the layout
+ * (`sharesDataRootUncertain: false`), the hedged variant everywhere else the
+ * advisory is raised. The two notices are unchanged by the layout: where the
+ * receipt lands, and the at-rest notice about the key file, which is news on every
+ * layout and is what a card on a separately-mounted appliance still says about
+ * where the key lands.
  *
  * A draft the run itself would refuse belongs in {@link receiptsProblems}, not
  * here: an advisory the operator cannot proceed past is a block wearing the
@@ -434,12 +460,18 @@ export function receiptsAdvisories(
   if (draft.mode !== "certificate") return [];
   const separatelyMounted =
     rendezvous?.configured === true && rendezvous.sharesDataRoot === false;
+  const sharedLayoutEstablished =
+    rendezvous?.configured === true &&
+    rendezvous.sharesDataRoot === true &&
+    rendezvous.sharesDataRootUncertain === false;
   return [
     ...(separatelyMounted
       ? []
       : [
           {
-            message: IDENTITY_SHARED_MOUNT_ADVISORY,
+            message: sharedLayoutEstablished
+              ? IDENTITY_SHARED_MOUNT_ADVISORY
+              : IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN,
             severity: "warning" as const,
           },
         ]),

@@ -330,6 +330,14 @@ export interface JobSigningPaths {
  * states no choice at all -- is the absent block the CLI already treats as "sign
  * nothing", so an operator who changed nothing composes the config they composed
  * before this surface existed.
+ *
+ * Both throws below guard an impossible state on a schema-validated intent rather
+ * than a live branch: `jobSigningChoiceSchema`'s refine requires a certificate
+ * intent to carry `partnerFingerprint`, so composing one without it is a
+ * programming error -- a caller reaching this function with a hand-built intent
+ * that bypassed the schema -- not a shape a validated job ever has. Throwing here
+ * turns that into a loud failure at compose time rather than a config the CLI
+ * child would refuse minutes later with a bare exit 64.
  */
 function composedSigning(
   intent: JobExchangeIntent,
@@ -341,12 +349,15 @@ function composedSigning(
       "certificate-mode signing reached config composition with no identity " +
         "path resolved",
     );
+  if (intent.signing.partnerFingerprint === undefined)
+    throw new Error(
+      "certificate-mode signing reached config composition with no partner " +
+        "fingerprint pinned",
+    );
   return {
     mode: "certificate",
     identityFile: paths.identityFile,
-    ...(intent.signing.partnerFingerprint !== undefined
-      ? { partnerFingerprint: intent.signing.partnerFingerprint }
-      : {}),
+    partnerFingerprint: intent.signing.partnerFingerprint,
     ...(paths.receiptOutput !== undefined
       ? { receiptOutput: paths.receiptOutput }
       : {}),

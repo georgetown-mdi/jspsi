@@ -94,6 +94,12 @@ function profileErrorReasonOf(body: unknown): JobInputProfileUnavailableReason {
  * surfaces that warn about the key's location read as the shared layout -- the
  * direction an unanswered probe is safe to fail in.
  *
+ * `sharesDataRootUncertain` reports whether that layout was positively established
+ * -- a lexical or filesystem match -- rather than a default the appliance's walk
+ * could not rule out. Meaningful only alongside `sharesDataRoot: true`; a body that
+ * does not positively confirm it reads as uncertain, the same fail-safe direction
+ * `sharesDataRoot` itself takes.
+ *
  * `problem` is why the appliance cannot run a filedrop exchange as provisioned, in
  * the operator's own terms; it accompanies `configured: false`, so a surface that
  * shows the unavailable state has the remedy to show with it. */
@@ -105,6 +111,7 @@ export interface JobRendezvousConfig {
   outboundLocator?: string;
   outboundFolderName?: string;
   sharesDataRoot?: boolean;
+  sharesDataRootUncertain?: boolean;
   problem?: string;
 }
 
@@ -275,13 +282,27 @@ async function probeJobRendezvous(
     // offering a card that fails there.
     if (split && outboundLocator === undefined) return { configured: false };
     const outboundFolderName = body.outboundFolderName;
+    // Anything but an explicit `false` reads as the shared layout: a body that
+    // does not answer leaves the identity-location warning raised rather than
+    // silently withheld, which is the direction that warning is safe to fail in.
+    const sharesDataRoot = body.sharesDataRoot !== false;
     return {
       configured: true,
       locator,
-      // Anything but an explicit `false` reads as the shared layout: a body that
-      // does not answer leaves the identity-location warning raised rather than
-      // silently withheld, which is the direction that warning is safe to fail in.
-      sharesDataRoot: body.sharesDataRoot !== false,
+      sharesDataRoot,
+      // Meaningful only alongside a shared layout, so carried only there.
+      // Uncertain unless the body positively confirms both that the layout is
+      // shared AND that the walk established it rather than defaulted to it:
+      // the same fail-safe direction as sharesDataRoot itself, so a malformed
+      // or absent field hedges rather than asserts the layout as fact.
+      ...(sharesDataRoot
+        ? {
+            sharesDataRootUncertain: !(
+              body.sharesDataRoot === true &&
+              body.sharesDataRootUncertain === false
+            ),
+          }
+        : {}),
       // A malformed name degrades to "the console cannot name the folder", which
       // is the direction the accept kit is safe to fail in.
       ...(typeof folderName === "string" && folderName.length > 0

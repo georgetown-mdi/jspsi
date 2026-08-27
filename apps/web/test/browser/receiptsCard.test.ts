@@ -126,6 +126,7 @@ const SINGLE_MOUNT_RENDEZVOUS: JobRendezvousConfig = {
   locator: "psilink",
   folderName: "psilink",
   sharesDataRoot: true,
+  sharesDataRootUncertain: false,
 };
 
 /**

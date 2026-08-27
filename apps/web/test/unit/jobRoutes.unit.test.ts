@@ -1180,6 +1180,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     expect(await response.json()).toEqual({
       configured: true,
       sharesDataRoot: false,
+      sharesDataRootUncertain: false,
       locator: "agency-a-agency-b",
       folderName: "agency-a-agency-b",
     });
@@ -1195,6 +1196,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
       // Nested INSIDE the data root rather than holding it: a partner's sync
       // reaches this folder, not the signing key in the folder above it.
       sharesDataRoot: false,
+      sharesDataRootUncertain: false,
       locator: "agency-drop",
       folderName: "agency-drop",
     });
@@ -1212,6 +1214,8 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     >;
     expect(body.configured).toBe(true);
     expect(body.sharesDataRoot).toBe(true);
+    // The data-root fallback IS the leg, a lexical match rather than a default.
+    expect(body.sharesDataRootUncertain).toBe(false);
     expect(JSON.stringify(body)).not.toContain(root);
   });
 
@@ -1228,6 +1232,8 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     >;
     expect(body.configured).toBe(true);
     expect(body.sharesDataRoot).toBe(true);
+    // A lexical containment match, not a default.
+    expect(body.sharesDataRootUncertain).toBe(false);
   });
 
   test("reports a locator with no name where it cannot name the folder", async () => {
@@ -1255,6 +1261,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     expect(Object.keys(JSON.parse(body) as object)).toEqual([
       "configured",
       "sharesDataRoot",
+      "sharesDataRootUncertain",
       "locator",
       "folderName",
     ]);
@@ -1272,6 +1279,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     expect(JSON.parse(body)).toEqual({
       configured: true,
       sharesDataRoot: false,
+      sharesDataRootUncertain: false,
       split: true,
       locator: "from-partner",
       folderName: "from-partner",
@@ -1293,6 +1301,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     expect(await (await getRendezvous()).json()).toEqual({
       configured: true,
       sharesDataRoot: false,
+      sharesDataRootUncertain: false,
       locator: "agency-drop",
       folderName: "agency-drop",
     });
