@@ -162,7 +162,8 @@ test("an input satisfying only some of the declared keys is refused", () => {
   };
   const links = refusalLinks(["ssn"], terms);
   expect(links[0]).toContain(
-    "the CSV cannot produce 1 of the 2 agreed linkage keys",
+    "1 of the 2 agreed linkage keys cannot be produced from this input's " +
+      "columns",
   );
   expect(links[1]).toBe(
     `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
@@ -188,7 +189,8 @@ test("a dead key beside a column-unsatisfiable one is refused, naming both cause
   };
   const links = refusalLinks(["dob"], terms);
   expect(links[0]).toContain(
-    "the CSV cannot produce 1 of the 2 agreed linkage keys",
+    "1 of the 2 agreed linkage keys cannot be produced from this input's " +
+      "columns",
   );
   expect(links[0]).toContain(
     "the cleaning declared for 1 of the 2 agreed linkage keys drops every " +

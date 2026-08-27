@@ -7,6 +7,7 @@ import {
   LinkageTermsUnsatisfiableError,
   MAX_ERROR_CAUSE_DEPTH,
   redactAndSanitizeForDisplay,
+  summarizeLinkageShortfall,
 } from "@psilink/core";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 
@@ -75,9 +76,11 @@ function fitDetailLinks(details: string[], overflowNoun: string): string[] {
  * names where the terms came from. The offline accept path calls no prepare at
  * all, so there this is the only place the refusal lands.
  *
- * This wrapper owns the message wording and the partner-sourced name handling,
- * kept in one copy so the accept and exchange paths cannot drift apart on the
- * escaping.
+ * This wrapper owns the source-specific wording and the partner-sourced name
+ * handling, kept in one copy so the accept and exchange paths cannot drift apart
+ * on the escaping. The shortfall itself is phrased by core's
+ * {@link summarizeLinkageShortfall}, the same fragment the run-boundary refusal
+ * states.
  *
  * @param standardization The committed config's explicit standardization, when
  *   any: an explicit column remap satisfies a field whose semantic type is
@@ -146,26 +149,6 @@ export function checkLinkageSatisfiability(
     ),
   ];
 
-  const total = verdict.keys.length;
-  // Each shortfall clause names the keys it is about in full, so a refusal
-  // carrying one clause reads as well as one carrying both.
-  const keysPhrase = (count: number): string =>
-    total === 1
-      ? "the one agreed linkage key"
-      : count === total
-        ? `all ${total} agreed linkage keys`
-        : `${count} of the ${total} agreed linkage keys`;
-  const shortfalls: string[] = [];
-  if (verdict.unsatisfiableKeys.length > 0)
-    shortfalls.push(
-      `the CSV cannot produce ${keysPhrase(verdict.unsatisfiableKeys.length)}`,
-    );
-  if (verdict.deadKeys.length > 0)
-    shortfalls.push(
-      `the cleaning declared for ${keysPhrase(verdict.deadKeys.length)} ` +
-        "drops every record",
-    );
-
   // The remedy lead names the step each shortfall actually takes: a missing column
   // is fixed in the CSV, a dead key only in the terms, so a refusal carrying both
   // names both. `blockRemedy` then closes with the out-of-band renegotiation that
@@ -179,7 +162,7 @@ export function checkLinkageSatisfiability(
 
   throw new LinkageTermsUnsatisfiableError(
     `this CSV cannot satisfy every linkage key the ${messaging.source} ` +
-      `declares: ${shortfalls.join(", and ")}. Running would exchange fewer ` +
+      `declares: ${summarizeLinkageShortfall(verdict)}. Running would exchange fewer ` +
       "keys than the agreed terms declare, while the exchange record would " +
       "still name every field those terms reference.",
     {

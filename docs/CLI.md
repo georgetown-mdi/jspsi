@@ -256,16 +256,18 @@ A pre-existing key file is treated differently from a configuration file: it is 
 
 ### Checking your input against the terms
 
-If `INPUT_FILE` is provided, its columns are checked against the invitation's terms before you are asked to confirm. The checks are:
+If `INPUT_FILE` is provided, its columns are checked against the invitation's terms before you are asked to confirm.
 
 The rule is one: acceptance stops unless the input can satisfy **every** linkage key the invitation's terms declare. There is no partial acceptance -- an exchange runs the keys both parties agreed on, so a file that can supply only some of them is a shortfall to settle with your partner before the run, not something to proceed past. The error names what is short and writes no files, and the remedy is a fresh invitation over terms both files can satisfy, agreed out of band.
 
-Two shapes reach that stop, and the error names whichever applies:
+Three shapes reach that stop, and the error names whichever applies:
 
 - **The input cannot produce a key's fields** -- the columns the key needs are absent, or carry a type the terms' cleaning cannot bind. The error names the unsatisfied fields and the keys they cost. The remedy is a CSV covering those field types, or new terms.
 - **A linkage key's own cleaning can never produce a value** -- a `parse_date` whose `input_format` omits a component, so it drops every record regardless of the data. The key is named even though its columns are present: it passes the column check yet would contribute nothing, so the fix is a corrected invitation from the partner, not a different CSV.
+- **The invitation's terms declare no linkage key at all** -- there is nothing to match on, so acceptance stops the same way.
 
-Terms declaring no linkage key at all stop acceptance the same way: there is nothing to match on.
+A further check covers what the input would send rather than what it can match:
+
 - **The input discloses columns the invitation will not accept** -- the invitation declares the inviting party accepts no payload column *and* is entitled to the matched result, while the input discloses some (the same set the display's `columns you will send` line lists, on an acceptance that reaches that display). A warning names them, one per line, because that disagreement is one the exchange refuses to run on. The two remedies are to set those columns not to transmit in the written configuration (`is_payload: false`, or the `ignored` role), or to ask the partner for an invitation that accepts them. What follows the warning differs by path, and the warning says which:
   - An acceptance that runs the exchange -- online, or from a WebRTC endpoint with an input file -- prepares it before asking you to confirm, so it meets the refusal itself: the command stops as a configuration error (exit 64) before the terms are displayed and without writing a configuration or key file.
   - An acceptance that only writes a configuration prepares nothing, so it is not stopped: confirming writes the configuration and key file, and the refusal arrives when you run `psilink exchange`.

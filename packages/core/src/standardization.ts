@@ -3140,6 +3140,48 @@ export function decideLinkageTermsVerdict(
 }
 
 /**
+ * State, in one sentence fragment, how a verdict falls short of its terms: which
+ * of the declared linkage keys the input's columns cannot produce, and which of
+ * them declare cleaning that drops every record.
+ *
+ * Every surface that refuses on {@link decideLinkageTermsVerdict} phrases the
+ * shortfall through this, so the run-boundary refusal and the pre-flight notice
+ * ahead of it cannot describe the same fault in different words. Each clause
+ * counts against the whole declared set rather than the other clause's remainder,
+ * so a refusal carrying one clause reads as well as one carrying both.
+ *
+ * The fragment is fixed copy and counts only. Names are terms content --
+ * partner-authored on every accept path -- and each caller places them on cause
+ * links of its own.
+ *
+ * Terms declaring no key are not its case and yield nothing: that refusal names
+ * the absent declaration itself, in copy each caller owns.
+ */
+export function summarizeLinkageShortfall(
+  verdict: LinkageTermsVerdict,
+): string {
+  const total = verdict.keys.length;
+  const keysPhrase = (count: number): string =>
+    total === 1
+      ? "the one agreed linkage key"
+      : count === total
+        ? `all ${total} agreed linkage keys`
+        : `${count} of the ${total} agreed linkage keys`;
+  const shortfalls: string[] = [];
+  if (verdict.unsatisfiableKeys.length > 0)
+    shortfalls.push(
+      `${keysPhrase(verdict.unsatisfiableKeys.length)} cannot be produced ` +
+        "from this input's columns",
+    );
+  if (verdict.deadKeys.length > 0)
+    shortfalls.push(
+      `the cleaning declared for ${keysPhrase(verdict.deadKeys.length)} ` +
+        "drops every record",
+    );
+  return shortfalls.join(", and ");
+}
+
+/**
  * Fail closed, before any credential, terms, or data are sent, on an input that
  * cannot fully satisfy the agreed linkage terms -- the run-boundary enforcement of
  * {@link decideLinkageTermsVerdict}, called from {@link prepareForExchange}.
@@ -3182,27 +3224,6 @@ export function assertLinkageTermsSatisfiable(
         "key with your partner, and run the exchange under those.",
     );
 
-  const total = verdict.keys.length;
-  // Each shortfall clause names the keys it is about in full, so a refusal
-  // carrying one clause reads as well as one carrying both.
-  const keysPhrase = (count: number): string =>
-    total === 1
-      ? "the one agreed linkage key"
-      : count === total
-        ? `all ${total} agreed linkage keys`
-        : `${count} of the ${total} agreed linkage keys`;
-  const shortfalls: string[] = [];
-  if (verdict.unsatisfiableKeys.length > 0)
-    shortfalls.push(
-      `${keysPhrase(verdict.unsatisfiableKeys.length)} cannot be produced ` +
-        "from this input's columns",
-    );
-  if (verdict.deadKeys.length > 0)
-    shortfalls.push(
-      `the cleaning declared for ${keysPhrase(verdict.deadKeys.length)} ` +
-        "drops every record",
-    );
-
   const details: string[] = [];
   if (verdict.unsatisfiedFields.length > 0)
     details.push(
@@ -3226,7 +3247,7 @@ export function assertLinkageTermsSatisfiable(
 
   throw new LinkageTermsUnsatisfiableError(
     `this input cannot satisfy every linkage key the agreed terms declare: ` +
-      `${shortfalls.join(", and ")}. The exchange is refused before any ` +
+      `${summarizeLinkageShortfall(verdict)}. The exchange is refused before any ` +
       "credential, terms, or data are sent: it would match on fewer keys " +
       "than both parties agreed to while its exchange record still names " +
       "every field those terms declare. Settle the shortfall with your " +

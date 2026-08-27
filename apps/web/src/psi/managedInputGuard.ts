@@ -12,8 +12,10 @@
  * failure, never the desync/attack framing (see docs/MANAGED_EXCHANGE.md, "The
  * input file each run", and docs/spec/MANAGED_EXCHANGE_RECORD.md, the
  * `inputFileHandle` and `lastRun` rows). The column check reuses core's
- * {@link assessLinkageSatisfiability}, the same column-shape verdict the CLI
- * pre-flight and the web intake surfaces block on, rather than re-deriving it.
+ * {@link assessLinkageSatisfiability} rather than re-deriving the column-shape
+ * verdict; the threshold it holds that verdict to is this guard's own and is
+ * looser than the one a run is enforced against (see
+ * {@link assessManagedInputColumns}).
  */
 
 import { assessLinkageSatisfiability } from "@psilink/core";
@@ -83,8 +85,15 @@ export class ManagedInputError extends Error {
  * shape, the guard every run path applies before any connection. Reuses core's
  * {@link assessLinkageSatisfiability} over the persisted document's linkage terms,
  * standardization, and metadata, so the verdict matches an exchange that would run
- * from exactly those terms -- the same block signal (`satisfiableKeyCount === 0`)
- * the CLI pre-flight and the web intake surfaces use, never a re-derivation.
+ * from exactly those terms, never a re-derivation.
+ *
+ * The threshold applied here (`satisfiableKeyCount === 0`) is the loose one, and
+ * this guard is advance notice rather than the decision: it catches, at run start
+ * and before any connection, an input that could match on nothing at all. Whether
+ * the run may proceed is settled by core's `assertLinkageTermsSatisfiable` -- every
+ * declared linkage key satisfiable and live -- enforced at the run boundary inside
+ * `prepareForExchange`, whose refusal `managedRun.ts` routes to this same benign
+ * `"input"` failure tier. An input this guard accepts can still be refused there.
  *
  * Returns `undefined` when the columns satisfy at least one key (the input is
  * accepted); returns a `"columns"` {@link ManagedInputRejection} carrying the

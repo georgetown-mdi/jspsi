@@ -16,6 +16,7 @@ import {
   assessLinkageSatisfiability,
   assertLinkageTermsSatisfiable,
   decideLinkageTermsVerdict,
+  summarizeLinkageShortfall,
   checkValueConstraints,
   summarizeDatasetConstraintViolations,
   StandardizedField,
@@ -5037,6 +5038,96 @@ describe("assertLinkageTermsSatisfiable", () => {
     const rendered = sanitizeErrorForDisplay(raised);
     expect(rendered).toContain("out of band");
     expect(rendered).toContain("unsatisfied linkage fields (1)");
+  });
+});
+
+// --- summarizeLinkageShortfall: the wording both refusals state --------------
+
+describe("summarizeLinkageShortfall", () => {
+  const deadTransform = [
+    { function: "parse_date", params: { inputFormat: "MM/DD" } },
+  ];
+  // One key per field, so a case picks each key's grade independently: withhold
+  // the column to make it unsatisfiable, give it the dead transform to make it
+  // dead.
+  const twoKeyTerms = (
+    ssnElement: LinkageKeyElement,
+    dobElement: LinkageKeyElement,
+  ): LinkageTerms => ({
+    version: "1.0.0",
+    identity: "Party",
+    date: "2025-01-01",
+    algorithm: "psi",
+    linkageStrategy: "cascade",
+    output: { expectsOutput: true, shareWithPartner: false },
+    deduplicate: false,
+    linkageFields: [
+      { name: "ssn", type: "ssn" },
+      { name: "dob", type: "date_of_birth" },
+    ],
+    linkageKeys: [
+      { name: "SSN", elements: [ssnElement] },
+      { name: "DOB", elements: [dobElement] },
+    ],
+  });
+  const summarize = (columns: string[], terms: LinkageTerms): string =>
+    summarizeLinkageShortfall(decideLinkageTermsVerdict(columns, terms));
+
+  test("a lone declared key is named as the one it is", () => {
+    expect(
+      summarize(["dob"], {
+        ...twoKeyTerms({ field: "ssn" }, { field: "dob" }),
+        linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+      }),
+    ).toBe(
+      "the one agreed linkage key cannot be produced from this input's columns",
+    );
+  });
+
+  test("a shortfall over every declared key is counted as all of them", () => {
+    expect(
+      summarize(
+        ["ssn", "dob"],
+        twoKeyTerms(
+          { field: "ssn", transform: deadTransform },
+          { field: "dob", transform: deadTransform },
+        ),
+      ),
+    ).toBe(
+      "the cleaning declared for all 2 agreed linkage keys drops every record",
+    );
+  });
+
+  test("both shortfall kinds are stated, each counted against the whole set", () => {
+    expect(
+      summarize(
+        ["dob"],
+        twoKeyTerms(
+          { field: "ssn" },
+          { field: "dob", transform: deadTransform },
+        ),
+      ),
+    ).toBe(
+      "1 of the 2 agreed linkage keys cannot be produced from this input's " +
+        "columns, and the cleaning declared for 1 of the 2 agreed linkage keys " +
+        "drops every record",
+    );
+  });
+
+  test("the run-boundary refusal states the fragment verbatim", () => {
+    const terms = twoKeyTerms(
+      { field: "ssn" },
+      { field: "dob", transform: deadTransform },
+    );
+    let raised: unknown;
+    try {
+      assertLinkageTermsSatisfiable(["dob"], terms);
+    } catch (err) {
+      raised = err;
+    }
+    expect(sanitizeErrorForDisplay(raised)).toContain(
+      summarize(["dob"], terms),
+    );
   });
 });
 

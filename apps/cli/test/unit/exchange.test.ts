@@ -1929,7 +1929,8 @@ test("prepareDataset: refuses when only some of the committed keys are satisfiab
   expect(err).toBeInstanceOf(UsageError);
   const rendered = sanitizeErrorForDisplay(err);
   expect(rendered).toContain(
-    "the CSV cannot produce 1 of the 2 agreed linkage keys",
+    "1 of the 2 agreed linkage keys cannot be produced from this input's " +
+      "columns",
   );
   expect(rendered).toContain("unsatisfied field: ssn (ssn)");
   expect(rendered).toContain("linkage key the CSV cannot produce: SSN");
