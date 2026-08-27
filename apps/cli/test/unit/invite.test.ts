@@ -1609,6 +1609,44 @@ test("validateInvite: --identity over a reused config is reported, not applied",
   }
 });
 
+test("validateInvite: --identity over a reused config redacts a planted key marker", async () => {
+  // A label containing a private-key BEGIN marker must not survive to the log
+  // sink, whose dangling-marker redaction would otherwise swallow the rest of
+  // the line -- the config label, path, and remedy -- behind it.
+  const terms = getDefaultLinkageTerms(
+    "Agency Config",
+    inferMetadata(["first_name", "last_name", "dob", "ssn"]),
+  );
+  const { dir, configPath, keyPath } = withConfig(terms);
+  const log = getLogger("invite-identity-key-marker-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({
+        configFile: configPath,
+        keyFile: keyPath,
+        identity: "-----BEGIN OPENSSH PRIVATE KEY-----",
+      }),
+      acceptTimeout: 900,
+      log,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    const ignored = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((message) => message.includes("--identity"));
+    expect(ignored).toHaveLength(1);
+    expect(ignored[0]).toContain("[redacted private key]");
+    expect(ignored[0]).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+    expect(ignored[0]).toContain(configPath);
+    expect(ignored[0]).toMatch(/to change it\.$/);
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("validateInvite: a config citing a rule set its own keys left is reported at the mint", async () => {
   // The citation the config carries rides the token to the partner, so a hand
   // edit that took the keys out of the cited set is named here rather than after

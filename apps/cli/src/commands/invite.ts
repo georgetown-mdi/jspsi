@@ -15,7 +15,7 @@ import {
   inferMetadata,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
-  sanitizeForDisplay,
+  redactAndSanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -596,11 +596,12 @@ export async function validateInvite(params: {
     const suppliedIdentity = options.identity?.trim();
     if (suppliedIdentity)
       log.warn(
-        `--identity "${sanitizeForDisplay(suppliedIdentity)}" has no effect ` +
+        `--identity "${redactAndSanitizeForDisplay(suppliedIdentity)}" has no effect ` +
           "when the linkage terms come from an existing configuration file; " +
           "the file's linkage_terms.identity " +
-          `("${sanitizeForDisplay(configTerms.identity)}") is used instead. ` +
-          `Edit linkage_terms.identity in ${options.configFile} to change it.`,
+          `("${redactAndSanitizeForDisplay(configTerms.identity)}") is used instead. ` +
+          "Edit linkage_terms.identity in " +
+          `${redactAndSanitizeForDisplay(options.configFile)} to change it.`,
       );
     // Config-as-source: the config supplies the linkage terms and persists
     // unchanged. The config read above is the mode discriminator -- it must run
