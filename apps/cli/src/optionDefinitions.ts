@@ -129,7 +129,11 @@ export function addCommonBootstrapOptions(
     })
     .option("identity", {
       type: "string",
-      describe: "identity string for this party (name, org, contact)",
+      describe:
+        "identity string for this party (name, org, contact): the label your " +
+        "partner reads in the agreed linkage terms. Required on a run that " +
+        "authors its own terms; a run whose terms come from a configuration " +
+        "file takes the label from its linkage_terms.identity instead",
     })
     .option("server-port", {
       type: "number",

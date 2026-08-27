@@ -500,23 +500,29 @@ function opening(
     "On Windows, run the commands from PowerShell, not Command Prompt.",
     "",
     // Ahead of the engine question, because it qualifies every reader: psilink
-    // names a party only from what the operator gives it, so a command carrying
-    // no name stops. The engine section below is one whole reader class is told
-    // to skip, which is why this cannot live there. The flag SHAPE is shown and
-    // the value is shouted rather than plausible: an unreplaced placeholder
-    // would otherwise reach the partner as this party's name, and no command on
-    // this sheet carries it pre-filled for that reason.
+    // names a party only from what the operator gives it, so an acceptance
+    // carrying no name stops. The engine section below is one a whole reader
+    // class is told to skip, which is why this cannot live there. Scoped to the
+    // accept command, the one place on this sheet that chooses the label:
+    // accepting writes it into psilink.yaml and the exchange steps read it from
+    // there. The flag SHAPE is shown and the value is shouted rather than
+    // plausible: an unreplaced placeholder would otherwise reach the partner as
+    // this party's name, and no command on this sheet carries it pre-filled for
+    // that reason.
     ...heading("THE NAME YOUR PARTNER SEES"),
     "psilink records a name for your side -- what your partner reads as who",
     "they exchanged with, in the agreed terms and in the record each of you",
-    "keeps. It picks none for you, so add this to the end of every psilink",
+    "keeps. It picks none for you, so add this to the end of the accept",
     "command on this sheet:",
     "",
     '  --identity "YOUR NAME, YOUR ORGANIZATION"',
     "",
     "with both parts replaced by what your partner will recognize -- your",
     "own name, and the organization you are exchanging on behalf of. Leave",
-    "it off and psilink stops and asks, rather than naming you itself.",
+    "it off and accepting stops and asks, rather than naming you itself.",
+    "",
+    "Accepting writes that name into psilink.yaml, so the exchange command",
+    "later on takes it from there and needs no flag of its own.",
     "",
     ...heading("WHICH DOCKER DO YOU HAVE?"),
     "  * Docker Desktop, on Windows, macOS, or Linux: nothing to do here.",

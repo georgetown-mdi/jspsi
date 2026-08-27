@@ -181,8 +181,8 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
     positionals[0] !== undefined ? String(positionals[0]) : undefined;
   if (arg0 === undefined)
     throw new UsageError(
-      "an invitation is required; usage: psilink accept INVITATION " +
-        "[INPUT_FILE] [OUTPUT_FILE]",
+      "an invitation is required; usage: psilink accept --identity IDENTITY " +
+        "INVITATION [INPUT_FILE] [OUTPUT_FILE]",
     );
 
   if (looksLikeUrl(arg0)) {
@@ -193,12 +193,13 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
     if (invitation === undefined || input === undefined)
       throw new UsageError(
         "online acceptance requires an invitation and an input file; usage: " +
-          "psilink accept URL INVITATION INPUT_FILE [OUTPUT_FILE]",
+          "psilink accept --identity IDENTITY URL INVITATION INPUT_FILE " +
+          "[OUTPUT_FILE]",
       );
     if (positionals.length > 4)
       throw new UsageError(
         "online acceptance takes at most four positionals; usage: psilink " +
-          "accept URL INVITATION INPUT_FILE [OUTPUT_FILE]",
+          "accept --identity IDENTITY URL INVITATION INPUT_FILE [OUTPUT_FILE]",
       );
     const output =
       positionals[3] !== undefined ? String(positionals[3]) : undefined;
@@ -208,7 +209,7 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
   if (positionals.length > 3)
     throw new UsageError(
       "offline acceptance takes at most three positionals; usage: psilink " +
-        "accept INVITATION [INPUT_FILE] [OUTPUT_FILE]",
+        "accept --identity IDENTITY INVITATION [INPUT_FILE] [OUTPUT_FILE]",
     );
   return {
     mode: "offline",

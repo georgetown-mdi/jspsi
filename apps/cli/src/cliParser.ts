@@ -77,7 +77,7 @@ export function buildCli(argv: string[]): Argv {
       .command(
         "$0",
         "Quick exchange (no shared secret; trusts the server): psilink " +
-          "[--save] URL INPUT_FILE [OUTPUT_FILE]",
+          "--identity IDENTITY [--save] URL INPUT_FILE [OUTPUT_FILE]",
         zeroSetupBuilder,
         zeroSetupHandler,
       )

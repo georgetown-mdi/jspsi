@@ -51,10 +51,13 @@ export function resolveIdentity(identity: string | undefined): string {
  * configuration: the `linkage_terms.identity` it loaded, which `--identity`
  * replaces for the run before this is reached.
  *
- * The configuration schema requires a non-empty identity, so a configuration
- * carrying none is one the operator has to fix; running it under a label they
- * never chose would put that label into the agreed terms a partner verifies a
- * signed receipt against.
+ * What this refuses is a configuration that carries no identity at all: running
+ * under a label the operator never chose would put that label into the agreed
+ * terms a partner verifies a signed receipt against. It is not a content check.
+ * The configuration schema requires a non-empty string and does not trim one, so
+ * a whitespace-only `linkage_terms.identity` is a label as far as both the
+ * schema and this are concerned, and rides into the terms as written; trimming
+ * it belongs at that schema, not here.
  */
 export function resolveConfiguredIdentity(
   configuredIdentity: string | undefined,

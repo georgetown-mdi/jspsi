@@ -241,7 +241,8 @@ export function resolvePositionals(positionals: Array<unknown>): {
       );
     }
     throw new Error(
-      "input file not specified; usage: psilink URL INPUT_FILE [OUTPUT_FILE]",
+      "input file not specified; usage: psilink --identity IDENTITY URL " +
+        "INPUT_FILE [OUTPUT_FILE]",
     );
   }
 
@@ -253,7 +254,8 @@ export function resolvePositionals(positionals: Array<unknown>): {
     // file:// case below, the input failed to parse, so there is no URL to route
     // through redactUrlCredentials; drop it entirely. The usage hint stands in
     // for the offending value, which the operator just typed.
-    "unable to parse server URL; usage: psilink URL INPUT_FILE [OUTPUT_FILE]",
+    "unable to parse server URL; usage: psilink --identity IDENTITY URL " +
+      "INPUT_FILE [OUTPUT_FILE]",
   );
   return { server, input: arg1, output: arg2 };
 }

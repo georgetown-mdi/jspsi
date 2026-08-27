@@ -195,12 +195,13 @@ test("validateInvite: offline requires an input file", async () => {
 });
 
 test("validateInvite: a missing or blank --identity is refused", async () => {
-  // The identity is resolved before anything is read or minted, so each of these
-  // aborts ahead of the (nonexistent) input file the offline path would
-  // otherwise fail on -- and ahead of the token, whose terms would carry the
-  // label. The blank cases are the scripted `--identity "$ORG"` with ORG unset;
-  // there is nothing for psilink to stand in, so they refuse exactly as the
-  // absent flag does.
+  // testOptions points the config at a path that does not exist, so this is the
+  // authoring path: the terms come from the input and nothing but the flag can
+  // name this party. The refusal lands ahead of that (nonexistent) input file
+  // the path would otherwise fail on, and ahead of the token whose terms would
+  // carry the label. The blank cases are the scripted `--identity "$ORG"` with
+  // ORG unset; there is nothing for psilink to stand in, so they refuse exactly
+  // as the absent flag does.
   for (const identity of [undefined, "", "   "])
     await expect(
       validateInvite({
@@ -1213,8 +1214,10 @@ test("validateInvite: a config's single-pass strategy is preserved when no flag 
     expect(ready.mode).toBe("offlineFromConfig");
     const token = await decodeInvitation(ready.invitation);
     expect(token.linkageTerms.linkageStrategy).toBe("single-pass");
+    // Keyed to this flag: the same path reports every other flag the config is
+    // authoritative for, and one of those firing is not this one staying quiet.
     const warn = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(warn).not.toContain("has no effect");
+    expect(warn).not.toContain("--linkage-strategy");
   } finally {
     warnSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1512,6 +1515,96 @@ test("validateInvite: derives terms from a config when no input file is given", 
     const token = await decodeInvitation(ready.invitation);
     expect(token.linkageTerms).toEqual(terms);
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a reused config supplies the identity, so no flag is needed", async () => {
+  // The label this invitation carries is the config's, chosen when that file was
+  // authored, so there is nothing here for the operator to name -- and demanding
+  // it would refuse a re-invite over terms they already settled. A blank value
+  // is the same case as no flag (the scripted `--identity "$ORG"` with ORG
+  // unset): nothing was named, and nothing is reported.
+  const terms = getDefaultLinkageTerms(
+    "Agency Config",
+    inferMetadata(["first_name", "last_name", "dob", "ssn"]),
+  );
+  const log = getLogger("invite-identity-from-config-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  for (const identity of [undefined, "   "]) {
+    const { dir, configPath, keyPath } = withConfig(terms);
+    try {
+      const ready = await validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({
+          configFile: configPath,
+          keyFile: keyPath,
+          identity,
+        }),
+        acceptTimeout: 900,
+        log,
+      });
+      expect(ready.mode).toBe("offlineFromConfig");
+      if (ready.mode !== "offlineFromConfig") return;
+      expect(ready.linkageTerms.identity).toBe("Agency Config");
+      const token = await decodeInvitation(ready.invitation);
+      expect(token.linkageTerms.identity).toBe("Agency Config");
+      expect(
+        warnSpy.mock.calls
+          .map((call) => String(call[0]))
+          .filter((message) => message.includes("--identity")),
+      ).toEqual([]);
+    } finally {
+      warnSpy.mockClear();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  warnSpy.mockRestore();
+});
+
+test("validateInvite: --identity over a reused config is reported, not applied", async () => {
+  // The flag cannot silently re-label terms the config is authoritative for, and
+  // dropping it silently would leave the operator reading their own value in the
+  // invitation. Named as ignored, like --linkage-strategy on the same path.
+  const terms = getDefaultLinkageTerms(
+    "Agency Config",
+    inferMetadata(["first_name", "last_name", "dob", "ssn"]),
+  );
+  const { dir, configPath, keyPath } = withConfig(terms);
+  const log = getLogger("invite-identity-ignored-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({
+        configFile: configPath,
+        keyFile: keyPath,
+        identity: "Agency Flag",
+      }),
+      acceptTimeout: 900,
+      log,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    if (ready.mode !== "offlineFromConfig") return;
+    // The token the partner reads carries the config's label, not the flag's.
+    expect(ready.linkageTerms.identity).toBe("Agency Config");
+    const token = await decodeInvitation(ready.invitation);
+    expect(token.linkageTerms.identity).toBe("Agency Config");
+    const ignored = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((message) => message.includes("--identity"));
+    expect(ignored).toHaveLength(1);
+    expect(ignored[0]).toContain(
+      "has no effect when the linkage terms come from an existing " +
+        "configuration file",
+    );
+    expect(ignored[0]).toContain('"Agency Flag"');
+    expect(ignored[0]).toContain('"Agency Config"');
+    expect(ignored[0]).toContain(configPath);
+  } finally {
+    warnSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -3283,6 +3376,43 @@ test("handler: a webrtc online invite tells the partner to accept, with no URL a
     // notice's prose mention of the command does not stand in for it.
     expect(stderr).not.toContain("\n  psilink exchange");
     expect(stderr).not.toContain("wss://peers.example.org");
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
+    runOnlineBootstrapMock.mockReset();
+  }
+});
+
+test("handler: the server-URL accept template names the identity too", async () => {
+  // The third of the three templates, and the one a file-sync partner reads.
+  // Accepting requires a label psilink invents for nobody, so a template that
+  // named the server and the invitation but not the identity would hand the
+  // partner a command that stops -- the same refusal the other two templates
+  // are pinned against.
+  const { input, options } = onlineFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockImplementation(async () => ({}));
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      identity: "Agency A",
+      args: ["sftp://host/drop", input],
+      "config-file": options.configFile,
+      "key-file": options.keyFile,
+      "log-level": "info",
+      record: false,
+    } as unknown as Arguments);
+    const stderr = stdio.stderrWrites.join("");
+    expect(exit).not.toHaveBeenCalled();
+    expect(stderr).toContain(
+      'psilink accept --identity "<YOUR NAME, YOUR ORGANIZATION>" ' +
+        "sftp://host/drop <INVITATION> <INPUT_FILE>",
+    );
   } finally {
     stdio.restore();
     exit.mockRestore();

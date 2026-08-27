@@ -214,7 +214,7 @@ test("a positional past the form's last one is a usage error, not a drop", () =>
   };
   expect(offline).toThrow(UsageError);
   expect(offline).toThrow(
-    "psilink accept INVITATION [INPUT_FILE] [OUTPUT_FILE]",
+    "psilink accept --identity IDENTITY INVITATION [INPUT_FILE] [OUTPUT_FILE]",
   );
   const online = (): void => {
     resolveAcceptPositionals([
@@ -227,7 +227,8 @@ test("a positional past the form's last one is a usage error, not a drop", () =>
   };
   expect(online).toThrow(UsageError);
   expect(online).toThrow(
-    "psilink accept URL INVITATION INPUT_FILE [OUTPUT_FILE]",
+    "psilink accept --identity IDENTITY URL INVITATION INPUT_FILE " +
+      "[OUTPUT_FILE]",
   );
   // The classification an unattended caller reads: a positional it typed is its
   // own to fix, so 64 rather than the transport's 69.

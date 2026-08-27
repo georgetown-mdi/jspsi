@@ -249,12 +249,12 @@ describe("accept kit, the account the container runs as", () => {
     }
   });
 
-  test("the identity every command needs is outside the skippable section", () => {
+  test("the identity the accept command needs is outside the skippable section", () => {
     // psilink names a party only from what the operator gives it, so every
-    // reader's first command stops without the flag -- not only the Docker
-    // Engine reader who takes --user. The engine section below is one a whole
-    // reader class is told to skip, so the guidance sits ahead of it and ahead
-    // of the first command it qualifies.
+    // reader's accept stops without the flag -- not only the Docker Engine
+    // reader who takes --user. The engine section below is one a whole reader
+    // class is told to skip, so the guidance sits ahead of it and ahead of the
+    // first command it qualifies.
     for (const endpoint of [FILEDROP, SFTP]) {
       const text = sheet(endpoint);
       const flag = text.indexOf('--identity "YOUR NAME, YOUR ORGANIZATION"');
@@ -265,7 +265,23 @@ describe("accept kit, the account the container runs as", () => {
         .split("THE NAME YOUR PARTNER SEES")[1]
         .split("WHICH DOCKER DO YOU HAVE?")[0];
       expect(section).toContain("what your partner reads as who");
-      expect(section).toContain("psilink stops and asks");
+      expect(section).toContain("accepting stops and asks");
+    }
+  });
+
+  test("the identity is scoped to the accept command, not the exchange run", () => {
+    // The exchange steps take the label from the psilink.yaml the accept step
+    // wrote, so an instruction to add the flag to every command on the sheet
+    // would send the reader to type one where it is not needed -- and read as a
+    // refusal the exchange run does not make.
+    for (const endpoint of [FILEDROP, SFTP]) {
+      const section = sheet(endpoint)
+        .split("THE NAME YOUR PARTNER SEES")[1]
+        .split("WHICH DOCKER DO YOU HAVE?")[0];
+      expect(section).toContain("the end of the accept");
+      expect(section).toContain("psilink.yaml");
+      expect(section).toContain("needs no flag");
+      expect(section).not.toContain("every psilink");
     }
   });
 
