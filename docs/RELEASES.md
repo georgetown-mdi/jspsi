@@ -196,22 +196,20 @@ If you must build and push by hand -- for a workflow outage or a local test -- f
 From the workspace root:
 
 ```sh
-npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev -w packages/core -w apps/cli -w apps/web > psilink-X.Y.Z.cdx.json
+npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev --legacy-peer-deps -w packages/core -w apps/cli -w apps/web > psilink-X.Y.Z.cdx.json
 ```
 
 `--omit=dev` stays: `apps/web`'s build tools are `devDependencies` and are not shipped. See [SBOM](#software-bill-of-materials-sbom) for the scoping rationale.
 
-**This command currently fails** with `ESBOMPROBLEMS` on an unsatisfiable `crossws` peer range. It is an upstream prerelease conflict that clears without action here, and the local workarounds cost more than the BOM is worth; the diagnosis, the rejected fixes, and what to re-check after a `@tanstack/*` or `nitropack` bump are in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-crossws-peer-conflict-blocks-the-release-sbom). Re-run the command and delete these three paragraphs once the `crossws` peer range resolves.
-
-If a release cannot wait for that to clear, drop `-w apps/web`:
+`--legacy-peer-deps` works around an unsatisfiable `crossws` optional peer that otherwise makes the unflagged command refuse with `ESBOMPROBLEMS`; the diagnosis and the measurement behind adopting the flag are in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-crossws-peer-conflict-blocks-the-release-sbom). Its cost: this one invocation stops validating peer conflicts, so a genuine peer conflict elsewhere in the tree would be suppressed just as quietly. Run the compensating strict check alongside it, from the workspace root:
 
 ```sh
-npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev -w packages/core -w apps/cli > psilink-X.Y.Z.cdx.json
+npm ls --all --omit=dev
 ```
 
-The conflict lives under `apps/web`, and the validity check is scoped to the selected workspaces, so this still generates. It covers the shipped CLI image's runtime tree in full, including every dependency the [Dependency Policy](../CONTRIBUTING.md#dependency-policy) names -- `@openmined/psi.js`, `@noble/curves`, `re2js`, `ssh2` and `ssh2-sftp-client`. What it omits is the web console's runtime set (the Nitro `.output`), so a release attaching this BOM must say so rather than let it read as complete.
+This still fails loudly on a peer conflict the flagged `npm sbom` invocation no longer reports -- today, naming only the same `crossws` edge -- so a releaser reads a known, diagnosed failure rather than a surprise. A finding that names anything else stops the release.
 
-Do not reach for `@cyclonedx/cyclonedx-npm --ignore-npm-errors` as the workaround. It does produce a BOM despite the conflict, but run over this workspace it silently omits `@openmined/psi.js` -- the vendored crypto addon, and the entry a security SBOM most needs -- along with the rest of the workspace packages' trees. A BOM that looks complete and is missing the crypto dependency is worse than a scoped one that says what it left out.
+Do not reach for `@cyclonedx/cyclonedx-npm --ignore-npm-errors` instead of the flag above. It does produce a BOM despite the conflict, but run over this workspace it silently omits `@openmined/psi.js` -- the vendored crypto addon, and the entry a security SBOM most needs -- along with the rest of the workspace packages' trees. A BOM that looks complete and is missing the crypto dependency is worse than one that states a limitation up front.
 
 ### 10. Publish the GitHub Release
 
@@ -311,3 +309,5 @@ git verify-tag vX.Y.Z
 ## Software Bill of Materials (SBOM)
 
 An SBOM in CycloneDX format is generated as part of the release checklist (step 9) and attached to each GitHub Release. One BOM covers both published images: they resolve the same committed lockfile through the same `npm ci --omit=dev` invocation, so their npm trees are identical and only their OS package layers differ -- which no `npm sbom` run reaches on either image, and which the [image vulnerability scan](#image-vulnerability-scan) covers separately. The `--omit=dev -w packages/core -w apps/cli -w apps/web` scoping covers everything a shipped image runs rather than the whole workspace: the CLI role's production tree (`packages/core` and `apps/cli`, matching the Dockerfile's runtime `npm ci --omit=dev -w packages/core -w apps/cli`) plus the web console's runtime dependencies, which ship bundled into the Nitro `.output` the image copies. `--omit=dev` excludes devDependencies (`apps/web`'s build tools among them), which the image does not ship. Because the `.output` is tree-shaken, the `apps/web` entry is a superset of what actually ships -- acceptable for a security SBOM. Because both the SBOM and the image resolve from the same committed lockfile, every dependency it does list appears at the exact resolved version the image runs. The one known residual: `npm sbom` omits a small number of packages that are hoisted to a single `node_modules` entry shared with a dev-only consumer elsewhere in the workspace (for example `yaml` and `tslib`, both installed in the shipped tree but currently absent from the SBOM's component list) -- confirm against `npm ls <pkg> --omit=dev -w packages/core -w apps/cli -w apps/web` if a specific package's presence in the image needs checking and it is missing from the SBOM. The superset also runs the other way: a devDependency of a source-only workspace that hoists to the root `node_modules` and satisfies another package's optional peer flips to `devOptional` and enters this graph without shipping (`tsx`, hoisted by `packages/peerjs-broker` and satisfying `vite`'s optional peer, is the known case). See `docs/spec/DEPENDENCY_PINS.md`.
+
+The release command also carries `--legacy-peer-deps` (see [step 9](#9-generate-and-attach-the-sbom)), which disables the invocation's peer-conflict validation but does not change which components the lockfile-only walk resolves or includes -- it only stops that walk from refusing on the one known conflict. See [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-crossws-peer-conflict-blocks-the-release-sbom) for why the conflict exists and what the flag costs.
