@@ -25,7 +25,12 @@ import {
   singleValue,
 } from "../util/cli";
 import { buildDataSpec } from "../onlineBootstrap";
-import { PLACEHOLDER_IDENTITY } from "../partyIdentity";
+import {
+  askIdentityAtPrompt,
+  identityFromFlagOrPrompt,
+  INIT_IDENTITY_QUESTION,
+  PLACEHOLDER_IDENTITY,
+} from "../partyIdentity";
 
 export function builder(cmd: Argv): Argv {
   return (
@@ -95,12 +100,11 @@ export async function handler(argv: Arguments): Promise<void> {
       const configFile =
         expandTilde(singleValue(argv, "config-file") as string | undefined) ??
         DEFAULT_CONFIG_PATH;
-      // Absent --identity, the template carries the placeholder, like the
-      // connection's host and username: init produces a scaffold to hand-edit,
-      // not a runnable config.
-      const identity =
-        (singleValue(argv, "identity") as string | undefined) ??
-        PLACEHOLDER_IDENTITY;
+      // Read here, with the other flags, so a repeated --identity is a usage
+      // error before any question is asked or any file is written; what the
+      // value means is settled below, once it is known whether this run can ask
+      // for one instead.
+      const identityFlag = singleValue(argv, "identity") as string | undefined;
       const positionals = (argv["args"] as Array<string> | undefined) ?? [];
       // This command sets unknown-options-as-args (so a bare `-` stdin token
       // survives as a positional), which also lets a mistyped `--flag` reach the
@@ -109,18 +113,38 @@ export async function handler(argv: Arguments): Promise<void> {
       assertNoUnknownOptions(positionals);
       const input = resolveInitInput(positionals);
 
+      // One interactivity decision serves both questions this command can ask:
+      // a terminal is there to answer, and stdin is not already spoken for by a
+      // `-` CSV. stdin is single-use, so a second rule here would be a way for
+      // the two questions to disagree about who owns it.
+      const interactive = process.stdin.isTTY === true && input !== "-";
+
       // Decide whether to (over)write before reading the input, so a `-` stdin CSV
       // is never consumed when the answer is "fail-closed" or "leave it" -- the
       // overwrite prompt and a stdin CSV both want stdin, the same conflict accept
       // resolves by refusing `-`.
       const decision = await decideOverwrite(configFile, {
-        interactive: process.stdin.isTTY === true && input !== "-",
+        interactive,
         confirm: () => promptConfirm(`Overwrite ${configFile}?`),
       });
       if (decision === "skip") {
         log.info(`left the existing file at ${configFile} unchanged.`);
         return;
       }
+
+      // Asked after the overwrite decision, so a run that leaves the existing
+      // file alone asks nothing: there is no file being written for the answer
+      // to be remembered in, and psilink remembers an answer nowhere else.
+      // Absent both the flag and an answer, the template carries the
+      // placeholder, like the connection's host and username: init produces a
+      // scaffold to hand-edit, not a runnable config.
+      const identity =
+        (await identityFromFlagOrPrompt(
+          identityFlag,
+          interactive
+            ? () => askIdentityAtPrompt(INIT_IDENTITY_QUESTION)
+            : undefined,
+        )) ?? PLACEHOLDER_IDENTITY;
 
       const data = await buildTemplateData(input, identity);
       const template = renderConfigTemplate(data);

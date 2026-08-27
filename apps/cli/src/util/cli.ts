@@ -876,6 +876,38 @@ export function writePromptLine(line: string): void {
 }
 
 /**
+ * Ask `question` on the prompt stream and resolve to the line the user typed,
+ * raw -- neither trimmed nor interpreted, since what a blank or padded answer
+ * means belongs to the caller that asked. EOF and a non-interactive stdin both
+ * resolve to the empty string, the same "nothing was answered" every caller of
+ * {@link promptConfirm} reads as a decline.
+ *
+ * The free-text sibling of {@link promptConfirm}, sharing its stdin regime
+ * rather than opening a second one: both read `process.stdin` through one
+ * readline interface at a time and ask on {@link promptStream} (stderr), so
+ * stdout stays reserved for a command's result data. stdin is single-use, so a
+ * command whose input CSV is `-` must not reach either of them.
+ */
+export async function promptFreeText(question: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: promptStream,
+  });
+  try {
+    // Raced against "close" for the reason promptConfirm races it: a
+    // `rl.question()` on a stdin already at EOF never settles
+    // (nodejs/node#53497), so the race is what turns a closed stdin into an
+    // empty answer rather than a pending promise.
+    return await new Promise<string>((resolve) => {
+      rl.once("close", () => resolve(""));
+      void rl.question(`${question} `).then(resolve, () => resolve(""));
+    });
+  } finally {
+    rl.close();
+  }
+}
+
+/**
  * Prompt the user to confirm on the terminal, returning true only on an
  * explicit yes. Anything else (including EOF or a non-interactive stdin)
  * defaults to no. Prompts on stderr so stdout stays reserved for exchange

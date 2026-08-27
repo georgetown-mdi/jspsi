@@ -33,6 +33,23 @@ export function ttyStream(): Readable {
 }
 
 /**
+ * A stdin stub that reports as an interactive terminal AND answers a prompt with
+ * `answer`, modelling someone typing it and pressing return. Deliberately never
+ * ends: a readline interface reads the line only while its input is still open,
+ * because a stream that reaches EOF closes the interface first and the prompt
+ * readers resolve to "nothing answered" (see {@link streamOf}, and promptConfirm
+ * / promptFreeText in src/util/cli.ts). A terminal stays open, which is why a
+ * prompt is asked only where one is attached.
+ * @internal test-only
+ */
+export function answeringTtyStream(answer: string): Readable {
+  const s = new Readable({ read() {} });
+  (s as Readable & { isTTY?: boolean }).isTTY = true;
+  setTimeout(() => s.push(Buffer.from(`${answer}\n`, "utf8")), 0);
+  return s;
+}
+
+/**
  * Run `fn` with `process.stdin` replaced by `stub`, restoring it afterward.
  * Awaits `fn` so the swap outlives an async stdin read before it is undone.
  * @internal test-only

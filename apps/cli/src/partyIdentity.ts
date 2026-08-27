@@ -1,5 +1,7 @@
 import { UsageError } from "@psilink/core";
 
+import { promptFreeText, writePromptLine } from "./util/cli";
+
 /** How every refusal here tells the operator to supply the label. */
 const IDENTITY_FLAG_HELP = '--identity "name, org, contact"';
 
@@ -139,6 +141,76 @@ export function optionalIdentity(
   if (isPlaceholderIdentity(chosen))
     throw new UsageError(IDENTITY_STILL_PLACEHOLDER);
   return chosen;
+}
+
+/**
+ * The line shown above either identity question, stating why psilink asks
+ * instead of supplying a label of its own. It is the sentence both refusals
+ * above carry, so the operator who is asked and the operator who is refused read
+ * the same account of what the label is for.
+ */
+export const IDENTITY_PROMPT_PREAMBLE =
+  `${PARTNER_READS_IT}, the invitation, and the disclosure record, so it is ` +
+  "yours to choose.";
+
+/**
+ * The question `psilink init` asks. It states what a blank answer does, because
+ * blank is not a refusal here: the template is a scaffold to hand-edit, so an
+ * operator who has not settled the wording yet gets {@link PLACEHOLDER_IDENTITY}
+ * to replace, exactly as a run with no terminal to ask at does.
+ */
+export const INIT_IDENTITY_QUESTION =
+  "Identity for this party (name, organization, contact), or blank to fill in " +
+  "by hand later:";
+
+/**
+ * The question `psilink accept` asks. It carries no blank-answer note because
+ * blank is absence and an acceptance will not proceed unnamed
+ * ({@link IDENTITY_REQUIRED}): it authors a durable partnership the partner
+ * reads a name off.
+ */
+export const ACCEPT_IDENTITY_QUESTION =
+  "Identity for this party (name, organization, contact):";
+
+/**
+ * Ask for this party's identity at the terminal and return the raw answer.
+ *
+ * Both lines go to the prompt stream rather than through a logger, so the
+ * question and the reason for it are on the terminal whatever `--log-level` and
+ * `--log-file` are set to -- the routing the consent surface already takes
+ * wherever a prompt follows it. Whether asking is possible at all is the
+ * caller's to decide; this only asks.
+ */
+export function askIdentityAtPrompt(question: string): Promise<string> {
+  writePromptLine(IDENTITY_PROMPT_PREAMBLE);
+  return promptFreeText(question);
+}
+
+/**
+ * This party's label from `--identity`, or from a question at the terminal when
+ * the flag carried none: the trimmed value, or `undefined` where neither source
+ * named this party.
+ *
+ * Both sources take one treatment, {@link optionalIdentity}'s: trimmed, a blank
+ * or whitespace-only value read as absence rather than as a label, and
+ * {@link PLACEHOLDER_IDENTITY} refused as neither. A prompt that is answered the
+ * way the flag can be misused is therefore refused the way the flag is, and an
+ * operator cannot reach a laxer path by typing at the question instead of
+ * passing the flag.
+ *
+ * `ask` is the whole interactivity decision, made by the caller: `undefined`
+ * means no question is possible or wanted -- no terminal, an input CSV already
+ * holding stdin, an unattended run -- and the flag's answer stands alone, so
+ * nothing scripted gains a prompt. The flag is read first either way, so
+ * supplying it is what keeps the question from being asked.
+ */
+export async function identityFromFlagOrPrompt(
+  identity: string | undefined,
+  ask: (() => Promise<string>) | undefined,
+): Promise<string | undefined> {
+  const supplied = optionalIdentity(identity);
+  if (supplied !== undefined || ask === undefined) return supplied;
+  return optionalIdentity(await ask());
 }
 
 /**

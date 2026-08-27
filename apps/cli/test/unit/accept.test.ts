@@ -48,16 +48,17 @@ import type {
   TransformStep,
 } from "@psilink/core";
 
-// Mock only promptConfirm; every other cli.ts export (openInputSource, which the
-// `-` stdin tests exercise for real, configureLogFile, etc.) is the genuine
-// implementation. This lets the handler tests assert whether the confirmation
-// prompt ran without driving a real readline over the test runner's stdin.
+// Mock only the two terminal reads; every other cli.ts export (openInputSource,
+// which the `-` stdin tests exercise for real, configureLogFile, etc.) is the
+// genuine implementation. This lets the handler tests assert whether the
+// confirmation prompt and the identity question ran without driving a real
+// readline over the test runner's stdin.
 vi.mock("../../src/util/cli", async () => {
   const actual =
     await vi.importActual<typeof import("../../src/util/cli")>(
       "../../src/util/cli",
     );
-  return { ...actual, promptConfirm: vi.fn() };
+  return { ...actual, promptConfirm: vi.fn(), promptFreeText: vi.fn() };
 });
 
 // Mock only runOnlineBootstrap, so the online-handler wiring can be asserted
@@ -90,15 +91,22 @@ import {
 } from "../../src/onlineBootstrap";
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 import {
+  ACCEPT_IDENTITY_QUESTION,
   IDENTITY_REQUIRED,
   IDENTITY_STILL_PLACEHOLDER,
   PLACEHOLDER_IDENTITY,
 } from "../../src/partyIdentity";
 import { saveConfig } from "../../src/config";
-import { exitCodeForError, promptConfirm } from "../../src/util/cli";
+import {
+  exitCodeForError,
+  promptConfirm,
+  promptFreeText,
+} from "../../src/util/cli";
 import { captureStdio } from "../loggingTestSupport";
+import { ttyStream } from "../stdinStream";
 
 const promptConfirmMock = vi.mocked(promptConfirm);
+const promptFreeTextMock = vi.mocked(promptFreeText);
 
 const silentLog = getLogger("accept-test");
 silentLog.setLevel("silent");
@@ -127,10 +135,11 @@ function testOptions(
 
 afterEach(() => {
   vi.useRealTimers();
-  // Reset the shared promptConfirm mock after every test so none inherits a stale
+  // Reset the shared prompt mocks after every test so none inherits a stale
   // implementation or call count from a prior one -- the guarantee lives here
   // rather than each handler test having to remember to reset it.
   promptConfirmMock.mockReset();
+  promptFreeTextMock.mockReset();
 });
 
 function sampleToken(
@@ -354,6 +363,68 @@ test("validateAccept: an --identity still carrying the init placeholder is refus
     ).rejects.toThrow(IDENTITY_STILL_PLACEHOLDER);
 });
 
+test("validateAccept: with no --identity, the answer at the terminal is this party's label", async () => {
+  // The label the acceptance records is the one the operator typed, trimmed the
+  // way a flag value is -- so what the partner reads and what the written
+  // configuration carries is the answer, not the keystrokes around it.
+  const encoded = await encodeInvitation(sampleToken(FUTURE()));
+  const askIdentity = vi.fn().mockResolvedValue("  Agency B  ");
+  const ready = await validateAccept({
+    resolved: { mode: "offline", invitation: encoded },
+    options: testOptions({ identity: undefined }),
+    askIdentity,
+    log: silentLog,
+  });
+  expect(askIdentity).toHaveBeenCalledTimes(1);
+  expect(ready.dataSpec.linkageTerms.identity).toBe("Agency B");
+});
+
+test("validateAccept: --identity is answer enough; no question is asked over it", async () => {
+  // The flag is the scripted path on both commands: where it names this party
+  // there is nothing to ask, so an acceptance that could ask still does not.
+  const encoded = await encodeInvitation(sampleToken(FUTURE()));
+  const askIdentity = vi.fn().mockResolvedValue("Someone Else");
+  const ready = await validateAccept({
+    resolved: { mode: "offline", invitation: encoded },
+    options: testOptions({ identity: "Agency B" }),
+    askIdentity,
+    log: silentLog,
+  });
+  expect(askIdentity).not.toHaveBeenCalled();
+  expect(ready.dataSpec.linkageTerms.identity).toBe("Agency B");
+});
+
+test("validateAccept: a blank answer is absence, and the acceptance stops unnamed", async () => {
+  // Blank at the question reads as blank at the flag: absence, not a label. An
+  // acceptance authors a durable partnership, so absence is where it stops --
+  // pressing return past the question does not name this party the empty string.
+  const encoded = await encodeInvitation(sampleToken(FUTURE()));
+  for (const answer of ["", "   ", "\n"])
+    await expect(
+      validateAccept({
+        resolved: { mode: "offline", invitation: encoded },
+        options: testOptions({ identity: undefined }),
+        askIdentity: vi.fn().mockResolvedValue(answer),
+        log: silentLog,
+      }),
+    ).rejects.toThrow(IDENTITY_REQUIRED);
+});
+
+test("validateAccept: the init placeholder typed at the question is refused", async () => {
+  // The one string that is not a label is refused whichever way it arrives, so
+  // an operator who pastes the template's own field back at the question is told
+  // the same thing as one who passes it on --identity.
+  const encoded = await encodeInvitation(sampleToken(FUTURE()));
+  await expect(
+    validateAccept({
+      resolved: { mode: "offline", invitation: encoded },
+      options: testOptions({ identity: undefined }),
+      askIdentity: vi.fn().mockResolvedValue(`  ${PLACEHOLDER_IDENTITY}  `),
+      log: silentLog,
+    }),
+  ).rejects.toThrow(IDENTITY_STILL_PLACEHOLDER);
+});
+
 test("validateAccept: a deduplicating invitation leaves this party one-to-one", async () => {
   // The hostile-flip guard at the CLI accept entry point. validateAccept derives
   // the acceptor's own terms (deriveAcceptedLinkageTerms) ahead of reading the
@@ -504,11 +575,14 @@ function makeStdin(csv: string): Readable {
   return stream;
 }
 
-/** Run `fn` with process.stdin replaced by a stream emitting `csv`, restoring it. */
-async function withStdin<T>(csv: string, fn: () => Promise<T>): Promise<T> {
+/** Run `fn` with process.stdin replaced by `stream`, restoring it after. */
+async function withStdinStream<T>(
+  stream: Readable,
+  fn: () => Promise<T>,
+): Promise<T> {
   const original = Object.getOwnPropertyDescriptor(process, "stdin");
   Object.defineProperty(process, "stdin", {
-    value: makeStdin(csv),
+    value: stream,
     configurable: true,
   });
   try {
@@ -517,6 +591,11 @@ async function withStdin<T>(csv: string, fn: () => Promise<T>): Promise<T> {
     if (original !== undefined)
       Object.defineProperty(process, "stdin", original);
   }
+}
+
+/** Run `fn` with process.stdin replaced by a stream emitting `csv`, restoring it. */
+async function withStdin<T>(csv: string, fn: () => Promise<T>): Promise<T> {
+  return withStdinStream(makeStdin(csv), fn);
 }
 
 test("validateAccept: offline `-` with consentToTerms reads the CSV from stdin and proceeds", async () => {
@@ -1619,6 +1698,31 @@ test("validateAccept: offline reuses a config whose linkage terms match the invi
     });
     expect(ready.reuseExistingConfig).toBe(true);
     expect(ready.mode).toBe("offline");
+  } finally {
+    fs.rmSync(options.configFile, { force: true });
+  }
+});
+
+test("validateAccept: an acceptance that keeps an existing config asks for nothing", async () => {
+  // The question exists to be remembered in the configuration the acceptance
+  // writes, and this one writes none: the kept file's own linkage terms govern
+  // every later run, so there is nowhere to put an answer. The standing refusal
+  // stands in its place -- what a kept configuration does with a label supplied
+  // by flag is decided elsewhere.
+  const options = testOptions({ identity: undefined });
+  writeExistingConfig(options.configFile);
+  const askIdentity = vi.fn().mockResolvedValue("Agency B");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    await expect(
+      validateAccept({
+        resolved: { mode: "offline", invitation: encoded },
+        options,
+        askIdentity,
+        log: silentLog,
+      }),
+    ).rejects.toThrow(IDENTITY_REQUIRED);
+    expect(askIdentity).not.toHaveBeenCalled();
   } finally {
     fs.rmSync(options.configFile, { force: true });
   }
@@ -3677,6 +3781,124 @@ function offlineAcceptFixture(): {
     keyFile: path.join(dir, ".psilink.key"),
   };
 }
+
+test("handler: at a terminal with no --identity, the answer lands in the config it writes", async () => {
+  // The whole point of asking: the label reaches the file this acceptance
+  // writes, so the later `psilink exchange` over it sends the name the operator
+  // gave here. Both questions belong to one session -- the identity first, then
+  // the terms and their y/N -- so the consent prompt is answered too.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  promptFreeTextMock.mockResolvedValue("Agency B, Health Dept");
+  promptConfirmMock.mockResolvedValue(true);
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+    );
+    await withStdinStream(ttyStream(), () =>
+      acceptHandler({
+        _: [],
+        $0: "psilink",
+        args: [encoded, input],
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments),
+    );
+    stdio.restore();
+    expect(exit).not.toHaveBeenCalled();
+    expect(promptFreeTextMock).toHaveBeenCalledTimes(1);
+    expect(promptFreeTextMock).toHaveBeenCalledWith(ACCEPT_IDENTITY_QUESTION);
+    expect(promptConfirmMock).toHaveBeenCalledTimes(1);
+    expect(
+      parseExchangeSpec(YAML.parse(fs.readFileSync(configFile, "utf8")))
+        .linkageTerms.identity,
+    ).toBe("Agency B, Health Dept");
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: with no terminal, an unnamed acceptance is refused, not left waiting", async () => {
+  // The unattended shape -- a pipe, a container run without -t, CI. Nothing is
+  // asked, because nothing would answer; what the operator gets is the standing
+  // refusal naming the flag, not a run blocked on a read.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const { stderrWrites, restore } = captureStdio();
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+    );
+    await withStdinStream(makeStdin(""), () =>
+      acceptHandler({
+        _: [],
+        $0: "psilink",
+        args: [encoded, input],
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "error",
+        record: false,
+      } as unknown as Arguments),
+    );
+    restore();
+    expect(exit).toHaveBeenCalledWith(64);
+    expect(stderrWrites.join("")).toContain("no identity for this party");
+    expect(promptFreeTextMock).not.toHaveBeenCalled();
+    expect(fs.existsSync(configFile)).toBe(false);
+    expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    restore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: --consent-to-terms asks nothing, identity question included", async () => {
+  // The flag declares the run unattended and frees stdin for a `-` CSV, so
+  // neither question may read it: an acceptance with no label takes the standing
+  // refusal there even at a terminal, rather than growing a prompt the flag was
+  // meant to remove.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const { restore } = captureStdio();
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+    );
+    await withStdinStream(ttyStream(), () =>
+      acceptHandler({
+        _: [],
+        $0: "psilink",
+        args: [encoded, input],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "error",
+        record: false,
+      } as unknown as Arguments),
+    );
+    restore();
+    expect(exit).toHaveBeenCalledWith(64);
+    expect(promptFreeTextMock).not.toHaveBeenCalled();
+    expect(promptConfirmMock).not.toHaveBeenCalled();
+    expect(fs.existsSync(configFile)).toBe(false);
+  } finally {
+    restore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("handler: --consent-to-terms skips the confirmation prompt and writes the config and key", async () => {
   // With --consent-to-terms the prompt is never consulted (promptConfirm is not

@@ -30,10 +30,18 @@ import {
   nonNegativeIntFlag,
   openInputSource,
   parseOrExit,
+  promptConfirm,
+  promptFreeText,
   singleValue,
   writeOutput,
 } from "../../src/util/cli";
-import { streamOf, ttyStream, withStdin } from "../stdinStream";
+import { captureStdio } from "../loggingTestSupport";
+import {
+  answeringTtyStream,
+  streamOf,
+  ttyStream,
+  withStdin,
+} from "../stdinStream";
 
 function argv(extra: Record<string, unknown>): Arguments {
   return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
@@ -934,4 +942,74 @@ test("writeOutput: a stat failure on fd 1 suppresses the warning rather than thr
   expect(log.errors).toHaveLength(0);
   expect(log.warns).toHaveLength(0);
   expect(chunks.join("")).toBe("a\n1\n");
+});
+
+// --- promptFreeText ----------------------------------------------------------
+
+test("promptFreeText: returns the line typed at a terminal, raw", async () => {
+  // Raw on purpose: what a padded answer means belongs to the caller that asked
+  // -- the identity resolvers trim it, and a later caller need not.
+  const { restore } = captureStdio();
+  try {
+    await expect(
+      withStdin(answeringTtyStream("  Jane Smith, Agency A  "), () =>
+        promptFreeText("Identity for this party:"),
+      ),
+    ).resolves.toBe("  Jane Smith, Agency A  ");
+  } finally {
+    restore();
+  }
+});
+
+test("promptFreeText: a stdin that ends answers nothing rather than hanging", async () => {
+  // `rl.question` on a stdin at EOF never settles (nodejs/node#53497), so the
+  // empty answer -- absence, to every caller here -- comes from the interface's
+  // close event. A piped line lands the same way: the stream's end closes the
+  // interface first, so a redirected answer is not silently taken for a typed
+  // one. Both callers ask only where a terminal is attached for that reason.
+  const { restore } = captureStdio();
+  try {
+    for (const piped of ["", "Agency A\n"])
+      await expect(
+        withStdin(streamOf(piped), () => promptFreeText("Identity:")),
+      ).resolves.toBe("");
+  } finally {
+    restore();
+  }
+});
+
+test("promptFreeText then promptConfirm: two questions, one open stdin", async () => {
+  // What `psilink accept` at a terminal now does: ask who this party is, then
+  // show the terms and ask the y/N. The two open a readline interface each, one
+  // after the other, over the single-use stdin -- so the second must still read
+  // its answer after the first has closed its own interface.
+  const stream = answeringTtyStream("Agency B, Health Dept");
+  const { restore } = captureStdio();
+  try {
+    await withStdin(stream, async () => {
+      expect(await promptFreeText("Identity for this party:")).toBe(
+        "Agency B, Health Dept",
+      );
+      stream.push(Buffer.from("y\n", "utf8"));
+      expect(await promptConfirm("Accept this invitation?")).toBe(true);
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("promptFreeText: the question goes to stderr, never stdout", async () => {
+  // stdout carries a command's result data (the result CSV, an invitation
+  // token), so a question written there would corrupt a redirected run -- the
+  // reason promptConfirm asks on stderr too.
+  const { stdoutWrites, stderrWrites, restore } = captureStdio();
+  try {
+    await withStdin(answeringTtyStream("Agency A"), () =>
+      promptFreeText("Identity for this party:"),
+    );
+  } finally {
+    restore();
+  }
+  expect(stdoutWrites.join("")).toBe("");
+  expect(stderrWrites.join("")).toContain("Identity for this party:");
 });

@@ -1,14 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { sanitizeErrorForDisplay, UsageError } from "@psilink/core";
 
 import {
+  ACCEPT_IDENTITY_QUESTION,
   configuredIdentityRequired,
   configuredIdentityStillPlaceholder,
+  identityFromFlagOrPrompt,
+  IDENTITY_PROMPT_PREAMBLE,
   IDENTITY_REQUIRED,
   IDENTITY_STILL_PLACEHOLDER,
+  INIT_IDENTITY_QUESTION,
   optionalIdentity,
   PLACEHOLDER_IDENTITY,
   resolveIdentity,
@@ -255,4 +259,65 @@ test("an optional identity is trimmed, and blank reads as absent", () => {
   expect(optionalIdentity(undefined)).toBeUndefined();
   for (const blank of ["", " ", "   ", "\t", " \t "])
     expect(optionalIdentity(blank)).toBeUndefined();
+});
+
+test("the flag answers first, and only its absence reaches the question", async () => {
+  // Supplying the flag is what keeps the question from being asked, so nothing
+  // scripted gains a prompt by a terminal happening to be attached.
+  const ask = vi.fn().mockResolvedValue("Asked Party");
+  await expect(identityFromFlagOrPrompt("  Flag Party  ", ask)).resolves.toBe(
+    "Flag Party",
+  );
+  expect(ask).not.toHaveBeenCalled();
+
+  await expect(identityFromFlagOrPrompt(undefined, ask)).resolves.toBe(
+    "Asked Party",
+  );
+  expect(ask).toHaveBeenCalledTimes(1);
+});
+
+test("no way to ask leaves the flag standing alone", async () => {
+  // The whole interactivity decision is the caller's: with no `ask`, absence
+  // stays absence and the caller's own rule -- a refusal, or a placeholder --
+  // applies, with nothing read from stdin.
+  await expect(identityFromFlagOrPrompt(undefined, undefined)).resolves.toBe(
+    undefined,
+  );
+  await expect(identityFromFlagOrPrompt("   ", undefined)).resolves.toBe(
+    undefined,
+  );
+  await expect(identityFromFlagOrPrompt(" Agency A ", undefined)).resolves.toBe(
+    "Agency A",
+  );
+});
+
+test("an answer takes the treatment a flag value takes", async () => {
+  // One resolution for both sources: trimmed, blank read as absence, and the
+  // template's placeholder refused -- so typing at the question is not a way
+  // around a guard the flag is held to.
+  await expect(
+    identityFromFlagOrPrompt(undefined, async () => "  Agency A  "),
+  ).resolves.toBe("Agency A");
+  for (const blank of ["", "   ", "\n", "\t"])
+    await expect(
+      identityFromFlagOrPrompt(undefined, async () => blank),
+    ).resolves.toBeUndefined();
+  for (const form of PLACEHOLDER_FORMS)
+    await expect(
+      identityFromFlagOrPrompt(undefined, async () => form),
+    ).rejects.toThrow(IDENTITY_STILL_PLACEHOLDER);
+});
+
+test("both questions state why psilink asks rather than naming the party", () => {
+  // The prompt copy and the refusals argue the same thing, so an operator meets
+  // one account of whose the label is however they reach it.
+  expect(IDENTITY_PROMPT_PREAMBLE).toContain(
+    "the name your partner reads in the agreed linkage terms",
+  );
+  for (const question of [INIT_IDENTITY_QUESTION, ACCEPT_IDENTITY_QUESTION])
+    expect(question).toContain("name, organization, contact");
+  // Only init's question offers to leave it: a blank answer there writes the
+  // scaffold's placeholder, while an acceptance stops.
+  expect(INIT_IDENTITY_QUESTION).toContain("blank");
+  expect(ACCEPT_IDENTITY_QUESTION).not.toContain("blank");
 });

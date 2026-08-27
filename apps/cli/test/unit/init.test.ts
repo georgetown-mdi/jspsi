@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import YAML from "yaml";
 import {
@@ -28,24 +28,30 @@ import {
 } from "../../src/commands/init";
 import { buildDataSpec, loadInputRows } from "../../src/onlineBootstrap";
 import {
+  IDENTITY_PROMPT_PREAMBLE,
+  INIT_IDENTITY_QUESTION,
   optionalIdentity,
+  PLACEHOLDER_IDENTITY,
   resolveIdentity,
   resolveInvitationIdentity,
 } from "../../src/partyIdentity";
 import { captureStdio } from "../loggingTestSupport";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
-// promptConfirm is mocked so the handler's interactive overwrite branch is
-// deterministic; everything else in util/cli stays real.
+// Both terminal reads are mocked so the handler's interactive branches are
+// deterministic -- neither the overwrite confirmation nor the identity question
+// drives a real readline over the test runner's stdin; everything else in
+// util/cli stays real.
 vi.mock("../../src/util/cli", async () => {
   const actual =
     await vi.importActual<typeof import("../../src/util/cli")>(
       "../../src/util/cli",
     );
-  return { ...actual, promptConfirm: vi.fn() };
+  return { ...actual, promptConfirm: vi.fn(), promptFreeText: vi.fn() };
 });
-const { promptConfirm } = await import("../../src/util/cli");
+const { promptConfirm, promptFreeText } = await import("../../src/util/cli");
 const promptConfirmMock = vi.mocked(promptConfirm);
+const promptFreeTextMock = vi.mocked(promptFreeText);
 
 // writeFileOwnerOnly is wrapped in a spy that delegates to the real impl, so most
 // tests write for real and the fail-closed test can force a FileExistsError (the
@@ -74,10 +80,18 @@ const SAMPLE_CSV =
   "first_name,last_name,dob,ssn,member_id\n" +
   "Alice,Smith,1990-01-02,123456789,M-1\n";
 
+beforeEach(() => {
+  // An unanswered question by default: the identity prompt resolves blank, which
+  // is the placeholder-writing path every test that is not about the question
+  // itself expects, whatever the runner's own stdin reports.
+  promptFreeTextMock.mockResolvedValue("");
+});
+
 afterEach(() => {
   for (const dir of tmpDirs.splice(0))
     fs.rmSync(dir, { recursive: true, force: true });
   promptConfirmMock.mockReset();
+  promptFreeTextMock.mockReset();
   // Clear call history but keep writeFileOwnerOnly delegating to the real impl
   // (a mockReset would strip that and silently no-op every later write).
   writeFileOwnerOnlyMock.mockClear();
@@ -372,12 +386,15 @@ test("handler: writes a parseable template and no key file, then exits 0", async
 test("handler: the identity it writes unasked is one no resolver accepts", async () => {
   // The drift tie, read off the written file rather than off the constant: the
   // template's own bytes have to be what the guard refuses, or a template
-  // hand-edited everywhere but this field mints an invitation under it.
+  // hand-edited everywhere but this field mints an invitation under it. Run
+  // against a non-interactive stdin, which is what leaves the field unasked.
   const dir = scratchDir();
   const configFile = path.join(dir, "psilink.yaml");
   vi.spyOn(process, "exit").mockImplementation((() => {}) as never);
 
-  await initHandler(argvFor({ "config-file": configFile }));
+  await withStdin(streamOf(""), () =>
+    initHandler(argvFor({ "config-file": configFile })),
+  );
 
   const written = parseExchangeSpec(
     YAML.parse(fs.readFileSync(configFile, "utf8")),
@@ -393,8 +410,10 @@ test("handler: the identity it writes unasked is one no resolver accepts", async
   // A template written WITH --identity carries the operator's own label, and
   // that one resolves -- the guard refuses the placeholder, not the field.
   const named = path.join(dir, "named.yaml");
-  await initHandler(
-    argvFor({ "config-file": named, identity: "Jane Smith, Agency A" }),
+  await withStdin(streamOf(""), () =>
+    initHandler(
+      argvFor({ "config-file": named, identity: "Jane Smith, Agency A" }),
+    ),
   );
   const namedTerms = parseExchangeSpec(
     YAML.parse(fs.readFileSync(named, "utf8")),
@@ -402,6 +421,150 @@ test("handler: the identity it writes unasked is one no resolver accepts", async
   expect(resolveInvitationIdentity(namedTerms.identity, named)).toBe(
     "Jane Smith, Agency A",
   );
+});
+
+test("handler: at a terminal with no --identity, it asks and writes the answer", async () => {
+  const dir = scratchDir();
+  const configFile = path.join(dir, "psilink.yaml");
+  promptFreeTextMock.mockResolvedValue("  Jane Smith, Agency A  ");
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => {}) as never);
+  const { stdoutWrites, stderrWrites, restore } = captureStdio();
+
+  await withStdin(ttyStream(), () =>
+    initHandler(argvFor({ "config-file": configFile })),
+  );
+
+  restore();
+  expect(exit).not.toHaveBeenCalled();
+  expect(promptFreeTextMock).toHaveBeenCalledTimes(1);
+  expect(promptFreeTextMock).toHaveBeenCalledWith(INIT_IDENTITY_QUESTION);
+  // Why psilink asks rather than naming the party itself, on the terminal the
+  // question is asked on -- and never on stdout, which carries result data.
+  expect(stderrWrites.join("")).toContain(IDENTITY_PROMPT_PREAMBLE);
+  expect(stdoutWrites.join("")).toBe("");
+  const { identity } = parseExchangeSpec(
+    YAML.parse(fs.readFileSync(configFile, "utf8")),
+  ).linkageTerms;
+  // Trimmed as a flag value is, and a label the resolvers take: the answer the
+  // operator typed is what a later `psilink invite` over this file mints under.
+  expect(identity).toBe("Jane Smith, Agency A");
+  expect(resolveInvitationIdentity(identity, configFile)).toBe(
+    "Jane Smith, Agency A",
+  );
+});
+
+test("handler: with no terminal it asks nothing and writes the placeholder", async () => {
+  // The unattended path -- a pipe, a container run without -t, CI -- is
+  // untouched by the question: nothing is asked and the scaffold carries the
+  // placeholder, so a scripted init behaves as it did before there was a prompt.
+  const dir = scratchDir();
+  const configFile = path.join(dir, "psilink.yaml");
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => {}) as never);
+
+  await withStdin(streamOf(""), () =>
+    initHandler(argvFor({ "config-file": configFile })),
+  );
+
+  expect(exit).not.toHaveBeenCalled();
+  expect(promptFreeTextMock).not.toHaveBeenCalled();
+  expect(
+    parseExchangeSpec(YAML.parse(fs.readFileSync(configFile, "utf8")))
+      .linkageTerms.identity,
+  ).toBe(PLACEHOLDER_IDENTITY);
+});
+
+test("handler: --identity at a terminal is answered by the flag, not a question", async () => {
+  // The flag stays the scripted path: supplying it is what keeps the question
+  // from being asked, terminal or not.
+  const dir = scratchDir();
+  const configFile = path.join(dir, "psilink.yaml");
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => {}) as never);
+
+  await withStdin(ttyStream(), () =>
+    initHandler(argvFor({ "config-file": configFile, identity: "Agency A" })),
+  );
+
+  expect(exit).not.toHaveBeenCalled();
+  expect(promptFreeTextMock).not.toHaveBeenCalled();
+  expect(
+    parseExchangeSpec(YAML.parse(fs.readFileSync(configFile, "utf8")))
+      .linkageTerms.identity,
+  ).toBe("Agency A");
+});
+
+test("handler: a blank answer leaves the placeholder to fill in by hand", async () => {
+  // Blank is absence, not a label -- and init's answer to absence is the
+  // scaffold it has always written, so an operator who has not settled the
+  // wording still gets a template rather than a refusal.
+  const dir = scratchDir();
+  const configFile = path.join(dir, "psilink.yaml");
+  promptFreeTextMock.mockResolvedValue("   ");
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => {}) as never);
+  const { restore } = captureStdio();
+
+  await withStdin(ttyStream(), () =>
+    initHandler(argvFor({ "config-file": configFile })),
+  );
+
+  restore();
+  expect(exit).not.toHaveBeenCalled();
+  expect(promptFreeTextMock).toHaveBeenCalledTimes(1);
+  expect(
+    parseExchangeSpec(YAML.parse(fs.readFileSync(configFile, "utf8")))
+      .linkageTerms.identity,
+  ).toBe(PLACEHOLDER_IDENTITY);
+});
+
+test("handler: the placeholder typed at the question is refused, writing nothing", async () => {
+  // An answer takes the treatment a flag value takes, so the one string that is
+  // not a name is refused wherever it comes from -- typing it back at the
+  // question is not a way around the guard.
+  const dir = scratchDir();
+  const configFile = path.join(dir, "psilink.yaml");
+  promptFreeTextMock.mockResolvedValue(`  ${PLACEHOLDER_IDENTITY}  `);
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => {}) as never);
+  const { stderrWrites, restore } = captureStdio();
+
+  await withStdin(ttyStream(), () =>
+    initHandler(argvFor({ "config-file": configFile, "log-level": "error" })),
+  );
+
+  restore();
+  expect(exit).toHaveBeenCalledWith(64);
+  expect(stderrWrites.join("")).toContain(PLACEHOLDER_IDENTITY);
+  expect(fs.existsSync(configFile)).toBe(false);
+});
+
+test("handler: declining the overwrite asks for no identity", async () => {
+  // Nothing is asked on a path that writes no file: psilink remembers an answer
+  // only in the configuration it was already going to write, so a run that
+  // leaves the existing one alone has nowhere to put one.
+  const dir = scratchDir();
+  const configFile = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configFile, "old contents\n");
+  promptConfirmMock.mockResolvedValue(false);
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => {}) as never);
+
+  await withStdin(ttyStream(), () =>
+    initHandler(argvFor({ "config-file": configFile })),
+  );
+
+  expect(exit).not.toHaveBeenCalled();
+  expect(promptConfirmMock).toHaveBeenCalled();
+  expect(promptFreeTextMock).not.toHaveBeenCalled();
+  expect(fs.readFileSync(configFile, "utf8")).toBe("old contents\n");
 });
 
 test("handler: --log-file is accepted and the config is still written", async () => {
@@ -510,11 +673,15 @@ test("handler: confirming the interactive overwrite replaces the file", async ()
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
+  // The confirmed overwrite goes on to ask for the identity, which writes its
+  // preamble to stderr; capture it rather than leaking it into the runner's own.
+  const { restore } = captureStdio();
 
   await withInteractiveStdin(async () => {
     await initHandler(argvFor({ "config-file": configFile }));
   });
 
+  restore();
   expect(exit).not.toHaveBeenCalled();
   const written = fs.readFileSync(configFile, "utf8");
   expect(written).not.toBe("old contents\n");
