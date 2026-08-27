@@ -346,7 +346,9 @@ async function expectAnnounced(sentence: string): Promise<void> {
 
 /**
  * ARIA's global states and properties, written out because nothing in this tree
- * ships the ARIA vocabulary to derive them from. This is the set the
+ * ships the ARIA vocabulary to derive them from; the set matched the WAI-ARIA
+ * 1.2 Recommendation's Global States and Properties section byte for byte when
+ * checked on 2026-08-27. This is the set the
  * presentational-role-conflict resolution reads: a `role="presentation"` is
  * ignored on an element carrying one of these, and NOT on an element carrying
  * some other `aria-*` attribute, so a premise drawn from the `aria-` prefix
