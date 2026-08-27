@@ -75,7 +75,9 @@ import {
 import { captureStdio } from "../loggingTestSupport";
 import {
   configuredIdentityRequired,
+  configuredIdentityStillPlaceholder,
   IDENTITY_REQUIRED,
+  PLACEHOLDER_IDENTITY,
 } from "../../src/partyIdentity";
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 
@@ -1608,6 +1610,40 @@ test("validateInvite: --identity over a reused config is reported, not applied",
     expect(ignored[0]).toContain(configPath);
   } finally {
     warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a config still carrying the init placeholder is refused, minting nothing", async () => {
+  // The template's identity is a well-formed label every schema accepts, so an
+  // operator who fills in the connection block and passes over this field would
+  // otherwise mint an invitation -- and a partnership every later run sends --
+  // naming their party the words asking for the name.
+  const { dir, configPath, keyPath } = withConfig(
+    getDefaultLinkageTerms(
+      PLACEHOLDER_IDENTITY,
+      inferMetadata(["first_name", "last_name", "dob", "ssn"]),
+    ),
+  );
+  const log = getLogger("invite-identity-placeholder-test");
+  log.setLevel("silent");
+  try {
+    for (const identity of [undefined, "Agency Flag"]) {
+      await expect(
+        validateInvite({
+          resolved: { mode: "offline" },
+          options: testOptions({
+            configFile: configPath,
+            keyFile: keyPath,
+            ...(identity !== undefined && { identity }),
+          }),
+          acceptTimeout: 900,
+          log,
+        }),
+      ).rejects.toThrow(configuredIdentityStillPlaceholder(configPath));
+    }
+    expect(fs.existsSync(keyPath)).toBe(false);
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

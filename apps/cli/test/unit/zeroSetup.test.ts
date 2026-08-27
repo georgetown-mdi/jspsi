@@ -33,6 +33,7 @@ import {
 import type { ConnectionOverrideOptions } from "../../src/optionDefinitions";
 import { resolveConnectionCredentials } from "../../src/util/atSignRefs";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
+import { PLACEHOLDER_IDENTITY } from "../../src/partyIdentity";
 import { runProtocol } from "../../src/protocol";
 import { PERSISTENCE_LOSS_EXIT_CODE } from "../../src/eventStream";
 import { captureFd3 } from "../eventStreamTestSupport";
@@ -477,6 +478,29 @@ test("handler: no --identity asks nothing and sends no identity", async () => {
       expect(terms.identity).toBeUndefined();
       expect("identity" in terms).toBe(false);
     }
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: an --identity still carrying the init placeholder exits 64", async () => {
+  // This path may run unnamed, but not under the template's placeholder: read as
+  // a label it would send the words asking for a name, and read as absence it
+  // would silently unname a run whose operator typed a value believing it named
+  // them. It stops before the connection is opened.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  vi.mocked(runProtocol).mockClear();
+  try {
+    await expect(
+      termsFromZeroSetupRun(dir, `  ${PLACEHOLDER_IDENTITY}  `),
+    ).rejects.toThrow("exit:64");
+    expect(runProtocol).not.toHaveBeenCalled();
   } finally {
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });

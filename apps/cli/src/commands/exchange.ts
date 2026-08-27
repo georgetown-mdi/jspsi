@@ -939,7 +939,16 @@ export async function handler(argv: Arguments): Promise<void> {
     // value is what a scripted `--identity "$ORG"` sends with ORG unset, so it
     // reads as absent and leaves the configuration's own label standing.
     let termsIdentity: string | undefined;
-    const flagIdentity = optionalIdentity(options.identity);
+    let flagIdentity: string | undefined;
+    try {
+      flagIdentity = optionalIdentity(options.identity);
+    } catch (err) {
+      // The one value the flag refuses rather than reads (the init template's
+      // identity placeholder) is a local usage fault decided before anything is
+      // sent, so it exits 64 here; the enclosing try carries only a finally, so
+      // an escaping refusal would reach the top-level printer and exit 1.
+      exitWithError(log, err, 64);
+    }
     if (flagIdentity !== undefined) {
       termsIdentity = flagIdentity;
       if (exchangeDataSpec.linkageTerms)

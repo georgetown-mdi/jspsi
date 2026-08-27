@@ -27,6 +27,11 @@ import {
   resolveInitInput,
 } from "../../src/commands/init";
 import { buildDataSpec, loadInputRows } from "../../src/onlineBootstrap";
+import {
+  optionalIdentity,
+  resolveIdentity,
+  resolveInvitationIdentity,
+} from "../../src/partyIdentity";
 import { captureStdio } from "../loggingTestSupport";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
@@ -362,6 +367,41 @@ test("handler: writes a parseable template and no key file, then exits 0", async
   expect(fs.readdirSync(dir)).toEqual(["psilink.yaml"]);
   // The written file is a valid config skeleton.
   parseExchangeSpec(YAML.parse(fs.readFileSync(configFile, "utf8")));
+});
+
+test("handler: the identity it writes unasked is one no resolver accepts", async () => {
+  // The drift tie, read off the written file rather than off the constant: the
+  // template's own bytes have to be what the guard refuses, or a template
+  // hand-edited everywhere but this field mints an invitation under it.
+  const dir = scratchDir();
+  const configFile = path.join(dir, "psilink.yaml");
+  vi.spyOn(process, "exit").mockImplementation((() => {}) as never);
+
+  await initHandler(argvFor({ "config-file": configFile }));
+
+  const written = parseExchangeSpec(
+    YAML.parse(fs.readFileSync(configFile, "utf8")),
+  );
+  const identity = written.linkageTerms.identity;
+  expect(identity).toBeDefined();
+  expect(() => resolveIdentity(identity)).toThrow(UsageError);
+  expect(() => optionalIdentity(identity)).toThrow(UsageError);
+  expect(() => resolveInvitationIdentity(identity, configFile)).toThrow(
+    UsageError,
+  );
+
+  // A template written WITH --identity carries the operator's own label, and
+  // that one resolves -- the guard refuses the placeholder, not the field.
+  const named = path.join(dir, "named.yaml");
+  await initHandler(
+    argvFor({ "config-file": named, identity: "Jane Smith, Agency A" }),
+  );
+  const namedTerms = parseExchangeSpec(
+    YAML.parse(fs.readFileSync(named, "utf8")),
+  ).linkageTerms;
+  expect(resolveInvitationIdentity(namedTerms.identity, named)).toBe(
+    "Jane Smith, Agency A",
+  );
 });
 
 test("handler: --log-file is accepted and the config is still written", async () => {

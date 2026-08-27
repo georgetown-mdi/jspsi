@@ -25,12 +25,7 @@ import {
   singleValue,
 } from "../util/cli";
 import { buildDataSpec } from "../onlineBootstrap";
-
-// The identity written into a fresh template when --identity is not given. A
-// placeholder, like the connection's host/username -- init produces a scaffold to
-// hand-edit, not a runnable config -- and non-empty so it satisfies the linkage
-// terms schema (identity has a 1-character minimum).
-const PLACEHOLDER_IDENTITY = "REPLACE_WITH_YOUR_IDENTITY";
+import { PLACEHOLDER_IDENTITY } from "../partyIdentity";
 
 export function builder(cmd: Argv): Argv {
   return (
@@ -100,6 +95,9 @@ export async function handler(argv: Arguments): Promise<void> {
       const configFile =
         expandTilde(singleValue(argv, "config-file") as string | undefined) ??
         DEFAULT_CONFIG_PATH;
+      // Absent --identity, the template carries the placeholder, like the
+      // connection's host and username: init produces a scaffold to hand-edit,
+      // not a runnable config.
       const identity =
         (singleValue(argv, "identity") as string | undefined) ??
         PLACEHOLDER_IDENTITY;
