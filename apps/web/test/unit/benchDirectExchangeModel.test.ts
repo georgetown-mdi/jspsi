@@ -14,7 +14,9 @@ import {
 } from "@bench/connectionTuningModel";
 import {
   DEFAULT_PREVIEW_IDENTITY,
+  DIRECT_LINKAGE_STRATEGY_DEFAULT,
   DIRECT_STEP_ORDER,
+  directLinkageStrategyIntentFields,
   directServerBlockedReason,
   previewInferredTerms,
 } from "@bench/directExchangeModel";
@@ -39,7 +41,11 @@ describe("previewInferredTerms", () => {
     // The preview must be exactly what the CLI infers from the same columns
     // (prepareForExchange with no spec: inferMetadata then getDefaultLinkageTerms),
     // or the operator would confirm terms the run does not honor.
-    const preview = previewInferredTerms(LINKABLE_COLUMNS, "County Health");
+    const preview = previewInferredTerms(
+      LINKABLE_COLUMNS,
+      "County Health",
+      DIRECT_LINKAGE_STRATEGY_DEFAULT,
+    );
     const core = getDefaultLinkageTerms(
       "County Health",
       inferMetadata(LINKABLE_COLUMNS),
@@ -55,6 +61,7 @@ describe("previewInferredTerms", () => {
     const preview = previewInferredTerms(
       LINKABLE_COLUMNS,
       DEFAULT_PREVIEW_IDENTITY,
+      DIRECT_LINKAGE_STRATEGY_DEFAULT,
     );
     const disclosed = disclosedColumnNames(inferMetadata(LINKABLE_COLUMNS));
 
@@ -74,14 +81,22 @@ describe("previewInferredTerms", () => {
     // as sent -- so an oversized header would reach prepareForExchange on the
     // appliance and be refused there, after the operator pressed Run.
     const past = "a".repeat(MAX_NAME_LENGTH + 1);
-    const preview = previewInferredTerms([...LINKABLE_COLUMNS, past], "x");
+    const preview = previewInferredTerms(
+      [...LINKABLE_COLUMNS, past],
+      "x",
+      DIRECT_LINKAGE_STRATEGY_DEFAULT,
+    );
     expect(preview.overlongDisclosedColumns).toEqual([6]);
     expect(preview.disclosedPayloadColumns).toContain(past);
   });
 
   test("a sent column name at the ceiling is carryable and leaves the run gate open", () => {
     const atCeiling = "a".repeat(MAX_NAME_LENGTH);
-    const preview = previewInferredTerms([...LINKABLE_COLUMNS, atCeiling], "x");
+    const preview = previewInferredTerms(
+      [...LINKABLE_COLUMNS, atCeiling],
+      "x",
+      DIRECT_LINKAGE_STRATEGY_DEFAULT,
+    );
     expect(preview.disclosedPayloadColumns).toContain(atCeiling);
     expect(preview.overlongDisclosedColumns).toEqual([]);
   });
@@ -91,18 +106,73 @@ describe("previewInferredTerms", () => {
     // over it on the count every carrying bound uses.
     const astral = "\u{1D54F}".repeat(MAX_NAME_LENGTH);
     expect([...astral].length).toBe(MAX_NAME_LENGTH);
-    const preview = previewInferredTerms([...LINKABLE_COLUMNS, astral], "x");
+    const preview = previewInferredTerms(
+      [...LINKABLE_COLUMNS, astral],
+      "x",
+      DIRECT_LINKAGE_STRATEGY_DEFAULT,
+    );
     expect(preview.overlongDisclosedColumns).toEqual([6]);
   });
 
   test("a file with no matchable columns is unlinkable and names the missing fields", () => {
-    const preview = previewInferredTerms(["notes", "comment"], "x");
+    const preview = previewInferredTerms(
+      ["notes", "comment"],
+      "x",
+      DIRECT_LINKAGE_STRATEGY_DEFAULT,
+    );
     expect(preview.satisfiableKeyCount).toBe(0);
     expect(preview.unsatisfied.length).toBeGreaterThan(0);
   });
 
   test("the spine walks file -> server -> confirm -> run", () => {
     expect(DIRECT_STEP_ORDER).toEqual(["file", "server", "confirm", "run"]);
+  });
+});
+
+describe("the direct-exchange linkage strategy", () => {
+  test("the preview carries the selected strategy, not the inferred default", () => {
+    // The CLI's zero-setup command applies --linkage-strategy over the terms it
+    // inferred, so a preview left on the default would show terms the run does
+    // not use -- and would withhold the single-pass disclosure the terms panel
+    // raises off this very field.
+    expect(
+      previewInferredTerms(LINKABLE_COLUMNS, "x", "single-pass").linkageTerms
+        .linkageStrategy,
+    ).toBe("single-pass");
+    expect(
+      previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade").linkageTerms
+        .linkageStrategy,
+    ).toBe("cascade");
+  });
+
+  test("the strategy does not disturb the inferred keys, fields, or disclosed set", () => {
+    const cascade = previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade");
+    const singlePass = previewInferredTerms(
+      LINKABLE_COLUMNS,
+      "x",
+      "single-pass",
+    );
+    expect(singlePass.linkageTerms.linkageKeys).toEqual(
+      cascade.linkageTerms.linkageKeys,
+    );
+    expect(singlePass.linkageTerms.linkageFields).toEqual(
+      cascade.linkageTerms.linkageFields,
+    );
+    expect(singlePass.disclosedPayloadColumns).toEqual(
+      cascade.disclosedPayloadColumns,
+    );
+  });
+
+  test("only a non-default choice reaches the intent", () => {
+    // A zero-setup run loads no configuration for a flag to override, so
+    // --linkage-strategy=cascade and no flag select the same strategy; emitting
+    // it would lengthen the graduated command line without changing the run.
+    expect(
+      directLinkageStrategyIntentFields(DIRECT_LINKAGE_STRATEGY_DEFAULT),
+    ).toEqual({});
+    expect(directLinkageStrategyIntentFields("single-pass")).toEqual({
+      linkageStrategy: "single-pass",
+    });
   });
 });
 

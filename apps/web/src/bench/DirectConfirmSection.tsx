@@ -6,12 +6,15 @@ import {
   Button,
   Checkbox,
   Group,
+  Radio,
   Stack,
   Text,
   TextInput,
 } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
+
+import { LinkageStrategySchema } from "@psilink/core";
 
 import { InvitationTerms } from "@components/InvitationTerms";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
@@ -21,23 +24,36 @@ import {
   IDENTITY_CONTROL_CHAR_PATTERN,
   MAX_IDENTITY_LENGTH,
 } from "@psi/identityLabel";
+import {
+  LINKAGE_STRATEGY_LABEL,
+  LINKAGE_STRATEGY_OPTION_COPY,
+  SINGLE_PASS_DISCLOSURE_BODY,
+  SINGLE_PASS_DISCLOSURE_TITLE,
+} from "@psi/linkageStrategyChoice";
 import { overlongColumnsAlert } from "@psi/columnNames";
 
 import {
   DEFAULT_PREVIEW_IDENTITY,
+  DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE,
   previewInferredTerms,
 } from "./directExchangeModel";
 import { FileProfileSummary } from "./ServerFilePicker";
 import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import styles from "./bench.module.css";
 
+import type { LinkageStrategy } from "@psilink/core";
 import type { ProfiledJobInput } from "@psi/workInputClient";
 
 /**
  * The direct-exchange confirm screen: the committed file's identity and shape, the
- * optional identity field, the browser-side preview of the terms the file is
- * EXPECTED to produce, the two fixed symmetry notices, and the trust-model
- * affirmation that gates Run.
+ * optional identity field, the linkage-strategy choice, the browser-side preview
+ * of the terms the file is EXPECTED to produce, the two fixed symmetry notices,
+ * and the trust-model affirmation that gates Run.
+ *
+ * The strategy is authored here rather than on the server step because it is a
+ * term rather than a connection setting: it reshapes the very terms previewed
+ * below it, and selecting single-pass carries the disclosure note the invitation
+ * flow's own authoring control presents.
  *
  * The terms preview is read-only. It is computed from the file's columns exactly as
  * the CLI's zero-setup command infers them ({@link previewInferredTerms}) and shown
@@ -56,6 +72,8 @@ export function DirectConfirmSection({
   profile,
   identity,
   onIdentity,
+  linkageStrategy,
+  onLinkageStrategy,
   affirmed,
   onAffirm,
   onRun,
@@ -66,6 +84,10 @@ export function DirectConfirmSection({
   /** The optional operator identity, threaded to the run's `--identity`. */
   identity: string;
   onIdentity: (value: string) => void;
+  /** The strategy the keys run under, threaded to the run's
+   * `--linkage-strategy` and applied over the previewed terms. */
+  linkageStrategy: LinkageStrategy;
+  onLinkageStrategy: (strategy: LinkageStrategy) => void;
   /** Whether the trust affirmation is checked -- the Run gate. */
   affirmed: boolean;
   onAffirm: (checked: boolean) => void;
@@ -75,14 +97,20 @@ export function DirectConfirmSection({
    * race the first). */
   running: boolean;
 }) {
-  // The preview depends only on the columns, not the identity: the inferred keys,
-  // fields, and disclosed set are column-derived, and the identity is not shown in
-  // the "proposing" framing (it only attributes the disclosure record and rides the
-  // run). Memoized on the profile (stable per committed file) so a keystroke in the
-  // identity field does not rebuild the terms panel and reset its collapsed sections.
+  // The preview depends on the columns and the chosen strategy, not the identity:
+  // the inferred keys, fields, and disclosed set are column-derived, and the
+  // identity is not shown in the "proposing" framing (it only attributes the
+  // disclosure record and rides the run). Memoized on the profile (stable per
+  // committed file) so a keystroke in the identity field does not rebuild the terms
+  // panel and reset its collapsed sections.
   const preview = useMemo(
-    () => previewInferredTerms(profile.columns, DEFAULT_PREVIEW_IDENTITY),
-    [profile],
+    () =>
+      previewInferredTerms(
+        profile.columns,
+        DEFAULT_PREVIEW_IDENTITY,
+        linkageStrategy,
+      ),
+    [profile, linkageStrategy],
   );
 
   // A direct run is a live two-party session against the agreed server, dialled
@@ -149,6 +177,45 @@ export function DirectConfirmSection({
         onChange={(event) => onIdentity(event.currentTarget.value)}
         error={identityError}
       />
+
+      <Stack gap="sm">
+        <Radio.Group
+          label={LINKAGE_STRATEGY_LABEL}
+          description={DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE}
+          value={linkageStrategy}
+          // Parsed rather than trusted so a Radio value literal drifting from the
+          // enum throws loudly instead of typechecking clean.
+          onChange={(value) =>
+            onLinkageStrategy(LinkageStrategySchema.parse(value))
+          }
+        >
+          <Radio
+            value="cascade"
+            label={LINKAGE_STRATEGY_OPTION_COPY.cascade.label}
+            description={LINKAGE_STRATEGY_OPTION_COPY.cascade.description}
+            mt="xs"
+          />
+          <Radio
+            value="single-pass"
+            label={LINKAGE_STRATEGY_OPTION_COPY["single-pass"].label}
+            description={
+              LINKAGE_STRATEGY_OPTION_COPY["single-pass"].description
+            }
+            mt="xs"
+          />
+        </Radio.Group>
+        {linkageStrategy === "single-pass" && (
+          <Alert
+            color="yellow"
+            title={SINGLE_PASS_DISCLOSURE_TITLE}
+            // Pinned so the consent-critical warning is announced on selection
+            // even if Mantine's default role changes.
+            role="alert"
+          >
+            {SINGLE_PASS_DISCLOSURE_BODY}
+          </Alert>
+        )}
+      </Stack>
 
       {overlongAlert !== undefined && (
         <Alert

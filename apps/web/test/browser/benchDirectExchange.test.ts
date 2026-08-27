@@ -11,7 +11,13 @@ import "@mantine/core/styles.css";
 
 import { LINKAGE_RULE_SET_VERDICT_COPY } from "@psilink/core";
 
+import {
+  SINGLE_PASS_DISCLOSURE_BODY,
+  SINGLE_PASS_DISCLOSURE_TITLE,
+} from "@psi/linkageStrategyChoice";
+
 import { BenchLobby } from "@bench/BenchLobby";
+import { DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE } from "@bench/directExchangeModel";
 import { DirectExchangeBench } from "@bench/DirectExchangeBench";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
@@ -348,6 +354,9 @@ describe("direct exchange confirm and run", () => {
     expect(intent.inputFile).toEqual({ name: "clients.csv" });
     expect(intent.inputCsv).toBeUndefined();
     expect(intent.identity).toBe("County Health");
+    // The strategy is left at the CLI's own default, which a zero-setup run
+    // selects by carrying no flag at all.
+    expect(intent.linkageStrategy).toBeUndefined();
     expect(intent.sharedSecret).toBeUndefined();
     expect(intent.linkageTerms).toBeUndefined();
     expect(intent.remote).toBeUndefined();
@@ -495,6 +504,51 @@ describe("direct exchange confirm and run", () => {
     expect(app.container.textContent).not.toContain(
       "Identity cannot begin with a dash",
     );
+  });
+
+  test("single-pass discloses its tradeoff, reshapes the preview, and rides the run", async () => {
+    const api = stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeBench));
+    await reachConfirm();
+
+    // The default is the CLI's, and it raises no disclosure of its own.
+    await expect
+      .element(page.getByRole("radio", { name: "Cascade" }))
+      .toBeChecked();
+    expect(app.container.textContent).not.toContain(
+      SINGLE_PASS_DISCLOSURE_TITLE,
+    );
+    // Both parties infer their own terms here, so the screen says the choice has
+    // to be the same on both sides.
+    expect(app.container.textContent).toContain(
+      DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE,
+    );
+
+    await page.getByRole("radio", { name: "Single-pass" }).click();
+    await expect
+      .element(page.getByText(SINGLE_PASS_DISCLOSURE_TITLE))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(SINGLE_PASS_DISCLOSURE_BODY);
+    // The preview is the terms the run uses, so the terms panel surfaces the
+    // strategy too rather than showing the cascade the run does not use.
+    expect(app.container.textContent).toContain(
+      "This exchange uses single-pass linkage",
+    );
+
+    await page.getByRole("checkbox").click();
+    await page.getByRole("button", { name: "Run the exchange" }).click();
+    await vi.waitFor(() => {
+      expect(
+        api.captured.some(
+          (request) => request.url === "/api/jobs" && request.method === "POST",
+        ),
+      ).toBe(true);
+    });
+    const post = api.captured.find(
+      (request) => request.url === "/api/jobs" && request.method === "POST",
+    );
+    const intent = JSON.parse(post?.body ?? "{}") as Record<string, unknown>;
+    expect(intent.linkageStrategy).toBe("single-pass");
   });
 });
 

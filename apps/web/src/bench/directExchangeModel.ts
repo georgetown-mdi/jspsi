@@ -10,7 +10,12 @@ import {
   payloadSendForMetadata,
 } from "@psi/metadataEditing";
 
-import type { LinkageField, LinkageTerms, Metadata } from "@psilink/core";
+import type {
+  LinkageField,
+  LinkageStrategy,
+  LinkageTerms,
+  Metadata,
+} from "@psilink/core";
 
 /**
  * The pure model behind the console "Direct exchange" bench: the symmetric spine's
@@ -57,6 +62,40 @@ export const DIRECT_STEP_ORDER: ReadonlyArray<DirectStep> = [
  * runs as the appliance user.
  */
 export const DEFAULT_PREVIEW_IDENTITY = "you";
+
+/** The strategy a direct run uses until the operator chooses otherwise: the
+ * CLI's own default, which a zero-setup command selects by carrying no
+ * `--linkage-strategy` at all. */
+export const DIRECT_LINKAGE_STRATEGY_DEFAULT: LinkageStrategy = "cascade";
+
+/**
+ * What the confirm screen states beside the strategy choice. A zero-setup
+ * exchange has each party infer terms from its own file rather than one party
+ * authoring them for both, and the strategy is a mandatory-consistency term, so
+ * the two parties must select the same value or the exchange aborts -- the same
+ * thing `docs/CLI.md` says of `--linkage-strategy` on the zero-setup command.
+ */
+export const DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE =
+  "You and your partner must choose the same option. Each of you reads terms " +
+  "from your own file here, so a mismatch stops the exchange before any " +
+  "records are compared.";
+
+/**
+ * The strategy field a zero-setup intent carries for the operator's choice.
+ *
+ * Only a non-default choice is emitted, matching every other zero-setup flag
+ * (see `zeroSetupOptionsArgv`): a zero-setup run loads no configuration file for
+ * a flag to override, so `--linkage-strategy=cascade` and no flag at all select
+ * the same strategy, and the graduated command line stays the shortest one that
+ * runs what was prototyped.
+ */
+export function directLinkageStrategyIntentFields(strategy: LinkageStrategy): {
+  linkageStrategy?: LinkageStrategy;
+} {
+  return strategy === DIRECT_LINKAGE_STRATEGY_DEFAULT
+    ? {}
+    : { linkageStrategy: strategy };
+}
 
 /** What the agreed-server step is waiting on, by the reading order of the screen
  * itself: the transport at the top, then the two authoring cards below it, then
@@ -151,15 +190,24 @@ export interface DirectTermsPreview {
  * rather than empty. Satisfiability is assessed against the FULL default terms so
  * the unsatisfied set can name the missing field types.
  *
+ * The operator's selected `linkageStrategy` is applied over the inferred terms,
+ * as the CLI's zero-setup command applies `--linkage-strategy` over the terms
+ * `prepareForExchange` authored -- so a run set to single-pass previews the terms
+ * it runs, disclosure note and all, rather than the cascade it does not.
+ *
  * `inferMetadata` throws on an empty column name; the picker's commit refuses a
  * blank header before the preview is computed, so callers pass only named columns.
  */
 export function previewInferredTerms(
   columns: Array<string>,
   identity: string,
+  linkageStrategy: LinkageStrategy,
 ): DirectTermsPreview {
   const metadata = inferMetadata(columns);
-  const linkageTerms = getDefaultLinkageTerms(identity, metadata);
+  const linkageTerms = {
+    ...getDefaultLinkageTerms(identity, metadata),
+    linkageStrategy,
+  };
   const payload = payloadSendForMetadata(metadata);
   if (payload !== undefined) linkageTerms.payload = payload;
   const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(

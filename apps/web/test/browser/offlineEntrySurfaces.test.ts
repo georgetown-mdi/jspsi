@@ -15,6 +15,7 @@ import {
 } from "@bench/acceptorColumnsModel";
 import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
 import { BenchLobby } from "@bench/BenchLobby";
+import { DIRECT_LINKAGE_STRATEGY_DEFAULT } from "@bench/directExchangeModel";
 import { DirectConfirmSection } from "@bench/DirectConfirmSection";
 import { InviterBench } from "@bench/InviterBench";
 import { OFFLINE_EXCHANGE_REASON } from "@bench/offlineExchangeGate";
@@ -172,6 +173,8 @@ function mountDirectConfirmSection() {
       profile: directProfile,
       identity: "",
       onIdentity: noop,
+      linkageStrategy: DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      onLinkageStrategy: noop,
       affirmed: true,
       onAffirm: noop,
       onRun: noop,
