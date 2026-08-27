@@ -935,8 +935,12 @@ describe("the receipts card's model", () => {
     // bench) while the download control renders on the run screen once the run
     // settles -- disjoint surfaces, so copy pointing at "here" would send the
     // operator looking for a control that is not on the screen they are reading.
+    // That control is offered on any settled run, so the sentence names failure
+    // outright: an operator who reads "once the exchange finishes" as "once it
+    // succeeds" never goes looking after the failed run whose receipt may be the
+    // only artifact left.
     expect(RECEIPT_LOCATION_NOTICE).toContain(
-      "the run screen offers it as a download once the exchange finishes",
+      "the run screen offers it as a download once the run finishes or fails",
     );
     expect(RECEIPT_LOCATION_NOTICE).not.toMatch(/\bhere\b/);
   });

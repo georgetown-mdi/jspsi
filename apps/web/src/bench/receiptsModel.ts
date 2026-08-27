@@ -342,14 +342,21 @@ export const NO_PARTNER_PIN_ADVISORY =
  * authoring knows the keeping step does not require reaching into the mount --
  * and names WHERE that download appears, since this notice renders on the
  * authoring screens and the control it points at renders on the run screen.
+ *
+ * That control is offered on any SETTLED run rather than a successful one
+ * ({@link ./ReceiptDownload}): the receipt is written at the signature swap,
+ * before this run's own writes, so a failure is precisely the run whose receipt
+ * may be the only artifact left. The sentence therefore names failure outright,
+ * an operator being free to read "finishes" as "succeeds" and never go looking
+ * after a run that failed.
  */
 export const RECEIPT_LOCATION_NOTICE =
   "The signed receipt is written with this run's files in your mounted folder, " +
   "as receipt.json inside the run's own directory, and the run screen offers " +
-  "it as a download once the exchange finishes. Discarding the run removes it " +
-  "along with the results, so keep a copy of your own if you mean to keep it " +
-  "-- it is the artifact an auditor checks, and neither party can recreate it " +
-  "afterwards.";
+  "it as a download once the run finishes or fails. Discarding the run removes " +
+  "it along with the results, so keep a copy of your own if you mean to keep " +
+  "it -- it is the artifact an auditor checks, and neither party can recreate " +
+  "it afterwards.";
 
 /** What the console says about the certificate export, so an operator who ticks
  * it knows what leaves the appliance. */

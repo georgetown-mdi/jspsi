@@ -3,6 +3,8 @@ import { describe, expect, test } from "vitest";
 import {
   RECEIPT_MISSING_LEAD,
   RECEIPT_MISSING_NOTICE,
+  RECEIPT_UNANSWERED_LEAD,
+  RECEIPT_UNANSWERED_NOTICE,
 } from "@bench/ReceiptDownload";
 import { completionOutcome } from "@bench/BenchRunSurface";
 
@@ -71,5 +73,19 @@ describe("the missing-receipt copy", () => {
       "produces a receipt for that run, not this one",
     );
     expect(RECEIPT_MISSING_NOTICE).toContain("neither party can recreate one");
+  });
+
+  test("the unanswered copy states the silence rather than the receipt", () => {
+    // What the operator is owed at the bound is the fact that asking stopped --
+    // an unanswered ask never said whether this run has a receipt, so the seat
+    // can neither claim one nor report one absent, and it must name the action
+    // that would destroy a receipt it cannot see.
+    expect(RECEIPT_UNANSWERED_LEAD).toContain("stopped answering");
+    expect(RECEIPT_UNANSWERED_NOTICE).toContain("stopped asking");
+    expect(RECEIPT_UNANSWERED_NOTICE).toContain("may still be");
+    expect(RECEIPT_UNANSWERED_NOTICE).toContain("reload");
+    expect(RECEIPT_UNANSWERED_NOTICE).toContain("keep the run");
+    expect(RECEIPT_UNANSWERED_NOTICE).not.toContain(RECEIPT_MISSING_LEAD);
+    expect(RECEIPT_UNANSWERED_NOTICE).not.toContain("holds none");
   });
 });
