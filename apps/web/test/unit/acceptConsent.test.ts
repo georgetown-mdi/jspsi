@@ -2018,6 +2018,11 @@ describe("summarizeInvitation", () => {
       // these cascade terms the exchange is refused rather than named a breadth.
       split_on: "not supported",
     };
+    // Two-directional: the table covers exactly core's function set, so a new
+    // core function fails here until it gets a verdict.
+    expect(Object.keys(MARKER_BEFORE_A_SUBSTRING).sort()).toEqual(
+      [...STANDARDIZATION_FUNCTION_NAMES].sort(),
+    );
     for (const [fn, marker] of Object.entries(MARKER_BEFORE_A_SUBSTRING)) {
       const params = PARAMS[fn];
       expect(

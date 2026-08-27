@@ -940,33 +940,31 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * The marker is undefined when the element matches exactly or only canonicalizes
  * its value (case, whitespace, accents, affixes, padding on its own, and a
  * `parse_date` that merely reformats between equivalent layouts -- routine
- * standardization, deliberately
- * not flagged so the recommended setup stays clean). It is also undefined when the
- * element's pipeline matches NOTHING -- a `parse_date` whose input format drops
- * every record, unless a later `coalesce` rescues it to a constant -- since that is
- * a narrowing-to-empty, not a broadening, and is surfaced separately by the
- * dead-key advisory. `remove_affixes` is in that
- * routine set by deliberate decision: stripping titles and suffixes (Dr., Jr.)
- * is a BROADENING canonicalizer in the same family as accent and case folding --
- * it makes superficially-different spellings match -- not a record-DROPPING
- * narrower like the flagged `filter_regex` / `null_if`, so it earns no marker
- * despite removing characters. It names any rule that materially changes which
- * records match: where the direction is determinable from the terms it names the
- * EFFECT ("partial" for a truncation, or for a `parse_date` whose output layout
- * drops a date component its input carries and so matches on only part of the
- * date; "any date" for a `parse_date` whose output carries no date token at all,
- * collapsing every date to one value -- a stronger breadth than the partial drop;
- * "fuzzy" / "sound-alike" / "fallback" for an expansion), and where an
- * arbitrary partner-authored pattern or value list -- or a fill whose reach into
- * the sliced value is a property of each record rather than of the terms -- makes
- * the direction indeterminate it names the RULE directly ("pattern replacement",
+ * standardization, deliberately not flagged so the recommended setup stays clean).
+ * It is also undefined when the element's pipeline matches NOTHING -- a
+ * `parse_date` whose input format drops every record, unless a later `coalesce`
+ * rescues it to a constant -- since that is a narrowing-to-empty, not a broadening,
+ * and is surfaced separately by the dead-key advisory. `remove_affixes` is in that
+ * routine set by deliberate decision: stripping titles and suffixes (Dr., Jr.) is a
+ * BROADENING canonicalizer in the same family as accent and case folding -- it
+ * makes superficially-different spellings match -- not a record-DROPPING narrower
+ * like the flagged `filter_regex` / `null_if`, so it earns no marker despite
+ * removing characters. It names any rule that materially changes which records
+ * match: where the direction is determinable from the terms it names the EFFECT
+ * ("partial" for a truncation, or for a `parse_date` whose output layout drops a
+ * date component its input carries and so matches on only part of the date; "any
+ * date" for a `parse_date` whose output carries no date token at all, collapsing
+ * every date to one value -- a stronger breadth than the partial drop; "fuzzy" /
+ * "sound-alike" / "fallback" for an expansion), and where an arbitrary
+ * partner-authored pattern or value list -- or a fill whose reach into the sliced
+ * value is a property of each record rather than of the terms -- makes the
+ * direction indeterminate it names the RULE directly ("pattern replacement",
  * "pattern extraction", "pattern filter", "excludes values", "padded slice").
- * Informative, not a
- * broaden-only warning: `filter_regex` and `null_if` narrow matching but are
- * still surfaced. "fuzzy" is reserved for the genuine fuzzy-comparison expansion,
- * distinct from `substring`'s "partial". None of the regex/value rules appear on
- * the default or guided path (only `substring` and `swap` do), so an
- * expert-authored rule is what trips those markers.
+ * Informative, not a broaden-only warning: `filter_regex` and `null_if` narrow
+ * matching but are still surfaced. "fuzzy" is reserved for the genuine
+ * fuzzy-comparison expansion, distinct from `substring`'s "partial". None of the
+ * regex/value rules appear on the default or guided path (only `substring` and
+ * `swap` do), so an expert-authored rule is what trips those markers.
  *
  * "partial" marks a LITERAL character-truncation, so it fires for a `substring`
  * only where the slice runs on a value the acceptor's own identifier still
@@ -988,17 +986,16 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *   indeterminate rule instead, exactly as it does for the step standing alone.
  *   That is the existing precedence applied, not reversed: the effect-named rule
  *   does not fire, so the directly-named one shows.
- * - `pad_left`. The fill characters are supplied by the terms, not derived from
- *   the value, so whether a later window reads identifier characters, pure fill,
- *   or a mix turns on each RECORD's own value length -- a window that lands in the
- *   fill collapses every record short enough onto one constant. Which records
- *   those are is a property of the data rather than of the terms, so "partial"
- *   would again assert a determinate breadth in the reassuring direction, the same
- *   failure `replace_regex` has. Padding on its own is
- *   routine canonicalization and earns no marker, so this one has no marker of its
- *   own to fall through to: "padded slice" names the compound rule directly, the
- *   way the pattern rules are named, and fires only where a substring actually
- *   slices a padded value.
+ * - `pad_left`. The fill characters are supplied by the terms, not derived from the
+ *   value, so whether a later window reads identifier characters, pure fill, or a
+ *   mix turns on each RECORD's own value length -- a window that lands in the fill
+ *   collapses every record short enough onto one constant. Which records those are
+ *   is a property of the data rather than of the terms, so "partial" would again
+ *   assert a determinate breadth in the reassuring direction, the same failure
+ *   `replace_regex` has. Padding on its own is routine canonicalization and earns
+ *   no marker, so this one has no marker of its own to fall through to: "padded
+ *   slice" names the compound rule directly, the way the pattern rules are named,
+ *   and fires only where a substring actually slices a padded value.
  *
  * The rest keep it:
  *
@@ -1015,11 +1012,20 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *   identifier and the effect stays determinate whatever the pattern.
  * - `filter_regex` and `null_if` keep it. Each passes the ORIGINAL value through
  *   or drops the record, substituting nothing a slice could read.
- * - `parse_date` keeps it. The canonical date is laid out from the date's own
- *   components, so slicing it matches on only part of the date -- the same reading
- *   the output-drops-a-component branch below gives "partial". Keeping it is also
- *   what stops a date-collapsing slice from showing NO marker, since a merely
- *   reformatting `parse_date` earns none of its own.
+ * - `parse_date` keeps it, with a stated limit. For a token-and-separator output
+ *   format the canonical date is laid out from the date's own components, so
+ *   slicing it matches on part of the date -- the reading the
+ *   output-drops-a-component branch below gives "partial". The limit: the output
+ *   format is inviter-authored text with only the YYYY/MM/DD tokens substituted,
+ *   so a literal region (`ACME-YYYYMMDD`) or a bare separator can occupy the
+ *   slice window and collapse records onto a constant the header still calls
+ *   "partial"; the detail row carrying the outputFormat is the surface that
+ *   exposes that shape. Deciding membership from the format's token positions is
+ *   a params-aware classification this name-only rule cannot express, and moving
+ *   `parse_date` into the set wholesale would wrongly suppress "partial" for
+ *   every plain format. Keeping it also stops a date-collapsing slice from
+ *   showing NO marker, since a merely reformatting `parse_date` earns none of
+ *   its own.
  * - `coalesce` keeps it. It substitutes only where the value is ABSENT, so a
  *   record that carries an identifier is truncated literally -- unlike `pad_left`,
  *   which rewrites the value of every record -- and the substitution is
