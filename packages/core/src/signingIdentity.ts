@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { camelizeKeys } from "./utils/camelizeKeys.js";
+import { partnerPinIsPresent } from "./config/signing.js";
 import { canonicalBytes } from "./utils/canonical.js";
 import {
   bytesEqual,
@@ -480,7 +481,7 @@ export async function assertPartnerCertificateTrusted(
   certificate: SigningCertificate,
   pinnedFingerprint: string | undefined,
 ): Promise<void> {
-  if (pinnedFingerprint === undefined || pinnedFingerprint.length === 0)
+  if (!partnerPinIsPresent(pinnedFingerprint))
     throw new SigningError(
       "no pinned partner fingerprint is configured, so the partner's " +
         "certificate cannot be trusted; obtain the partner's fingerprint " +

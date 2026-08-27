@@ -83,7 +83,8 @@ import type { ExchangeSpec } from "./config/exchangeSpec.js";
 import type { PartnerPayload } from "./payloadExchange.js";
 import type { BuiltExchangeRecord } from "./exchangeRecord.js";
 import type { SigningIdentity } from "./signingIdentity.js";
-import type { SigningMode } from "./config/signing.js";
+import { partnerPinIsPresent } from "./config/signing.js";
+import type { SigningConfig, SigningMode } from "./config/signing.js";
 import type { DualSignedRecord, ReceiptContent } from "./signedReceipt.js";
 
 // The deduplicating-strategy refusal is defined beside the accept path it also
@@ -489,6 +490,57 @@ export function assertSigningModeImplemented(
 }
 
 /**
+ * Refuse a `certificate`-mode exchange that pins no partner fingerprint, before
+ * it runs.
+ *
+ * Such a run cannot finish, and it fails at the worst possible point. The
+ * signature swap is the last step of a successful exchange, so the payloads have
+ * already crossed when it starts, and the partner's certificate arrives with
+ * nothing on file to check it against: {@link assertPartnerCertificateTrusted}
+ * rejects unconditionally on an absent pin, which terminates the run. Every local
+ * artifact is written after {@link runExchange} returns, so the operator is left
+ * with no result, no exchange record, and no receipt -- while this party's data
+ * is in the partner's hands, and on the leg that sends its `{certificate,
+ * signature}` frame first the partner also holds this party's signed receipt.
+ * Nothing about the partner or the network changes that: the `signing` block is
+ * only ever this party's own config, and no invitation or accept path supplies a
+ * pin later (see `config/signing.ts`), so the outcome is settled while the
+ * operator is still configuring.
+ *
+ * Refused here for the reason its {@link assertSigningModeImplemented} sibling
+ * is, and as the same {@link OperatorConfigError}: this is a local configuration
+ * fault with an actionable remedy, surfaced as that category on both front ends
+ * (and exit 64 on the CLI, through the base class). Strictly the worse of the
+ * two, in fact -- a `session-derived` config at least COMPLETES the exchange and
+ * leaves the ordinary unsigned record behind.
+ *
+ * Scoped to `certificate` mode alone: `none`, an absent block, and an
+ * unimplemented mode (already refused above) verify no partner certificate, so
+ * they need no pin. The pin's own SHAPE is the schema's
+ * ({@link FINGERPRINT_REGEX}), which is what keeps a malformed pin reported as
+ * malformed rather than as a partner mismatch; this gate asks only whether one
+ * was set at all, through the predicate the verification-time refusal reads
+ * ({@link partnerPinIsPresent}).
+ */
+export function assertCertificateModePinsPartner(
+  signing: SigningConfig | undefined,
+): void {
+  if (signing?.mode !== "certificate") return;
+  if (partnerPinIsPresent(signing.partnerFingerprint)) return;
+  throw new OperatorConfigError(
+    "this exchange signs receipts (signing.mode: certificate) but pins no " +
+      "partner fingerprint, so it cannot finish: the two sides swap signatures " +
+      "after the payloads have crossed, and the certificate the partner " +
+      "presents there is refused when nothing is on file to check it against. " +
+      "The run would stop having sent this party's data and having written no " +
+      "result, no exchange record, and no receipt. Obtain the partner's " +
+      "fingerprint out-of-band -- they produce it with 'psilink fingerprint' " +
+      '-- and set signing.partner_fingerprint, or set signing.mode to "none" ' +
+      "to run unsigned until you hold it.",
+  );
+}
+
+/**
  * The refusal raised when a partner presents a `deduplicate` its invitation did
  * not declare ({@link assertPresentedDeduplicateMatchesInvitation}).
  *
@@ -706,6 +758,13 @@ export function prepareForExchange(
   // block would otherwise run to completion and leave the operator the unsigned
   // record they did not ask for. See assertSigningModeImplemented.
   assertSigningModeImplemented(exchangeDataSpec.signing?.mode);
+
+  // Fail closed on the same footing when certificate mode pins no partner: the
+  // signature swap runs after the payloads have crossed and rejects any
+  // certificate presented against an absent pin, so the run discloses this
+  // party's data and then terminates with nothing written locally. See
+  // assertCertificateModePinsPartner.
+  assertCertificateModePinsPartner(exchangeDataSpec.signing);
 
   // Reject a payload data dictionary that does not match what metadata transmits.
   // `payload.send` is exchanged, consented to, written into the exchange record,

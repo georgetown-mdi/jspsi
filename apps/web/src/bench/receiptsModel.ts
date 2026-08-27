@@ -143,6 +143,50 @@ export const PARTNER_FINGERPRINT_PROBLEM =
   "fingerprint' prints. Copy it whole, from a channel you trust.";
 
 /**
+ * The problem certificate mode reports with no partner fingerprint pinned, in
+ * the terms the run measurably behaves in rather than softened ones. Core's
+ * signature swap runs inside the exchange, after the payloads have crossed, and
+ * an absent pin is a hard refusal there that terminates the run; every local
+ * artifact -- the results and the exchange record as much as the receipt -- is
+ * written only once the exchange has returned. So a run started this way would
+ * put the operator's data in their partner's hands and leave them nothing at
+ * all, which is a materially worse outcome than a missing receipt and has to be
+ * said in those words.
+ *
+ * Nor would the refusal be symmetric across the two sides: the initiator sends
+ * its own `{certificate, signature}` frame BEFORE it verifies the partner's,
+ * while the responder verifies first (`exchangeSignedReceipt` in core), so on the
+ * initiating side the partner would hold this party's signed receipt by the time
+ * the run stopped. Which role this side takes is not the operator's to choose
+ * while authoring -- a file-sync exchange settles it at rendezvous -- so the copy
+ * states that disclosure conditionally, and says nothing about what the partner
+ * writes down locally, which no party can observe.
+ *
+ * A block rather than an advisory, and the same block core makes
+ * (`assertCertificateModePinsPartner`, before any connection is opened): no
+ * partner and no network state can make such a run finish, so it is a
+ * configuration error and not an operator posture the console defers to.
+ * AUTHORING is untouched -- the mode, the fingerprint request, and the pin field
+ * all stay open -- and the copy names the exit for an operator part-way through
+ * the two-sided ceremony: run unsigned now, switch to a certificate signature
+ * once the partner's fingerprint arrives.
+ */
+export const NO_PARTNER_PIN_PROBLEM =
+  "Enter your partner's fingerprint before signing receipts. The exchange " +
+  "refuses to start without one, because nothing would be on file to check the " +
+  "certificate your partner presents against. Ask them to run 'psilink " +
+  "fingerprint' and send you the value over a channel you trust -- a phone " +
+  "call, not the same email as the invitation. A run started without it would " +
+  "fail late rather than early: it goes all the way to the point where the two " +
+  "sides sign -- your data has already gone to your partner by then -- and " +
+  "stops there, with nothing written on this side: no results, no exchange " +
+  "record, and no receipt. Which side sends its signature first is settled when " +
+  "the two sides meet, so on a run where this side sends first, your partner " +
+  "would already have your signed receipt. To exchange before their fingerprint " +
+  "arrives, choose 'No receipt' now and switch to a certificate signature once " +
+  "you hold it.";
+
+/**
  * Why the card withholds the fingerprint request while this exchange states no
  * identity. The one hard precondition on the whole card, and the only thing here
  * the console does not merely warn about: the appliance's boundary schema requires
@@ -203,13 +247,16 @@ export const RETENTION_NOTE_CONTROL_CHAR_PROBLEM =
  *
  * Every entry is a refusal the RUN itself would make: core refuses the
  * unimplemented mode before the exchange starts, the CLI exits 64 on certificate
- * mode with no identity file, and the config schema refuses a non-canonical pin
- * and an over-long note. The server's job-intent schema refuses a note carrying
- * a control character the same way, so that rule is mirrored here too
- * ({@link NOTE_CONTROL_CHAR_PATTERN}) -- otherwise a pasted control byte would
- * report no card problem and fail only at submit with a generic message. None
- * of them is a judgement about a value both boundaries accept -- certificate
- * mode with no partner pin is legitimate and draws an advisory, not a block.
+ * mode with no identity file, core refuses certificate mode with no partner pin
+ * before any connection is opened ({@link NO_PARTNER_PIN_PROBLEM}) and the
+ * appliance's job schema refuses that intent at create time, and the config
+ * schema refuses a non-canonical pin and an over-long note. The server's
+ * job-intent schema refuses a note carrying a control character the same way, so
+ * that rule is mirrored here too ({@link NOTE_CONTROL_CHAR_PATTERN}) --
+ * otherwise a pasted control byte would report no card problem and fail only at
+ * submit with a generic message. None of them is a judgement about a value both
+ * boundaries accept: what the console warns and guides about instead, because
+ * the operator may legitimately choose it, is in {@link receiptsAdvisories}.
  */
 export function receiptsProblems(draft: ReceiptsDraft): Array<string> {
   const problems: Array<string> = [];
@@ -217,6 +264,8 @@ export function receiptsProblems(draft: ReceiptsDraft): Array<string> {
   if (draft.mode === "certificate" && draft.ownFingerprint === undefined)
     problems.push(IDENTITY_MISSING_PROBLEM);
   const pin = draft.partnerFingerprint.trim();
+  if (draft.mode === "certificate" && pin === "")
+    problems.push(NO_PARTNER_PIN_PROBLEM);
   if (
     draft.mode === "certificate" &&
     pin !== "" &&
@@ -270,15 +319,23 @@ export const IDENTITY_AT_REST_NOTICE =
  * worth reading. What the key-hygiene half of the news is holds on every layout and
  * is stated separately ({@link IDENTITY_AT_REST_NOTICE}), so withholding this one
  * leaves the card saying where the key lands rather than saying nothing about it.
+ *
+ * The copy states an unruled-out layout rather than an established one, because
+ * that is what raising it establishes: the report is fail-closed on both halves
+ * -- a leg or a data root whose real path cannot be read counts as holding
+ * (`jobRendezvous.ts`), and an appliance that has not answered keeps the
+ * advisory too -- so the raised case includes layouts the walk could not
+ * determine. An operator who checks and finds the folders separate must not have
+ * been told flatly that they are not.
  */
 export const IDENTITY_SHARED_MOUNT_ADVISORY =
-  "This appliance rendezvouses out of the folder you mounted, so a " +
-  "shared-folder exchange here syncs the very folder your signing key sits in. " +
-  "On a run like that your long-lived private key sits where your partner " +
-  "writes, and whoever reads it can sign receipts in your name -- for every " +
-  "exchange, with every partner. Give the synced folder a mount of its own " +
-  "(JOB_RENDEZVOUS_DIR), separate from this one, before you sign an exchange " +
-  "that runs over it.";
+  "psilink cannot rule out that this appliance rendezvouses out of the folder " +
+  "you mounted, and on that layout a shared-folder exchange syncs the very " +
+  "folder your signing key sits in. On a run like that your long-lived private " +
+  "key sits where your partner writes, and whoever reads it can sign receipts " +
+  "in your name -- for every exchange, with every partner. Give the synced " +
+  "folder a mount of its own (JOB_RENDEZVOUS_DIR), separate from this one, " +
+  "before you sign an exchange that runs over it.";
 
 /**
  * What the console says about re-keying, so the operator learns it here rather
@@ -293,44 +350,6 @@ export const IDENTITY_REGENERATION_NOTICE =
   "a command-line action -- psilink fingerprint --force -- because the new key " +
   "has a new fingerprint, and every partner who pinned the old one must be sent " +
   "the new one before their verification works again.";
-
-/**
- * What the console says about signing without a partner pin, stated as the run
- * measurably behaves rather than softened. Core's signature swap runs inside the
- * exchange, after the payloads have crossed, and an absent pin is a hard refusal
- * there that terminates the run; every local artifact -- the results and the
- * exchange record as much as the receipt -- is written only once the exchange has
- * returned. So the operator's data reaches their partner and the run leaves them
- * nothing at all, which is a materially worse outcome than a missing receipt and
- * has to be said in those words.
- *
- * Nor is the refusal symmetric across the two sides: the initiator sends its own
- * `{certificate, signature}` frame BEFORE it verifies the partner's, while the
- * responder verifies first (`exchangeSignedReceipt` in core), so on the
- * initiating side the partner holds this party's signed receipt by the time the
- * run stops. Which role this side takes is not the operator's to choose while
- * authoring -- a file-sync exchange settles it at rendezvous -- so the copy
- * states that disclosure conditionally, and says nothing about what the partner
- * writes down locally, which no party can observe.
- *
- * Still an advisory rather than a block: pinning is half of a two-sided ceremony
- * the operator may legitimately be part-way through while authoring, and the
- * console guides its own operator instead of stopping them. Raised at
- * `warning` weight: it names a cost this run itself will incur, not a fact
- * about where a file lands.
- */
-export const NO_PARTNER_PIN_ADVISORY =
-  "Without your partner's fingerprint this exchange cannot finish, and it fails " +
-  "late rather than early: it runs all the way to the point where the two sides " +
-  "sign -- your data has already gone to your partner by then -- and stops " +
-  "there, because nothing is on file to check the certificate they present " +
-  "against. Nothing is written on this side: no results, no exchange record, and " +
-  "no receipt. Which side sends its signature first is settled when the two " +
-  "sides meet, so on a run where this side sends first, your partner already " +
-  "has your signed receipt when it stops. Enter their fingerprint before you " +
-  "start the run. Ask them to run " +
-  "'psilink fingerprint' and send you the value over a channel you trust -- a " +
-  "phone call, not the same email as the invitation.";
 
 /**
  * Where the signed receipt lands, and what removes it. The receipt is written
@@ -400,9 +419,13 @@ export interface ReceiptsAdvisory {
  * the folder the signing key sits in. Withheld only on a report that positively says
  * otherwise -- an appliance that has not answered yet, or one whose probe failed,
  * keeps the advisory, since an unread report is not evidence of a separate mount.
- * Everything else here is unchanged by the layout: the draft's own two, and the
+ * The two notices are unchanged by the layout: where the receipt lands, and the
  * at-rest notice about the key file, which is news on every layout and is what a
  * card on a separately-mounted appliance still says about where the key lands.
+ *
+ * A draft the run itself would refuse belongs in {@link receiptsProblems}, not
+ * here: an advisory the operator cannot proceed past is a block wearing the
+ * wrong weight.
  */
 export function receiptsAdvisories(
   draft: ReceiptsDraft,
@@ -422,9 +445,6 @@ export function receiptsAdvisories(
         ]),
     { message: IDENTITY_AT_REST_NOTICE, severity: "info" },
     { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
-    ...(draft.partnerFingerprint.trim() === ""
-      ? [{ message: NO_PARTNER_PIN_ADVISORY, severity: "warning" as const }]
-      : []),
   ];
 }
 

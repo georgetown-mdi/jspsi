@@ -84,7 +84,7 @@ test("certificate mode with no identity file is a usage error", async () => {
   ).rejects.toThrow(/no signing identity was found/);
 });
 
-test("certificate mode with no pin resolves (verification fails closed at run time)", async () => {
+test("certificate mode with no pin resolves (the run is refused before this seam)", async () => {
   const identityPath = path.join(dir, "signing-identity.json");
   saveSigningIdentity(identityPath, identity, { exclusive: true });
   const config: SigningConfig = {
@@ -92,8 +92,11 @@ test("certificate mode with no pin resolves (verification fails closed at run ti
     identityFile: identityPath,
   };
   const resolved = await resolveSigningPersist(config, "Party A", noopLog);
-  // The pin is absent here; the fail-closed rejection happens in the signing step
-  // (verifyPresentedCertificate), not at config resolution.
+  // This resolver states no pin rule of its own: an unpinned certificate-mode
+  // config is refused by core's single gate (assertCertificateModePinsPartner,
+  // inside prepareForExchange), which the exchange handler reaches before it
+  // resolves signing at all -- exchange.test.ts drives that ordering. Restating
+  // the rule here would put two spellings of one refusal on the path.
   expect(resolved).not.toBeNull();
   expect(resolved!.partnerFingerprint).toBeUndefined();
 });
