@@ -3157,7 +3157,7 @@ test("handler: the invitation reaches stdout and never a diagnostic line", async
     // than carried, and with the identity accepting requires named where they
     // meet the command.
     expect(diagnostics).toContain(
-      'psilink accept --identity "<YOUR NAME, YOUR ORGANIZATION>" ' +
+      "psilink accept --identity <YOUR NAME, YOUR ORGANIZATION> " +
         "<INVITATION> <INPUT_FILE>",
     );
   } finally {
@@ -3446,7 +3446,7 @@ test("handler: a webrtc online invite tells the partner to accept, with no URL a
     expect(exit).not.toHaveBeenCalled();
     expect(stderr).toContain("accepts and runs the exchange with:");
     expect(stderr).toContain(
-      'psilink accept --identity "<YOUR NAME, YOUR ORGANIZATION>" ' +
+      "psilink accept --identity <YOUR NAME, YOUR ORGANIZATION> " +
         "<INVITATION> <INPUT_FILE>",
     );
     // Matched on the template's own indented command line, so the peer-budget
@@ -3487,7 +3487,7 @@ test("handler: the server-URL accept template names the identity too", async () 
     const stderr = stdio.stderrWrites.join("");
     expect(exit).not.toHaveBeenCalled();
     expect(stderr).toContain(
-      'psilink accept --identity "<YOUR NAME, YOUR ORGANIZATION>" ' +
+      "psilink accept --identity <YOUR NAME, YOUR ORGANIZATION> " +
         "sftp://host/drop <INVITATION> <INPUT_FILE>",
     );
   } finally {

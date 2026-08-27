@@ -13,9 +13,13 @@ import type { Displayable } from "./utils/sanitizeForDisplay.js";
 
 /**
  * What a surface shows in place of a party's identity when the party supplied
- * none. Parenthesized and lower-case so it cannot be mistaken for the name
- * itself, and it states what happened rather than the field being empty: nobody
- * gave a name, and psilink did not pick one.
+ * none. Parenthesized and lower-case so it states an absence -- nobody gave a
+ * name, and psilink did not pick one -- rather than filling in a name of its
+ * own. Display cannot separate this marker from a party that named itself the
+ * same text: `identity` is unauthenticated free text, so a forged marker
+ * renders exactly like a genuine one. The record document can make that
+ * distinction, structurally, by the field's presence rather than its value
+ * (docs/spec/EXCHANGE_RECORD.md, The parties' identities).
  */
 export const UNNAMED_PARTY_LABEL: Displayable = displayText`(no name given)`;
 

@@ -1232,8 +1232,11 @@ const INVITATION_PLACEHOLDER = "<INVITATION>";
  * partner's own label -- psilink stands in none -- so the template names the flag
  * where the partner meets the command, rather than leaving the refusal to teach
  * it. A placeholder for the same reason `<INPUT_FILE>` is: nobody but the partner
- * can choose the name their side is known by. */
-const IDENTITY_PLACEHOLDER = '--identity "<YOUR NAME, YOUR ORGANIZATION>"';
+ * can choose the name their side is known by. Left unquoted like its siblings, so
+ * a partner who pastes the template unreplaced gets a shell redirect error
+ * instead of a run that accepts under the literal placeholder text; the partner
+ * quotes their filled-in value themselves if it contains spaces. */
+const IDENTITY_PLACEHOLDER = "--identity <YOUR NAME, YOUR ORGANIZATION>";
 
 /**
  * Print the invitation string (to stdout, so it is captured even at a quiet log

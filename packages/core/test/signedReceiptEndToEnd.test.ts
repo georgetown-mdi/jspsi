@@ -303,7 +303,7 @@ function recording(conn: MessageConnection): {
   };
 }
 
-describe("a signing party refuses an unnamed partner before data moves", () => {
+describe("a signing party refuses an unnamed partner before its own data moves", () => {
   // The partner here signs nothing: an unnamed party that DID configure
   // certificate signing is refused by prepareForExchange before it connects, so
   // the pair that can actually reach a terms exchange is a signing party against
@@ -311,7 +311,7 @@ describe("a signing party refuses an unnamed partner before data moves", () => {
   // handshake roles, since the two send different frames before the partner's
   // terms are in hand.
   for (const signerRole of ["initiator", "responder"] as const) {
-    test(`the ${signerRole} refuses, with no payload or PSI frame sent`, async () => {
+    test(`the ${signerRole} refuses, sending nothing past terms, decision, and abort`, async () => {
       const [rawSigner, rawPartner] = createMessagePipe();
       const signerSide = recording(rawSigner);
       const partnerSide = recording(rawPartner);

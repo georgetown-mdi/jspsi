@@ -43,8 +43,10 @@ describe("a party identity as display text", () => {
   test("an absent name reads as an absence, in one wording", () => {
     expect(displayPartyIdentity(undefined)).toBe(UNNAMED_PARTY_LABEL);
     expect(redactAndDisplayPartyIdentity(undefined)).toBe(UNNAMED_PARTY_LABEL);
-    // Parenthesized and lower-case so it cannot be read as the name itself, and
-    // printable ASCII so it cannot itself carry anything into a terminal.
+    // Parenthesized and lower-case so it states an absence rather than filling
+    // in a name -- though display cannot separate this marker from a party that
+    // named itself the same text -- and printable ASCII so it cannot itself
+    // carry anything into a terminal.
     expect(UNNAMED_PARTY_LABEL).toBe("(no name given)");
     expect(UNNAMED_PARTY_LABEL).toMatch(/^[\x20-\x7e]+$/);
   });
