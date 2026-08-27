@@ -1844,6 +1844,22 @@ describe("summarizeInvitation", () => {
       ]),
     ).toBe("last name (pattern replacement)");
 
+    // pad_left prepends fill the terms supply rather than the value, so whether
+    // the window reads identifier characters, pure fill, or a mix turns on each
+    // record's own value length -- "(partial)" would assert a determinate breadth
+    // the terms cannot support. Padding alone is routine, so the suppressed
+    // compound falls through to a marker named for the compound itself rather than
+    // showing nothing.
+    expect(
+      headerFor([{ function: "pad_left", params: { length: 9 } }, slice]),
+    ).toBe("last name (padded slice)");
+    // Order matters here as it does for phonetic: the substring FIRST truncates
+    // the literal identifier, and padding that truncation leaves "(partial)"
+    // faithful.
+    expect(
+      headerFor([slice, { function: "pad_left", params: { length: 9 } }]),
+    ).toBe("last name (partial)");
+
     // extract_regex returns a contiguous run of the value's own characters, so a
     // slice of that run is still part of the identifier whatever the pattern.
     expect(
@@ -1924,7 +1940,12 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (partial)");
 
     // Each of these steps standing alone still earns its own marker, so the
-    // compound rule above reaches no element carrying a single transform.
+    // compound rule above reaches no element carrying a single transform --
+    // except pad_left, whose standalone padding stays routine, which is why the
+    // compound needs a marker of its own.
+    expect(headerFor([{ function: "pad_left", params: { length: 9 } }])).toBe(
+      "last name",
+    );
     expect(headerFor([slice])).toBe("last name (partial)");
     expect(
       headerFor([
@@ -1940,6 +1961,69 @@ describe("summarizeInvitation", () => {
     expect(
       headerFor([{ function: "coalesce", params: { default: "X" } }]),
     ).toBe("last name (fallback)");
+  });
+
+  test("pins what each core function does to a substring that follows it", () => {
+    // The suppression rule is order-sensitive and hand-maintained, and the JSDoc
+    // enumeration behind it is prose, so pin its verdict for every function core
+    // admits: the marker keeps "(partial)" where the acceptor's identifier still
+    // composes the sliced value, and names another honest rule where a window can
+    // read text the value did not supply. The reverse order and the standalone
+    // baselines have their own cases above.
+    const slice = { function: "substring", params: { start: 1, length: 3 } };
+    // Undefined-valued so the functions taking no params (every normalizer, and
+    // phonetic) fall out of the lookup rather than needing an empty entry.
+    const PARAMS: Record<string, Record<string, unknown> | undefined> = {
+      substring: { start: 1, length: 3 },
+      pad_left: { length: 9 },
+      parse_date: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+      null_if: { values: ["x"] },
+      replace_regex: { pattern: "a", replacement: "b" },
+      extract_regex: { pattern: "(.*)" },
+      filter_regex: { pattern: ".*" },
+      split_on: { delimiter: " " },
+      coalesce: { default: "X" },
+    };
+    const MARKER_BEFORE_A_SUBSTRING: Record<string, string> = {
+      // Every character of the output comes from the value itself -- folded,
+      // dropped, or (a separator) mapped one for one -- so the slice still reads
+      // the identifier.
+      remove_non_ascii: "partial",
+      replace_separators_with_spaces: "partial",
+      squash_spaces: "partial",
+      remove_punctuation: "partial",
+      remove_dashes: "partial",
+      trim_whitespace: "partial",
+      to_upper_case: "partial",
+      to_lower_case: "partial",
+      remove_accents: "partial",
+      remove_affixes: "partial",
+      // Likewise for the value-deriving steps that still derive from the value: a
+      // slice of a slice, a captured run of the value's own characters, a
+      // pass-through-or-drop, a date laid out from its own components, and a
+      // substitution that fires only where there is no identifier to truncate.
+      substring: "partial",
+      extract_regex: "partial",
+      filter_regex: "partial",
+      null_if: "partial",
+      parse_date: "partial",
+      coalesce: "partial",
+      // These three derive a value the identifier need not compose, so the
+      // slice is not a truncation of it and each falls through to the honest
+      // marker for what the element actually does.
+      phonetic: "sound-alike",
+      replace_regex: "pattern replacement",
+      pad_left: "padded slice",
+      // A declared fan-out is decided above the truncation rule entirely: under
+      // these cascade terms the exchange is refused rather than named a breadth.
+      split_on: "not supported",
+    };
+    for (const [fn, marker] of Object.entries(MARKER_BEFORE_A_SUBSTRING)) {
+      const params = PARAMS[fn];
+      expect(
+        headerFor([{ function: fn, ...(params && { params }) }, slice]),
+      ).toBe(`last name (${marker})`);
+    }
   });
 
   test("classifies every core standardization function as marked or routine", () => {

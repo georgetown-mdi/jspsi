@@ -913,15 +913,17 @@ function declaresFanOut(element: LinkageKeyElement): boolean {
  * Transform functions that derive a value the acceptor's own identifier need not
  * compose, so a later `substring` slicing that value is no longer a truncation of
  * the identifier and earns no "partial" (see {@link elementBreadthMarker}, which
- * carries the per-function reasoning and why the rest of the value-deriving family
- * is deliberately absent). Membership is a policy decision about the always-visible
- * consent marker, not core's runtime behavior; the names are core's own
- * schema-validated function names, so the marker stays derived from the validated
- * function set rather than from partner free text.
+ * classifies every function name core admits against that axis and carries the
+ * per-function reasoning, for the members here and for the ones deliberately
+ * absent). Membership is a policy decision about the always-visible consent
+ * marker, not core's runtime behavior; the names are core's own schema-validated
+ * function names, so the marker stays derived from the validated function set
+ * rather than from partner free text.
  */
 const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
   "phonetic",
   "replace_regex",
+  "pad_left",
 ]);
 
 /**
@@ -936,8 +938,9 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * agreed strategy makes true.
  *
  * The marker is undefined when the element matches exactly or only canonicalizes
- * its value (case, whitespace, accents, affixes, padding, and a `parse_date` that merely
- * reformats between equivalent layouts -- routine standardization, deliberately
+ * its value (case, whitespace, accents, affixes, padding on its own, and a
+ * `parse_date` that merely reformats between equivalent layouts -- routine
+ * standardization, deliberately
  * not flagged so the recommended setup stays clean). It is also undefined when the
  * element's pipeline matches NOTHING -- a `parse_date` whose input format drops
  * every record, unless a later `coalesce` rescues it to a constant -- since that is
@@ -954,9 +957,11 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * date; "any date" for a `parse_date` whose output carries no date token at all,
  * collapsing every date to one value -- a stronger breadth than the partial drop;
  * "fuzzy" / "sound-alike" / "fallback" for an expansion), and where an
- * arbitrary partner-authored pattern or value list makes the direction
- * indeterminate it names the RULE directly ("pattern replacement", "pattern
- * extraction", "pattern filter", "excludes values"). Informative, not a
+ * arbitrary partner-authored pattern or value list -- or a fill whose reach into
+ * the sliced value is a property of each record rather than of the terms -- makes
+ * the direction indeterminate it names the RULE directly ("pattern replacement",
+ * "pattern extraction", "pattern filter", "excludes values", "padded slice").
+ * Informative, not a
  * broaden-only warning: `filter_regex` and `null_if` narrow matching but are
  * still surfaced. "fuzzy" is reserved for the genuine fuzzy-comparison expansion,
  * distinct from `substring`'s "partial". None of the regex/value rules appear on
@@ -967,33 +972,59 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * only where the slice runs on a value the acceptor's own identifier still
  * composes. A prior step that derives a value the identifier need not compose
  * breaks that correspondence, and the substring after it earns no "partial": the
- * deriving step's own marker is then the dominant, honest one. Two functions break
- * it ({@link LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS}), and the rest of the
- * value-deriving family deliberately does not:
+ * deriving step's own marker is then the dominant, honest one. Every function name
+ * core admits (`STANDARDIZATION_FUNCTION_NAMES`) is classified against that one
+ * axis -- can a later slice window read text the acceptor's value did not supply.
+ * Three break it ({@link LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS}):
  *
- * - `phonetic` breaks it. The name is replaced by an opaque sound-alike code, so
- *   the slice truncates the code rather than the name and "sound-alike" is what
- *   the element does.
- * - `replace_regex` breaks it. An arbitrary partner-authored pattern and
- *   replacement compose the value, which need share no character with the
- *   identifier -- a `.*` pattern collapses every value to the replacement -- so
- *   "partial" would assert a determinate breadth the terms cannot support, and on
- *   a consent surface it would assert the reassuring direction. "pattern
- *   replacement" names the indeterminate rule instead, exactly as it does for the
- *   step standing alone. That is the existing precedence applied, not reversed:
- *   the effect-named rule does not fire, so the directly-named one shows.
+ * - `phonetic`. The name is replaced by an opaque sound-alike code, so the slice
+ *   truncates the code rather than the name and "sound-alike" is what the element
+ *   does.
+ * - `replace_regex`. An arbitrary partner-authored pattern and replacement compose
+ *   the value, which need share no character with the identifier -- a `.*` pattern
+ *   collapses every value to the replacement -- so "partial" would assert a
+ *   determinate breadth the terms cannot support, and on a consent surface it
+ *   would assert the reassuring direction. "pattern replacement" names the
+ *   indeterminate rule instead, exactly as it does for the step standing alone.
+ *   That is the existing precedence applied, not reversed: the effect-named rule
+ *   does not fire, so the directly-named one shows.
+ * - `pad_left`. The fill characters are supplied by the terms, not derived from
+ *   the value, so whether a later window reads identifier characters, pure fill,
+ *   or a mix turns on each RECORD's own value length -- a window that lands in the
+ *   fill collapses every record short enough onto one constant. Which records
+ *   those are is a property of the data rather than of the terms, so "partial"
+ *   would again assert a determinate breadth in the reassuring direction, the same
+ *   failure `replace_regex` has. Padding on its own is
+ *   routine canonicalization and earns no marker, so this one has no marker of its
+ *   own to fall through to: "padded slice" names the compound rule directly, the
+ *   way the pattern rules are named, and fires only where a substring actually
+ *   slices a padded value.
+ *
+ * The rest keep it:
+ *
+ * - The character-level normalizers -- `remove_non_ascii`,
+ *   `replace_separators_with_spaces`, `squash_spaces`, `remove_punctuation`,
+ *   `remove_dashes`, `trim_whitespace`, `to_upper_case`, `to_lower_case`,
+ *   `remove_accents`, `remove_affixes` -- emit only the value's own characters,
+ *   folded or dropped (a separator becomes a space one for one), so whatever a
+ *   later window reads came from the identifier.
+ * - `substring` keeps it: a slice of a slice is still the identifier's own
+ *   characters.
  * - `extract_regex` keeps it. Core's extraction returns a contiguous run of the
  *   value's own characters, so a slice of that run is still part of the
  *   identifier and the effect stays determinate whatever the pattern.
+ * - `filter_regex` and `null_if` keep it. Each passes the ORIGINAL value through
+ *   or drops the record, substituting nothing a slice could read.
  * - `parse_date` keeps it. The canonical date is laid out from the date's own
  *   components, so slicing it matches on only part of the date -- the same reading
  *   the output-drops-a-component branch below gives "partial". Keeping it is also
  *   what stops a date-collapsing slice from showing NO marker, since a merely
  *   reformatting `parse_date` earns none of its own.
- * - `coalesce` keeps it. It substitutes only where the value is absent, so a
- *   record that carries an identifier is truncated literally, and the substitution
- *   is order-independent -- suppressing here would mark `[coalesce, substring]`
- *   and `[substring, coalesce]` differently for the same matching behavior.
+ * - `coalesce` keeps it. It substitutes only where the value is ABSENT, so a
+ *   record that carries an identifier is truncated literally -- unlike `pad_left`,
+ *   which rewrites the value of every record -- and the substitution is
+ *   order-independent, so suppressing here would mark `[coalesce, substring]` and
+ *   `[substring, coalesce]` differently for the same matching behavior.
  * - `split_on` never reaches this rule: it is a fan-out, decided above.
  *
  * This mirrors the detail row's position-aware literal ({@link substringEffect} /
@@ -1009,8 +1040,10 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * header is deliberately terse, so an element carrying more than one rule shows
  * just the first -- the fan-out rule ranks first, whichever of its two markers it
  * earns, then the maximal-breadth "any date" collapse, then the other
- * effect-named rules, then the directly-named ones -- while its complete rule set
- * is carried on {@link InvitationKeySummary.elements} for the renderer's per-key
+ * effect-named rules, then the directly-named ones, of which the padded slice is
+ * last since it is the only one naming a compound rather than a single step --
+ * while its complete rule set is carried on
+ * {@link InvitationKeySummary.elements} for the renderer's per-key
  * detail. The element stays flagged either way.
  */
 function elementBreadthMarker(
@@ -1073,6 +1106,18 @@ function elementBreadthMarker(
   if (functions.has("extract_regex")) return displayText`pattern extraction`;
   if (functions.has("filter_regex")) return displayText`pattern filter`;
   if (functions.has("null_if")) return displayText`excludes values`;
+  // The fall-through for the one breaking function with no marker of its own:
+  // padding alone is routine canonicalization, so a `pad_left` that suppressed a
+  // later substring's "partial" would otherwise leave a compound that does loosen
+  // matching -- a window landing in the fill collapses every short record onto one
+  // constant -- showing nothing at all. Named for the compound rather than for the
+  // pad, since it is the slicing of a padded value that is worth showing.
+  const slicesPaddedValue = steps.some(
+    (step, index) =>
+      step.function === "substring" &&
+      steps.slice(0, index).some((prior) => prior.function === "pad_left"),
+  );
+  if (slicesPaddedValue) return displayText`padded slice`;
   return undefined;
 }
 
