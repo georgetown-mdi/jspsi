@@ -588,9 +588,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     }).trim();
-  } catch {
+  } catch (error) {
     process.stderr.write(
-      `error: ${process.cwd()} is not inside a git worktree -- this verifier reports on the tree it is run from, so run it inside the one whose refs you are naming\n`,
+      `error: ${process.cwd()} is not inside a git worktree -- this verifier reports on the tree it is run from, so run it inside the one whose refs you are naming (git: ${error.message ?? error})\n`,
     );
     process.exit(2);
   }
