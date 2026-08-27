@@ -16,6 +16,7 @@ import {
 } from "../src/signingIdentity";
 
 import type { Output } from "../src/config/linkageTerms";
+import type { MessageConnection } from "../src/connection/messageConnection";
 import type { ExchangeRecord } from "../src/exchangeRecord";
 import type { ExchangeResult } from "../src/exchange";
 import type { RunExchangeOptions } from "../src/exchange";
@@ -202,12 +203,12 @@ test("one party without signing config skips the step (no half-signed exchange)"
   await initiator;
 });
 
-test("an unnamed party refuses the receipt step rather than signing", async () => {
+test("an unnamed party refuses at terms agreement rather than signing", async () => {
   // A certificate is trusted by the identity its holder used in the AGREED TERMS,
   // and `linkage_terms.identity` is optional -- so a party that named itself none
-  // has nothing for the pin to authorize. Both sides refuse before any
-  // certificate or signature crosses the channel, and each refusal names the side
-  // that is unnamed rather than reaching for a substitute.
+  // has nothing for the pin to authorize. Both sides refuse the moment the terms
+  // are agreed, and each refusal names the side that is unnamed rather than
+  // reaching for a substitute.
   const [connInitiator, connResponder] = createMessagePipe();
   const unnamed = prepareForExchange(
     { linkageTerms: { ...firstNameTerms, output: both } },
@@ -259,6 +260,146 @@ test("an unnamed party refuses the receipt step rather than signing", async () =
   ).toContain("this party's agreed terms carry none");
   await connInitiator.close();
   await connResponder.close();
+});
+
+// --- The refusal's timing, read off the wire ---------------------------------
+
+/**
+ * What a frame a party put on the wire is, by the field that identifies it: the
+ * terms frames and the bare decision frame the terms exchange sends, the abort
+ * that ends a refused run, the payload frame, and `opaque` for everything else --
+ * which is what a PSI round's binary message classifies as. Asserting the whole
+ * sequence therefore pins what did NOT go out as much as what did.
+ */
+function frameKind(frame: unknown): string {
+  if (typeof frame !== "object" || frame === null) return "opaque";
+  if ("hasData" in frame) return "payload";
+  if ("linkageTerms" in frame) return "terms";
+  if ("decision" in frame)
+    return (frame as { decision: unknown }).decision === "abort"
+      ? "abort"
+      : "decision";
+  return "opaque";
+}
+
+/** A connection that records, in order, every frame the party sends through it. */
+function recording(conn: MessageConnection): {
+  conn: MessageConnection;
+  sent: Array<unknown>;
+} {
+  const sent: Array<unknown> = [];
+  return {
+    sent,
+    conn: {
+      send: (data: unknown) => {
+        sent.push(data);
+        return conn.send(data);
+      },
+      receive: (timeoutMs?: number) => conn.receive(timeoutMs),
+      close: () => conn.close(),
+      setInboundFrameCap: (maxBytes: number | undefined) =>
+        conn.setInboundFrameCap?.(maxBytes),
+    },
+  };
+}
+
+describe("a signing party refuses an unnamed partner before data moves", () => {
+  // The partner here signs nothing: an unnamed party that DID configure
+  // certificate signing is refused by prepareForExchange before it connects, so
+  // the pair that can actually reach a terms exchange is a signing party against
+  // an unsigned one. It is that signing party's timing under test, on both
+  // handshake roles, since the two send different frames before the partner's
+  // terms are in hand.
+  for (const signerRole of ["initiator", "responder"] as const) {
+    test(`the ${signerRole} refuses, with no payload or PSI frame sent`, async () => {
+      const [rawSigner, rawPartner] = createMessagePipe();
+      const signerSide = recording(rawSigner);
+      const partnerSide = recording(rawPartner);
+      const unnamed = prepareForExchange(
+        { linkageTerms: { ...firstNameTerms, output: both } },
+        undefined,
+        serverRows,
+        ["first_name"],
+      );
+      expect(unnamed.linkageTerms.identity).toBeUndefined();
+
+      const partnerRole =
+        signerRole === "initiator" ? "responder" : "initiator";
+      const refusal = runExchange(
+        signerSide.conn,
+        signerRole,
+        prepared("Signing Co", both, clientRows),
+        {
+          psiLibrary,
+          signingIdentity: identityA,
+          partnerFingerprint: fingerprintB,
+          sessionKey,
+        },
+      ).then(
+        () => {
+          throw new Error("expected the signing party to refuse");
+        },
+        (reason: unknown) => reason,
+      );
+      // The unsigned partner derives no refusal of its own: it runs on into the
+      // PSI rounds until the abort frame reaches it (or the close below does).
+      const partner = runExchange(partnerSide.conn, partnerRole, unnamed, {
+        psiLibrary,
+      }).catch(() => undefined);
+
+      const raised = await refusal;
+      expect(raised).toBeInstanceOf(ReceiptVerificationError);
+      expect((raised as Error).message).toContain(
+        "the partner's agreed terms carry none",
+      );
+
+      // The whole point of the timing, read off the wire: the terms exchange's
+      // own frames went out and then the abort, and nothing else did -- no
+      // linkage key, no payload row. The initiator sends its terms and the bare
+      // proceed decision before the partner's terms are in hand; the responder's
+      // single frame carries both.
+      expect(signerSide.sent.map(frameKind)).toEqual(
+        signerRole === "initiator"
+          ? ["terms", "decision", "abort"]
+          : ["terms", "abort"],
+      );
+      // And in the other direction, the partner disclosed no payload either.
+      expect(partnerSide.sent.map(frameKind)).not.toContain("payload");
+
+      await rawSigner.close();
+      await rawPartner.close();
+      await partner;
+    });
+  }
+
+  test("the same pair completes when neither party signs", async () => {
+    // The refusal is the signing configuration's, not the unnamed partner's: an
+    // unsigned exchange against a party that named nobody runs to a result.
+    const [connInitiator, connResponder] = createMessagePipe();
+    const unnamed = prepareForExchange(
+      { linkageTerms: { ...firstNameTerms, output: both } },
+      undefined,
+      serverRows,
+      ["first_name"],
+    );
+    const [named, unnamedResult] = await Promise.all([
+      runExchange(
+        connInitiator,
+        "initiator",
+        prepared("Signing Co", both, clientRows),
+        { psiLibrary },
+      ),
+      runExchange(connResponder, "responder", unnamed, { psiLibrary }),
+    ]);
+    expect(named.signedReceipt).toBeUndefined();
+    expect(named.partnerTerms.identity).toBeUndefined();
+    expect(unnamedResult.partnerTerms.identity).toBe("Signing Co");
+    expect(named.audit!.record.termsHash).toBe(
+      unnamedResult.audit!.record.termsHash,
+    );
+    await connInitiator.close();
+    await connResponder.close();
+  });
 });
 
 test("a fingerprint-pin mismatch terminates the exchange fail-closed", async () => {

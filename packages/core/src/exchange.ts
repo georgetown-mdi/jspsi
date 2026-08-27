@@ -549,13 +549,14 @@ export function assertCertificateModePinsPartner(
  * A receipt names both parties, and a certificate is trusted by the identity its
  * holder used in the AGREED TERMS rather than the one the certificate carries, so
  * a party that named itself none has nothing for its partner to authorize the
- * certificate against: {@link runExchange} refuses the signature swap outright on
- * such a run. That refusal sits at the last step of an otherwise successful
- * exchange, so it lands after the payloads have crossed, and every local artifact
- * -- the result and the exchange record as much as the receipt -- is written only
- * once the exchange returns. This party's own absence is settled while the
- * operator is still configuring, so it is refused here instead, before any
- * credential, terms, or data are sent.
+ * certificate against: {@link runExchange} refuses such a run at the terms
+ * exchange and again at the signature swap. Either refusal lands only once the
+ * connection is open, this party's credentials have been presented, and its own
+ * terms have gone out, and it leaves no local artifact behind -- the result and
+ * the exchange record as much as the receipt are written only once the exchange
+ * returns. This party's own absence is settled while the operator is still
+ * configuring, so it is refused here instead, before any credential, terms, or
+ * data are sent.
  *
  * Held to the RESOLVED local terms rather than to the identity argument
  * {@link prepareForExchange} takes, because those are what the run puts on the
@@ -566,9 +567,11 @@ export function assertCertificateModePinsPartner(
  * {@link LinkageTermsSchema}, so no parsed document reaches either with a blank
  * label.
  *
- * The PARTNER's half stays where it is: their terms arrive at the terms exchange,
- * so nothing locally knowable settles it now. The refusal in `runExchange`
- * remains the backstop for both sides.
+ * The PARTNER's half cannot be settled here -- their terms arrive at the terms
+ * exchange -- so it is settled there, by
+ * {@link assertSignedReceiptNamesBothParties}, which also stands in for this one
+ * on a {@link runExchange} call whose signing options were threaded past
+ * `prepareForExchange`.
  *
  * An {@link OperatorConfigError}, as its {@link assertCertificateModePinsPartner}
  * and {@link assertSigningModeImplemented} siblings are: `signing.mode` and this
@@ -587,11 +590,62 @@ export function assertCertificateModeNamesLocalParty(
       "party, so it cannot finish: a receipt names both parties, and the " +
       "certificate this party presents is trusted by the identity it used in " +
       "the agreed terms -- an unnamed party leaves the partner nothing to " +
-      "check that certificate against. The run would stop at the signature " +
-      "swap, after this party's data had crossed, with no result, no exchange " +
-      "record, and no receipt written. Set linkage_terms.identity to this " +
-      "party's name -- or pass --identity, where the interface takes one -- or " +
-      'set signing.mode to "none" to run unsigned.',
+      "check that certificate against. The run would stop at terms agreement, " +
+      "with no result, no exchange record, and no receipt written. Set " +
+      "linkage_terms.identity to this party's name -- or pass --identity, " +
+      'where the interface takes one -- or set signing.mode to "none" to run ' +
+      "unsigned.",
+  );
+}
+
+/**
+ * Refuse a run that will sign a receipt when either party's AGREED terms carry no
+ * identity.
+ *
+ * A receipt names both parties, and each party's certificate is trusted by the
+ * identity its holder used in the agreed terms rather than the one the certificate
+ * carries. An unnamed party therefore has nothing for the pin to authorize: this
+ * side could not present a certificate the partner can check, and could not check
+ * the partner's against a name it never gave. Fail closed and name which side is
+ * unnamed rather than reaching for a substitute, which would make the binding
+ * check vacuous.
+ *
+ * {@link runExchange} calls this at TWO points, over the same pair of agreed
+ * terms. The first is the terms exchange, the moment the partner's terms are in
+ * hand: the partner's absence is knowable there, so the run ends before the
+ * bootstrap frame, any linkage key, or any payload row moves, rather than after
+ * this party's data has crossed. The second is the signature swap itself, where a
+ * receipt cannot be built from an unnamed pair whatever route reached it. Holding
+ * the same condition at both keeps the point of use fail-closed without resting on
+ * the earlier gate having run.
+ *
+ * A {@link ReceiptVerificationError} -- the security-category error the swap's own
+ * pin and signature refusals raise -- because what fails is the receipt's identity
+ * binding, not this party's configuration: on the partner's half the fault is not
+ * locally correctable at all, and {@link assertCertificateModeNamesLocalParty}
+ * already raises the operator-config form for the half that is, before the run
+ * starts.
+ *
+ * Returns the two names it just held to being present, so the swap binds the
+ * values this check passed rather than re-reading a field and reaching for a
+ * fallback if it were absent.
+ */
+export function assertSignedReceiptNamesBothParties(
+  localTerms: LinkageTerms,
+  partnerTerms: LinkageTerms,
+): { local: string; partner: string } {
+  if (localTerms.identity !== undefined && partnerTerms.identity !== undefined)
+    return { local: localTerms.identity, partner: partnerTerms.identity };
+  throw new ReceiptVerificationError(
+    "a signed receipt names both parties, and " +
+      (localTerms.identity === undefined
+        ? partnerTerms.identity === undefined
+          ? "neither party's agreed terms carry an identity"
+          : "this party's agreed terms carry none"
+        : "the partner's agreed terms carry none") +
+      ". A certificate is trusted by the identity its holder used in the " +
+      "agreed terms, so an unnamed party cannot present or verify one: set " +
+      "linkage_terms.identity on both sides, or run without receipt signing.",
   );
 }
 
@@ -1366,6 +1420,14 @@ export async function runExchange(
   const onProtocolConfirmed = options.onProtocolConfirmed ?? (() => {});
   const verbosity = options.verbosity ?? 0;
 
+  // What the signed-receipt step needs: a signing identity to sign with AND the
+  // session key its binder derives from. Read as ONE predicate, here, so the
+  // terms-time identity refusal below, the record build, and the swap itself all
+  // gate on the same reading rather than on copies that could drift apart.
+  const { signingIdentity, sessionKey } = options;
+  const willSignReceipt =
+    signingIdentity !== undefined && sessionKey !== undefined;
+
   // Whether THIS party will disclose payload to a partner entitled to output:
   // true when its metadata transmits any column (isDisclosedToPartner, the single
   // source of truth preparePayload gathers on). Advertised on the terms exchange
@@ -1445,6 +1507,32 @@ export async function runExchange(
       "partner presented a deduplicate its invitation did not declare",
     ]);
     throw err;
+  }
+
+  // A run that will sign a receipt needs both parties named, and the partner's
+  // name is settled the moment its terms arrive -- so the pair is held to that
+  // here, at the same point and for the same reason as the deduplicate check
+  // above: before the bootstrap frame, before any linkage key, and before any
+  // payload row moves. The signature swap holds the same condition again at the
+  // point of use. See assertSignedReceiptNamesBothParties.
+  if (willSignReceipt) {
+    try {
+      assertSignedReceiptNamesBothParties(linkageTerms, partnerTerms);
+    } catch (err) {
+      // One-sided, like the deduplicate refusal above: a partner that is not
+      // signing derives no refusal of its own, and would otherwise wait out its
+      // whole peer-inactivity budget for rounds this party will never run. What
+      // the partner makes of the arriving frame is what that block describes.
+      // The reason is a fixed literal over the two identities both sides already
+      // hold -- each sent the other its own terms -- so the only thing it adds
+      // is that this side meant to sign, which its receipt frame would have said
+      // moments later.
+      await sendAbort(conn, [
+        "a signed receipt names both parties and one side's agreed terms " +
+          "carry no identity",
+      ]);
+      throw err;
+    }
   }
 
   // Resolve the matching cardinality from both parties' agreed deduplicate
@@ -1738,26 +1826,25 @@ export async function runExchange(
       ? undefined
       : matchedPairCount(associationTable);
 
-  // What the signed-receipt step needs: a signing identity AND the session key
-  // its binder derives from, resolved once here so the record build below and the
-  // step itself read ONE predicate. That single predicate is what makes the
-  // record's binder present exactly when a receipt exists to pair with it, so an
-  // absent binder in a written record states that no receipt belongs to it --
-  // which is what lets a verifier read an unpaired receipt as a mismatch rather
-  // than as merely unchecked. The binder is derived here, before the record is
-  // built, so both artifacts carry the one value; a failure derives nothing and
-  // throws, unlike the record build below, because the signing step is fatal and
-  // could not run without it.
-  const signing =
-    options.signingIdentity !== undefined && options.sessionKey !== undefined
-      ? {
-          identity: options.signingIdentity,
-          sessionKey: options.sessionKey,
-          // Both parties fold in the INITIATOR's role, so both derive the same
-          // binder with no extra messages; see deriveReceiptBinder.
-          binder: await deriveReceiptBinder(options.sessionKey, "initiator"),
-        }
-      : undefined;
+  // The signed-receipt step's inputs, assembled from the one willSignReceipt
+  // predicate resolved above so the record build below and the step itself read
+  // it rather than restating it. That single predicate is what makes the record's
+  // binder present exactly when a receipt exists to pair with it, so an absent
+  // binder in a written record states that no receipt belongs to it -- which is
+  // what lets a verifier read an unpaired receipt as a mismatch rather than as
+  // merely unchecked. The binder is derived here, before the record is built, so
+  // both artifacts carry the one value; a failure derives nothing and throws,
+  // unlike the record build below, because the signing step is fatal and could
+  // not run without it.
+  const signing = willSignReceipt
+    ? {
+        identity: signingIdentity,
+        sessionKey,
+        // Both parties fold in the INITIATOR's role, so both derive the same
+        // binder with no extra messages; see deriveReceiptBinder.
+        binder: await deriveReceiptBinder(sessionKey, "initiator"),
+      }
+    : undefined;
 
   // Build the record after the exchange has fully succeeded. It is a secondary
   // audit artifact, so a failure to build it (e.g. an unexpected non-canonical
@@ -1802,28 +1889,15 @@ export async function runExchange(
   // result, including payloads.
   let signedReceipt: DualSignedRecord | undefined;
   if (signing !== undefined) {
-    // A receipt binds each party's certificate to the identity that party used in
-    // the AGREED TERMS, so a party that named itself none has nothing for a
-    // certificate to be authorized against. Refuse the step rather than reach for
-    // a substitute: the local absence would leave the partner unable to verify
-    // this side's certificate, and the partner's absence would leave the pin
-    // authorizing nothing. Fail closed and name which side is unnamed, before any
-    // certificate or signature crosses the channel.
-    if (
-      linkageTerms.identity === undefined ||
-      partnerTerms.identity === undefined
-    )
-      throw new ReceiptVerificationError(
-        "a signed receipt names both parties, and " +
-          (linkageTerms.identity === undefined
-            ? partnerTerms.identity === undefined
-              ? "neither party's agreed terms carry an identity"
-              : "this party's agreed terms carry none"
-            : "the partner's agreed terms carry none") +
-          ". A certificate is trusted by the identity its holder used in the " +
-          "agreed terms, so an unnamed party cannot present or verify one: set " +
-          "linkage_terms.identity on both sides, or run without receipt signing.",
-      );
+    // The identity binding again, at the point of use: a receipt cannot be built
+    // from a pair either side of which named nobody, whatever route reached this
+    // step. The terms exchange holds the same condition over the same two agreed
+    // terms, so a run reaching here through runExchange was already refused there;
+    // this stands whether or not it was. See assertSignedReceiptNamesBothParties.
+    const namedParties = assertSignedReceiptNamesBothParties(
+      linkageTerms,
+      partnerTerms,
+    );
     // The receipt content is built from the mutually-verifiable facts directly --
     // the agreed-terms hash and session-keyed MACs of the two directional payloads
     // -- NOT from the salted record commitments (per-party salts are not
@@ -1846,7 +1920,7 @@ export async function runExchange(
       // The partner's agreed-terms identity (not the certificate's own), so the
       // pinned certificate must authorize the identity the partner used in the
       // agreed terms rather than a value it self-asserts in its certificate.
-      partnerIdentity: partnerTerms.identity,
+      partnerIdentity: namedParties.partner,
       content,
     });
   }

@@ -17,6 +17,7 @@ import {
   handler as zeroSetupHandler,
 } from "../../../src/commands/zeroSetup";
 import { saveConfig } from "../../../src/config";
+import { UNNAMED_PARTNER_ACCOUNTING_NOTE } from "../../../src/protocol";
 import { saveKeyFile } from "../../../src/keyFile";
 import { DEFAULT_RECORD_BASENAME, keysPathFor } from "../../../src/recordFile";
 import { captureStdio } from "../../loggingTestSupport";
@@ -440,6 +441,19 @@ describe("zero-setup", () => {
     expect(diagnostics).toContain("terms agreed, partner identity: party-a");
     expect(diagnostics).toContain(
       `terms agreed, partner identity: ${UNNAMED_PARTY_LABEL}`,
+    );
+    // Both runs file a record, so the side that read an unnamed partner is told
+    // what its record will be missing -- the marker on its own reads as benign,
+    // and the operator filing these toward an accounting of disclosures can
+    // still re-run named at this point.
+    expect(diagnostics).toContain(
+      `terms agreed, partner identity: ${UNNAMED_PARTY_LABEL} ` +
+        UNNAMED_PARTNER_ACCOUNTING_NOTE,
+    );
+    // And the named partner's line stays an ordinary one: nothing is missing
+    // from the record that reads it.
+    expect(diagnostics).not.toContain(
+      `party-a ${UNNAMED_PARTNER_ACCOUNTING_NOTE}`,
     );
   }, 90_000);
 });

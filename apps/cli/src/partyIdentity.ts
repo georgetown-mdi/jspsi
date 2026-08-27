@@ -19,6 +19,14 @@ export const IDENTITY_REQUIRED =
 /**
  * The refusal {@link resolveInvitationIdentity} raises, naming the configuration
  * file that was expected to carry the label.
+ *
+ * The path composes RAW, as every fragment interpolated into an `Error` does:
+ * `sanitizeErrorForDisplay` escapes and redacts the whole rendered chain once,
+ * where the CLI shows it. Escaping here as well would escape it twice -- a
+ * Windows path's every backslash reaching the operator quadrupled -- which is
+ * what the sibling `--identity` warning in `commands/invite.ts` does NOT do
+ * either: that one goes to a `log` sink, its own display boundary, and so escapes
+ * there. See CONTRIBUTING.md, Operator-facing escaping.
  */
 export function configuredIdentityRequired(configPath: string): string {
   return (
@@ -77,16 +85,23 @@ export function optionalIdentity(
  * invocation would leave the partnership named in the invitation and unnamed
  * everywhere after it.
  *
- * The schema does not trim the value, so a whitespace-only
- * `linkage_terms.identity` is a label as far as both it and this are concerned,
- * and rides into the terms as written; trimming it belongs at that schema, not
- * here.
+ * A whitespace-only value takes the same refusal, on the same reading of blank
+ * the `--identity` paths take: the schema's `.min(1)` admits it, and it would
+ * otherwise mint an invitation whose inviter heading renders empty -- named as
+ * far as every check is concerned and nameless to the partner reading it.
+ *
+ * What comes back is the configured value VERBATIM, trimmed or not. Trimming
+ * only decides whether this refuses; the label the partnership actually sends is
+ * the configuration's own bytes, which every later `psilink exchange` reads
+ * straight from the file, and a certificate authorizes an exact identity string.
+ * Returning a trimmed copy would name the partnership one way in the invitation
+ * and another in every run under it.
  */
 export function resolveInvitationIdentity(
   configuredIdentity: string | undefined,
   configPath: string,
 ): string {
-  if (configuredIdentity !== undefined && configuredIdentity !== "")
+  if (configuredIdentity !== undefined && configuredIdentity.trim() !== "")
     return configuredIdentity;
   throw new UsageError(configuredIdentityRequired(configPath));
 }

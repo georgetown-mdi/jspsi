@@ -6,12 +6,14 @@ import {
   assertAlgorithmImplemented,
   assertCertificateModeNamesLocalParty,
   assertCertificateModePinsPartner,
+  assertSignedReceiptNamesBothParties,
   assertSigningModeImplemented,
 } from "../src/exchange";
 import {
   assertPartnerCertificateTrusted,
   generateSigningIdentity,
 } from "../src/signingIdentity";
+import { ReceiptVerificationError } from "../src/signedReceipt";
 import {
   OperatorConfigError,
   StandardizationTermsError,
@@ -964,6 +966,56 @@ describe("assertCertificateModeNamesLocalParty", () => {
         prepared.linkageTerms,
       ),
     ).toThrow(OperatorConfigError);
+  });
+});
+
+// --- assertSignedReceiptNamesBothParties (held at two points in a run) -------
+
+describe("assertSignedReceiptNamesBothParties", () => {
+  const { identity: _named, ...unnamedTerms } = terms;
+  const partnerTerms: LinkageTerms = { ...terms, identity: "Partner Co" };
+
+  test("returns both names when both parties are named", () => {
+    expect(assertSignedReceiptNamesBothParties(terms, partnerTerms)).toEqual({
+      local: "Tester",
+      partner: "Partner Co",
+    });
+  });
+
+  test("names the unnamed side, on each of the three ways a pair can be", () => {
+    // The message is what tells the operator which configuration to change, and
+    // the two sides are not interchangeable: only one of them is theirs to fix.
+    const raised = (local: LinkageTerms, partner: LinkageTerms) => {
+      try {
+        assertSignedReceiptNamesBothParties(local, partner);
+      } catch (err) {
+        return err;
+      }
+      throw new Error("expected a refusal, got a named pair");
+    };
+    expect(raised(terms, unnamedTerms)).toBeInstanceOf(
+      ReceiptVerificationError,
+    );
+    expect((raised(terms, unnamedTerms) as Error).message).toContain(
+      "the partner's agreed terms carry none",
+    );
+    expect((raised(unnamedTerms, partnerTerms) as Error).message).toContain(
+      "this party's agreed terms carry none",
+    );
+    expect((raised(unnamedTerms, unnamedTerms) as Error).message).toContain(
+      "neither party's agreed terms carry an identity",
+    );
+  });
+
+  test("every refusal names the remedy on both sides", () => {
+    for (const pair of [
+      [terms, unnamedTerms],
+      [unnamedTerms, partnerTerms],
+      [unnamedTerms, unnamedTerms],
+    ] as const)
+      expect(() =>
+        assertSignedReceiptNamesBothParties(pair[0], pair[1]),
+      ).toThrow(/linkage_terms\.identity on both sides/);
   });
 });
 

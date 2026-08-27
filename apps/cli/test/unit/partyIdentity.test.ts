@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "vitest";
-import { UsageError } from "@psilink/core";
+import { sanitizeErrorForDisplay, UsageError } from "@psilink/core";
 
 import {
   configuredIdentityRequired,
@@ -101,6 +101,52 @@ test("an invitation over a configuration carrying no identity is refused", () =>
   );
   expect((raised as Error).message).toContain("/work/psilink.yaml");
   expect((raised as Error).message).toContain("linkage_terms.identity");
+});
+
+test("a whitespace-only configured identity is refused, not carried", () => {
+  // The terms schema's non-empty rule admits "   ", so without this the
+  // invitation is minted "named" and renders an empty inviter heading to the
+  // partner reading it -- while the same command's --identity path trims to
+  // absence and refuses.
+  for (const blank of [" ", "   ", "\t", " \t ", "\n"]) {
+    const raised = refusalFrom(() =>
+      resolveInvitationIdentity(blank, "/work/psilink.yaml"),
+    );
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as Error).message).toBe(
+      configuredIdentityRequired("/work/psilink.yaml"),
+    );
+  }
+});
+
+test("a configured identity comes back verbatim, whitespace and all", () => {
+  // Trimming decides only whether the refusal fires. The label the partnership
+  // sends is the configuration's own bytes -- every later `psilink exchange`
+  // reads them straight from the file, and a certificate authorizes an exact
+  // string -- so this must not hand back a trimmed copy.
+  expect(
+    resolveInvitationIdentity("  Test Party  ", "/work/psilink.yaml"),
+  ).toBe("  Test Party  ");
+});
+
+test("the configuration path in the refusal is escaped exactly once", () => {
+  // The message composes the path RAW and takes its single escape from the
+  // renderer the CLI shows errors through. Pinned in both directions: a raw
+  // control character must not reach the operator's terminal, and a Windows
+  // path's backslashes must not come back quadrupled by a second escape at
+  // composition (CONTRIBUTING.md, Operator-facing escaping).
+  const windows = String.raw`C:\work\psilink.yaml`;
+  const rendered = sanitizeErrorForDisplay(
+    new UsageError(configuredIdentityRequired(windows)),
+  );
+  expect(rendered).toContain(String.raw`C:\\work\\psilink.yaml`);
+  expect(rendered).not.toContain(String.raw`C:\\\\work`);
+
+  const withControl = sanitizeErrorForDisplay(
+    new UsageError(configuredIdentityRequired("/work/\u001b[31mpsilink.yaml")),
+  );
+  expect(withControl).not.toContain("\u001b");
+  expect(withControl).toContain(String.raw`\x1b[31mpsilink.yaml`);
 });
 
 test("an optional identity is trimmed, and blank reads as absent", () => {
