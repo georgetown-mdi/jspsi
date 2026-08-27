@@ -325,9 +325,10 @@ Three records of what npm's resolver leaves behind in this workspace: a peer
 conflict that blocks the release SBOM, what the mere presence of a root
 `overrides` block does to a later install, and the one override this repository
 carries. Their normative residue is short -- release step 9 is blocked, the
-`brace-expansion` override exists, and a CI check watches for the upstream move
-that retires it -- and the measurement behind each is kept so the dead ends are
-not re-walked.
+`brace-expansion` override exists, and a CI check stands over each of the last
+two: one watching for the upstream move that retires the override, the other for
+the split hoist the block's presence leaves behind -- and the measurement behind
+each is kept so the dead ends are not re-walked.
 
 ### The crossws peer conflict blocks the release SBOM
 
@@ -391,6 +392,20 @@ duplicate. A from-scratch resolve does hoist correctly and is still not the
 remedy, for the reason the brace-expansion record states of the same route: it
 drifts on the order of 180 unrelated package versions, which is a far larger
 review surface than the bump being landed.
+
+**What catches the next one.** `scripts/check-nested-root-package.mjs`
+(`npm run check:nested-root-package`, a CI static check in
+`static_checks.yaml`) reads the committed lockfile and fails on any package
+installed at the top level of both the root `node_modules` and a workspace's,
+naming the package and both entries -- so the split lands as a named failure on
+the bump's own pull request rather than as the unattributed exit code above. It
+covers every package rather than the ones this has happened to, because the
+mechanism is the block's presence and not any one dependency; a split that is
+meant to stand is recorded, with its reason, in the check's own
+`NESTED_BY_DESIGN` map, which is empty. What it reports is the split the
+lockfile records, not one npm would resolve, and only at that one depth: a copy
+nested under another package is ordinary conflict resolution, which this tree
+carries dozens of.
 
 ### The brace-expansion advisory is fixed by a root override
 
