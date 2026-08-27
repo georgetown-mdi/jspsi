@@ -625,9 +625,10 @@ function legAliasesDataRootChain(
  * symlink that would join them is precisely what could not be resolved, and this
  * decides whether a warn-and-guide advisory is raised, so what cannot be ruled out
  * is reported rather than dropped -- as `uncertain`, since it is a default rather
- * than a match. The lexical comparison still decides every leg that resolves, so
- * the data-root fallback -- where the leg IS the data root -- does not depend on
- * the filesystem answering at all, and is never `uncertain`. Every leg is checked
+ * than a match. The lexical comparison -- including the data-root fallback, where
+ * the leg IS the data root -- runs only once both sides canonicalize, so it
+ * shares the same gate: an unreadable data-root real path skips it and reports
+ * `uncertain` for that leg exactly as an unreadable leg does. Every leg is checked
  * rather than stopping at the first that holds, so one leg's unresolved comparison
  * does not shadow another leg's lexical or filesystem match: a positive match on
  * any leg makes the whole verdict established.
