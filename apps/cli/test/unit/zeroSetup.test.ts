@@ -19,6 +19,8 @@ import {
 import type {
   ExchangeBootstrapResult,
   FileDropConnectionConfig,
+  LinkageTerms,
+  PreparedExchange,
   SFTPConnectionConfig,
 } from "@psilink/core";
 import {
@@ -34,9 +36,7 @@ import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
 import { PERSISTENCE_LOSS_EXIT_CODE } from "../../src/eventStream";
 import { captureFd3 } from "../eventStreamTestSupport";
-import { captureStdio } from "../loggingTestSupport";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
-import { IDENTITY_REQUIRED } from "../../src/partyIdentity";
 
 // The handler hands the resolved connection to runProtocol; mock it so the happy
 // path can be driven to that hand-off without opening a transport. Hoisted above
@@ -429,77 +429,71 @@ test("handler: a repeated single-value flag exits 64 naming the flag", async () 
 
 // --- handler: the identity this party puts in the terms ----------------------
 
-test("handler: a missing or blank --identity is refused before the connection", async () => {
-  // The refusal has to reach the operator (it names the flag that resolves it),
-  // and it has to land before the first-use host-key prompt: a run that cannot
-  // name this party should not have pinned a key on the way to finding out. The
-  // blank values are the scripted `--identity "$ORG"` with ORG unset, which the
-  // gate reads as the flag not being there at all.
+/** The linkage terms the handler handed runProtocol for this run. */
+async function termsFromZeroSetupRun(
+  dir: string,
+  identity: string | undefined,
+): Promise<LinkageTerms> {
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+  );
+  let prepared: PreparedExchange | undefined;
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    prepared = callArgs[2] as PreparedExchange;
+    return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
+  }) as never);
+
+  await handler({
+    _: ["sftp://userb@localhost:2222/drop", input],
+    $0: "psilink",
+    "config-file": path.join(dir, "psilink.yaml"),
+    "key-file": path.join(dir, ".psilink.key"),
+    ...(identity !== undefined ? { identity } : {}),
+    record: false,
+    "log-level": "silent",
+  } as unknown as Arguments);
+
+  if (prepared === undefined)
+    throw new Error("the run never reached runProtocol");
+  return prepared.linkageTerms;
+}
+
+test("handler: no --identity asks nothing and sends no identity", async () => {
+  // The quick path's whole property: a run given no label completes without a
+  // question and without a stand-in. The terms carry no `identity` key at all --
+  // not the account psilink runs as, not an empty string -- so a partner reads
+  // this party as one that named itself none.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
-  const stdio = captureStdio();
   const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
     code?: number,
   ) => {
     throw new Error(`exit:${code ?? 0}`);
   }) as never);
   try {
-    const input = path.join(dir, "input.csv");
-    fs.writeFileSync(
-      input,
-      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
-    );
-    for (const identity of [undefined, "", "   "]) {
-      vi.mocked(establishHostKeyTrust).mockClear();
-      await expect(
-        handler({
-          _: ["sftp://userb@localhost:2222/drop", input],
-          $0: "psilink",
-          "config-file": path.join(dir, "psilink.yaml"),
-          "key-file": path.join(dir, ".psilink.key"),
-          ...(identity !== undefined ? { identity } : {}),
-          record: false,
-          "log-level": "error",
-        } as unknown as Arguments),
-      ).rejects.toThrow("exit:64");
-      expect(stdio.stderrWrites.join("")).toContain(IDENTITY_REQUIRED);
-      expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+    for (const blank of [undefined, "", "   "]) {
+      const terms = await termsFromZeroSetupRun(dir, blank);
+      expect(terms.identity).toBeUndefined();
+      expect("identity" in terms).toBe(false);
     }
   } finally {
-    stdio.restore();
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("handler: a supplied --identity carries the run past the identity gate", async () => {
-  // The run gets past the gate and fails on its (absent) input file instead, so
-  // the refusal above is the identity's doing and not something the fixture
-  // would have failed on anyway.
+test("handler: a supplied --identity rides into the terms, trimmed", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
-  const stdio = captureStdio();
   const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
     code?: number,
   ) => {
     throw new Error(`exit:${code ?? 0}`);
   }) as never);
   try {
-    await expect(
-      handler({
-        _: [
-          "sftp://userb@localhost:2222/drop",
-          path.join(dir, "nonexistent.csv"),
-        ],
-        $0: "psilink",
-        "config-file": path.join(dir, "psilink.yaml"),
-        "key-file": path.join(dir, ".psilink.key"),
-        identity: "Tester",
-        record: false,
-        "log-level": "error",
-      } as unknown as Arguments),
-    ).rejects.toThrow("exit:69");
-    expect(stdio.stderrWrites.join("")).not.toContain(IDENTITY_REQUIRED);
+    const terms = await termsFromZeroSetupRun(dir, "  Jane Smith, Agency A  ");
+    expect(terms.identity).toBe("Jane Smith, Agency A");
   } finally {
-    stdio.restore();
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }

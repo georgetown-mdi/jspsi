@@ -34,8 +34,8 @@ import {
   type KeyFile,
   type KeyFileExpiryStatus,
 } from "../keyFile";
+import { optionalIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
-import { resolveConfiguredIdentity } from "../partyIdentity";
 import { resolveReceiptOutput } from "../receiptFile";
 import { warnOnIdentityDivergence } from "../signingIdentityDivergence";
 import {
@@ -693,7 +693,7 @@ export interface OutboundConsentContext {
 /** @internal exported for testing */
 export async function prepareDataset(
   exchangeDataSpec: ExchangeDataSpec,
-  identity: string,
+  identity: string | undefined,
   input: string,
   outboundConsent: OutboundConsentContext,
 ): Promise<PreparedExchange> {
@@ -932,34 +932,6 @@ export async function handler(argv: Arguments): Promise<void> {
 
     announceRetainMode(connection, log);
 
-    // termsIdentity is the identity this run PUTS IN THE AGREED TERMS, which is
-    // what a partner verifies a signed receipt's certificate against. It comes
-    // from --identity, else the loaded configuration's linkage_terms.identity,
-    // which ExchangeSpecSchema requires to be non-empty; the guard behind it
-    // covers the case ExchangeDataSpec's optional linkageTerms leaves open,
-    // refusing (exit 64) rather than running under a label the operator never
-    // chose. Resolved ahead of the host-key trust below so a run that cannot
-    // name this party never writes a first-use pin on its way to finding out.
-    let identity: string;
-    let termsIdentity: string | undefined;
-    const flagIdentity = options.identity?.trim();
-    if (flagIdentity) {
-      identity = flagIdentity;
-      termsIdentity = identity;
-      if (exchangeDataSpec.linkageTerms)
-        exchangeDataSpec.linkageTerms = {
-          ...exchangeDataSpec.linkageTerms,
-          identity,
-        };
-    } else {
-      termsIdentity = exchangeDataSpec.linkageTerms?.identity;
-      try {
-        identity = resolveConfiguredIdentity(termsIdentity, options.configFile);
-      } catch (err) {
-        exitWithError(log, err, 64);
-      }
-    }
-
     // Establish SSH host-key trust before any exchange work: on an unpinned sftp
     // config this prompts and pins on first interactive use, and fails closed
     // (no prompt, no auto-accept) on a non-interactive run. It is a no-op for a
@@ -978,9 +950,29 @@ export async function handler(argv: Arguments): Promise<void> {
       exitWithError(log, err, err instanceof UsageError ? 64 : 69);
     }
 
+    // termsIdentity is the identity this run PUTS IN THE AGREED TERMS, which is
+    // what a partner verifies a signed receipt's certificate against. It comes
+    // from --identity, else the loaded configuration's linkage_terms.identity,
+    // and is absent when neither names this party: the terms then carry no
+    // identity at all rather than a label the operator never chose. A blank flag
+    // value is what a scripted `--identity "$ORG"` sends with ORG unset, so it
+    // reads as absent and leaves the configuration's own label standing.
+    let termsIdentity: string | undefined;
+    const flagIdentity = optionalIdentity(options.identity);
+    if (flagIdentity !== undefined) {
+      termsIdentity = flagIdentity;
+      if (exchangeDataSpec.linkageTerms)
+        exchangeDataSpec.linkageTerms = {
+          ...exchangeDataSpec.linkageTerms,
+          identity: flagIdentity,
+        };
+    } else {
+      termsIdentity = exchangeDataSpec.linkageTerms?.identity;
+    }
+
     let prepared: PreparedExchange;
     try {
-      prepared = await prepareDataset(exchangeDataSpec, identity, input, {
+      prepared = await prepareDataset(exchangeDataSpec, termsIdentity, input, {
         configPath: options.configFile,
         logFile,
       });

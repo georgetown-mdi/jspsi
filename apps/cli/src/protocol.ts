@@ -15,6 +15,7 @@ import {
   ReceiptVerificationError,
   causeChainSome,
   isPeerWaitTimeout,
+  redactAndDisplayPartyIdentity,
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
   UsageError,
@@ -1621,10 +1622,11 @@ export async function runProtocol(
         onProtocolConfirmed: (partnerTerms, resolvedRole) => {
           // identity is partner-controlled free text with no consistency check
           // (a mutually-distrusting party sets it), so escape it before it
-          // reaches the operator's terminal/logs.
+          // reaches the operator's terminal/logs. A partner that supplied none
+          // is reported as unnamed rather than as an empty line.
           log.info(
             "terms agreed, partner identity:",
-            redactAndSanitizeForDisplay(partnerTerms.identity),
+            redactAndDisplayPartyIdentity(partnerTerms.identity),
           );
           log.info("role:", resolvedRole);
         },

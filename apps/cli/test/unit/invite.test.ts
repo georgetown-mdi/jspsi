@@ -73,7 +73,10 @@ import {
   runOnlineBootstrap,
 } from "../../src/onlineBootstrap";
 import { captureStdio } from "../loggingTestSupport";
-import { IDENTITY_REQUIRED } from "../../src/partyIdentity";
+import {
+  configuredIdentityRequired,
+  IDENTITY_REQUIRED,
+} from "../../src/partyIdentity";
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 
 const silentLog = getLogger("invite-test");
@@ -1605,6 +1608,42 @@ test("validateInvite: --identity over a reused config is reported, not applied",
     expect(ignored[0]).toContain(configPath);
   } finally {
     warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a config carrying no identity is refused, flag or not", async () => {
+  // Inviting authors a partnership the partner reads a name off, and this path
+  // persists the configuration unchanged -- so a label given for this one
+  // invocation would name the partnership in the invitation and nowhere after
+  // it. Refuse, naming the field to set, whether or not --identity was typed.
+  const named = getDefaultLinkageTerms(
+    "Agency Config",
+    inferMetadata(["first_name", "last_name", "dob", "ssn"]),
+  );
+  const { identity: _dropped, ...unnamed } = named;
+  const { dir, configPath, keyPath } = withConfig(unnamed as LinkageTerms);
+  const log = getLogger("invite-identity-absent-test");
+  log.setLevel("silent");
+  try {
+    for (const identity of [undefined, "Agency Flag"]) {
+      await expect(
+        validateInvite({
+          resolved: { mode: "offline" },
+          options: testOptions({
+            configFile: configPath,
+            keyFile: keyPath,
+            ...(identity !== undefined && { identity }),
+          }),
+          acceptTimeout: 900,
+          log,
+        }),
+      ).rejects.toThrow(configuredIdentityRequired(configPath));
+    }
+    // The refusal lands before anything is written: no key file, and the config
+    // is the one the fixture wrote.
+    expect(fs.existsSync(keyPath)).toBe(false);
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

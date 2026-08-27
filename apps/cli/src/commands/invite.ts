@@ -34,7 +34,7 @@ import {
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
-import { resolveIdentity } from "../partyIdentity";
+import { resolveIdentity, resolveInvitationIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
 import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
 import {
@@ -274,7 +274,9 @@ type InviteReady =
  * `--identity` follows the same rule, for the same reason: the two paths that
  * author terms require it (there is no label to mint an invitation under
  * otherwise), while the config-as-source path takes the label from the config's
- * own `linkage_terms.identity` and warns that the flag had no effect.
+ * own `linkage_terms.identity` and warns that the flag had no effect. Every path
+ * requires one, though: an invitation names its inviter, so a configuration
+ * carrying no identity is refused rather than minted under none.
  *
  * @internal exported for testing
  */
@@ -590,16 +592,23 @@ export async function validateInvite(params: {
       );
     // The identity is one of those terms, so it is governed by the same rule:
     // the config supplies the label this invitation is minted under, and a flag
-    // typed here is reported rather than silently dropped. A blank value is
-    // nothing to report -- it is what a scripted `--identity "$ORG"` sends with
-    // ORG unset, and the config would carry this run either way.
+    // typed here is reported rather than silently dropped. A configuration
+    // carrying none refuses instead -- an invitation names its inviter, and this
+    // path cannot write the label anywhere the partnership's later runs would
+    // read it. A blank flag value is nothing to report -- it is what a scripted
+    // `--identity "$ORG"` sends with ORG unset, and the config would carry this
+    // run either way.
+    const configIdentity = resolveInvitationIdentity(
+      configTerms.identity,
+      options.configFile,
+    );
     const suppliedIdentity = options.identity?.trim();
     if (suppliedIdentity)
       log.warn(
         `--identity "${redactAndSanitizeForDisplay(suppliedIdentity)}" has no effect ` +
           "when the linkage terms come from an existing configuration file; " +
           "the file's linkage_terms.identity " +
-          `("${redactAndSanitizeForDisplay(configTerms.identity)}") is used instead. ` +
+          `("${redactAndSanitizeForDisplay(configIdentity)}") is used instead. ` +
           "Edit linkage_terms.identity in " +
           `${redactAndSanitizeForDisplay(options.configFile)} to change it.`,
       );

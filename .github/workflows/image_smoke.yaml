@@ -578,6 +578,11 @@ jobs:
       # SFTP is deliberately not exercised: the variant cannot reach a server
       # offering only curve25519 key exchange, which is a documented limitation
       # rather than a regression (docs/notes/fips-variant-image.md).
+      #
+      # No `--identity` on either party, deliberately: the quick path asks
+      # nothing and requires nothing, so this run is the standing check that it
+      # completes for a party that names itself none. The invite/accept step
+      # above passes one, because those legs do require it.
       - name: Run a full exchange end-to-end in the image
         if: matrix.fips == 'true'
         run: |
@@ -593,14 +598,10 @@ jobs:
           sudo chown -R 1000:1000 "$work/a" "$work/b" "$work/share"
 
           for party in a b; do
-            case "$party" in
-              a) identity="CI Smoke Party A" ;;
-              b) identity="CI Smoke Party B" ;;
-            esac
             docker run -d --name "exchange-$party" \
               -v "$work/$party:/work" -v "$work/share:/share" \
               ${{ matrix.tag }} \
-              --identity "$identity" --linkage-strategy single-pass file:///share input.csv output.csv
+              --linkage-strategy single-pass file:///share input.csv output.csv
           done
 
           codes=$(timeout 900 docker wait exchange-a exchange-b || true)

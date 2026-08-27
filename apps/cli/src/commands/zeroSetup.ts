@@ -24,7 +24,7 @@ import {
 import { openEventStream, reportPersistenceLoss } from "../eventStream";
 import { detectFileConflicts, expandTilde } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
-import { resolveIdentity } from "../partyIdentity";
+import { optionalIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveConnectionCredentials } from "../util/atSignRefs";
 import { establishHostKeyTrust } from "../hostKeyTrust";
@@ -241,8 +241,7 @@ export function resolvePositionals(positionals: Array<unknown>): {
       );
     }
     throw new Error(
-      "input file not specified; usage: psilink --identity IDENTITY URL " +
-        "INPUT_FILE [OUTPUT_FILE]",
+      "input file not specified; usage: psilink URL INPUT_FILE [OUTPUT_FILE]",
     );
   }
 
@@ -254,8 +253,7 @@ export function resolvePositionals(positionals: Array<unknown>): {
     // file:// case below, the input failed to parse, so there is no URL to route
     // through redactUrlCredentials; drop it entirely. The usage hint stands in
     // for the offending value, which the operator just typed.
-    "unable to parse server URL; usage: psilink --identity IDENTITY URL " +
-      "INPUT_FILE [OUTPUT_FILE]",
+    "unable to parse server URL; usage: psilink URL INPUT_FILE [OUTPUT_FILE]",
   );
   return { server, input: arg1, output: arg2 };
 }
@@ -281,7 +279,7 @@ export function createConnection(
 }
 
 async function prepareDataset(
-  identity: string,
+  identity: string | undefined,
   input: string,
   linkageStrategy: LinkageStrategy | undefined,
 ): Promise<PreparedExchange> {
@@ -634,16 +632,6 @@ export async function handler(argv: Arguments): Promise<void> {
       }
     }
 
-    // Resolve this party's identity before the connection is built, so a run
-    // with no label to put in the terms is refused (exit 64) ahead of the
-    // first-use host-key prompt and the pin it would write.
-    let identity: string;
-    try {
-      identity = resolveIdentity(options.identity);
-    } catch (err) {
-      exitWithError(log, err, 64);
-    }
-
     let connection: ConnectionConfig;
     let liveConnection: ConnectionConfig;
     let prepared: PreparedExchange;
@@ -667,7 +655,15 @@ export async function handler(argv: Arguments): Promise<void> {
       // the exchange itself. A missing or unreadable `@path` file is a UsageError
       // here (exit 64), before any credential is sent.
       liveConnection = resolveConnectionCredentials(connection);
-      prepared = await prepareDataset(identity, input, linkageStrategy);
+      // The quick path asks nothing and requires nothing: `--identity` rides
+      // into the terms when it names this party, and the terms carry none when
+      // it does not. A blank value is what a scripted `--identity "$ORG"` sends
+      // with ORG unset, so it reads as absent rather than as an empty label.
+      prepared = await prepareDataset(
+        optionalIdentity(options.identity),
+        input,
+        linkageStrategy,
+      );
     } catch (err) {
       // A bad URL scheme or unsupported channel is a usage error (exit 64);
       // prepareDataset failures carry their own exitCode; otherwise exit 69.

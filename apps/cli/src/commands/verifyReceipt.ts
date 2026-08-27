@@ -921,6 +921,13 @@ function signingIdentityPathFrom(
  * The identities are unordered: no artifact outside the dual-signed record records
  * which party held which handshake role, and the per-signer signature binding is
  * what fixes a certificate to its role.
+ *
+ * The pair is supplied only when BOTH parties are named. `linkage_terms.identity`
+ * is optional, and an unnamed party has nothing a certificate could be authorized
+ * against -- which is why an exchange with one refuses to produce a receipt at all
+ * (core's `runExchange`). A half-pair would anchor one signer and silently leave
+ * the other's identity check reading as performed, so the check is reported as not
+ * performed instead.
  */
 async function signedRecordExpectations(
   record: ExchangeRecord | undefined,
@@ -934,15 +941,26 @@ async function signedRecordExpectations(
 > {
   if (record !== undefined)
     return {
-      expectedIdentities: [record.localIdentity, record.partnerIdentity],
+      ...namedPair(record.localIdentity, record.partnerIdentity),
       expectedTermsHash: record.termsHash,
       recordReceiptBinder: record.receiptBinder ?? null,
     };
   if (localTerms === undefined || partnerTerms === undefined) return {};
   return {
-    expectedIdentities: [localTerms.identity, partnerTerms.identity],
+    ...namedPair(localTerms.identity, partnerTerms.identity),
     expectedTermsHash: await computeTermsHash(localTerms, partnerTerms),
   };
+}
+
+/** The `expectedIdentities` pair, present only where both parties named
+ * themselves; see {@link signedRecordExpectations}. */
+function namedPair(
+  local: string | undefined,
+  partner: string | undefined,
+): Pick<DualSignedRecordVerificationInputs, "expectedIdentities"> {
+  return local === undefined || partner === undefined
+    ? {}
+    : { expectedIdentities: [local, partner] };
 }
 
 /**

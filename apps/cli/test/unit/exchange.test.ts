@@ -1297,11 +1297,10 @@ test("handler compares the signing identity against --identity when it is given"
 });
 
 test("handler takes the run's identity from the configuration", async () => {
-  // What guarantees the label is there is the schema (see the empty-identity
-  // config case above); the guard behind it refuses rather than substituting a
-  // label the operator never chose, and is covered in partyIdentity.test.ts,
-  // where a spec with no terms is expressible. No lookup stands behind either,
-  // which partyIdentity.test.ts pins across the whole CLI source.
+  // The label is the config's when it carries one; an empty string is refused by
+  // the schema (see the empty-identity config case above) rather than reaching
+  // here, and no lookup stands behind either -- partyIdentity.test.ts pins that
+  // across the whole CLI source.
   fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
   saveKeyFile(keyFile, {
     sharedSecret: TOKEN_A,
@@ -1344,6 +1343,35 @@ test("handler treats a blank --identity as absent, falling back to the config", 
     identity: "   ",
   } as unknown as Arguments);
   expect(vi.mocked(prepareForExchange).mock.calls[0][1]).toBe("Test Party");
+});
+
+test("handler runs a configuration carrying no identity, sending none", async () => {
+  // `linkage_terms.identity` is optional, so a configuration that names this
+  // party nothing runs -- the terms carry no identity rather than a label the
+  // operator never chose, and nothing is read off the account psilink runs as.
+  const { identity: _dropped, ...unnamedTerms } = minimalLinkageTerms;
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({ ...minimalFiledropConfig, linkageTerms: unnamedTerms }),
+  );
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: new Date(Date.now() + 365 * 86_400_000).toISOString(),
+  });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  vi.mocked(prepareForExchange).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler({
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+  } as unknown as Arguments);
+  expect(vi.mocked(prepareForExchange).mock.calls[0][1]).toBeUndefined();
 });
 
 test("handler trims a supplied --identity before using it", async () => {

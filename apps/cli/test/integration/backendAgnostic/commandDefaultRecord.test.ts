@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import yargs from "yargs";
-import { prepareForExchange } from "@psilink/core";
+import { prepareForExchange, UNNAMED_PARTY_LABEL } from "@psilink/core";
 import type { ExchangeSpec } from "@psilink/core";
 
 import {
@@ -19,6 +19,7 @@ import {
 import { saveConfig } from "../../../src/config";
 import { saveKeyFile } from "../../../src/keyFile";
 import { DEFAULT_RECORD_BASENAME, keysPathFor } from "../../../src/recordFile";
+import { captureStdio } from "../../loggingTestSupport";
 
 // Net-new coverage: the per-command-handler wiring that turns the default-on
 // audit record into files on disk. `psilink exchange` and the zero-setup command
@@ -104,7 +105,7 @@ const PROVISION_ROWS = [
   },
 ];
 
-const RECORD_VERSION = "psilink-exchange-record/v4";
+const RECORD_VERSION = "psilink-exchange-record/v5";
 
 let work: string;
 let originalCwd: string;
@@ -364,5 +365,81 @@ describe("zero-setup", () => {
     );
 
     expectDefaultRecord(work, "party-a", "party-b");
+  }, 90_000);
+
+  test("one party names itself, the other does not, and both sides say so", async () => {
+    // The whole shape of the optional identity, driven end to end over a real
+    // two-party exchange: `--identity` rides into the terms when it is given and
+    // nothing rides when it is not. Each side's record states what it holds --
+    // the named party's own label present and its partner's field absent, and the
+    // mirror on the other side -- and each side's terms-agreed line names the
+    // partner it actually got, the unnamed one as an absence rather than as a
+    // label psilink picked.
+    const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
+    const url = pathToFileURL(dropDir).href;
+    const inputA = path.join(work, "named-input.csv");
+    fs.writeFileSync(inputA, PARTY_A_CSV);
+    const inputB = path.join(work, "unnamed-input.csv");
+    fs.writeFileSync(inputB, PARTY_B_CSV);
+    const recordNamed = path.join(work, "named-record.json");
+    const recordUnnamed = path.join(work, "unnamed-record.json");
+
+    const stdio = captureStdio();
+    try {
+      await runBoth(
+        [
+          url,
+          inputA,
+          path.join(work, "named-out.csv"),
+          "--identity",
+          "party-a",
+          "--record-file",
+          recordNamed,
+          "--polling-frequency",
+          "100ms",
+          "--peer-timeout",
+          `${PEER_TIMEOUT_SECONDS}s`,
+          "--log-level",
+          "info",
+        ],
+        [
+          url,
+          inputB,
+          path.join(work, "unnamed-out.csv"),
+          "--record-file",
+          recordUnnamed,
+          "--polling-frequency",
+          "100ms",
+          "--peer-timeout",
+          `${PEER_TIMEOUT_SECONDS}s`,
+          "--log-level",
+          "info",
+        ],
+      );
+    } finally {
+      stdio.restore();
+    }
+
+    const named = JSON.parse(fs.readFileSync(recordNamed, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(named.localIdentity).toBe("party-a");
+    expect("partnerIdentity" in named).toBe(false);
+
+    const unnamed = JSON.parse(
+      fs.readFileSync(recordUnnamed, "utf8"),
+    ) as Record<string, unknown>;
+    expect("localIdentity" in unnamed).toBe(false);
+    expect(unnamed.partnerIdentity).toBe("party-a");
+
+    // Both parties' diagnostics land on this one process's stderr, so the two
+    // directions of display are asserted together: the unnamed party read a named
+    // partner, and the named party read an unnamed one.
+    const diagnostics = stdio.stderrWrites.join("");
+    expect(diagnostics).toContain("terms agreed, partner identity: party-a");
+    expect(diagnostics).toContain(
+      `terms agreed, partner identity: ${UNNAMED_PARTY_LABEL}`,
+    );
   }, 90_000);
 });

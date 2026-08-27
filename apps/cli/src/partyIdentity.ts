@@ -17,14 +17,16 @@ export const IDENTITY_REQUIRED =
   `yours to choose: pass ${IDENTITY_FLAG_HELP}.`;
 
 /**
- * The refusal {@link resolveConfiguredIdentity} raises, naming the configuration
+ * The refusal {@link resolveInvitationIdentity} raises, naming the configuration
  * file that was expected to carry the label.
  */
 export function configuredIdentityRequired(configPath: string): string {
   return (
     `no identity for this party: ${configPath} carries no ` +
-    `linkage_terms.identity. ${PARTNER_READS_IT}, so set it there, or pass ` +
-    `${IDENTITY_FLAG_HELP} for this run.`
+    `linkage_terms.identity, and it is the source of this invitation's terms. ` +
+    `${PARTNER_READS_IT}, so set it there -- ${IDENTITY_FLAG_HELP} cannot ` +
+    "stand in, because the configuration persists unchanged and is what every " +
+    "exchange under this partnership sends."
   );
 }
 
@@ -47,19 +49,40 @@ export function resolveIdentity(identity: string | undefined): string {
 }
 
 /**
- * This party's identity label for a command that runs an exchange from a saved
- * configuration: the `linkage_terms.identity` it loaded, which `--identity`
- * replaces for the run before this is reached.
+ * This party's identity label for a run that may go unnamed: the `--identity`
+ * value, trimmed, or `undefined` where the flag names nothing.
  *
- * What this refuses is a configuration that carries no identity at all: running
- * under a label the operator never chose would put that label into the agreed
- * terms a partner verifies a signed receipt against. It is not a content check.
- * The configuration schema requires a non-empty string and does not trim one, so
- * a whitespace-only `linkage_terms.identity` is a label as far as both the
- * schema and this are concerned, and rides into the terms as written; trimming
- * it belongs at that schema, not here.
+ * A blank value is absence rather than a label: it is what a scripted
+ * `--identity "$ORG"` sends with `ORG` unset, and an empty string is not a name
+ * the terms schema would accept. Absence is carried through as absence -- the
+ * terms simply hold no identity, and psilink substitutes nothing for it.
  */
-export function resolveConfiguredIdentity(
+export function optionalIdentity(
+  identity: string | undefined,
+): string | undefined {
+  const chosen = identity?.trim() ?? "";
+  return chosen.length === 0 ? undefined : chosen;
+}
+
+/**
+ * This party's identity label for an invitation minted from a saved
+ * configuration: the `linkage_terms.identity` that configuration carries.
+ *
+ * Inviting is a ceremony interface -- it authors a durable partnership the
+ * partner reads a name off, in the invitation and in every exchange that follows
+ * -- so it is one of the two commands that will not proceed unnamed, and this is
+ * that refusal for the path whose label comes from a file rather than a flag.
+ * `--identity` is not an alternative here: the configuration persists unchanged
+ * and supplies the terms of every later run, so a label given for this one
+ * invocation would leave the partnership named in the invitation and unnamed
+ * everywhere after it.
+ *
+ * The schema does not trim the value, so a whitespace-only
+ * `linkage_terms.identity` is a label as far as both it and this are concerned,
+ * and rides into the terms as written; trimming it belongs at that schema, not
+ * here.
+ */
+export function resolveInvitationIdentity(
   configuredIdentity: string | undefined,
   configPath: string,
 ): string {

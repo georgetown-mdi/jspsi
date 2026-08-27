@@ -7,8 +7,9 @@ import { UsageError } from "@psilink/core";
 import {
   configuredIdentityRequired,
   IDENTITY_REQUIRED,
-  resolveConfiguredIdentity,
+  optionalIdentity,
   resolveIdentity,
+  resolveInvitationIdentity,
 } from "../../src/partyIdentity";
 
 /** Every TypeScript source the CLI ships, by name and content, for the
@@ -81,15 +82,18 @@ test("nothing the CLI ships resolves a party name from the account", () => {
   expect(offenders).toEqual([]);
 });
 
-test("a configured identity is returned", () => {
-  expect(resolveConfiguredIdentity("Test Party", "/work/psilink.yaml")).toBe(
+test("an invitation's configured identity is returned", () => {
+  expect(resolveInvitationIdentity("Test Party", "/work/psilink.yaml")).toBe(
     "Test Party",
   );
 });
 
-test("a configuration carrying no identity is refused, naming the file", () => {
+test("an invitation over a configuration carrying no identity is refused", () => {
+  // Inviting authors a partnership the partner reads a name off, so it is one of
+  // the two commands that will not proceed unnamed; the refusal names the file
+  // and the field, since the flag cannot stand in on this path.
   const raised = refusalFrom(() =>
-    resolveConfiguredIdentity(undefined, "/work/psilink.yaml"),
+    resolveInvitationIdentity(undefined, "/work/psilink.yaml"),
   );
   expect(raised).toBeInstanceOf(UsageError);
   expect((raised as Error).message).toBe(
@@ -97,4 +101,16 @@ test("a configuration carrying no identity is refused, naming the file", () => {
   );
   expect((raised as Error).message).toContain("/work/psilink.yaml");
   expect((raised as Error).message).toContain("linkage_terms.identity");
+});
+
+test("an optional identity is trimmed, and blank reads as absent", () => {
+  // The runs that may go unnamed take this instead of the refusal: a label rides
+  // into the terms, and anything blank -- what `--identity "$ORG"` sends with ORG
+  // unset -- leaves the terms carrying none rather than an empty label.
+  expect(optionalIdentity("  Jane Smith, Agency A  ")).toBe(
+    "Jane Smith, Agency A",
+  );
+  expect(optionalIdentity(undefined)).toBeUndefined();
+  for (const blank of ["", " ", "   ", "\t", " \t "])
+    expect(optionalIdentity(blank)).toBeUndefined();
 });
