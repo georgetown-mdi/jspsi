@@ -247,15 +247,15 @@ function buildExchangeHandoffTemplate(
  * locator), the run's tuning flags, its identity, its linkage-strategy selector
  * when set, and the input/output positionals. The identity is always carried: the
  * graduated command reads no configuration document, and the account a scheduled
- * container runs as may have no user name for the CLI to fall back on.
- * The sftp arm reuses
- * {@link zeroSetupSftpArgv} against a placeholder-credential entry, so the URL,
- * username, and mandatory fingerprint pin are exactly what ran while no credential
- * `@path` is emitted. The tuning flags come from {@link zeroSetupOptionsArgv} --
- * the same builder the live run's argv uses -- so a retained-transcript run
- * graduates to a recurring command that retains identically, and a run tuned for
- * a slow peer graduates to one tuned the same way; the flags name no path and
- * carry no credential, so they are portable verbatim.
+ * container runs as may have no user name for the CLI to fall back on. The sftp
+ * arm reuses {@link zeroSetupSftpArgv} against a placeholder-credential entry, so
+ * the URL, username, and mandatory fingerprint pin are exactly what ran while no
+ * credential `@path` is emitted. The tuning flags come from
+ * {@link zeroSetupOptionsArgv} -- the same builder the live run's argv uses -- so
+ * a retained-transcript run graduates to a recurring command that retains
+ * identically, and a run tuned for a slow peer graduates to one tuned the same
+ * way; the flags name no path and carry no credential, so they are portable
+ * verbatim.
  */
 function buildZeroSetupHandoffTemplate(
   intent: JobZeroSetupIntent,
