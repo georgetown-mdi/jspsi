@@ -2247,9 +2247,8 @@ describe("acceptor bench: run and completion", () => {
   });
 
   test("a partially-covered file never reaches the run at all", async () => {
-    // The advisory this seat used to carry forward into the run is gone with the
-    // tier it belonged to: partial coverage stops the launch, so no run starts and
-    // there is nothing to warn about once one has.
+    // A partially-covered file never reaches a run: the launch gate refuses it at
+    // this seat, so nothing starts and there is no run surface to warn on.
     window.location.hash = await encodeRunToken();
     app.render(createElement(AcceptorBench));
     await expect

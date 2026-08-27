@@ -235,7 +235,7 @@ export class InvitationFileError extends Error {
       failure.kind === "unreadable"
         ? "invitation file could not be read"
         : failure.kind === "unlinkable"
-          ? "invitation file satisfies no linkage keys"
+          ? "invitation file cannot satisfy the linkage terms"
           : failure.kind === "overlong"
             ? "invitation file sends an over-long column name"
             : "invitation file has an empty column name",

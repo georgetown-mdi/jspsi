@@ -734,6 +734,52 @@ describe("validateAdvancedInvite", () => {
     );
   });
 
+  test("(c) blocks Generate on a dead-key-only shortfall with the cleaning remedy", () => {
+    // Shape-satisfiable and still refused: every element field resolves, but the
+    // key's declared parse_date can never yield a value. The columns are fine, so
+    // the remedy is the cleaning rather than the column mapping -- the split the
+    // acceptor's launch gate keeps.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const onlyDobKey = onlyKeyEnabled(draft, "SSN + LN + DOB");
+    const deadDraft = {
+      ...onlyDobKey,
+      keys: onlyDobKey.keys.map((entry) =>
+        entry.key.name === "SSN + LN + DOB"
+          ? {
+              ...entry,
+              key: {
+                ...entry.key,
+                elements: entry.key.elements.map((element) =>
+                  element.field === "date_of_birth"
+                    ? {
+                        ...element,
+                        transform: [
+                          {
+                            function: "parse_date",
+                            params: { inputFormat: "MM/DD" },
+                          },
+                        ],
+                      }
+                    : element,
+                ),
+              },
+            }
+          : entry,
+      ),
+    };
+    const result = validateAdvancedInvite(deadDraft, seed, NOW);
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.keys).toContain(
+      "the cleaning declared for the one agreed linkage key drops every record",
+    );
+    expect(result.errors.keys).toContain(
+      'Review the cleaning on the keys badged "won\'t match"',
+    );
+    // The column-mapping remedy would misdirect here: the columns produce every
+    // field this key references.
+    expect(result.errors.keys).not.toContain("map a column to");
+  });
+
   test("(c) blocks Generate on an incomplete legal agreement, per field", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const result = validateAdvancedInvite(

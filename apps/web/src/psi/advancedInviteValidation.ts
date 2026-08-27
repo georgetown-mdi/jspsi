@@ -31,6 +31,7 @@ import type {
   CSVRow,
   CountOnlyShapeViolation,
   LinkageTerms,
+  LinkageTermsVerdict,
 } from "@psilink/core";
 
 import type { ImportedCitationDropCause } from "./advancedInviteTerms";
@@ -157,6 +158,29 @@ const DEDUPLICATE_STRATEGY_MESSAGE =
   "The linkage strategy this invitation names cannot run a deduplicating " +
   'match. Choose another Linkage strategy, or clear "Allow several of your ' +
   'records to match one partner record".';
+
+/**
+ * What to do about a linkage shortfall, chosen by which shortfall holds -- the
+ * split the acceptor's launch gate keeps (`acceptorLaunchBlockedReason`), and for
+ * the same reason: a key the columns cannot produce is cleared at the column
+ * mapping, while a key whose declared cleaning drops every record has columns that
+ * already resolve, so pointing at the mapping would name a control that cannot
+ * clear it. An unsatisfiable key takes precedence where both hold, as it does
+ * there, since it is the shortfall the operator's own columns settle.
+ *
+ * The dead case points at the badge rather than the key, for the reason
+ * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field: an imported document's key names
+ * are partner-influenceable, and the key list carries the badge beside this
+ * message.
+ */
+function shortfallRemedy(verdict: LinkageTermsVerdict): string {
+  if (verdict.unsatisfiableKeys.length > 0)
+    return (
+      "Turn off the keys your columns cannot produce, or map a column to " +
+      "every field they need."
+    );
+  return 'Review the cleaning on the keys badged "won\'t match", or turn them off.';
+}
 
 /**
  * Validate a draft for the Generate gate. The core schema
@@ -321,8 +345,7 @@ export function validateAdvancedInvite(
       // counts only; the key names stay off this message.
       errors.keys =
         `These terms cannot be run against your file: ${summarizeLinkageShortfall(verdict)}. ` +
-        "Turn off the keys your columns cannot produce, or map a column to " +
-        "every field they need.";
+        shortfallRemedy(verdict);
     }
   }
 

@@ -379,6 +379,11 @@ describe("generateInvitation", () => {
     if (failure.kind !== "unlinkable") throw new Error("unreachable");
     expect(failure.refusal.kind).toBe("shortfall");
     if (failure.refusal.kind !== "shortfall") throw new Error("unreachable");
+    // The base message is the log line for every "unlinkable" refusal, so it must
+    // hold for a file that satisfies some keys, not only one that satisfies none.
+    expect((error as InvitationFileError).message).toBe(
+      "invitation file cannot satisfy the linkage terms",
+    );
     // Some keys ARE producible, which is exactly what a per-key threshold would
     // have passed on.
     expect(failure.refusal.verdict.unsatisfiableKeys.length).toBeGreaterThan(0);
