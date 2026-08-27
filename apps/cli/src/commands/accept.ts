@@ -413,7 +413,6 @@ export async function validateAccept(params: {
     checkLinkageSatisfiability(
       rows.columns,
       myTerms,
-      log,
       INVITATION_PREFLIGHT_MESSAGING,
     );
     const dataSpec = buildDataSpec({
@@ -539,7 +538,6 @@ export async function validateAccept(params: {
     checkLinkageSatisfiability(
       rows.columns,
       myTerms,
-      log,
       INVITATION_PREFLIGHT_MESSAGING,
     );
   const dataSpec = buildDataSpec({

@@ -197,6 +197,38 @@ export class OutboundDisclosureRefusalError extends UsageError {
 }
 
 /**
+ * The refusal raised, before any credential, terms, or data are sent, when this
+ * party's input cannot fully satisfy the linkage terms the two parties agreed to
+ * -- a declared key whose fields the columns cannot produce, a key whose own
+ * declared cleaning drops every record, or terms declaring no key at all. One
+ * grading decides it (`decideLinkageTermsVerdict`) and one boundary enforces it
+ * ({@link prepareForExchange}); a front end that grades earlier gives advance
+ * notice of this same refusal rather than holding a threshold of its own.
+ *
+ * Not a transport fault: it fires before anything is sent, and a caller that
+ * retries the same input refuses identically, so a surface offering a retry would
+ * loop an unattended run on a deterministic local fault. That is why it is a
+ * distinct type rather than a plain {@link UsageError} -- a caller keeping
+ * per-failure bookkeeping branches on it deterministically (the web's managed
+ * re-run records it in the benign input tier) while the CLI's `instanceof
+ * UsageError` check still classifies it as a configuration error (exit 64,
+ * EX_USAGE).
+ *
+ * Deliberately NOT an {@link OperatorConfigError}: the field and key names it
+ * enumerates are the AGREED terms' own, adopted from the partner's invitation on
+ * every accept path, so its message is not composed solely of local content and
+ * stays out of the surfacing contract that base type carries. The names ride
+ * capped cause links of their own, so a surface that renders the chain spends
+ * their budget on them alone and reaches the summary and its remedy first.
+ */
+export class LinkageTermsUnsatisfiableError extends UsageError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "LinkageTermsUnsatisfiableError";
+  }
+}
+
+/**
  * The specific {@link OperatorConfigError} for an authored ("authoritative")
  * standardization that contradicts its own linkage terms -- a transform output
  * naming no declared linkage field, or an unknown standardization function (see

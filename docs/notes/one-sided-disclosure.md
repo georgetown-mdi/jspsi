@@ -109,6 +109,24 @@ Under the honest-but-curious model the project adopts, the residual leak in the 
 
 The mechanism that resulted is specified in [PROTOCOL.md](../spec/PROTOCOL.md#linkage-strategies-cascade-and-single-pass) and surfaced to operators through [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#linkage_termslinkage_strategy); the send-gate that enforces non-output is in [FILE_SYNC.md](../spec/FILE_SYNC.md). What remains in this note is the rationale behind that choice and the alternatives that were weighed but not built (self-censor, the heavyweight fixes), kept so they need not be reconstructed if the threat model changes.
 
+## A partial run is a disclosure, not just a worse result
+
+Everything above weighs what a *complete* run discloses. A run that goes ahead on only some of the agreed linkage keys is a separate question, and it came out differently: it is refused outright, on every path, rather than warned about.
+
+The reason is that the shortfall is not private to the party that has it. The rounds are lockstep, so an agreed key runs whether or not this party can populate it, and a key it populates for no record is a round it enters with an empty contribution. That is a different shape on the wire from a key that ran with values and matched nothing - one is an empty set, the other a populated set with no matches - and the two are distinguishable by the partner's software, in both directions, per key. The single-pass strategy sharpens it further: its index table is per-record, so an under-covered *sender* hands the receiver exactly which rows it had nothing for on which key. So the partner does not merely get a thinner result; it learns which of the agreed identifiers this party could not supply, at whatever granularity the strategy allows. That is a fact about this party's own data holdings, and nothing in the agreed terms, the consent facts, or the invitation declares it or asks the operator to consent to it.
+
+There is a compliance half as well. The exchange record's `matchingBasis` is derived from the *agreed* terms, so a partial run writes a disclosure record naming identifier fields this party never contributed a value for. The record's existing over-claim rationale covers fields the terms do not reference; it does not cover fields the input never populated.
+
+Why a warning cannot carry either half:
+
+- **Consent.** The `linkageKeys` consent fact states that the agreed keys are what the run computes. A partial run does not honour it, and the operator warned about the shortfall is not the party whose consent is at stake - the partner is, and the partner sees no warning. Warn-and-proceed puts the choice with the wrong side.
+- **Unattended runs.** A recurring exchange is a scheduled job. A warning on stderr in a discarded log does not reach anyone before the data moves, so the only tier that binds an unattended run is a refusal.
+- **The remedy is out of band anyway.** A file that cannot fulfil the agreed terms needs new terms, and terms are agreed between the parties, not adjusted locally. Since the fix is a conversation with the partner, letting the run proceed buys nothing except an exchange neither party agreed to.
+
+The rule that resulted is one line - a run is refused unless the agreed terms declare at least one linkage key and the input can satisfy every one of them, none declaring cleaning that drops every record - and it is graded in one place in `@psilink/core`, enforced at the pre-send boundary every front end passes through, so no surface holds a threshold of its own. Its operator-facing form is in [CLI.md](../CLI.md) and [COMMUNICATION.md](../COMMUNICATION.md).
+
+Two consequences are deliberate. A run that becomes unrunnable because the *data* drifted (a column dropped from a recurring feed) fails rather than degrading quietly, which is the intended trade: a silently narrowed linkage is worse than a stopped one. And the check is over column shape, so it cannot catch a field whose every row cleans to empty - that residual stays with the runtime coverage sweep, which is why the sweep is worth keeping beside this rule.
+
 ## See also
 
 - [DESIGN.md](../DESIGN.md#multiple-potential-matches) - the secure-computation extension already scoped for threshold and weighted matching, which would also address this disclosure.

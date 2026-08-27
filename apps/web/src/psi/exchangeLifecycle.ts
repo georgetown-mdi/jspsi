@@ -1,5 +1,6 @@
 import {
   ConnectionError,
+  LinkageTermsUnsatisfiableError,
   OperatorConfigError,
   getLogger,
   runExchange,
@@ -120,7 +121,15 @@ export interface StageDefinition {
  * in the generic (message-swallowing) `"exchange"` alert. Keying on the type lets
  * a future local-config check -- e.g. the disclosure-commitment drift a recurring
  * web exchange reaches -- join the `config` alert by extending `OperatorConfigError`
- * at its throw site, with no change here. `"exchange"` and `"output"` are
+ * at its throw site, with no change here.
+ *
+ * The one other member is {@link LinkageTermsUnsatisfiableError}, admitted for the
+ * AFFORDANCE rather than the message: it is a deterministic pre-connection refusal
+ * whose recovery is a different file or new terms, so offering a retry would loop
+ * an unattended run on a fault every attempt reproduces. Its message names the
+ * agreed terms' own key and field names, partner-authored on every accept path, so
+ * it does NOT inherit the message-rendering half of this category -- the alert
+ * builder gives it fixed copy of its own. `"exchange"` and `"output"` are
  * owner-local discriminants (an output-generation failure is not a connection
  * error). */
 export type ExchangeErrorCategory =
@@ -141,12 +150,18 @@ export type ExchangeErrorCategory =
  * the partner-influenceable payload-send `UsageError` out of the message-surfacing
  * alert; the PHASE keeps an `OperatorConfigError` surfacing mid-`"run"` (none does
  * today) from being mislabeled -- neither is a prose claim about what the other
- * half throws. */
+ * half throws. A {@link LinkageTermsUnsatisfiableError} joins the category on the
+ * same phase discriminant, for the non-retry affordance rather than the message
+ * (see {@link ExchangeErrorCategory}). */
 function classifyExchangeFailure(
   error: unknown,
   phase: "prepare" | "run",
 ): ExchangeErrorCategory {
-  if (phase === "prepare" && error instanceof OperatorConfigError)
+  if (
+    phase === "prepare" &&
+    (error instanceof OperatorConfigError ||
+      error instanceof LinkageTermsUnsatisfiableError)
+  )
     return "config";
   return error instanceof ConnectionError && error.kind === "security"
     ? "security"

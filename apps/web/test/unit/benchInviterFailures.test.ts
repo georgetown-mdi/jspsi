@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 
+import { LinkageTermsUnsatisfiableError } from "@psilink/core";
+
 import { JobApiRequestError } from "@psi/serverJobExchangeDriver";
 import { failureFor } from "@bench/useInviterExchange";
 
@@ -150,5 +152,28 @@ describe("failureFor", () => {
     expect(
       failureFor("config", new JobApiRequestError(500, "x"), WORK_FILE).title,
     ).toBe("Could not prepare the exchange");
+  });
+
+  test("a file that cannot supply the agreed keys gets fixed copy and no retry", () => {
+    // The refusal's own message enumerates the agreed terms' key and field names,
+    // which are partner-authored on every accept path, so the alert states the
+    // condition instead of echoing them. Classified `config`, which is the
+    // start-over affordance rather than the retryable `exchange` one: the same
+    // file refuses identically however many times it runs.
+    const failure = failureFor(
+      "config",
+      new LinkageTermsUnsatisfiableError(
+        "this input cannot satisfy every linkage key the agreed terms declare: " +
+          "1 of the 2 agreed linkage keys cannot be produced",
+      ),
+      WORK_FILE,
+    );
+    expect(failure.category).toBe("config");
+    expect(failure.title).toBe(
+      "This file cannot supply the linkage keys you agreed to",
+    );
+    expect(failure.message).not.toContain("agreed linkage keys cannot be");
+    expect(failure.message).toContain("nothing left this device");
+    expect(failure.message).toContain("settle new terms with your partner");
   });
 });

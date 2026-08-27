@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import {
+  LinkageTermsUnsatisfiableError,
   joinErrorCauseChain,
   loadPsiBackend,
   prepareForExchange,
@@ -181,6 +182,25 @@ export function failureFor(
         "run would send your data for an exchange that already happened. On " +
         "this machine, a local write failed: " +
         sanitizedFailureMessage(error),
+    };
+  }
+  if (error instanceof LinkageTermsUnsatisfiableError) {
+    // The pre-connection refusal for a file that cannot supply every linkage key
+    // the agreed terms declare. Fixed and non-oracular: the refusal enumerates the
+    // agreed terms' own key and field names, partner-authored on every accept
+    // path, and the operator reads which keys are short off the per-key verdict on
+    // the columns step rather than out of an alert. Classified `config`, so the
+    // alert offers start-over rather than a retry -- the same file refuses
+    // identically however many times it runs.
+    return {
+      category: "config",
+      title: "This file cannot supply the linkage keys you agreed to",
+      message:
+        "This exchange matches on every linkage key its terms declare, and " +
+        "your file cannot supply them all, so it stopped before connecting " +
+        "and nothing left this device. Start over with a file whose columns " +
+        "cover the agreed keys, or settle new terms with your partner over " +
+        "the keys both of your files can supply.",
     };
   }
   if (category === "config") {

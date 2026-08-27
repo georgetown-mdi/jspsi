@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { getDefaultLinkageTerms } from "@psilink/core";
+import { getDefaultLinkageTerms, inferMetadata } from "@psilink/core";
 
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 import { prepareManagedRerunExchange } from "@psi/managedPreparedExchange";
@@ -16,10 +16,16 @@ const rows: Array<CSVRow> = [
   { first_name: "Ada", last_name: "Lovelace", date_of_birth: "12/10/1815" },
 ];
 
+// The terms a deposit composed from this party's own file: the built-in rule set
+// narrowed to the keys these columns support, which is what a re-run's own
+// columns then have to satisfy in full.
+const standingTerms = (identity: string) =>
+  getDefaultLinkageTerms(identity, inferMetadata(columns));
+
 function exchangeFile(expectedPayloadColumns?: Array<string>) {
   return composeManagedExchangeFile({
     connection: { channel: "webrtc", host: "signaling.example.org" },
-    linkageTerms: getDefaultLinkageTerms("County Health Dept"),
+    linkageTerms: standingTerms("County Health Dept"),
     ...(expectedPayloadColumns !== undefined ? { expectedPayloadColumns } : {}),
   });
 }
@@ -55,7 +61,7 @@ describe("prepareManagedRerunExchange", () => {
     for (const declared of [false, true]) {
       const document = composeManagedExchangeFile({
         connection: { channel: "webrtc", host: "signaling.example.org" },
-        linkageTerms: getDefaultLinkageTerms("County Health Dept"),
+        linkageTerms: standingTerms("County Health Dept"),
         expectedPartnerDeduplicate: declared,
       });
       const prepared = prepareManagedRerunExchange(document, rows, columns);
@@ -76,7 +82,7 @@ describe("prepareManagedRerunExchange", () => {
     // carries no metadata, so the set resolves from THIS run's header.
     const stale = composeManagedExchangeFile({
       connection: { channel: "webrtc", host: "signaling.example.org" },
-      linkageTerms: getDefaultLinkageTerms("Clinic A"),
+      linkageTerms: standingTerms("Clinic A"),
       outboundPayloadConsent: {
         status: "confirmed",
         columns: ["consented_column"],
@@ -90,7 +96,7 @@ describe("prepareManagedRerunExchange", () => {
   test("a consent record covering the run's set prepares normally", () => {
     const covered = composeManagedExchangeFile({
       connection: { channel: "webrtc", host: "signaling.example.org" },
-      linkageTerms: getDefaultLinkageTerms("Clinic A"),
+      linkageTerms: standingTerms("Clinic A"),
       outboundPayloadConsent: { status: "confirmed", columns: [] },
     });
     expect(() =>

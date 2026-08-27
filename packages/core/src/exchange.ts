@@ -13,6 +13,7 @@ import { getDefaultStandardization } from "./defaults/standardization.js";
 import {
   buildStandardizedDataset,
   assertFanOutImplemented,
+  assertLinkageTermsSatisfiable,
   assertStandardizationMatchesTerms,
   declaredEffectiveKeyCount,
   MAX_KEY_CANDIDATES_PER_ROW,
@@ -810,6 +811,8 @@ export function resolveExchangeInputs(
  * - Constructs a {@link StandardizedDataset} ready for key-iterable creation.
  * - Fails closed when an explicit (authoritative) standardization contradicts
  *   the linkage terms.
+ * - Fails closed when the input cannot satisfy every linkage key the agreed terms
+ *   declare (see {@link assertLinkageTermsSatisfiable}).
  *
  * Call this before the exchange's connection is opened. After the handshake role
  * and PSI role are resolved, {@link runExchange} builds the key iterables and
@@ -978,6 +981,26 @@ export function prepareForExchange(
       exchangeDataSpec.standardization,
       linkageTerms,
     );
+
+  // Fail closed when this input cannot satisfy every linkage key the agreed terms
+  // declare -- a key whose fields the columns cannot produce, a key whose own
+  // declared cleaning drops every record, or terms declaring no key at all. Such a
+  // run matches on fewer keys than both parties consented to while its exchange
+  // record still names every field the terms declare, and the shortfall is settled
+  // with the partner out of band rather than run anyway. Refused here, before any
+  // credential, terms, or data are sent, so no front end's own pre-flight can
+  // proceed past it. Graded over the AUTHORED standardization rather than the
+  // resolved default just below, so the front ends that grade earlier from the same
+  // spec cannot disagree with this gate. Ordered behind the standardization/terms
+  // contradiction above so an authored transform whose output names no declared
+  // field is reported as that rather than as the unsatisfied field it leaves
+  // behind. See assertLinkageTermsSatisfiable.
+  assertLinkageTermsSatisfiable(
+    columnNames,
+    linkageTerms,
+    exchangeDataSpec.standardization,
+    metadata,
+  );
 
   // Fail closed on a transform that fans one value out into several match
   // candidates under a strategy that matches one value per record: the splitting

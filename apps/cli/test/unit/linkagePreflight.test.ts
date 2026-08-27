@@ -3,6 +3,7 @@ import {
   CAUSE_DEPTH_ELISION_MARKER,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   inferMetadata,
+  LinkageTermsUnsatisfiableError,
   MAX_ERROR_CAUSE_DEPTH,
   MAX_NAME_LENGTH,
   sanitizeErrorForDisplay,
@@ -15,9 +16,9 @@ import {
   warnColumnsTheInvitationWillNotAccept,
 } from "../../src/commands/linkagePreflight";
 
-// Minimal logger stub: checkLinkageSatisfiability only emits warnings (the block
-// path throws), so capture log.warn. Cast through unknown because the parameter
-// is the full loglevel logger type but only `warn` is exercised here.
+// Minimal logger stub for warnColumnsTheInvitationWillNotAccept, the one export
+// here that still writes to a log sink. Cast through unknown because the
+// parameter is the full loglevel logger type but only `warn` is exercised.
 function makeLogger(): { log: ReturnType<typeof getLogger>; warns: string[] } {
   const warns: string[] = [];
   const log = {
@@ -56,17 +57,23 @@ function dobTerms(
   };
 }
 
+const deadDobElement = {
+  field: "dob",
+  transform: [{ function: "parse_date", params: { inputFormat: "MM/DD" } }],
+};
+
 function refusalRenderedForDisplay(
   columns: string[],
   terms: LinkageTerms,
-  log: ReturnType<typeof getLogger>,
 ): string {
   let thrown: unknown;
   try {
-    checkLinkageSatisfiability(columns, terms, log, messaging);
+    checkLinkageSatisfiability(columns, terms, messaging);
   } catch (err) {
     thrown = err;
   }
+  expect(thrown).toBeInstanceOf(LinkageTermsUnsatisfiableError);
+  // A UsageError subclass, so the CLI's error->exit boundary reports exit 64.
   expect(thrown).toBeInstanceOf(UsageError);
   // The refusal composes its tokens RAW, so the escape it relies on is the one
   // the CLI's error boundary applies (`sanitizeErrorForDisplay` in `runOrExit`
@@ -76,16 +83,23 @@ function refusalRenderedForDisplay(
 }
 
 // The rendered refusal split into the cause links the operator reads, in order.
-function refusalLinks(
-  columns: string[],
-  terms: LinkageTerms,
-  log: ReturnType<typeof getLogger>,
-): string[] {
-  return refusalRenderedForDisplay(columns, terms, log).split("\ncaused by: ");
+function refusalLinks(columns: string[], terms: LinkageTerms): string[] {
+  return refusalRenderedForDisplay(columns, terms).split("\ncaused by: ");
 }
 
+test("an input satisfying every declared key passes", () => {
+  expect(() =>
+    checkLinkageSatisfiability(
+      ["dob"],
+      dobTerms([
+        { function: "parse_date", params: { inputFormat: "MM/DD/YYYY" } },
+      ]),
+      messaging,
+    ),
+  ).not.toThrow();
+});
+
 test("refuses by name when the only linkage key's parse_date drops every record", () => {
-  const { log, warns } = makeLogger();
   // The column is present, so the column verdict passes -- yet the one key it
   // satisfies is dead, so the run could emit no key string and would write a
   // guaranteed-empty result at exit 0. It is refused instead, naming the key on a
@@ -93,22 +107,23 @@ test("refuses by name when the only linkage key's parse_date drops every record"
   const links = refusalLinks(
     ["dob"],
     dobTerms([{ function: "parse_date", params: { inputFormat: "MM/DD" } }]),
-    log,
   );
   expect(links[0]).toContain(
-    "none of the invitation's linkage keys can ever match",
+    "cannot satisfy every linkage key the invitation declares",
+  );
+  expect(links[0]).toContain(
+    "the cleaning declared for the one agreed linkage key drops every record",
   );
   expect(links[1]).toBe(
     `Correct the cleaning steps those keys declare, ${messaging.blockRemedy}`,
   );
   expect(links).toContain("linkage key that drops every record: DOB");
-  expect(warns).toEqual([]);
 });
 
-test("a dead key beside a live one warns and proceeds", () => {
-  const { log, warns } = makeLogger();
-  // DOB is dead; SSN is satisfiable and live, so the exchange can still match on
-  // it. That is the partial case: warn by name, do not refuse.
+test("a dead key beside a live one is refused, not warned", () => {
+  // DOB is dead; SSN is satisfiable and live. The exchange would still match on
+  // SSN, and would run one key short of what both parties agreed to, so it is
+  // refused rather than warned about.
   const terms: LinkageTerms = {
     ...dobTerms(),
     linkageFields: [
@@ -116,47 +131,50 @@ test("a dead key beside a live one warns and proceeds", () => {
       { name: "ssn", type: "ssn" },
     ],
     linkageKeys: [
-      {
-        name: "DOB",
-        elements: [
-          {
-            field: "dob",
-            transform: [
-              { function: "parse_date", params: { inputFormat: "MM/DD" } },
-            ],
-          },
-        ],
-      },
+      { name: "DOB", elements: [deadDobElement] },
       { name: "SSN", elements: [{ field: "ssn" }] },
     ],
   };
-  expect(() =>
-    checkLinkageSatisfiability(["dob", "ssn"], terms, log, messaging),
-  ).not.toThrow();
-  expect(warns).toHaveLength(1);
-  expect(warns[0]).toContain("can never match");
-  expect(warns[0]).toContain("(DOB)");
-  expect(warns[0]).toContain("invitation");
+  const links = refusalLinks(["dob", "ssn"], terms);
+  expect(links[0]).toContain(
+    "the cleaning declared for 1 of the 2 agreed linkage keys drops every " +
+      "record",
+  );
+  expect(links[1]).toBe(
+    `Correct the cleaning steps those keys declare, ${messaging.blockRemedy}`,
+  );
+  expect(links).toContain("linkage key that drops every record: DOB");
 });
 
-test("does not warn for a complete parse_date input format", () => {
-  const { log, warns } = makeLogger();
-  checkLinkageSatisfiability(
-    ["dob"],
-    dobTerms([
-      { function: "parse_date", params: { inputFormat: "MM/DD/YYYY" } },
-    ]),
-    log,
-    messaging,
+test("an input satisfying only some of the declared keys is refused", () => {
+  // SSN is satisfiable; EMAIL needs a column the CSV lacks. The partial-coverage
+  // case: refused, naming the field the CSV cannot produce and the key it costs.
+  const terms: LinkageTerms = {
+    ...dobTerms(),
+    linkageFields: [
+      { name: "ssn", type: "ssn" },
+      { name: "email", type: "email_address" },
+    ],
+    linkageKeys: [
+      { name: "SSN", elements: [{ field: "ssn" }] },
+      { name: "EMAIL", elements: [{ field: "email" }] },
+    ],
+  };
+  const links = refusalLinks(["ssn"], terms);
+  expect(links[0]).toContain(
+    "the CSV cannot produce 1 of the 2 agreed linkage keys",
   );
-  expect(warns).toEqual([]);
+  expect(links[1]).toBe(
+    `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
+  );
+  expect(links).toContain("unsatisfied field: email (email_address)");
+  expect(links).toContain("linkage key the CSV cannot produce: EMAIL");
 });
 
 test("a dead key beside a column-unsatisfiable one is refused, naming both causes", () => {
-  const { log, warns } = makeLogger();
   // DOB is shape-satisfiable (column present) but dead; SSN is shape-unsatisfiable
   // (no ssn column). Every key is out, each for its own reason, so the refusal
-  // states both rather than warning twice and running to an empty result.
+  // states both and its remedy names both steps.
   const terms: LinkageTerms = {
     ...dobTerms(),
     linkageFields: [
@@ -164,57 +182,58 @@ test("a dead key beside a column-unsatisfiable one is refused, naming both cause
       { name: "ssn", type: "ssn" },
     ],
     linkageKeys: [
-      {
-        name: "DOB",
-        elements: [
-          {
-            field: "dob",
-            transform: [
-              { function: "parse_date", params: { inputFormat: "MM/DD" } },
-            ],
-          },
-        ],
-      },
+      { name: "DOB", elements: [deadDobElement] },
       { name: "SSN", elements: [{ field: "ssn" }] },
     ],
   };
-  const links = refusalLinks(["dob"], terms, log);
-  expect(links[0]).toContain("the CSV satisfies no other key");
+  const links = refusalLinks(["dob"], terms);
+  expect(links[0]).toContain(
+    "the CSV cannot produce 1 of the 2 agreed linkage keys",
+  );
+  expect(links[0]).toContain(
+    "the cleaning declared for 1 of the 2 agreed linkage keys drops every " +
+      "record",
+  );
   expect(links[1]).toBe(
-    `Correct the cleaning steps those keys declare, ${messaging.blockRemedy}`,
+    "Provide a CSV that covers the required field types and correct the " +
+      `cleaning steps those keys declare, ${messaging.blockRemedy}`,
   );
   expect(links).toContain("linkage key that drops every record: DOB");
   expect(links).toContain("unsatisfied field: ssn (ssn)");
-  expect(warns).toEqual([]);
+});
+
+test("terms declaring no linkage key at all are refused", () => {
+  // A key-count threshold passes this vacuously; the terms derivation reaches it
+  // by narrowing the built-in rule set all the way down.
+  const links = refusalLinks(["dob"], { ...dobTerms(), linkageKeys: [] });
+  expect(links[0]).toContain(
+    "the invitation's linkage terms declare no linkage key",
+  );
+  expect(links[1]).toBe(
+    `Agree linkage terms declaring at least one linkage key, ${messaging.blockRemedy}`,
+  );
 });
 
 // linkageKeys is bounded only at MAX_LINKAGE_ENTRIES, so the dead-key
 // enumeration can ask for more cause links than the renderer walks, exactly as
-// the column block's field enumeration can. The remedy must still arrive whole,
-// and the keys past the depth bound must be counted rather than dropped into a
-// list that reads as complete.
+// the field enumeration can. The remedy must still arrive whole, and the keys
+// past the depth bound must be counted rather than dropped into a list that
+// reads as complete.
 test("the dead-key refusal reports the keys it could not name, with the total", () => {
-  const { log } = makeLogger();
   const total = 20;
   const terms: LinkageTerms = {
     ...dobTerms(),
     linkageKeys: Array.from({ length: total }, (_, index) => ({
       name: `KEY_${index}`,
-      elements: [
-        {
-          field: "dob",
-          transform: [
-            { function: "parse_date", params: { inputFormat: "MM/DD" } },
-          ],
-        },
-      ],
+      elements: [deadDobElement],
     })),
   };
-  const links = refusalLinks(["dob"], terms, log);
+  const links = refusalLinks(["dob"], terms);
 
   expect(links.length).toBe(MAX_ERROR_CAUSE_DEPTH);
   expect(links[0]).toContain(
-    "none of the invitation's linkage keys can ever match",
+    `the cleaning declared for all ${total} agreed linkage keys drops every ` +
+      "record",
   );
   expect(links[1]).toBe(
     `Correct the cleaning steps those keys declare, ${messaging.blockRemedy}`,
@@ -226,8 +245,8 @@ test("the dead-key refusal reports the keys it could not name, with the total", 
     expect(link).toBe(`linkage key that drops every record: KEY_${index}`),
   );
   expect(links[links.length - 1]).toBe(
-    `and ${total - named.length} more details of the keys that cannot match ` +
-      `(${total} in total)`,
+    `and ${total - named.length} more details of the terms this CSV cannot ` +
+      `satisfy (${total} in total)`,
   );
 
   const rendered = links.join("\n");
@@ -253,12 +272,7 @@ const HOSTILE_FIELD_NAME = `ssn\\evil${ESC}[31m`;
 const HOSTILE_FIELD_ESCAPED_ONCE = String.raw`ssn\\evil\x1b[31m`;
 const HOSTILE_FIELD_ESCAPED_TWICE = String.raw`ssn\\\\evil\\x1b[31m`;
 
-const deadDobElement = {
-  field: "dob",
-  transform: [{ function: "parse_date", params: { inputFormat: "MM/DD" } }],
-};
-
-// The only key is dead and hostile-named: the all-keys-dead refusal, naming it.
+// The only key is dead and hostile-named: the dead-key refusal, naming it.
 function hostileDeadKeyTerms(): LinkageTerms {
   return {
     ...dobTerms(),
@@ -276,31 +290,10 @@ function hostileUnsatisfiedFieldTerms(): LinkageTerms {
   };
 }
 
-// A hostile-named dead key, a live key, and a key needing a hostile-named field
-// the CSV lacks: one call that reaches both warn routes, neither refused.
-function hostileWarnedTerms(): LinkageTerms {
-  return {
-    ...dobTerms(),
-    linkageFields: [
-      { name: "dob", type: "date_of_birth" },
-      { name: "ssn", type: "ssn" },
-      { name: HOSTILE_FIELD_NAME, type: "email_address" },
-    ],
-    linkageKeys: [
-      { name: HOSTILE_KEY_NAME, elements: [deadDobElement] },
-      { name: "SSN", elements: [{ field: "ssn" }] },
-      { name: "EMAIL", elements: [{ field: HOSTILE_FIELD_NAME }] },
-    ],
-  };
-}
-
 test("a refusal escapes a hostile key or field name exactly once end to end", () => {
-  const { log, warns } = makeLogger();
-
   const deadKeyRefusal = refusalRenderedForDisplay(
     ["dob"],
     hostileDeadKeyTerms(),
-    log,
   );
   expect(deadKeyRefusal).toContain(HOSTILE_KEY_ESCAPED_ONCE);
   expect(deadKeyRefusal).not.toContain(HOSTILE_KEY_ESCAPED_TWICE);
@@ -309,34 +302,10 @@ test("a refusal escapes a hostile key or field name exactly once end to end", ()
   const columnRefusal = refusalRenderedForDisplay(
     ["dob"],
     hostileUnsatisfiedFieldTerms(),
-    log,
   );
   expect(columnRefusal).toContain(HOSTILE_FIELD_ESCAPED_ONCE);
   expect(columnRefusal).not.toContain(HOSTILE_FIELD_ESCAPED_TWICE);
   expect(columnRefusal).not.toContain(ESC);
-
-  expect(warns).toEqual([]);
-});
-
-test("a warning escapes a hostile key or field name exactly once end to end", () => {
-  const { log, warns } = makeLogger();
-  // The warn call site is the sink: nothing escapes downstream of it, so the
-  // escaped form has to be what the sink already received.
-  checkLinkageSatisfiability(
-    ["dob", "ssn"],
-    hostileWarnedTerms(),
-    log,
-    messaging,
-  );
-
-  expect(warns).toHaveLength(2);
-  const [deadKeyWarning, unsatisfiedFieldWarning] = warns;
-  expect(deadKeyWarning).toContain(HOSTILE_KEY_ESCAPED_ONCE);
-  expect(deadKeyWarning).not.toContain(HOSTILE_KEY_ESCAPED_TWICE);
-  expect(deadKeyWarning).not.toContain(ESC);
-  expect(unsatisfiedFieldWarning).toContain(HOSTILE_FIELD_ESCAPED_ONCE);
-  expect(unsatisfiedFieldWarning).not.toContain(HOSTILE_FIELD_ESCAPED_TWICE);
-  expect(unsatisfiedFieldWarning).not.toContain(ESC);
 });
 
 // --- warnColumnsTheInvitationWillNotAccept ------------------------------------
@@ -394,23 +363,21 @@ test("with neither metadata nor column names there is nothing to compare", () =>
   expect(warns).toEqual([]);
 });
 
-test("a key blocked for a missing column is not also warned as dead, and still throws", () => {
-  const { log, warns } = makeLogger();
-  // The column is absent, so the key fails the column verdict (block); a dead
-  // element transform does not produce a second, contradictory dead-key warning,
-  // since deadKeys is scoped to shape-satisfiable keys.
-  expect(() =>
-    checkLinkageSatisfiability(
-      ["other_column"],
-      dobTerms([{ function: "parse_date", params: { inputFormat: "MM/DD" } }]),
-      log,
-      messaging,
-    ),
-  ).toThrow("cannot satisfy any");
-  expect(warns).toEqual([]);
+test("a key blocked for a missing column is not also reported as dead", () => {
+  // The column is absent, so the key is unsatisfiable; a dead element transform
+  // does not additionally list it as dead, since the dead grade is scoped to
+  // shape-satisfiable keys.
+  const links = refusalLinks(
+    ["other_column"],
+    dobTerms([{ function: "parse_date", params: { inputFormat: "MM/DD" } }]),
+  );
+  expect(links[1]).toBe(
+    `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
+  );
+  expect(links.join("\n")).not.toContain("drops every record");
 });
 
-// The block names field names that are TERMS content -- the partner's, on the
+// The refusal names field names that are TERMS content -- the partner's, on the
 // accept path -- so each sits on a labelled link of its own and can spend no
 // budget but that link's. Driven at the widest name the terms schema admits, and
 // at a name past every budget, because what the operator has to act on is the
@@ -418,42 +385,29 @@ test("a key blocked for a missing column is not also warned as dead, and still t
 test.each([
   ["the widest name the terms schema admits", MAX_NAME_LENGTH],
   ["a name past every budget", COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH * 4],
-])(
-  "the block's remedy reaches the operator whole under %s",
-  (_label, width) => {
-    const { log } = makeLogger();
-    const wide = "w".repeat(width);
-    const terms: LinkageTerms = {
-      ...dobTerms(),
-      linkageFields: [{ name: wide, type: "ssn" }],
-      linkageKeys: [{ name: "SSN", elements: [{ field: wide }] }],
-    };
-    const err = (() => {
-      try {
-        checkLinkageSatisfiability(["other_column"], terms, log, messaging);
-      } catch (e: unknown) {
-        return e;
-      }
-      throw new Error("the pre-flight did not block");
-    })();
-
-    const links = sanitizeErrorForDisplay(err).split("\ncaused by: ");
-    expect(links[0]).toContain("cannot satisfy any of the invitation's");
-    // The remedy whole, not a prefix of it: a wide name sharing its link is what
-    // would deliver one.
-    expect(links).toContain(
-      `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
-    );
-    const nameLink = links.find((link) =>
-      link.startsWith("unsatisfied field: "),
-    );
-    expect(nameLink).toBeDefined();
-    expect(nameLink).toContain("w".repeat(64));
-  },
-);
+])("the refusal's remedy reaches the operator whole under %s", (_l, width) => {
+  const wide = "w".repeat(width);
+  const terms: LinkageTerms = {
+    ...dobTerms(),
+    linkageFields: [{ name: wide, type: "ssn" }],
+    linkageKeys: [{ name: "SSN", elements: [{ field: wide }] }],
+  };
+  const links = refusalLinks(["other_column"], terms);
+  expect(links[0]).toContain(
+    "cannot satisfy every linkage key the invitation declares",
+  );
+  // The remedy whole, not a prefix of it: a wide name sharing its link is what
+  // would deliver one.
+  expect(links).toContain(
+    `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
+  );
+  const nameLink = links.find((link) => link.startsWith("unsatisfied field: "));
+  expect(nameLink).toBeDefined();
+  expect(nameLink).toContain("w".repeat(64));
+});
 
 // Terms whose every declared field is unsatisfiable against a CSV holding none
-// of them, one key per field, so no key is countable and the pre-flight blocks
+// of them, one key per field, so every key is out and the pre-flight refuses
 // with `fieldCount` names to enumerate.
 function unsatisfiableTerms(fieldCount: number): LinkageTerms {
   const fields = Array.from({ length: fieldCount }, (_, index) => ({
@@ -470,31 +424,21 @@ function unsatisfiableTerms(fieldCount: number): LinkageTerms {
   };
 }
 
-// Render the block this terms set raises, as the operator reads it.
-function blockedLinks(terms: LinkageTerms): string[] {
-  const { log } = makeLogger();
-  const err = (() => {
-    try {
-      checkLinkageSatisfiability(["other_column"], terms, log, messaging);
-    } catch (e: unknown) {
-      return e;
-    }
-    throw new Error("the pre-flight did not block");
-  })();
-  return sanitizeErrorForDisplay(err).split("\ncaused by: ");
-}
-
 // linkageFields is bounded only at MAX_LINKAGE_ENTRIES, so the enumeration can
 // ask for more cause links than the renderer walks. What the operator must not
 // get is a list that reads as complete while the rest was dropped past the depth
 // bound, so the last link the renderer reaches reports the overflow and the
 // total instead of naming one more field.
-test("the block reports the fields it could not name, with the total", () => {
+test("the refusal reports the details it could not name, with the total", () => {
   const total = 20;
-  const links = blockedLinks(unsatisfiableTerms(total));
+  // Each field costs one detail link and each key it collapses costs another.
+  const details = total * 2;
+  const links = refusalLinks(["other_column"], unsatisfiableTerms(total));
 
   expect(links.length).toBe(MAX_ERROR_CAUSE_DEPTH);
-  expect(links[0]).toContain("cannot satisfy any of the invitation's");
+  expect(links[0]).toContain(
+    "cannot satisfy every linkage key the invitation declares",
+  );
   expect(links[1]).toBe(
     `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
   );
@@ -505,7 +449,8 @@ test("the block reports the fields it could not name, with the total", () => {
     expect(link).toBe(`unsatisfied field: field${index} (ssn)`),
   );
   expect(links[links.length - 1]).toBe(
-    `and ${total - named.length} more unsatisfied fields (${total} in total)`,
+    `and ${details - named.length} more details of the terms this CSV cannot ` +
+      `satisfy (${details} in total)`,
   );
 
   // The fields past the enumeration are accounted for by that count, not by a
@@ -518,20 +463,25 @@ test("the block reports the fields it could not name, with the total", () => {
   expect(rendered).not.toContain(CAUSE_DEPTH_ELISION_MARKER);
 });
 
-test("the block names every field when they all fit the link budget", () => {
-  // One name per link the renderer reaches after the summary and the remedy: the
-  // widest enumeration that needs no overflow link at all.
-  const total = MAX_ERROR_CAUSE_DEPTH - 2;
-  const links = blockedLinks(unsatisfiableTerms(total));
+test("the refusal names every detail when they all fit the link budget", () => {
+  // One detail per link the renderer reaches after the summary and the remedy:
+  // the widest enumeration that needs no overflow link at all. Each field costs
+  // two links (the field, then the key it collapses), so half as many fields.
+  const fields = (MAX_ERROR_CAUSE_DEPTH - 2) / 2;
+  const links = refusalLinks(["other_column"], unsatisfiableTerms(fields));
 
   expect(links.length).toBe(MAX_ERROR_CAUSE_DEPTH);
-  expect(links.slice(2)).toEqual(
-    Array.from(
-      { length: total },
+  expect(links.slice(2)).toEqual([
+    ...Array.from(
+      { length: fields },
       (_, index) => `unsatisfied field: field${index} (ssn)`,
     ),
-  );
+    ...Array.from(
+      { length: fields },
+      (_, index) => `linkage key the CSV cannot produce: KEY_field${index}`,
+    ),
+  ]);
   const rendered = links.join("\n");
-  expect(rendered).not.toContain("more unsatisfied fields");
+  expect(rendered).not.toContain("more details of the terms");
   expect(rendered).not.toContain(CAUSE_DEPTH_ELISION_MARKER);
 });

@@ -14,6 +14,8 @@ import {
   dateFormatComponents,
   unsatisfiedLinkageFields,
   assessLinkageSatisfiability,
+  assertLinkageTermsSatisfiable,
+  decideLinkageTermsVerdict,
   checkValueConstraints,
   summarizeDatasetConstraintViolations,
   StandardizedField,
@@ -24,6 +26,7 @@ import {
 import * as standardizationModule from "../src/standardization";
 import { ESC, PRINTABLE_ASCII, RLO } from "../src/displayEscapingFixtures";
 import {
+  LinkageTermsUnsatisfiableError,
   OperatorConfigError,
   StandardizationTermsError,
   UnknownStandardizationFunctionError,
@@ -34,7 +37,11 @@ import { getLogger } from "../src/utils/logger";
 import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { inferMetadata } from "../src/config/metadata";
-import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
+import {
+  DEFAULT_LINKAGE_RULE_SET,
+  getDefaultLinkageTerms,
+  linkageTermsFromRuleSet,
+} from "../src/defaults/linkageTerms";
 import { getDefaultStandardization } from "../src/defaults/standardization";
 import { MAX_TRANSFORM_PARAM_LENGTH } from "../src/config/linkageTerms";
 import type {
@@ -4432,10 +4439,9 @@ describe("assessLinkageSatisfiability", () => {
     expect(satisfiableKeyCount).toBe(fullTerms.linkageKeys.length);
   });
 
-  test("an input covering no complete key reports zero satisfiable keys (the block signal)", () => {
+  test("an input covering no complete key reports zero satisfiable keys", () => {
     // Only first_name is present. Every default key has at least one other
-    // required field (ssn, last_name, or date_of_birth), so no key can match and
-    // the exchange should be blocked rather than run to a silent empty result.
+    // required field (ssn, last_name, or date_of_birth), so no key can match.
     const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
       ["first_name"],
       fullTerms,
@@ -4447,10 +4453,10 @@ describe("assessLinkageSatisfiability", () => {
     expect(names).toContain("date_of_birth");
   });
 
-  test("an input missing one field keeps the keys that do not need it (partial, warn)", () => {
+  test("an input missing one field keeps the keys that do not need it", () => {
     // No ssn column, but first/last name and dob are present. Keys that require
     // ssn become unsatisfiable; the name+dob keys survive, so the count is
-    // positive-but-not-all -- the warn (not block) case.
+    // positive but short of the declared total.
     const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
       ["last_name", "first_name", "dob"],
       fullTerms,
@@ -4807,6 +4813,230 @@ describe("assessLinkageSatisfiability dead keys", () => {
         expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).toBeNull();
       }
     }
+  });
+});
+
+// --- decideLinkageTermsVerdict: the grading a run is held to -----------------
+
+describe("decideLinkageTermsVerdict", () => {
+  // Two independent keys over two fields, so a case can leave one key short
+  // while the other stays live -- the shape the collapsed rule turns on.
+  const twoKeyTerms = (
+    keyElements: LinkageKey["elements"][] = [
+      [{ field: "dob" }],
+      [{ field: "ssn" }],
+    ],
+  ): LinkageTerms => ({
+    version: "1.0.0",
+    identity: "Party",
+    date: "2025-01-01",
+    algorithm: "psi",
+    linkageStrategy: "cascade",
+    output: { expectsOutput: true, shareWithPartner: false },
+    deduplicate: false,
+    linkageFields: [
+      { name: "dob", type: "date_of_birth" },
+      { name: "ssn", type: "ssn" },
+    ],
+    linkageKeys: keyElements.map((elements, i) => ({
+      name: `KEY${i}`,
+      elements,
+    })),
+  });
+  const deadTransform = [
+    { function: "parse_date" as const, params: { inputFormat: "MM/DD" } },
+  ];
+
+  test("every key satisfiable and live -> the run may proceed", () => {
+    const verdict = decideLinkageTermsVerdict(["dob", "ssn"], twoKeyTerms());
+    expect(verdict.fullySatisfied).toBe(true);
+    expect(verdict.keys.map((k) => k.fitness)).toEqual([
+      "satisfiable",
+      "satisfiable",
+    ]);
+    expect(verdict.unsatisfiableKeys).toEqual([]);
+    expect(verdict.deadKeys).toEqual([]);
+    expect(verdict.unsatisfiedFields).toEqual([]);
+  });
+
+  test("one unsatisfiable key among satisfiable ones -> refused", () => {
+    const verdict = decideLinkageTermsVerdict(["dob"], twoKeyTerms());
+    expect(verdict.fullySatisfied).toBe(false);
+    expect(verdict.keys.map((k) => k.fitness)).toEqual([
+      "satisfiable",
+      "unsatisfiable",
+    ]);
+    expect(verdict.unsatisfiableKeys.map((k) => k.name)).toEqual(["KEY1"]);
+    expect(verdict.deadKeys).toEqual([]);
+    expect(verdict.unsatisfiedFields.map((f) => f.name)).toEqual(["ssn"]);
+  });
+
+  test("one dead key among live ones -> refused", () => {
+    // Both keys' columns are present, so the column check passes; KEY0's own
+    // element cleaning drops every record regardless of the data.
+    const verdict = decideLinkageTermsVerdict(
+      ["dob", "ssn"],
+      twoKeyTerms([
+        [{ field: "dob", transform: deadTransform }],
+        [{ field: "ssn" }],
+      ]),
+    );
+    expect(verdict.fullySatisfied).toBe(false);
+    expect(verdict.keys.map((k) => k.fitness)).toEqual(["dead", "satisfiable"]);
+    expect(verdict.deadKeys.map((k) => k.name)).toEqual(["KEY0"]);
+    expect(verdict.unsatisfiableKeys).toEqual([]);
+    expect(verdict.unsatisfiedFields).toEqual([]);
+  });
+
+  test("no satisfiable key -> refused", () => {
+    const verdict = decideLinkageTermsVerdict(["other_column"], twoKeyTerms());
+    expect(verdict.fullySatisfied).toBe(false);
+    expect(verdict.keys.map((k) => k.fitness)).toEqual([
+      "unsatisfiable",
+      "unsatisfiable",
+    ]);
+    expect(verdict.unsatisfiableKeys.map((k) => k.name)).toEqual([
+      "KEY0",
+      "KEY1",
+    ]);
+    expect(verdict.unsatisfiedFields.map((f) => f.name)).toEqual([
+      "dob",
+      "ssn",
+    ]);
+  });
+
+  test("every satisfiable key dead -> refused", () => {
+    const verdict = decideLinkageTermsVerdict(
+      ["dob"],
+      twoKeyTerms([
+        [{ field: "dob", transform: deadTransform }],
+        [{ field: "ssn" }],
+      ]),
+    );
+    expect(verdict.fullySatisfied).toBe(false);
+    expect(verdict.keys.map((k) => k.fitness)).toEqual([
+      "dead",
+      "unsatisfiable",
+    ]);
+    expect(verdict.deadKeys.map((k) => k.name)).toEqual(["KEY0"]);
+    expect(verdict.unsatisfiableKeys.map((k) => k.name)).toEqual(["KEY1"]);
+  });
+
+  test("terms declaring no linkage key at all -> refused", () => {
+    // A key-count threshold passes this vacuously (0 satisfiable of 0 declared),
+    // and linkageTermsFromRuleSet reaches it by narrowing the built-in set all
+    // the way down when the columns support no key.
+    const verdict = decideLinkageTermsVerdict(["dob", "ssn"], twoKeyTerms([]));
+    expect(verdict.fullySatisfied).toBe(false);
+    expect(verdict.keys).toEqual([]);
+    expect(verdict.unsatisfiableKeys).toEqual([]);
+    expect(verdict.deadKeys).toEqual([]);
+  });
+
+  test("linkageTermsFromRuleSet can derive the keyless terms the verdict refuses", () => {
+    // The derived-defaults path, not a hand-built fixture: metadata carrying no
+    // linkage-roled column narrows the built-in rule set to no key.
+    const derived = linkageTermsFromRuleSet(DEFAULT_LINKAGE_RULE_SET, "Party", [
+      {
+        name: "row_id",
+        type: "identifier",
+        role: "identifier",
+        isPayload: false,
+      },
+    ]);
+    expect(derived.linkageKeys).toEqual([]);
+    expect(decideLinkageTermsVerdict(["row_id"], derived).fullySatisfied).toBe(
+      false,
+    );
+  });
+
+  test("assessLinkageSatisfiability projects the same grading", () => {
+    // The per-key readout and the run's verdict must not drift: the shape count
+    // is exactly the keys the verdict does not grade unsatisfiable.
+    const columns = ["dob"];
+    const terms = twoKeyTerms([
+      [{ field: "dob", transform: deadTransform }],
+      [{ field: "ssn" }],
+    ]);
+    const verdict = decideLinkageTermsVerdict(columns, terms);
+    const { unsatisfied, satisfiableKeyCount, deadKeys } =
+      assessLinkageSatisfiability(columns, terms);
+    expect(satisfiableKeyCount).toBe(
+      verdict.keys.length - verdict.unsatisfiableKeys.length,
+    );
+    expect(deadKeys).toEqual(verdict.deadKeys);
+    expect(unsatisfied).toEqual(verdict.unsatisfiedFields);
+  });
+});
+
+// --- assertLinkageTermsSatisfiable: the run-boundary refusal -----------------
+
+describe("assertLinkageTermsSatisfiable", () => {
+  const oneKeyTerms = (name: string): LinkageTerms => ({
+    version: "1.0.0",
+    identity: "Party",
+    date: "2025-01-01",
+    algorithm: "psi",
+    linkageStrategy: "cascade",
+    output: { expectsOutput: true, shareWithPartner: false },
+    deduplicate: false,
+    linkageFields: [{ name: "ssn", type: "ssn" }],
+    linkageKeys: [{ name, elements: [{ field: "ssn" }] }],
+  });
+
+  test("a fully satisfied input passes", () => {
+    expect(() =>
+      assertLinkageTermsSatisfiable(["ssn"], oneKeyTerms("SSN")),
+    ).not.toThrow();
+  });
+
+  test("a shortfall raises the typed refusal and names it", () => {
+    let raised: unknown;
+    try {
+      assertLinkageTermsSatisfiable(["other"], oneKeyTerms("SSN"));
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(LinkageTermsUnsatisfiableError);
+    // A UsageError subclass, so the CLI's error->exit boundary reports exit 64.
+    expect(raised).toBeInstanceOf(UsageError);
+    // Deliberately not an OperatorConfigError: its message carries the agreed
+    // terms' names, which are partner-authored on every accept path.
+    expect(raised).not.toBeInstanceOf(OperatorConfigError);
+    const rendered = sanitizeErrorForDisplay(raised);
+    expect(rendered).toContain("out of band");
+    expect(rendered).toContain("SSN");
+    expect(rendered).toContain("ssn (ssn)");
+  });
+
+  test("keyless terms raise the refusal with no name enumeration to make", () => {
+    let raised: unknown;
+    try {
+      assertLinkageTermsSatisfiable(["ssn"], {
+        ...oneKeyTerms("SSN"),
+        linkageKeys: [],
+      });
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(LinkageTermsUnsatisfiableError);
+    expect((raised as Error).cause).toBeUndefined();
+    expect(sanitizeErrorForDisplay(raised)).toContain("declare no linkage key");
+  });
+
+  test("a partner-authored key name spends only its own display budget", () => {
+    // The names ride cause links of their own, so a key name packed to the
+    // display cap cannot truncate the summary or the remedy sentence.
+    const shouting = "K".repeat(4000);
+    let raised: unknown;
+    try {
+      assertLinkageTermsSatisfiable(["other"], oneKeyTerms(shouting));
+    } catch (err) {
+      raised = err;
+    }
+    const rendered = sanitizeErrorForDisplay(raised);
+    expect(rendered).toContain("out of band");
+    expect(rendered).toContain("unsatisfied linkage fields (1)");
   });
 });
 

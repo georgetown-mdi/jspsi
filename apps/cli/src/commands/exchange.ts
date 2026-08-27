@@ -704,21 +704,19 @@ export async function prepareDataset(
   });
 
   // Pre-flight this run's CSV against the committed linkage terms before any
-  // exchange work, the same satisfiability gate accept applies. This is the only
-  // place that catches it on the recurring path: prepareForExchange only fails
-  // closed on an explicit standardization that contradicts its terms, never on a
-  // CSV that no longer satisfies the agreed terms, so a run whose CSV no longer
-  // satisfies them -- a swapped CSV, or one never checked at an offline accept --
-  // would otherwise reach a silent empty result indistinguishable from a real
-  // non-match. Gated on explicit linkageTerms only: the guard targets the
-  // operator's committed terms, not the default terms derived from the CSV when
-  // none are committed. The config's standardization and metadata are passed so
-  // the verdict matches what prepareForExchange resolves (accept passes neither).
+  // exchange work, the same satisfiability gate accept applies -- advance notice,
+  // in configuration-specific wording, of the refusal prepareForExchange raises
+  // from the same core verdict below. It guards a recurring run whose CSV has
+  // drifted from the terms the configuration committed to: a file swapped since
+  // setup, or one never checked at an offline accept. Gated on explicit
+  // linkageTerms only: the wording here names the operator's committed terms, and
+  // terms derived from the CSV when none are committed are graded by the run
+  // boundary alone. The config's standardization and metadata are passed so the
+  // verdict matches what prepareForExchange grades (accept passes neither).
   if (exchangeDataSpec.linkageTerms !== undefined)
     checkLinkageSatisfiability(
       columns,
       exchangeDataSpec.linkageTerms,
-      log,
       {
         source: "configuration",
         blockRemedy:

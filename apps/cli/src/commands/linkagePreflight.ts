@@ -1,29 +1,31 @@
 import {
-  assessLinkageSatisfiability,
   chainDetailCauses,
+  decideLinkageTermsVerdict,
   disclosedColumnNames,
   getLogger,
   inferMetadata,
+  LinkageTermsUnsatisfiableError,
   MAX_ERROR_CAUSE_DEPTH,
   redactAndSanitizeForDisplay,
-  UsageError,
 } from "@psilink/core";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 
 /**
  * Source-specific wording for {@link checkLinkageSatisfiability}. The accept and
- * exchange entry points share the block/warn policy and the field sanitization
- * but differ in where the terms came from and how an operator fixes a run that
- * can satisfy nothing.
+ * exchange entry points share the refusal and the field sanitization but differ in
+ * where the terms came from and how an operator settles terms their input cannot
+ * satisfy.
  */
 export interface LinkagePreflightMessaging {
   /** Possessive noun naming the terms' origin in the messages: `"invitation"` on
    * the accept path (the partner's adopted terms), `"configuration"` on the
    * exchange path (the committed config). */
   source: string;
-  /** Clause closing the block error after "...covers the required field types, ".
-   * Accept points at requesting a fresh invitation; exchange at re-establishing
-   * the committed exchange. */
+  /** Clause closing the block error after the remedy lead the verdict selects
+   * ("...covers the required field types, "). Accept points at requesting a fresh
+   * invitation; exchange at re-establishing the committed exchange. Both name the
+   * out-of-band renegotiation that is the real remedy for terms this input cannot
+   * satisfy. */
   blockRemedy: string;
 }
 
@@ -62,16 +64,20 @@ function fitDetailLinks(details: string[], overflowNoun: string): string[] {
 
 /**
  * Pre-flight a CSV's `columns` against the linkage `terms` it will be exchanged
- * under, enforcing the policy both real-exchange entry points share: block
- * (throw {@link UsageError}, exit 64) when no linkage key can produce a key
- * string -- whether because no key is satisfiable from the columns or because
- * every satisfiable one declares cleaning that drops all records -- since the
- * exchange would then produce a result byte-indistinguishable from a legitimately
- * empty intersection, and warn-and-proceed when only some keys are lost that way.
- * The detection lives in `@psilink/core`'s {@link assessLinkageSatisfiability};
- * this wrapper owns only the message wording and partner-sourced field
- * sanitization, kept in one copy so the accept and exchange paths cannot drift
- * apart on the threshold or the escaping.
+ * under: refuse (throw {@link LinkageTermsUnsatisfiableError}, exit 64) unless the
+ * terms declare at least one linkage key and this CSV can satisfy every one of
+ * them.
+ *
+ * It holds no policy of its own. The grading is core's
+ * {@link decideLinkageTermsVerdict}, the same verdict `prepareForExchange`
+ * enforces at the run boundary, so this is advance notice of a refusal that would
+ * fire anyway -- earlier, before any connection or credential, and in wording that
+ * names where the terms came from. The offline accept path calls no prepare at
+ * all, so there this is the only place the refusal lands.
+ *
+ * This wrapper owns the message wording and the partner-sourced name handling,
+ * kept in one copy so the accept and exchange paths cannot drift apart on the
+ * escaping.
  *
  * @param standardization The committed config's explicit standardization, when
  *   any: an explicit column remap satisfies a field whose semantic type is
@@ -87,116 +93,104 @@ function fitDetailLinks(details: string[], overflowNoun: string): string[] {
 export function checkLinkageSatisfiability(
   columns: string[],
   terms: LinkageTerms,
-  log: ReturnType<typeof getLogger>,
   messaging: LinkagePreflightMessaging,
   standardization?: Standardization,
   metadata?: Metadata,
 ): void {
-  const { unsatisfied, satisfiableKeyCount, deadKeys } =
-    assessLinkageSatisfiability(columns, terms, standardization, metadata);
+  const verdict = decideLinkageTermsVerdict(
+    columns,
+    terms,
+    standardization,
+    metadata,
+  );
+  if (verdict.fullySatisfied) return;
 
-  // Both refusals below partition by WHO CHOSE THE BYTES rather than composing
-  // one sentence: the names are terms content -- partner-authored on the accept
-  // path -- and the display boundary caps each cause link independently, so names
+  if (verdict.keys.length === 0)
+    throw new LinkageTermsUnsatisfiableError(
+      `the ${messaging.source}'s linkage terms declare no linkage key, so this ` +
+        "exchange has nothing to match on and would produce a result " +
+        "indistinguishable from a legitimately empty intersection.",
+      {
+        cause: chainDetailCauses([
+          "Agree linkage terms declaring at least one linkage key, " +
+            messaging.blockRemedy,
+        ]),
+      },
+    );
+
+  // The refusal partitions by WHO CHOSE THE BYTES rather than composing one
+  // sentence: the names are terms content -- partner-authored on the accept path
+  // -- and the display boundary caps each cause link independently, so names
   // sharing the operative sentence's link can spend its budget and delete the step
   // the operator has to act on. Each name gets a labelled link of its own, raw,
   // since the boundary that renders the chain is the one altitude that escapes it.
   // The remedy is chained ahead of the names for the reason the transport refusals
   // chain theirs first: the renderer's depth bound reaches it before any detail.
+  //
+  // Ordered by how directly the operator acts on each: the unsatisfied fields name
+  // what a conforming CSV has to carry, the dead keys name what a corrected terms
+  // document has to fix, and the unsatisfiable keys report which agreed keys those
+  // field gaps cost -- a consequence of the first list rather than a separate step.
   // With no DECLARED field unproducible -- the keys are unsatisfiable only by
-  // referencing undeclared fields -- there is no field link at all, leaving the
-  // summary and its remedy to stand alone.
-  const fieldDetails = unsatisfied.map(
-    (field) => `unsatisfied field: ${field.name} (${field.type})`,
-  );
+  // referencing undeclared fields -- there is no field link at all and the key
+  // links carry the whole enumeration.
+  const details = [
+    ...verdict.unsatisfiedFields.map(
+      (field) => `unsatisfied field: ${field.name} (${field.type})`,
+    ),
+    ...verdict.deadKeys.map(
+      (key) => `linkage key that drops every record: ${key.name}`,
+    ),
+    ...verdict.unsatisfiableKeys.map(
+      (key) => `linkage key the CSV cannot produce: ${key.name}`,
+    ),
+  ];
 
-  // Keys whose columns are all present but whose declared cleaning can never
-  // produce a value (a self-defeating parse_date input format): they pass the
-  // column check below yet would contribute nothing. Surfaced separately from the
-  // column block/warn -- their remedy is to fix the terms, not the CSV -- and
-  // before the all-satisfiable early return, since a dead key still counts as
-  // shape-satisfiable.
-  if (deadKeys.length > 0) {
-    // deadKeys is a subset of the shape-satisfiable keys, so an equal count means
-    // every key that passed the column check is dead: the run can emit no key
-    // string at all, which is the guaranteed-empty result the column block below
-    // exists to prevent, reached by a different route. Refused rather than warned
-    // for that reason. Any remaining key is out for the column reason, so the
-    // chain carries that half of the cause too.
-    if (satisfiableKeyCount === deadKeys.length) {
-      const noOtherKeySatisfied = deadKeys.length < terms.linkageKeys.length;
-      throw new UsageError(
-        `none of the ${messaging.source}'s linkage keys can ever match: a ` +
-          "cleaning step drops every record for every key the CSV satisfies" +
-          (noOtherKeySatisfied ? ", and the CSV satisfies no other key" : "") +
-          "; running would produce a guaranteed empty result.",
-        {
-          cause: chainDetailCauses([
-            `Correct the cleaning steps those keys declare, ${messaging.blockRemedy}`,
-            ...fitDetailLinks(
-              [
-                ...deadKeys.map(
-                  (key) => `linkage key that drops every record: ${key.name}`,
-                ),
-                ...(noOtherKeySatisfied ? fieldDetails : []),
-              ],
-              "details of the keys that cannot match",
-            ),
-          ]),
-        },
-      );
-    }
-    // The warn route escapes at its own call site, because a log.warn IS the
-    // sink: nothing downstream of it escapes again.
-    const deadNames = deadKeys
-      .map((key) => redactAndSanitizeForDisplay(key.name))
-      .join(", ");
-    log.warn(
-      `${deadKeys.length} of the ${messaging.source}'s linkage keys can never ` +
-        `match -- a cleaning step drops every record (${deadNames}); those keys ` +
-        "will contribute nothing to this exchange.",
+  const total = verdict.keys.length;
+  // Each shortfall clause names the keys it is about in full, so a refusal
+  // carrying one clause reads as well as one carrying both.
+  const keysPhrase = (count: number): string =>
+    total === 1
+      ? "the one agreed linkage key"
+      : count === total
+        ? `all ${total} agreed linkage keys`
+        : `${count} of the ${total} agreed linkage keys`;
+  const shortfalls: string[] = [];
+  if (verdict.unsatisfiableKeys.length > 0)
+    shortfalls.push(
+      `the CSV cannot produce ${keysPhrase(verdict.unsatisfiableKeys.length)}`,
     );
-  }
-
-  // Gate on the key count, not on `unsatisfied.length`: a key can be unsatisfiable
-  // because it references a field the terms never declare (not just a declared
-  // field the CSV lacks), in which case `unsatisfied` is empty yet keys still
-  // collapse. satisfiableKeyCount accounts for both.
-  if (satisfiableKeyCount === terms.linkageKeys.length) return;
-
-  if (satisfiableKeyCount === 0)
-    throw new UsageError(
-      `the CSV cannot satisfy any of the ${messaging.source}'s linkage keys; ` +
-        "running would produce a silent empty result.",
-      {
-        cause: chainDetailCauses([
-          `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
-          ...fitDetailLinks(fieldDetails, "unsatisfied fields"),
-        ]),
-      },
+  if (verdict.deadKeys.length > 0)
+    shortfalls.push(
+      `the cleaning declared for ${keysPhrase(verdict.deadKeys.length)} ` +
+        "drops every record",
     );
 
-  // This warn route escapes at its own call site for the same reason as the
-  // dead-key one above. `type` is a schema-validated enum literal but takes the
-  // same path as `name`, so no later edit leaves a raw token beside an escaped
-  // one. The enumeration is omitted on the same no-declared-field condition as
-  // the blocks above, leaving the warning itself as the signal.
-  const detail =
-    unsatisfied.length > 0
-      ? " (unsatisfied fields: " +
-        unsatisfied
-          .map(
-            (field) =>
-              `${redactAndSanitizeForDisplay(field.name)} ` +
-              `(${redactAndSanitizeForDisplay(field.type)})`,
-          )
-          .join(", ") +
-        ")"
-      : "";
-  log.warn(
-    `the CSV cannot satisfy all of the ${messaging.source}'s linkage fields` +
-      detail +
-      "; keys that require those fields will be inactive for this exchange.",
+  // The remedy lead names the step each shortfall actually takes: a missing column
+  // is fixed in the CSV, a dead key only in the terms, so a refusal carrying both
+  // names both. `blockRemedy` then closes with the out-of-band renegotiation that
+  // settles terms this input cannot satisfy at all.
+  const remedyLeads: string[] = [];
+  if (verdict.unsatisfiableKeys.length > 0)
+    remedyLeads.push("provide a CSV that covers the required field types");
+  if (verdict.deadKeys.length > 0)
+    remedyLeads.push("correct the cleaning steps those keys declare");
+  const remedy = remedyLeads.join(" and ");
+
+  throw new LinkageTermsUnsatisfiableError(
+    `this CSV cannot satisfy every linkage key the ${messaging.source} ` +
+      `declares: ${shortfalls.join(", and ")}. Running would exchange fewer ` +
+      "keys than the agreed terms declare, while the exchange record would " +
+      "still name every field those terms reference.",
+    {
+      cause: chainDetailCauses([
+        `${remedy.charAt(0).toUpperCase()}${remedy.slice(1)}, ${messaging.blockRemedy}`,
+        ...fitDetailLinks(
+          details,
+          "details of the terms this CSV cannot satisfy",
+        ),
+      ]),
+    },
   );
 }
 
@@ -254,9 +248,9 @@ const ACCEPTANCE_OUTCOME: Record<AcceptMode, string> = {
  * `prepareForExchange`, before any data is sent, so without this the operator
  * meets the refusal only after consenting, writing files, and coordinating with
  * a partner -- while both facts were on the consent surface. It warns rather than
- * refuses on both paths, matching the grading {@link checkLinkageSatisfiability}
- * already applies; what the acceptance then does differs by path, so the warning
- * states it (see {@link ACCEPTANCE_OUTCOME}).
+ * refuses on both paths, because the disagreement is settled by editing the
+ * configuration this acceptance is about to write; what the acceptance then does
+ * differs by path, so the warning states it (see {@link ACCEPTANCE_OUTCOME}).
  *
  * A NON-EMPTY declared `send` that disagrees with the disclosed set is a
  * different comparison with different remedies and is not covered here. The

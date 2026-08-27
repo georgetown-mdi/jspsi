@@ -9,7 +9,8 @@ import {
   ConnectionError,
   createMessagePipe,
 } from "../src/connection/messageConnection";
-import { UsageError } from "../src/errors";
+import { LinkageTermsUnsatisfiableError, UsageError } from "../src/errors";
+import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 
 import type { Algorithm } from "../src/types";
 import type { BuiltExchangeRecord } from "../src/exchangeRecord";
@@ -660,4 +661,75 @@ test("the unconditional count exchange composes into a deadlock-free full exchan
     expect(respRecvInit.resolvedRole).toBe("sender");
     expect(respRecvResp.resolvedRole).toBe("receiver");
   }
+});
+
+// --- Terms the input cannot fully satisfy ------------------------------------
+//
+// governance.matchingBasis is derived from the AGREED terms (pinned above), so it
+// names every linkage field those terms declare whatever this party's columns
+// actually supplied. A party whose columns cannot produce one of the agreed keys
+// therefore has to be stopped before the run, or the record it writes names a
+// field it contributed nothing for.
+
+// clientRows carry first_name and note, never a last_name column, so the second
+// agreed key here can produce no key string for any of this party's records.
+const partlySatisfiedTerms = {
+  ...firstNameTerms,
+  identity: "Initiator Co",
+  output: bothOut,
+  linkageFields: [
+    { name: "firstName", type: "first_name" as const },
+    { name: "lastName", type: "last_name" as const },
+  ],
+  linkageKeys: [
+    { name: "firstName", elements: [{ field: "firstName" }] },
+    {
+      name: "firstName + lastName",
+      elements: [{ field: "firstName" }, { field: "lastName" }],
+    },
+  ],
+};
+
+const preparePartlySatisfied = () =>
+  prepareForExchange(
+    { linkageTerms: partlySatisfiedTerms },
+    "Initiator Co",
+    clientRows,
+    ["first_name", "note"],
+  );
+
+test("terms the input only partly satisfies stop the run before any record is built", async () => {
+  const records: Array<BuiltExchangeRecord> = [];
+  const [conn] = createMessagePipe();
+  const run = (async () => {
+    records.push(
+      built(
+        await runExchange(conn, "initiator", preparePartlySatisfied(), {
+          psiLibrary,
+        }),
+      ),
+    );
+  })();
+
+  await expect(run).rejects.toBeInstanceOf(LinkageTermsUnsatisfiableError);
+  expect(records).toEqual([]);
+});
+
+test("the refusal names the shortfall and the out-of-band remedy", () => {
+  let raised: unknown;
+  try {
+    preparePartlySatisfied();
+  } catch (err) {
+    raised = err;
+  }
+  expect(raised).toBeInstanceOf(LinkageTermsUnsatisfiableError);
+  // A UsageError subclass, so the CLI's error->exit boundary reports exit 64.
+  expect(raised).toBeInstanceOf(UsageError);
+  const rendered = sanitizeErrorForDisplay(raised);
+  expect(rendered).toContain("1 of the 2 agreed linkage keys");
+  expect(rendered).toContain("out of band");
+  // The names ride cause links of their own, so both the unsatisfied field and
+  // the key it collapses are reachable in the rendered chain.
+  expect(rendered).toContain("lastName (last_name)");
+  expect(rendered).toContain("firstName + lastName");
 });

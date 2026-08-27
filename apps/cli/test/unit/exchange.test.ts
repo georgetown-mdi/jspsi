@@ -1866,6 +1866,19 @@ const ssnAndNameDobTerms: LinkageTerms = {
   ],
 };
 
+// The last-name+dob key alone: the terms a last_name+dob CSV satisfies in full,
+// for the tests whose subject is the lock-in rather than coverage.
+const nameDobTerms: LinkageTerms = {
+  ...ssnAndNameDobTerms,
+  linkageFields: [
+    { name: "last_name", type: "last_name" },
+    { name: "dob", type: "date_of_birth" },
+  ],
+  linkageKeys: [
+    { name: "NAME_DOB", elements: [{ field: "last_name" }, { field: "dob" }] },
+  ],
+};
+
 function writeInput(contents: string): string {
   const input = path.join(dir, "in.csv");
   fs.writeFileSync(input, contents);
@@ -1880,7 +1893,7 @@ function consentContext(): { configPath: string; logFile: string | undefined } {
   return { configPath: configFile, logFile: undefined };
 }
 
-test("prepareDataset: blocks (UsageError) naming the field when the CSV satisfies no linkage key", async () => {
+test("prepareDataset: refuses (UsageError) naming the field when the CSV satisfies no linkage key", async () => {
   // A first_name-only CSV cannot produce the ssn field the lone key needs, so the
   // run must stop with a usage error rather than reach a silent empty exchange.
   const input = writeInput("first_name\nAda\n");
@@ -1892,7 +1905,7 @@ test("prepareDataset: blocks (UsageError) naming the field when the CSV satisfie
   ).catch((e: unknown) => e);
   expect(err).toBeInstanceOf(UsageError);
   expect((err as Error).message).toMatch(
-    /cannot satisfy any of the configuration's linkage keys/,
+    /cannot satisfy every linkage key the configuration declares/,
   );
   // The field is named on a labelled link of its own -- terms content is
   // partner-chosen on the sibling accept path -- so it is the rendered chain the
@@ -1902,25 +1915,25 @@ test("prepareDataset: blocks (UsageError) naming the field when the CSV satisfie
   );
 });
 
-test("prepareDataset: warns naming the unsatisfied field and proceeds when only some keys are satisfiable", async () => {
-  // last_name+dob satisfy the NAME_DOB key but not the SSN key, so prepareDataset
-  // warns (naming ssn) and proceeds to prepareForExchange rather than blocking.
+test("prepareDataset: refuses when only some of the committed keys are satisfiable", async () => {
+  // last_name+dob satisfy the NAME_DOB key but not the SSN key. The run would
+  // match on fewer keys than the committed terms declare, so it stops before any
+  // exchange work rather than proceeding on what is left.
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
-  const prepared = await prepareDataset(
+  const err = await prepareDataset(
     { linkageTerms: ssnAndNameDobTerms },
     "Test Party",
     input,
     consentContext(),
+  ).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(UsageError);
+  const rendered = sanitizeErrorForDisplay(err);
+  expect(rendered).toContain(
+    "the CSV cannot produce 1 of the 2 agreed linkage keys",
   );
-  expect(prepared).toBeDefined();
-  expect(
-    mockState.warnings.some(
-      (m) =>
-        m.includes(
-          "cannot satisfy all of the configuration's linkage fields",
-        ) && m.includes("ssn (ssn)"),
-    ),
-  ).toBe(true);
+  expect(rendered).toContain("unsatisfied field: ssn (ssn)");
+  expect(rendered).toContain("linkage key the CSV cannot produce: SSN");
+  expect(mockState.warnings).toHaveLength(0);
 });
 
 test("prepareDataset: an explicit standardization remap satisfies a field the column type alone would not", async () => {
@@ -1934,7 +1947,9 @@ test("prepareDataset: an explicit standardization remap satisfies a field the co
       input,
       consentContext(),
     ),
-  ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
+  ).rejects.toThrow(
+    /cannot satisfy every linkage key the configuration declares/,
+  );
 
   // ...but a remap binding ssn <- ssn_source makes the field producible, so the
   // same CSV proceeds with no block and no warning. This is the exchange-path
@@ -1974,7 +1989,9 @@ test("prepareDataset: an explicit metadata type satisfies a column whose name do
       input,
       consentContext(),
     ),
-  ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
+  ).rejects.toThrow(
+    /cannot satisfy every linkage key the configuration declares/,
+  );
 
   // ...but the config's explicit metadata types patient_number as ssn, exactly as
   // the exchange will, so the same CSV proceeds with no block and no warning. The
@@ -2018,7 +2035,9 @@ test("prepareDataset: an explicit metadata type that retypes the column away blo
       input,
       consentContext(),
     ),
-  ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
+  ).rejects.toThrow(
+    /cannot satisfy every linkage key the configuration declares/,
+  );
 });
 
 // --- prepareDataset: recurring payload lock-in -------------------------------
@@ -2029,7 +2048,7 @@ test("prepareDataset: a committed payload.receive locks in the expected received
   // transmitted payload matches it exactly (the recurring half of the lock-in).
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const terms: LinkageTerms = {
-    ...ssnAndNameDobTerms,
+    ...nameDobTerms,
     payload: { receive: [{ name: "diagnosis" }, { name: "notes" }] },
   };
   const prepared = await prepareDataset(
@@ -2044,7 +2063,7 @@ test("prepareDataset: a committed payload.receive locks in the expected received
 test("prepareDataset: a config without payload.receive locks in nothing (lazy)", async () => {
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const prepared = await prepareDataset(
-    { linkageTerms: ssnAndNameDobTerms },
+    { linkageTerms: nameDobTerms },
     "Test Party",
     input,
     consentContext(),
@@ -2060,7 +2079,7 @@ test("prepareDataset: the top-level expectedPayloadColumns is the canonical lock
   // advertised no payload.send.
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const terms: LinkageTerms = {
-    ...ssnAndNameDobTerms,
+    ...nameDobTerms,
     payload: { receive: [{ name: "ignored_by_precedence" }] },
   };
   const prepared = await prepareDataset(
@@ -2077,7 +2096,7 @@ test("prepareDataset: an empty expectedPayloadColumns locks in the strict empty 
   // set; it is a strict "receive nothing" lock-in, not the absent/lazy case.
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const prepared = await prepareDataset(
-    { linkageTerms: ssnAndNameDobTerms, expectedPayloadColumns: [] },
+    { linkageTerms: nameDobTerms, expectedPayloadColumns: [] },
     "Test Party",
     input,
     consentContext(),
@@ -2096,7 +2115,7 @@ test("prepareDataset: the config's expectedPartnerDeduplicate is restored onto t
   for (const declared of [false, true]) {
     const prepared = await prepareDataset(
       {
-        linkageTerms: ssnAndNameDobTerms,
+        linkageTerms: nameDobTerms,
         expectedPartnerDeduplicate: declared,
       },
       "Test Party",
@@ -2114,7 +2133,7 @@ test("prepareDataset: a config with no declaration binds nothing (the two-config
   // This party's own linkage_terms.deduplicate is NOT read as a binding.
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const prepared = await prepareDataset(
-    { linkageTerms: { ...ssnAndNameDobTerms, deduplicate: true } },
+    { linkageTerms: { ...nameDobTerms, deduplicate: true } },
     "Test Party",
     input,
     consentContext(),
