@@ -89,7 +89,11 @@ import {
   runOnlineBootstrap,
 } from "../../src/onlineBootstrap";
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
-import { IDENTITY_REQUIRED } from "../../src/partyIdentity";
+import {
+  IDENTITY_REQUIRED,
+  IDENTITY_STILL_PLACEHOLDER,
+  PLACEHOLDER_IDENTITY,
+} from "../../src/partyIdentity";
 import { saveConfig } from "../../src/config";
 import { exitCodeForError, promptConfirm } from "../../src/util/cli";
 import { captureStdio } from "../loggingTestSupport";
@@ -333,6 +337,21 @@ test("validateAccept: a missing or blank --identity is refused", async () => {
         log: silentLog,
       }),
     ).rejects.toThrow(IDENTITY_REQUIRED);
+});
+
+test("validateAccept: an --identity still carrying the init placeholder is refused", async () => {
+  // Accepting authors a durable partnership under this party's own label, so the
+  // template's placeholder is refused here exactly as no label at all -- whether
+  // it was copied verbatim or with the whitespace a quoted argument leaves.
+  const encoded = await encodeInvitation(sampleToken(FUTURE()));
+  for (const identity of [PLACEHOLDER_IDENTITY, `  ${PLACEHOLDER_IDENTITY}  `])
+    await expect(
+      validateAccept({
+        resolved: { mode: "offline", invitation: encoded },
+        options: testOptions({ identity }),
+        log: silentLog,
+      }),
+    ).rejects.toThrow(IDENTITY_STILL_PLACEHOLDER);
 });
 
 test("validateAccept: a deduplicating invitation leaves this party one-to-one", async () => {

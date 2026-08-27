@@ -6,11 +6,33 @@ import { sanitizeErrorForDisplay, UsageError } from "@psilink/core";
 
 import {
   configuredIdentityRequired,
+  configuredIdentityStillPlaceholder,
   IDENTITY_REQUIRED,
+  IDENTITY_STILL_PLACEHOLDER,
   optionalIdentity,
+  PLACEHOLDER_IDENTITY,
   resolveIdentity,
   resolveInvitationIdentity,
 } from "../../src/partyIdentity";
+
+/** The placeholder as it reaches a resolver: verbatim, and with the whitespace a
+ * hand-edited file or a quoted shell argument leaves around it. */
+const PLACEHOLDER_FORMS = [
+  PLACEHOLDER_IDENTITY,
+  ` ${PLACEHOLDER_IDENTITY}`,
+  `${PLACEHOLDER_IDENTITY} `,
+  `  ${PLACEHOLDER_IDENTITY}\t`,
+  `\n${PLACEHOLDER_IDENTITY}\n`,
+];
+
+/** Labels a partner could legitimately read, each one holding the placeholder's
+ * text or shape without being it. */
+const REAL_LABELS = [
+  `${PLACEHOLDER_IDENTITY} Health Authority`,
+  `Jane Smith, ${PLACEHOLDER_IDENTITY} Inc, jane@example.org`,
+  PLACEHOLDER_IDENTITY.toLowerCase(),
+  `${PLACEHOLDER_IDENTITY}_2`,
+];
 
 /** Every TypeScript source the CLI ships, by name and content, for the
  * structural check below; a failure then names the file rather than printing
@@ -29,7 +51,7 @@ function cliSources(): Array<{ name: string; text: string }> {
 
 /** Raise and return what a refusal threw, so each case below asserts on the
  * error rather than on a rejection shape. */
-function refusalFrom(resolve: () => string): unknown {
+function refusalFrom(resolve: () => string | undefined): unknown {
   try {
     resolve();
   } catch (err) {
@@ -60,6 +82,48 @@ test("a blank --identity is refused exactly as an absent one", () => {
     expect(raised).toBeInstanceOf(UsageError);
     expect((raised as Error).message).toBe(IDENTITY_REQUIRED);
   }
+});
+
+test("the init template's placeholder is refused as firmly as no identity", () => {
+  // The template writes a value the terms schema accepts, so nothing downstream
+  // can tell it from a name: an operator who copies it to the command line would
+  // otherwise author a partnership whose inviter is the words asking for a name.
+  for (const form of PLACEHOLDER_FORMS) {
+    const raised = refusalFrom(() => resolveIdentity(form));
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as Error).message).toBe(IDENTITY_STILL_PLACEHOLDER);
+  }
+});
+
+test("a run that may go unnamed refuses the placeholder rather than dropping it", () => {
+  // Reading it as absence would be the quiet failure: the run proceeds under the
+  // configuration's own label, or under none, while the operator who typed the
+  // value believes they named this party.
+  for (const form of PLACEHOLDER_FORMS) {
+    const raised = refusalFrom(() => optionalIdentity(form));
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as Error).message).toBe(IDENTITY_STILL_PLACEHOLDER);
+  }
+});
+
+test("a real label carrying the placeholder's text is a name like any other", () => {
+  // The match is the whole trimmed value, not a substring or a case-folded one:
+  // an organization whose name happens to contain those words -- or an operator
+  // who edited the field to something built from them -- must not be refused.
+  for (const label of REAL_LABELS) {
+    expect(resolveIdentity(label)).toBe(label);
+    expect(optionalIdentity(label)).toBe(label);
+    expect(resolveInvitationIdentity(label, "/work/psilink.yaml")).toBe(label);
+  }
+});
+
+test("the placeholder refusal names the flag that supplies an identity", () => {
+  // Same obligation the empty-value refusal carries: the message is the only
+  // place this path tells the operator how to name the party.
+  expect(IDENTITY_STILL_PLACEHOLDER).toContain(
+    '--identity "name, org, contact"',
+  );
+  expect(IDENTITY_STILL_PLACEHOLDER).toContain(PLACEHOLDER_IDENTITY);
 });
 
 test("the refusal names the flag that supplies an identity", () => {
@@ -117,6 +181,38 @@ test("a whitespace-only configured identity is refused, not carried", () => {
       configuredIdentityRequired("/work/psilink.yaml"),
     );
   }
+});
+
+test("an invitation over a configuration still carrying the placeholder is refused", () => {
+  // The driving case: the operator fills in the connection block and passes over
+  // this field, and the invitation -- certificate mode included -- would go out
+  // naming the party the template's instruction to name it. The refusal has to
+  // carry the field and the file, since the flag cannot stand in on this path.
+  for (const form of PLACEHOLDER_FORMS) {
+    const raised = refusalFrom(() =>
+      resolveInvitationIdentity(form, "/work/psilink.yaml"),
+    );
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as Error).message).toBe(
+      configuredIdentityStillPlaceholder("/work/psilink.yaml"),
+    );
+  }
+  const message = configuredIdentityStillPlaceholder("/work/psilink.yaml");
+  expect(message).toContain("linkage_terms.identity");
+  expect(message).toContain("/work/psilink.yaml");
+  expect(message).toContain(PLACEHOLDER_IDENTITY);
+});
+
+test("the placeholder refusal escapes the configuration path exactly once", () => {
+  // Same display-boundary contract as the absent-identity refusal: the path is
+  // composed RAW and escaped once by the renderer the CLI shows errors through
+  // (CONTRIBUTING.md, Operator-facing escaping).
+  const windows = String.raw`C:\work\psilink.yaml`;
+  const rendered = sanitizeErrorForDisplay(
+    new UsageError(configuredIdentityStillPlaceholder(windows)),
+  );
+  expect(rendered).toContain(String.raw`C:\\work\\psilink.yaml`);
+  expect(rendered).not.toContain(String.raw`C:\\\\work`);
 });
 
 test("a configured identity comes back verbatim, whitespace and all", () => {

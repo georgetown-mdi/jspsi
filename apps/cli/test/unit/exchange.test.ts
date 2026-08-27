@@ -32,6 +32,7 @@ import {
   warnThresholdDaysForPolicy,
   EXPIRY_WARN_THRESHOLD_DIVISOR,
 } from "../../src/commands/exchange";
+import { PLACEHOLDER_IDENTITY } from "../../src/partyIdentity";
 import { ttyStream, withStdin } from "../stdinStream";
 
 const mockState = vi.hoisted(() => ({
@@ -1372,6 +1373,41 @@ test("handler treats a blank --identity as absent, falling back to the config", 
     identity: "   ",
   } as unknown as Arguments);
   expect(vi.mocked(prepareForExchange).mock.calls[0][1]).toBe("Test Party");
+});
+
+test("handler exits 64 on an --identity still carrying the init placeholder", async () => {
+  // The optional-identity path refuses this one value rather than reading it as
+  // a label or dropping it to absence, and the refusal is a local usage fault:
+  // exit 64, decided before the protocol runs, not the top-level printer's 1.
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: new Date(Date.now() + 365 * 86_400_000).toISOString(),
+  });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        identity: PLACEHOLDER_IDENTITY,
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(runProtocol).not.toHaveBeenCalled();
+  } finally {
+    exitSpy.mockRestore();
+  }
 });
 
 test("handler runs a configuration carrying no identity, sending none", async () => {
