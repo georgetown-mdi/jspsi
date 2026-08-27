@@ -62,8 +62,7 @@ function scriptedDiscardClient(statuses: Array<JobStatusProbe>) {
       call++;
       return Promise.resolve(status);
     },
-    fetchArtifactAvailability: () =>
-      Promise.resolve({ record: { available: false }, receipt: "none" }),
+    fetchRecordAvailability: () => Promise.resolve({ available: false }),
   };
   return { client, order };
 }
@@ -202,8 +201,7 @@ describe("discardServerJob", () => {
       deleteJob: () => Promise.reject(new Error("delete failed")),
       fetchJobStatus: () =>
         Promise.resolve({ kind: "live", status: "succeeded" }),
-      fetchArtifactAvailability: () =>
-        Promise.resolve({ record: { available: false }, receipt: "none" }),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
 
     await discardServerJob(client, "job-x", NO_DELAY);

@@ -3,8 +3,8 @@ import { describe, expect, test } from "vitest";
 import {
   RECEIPT_MISSING_LEAD,
   RECEIPT_MISSING_NOTICE,
-  completionOutcome,
-} from "@bench/BenchRunSurface";
+} from "@bench/ReceiptDownload";
+import { completionOutcome } from "@bench/BenchRunSurface";
 
 import type { RunOutputs } from "@bench/runOutputs";
 
@@ -53,14 +53,23 @@ describe("completionOutcome", () => {
 });
 
 describe("the missing-receipt copy", () => {
-  test("states the absent artifact without unsettling the exchange", () => {
+  test("states the absent artifact without claiming an outcome", () => {
     expect(RECEIPT_MISSING_LEAD).toContain("no signed receipt");
     expect(RECEIPT_MISSING_NOTICE).toContain("holds none for it");
-    // The exchange completed: the copy must not read as a failed run, and must
-    // not send the operator to run it again for a receipt a re-run cannot
-    // produce.
-    expect(RECEIPT_MISSING_NOTICE).toContain("The exchange itself completed");
-    expect(RECEIPT_MISSING_NOTICE).toContain("would not recover this receipt");
+    // The control renders on any settled run, so the copy must hold for a run
+    // that stopped before the signature swap as well as one that completed and
+    // lost the file: it names when a receipt is written rather than asserting
+    // this exchange finished.
+    expect(RECEIPT_MISSING_NOTICE).not.toMatch(/exchange itself completed/);
+    expect(RECEIPT_MISSING_NOTICE).toContain(
+      "once both parties have exchanged signatures",
+    );
+    expect(RECEIPT_MISSING_NOTICE).toContain("stopped before that point");
+    // It must not send the operator to run the exchange again for a receipt a
+    // re-run cannot produce.
+    expect(RECEIPT_MISSING_NOTICE).toContain(
+      "produces a receipt for that run, not this one",
+    );
     expect(RECEIPT_MISSING_NOTICE).toContain("neither party can recreate one");
   });
 });

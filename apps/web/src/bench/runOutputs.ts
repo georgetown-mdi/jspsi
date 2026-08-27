@@ -8,18 +8,6 @@ import {
 import type { ExchangeResult, PreparedExchange } from "@psilink/core";
 import type { ExchangeOutputs } from "@psi/exchangeLifecycle";
 
-/**
- * Where this run's signed receipt stands, for a run that asked for one. The
- * `available` case carries the download; `missing` is a run whose receipt the
- * appliance does not hold, which the surface states rather than rendering
- * nothing -- an operator who authored a certificate-mode exchange and finds no
- * receipt row cannot otherwise tell a receipt that was never written from a
- * control that was simply left off.
- */
-export type ReceiptOutcome =
-  | { kind: "available"; receiptUrl: string; receiptFileName: string }
-  | { kind: "missing" };
-
 /** The bench run's downloadable artifacts: the lifecycle's outputs widened with
  * the matched-record count the completion header states. It counts the ROWS of a
  * matched result table, so it is meaningful for the `matched` case alone -- a
@@ -29,12 +17,6 @@ export type ReceiptOutcome =
  * counts its rows. */
 export type RunOutputs = ExchangeOutputs & {
   matchedRecordCount?: number;
-  /** The signed receipt this run produced, absent for every run with nothing to
-   * say about one: a run that asked for no receipt, a run whose appliance answered
-   * nothing about it, and the whole in-browser path, which signs none. Absent is
-   * therefore silence rather than a claim, which is why a receipt the appliance
-   * says it does not hold is a `missing` value here and not an omission. */
-  receipt?: ReceiptOutcome;
 };
 
 /** The two outcomes that leave a run with no result file to download: the terms

@@ -76,8 +76,7 @@ function reattachClient(args: {
       statusIds.push(jobId);
       return Promise.resolve(args.probe);
     },
-    fetchArtifactAvailability: () =>
-      Promise.resolve({ record: { available: false }, receipt: "none" }),
+    fetchRecordAvailability: () => Promise.resolve({ available: false }),
   };
   return { client, statusIds, streamedIds };
 }

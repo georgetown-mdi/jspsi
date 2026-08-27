@@ -11,13 +11,13 @@ import {
   RECONNECTING_HEADING,
   ReattachedRunNotice,
   ReattachingNotice,
-  ReceiptDownload,
   RunWarningsAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
   recoveredExchangeHeading,
 } from "./BenchRunSurface";
 import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
+import { ReceiptDownload } from "./ReceiptDownload";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { awaitingPartner } from "./exchangeRun";
@@ -83,6 +83,10 @@ export function DirectRunSection({
   onAbandon: () => void;
 }) {
   const done = outputs !== undefined;
+  // The run reached a terminal, which is what the two appliance-artifact
+  // panels below key on: each states its artifact's standing once the run is
+  // past producing it.
+  const settled = done || failure !== undefined;
   const awaiting = awaitingPartner(run);
   // A retryable failure is a transport/exchange fault; the terms mismatch is a
   // config failure, which -- like a security failure -- is not retried as-is but
@@ -207,14 +211,13 @@ export function DirectRunSection({
               />
             </>
           )}
-          <ReceiptDownload receipt={outputs.receipt} />
         </>
       )}
       {jobId !== undefined && (
-        <DiagnosticLogPanel
-          jobId={jobId}
-          settled={done || failure !== undefined}
-        />
+        <>
+          <ReceiptDownload jobId={jobId} settled={settled} />
+          <DiagnosticLogPanel jobId={jobId} settled={settled} />
+        </>
       )}
       {/* Available from job creation onward, collapsed until the run completes
           -- the inviter seat's rule, applied identically here. */}

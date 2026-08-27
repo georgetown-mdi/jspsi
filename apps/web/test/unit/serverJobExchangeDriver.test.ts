@@ -23,7 +23,6 @@ import type {
 } from "@psilink/core";
 import type {
   JobApiClient,
-  JobArtifactAvailability,
   RecordAvailability,
   ServerJobExchangeDriverConfig,
   ServerJobZeroSetupDriverConfig,
@@ -71,39 +70,15 @@ async function* scriptedStream(
   }
 }
 
-/** What an appliance that holds neither secondary artifact answers, which is the
- * reading every test that exercises neither runs under. */
-const NO_ARTIFACTS: JobArtifactAvailability = {
-  record: { available: false },
-  receipt: "none",
-};
-
-/** The scripted availability a test hands {@link scriptedClient}: the record
- * half alone (the receipt then answering nothing), the whole reading, or a
- * function that throws to script a failed query. */
-type ScriptedAvailability =
-  | RecordAvailability
-  | JobArtifactAvailability
-  | (() => Promise<JobArtifactAvailability>);
-
-/** Widen a record-only availability to the whole reading, so the record tests
- * keep stating the one half they are about. */
-function artifactsOf(
-  availability: RecordAvailability | JobArtifactAvailability,
-): JobArtifactAvailability {
-  return "record" in availability
-    ? availability
-    : { record: availability, receipt: "none" };
-}
-
 /** A {@link JobApiClient} whose event stream is a fixed script, capturing the
- * intent it was asked to create and each cancel it received. The artifact
- * availability defaults to neither artifact; a test that exercises the record set
- * or the receipt passes an availability (or a function that throws to script a
- * failed query). */
+ * intent it was asked to create and each cancel it received. The record
+ * availability defaults to unavailable; a test that exercises the record set
+ * passes an availability (or a function that throws to script a failed query). */
 function scriptedClient(
   events: Array<RelayEvent>,
-  availability: ScriptedAvailability = NO_ARTIFACTS,
+  availability: RecordAvailability | (() => Promise<RecordAvailability>) = {
+    available: false,
+  },
 ) {
   const createdIntents: Array<unknown> = [];
   const cancelledIds: Array<string> = [];
@@ -123,10 +98,10 @@ function scriptedClient(
       return Promise.resolve();
     },
     fetchJobStatus: () => Promise.resolve({ kind: "live", status: "running" }),
-    fetchArtifactAvailability: () =>
+    fetchRecordAvailability: () =>
       typeof availability === "function"
         ? availability()
-        : Promise.resolve(artifactsOf(availability)),
+        : Promise.resolve(availability),
   };
   return { client, createdIntents, cancelledIds, deletedIds };
 }
@@ -598,9 +573,7 @@ describe("createServerJobExchangeDriver record downloads", () => {
     const controller = new AbortController();
     const { client } = scriptedClient([result(true)], () => {
       controller.abort();
-      return Promise.resolve(
-        artifactsOf({ available: true, createdAt: CREATED_AT }),
-      );
+      return Promise.resolve({ available: true, createdAt: CREATED_AT });
     });
     const driver = createServerJobExchangeDriver(driverConfig(), client);
     const events = driverEvents(controller.signal);
@@ -636,99 +609,6 @@ describe("createServerJobExchangeDriver record downloads", () => {
 
     expect(inBrowser.record?.recordFileName).toBe(RECORD_NAME);
     expect(inBrowser.record?.keysFileName).toBe(KEYS_NAME);
-  });
-});
-
-describe("createServerJobExchangeDriver receipt download", () => {
-  const CREATED_AT = "2026-07-08T14:32:00.000Z";
-  const RECEIPT_NAME = "psilink-receipt-2026-07-08T14-32-00-000Z.json";
-
-  /** The outputs one scripted run delivered. */
-  async function runWith(
-    availability: ScriptedAvailability,
-    events: Array<RelayEvent> = [result(true)],
-  ): Promise<RunOutputs> {
-    const { client } = scriptedClient(events, availability);
-    const driver = createServerJobExchangeDriver(driverConfig(), client);
-    const driven = driverEvents(new AbortController().signal);
-
-    await driver.run(driven);
-
-    expect(driven.onError).not.toHaveBeenCalled();
-    return driven.onResult.mock.calls[0][0] as RunOutputs;
-  }
-
-  test("an available receipt is offered on the record's stamped convention", async () => {
-    const outputs = await runWith({
-      record: { available: true, createdAt: CREATED_AT },
-      receipt: "available",
-    });
-
-    expect(outputs.receipt).toEqual({
-      kind: "available",
-      receiptUrl: "/api/jobs/job-1/receipt",
-      receiptFileName: RECEIPT_NAME,
-    });
-    // The stamp is the record downloads' own, so one exchange's artifacts file
-    // together whichever of them the operator keeps.
-    expect(outputs.record?.recordFileName).toBe(
-      "psilink-record-2026-07-08T14-32-00-000Z.json",
-    );
-  });
-
-  test("a receipt the run asked for and does not have is stated, not omitted", async () => {
-    const outputs = await runWith({
-      record: { available: true, createdAt: CREATED_AT },
-      receipt: "missing",
-    });
-
-    expect(outputs.receipt).toEqual({ kind: "missing" });
-  });
-
-  test("a run that asked for no receipt offers no receipt control", async () => {
-    const outputs = await runWith({
-      record: { available: true, createdAt: CREATED_AT },
-      receipt: "none",
-    });
-
-    expect(outputs.receipt).toBeUndefined();
-  });
-
-  test("an available receipt on a run with no record is stamped with the job id", async () => {
-    // Core signs the receipt from the mutually-verifiable facts whether or not
-    // this party's local record built, so the receipt survives a run the record
-    // did not -- and there is no createdAt to stamp its name from.
-    const outputs = await runWith({
-      record: { available: false },
-      receipt: "available",
-    });
-
-    expect(outputs.receipt).toEqual({
-      kind: "available",
-      receiptUrl: "/api/jobs/job-1/receipt",
-      receiptFileName: "psilink-receipt-job-1.json",
-    });
-    expect(outputs.record).toBeUndefined();
-  });
-
-  test("a withheld result still offers the receipt", async () => {
-    const outputs = await runWith(
-      { record: { available: false }, receipt: "available" },
-      [result(false)],
-    );
-
-    expect(outputs.kind).toBe("withheld");
-    expect(outputs.receipt?.kind).toBe("available");
-  });
-
-  test("a failed availability query offers no receipt control", async () => {
-    // The failed read established nothing about this run's receipt, so the seat
-    // says nothing rather than reporting one missing.
-    const outputs = await runWith(() =>
-      Promise.reject(new Error("status fetch failed")),
-    );
-
-    expect(outputs.receipt).toBeUndefined();
   });
 });
 
@@ -947,7 +827,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       deleteJob: () => Promise.resolve(),
       fetchJobStatus: () =>
         Promise.resolve({ kind: "live", status: "running" }),
-      fetchArtifactAvailability: () => Promise.resolve(NO_ARTIFACTS),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const config: ServerJobExchangeDriverConfig = {
       ...driverConfig(),
@@ -989,7 +869,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       deleteJob: () => Promise.resolve(),
       fetchJobStatus: () =>
         Promise.resolve({ kind: "live", status: "running" }),
-      fetchArtifactAvailability: () => Promise.resolve(NO_ARTIFACTS),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), client);
     const events = driverEvents(controller.signal);
@@ -1014,7 +894,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.resolve(),
       fetchJobStatus: () => Promise.resolve({ kind: "gone" }),
-      fetchArtifactAvailability: () => Promise.resolve(NO_ARTIFACTS),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), failingClient);
     const events = driverEvents(new AbortController().signal);
@@ -1033,7 +913,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.resolve(),
       fetchJobStatus: () => Promise.resolve({ kind: "gone" }),
-      fetchArtifactAvailability: () => Promise.resolve(NO_ARTIFACTS),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), client);
     const events = driverEvents(new AbortController().signal);
@@ -1252,18 +1132,16 @@ describe("createFetchJobApiClient over an injected fetch", () => {
     expect(error.activeJobId).toBeUndefined();
   });
 
-  /** A fetch answering every request with `body` as a 200 JSON status body. */
-  const statusResponse =
-    (body: unknown): typeof fetch =>
-    () =>
-      Promise.resolve(
-        new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
-
-  test("fetchArtifactAvailability reads recordAvailable and recordCreatedAt", async () => {
+  test("fetchRecordAvailability reads recordAvailable and recordCreatedAt", async () => {
+    const statusResponse =
+      (body: unknown): typeof fetch =>
+      () =>
+        Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
     const signal = new AbortController().signal;
 
     await expect(
@@ -1272,9 +1150,10 @@ describe("createFetchJobApiClient over an injected fetch", () => {
           recordAvailable: true,
           recordCreatedAt: "2026-07-08T14:32:00.000Z",
         }),
-      ).fetchArtifactAvailability("job-1", signal),
-    ).resolves.toMatchObject({
-      record: { available: true, createdAt: "2026-07-08T14:32:00.000Z" },
+      ).fetchRecordAvailability("job-1", signal),
+    ).resolves.toEqual({
+      available: true,
+      createdAt: "2026-07-08T14:32:00.000Z",
     });
 
     // recordAvailable false, a missing createdAt, and a non-2xx all read as
@@ -1282,50 +1161,21 @@ describe("createFetchJobApiClient over an injected fetch", () => {
     await expect(
       createFetchJobApiClient(
         statusResponse({ recordAvailable: false }),
-      ).fetchArtifactAvailability("job-1", signal),
-    ).resolves.toMatchObject({ record: { available: false } });
+      ).fetchRecordAvailability("job-1", signal),
+    ).resolves.toEqual({ available: false });
     await expect(
       createFetchJobApiClient(
         statusResponse({ recordAvailable: true }),
-      ).fetchArtifactAvailability("job-1", signal),
-    ).resolves.toMatchObject({ record: { available: false } });
+      ).fetchRecordAvailability("job-1", signal),
+    ).resolves.toEqual({ available: false });
     const notFound: typeof fetch = () =>
       Promise.resolve(new Response(null, { status: 404 }));
     await expect(
-      createFetchJobApiClient(notFound).fetchArtifactAvailability(
+      createFetchJobApiClient(notFound).fetchRecordAvailability(
         "job-1",
         signal,
       ),
-    ).resolves.toEqual({ record: { available: false }, receipt: "none" });
-  });
-
-  test("fetchArtifactAvailability reads receiptAvailable and receiptRequested", async () => {
-    const signal = new AbortController().signal;
-    const receiptOf = async (body: unknown) =>
-      (
-        await createFetchJobApiClient(
-          statusResponse(body),
-        ).fetchArtifactAvailability("job-1", signal)
-      ).receipt;
-
-    // The two status shapes the seat renders from: a receipt on disk, and one a
-    // certificate-mode run asked for and the appliance does not hold.
-    await expect(
-      receiptOf({ receiptRequested: true, receiptAvailable: true }),
-    ).resolves.toBe("available");
-    await expect(
-      receiptOf({ receiptRequested: true, receiptAvailable: false }),
-    ).resolves.toBe("missing");
-
-    // A run that asked for none, and every body that answers nothing about a
-    // receipt, read as none: only a literal true on either field answers, so a
-    // malformed frame never reports a receipt missing.
-    await expect(
-      receiptOf({ receiptRequested: false, receiptAvailable: false }),
-    ).resolves.toBe("none");
-    await expect(receiptOf({})).resolves.toBe("none");
-    await expect(receiptOf({ receiptRequested: "yes" })).resolves.toBe("none");
-    await expect(receiptOf(null)).resolves.toBe("none");
+    ).resolves.toEqual({ available: false });
   });
 });
 
@@ -1674,7 +1524,7 @@ describe("createServerJobReattachDriver", () => {
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.resolve(),
       fetchJobStatus: () => Promise.resolve({ kind: "gone" }),
-      fetchArtifactAvailability: () => Promise.resolve(NO_ARTIFACTS),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const events = driverEvents(new AbortController().signal);
 

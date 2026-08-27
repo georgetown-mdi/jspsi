@@ -15,13 +15,13 @@ import {
   RECONNECTING_HEADING,
   ReattachedRunNotice,
   ReattachingNotice,
-  ReceiptDownload,
   RunWarningsAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
   recoveredExchangeHeading,
 } from "./BenchRunSurface";
 import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
+import { ReceiptDownload } from "./ReceiptDownload";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { reattachedRunState } from "./reattachedRunState";
@@ -112,6 +112,10 @@ export function AcceptorExchangeSection({
   onAbandon: () => void;
 }) {
   const phase = outputs !== undefined ? "done" : "running";
+  // The run reached a terminal, which is what the two appliance-artifact
+  // panels below key on: each states its artifact's standing once the run is
+  // past producing it.
+  const settled = phase === "done" || failure !== undefined;
 
   // A busy (409) create at start re-attached this surface to an exchange the
   // appliance already held (a second tab, a navigate-away-and-back, or an orphaned
@@ -285,14 +289,13 @@ export function AcceptorExchangeSection({
               />
             </>
           )}
-          <ReceiptDownload receipt={outputs.receipt} />
         </>
       )}
       {serverJob && jobId !== undefined && (
-        <DiagnosticLogPanel
-          jobId={jobId}
-          settled={phase === "done" || failure !== undefined}
-        />
+        <>
+          <ReceiptDownload jobId={jobId} settled={settled} />
+          <DiagnosticLogPanel jobId={jobId} settled={settled} />
+        </>
       )}
       {/* Available from job creation onward, collapsed until the run completes
           -- the inviter seat's rule, applied identically here. */}

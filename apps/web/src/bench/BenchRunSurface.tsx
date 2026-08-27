@@ -9,11 +9,7 @@ import { DEFAULT_PEER_TIMEOUT_MS } from "@psilink/core";
 import { dateTimeLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
-import type {
-  NoResultFileOutputs,
-  ReceiptOutcome,
-  RunOutputs,
-} from "./runOutputs";
+import type { NoResultFileOutputs, RunOutputs } from "./runOutputs";
 import type { ReactNode } from "react";
 import type { RunFailure } from "./useInviterExchange";
 
@@ -224,62 +220,6 @@ export function DownloadRow({
       >
         {fileName}
       </a>
-    </div>
-  );
-}
-
-/**
- * The lead the seat shows when a run that asked for a signed receipt has none on
- * the appliance. It states the artifact's absence, not the exchange's outcome,
- * which the completion panel above it already carries.
- */
-export const RECEIPT_MISSING_LEAD = "This run has no signed receipt.";
-
-/**
- * What the seat says under that lead. A receipt is written from the mutually
- * verifiable facts once the signature swap completes and before the run's
- * terminal, so by the time this renders the file is written or it is not; the
- * copy therefore states the loss as settled rather than as something still
- * arriving. It also has to say what the loss does and does not cost: the exchange
- * completed and re-running it recovers nothing, because a receipt covers the run
- * that produced it.
- */
-export const RECEIPT_MISSING_NOTICE =
-  "This exchange asked for a signed receipt and this appliance holds none for " +
-  "it, so there is nothing to download here. The exchange itself completed -- " +
-  "the results above stand, and running it again would not recover this " +
-  "receipt, because a receipt covers the run that produced it and neither " +
-  "party can recreate one afterwards.";
-
-/**
- * The signed receipt a console server-job run produced, rendered beside the
- * record downloads. An `available` receipt is a download row named on the
- * record's stamped convention; a receipt the appliance says it does not hold is
- * stated instead of omitted, so an operator who authored a certificate-mode
- * exchange is never left reading an absent control as an absent feature.
- *
- * A run with no receipt to speak of -- one that asked for none, one whose
- * appliance answered nothing, and the whole in-browser path -- carries no
- * {@link RunOutputs.receipt} at all and renders nothing here.
- */
-export function ReceiptDownload({
-  receipt,
-}: {
-  receipt: ReceiptOutcome | undefined;
-}) {
-  if (receipt === undefined) return null;
-  if (receipt.kind === "available")
-    return (
-      <DownloadRow
-        label="Download signed receipt (safe to share)"
-        href={receipt.receiptUrl}
-        fileName={receipt.receiptFileName}
-      />
-    );
-  return (
-    <div className={styles.callout}>
-      <p className={styles.calloutLead}>{RECEIPT_MISSING_LEAD}</p>
-      <p className={styles.small}>{RECEIPT_MISSING_NOTICE}</p>
     </div>
   );
 }
