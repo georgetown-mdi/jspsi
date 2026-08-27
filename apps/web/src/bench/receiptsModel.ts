@@ -337,14 +337,17 @@ export const NO_PARTNER_PIN_ADVISORY =
  * with this run's files rather than into the mounted folder's top level -- it
  * belongs to one exchange, unlike the identity -- so discarding the run discards
  * it too. Stated before the run rather than after, because by the time an
- * operator misses the file the run they would have copied it from is gone.
+ * operator misses the file the run they would have copied it from is gone. It
+ * names the download the finished run offers alongside the folder, so an
+ * operator reading this while authoring knows the keeping step does not require
+ * reaching into the mount.
  */
 export const RECEIPT_LOCATION_NOTICE =
   "The signed receipt is written with this run's files in your mounted folder, " +
-  "as receipt.json inside the run's own directory. Discarding the run removes " +
-  "it along with the results, so copy it somewhere of your own if you mean to " +
-  "keep it -- it is the artifact an auditor checks, and neither party can " +
-  "recreate it afterwards.";
+  "as receipt.json inside the run's own directory, and the finished run offers " +
+  "it here as a download. Discarding the run removes it along with the results, " +
+  "so keep a copy of your own if you mean to keep it -- it is the artifact an " +
+  "auditor checks, and neither party can recreate it afterwards.";
 
 /** What the console says about the certificate export, so an operator who ticks
  * it knows what leaves the appliance. */

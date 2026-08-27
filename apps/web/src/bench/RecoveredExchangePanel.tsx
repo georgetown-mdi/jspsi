@@ -28,6 +28,7 @@ import { failureFor } from "./useInviterExchange";
 import {
   DownloadRow,
   NoResultFileInset,
+  ReceiptDownload,
   RunWarningsAlert,
   recoveredExchangeHeading,
 } from "./BenchRunSurface";
@@ -314,6 +315,7 @@ export function RecoveredExchangePanel() {
               />
             </>
           )}
+          <ReceiptDownload receipt={outputs.receipt} />
         </>
       )}
       {/* Available for as long as the appliance holds the job, collapsed

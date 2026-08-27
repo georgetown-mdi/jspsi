@@ -11,6 +11,7 @@ import {
   RECONNECTING_HEADING,
   ReattachedRunNotice,
   ReattachingNotice,
+  ReceiptDownload,
   RunWarningsAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
@@ -206,6 +207,7 @@ export function DirectRunSection({
               />
             </>
           )}
+          <ReceiptDownload receipt={outputs.receipt} />
         </>
       )}
       {jobId !== undefined && (

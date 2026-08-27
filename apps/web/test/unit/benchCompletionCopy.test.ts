@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-import { completionOutcome } from "@bench/BenchRunSurface";
+import {
+  RECEIPT_MISSING_LEAD,
+  RECEIPT_MISSING_NOTICE,
+  completionOutcome,
+} from "@bench/BenchRunSurface";
 
 import type { RunOutputs } from "@bench/runOutputs";
 
@@ -45,5 +49,18 @@ describe("completionOutcome", () => {
 
   test("names nothing for a run with no outputs at all", () => {
     expect(completionOutcome(undefined)).toBeUndefined();
+  });
+});
+
+describe("the missing-receipt copy", () => {
+  test("states the absent artifact without unsettling the exchange", () => {
+    expect(RECEIPT_MISSING_LEAD).toContain("no signed receipt");
+    expect(RECEIPT_MISSING_NOTICE).toContain("holds none for it");
+    // The exchange completed: the copy must not read as a failed run, and must
+    // not send the operator to run it again for a receipt a re-run cannot
+    // produce.
+    expect(RECEIPT_MISSING_NOTICE).toContain("The exchange itself completed");
+    expect(RECEIPT_MISSING_NOTICE).toContain("would not recover this receipt");
+    expect(RECEIPT_MISSING_NOTICE).toContain("neither party can recreate one");
   });
 });

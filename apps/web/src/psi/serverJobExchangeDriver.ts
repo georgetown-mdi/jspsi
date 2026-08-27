@@ -122,6 +122,37 @@ export interface ServerJobExchangeDriverConfig {
 export type RecordAvailability =
   { available: false } | { available: true; createdAt: string };
 
+/**
+ * Where the signed receipt stands on the appliance, read off `GET /api/jobs/:id`
+ * beside the record's standing. `available` is the file on disk; `missing` is a
+ * run whose intent asked for a receipt and whose file is not there; `none` covers
+ * both a run that asked for no receipt and a body that answered nothing about one,
+ * which are the two readings that leave a seat with nothing to say.
+ *
+ * `missing` is kept apart from `none` for the same reason the diagnostic log keeps
+ * its own two apart ({@link ../psi/jobDiagnosticLog}): only `receiptRequested` --
+ * the appliance's own record of the intent it launched -- separates a receipt that
+ * was never asked for from one that was asked for and is not there.
+ */
+export type ReceiptAvailability = "available" | "missing" | "none";
+
+/** What one `GET /api/jobs/:id` read tells the driver about the run's secondary
+ * artifacts. Both ride one read because one status body answers for both, and a
+ * second read would answer for a different moment. */
+export interface JobArtifactAvailability {
+  record: RecordAvailability;
+  receipt: ReceiptAvailability;
+}
+
+/** What an unreadable status answers about either artifact: nothing. A seat that
+ * cannot reach the appliance offers no receipt control rather than reporting one
+ * missing, which would state something the failed read never established. Built
+ * per call rather than shared, so a consumer that writes to the value it is
+ * handed cannot reach the next caller's reading. */
+function unansweredArtifacts(): JobArtifactAvailability {
+  return { record: { available: false }, receipt: "none" };
+}
+
 /** The browser-side job-API surface a server-job driver reaches, injectable so
  * the fidelity tests feed a scripted event stream without a live server. The
  * defaults hit the real same-origin endpoints. */
@@ -161,13 +192,14 @@ export interface JobApiClient {
     jobId: string,
     signal: AbortSignal,
   ) => Promise<JobStatusProbe>;
-  /** `GET /api/jobs/:id`, reading `recordAvailable`/`recordCreatedAt` off the
-   * status body. A graceful-degrade metadata fetch: the driver delivers the
-   * result without the record pair if this fails or aborts. */
-  fetchRecordAvailability: (
+  /** `GET /api/jobs/:id`, reading `recordAvailable`/`recordCreatedAt` and the
+   * receipt pair off the status body. A graceful-degrade metadata fetch: the
+   * driver delivers the result without the record pair and without a receipt
+   * control if this fails or aborts. */
+  fetchArtifactAvailability: (
     jobId: string,
     signal: AbortSignal,
-  ) => Promise<RecordAvailability>;
+  ) => Promise<JobArtifactAvailability>;
 }
 
 /** The exchange's live run status, read off `GET /api/jobs/:id`. `running` is a
@@ -250,6 +282,12 @@ function jobKeysUrl(jobId: string): string {
   return `/api/jobs/${jobId}/keys`;
 }
 
+/** The dual-signed receipt both parties' certificates cover, served from the
+ * appliance. */
+function jobReceiptUrl(jobId: string): string {
+  return `/api/jobs/${jobId}/receipt`;
+}
+
 /** The default {@link JobApiClient}, hitting the real same-origin job endpoints
  * with a streaming `fetch` (not `EventSource`, which is harder to drive from a
  * unit test). Every connect replays the job's full event history and the
@@ -319,20 +357,45 @@ export function createFetchJobApiClient(
         return { kind: "live", status: "running" };
       }
     },
-    fetchRecordAvailability: async (jobId, signal) => {
+    fetchArtifactAvailability: async (jobId, signal) => {
       const response = await fetchImpl(`/api/jobs/${jobId}`, {
         method: "GET",
         signal,
       });
-      if (!response.ok) return { available: false };
+      if (!response.ok) return unansweredArtifacts();
       const body: unknown = await response.json();
-      const available = (body as { recordAvailable?: unknown }).recordAvailable;
-      const createdAt = (body as { recordCreatedAt?: unknown }).recordCreatedAt;
-      if (available !== true || typeof createdAt !== "string")
-        return { available: false };
-      return { available: true, createdAt };
+      if (body === null || typeof body !== "object")
+        return unansweredArtifacts();
+      return {
+        record: recordAvailabilityOf(body),
+        receipt: receiptAvailabilityOf(body),
+      };
     },
   };
+}
+
+/** Read the record pair's standing off a status body. Offered all-or-nothing:
+ * without a `createdAt` there is no stamp to name the downloads by, so a body
+ * that carries availability without one reads as unavailable. */
+function recordAvailabilityOf(body: object): RecordAvailability {
+  const available = (body as { recordAvailable?: unknown }).recordAvailable;
+  const createdAt = (body as { recordCreatedAt?: unknown }).recordCreatedAt;
+  if (available !== true || typeof createdAt !== "string")
+    return { available: false };
+  return { available: true, createdAt };
+}
+
+/** Read the receipt's standing off a status body, strictly: only a literal `true`
+ * on either field answers, so a frame that omits one or carries a non-boolean
+ * falls to `none` and the seat says nothing about this run's receipt rather than
+ * reporting one missing on the strength of a malformed body. */
+function receiptAvailabilityOf(body: object): ReceiptAvailability {
+  const status = body as {
+    receiptAvailable?: unknown;
+    receiptRequested?: unknown;
+  };
+  if (status.receiptAvailable === true) return "available";
+  return status.receiptRequested === true ? "missing" : "none";
 }
 
 /** Read a `{ id }` string off a job-API response body, or undefined when the
@@ -818,6 +881,47 @@ function withRecordDownloads(
   return outputs;
 }
 
+/**
+ * Attach the signed receipt's standing to the outputs for a run the appliance
+ * answered about. A `none` reading attaches nothing at all, so a run that signed
+ * no receipt -- and one whose appliance said nothing about a receipt -- leaves the
+ * surface with no receipt control to render.
+ *
+ * The download name follows the record's stamped convention, which is also the
+ * CLI's own default receipt name off the same `createdAt`
+ * (`defaultReceiptPath` in apps/cli), so an operator's console and command-line
+ * runs file the artifact under one convention.
+ *
+ * The stamp falls back to the job id where this run offers no record to take one
+ * from. Core signs the receipt from the mutually-verifiable facts whether or not
+ * this party's local record built, so a run can hold a receipt and no record --
+ * the case the receipt endpoint is deliberately not success-gated for -- and
+ * withholding the download for want of a filename would hide the one
+ * third-party-verifiable artifact that survived. The id names the run as
+ * unambiguously as the timestamp does, and is the stamp the diagnostic log's own
+ * download name already carries.
+ */
+function withReceiptDownload(
+  outputs: RunOutputs,
+  jobId: string,
+  availability: JobArtifactAvailability,
+): RunOutputs {
+  if (availability.receipt === "none") return outputs;
+  if (availability.receipt === "missing") {
+    outputs.receipt = { kind: "missing" };
+    return outputs;
+  }
+  const stamp = availability.record.available
+    ? recordFileStamp(availability.record.createdAt)
+    : jobId;
+  outputs.receipt = {
+    kind: "available",
+    receiptUrl: jobReceiptUrl(jobId),
+    receiptFileName: `psilink-receipt-${stamp}.json`,
+  };
+  return outputs;
+}
+
 /** Read the category off an `error` relay event, preserving it verbatim -- a
  * CLI-classified `security` terminal must reach the consumer as `security`,
  * never be downgraded to the retryable `exchange`. An event whose category is
@@ -1119,7 +1223,7 @@ async function consumeJobStream(
         }
         case "result": {
           const outputs = baseResultOutputs(event, jobId);
-          const availability = await queryRecordAvailability(
+          const availability = await queryArtifactAvailability(
             client,
             jobId,
             signal,
@@ -1127,8 +1231,9 @@ async function consumeJobStream(
           // Re-check after the await: a caller-initiated abort mid-query
           // stays silent, matching the browser lifecycle.
           if (aborted()) return;
-          if (availability.available)
-            withRecordDownloads(outputs, jobId, availability.createdAt);
+          if (availability.record.available)
+            withRecordDownloads(outputs, jobId, availability.record.createdAt);
+          withReceiptDownload(outputs, jobId, availability);
           onResult(outputs);
           return;
         }
@@ -1161,22 +1266,22 @@ async function consumeJobStream(
   }
 }
 
-/** Query the job's record availability as a graceful-degrade step: any failure
- * or abort resolves to unavailable so the run still delivers its primary
- * artifact (the result CSV) rather than failing on a metadata fetch. The
- * diagnostic is dev-gated like the driver's other server-influenced logs. */
-async function queryRecordAvailability(
+/** Query the job's secondary-artifact availability as a graceful-degrade step:
+ * any failure or abort resolves to answering nothing so the run still delivers
+ * its primary artifact (the result CSV) rather than failing on a metadata fetch.
+ * The diagnostic is dev-gated like the driver's other server-influenced logs. */
+async function queryArtifactAvailability(
   client: JobApiClient,
   jobId: string,
   signal: AbortSignal,
-): Promise<RecordAvailability> {
+): Promise<JobArtifactAvailability> {
   try {
-    return await client.fetchRecordAvailability(jobId, signal);
+    return await client.fetchArtifactAvailability(jobId, signal);
   } catch (error) {
     whenDiagnostic(() =>
-      log.warn("server job record availability query failed:", error),
+      log.warn("server job artifact availability query failed:", error),
     );
-    return { available: false };
+    return unansweredArtifacts();
   }
 }
 
