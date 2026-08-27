@@ -910,6 +910,23 @@ function declaresFanOut(element: LinkageKeyElement): boolean {
 }
 
 /**
+ * Transform functions that derive a value the acceptor's own identifier need not
+ * compose, so a later `substring` slicing that value is no longer a truncation of
+ * the identifier and earns no "partial" (see {@link elementBreadthMarker}, which
+ * classifies every function name core admits against that axis and carries the
+ * per-function reasoning, for the members here and for the ones deliberately
+ * absent). Membership is a policy decision about the always-visible consent
+ * marker, not core's runtime behavior; the names are core's own schema-validated
+ * function names, so the marker stays derived from the validated function set
+ * rather than from partner free text.
+ */
+const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
+  "phonetic",
+  "replace_regex",
+  "pad_left",
+]);
+
+/**
  * The terse informative marker for a key element's collapsed-header entry.
  *
  * A rule the exchange refuses outright is named as one ("not supported") and
@@ -921,51 +938,118 @@ function declaresFanOut(element: LinkageKeyElement): boolean {
  * agreed strategy makes true.
  *
  * The marker is undefined when the element matches exactly or only canonicalizes
- * its value (case, whitespace, accents, affixes, padding, and a `parse_date` that merely
- * reformats between equivalent layouts -- routine standardization, deliberately
- * not flagged so the recommended setup stays clean). It is also undefined when the
- * element's pipeline matches NOTHING -- a `parse_date` whose input format drops
- * every record, unless a later `coalesce` rescues it to a constant -- since that is
- * a narrowing-to-empty, not a broadening, and is surfaced separately by the
- * dead-key advisory. `remove_affixes` is in that
- * routine set by deliberate decision: stripping titles and suffixes (Dr., Jr.)
- * is a BROADENING canonicalizer in the same family as accent and case folding --
- * it makes superficially-different spellings match -- not a record-DROPPING
- * narrower like the flagged `filter_regex` / `null_if`, so it earns no marker
- * despite removing characters. It names any rule that materially changes which
- * records match: where the direction is determinable from the terms it names the
- * EFFECT ("partial" for a truncation, or for a `parse_date` whose output layout
- * drops a date component its input carries and so matches on only part of the
- * date; "any date" for a `parse_date` whose output carries no date token at all,
- * collapsing every date to one value -- a stronger breadth than the partial drop;
- * "fuzzy" / "sound-alike" / "fallback" for an expansion), and where an
- * arbitrary partner-authored pattern or value list makes the direction
- * indeterminate it names the RULE directly ("pattern replacement", "pattern
- * extraction", "pattern filter", "excludes values"). Informative, not a
- * broaden-only warning: `filter_regex` and `null_if` narrow matching but are
- * still surfaced. "fuzzy" is reserved for the genuine fuzzy-comparison expansion,
- * distinct from `substring`'s "partial". None of the regex/value rules appear on
- * the default or guided path (only `substring` and `swap` do), so an
- * expert-authored rule is what trips those markers.
+ * its value (case, whitespace, accents, affixes, padding on its own, and a
+ * `parse_date` that merely reformats between equivalent layouts -- routine
+ * standardization, deliberately not flagged so the recommended setup stays clean).
+ * It is also undefined when the element's pipeline matches NOTHING -- a
+ * `parse_date` whose input format drops every record, unless a later `coalesce`
+ * rescues it to a constant -- since that is a narrowing-to-empty, not a broadening,
+ * and is surfaced separately by the dead-key advisory. `remove_affixes` is in that
+ * routine set by deliberate decision: stripping titles and suffixes (Dr., Jr.) is a
+ * BROADENING canonicalizer in the same family as accent and case folding -- it
+ * makes superficially-different spellings match -- not a record-DROPPING narrower
+ * like the flagged `filter_regex` / `null_if`, so it earns no marker despite
+ * removing characters. It names any rule that materially changes which records
+ * match: where the direction is determinable from the terms it names the EFFECT
+ * ("partial" for a truncation, or for a `parse_date` whose output layout drops a
+ * date component its input carries and so matches on only part of the date; "any
+ * date" for a `parse_date` whose output carries no date token at all, collapsing
+ * every date to one value -- a stronger breadth than the partial drop; "fuzzy" /
+ * "sound-alike" / "fallback" for an expansion), and where an arbitrary
+ * partner-authored pattern or value list -- or a fill whose reach into the sliced
+ * value is a property of each record rather than of the terms -- makes the
+ * direction indeterminate it names the RULE directly ("pattern replacement",
+ * "pattern extraction", "pattern filter", "excludes values", "padded slice").
+ * Informative, not a broaden-only warning: `filter_regex` and `null_if` narrow
+ * matching but are still surfaced. "fuzzy" is reserved for the genuine
+ * fuzzy-comparison expansion, distinct from `substring`'s "partial". None of the
+ * regex/value rules appear on the default or guided path (only `substring` and
+ * `swap` do), so an expert-authored rule is what trips those markers.
  *
  * "partial" marks a LITERAL character-truncation, so it fires for a `substring`
- * only where the slice runs on the literal value. A `substring` after a
- * value-recoding `phonetic` step (which replaces the name with a sound-alike
- * code) slices that code, not the name, so it is not flagged "partial" -- the
- * recoding's "sound-alike" is then the dominant, honest effect. This mirrors the
- * detail row's position-aware literal ({@link substringEffect} /
- * {@link summarizeKey}, which render "the first N characters" only for a
- * substring on the unmodified value). A routine normalizer before the substring
- * (case/accents/...) does not recode the value out of literal correspondence, so
- * it keeps "partial"; a `phonetic` AFTER the substring does too, since the
- * literal is truncated first.
+ * only where the slice runs on a value the acceptor's own identifier still
+ * composes. A prior step that derives a value the identifier need not compose
+ * breaks that correspondence, and the substring after it earns no "partial": the
+ * deriving step's own marker is then the dominant, honest one. Every function name
+ * core admits (`STANDARDIZATION_FUNCTION_NAMES`) is classified against that one
+ * axis -- can a later slice window read text the acceptor's value did not supply.
+ * Three break it ({@link LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS}):
+ *
+ * - `phonetic`. The name is replaced by an opaque sound-alike code, so the slice
+ *   truncates the code rather than the name and "sound-alike" is what the element
+ *   does.
+ * - `replace_regex`. An arbitrary partner-authored pattern and replacement compose
+ *   the value, which need share no character with the identifier -- a `.*` pattern
+ *   collapses every value to the replacement -- so "partial" would assert a
+ *   determinate breadth the terms cannot support, and on a consent surface it
+ *   would assert the reassuring direction. "pattern replacement" names the
+ *   indeterminate rule instead, exactly as it does for the step standing alone.
+ *   That is the existing precedence applied, not reversed: the effect-named rule
+ *   does not fire, so the directly-named one shows.
+ * - `pad_left`. The fill characters are supplied by the terms, not derived from the
+ *   value, so whether a later window reads identifier characters, pure fill, or a
+ *   mix turns on each RECORD's own value length -- a window that lands in the fill
+ *   collapses every record short enough onto one constant. Which records those are
+ *   is a property of the data rather than of the terms, so "partial" would again
+ *   assert a determinate breadth in the reassuring direction, the same failure
+ *   `replace_regex` has. Padding on its own is routine canonicalization and earns
+ *   no marker, so this one has no marker of its own to fall through to: "padded
+ *   slice" names the compound rule directly, the way the pattern rules are named,
+ *   and fires only where a substring actually slices a padded value.
+ *
+ * The rest keep it:
+ *
+ * - The character-level normalizers -- `remove_non_ascii`,
+ *   `replace_separators_with_spaces`, `squash_spaces`, `remove_punctuation`,
+ *   `remove_dashes`, `trim_whitespace`, `to_upper_case`, `to_lower_case`,
+ *   `remove_accents`, `remove_affixes` -- emit only the value's own characters,
+ *   folded or dropped (a separator becomes a space one for one), so whatever a
+ *   later window reads came from the identifier.
+ * - `substring` keeps it: a slice of a slice is still the identifier's own
+ *   characters.
+ * - `extract_regex` keeps it. Core's extraction returns a contiguous run of the
+ *   value's own characters, so a slice of that run is still part of the
+ *   identifier and the effect stays determinate whatever the pattern.
+ * - `filter_regex` and `null_if` keep it. Each passes the ORIGINAL value through
+ *   or drops the record, substituting nothing a slice could read.
+ * - `parse_date` keeps it, with a stated limit. For a token-and-separator output
+ *   format the canonical date is laid out from the date's own components, so
+ *   slicing it matches on part of the date -- the reading the
+ *   output-drops-a-component branch below gives "partial". The limit: the output
+ *   format is inviter-authored text with only the YYYY/MM/DD tokens substituted,
+ *   so a literal region (`ACME-YYYYMMDD`) or a bare separator can occupy the
+ *   slice window and collapse records onto a constant the header still calls
+ *   "partial"; the detail row carrying the outputFormat is the surface that
+ *   exposes that shape. Deciding membership from the format's token positions is
+ *   a params-aware classification this name-only rule cannot express, and moving
+ *   `parse_date` into the set wholesale would wrongly suppress "partial" for
+ *   every plain format. Keeping it also stops a date-collapsing slice from
+ *   showing NO marker, since a merely reformatting `parse_date` earns none of
+ *   its own.
+ * - `coalesce` keeps it. It substitutes only where the value is ABSENT, so a
+ *   record that carries an identifier is truncated literally -- unlike `pad_left`,
+ *   which rewrites the value of every record -- and the substitution is
+ *   order-independent, so suppressing here would mark `[coalesce, substring]` and
+ *   `[substring, coalesce]` differently for the same matching behavior.
+ * - `split_on` never reaches this rule: it is a fan-out, decided above.
+ *
+ * This mirrors the detail row's position-aware literal ({@link substringEffect} /
+ * {@link summarizeKey}, which render "the first N characters" only for a substring
+ * on the unmodified value) at the coarser grain the header claims. The detail
+ * asserts a character POSITION, which any earlier step can shift, so it needs the
+ * first step; the header asserts only that part of the value is matched on, which
+ * survives a position-shifting normalizer. So a routine normalizer before the
+ * substring (case/accents/...) keeps "partial", and a breaking step AFTER the
+ * substring does too, since the literal is truncated first.
  *
  * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
  * header is deliberately terse, so an element carrying more than one rule shows
  * just the first -- the fan-out rule ranks first, whichever of its two markers it
  * earns, then the maximal-breadth "any date" collapse, then the other
- * effect-named rules, then the directly-named ones -- while its complete rule set
- * is carried on {@link InvitationKeySummary.elements} for the renderer's per-key
+ * effect-named rules, then the directly-named ones, of which the padded slice is
+ * last since it is the only one naming a compound rather than a single step --
+ * while its complete rule set is carried on
+ * {@link InvitationKeySummary.elements} for the renderer's per-key
  * detail. The element stays flagged either way.
  */
 function elementBreadthMarker(
@@ -1001,13 +1085,17 @@ function elementBreadthMarker(
   const parseDateBreadths = steps.map(parseDateBreadth);
   if (parseDateBreadths.includes("any date")) return displayText`any date`;
   // Effect named where the direction is determinable from the terms. "partial"
-  // is a literal truncation, so a substring counts only where it slices the
-  // literal value -- not after a value-recoding `phonetic` step, where it slices
-  // the sound-alike code and "sound-alike" (below) is the honest dominant effect.
+  // is a literal truncation, so a substring counts only where the value it slices
+  // is still composed of the acceptor's identifier -- not after a step that
+  // derives an unrelated value, whose own marker (below) is then the honest one.
   const truncatesLiteral = steps.some(
     (step, index) =>
       step.function === "substring" &&
-      !steps.slice(0, index).some((prior) => prior.function === "phonetic"),
+      !steps
+        .slice(0, index)
+        .some((prior) =>
+          LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS.has(prior.function),
+        ),
   );
   if (truncatesLiteral) return displayText`partial`;
   if (element.generateFuzzyComparisons !== undefined) return displayText`fuzzy`;
@@ -1024,6 +1112,18 @@ function elementBreadthMarker(
   if (functions.has("extract_regex")) return displayText`pattern extraction`;
   if (functions.has("filter_regex")) return displayText`pattern filter`;
   if (functions.has("null_if")) return displayText`excludes values`;
+  // The fall-through for the one breaking function with no marker of its own:
+  // padding alone is routine canonicalization, so a `pad_left` that suppressed a
+  // later substring's "partial" would otherwise leave a compound that does loosen
+  // matching -- a window landing in the fill collapses every short record onto one
+  // constant -- showing nothing at all. Named for the compound rather than for the
+  // pad, since it is the slicing of a padded value that is worth showing.
+  const slicesPaddedValue = steps.some(
+    (step, index) =>
+      step.function === "substring" &&
+      steps.slice(0, index).some((prior) => prior.function === "pad_left"),
+  );
+  if (slicesPaddedValue) return displayText`padded slice`;
   return undefined;
 }
 
