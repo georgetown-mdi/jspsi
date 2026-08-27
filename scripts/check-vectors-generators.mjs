@@ -157,6 +157,12 @@ export const GENERATED_VECTORS = [
     needsCoreDist: true,
   },
   {
+    vectors: "index-table-vectors.json",
+    generator: "generate-index-table-vectors.mjs",
+    writes: "stdout",
+    needsCoreDist: true,
+  },
+  {
     vectors: "kex-vectors.json",
     generator: "generate-kex-vectors.mjs",
     writes: "stdout",

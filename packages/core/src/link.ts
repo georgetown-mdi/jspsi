@@ -1411,7 +1411,8 @@ export async function linkViaSinglePassPSI(
 // sweep below is ONE implementation over both of message 2's layouts and over the
 // receiver's own locally built table -- the spec fixes one resolution rule, and a
 // per-layout copy of it could drift from that rule silently.
-interface KeyCells {
+/** @internal the shape both of message 2's index-table decoders return. */
+export interface KeyCells {
   /** How many candidate values record `row` contributes to this key's round. */
   count(row: number): number;
   /** Record `row`'s `k`-th value index, `0 <= k < count(row)`. */
@@ -1449,7 +1450,8 @@ class RaggedKeyCells implements KeyCells {
 // One key's column of this party's own value indices, in whichever layout its
 // declared width calls for. The two carry the same information; they differ only
 // in what they cost to build and to ship (see getSortedDistinctValueIndices).
-type LocalKeyColumn =
+/** @internal the input getSortedDistinctValueIndices remaps onto the wire. */
+export type LocalKeyColumn =
   | { readonly ragged: false; readonly indices: Array<number> }
   | {
       readonly ragged: true;
@@ -1572,7 +1574,8 @@ function getDistinctValuesAndIndices(
 //     strictly ascending within the cell. The remap permutes the indices, so each
 //     cell is re-sorted after it -- the ordering is a property of the SORTED
 //     indices the receiver validates, not of the build order they came from.
-function getSortedDistinctValueIndices(
+/** @internal exported for the index-table layout conformance vectors. */
+export function getSortedDistinctValueIndices(
   columns: Array<LocalKeyColumn>,
   permutation: Array<number>,
   numRecords: number,
@@ -1608,7 +1611,8 @@ function getSortedDistinctValueIndices(
 // per (key, record). A frame carrying any other number of words is a clean
 // protocol error rather than a wrong reconstruction. subarray returns a view over
 // the decoded frame rather than a copy, so nothing is duplicated here.
-function decodeFixedWidthIndexTable(
+/** @internal exported for the index-table layout conformance vectors. */
+export function decodeFixedWidthIndexTable(
   participantId: string,
   words: Int32Array,
   keyCount: number,
