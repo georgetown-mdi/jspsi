@@ -247,9 +247,10 @@ export function assertAlgorithmImplemented(algorithm: Algorithm): void {
  * this party's own algorithm is its own config, so a divergence is the partner
  * having proceeded past the terms-exchange compatibility abort that refuses one --
  * a peer violating the message protocol, not a local misconfiguration. The CLI's
- * `instanceof UsageError ? 64 : 69` mapping therefore yields 69, and a consumer
- * keeping per-failure bookkeeping can branch on the type. The message names only
- * the fixed algorithm literals of `AlgorithmSchema`, never partner free text.
+ * exit-code mapping therefore yields 69 -- the `usage` kind is the one it reads as
+ * 64 -- and a consumer keeping per-failure bookkeeping can branch on the type. The
+ * message names only the fixed algorithm literals of `AlgorithmSchema`, never
+ * partner free text.
  */
 export class AlgorithmDivergenceError extends ConnectionError {
   constructor(message: string) {
@@ -495,9 +496,9 @@ export function assertSigningModeImplemented(
  * A {@link ConnectionError} of kind `protocol` rather than a {@link UsageError},
  * for the same reason as {@link AlgorithmDivergenceError}: the contradiction is
  * between two documents the PARTNER authored, so the fault is the peer's rather
- * than this operator's configuration. The CLI's `instanceof UsageError ? 64 : 69`
- * mapping therefore yields 69, and a consumer keeping per-failure bookkeeping can
- * branch on the type.
+ * than this operator's configuration. The CLI's exit-code mapping therefore yields
+ * 69 -- the `usage` kind is the one it reads as 64 -- and a consumer keeping
+ * per-failure bookkeeping can branch on the type.
  *
  * It carries `psilinkRecoveryHintEmitted` (the class-field form its
  * `PeerAbortError` and `FrameSizeExceededError` siblings use in `errors.ts`) so

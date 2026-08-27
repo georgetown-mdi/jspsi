@@ -26,6 +26,7 @@ import { ESC, PRINTABLE_ASCII, RLO } from "../src/displayEscapingFixtures";
 import {
   OperatorConfigError,
   StandardizationTermsError,
+  UnknownStandardizationFunctionError,
   UsageError,
 } from "../src/errors";
 import * as linearRegex from "../src/utils/linearRegex";
@@ -892,6 +893,32 @@ test("unknown function name throws", () => {
     runPipeline("x", [{ function: "nonexistent_function" }]),
   ).toThrow(
     "unknown standardization function: a function this build does not recognize",
+  );
+});
+
+test("an unknown function name is refused as a typed usage error", () => {
+  // The class, not just the message: the refusal is deterministic in the steps it
+  // compiled, so a consumer classifying it -- the CLI's error->exit boundary maps
+  // a UsageError to 64 -- must not see a bare Error and read it as the transport
+  // having failed. Both surfaces the compiler serves are pinned, since the
+  // element-transform one carries partner-authored steps.
+  expect(() =>
+    runPipeline("x", [{ function: "nonexistent_function" }]),
+  ).toThrow(UnknownStandardizationFunctionError);
+  expect(() =>
+    buildKeyStrings(
+      {
+        name: "K",
+        elements: [{ field: "f", transform: [{ function: "no" }] }],
+      },
+      new StandardizedDataset([
+        new StandardizedField("f", "F", [], [{ F: "value" }]),
+      ]),
+      0,
+    ),
+  ).toThrow(UnknownStandardizationFunctionError);
+  expect(new UnknownStandardizationFunctionError("x")).toBeInstanceOf(
+    UsageError,
   );
 });
 

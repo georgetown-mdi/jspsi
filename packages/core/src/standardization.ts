@@ -3,6 +3,7 @@ import { getLogger } from "./utils/logger.js";
 import {
   OperatorConfigError,
   StandardizationTermsError,
+  UnknownStandardizationFunctionError,
   UsageError,
 } from "./errors.js";
 import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
@@ -1229,7 +1230,7 @@ function compileStep(step: {
   // this build knows -- so it is narrowed rather than echoed, as the magnitude
   // refusals narrow theirs.
   if (!factory)
-    throw new Error(
+    throw new UnknownStandardizationFunctionError(
       `unknown standardization function: ${transformFunctionLabel(step.function)}`,
     );
   return {
