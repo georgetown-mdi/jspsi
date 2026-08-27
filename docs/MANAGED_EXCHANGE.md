@@ -508,11 +508,13 @@ not a same-shaped wrong file.
 
 That shortfall is a state of its own on the run surface, held apart from the file
 that could not be read: the same file falls the same way short of the same keys
-however many times it runs, so the surface states the condition and names the two
-ways forward -- a file covering every agreed key, or terms settled with the
-partner over the keys both files can supply -- rather than offering the run again
-as though it might pass. The copy names no key or field: the shortfall's detail is
-partner-authored.
+however many times it runs, so the alert copy and the affordances beside it --
+the recovery block and the saved-exchanges footer -- point at the two ways
+forward: a file covering every agreed key, or terms settled with the partner
+over the keys both files can supply. The run control itself is not withheld;
+it stays enabled on the input source and the device's connectivity alone, the
+same as any other state. The copy names no key or field: the shortfall's detail
+is partner-authored.
 
 ## The durability and crash-consistency contract
 

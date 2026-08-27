@@ -43,11 +43,12 @@ import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 import type { ManagedFailureTier } from "@psi/managedFailureTiers";
 import type { ManagedLocalState } from "@psi/managedLocalState";
 
-/** The recovery affordance a surface state offers. It selects the state's copy and
- * what the host renders below the alert -- the recovery block, and through {@link
- * managedRunRetryable} whether the saved-exchanges footer stands beside it. It is not
- * a gate on the run control, which the surface enables from the input source and the
- * device's connectivity alone.
+/** The recovery affordance a surface state offers. It drives what the host renders
+ * below the alert -- the recovery block, and through {@link managedRunRetryable}
+ * whether the saved-exchanges footer stands beside it. The state's copy is a sibling
+ * field authored alongside it, not derived from it. It is not a gate on the run
+ * control, which the surface enables from the input source and the device's
+ * connectivity alone.
  *
  * - `"reinvite"` -- fast re-invite is the recovery (a lapsed, desynced, restored, or
  *   persist-failed exchange). The inviter side re-mints from the stored document; the
