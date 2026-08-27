@@ -882,11 +882,11 @@ export function writePromptLine(line: string): void {
  * resolve to the empty string, the same "nothing was answered" every caller of
  * {@link promptConfirm} reads as a decline.
  *
- * The free-text sibling of {@link promptConfirm}, sharing its stdin regime
- * rather than opening a second one: both read `process.stdin` through one
- * readline interface at a time and ask on {@link promptStream} (stderr), so
- * stdout stays reserved for a command's result data. stdin is single-use, so a
- * command whose input CSV is `-` must not reach either of them.
+ * The one place a question is asked: {@link promptConfirm} is this with a y/N
+ * suffix and its answer interpreted, so `process.stdin` is read through one
+ * readline interface at a time and every question goes to {@link promptStream}
+ * (stderr), leaving stdout reserved for a command's result data. stdin is
+ * single-use, so a command whose input CSV is `-` must not reach either of them.
  */
 export async function promptFreeText(question: string): Promise<string> {
   const rl = readline.createInterface({
@@ -894,10 +894,13 @@ export async function promptFreeText(question: string): Promise<string> {
     output: promptStream,
   });
   try {
-    // Raced against "close" for the reason promptConfirm races it: a
-    // `rl.question()` on a stdin already at EOF never settles
-    // (nodejs/node#53497), so the race is what turns a closed stdin into an
-    // empty answer rather than a pending promise.
+    // `rl.question()` never settles when stdin reaches EOF (a closed or
+    // piped-empty stdin) -- a long-standing readline/promises behavior
+    // (nodejs/node#53497). Race it against the interface's "close" event (which
+    // does fire on EOF) so a closed stdin deterministically resolves to the
+    // empty answer instead of leaving the promise pending -- which today exits
+    // silently via event-loop drain and would deadlock outright if any handle
+    // were open here.
     return await new Promise<string>((resolve) => {
       rl.once("close", () => resolve(""));
       void rl.question(`${question} `).then(resolve, () => resolve(""));
@@ -914,24 +917,8 @@ export async function promptFreeText(question: string): Promise<string> {
  * results.
  */
 export async function promptConfirm(question: string): Promise<boolean> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: promptStream,
-  });
-  try {
-    // `rl.question()` never settles when stdin reaches EOF (a closed or
-    // piped-empty stdin) -- a long-standing readline/promises behavior
-    // (nodejs/node#53497). Race it against the interface's "close" event (which
-    // does fire on EOF) so a closed stdin deterministically resolves to "no"
-    // instead of leaving the promise pending -- which today exits silently via
-    // event-loop drain and would deadlock outright if any handle were open here.
-    const answer = await new Promise<string>((resolve) => {
-      rl.once("close", () => resolve(""));
-      void rl.question(`${question} [y/N] `).then(resolve, () => resolve(""));
-    });
-    const normalized = answer.trim().toLowerCase();
-    return normalized === "y" || normalized === "yes";
-  } finally {
-    rl.close();
-  }
+  const normalized = (await promptFreeText(`${question} [y/N]`))
+    .trim()
+    .toLowerCase();
+  return normalized === "y" || normalized === "yes";
 }

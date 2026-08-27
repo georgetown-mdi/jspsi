@@ -979,7 +979,7 @@ test("promptFreeText: a stdin that ends answers nothing rather than hanging", as
 });
 
 test("promptFreeText then promptConfirm: two questions, one open stdin", async () => {
-  // What `psilink accept` at a terminal now does: ask who this party is, then
+  // What `psilink accept` at a terminal does: ask who this party is, then
   // show the terms and ask the y/N. The two open a readline interface each, one
   // after the other, over the single-use stdin -- so the second must still read
   // its answer after the first has closed its own interface.
