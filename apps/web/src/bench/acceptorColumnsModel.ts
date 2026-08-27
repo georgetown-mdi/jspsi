@@ -330,7 +330,8 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  * ({@link acceptorOverlongDisclosedColumns}) -- a name the partner's parse refuses
  * once the frame is already sent -- OR the metadata carries more than one identifier
  * column, OR an authored cleaning step is invalid/mid-edit, OR one of the step's own
- * blocks. Partial coverage does NOT gate -- it threads a warning instead.
+ * blocks. Partial coverage does NOT gate here -- it threads an advisory of the
+ * refusal the run boundary raises instead.
  *
  * The gate and the explanation are ONE derivation rather than two that agree, so a
  * state that disables the button while telling a screen-reader operator nothing is
@@ -418,7 +419,10 @@ export function acceptorStandardizationValid(
  * The launch payload: the edited `{ metadata, standardization }` (the exact shape
  * {@link AcceptorDataEdits} expects), plus an optional partial-coverage advisory the
  * run package surfaces. The pair is the SAME one the verdict consumed, so the gate
- * and the run cannot disagree. The warning is present only when coverage is partial.
+ * and the run cannot disagree. The warning is present only when coverage is partial,
+ * and it is advance notice of a refusal rather than of a narrowed run: an exchange
+ * runs the keys both parties agreed on, so the run boundary refuses an input short
+ * of any one of them.
  */
 export function acceptorLaunchPayload(
   verdict: AcceptorVerdictViewModel,
@@ -427,11 +431,13 @@ export function acceptorLaunchPayload(
   const warning: AlertContent | undefined =
     verdict.kind === "partial"
       ? {
-          title: "Partial coverage",
+          title: "Not every agreed key is covered",
           message:
-            `Only ${verdict.satisfiableKeyCount} of ${verdict.totalKeys} linkage keys can match with ` +
-            "this file. Keys that need the missing fields will be inactive; the " +
-            "others will proceed normally.",
+            `This file covers ${verdict.satisfiableKeyCount} of the ${verdict.totalKeys} agreed linkage ` +
+            "keys. An exchange runs the keys both parties agreed on, so it will " +
+            "refuse to run on these terms with this file. Use a file that covers " +
+            "every agreed key, or agree terms with your partner over the keys " +
+            "both files can supply.",
         }
       : undefined;
   return {

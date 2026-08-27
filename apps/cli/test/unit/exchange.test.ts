@@ -1735,28 +1735,28 @@ test("handler: an unnamed party that signs nothing runs unchanged", async () => 
   }
 });
 
-// --- handler: host-key trust precedes the outbound-consent surface ----------
-// The outbound-consent copy (apps/cli/src/outboundPayloadConsent.ts) promises
-// that nothing this party SENDS precedes the question, not that nothing has
-// connected -- because on an unpinned sftp config the credential-free first-use
-// host-key probe runs ahead of it. That step order is the premise the wording
-// rests on, so the two checks below hold it rather than the comment beside the
-// copy: an edit that reordered the flow would otherwise leave the copy
-// describing an order the handler no longer has, and nothing would catch it.
-// Both stub establishHostKeyTrust (as the whole file does), so what they pin is
-// the order of the two STEPS; that the probe -- the connection the wording
-// concedes -- happens inside the first of them is hostKeyTrust.test.ts's.
+// --- handler: the local preparation precedes host-key trust -----------------
+// An exchange refused from local inputs alone must not have connected to the
+// server first, and on an unpinned sftp config the first-use host-key step is
+// what would connect: its probe opens a real transport. So the preparation that
+// carries those refusals -- the linkage-satisfiability gate and the
+// outbound-consent surface -- runs ahead of that step, and the two checks below
+// hold that order rather than the comments beside either. Both stub
+// establishHostKeyTrust (as the whole file does), so what they pin is the order
+// of the two STEPS; that the probe is what the second one opens is
+// hostKeyTrust.test.ts's.
 
-/** Write the sftp config, key file, and CSV the two ordering checks drive the handler over. */
-function writeSftpExchangeInputs(): string {
+/** Write the sftp config, key file, and CSV the two ordering checks drive the
+ * handler over; the default CSV satisfies the config's lone ssn key. */
+function writeSftpExchangeInputs(csv = "ssn\n123456789\n"): string {
   fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
   saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   const input = path.join(dir, "in.csv");
-  fs.writeFileSync(input, "ssn\n123456789\n");
+  fs.writeFileSync(input, csv);
   return input;
 }
 
-test("handler: host-key trust runs before the outbound-consent surface", async () => {
+test("handler: the outbound-consent surface runs before host-key trust", async () => {
   const input = writeSftpExchangeInputs();
 
   const steps: string[] = [];
@@ -1788,25 +1788,22 @@ test("handler: host-key trust runs before the outbound-consent surface", async (
     expect(exitSpy).not.toHaveBeenCalled();
     // Both steps ran, and in this order: an assertion over one call alone would
     // read a silently skipped step as satisfied.
-    expect(steps).toEqual(["host-key trust", "outbound consent"]);
+    expect(steps).toEqual(["outbound consent", "host-key trust"]);
   } finally {
     exitSpy.mockRestore();
   }
 });
 
-test("handler: a refused host key stops the run before the outbound-consent surface", async () => {
+test("handler: an input that cannot satisfy the agreed terms exits 64 with no host-key probe", async () => {
   // The ordering above is a call order, which a handler that STARTED host-key
-  // trust without awaiting it would satisfy just as well -- and then a refusal
-  // would surface only after the operator had been asked about columns. So the
-  // refusing case is driven too: the run must end at the refusal, exit 64 (the
-  // classification a declined prompt carries), and never reach the question.
-  const input = writeSftpExchangeInputs();
+  // trust without awaiting it would satisfy just as well -- and then the probe
+  // would have connected anyway. So the refusing case is driven too, over the
+  // same unpinned sftp config: a CSV that can produce none of the terms' fields
+  // must end the run at the refusal, exit 64, with the host-key step -- and so
+  // the probe inside it -- never entered.
+  const input = writeSftpExchangeInputs("first_name\nAda\n");
 
   vi.mocked(establishHostKeyTrust).mockClear();
-  vi.mocked(establishHostKeyTrust).mockRejectedValueOnce(
-    new UsageError("the presented host key was not trusted"),
-  );
-  vi.mocked(confirmOutboundPayloadConsent).mockClear();
   vi.mocked(runProtocol).mockReset();
   const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
     code?: number,
@@ -1824,7 +1821,10 @@ test("handler: a refused host key stops the run before the outbound-consent surf
         "log-level": "silent",
       } as unknown as Arguments),
     ).rejects.toThrow("exit:64");
-    expect(vi.mocked(confirmOutboundPayloadConsent)).not.toHaveBeenCalled();
+    expect(mockState.errors.join("\n")).toContain(
+      "cannot satisfy every linkage key the configuration declares",
+    );
+    expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
   } finally {
     exitSpy.mockRestore();

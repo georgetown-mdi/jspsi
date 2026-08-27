@@ -931,24 +931,6 @@ export async function handler(argv: Arguments): Promise<void> {
 
     announceRetainMode(connection, log);
 
-    // Establish SSH host-key trust before any exchange work: on an unpinned sftp
-    // config this prompts and pins on first interactive use, and fails closed
-    // (no prompt, no auto-accept) on a non-interactive run. It is a no-op for a
-    // pinned config or a non-sftp channel. Runs before dataset prep so a
-    // non-interactive no-pin run fails fast; a UsageError (non-TTY, or a declined
-    // prompt) maps to exit 64, a probe transport failure to 69.
-    try {
-      await establishHostKeyTrust(connection, {
-        verbosity,
-        loggerName: "exchange",
-        // The config is already on disk and exchange does not re-write it, so a
-        // first-use pin is written in place now.
-        persistence: { mode: "write-now", configPath: options.configFile },
-      });
-    } catch (err) {
-      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
-    }
-
     // termsIdentity is the identity this run PUTS IN THE AGREED TERMS, which is
     // what a partner verifies a signed receipt's certificate against. It comes
     // from --identity, else the loaded configuration's linkage_terms.identity,
@@ -980,6 +962,28 @@ export async function handler(argv: Arguments): Promise<void> {
       // openInputSource raises is a UsageError carrying no exitCode -- must map to
       // 64, not collapse to 69; a missing input file carries its own exitCode 69.
       exitWithError(log, err, exitCodeForError(err));
+    }
+
+    // Establish SSH host-key trust: on an unpinned sftp config this prompts and
+    // pins on first interactive use, and fails closed (no prompt, no
+    // auto-accept) on a non-interactive run. It is a no-op for a pinned config
+    // or a non-sftp channel. It follows the dataset preparation above because
+    // the first-use probe opens a real transport to the server, while every
+    // refusal that preparation can raise -- the linkage terms the input cannot
+    // satisfy, an unconfirmed outbound payload -- is decided from local inputs
+    // alone; deciding those first is what keeps a refused run from connecting.
+    // A UsageError (non-TTY, or a declined prompt) maps to exit 64, a probe
+    // transport failure to 69.
+    try {
+      await establishHostKeyTrust(connection, {
+        verbosity,
+        loggerName: "exchange",
+        // The config is already on disk and exchange does not re-write it, so a
+        // first-use pin is written in place now.
+        persistence: { mode: "write-now", configPath: options.configFile },
+      });
+    } catch (err) {
+      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
     }
 
     const recordOutput = resolveRecordOutput({

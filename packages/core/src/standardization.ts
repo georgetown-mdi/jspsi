@@ -3220,8 +3220,9 @@ export function assertLinkageTermsSatisfiable(
       "the agreed linkage terms declare no linkage key, so this exchange has " +
         "nothing to match on and would produce a result indistinguishable " +
         "from an empty intersection. It is refused before any credential, " +
-        "terms, or data are sent. Agree terms declaring at least one linkage " +
-        "key with your partner, and run the exchange under those.",
+        "terms, or data are sent. Run it with an input whose columns can " +
+        "supply at least one linkage key, or agree terms declaring one with " +
+        "your partner and run the exchange under those.",
     );
 
   const details: string[] = [];

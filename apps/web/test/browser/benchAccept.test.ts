@@ -2280,10 +2280,12 @@ describe("acceptor bench: run and completion", () => {
     // ambiguity).
     await vi.waitFor(() => {
       const problems = document.querySelector('section[aria-label="Problems"]');
-      expect(problems?.textContent).toContain("Partial coverage");
+      expect(problems?.textContent).toContain(
+        "Not every agreed key is covered",
+      );
     });
     const work = document.querySelector("main") as Element;
-    expect(work.textContent).toContain("Partial coverage");
-    expect(work.textContent).toContain("linkage keys can match with");
+    expect(work.textContent).toContain("Not every agreed key is covered");
+    expect(work.textContent).toContain("refuse to run on these terms");
   });
 });

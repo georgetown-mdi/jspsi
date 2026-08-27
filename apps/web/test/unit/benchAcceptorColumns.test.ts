@@ -1131,8 +1131,14 @@ describe("acceptor launch payload", () => {
       editorState,
     );
     const payload = acceptorLaunchPayload(verdict, editorState);
-    expect(payload.warning?.title).toBe("Partial coverage");
-    expect(payload.warning?.message).toContain("1 of 2 linkage keys can match");
+    expect(payload.warning?.title).toBe("Not every agreed key is covered");
+    // The advisory names the coverage AND the consequence: the run boundary
+    // refuses an input short of any agreed key, so copy promising the covered
+    // keys still run would send the operator into a refusal it denied.
+    expect(payload.warning?.message).toContain(
+      "covers 1 of the 2 agreed linkage keys",
+    );
+    expect(payload.warning?.message).toContain("refuse to run on these terms");
   });
 });
 
