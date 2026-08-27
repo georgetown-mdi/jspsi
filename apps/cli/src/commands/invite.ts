@@ -1,5 +1,4 @@
 import type { Argv, Arguments } from "yargs";
-import { userInfo } from "node:os";
 
 import {
   getLogger,
@@ -34,6 +33,7 @@ import {
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
+import { resolveIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
 import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
 import {
@@ -282,7 +282,7 @@ export async function validateInvite(params: {
 }): Promise<InviteReady> {
   const { resolved, options, acceptTimeout, expiresIn, linkageStrategy, log } =
     params;
-  const identity = options.identity ?? userInfo().username;
+  const identity = resolveIdentity(options.identity);
   // parseDuration yields whole milliseconds at second granularity (its smallest
   // unit), so dividing by 1000 is exact: the lifetime is always a whole number
   // of seconds, whether defaulted or overridden, and feeds expiresFromNow below.

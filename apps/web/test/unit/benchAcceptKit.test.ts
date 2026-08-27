@@ -249,6 +249,24 @@ describe("accept kit, the account the container runs as", () => {
     }
   });
 
+  test("names the identity the flag costs, beside the flag", () => {
+    // The flag runs psilink as an account the image does not define, and psilink
+    // takes this party's name from the account it runs as. A reader who takes the
+    // flag and nothing else is stopped on the sheet's first command, so the
+    // remedy travels with the flag rather than waiting for the refusal.
+    for (const endpoint of [FILEDROP, SFTP]) {
+      const text = sheet(endpoint);
+      const consequence = text.split(USER_FLAG)[1].split("sudo chown")[0];
+      expect(consequence).toContain("--identity");
+      expect(consequence).toContain("the one");
+      expect(consequence).toContain("your partner sees in the agreed terms");
+      // Ahead of the first command, like the flag it qualifies.
+      expect(text.indexOf("--identity")).toBeLessThan(
+        text.indexOf("docker run"),
+      );
+    }
+  });
+
   test("the flag's scope names the second folder each channel mounts", () => {
     // Every command carries two mounts, and the chown fallback reaches only
     // the first: the flag is what covers the shared folder (/sync) and the

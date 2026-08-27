@@ -1,6 +1,5 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
-import { userInfo } from "node:os";
 
 import {
   parseExchangeSpec,
@@ -36,6 +35,7 @@ import {
   type KeyFileExpiryStatus,
 } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
+import { resolveConfiguredIdentity } from "../partyIdentity";
 import { resolveReceiptOutput } from "../receiptFile";
 import { warnOnIdentityDivergence } from "../signingIdentityDivergence";
 import {
@@ -951,11 +951,12 @@ export async function handler(argv: Arguments): Promise<void> {
     }
 
     // termsIdentity is the identity this run PUTS IN THE AGREED TERMS, which is
-    // what a partner verifies a signed receipt's certificate against. On this
-    // path it is always set: loadConfig parses through ExchangeSpecSchema, which
-    // requires linkage_terms, and LinkageTermsSchema requires a non-empty
-    // identity. The fallback below discharges ExchangeDataSpec's optional type,
-    // not a live case.
+    // what a partner verifies a signed receipt's certificate against. It comes
+    // from --identity, else the loaded configuration's linkage_terms.identity,
+    // which ExchangeSpecSchema requires to be non-empty. There is no account-name
+    // fallback for the case ExchangeDataSpec's optional linkageTerms leaves open:
+    // resolveConfiguredIdentity refuses it (exit 64) rather than running under a
+    // label the operator never chose.
     let identity: string;
     let termsIdentity: string | undefined;
     if (options.identity) {
@@ -968,7 +969,11 @@ export async function handler(argv: Arguments): Promise<void> {
         };
     } else {
       termsIdentity = exchangeDataSpec.linkageTerms?.identity;
-      identity = termsIdentity ?? userInfo().username;
+      try {
+        identity = resolveConfiguredIdentity(termsIdentity, options.configFile);
+      } catch (err) {
+        exitWithError(log, err, 64);
+      }
     }
 
     let prepared: PreparedExchange;

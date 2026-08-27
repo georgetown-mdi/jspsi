@@ -28,6 +28,8 @@ The threat model behind the rule -- what a substituted configuration can do with
 
 The `--config-file` and `--key-file` arguments are expected to be available for all relevant commands below, and are thus not explicitly listed.
 
+`--identity` supplies this party's label in the linkage terms -- what your partner reads as your name there, in the invitation, and in the exchange record. The commands that author their own terms (`psilink invite`, `psilink accept`, and the zero-setup form) fall back to the user name of the account psilink runs as; `psilink exchange` takes `linkage_terms.identity` from the configuration instead, which `--identity` replaces for that one run. A command left with neither stops with a usage error (exit 64) naming how to supply one, rather than sending a label you did not choose. An account has no user name to fall back on when a container runs under a uid the image does not define, which is what [running the container as your own account](DEPLOYMENT.md#the-user-the-image-runs-as) does.
+
 A leading `~` (or `~/`) in a local filesystem path -- whether given on the command line or written into the configuration file -- is expanded to the current user's home directory. Which paths are expanded depends on the command:
 
 - The path inside an `@`-file reference (for example, `@~/secrets/id_rsa`) is expanded wherever a reference is resolved.

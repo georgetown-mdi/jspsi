@@ -70,6 +70,15 @@ vi.mock("../../src/onlineBootstrap", async () => {
   return { ...actual, runOnlineBootstrap: vi.fn() };
 });
 
+// Wrap the account user-name lookup as a PASSTHROUGH spy: every test below that
+// supplies no --identity keeps the real fallback, while the two identity tests
+// replace it with the throw an account with no user-database entry raises.
+vi.mock("../../src/util/accountUserName", async (importActual) => {
+  const actual =
+    await importActual<typeof import("../../src/util/accountUserName")>();
+  return { ...actual, accountUserName: vi.fn(actual.accountUserName) };
+});
+
 import {
   handler as acceptHandler,
   resolveAcceptPositionals,
@@ -87,6 +96,8 @@ import {
   runOnlineBootstrap,
 } from "../../src/onlineBootstrap";
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
+import { accountUserName } from "../../src/util/accountUserName";
+import { IDENTITY_REQUIRED } from "../../src/partyIdentity";
 import { saveConfig } from "../../src/config";
 import { exitCodeForError, promptConfirm } from "../../src/util/cli";
 import { captureStdio } from "../loggingTestSupport";
@@ -309,6 +320,42 @@ test("validateAccept: an invalid invitation is rejected before the prompt", asyn
       log: silentLog,
     }),
   ).rejects.toBeInstanceOf(UsageError);
+});
+
+test("validateAccept: an account with no user name is refused, not defaulted", async () => {
+  // The acceptor records its OWN identity in the derived terms (the invitation
+  // carries the inviter's), so a valid invitation is not a label this party can
+  // borrow: with none supplied and none to read, the acceptance stops.
+  const encoded = await encodeInvitation(sampleToken(FUTURE()));
+  vi.mocked(accountUserName).mockImplementationOnce(() => {
+    throw Object.assign(new Error("uv_os_get_passwd returned ENOENT"), {
+      code: "ERR_SYSTEM_ERROR",
+    });
+  });
+  await expect(
+    validateAccept({
+      resolved: { mode: "offline", invitation: encoded },
+      options: testOptions(),
+      log: silentLog,
+    }),
+  ).rejects.toThrow(IDENTITY_REQUIRED);
+});
+
+test("validateAccept: a supplied --identity never consults the account", async () => {
+  const encoded = await encodeInvitation(sampleToken(FUTURE()));
+  vi.mocked(accountUserName).mockClear();
+  await expect(
+    validateAccept({
+      resolved: {
+        mode: "offline",
+        invitation: encoded,
+        input: "/nonexistent/psilink-input.csv",
+      },
+      options: testOptions({ identity: "Agency B" }),
+      log: silentLog,
+    }),
+  ).rejects.toMatchObject({ exitCode: 69 });
+  expect(vi.mocked(accountUserName)).not.toHaveBeenCalled();
 });
 
 test("validateAccept: a deduplicating invitation leaves this party one-to-one", async () => {

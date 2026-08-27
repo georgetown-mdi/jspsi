@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import { userInfo } from "node:os";
 
 import type { Argv, Arguments } from "yargs";
 
@@ -35,6 +34,7 @@ import {
   type ReconcileDiff,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
+import { resolveIdentity } from "../partyIdentity";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { decodeAndValidateInvitation } from "../invitationDecode";
 import {
@@ -319,7 +319,7 @@ export async function validateAccept(params: {
     ["key"],
   );
 
-  const myIdentity = options.identity ?? userInfo().username;
+  const myIdentity = resolveIdentity(options.identity);
   // Adopt the invitation's agreed linkage fields/keys/algorithm, but record this
   // party's own identity (the invitation's identity is the inviter's) and MIRROR
   // the output direction rather than copying it: validateCompatibility compares

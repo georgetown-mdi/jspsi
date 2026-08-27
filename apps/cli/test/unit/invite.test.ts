@@ -56,6 +56,15 @@ vi.mock("../../src/config", async () => {
   };
 });
 
+// Wrap the account user-name lookup as a PASSTHROUGH spy: every test below that
+// supplies no --identity keeps the real fallback, while the two identity tests
+// replace it with the throw an account with no user-database entry raises.
+vi.mock("../../src/util/accountUserName", async (importActual) => {
+  const actual =
+    await importActual<typeof import("../../src/util/accountUserName")>();
+  return { ...actual, accountUserName: vi.fn(actual.accountUserName) };
+});
+
 import {
   handler as inviteHandler,
   offlineAbandonNotice,
@@ -73,6 +82,8 @@ import {
   runOnlineBootstrap,
 } from "../../src/onlineBootstrap";
 import { captureStdio } from "../loggingTestSupport";
+import { accountUserName } from "../../src/util/accountUserName";
+import { IDENTITY_REQUIRED } from "../../src/partyIdentity";
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 
 const silentLog = getLogger("invite-test");
@@ -188,6 +199,38 @@ test("validateInvite: offline requires an input file", async () => {
       log: silentLog,
     }),
   ).rejects.toBeInstanceOf(UsageError);
+});
+
+test("validateInvite: an account with no user name is refused, not defaulted", async () => {
+  // The identity is resolved before anything is read or minted, so this aborts
+  // ahead of the (nonexistent) input file the offline path would otherwise fail
+  // on -- and ahead of the token, whose terms would carry the label.
+  vi.mocked(accountUserName).mockImplementationOnce(() => {
+    throw Object.assign(new Error("uv_os_get_passwd returned ENOENT"), {
+      code: "ERR_SYSTEM_ERROR",
+    });
+  });
+  await expect(
+    validateInvite({
+      resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
+      options: testOptions(),
+      acceptTimeout: 900,
+      log: silentLog,
+    }),
+  ).rejects.toThrow(IDENTITY_REQUIRED);
+});
+
+test("validateInvite: a supplied --identity never consults the account", async () => {
+  vi.mocked(accountUserName).mockClear();
+  await expect(
+    validateInvite({
+      resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
+      options: testOptions({ identity: "Agency A" }),
+      acceptTimeout: 900,
+      log: silentLog,
+    }),
+  ).rejects.toMatchObject({ exitCode: 69 });
+  expect(vi.mocked(accountUserName)).not.toHaveBeenCalled();
 });
 
 test("validateInvite: a non-positive accept-timeout is rejected", async () => {

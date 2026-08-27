@@ -33,6 +33,7 @@ import {
   EXPIRY_WARN_THRESHOLD_DIVISOR,
 } from "../../src/commands/exchange";
 import { ttyStream, withStdin } from "../stdinStream";
+import { accountUserName } from "../../src/util/accountUserName";
 
 const mockState = vi.hoisted(() => ({ warnings: [] as string[] }));
 
@@ -79,6 +80,15 @@ vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
 // drives; stub it so that test reaches the runProtocol hand-off without probing
 // sftp.example.org (hostKeyTrust.test.ts covers the real flow).
 vi.mock("../../src/hostKeyTrust", () => ({ establishHostKeyTrust: vi.fn() }));
+
+// The account user-name lookup, spy-WRAPPED rather than replaced: this command
+// reads its identity from the configuration and must reach for the account on no
+// path at all, which the identity test below asserts against the real function.
+vi.mock("../../src/util/accountUserName", async (importActual) => {
+  const actual =
+    await importActual<typeof import("../../src/util/accountUserName")>();
+  return { ...actual, accountUserName: vi.fn(actual.accountUserName) };
+});
 
 // The outbound-consent surface is spy-WRAPPED rather than replaced: the ordering
 // test below needs to observe when the handler reaches it, while the
@@ -1294,6 +1304,35 @@ test("handler compares the signing identity against --identity when it is given"
   expect(warning).toBeDefined();
   expect(warning).toContain('"Test Party"');
   expect(warning).toContain('"Overridden Party"');
+});
+
+test("handler takes the run's identity from the configuration, never the account", async () => {
+  // This command has no account-user-name fallback at all, so a uid with no
+  // user-database entry cannot reach it. What guarantees the label is there is
+  // the schema (see the empty-identity config case above); the guard behind it
+  // refuses rather than substituting a label the operator never chose, and is
+  // covered in partyIdentity.test.ts, where a spec with no terms is expressible.
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: new Date(Date.now() + 365 * 86_400_000).toISOString(),
+  });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  vi.mocked(accountUserName).mockClear();
+  vi.mocked(prepareForExchange).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  await handler({
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+  } as unknown as Arguments);
+  expect(vi.mocked(prepareForExchange).mock.calls[0][1]).toBe("Test Party");
+  expect(vi.mocked(accountUserName)).not.toHaveBeenCalled();
 });
 
 // --- handler: --invitation provisioning --------------------------------------

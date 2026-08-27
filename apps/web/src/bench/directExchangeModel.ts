@@ -53,15 +53,25 @@ export const DIRECT_STEP_ORDER: ReadonlyArray<DirectStep> = [
 ];
 
 /**
- * The identity the preview uses when the operator leaves the optional identity
- * field blank. The real run defaults `--identity` to the appliance user (the
- * container account), which the browser cannot read, so the preview uses this
- * neutral placeholder. It is never displayed: the confirm screen shows the
- * inferred terms under a self-terms ("proposing") framing that does not surface
- * the identity string, and the preview copy states plainly that a blank field
- * runs as the appliance user.
+ * The identity the preview stands the operator's label in for. The preview is
+ * memoized on the committed file rather than rebuilt per keystroke, so it does
+ * not read the identity field at all. That costs nothing: the preview is never
+ * displayed with an identity -- the confirm screen shows the inferred terms under
+ * a self-terms ("proposing") framing that does not surface the identity string.
  */
 export const DEFAULT_PREVIEW_IDENTITY = "you";
+
+/**
+ * Why the confirm step will not run without an identity, stated where the
+ * disabled Run button is. The label is the one thing the partner reads as this
+ * party's name and nothing stands in for it: a zero-setup run carries no terms
+ * document, and the CLI's own fallback is the user name of the account it runs
+ * as, which an appliance container running under a uid its image does not define
+ * has none of.
+ */
+export const DIRECT_IDENTITY_REQUIRED_REASON =
+  "Fill in your identity above to run: it is the name your partner sees, and " +
+  "a direct exchange carries no other record of who you are.";
 
 /** The strategy a direct run uses until the operator chooses otherwise: the
  * CLI's own default, which a zero-setup command selects by carrying no

@@ -345,6 +345,22 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     expect(argv.slice(-2)).toEqual(["input.csv", "results.csv"]);
   });
 
+  test("the graduated command carries --identity, which the scheduled run needs", () => {
+    // The console run had the label because the intent requires it; the command
+    // the operator graduates to has no configuration document to read one from,
+    // and the account a scheduled container runs as may have no user name to fall
+    // back on. Dropping the flag here would strand the run this hand-off exists to
+    // carry.
+    const handoff = buildJobHandoff(
+      validZeroSetupIntent({ identity: "County Health" }),
+      undefined,
+      { credentialPasted: false, filedropSplit: false },
+    );
+    const argv =
+      handoff.template.kind === "command" ? handoff.template.argv : [];
+    expect(argv).toContain("--identity=County Health");
+  });
+
   // The hand-off is what the operator graduates to cron with, so a run that kept
   // its files has to graduate to a command (or a config) that keeps them too:
   // otherwise the scheduled run silently loses the transcript the prototype had,

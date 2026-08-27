@@ -16,8 +16,11 @@ import {
   SINGLE_PASS_DISCLOSURE_TITLE,
 } from "@psi/linkageStrategyChoice";
 
+import {
+  DIRECT_IDENTITY_REQUIRED_REASON,
+  DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE,
+} from "@bench/directExchangeModel";
 import { BenchLobby } from "@bench/BenchLobby";
-import { DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE } from "@bench/directExchangeModel";
 import { DirectExchangeBench } from "@bench/DirectExchangeBench";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
@@ -256,10 +259,19 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+/** The identity {@link reachConfirm} fills in. The field is required, so every
+ * flow that reaches Run has to carry one. */
+const CONFIRM_IDENTITY = "County Health";
+
+/** The confirm screen's identity field. Matched by pattern because Mantine renders
+ * the required marker inside the label. */
+const identityField = () => page.getByLabelText(/Your identity/);
+
 /** Reach the confirm step: pick and commit the mounted file (which auto-advances to
  * the server step), then continue past the agreed-server step (SFTP is configured
- * and selected by default). */
-async function reachConfirm() {
+ * and selected by default), then fill the required identity unless the caller is
+ * testing the field itself (`identity: ""`). */
+async function reachConfirm({ identity = CONFIRM_IDENTITY } = {}) {
   await page.getByRole("button", { name: "Select clients.csv" }).click();
   await page.getByRole("button", { name: "Use this file" }).click();
   await expect
@@ -271,6 +283,7 @@ async function reachConfirm() {
   await expect
     .element(page.getByRole("heading", { level: 1, name: "Confirm and run" }))
     .toBeInTheDocument();
+  if (identity !== "") await userEvent.fill(identityField(), identity);
 }
 
 describe("direct exchange confirm and run", () => {
@@ -319,15 +332,11 @@ describe("direct exchange confirm and run", () => {
       .element(page.getByText("writes a disclosure record", { exact: false }))
       .toBeInTheDocument();
 
-    // Run is gated behind the trust affirmation.
+    // Run is gated behind the trust affirmation (the identity is already filled).
     await expect
       .element(page.getByRole("button", { name: "Run the exchange" }))
       .toBeDisabled();
 
-    await userEvent.fill(
-      page.getByLabelText("Your identity (optional)"),
-      "County Health",
-    );
     await page.getByRole("checkbox").click();
     await expect
       .element(page.getByRole("button", { name: "Run the exchange" }))
@@ -470,6 +479,33 @@ describe("direct exchange confirm and run", () => {
     );
   });
 
+  test("Run stays blocked until an identity is given, and says why", async () => {
+    // The label is what the partner reads as this party's name, and a zero-setup
+    // run carries nothing else that names this side: the CLI's own fallback is the
+    // account it runs as, which an appliance container under an unmapped uid does
+    // not have. So the console collects it rather than starting a job that stops.
+    stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeBench));
+    await reachConfirm({ identity: "" });
+    await page.getByRole("checkbox").click();
+
+    await expect
+      .element(page.getByRole("button", { name: "Run the exchange" }))
+      .toBeDisabled();
+    // Disabled with the reason beside it, not silently.
+    await expect
+      .element(page.getByText(DIRECT_IDENTITY_REQUIRED_REASON))
+      .toBeInTheDocument();
+
+    await userEvent.fill(identityField(), "County Health");
+    await expect
+      .element(page.getByRole("button", { name: "Run the exchange" }))
+      .toBeEnabled();
+    expect(app.container.textContent).not.toContain(
+      DIRECT_IDENTITY_REQUIRED_REASON,
+    );
+  });
+
   test("an invalid identity names the fault at the field and blocks Run", async () => {
     stubJobApi({ sftp: CONFIGURED_SFTP });
     app.render(createElement(DirectExchangeBench));
@@ -482,10 +518,7 @@ describe("direct exchange confirm and run", () => {
 
     // A leading-dash label is refused inline (the intent schema would 400 it, which
     // failureFor would misattribute to the file/SFTP destination) and Run is disabled.
-    await userEvent.fill(
-      page.getByLabelText("Your identity (optional)"),
-      "-county",
-    );
+    await userEvent.fill(identityField(), "-county");
     await expect
       .element(page.getByText("Identity cannot begin with a dash"))
       .toBeInTheDocument();
@@ -494,10 +527,7 @@ describe("direct exchange confirm and run", () => {
       .toBeDisabled();
 
     // Correcting it clears the error and re-enables Run.
-    await userEvent.fill(
-      page.getByLabelText("Your identity (optional)"),
-      "county-health",
-    );
+    await userEvent.fill(identityField(), "county-health");
     await expect
       .element(page.getByRole("button", { name: "Run the exchange" }))
       .toBeEnabled();

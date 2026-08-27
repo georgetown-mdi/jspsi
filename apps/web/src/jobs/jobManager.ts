@@ -882,7 +882,7 @@ export class JobManager {
         workdir: args.workdir,
         eventStream: args.eventStream,
         runControls: args.runControls,
-        ...(intent.identity !== undefined ? { identity: intent.identity } : {}),
+        identity: intent.identity,
         ...(intent.linkageStrategy !== undefined
           ? { linkageStrategy: intent.linkageStrategy }
           : {}),

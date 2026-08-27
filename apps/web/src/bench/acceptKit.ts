@@ -531,6 +531,21 @@ function opening(
             "folder -- and everything it writes stays yours afterwards.",
           ]),
     "",
+    // The flag's own consequence, stated where the flag is: psilink names this
+    // party from the account it runs as, and running as the reader's own account
+    // is one the image does not define. Reaching accept without a name is a clean
+    // refusal rather than a wrong label, so the cost of omitting this would be a
+    // stop on the sheet's first command -- and a reader numbered 1000, who gets no
+    // refusal, would otherwise send their partner the image's account name.
+    "One thing comes with it. psilink records a name for you -- the one",
+    "your partner sees in the agreed terms -- and takes it from the account",
+    "it runs as, which under this flag is one the container does not know.",
+    "So name yourself, on every command on this sheet, beside the flag:",
+    "",
+    '  --identity "Your name, Your organization"',
+    "",
+    "Without it psilink stops and asks rather than picking a name for you.",
+    "",
     "If you cannot change the commands, the other way is to hand a single",
     "folder over to user 1000. From inside the folder that holds your CSV",
     ...(endpoint.channel !== "filedrop"

@@ -1,6 +1,5 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
-import { userInfo } from "node:os";
 
 import {
   getLogger,
@@ -25,6 +24,7 @@ import {
 import { openEventStream, reportPersistenceLoss } from "../eventStream";
 import { detectFileConflicts, expandTilde } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
+import { resolveIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveConnectionCredentials } from "../util/atSignRefs";
 import { establishHostKeyTrust } from "../hostKeyTrust";
@@ -632,6 +632,16 @@ export async function handler(argv: Arguments): Promise<void> {
       }
     }
 
+    // Resolve this party's identity before the connection is built, so a run
+    // with no label to put in the terms is refused (exit 64) ahead of the
+    // first-use host-key prompt and the pin it would write.
+    let identity: string;
+    try {
+      identity = resolveIdentity(options.identity);
+    } catch (err) {
+      exitWithError(log, err, 64);
+    }
+
     let connection: ConnectionConfig;
     let liveConnection: ConnectionConfig;
     let prepared: PreparedExchange;
@@ -655,7 +665,6 @@ export async function handler(argv: Arguments): Promise<void> {
       // the exchange itself. A missing or unreadable `@path` file is a UsageError
       // here (exit 64), before any credential is sent.
       liveConnection = resolveConnectionCredentials(connection);
-      const identity = options.identity ?? userInfo().username;
       prepared = await prepareDataset(identity, input, linkageStrategy);
     } catch (err) {
       // A bad URL scheme or unsupported channel is a usage error (exit 64);

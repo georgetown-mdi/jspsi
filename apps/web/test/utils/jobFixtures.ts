@@ -112,6 +112,11 @@ export function testSplitSftpServerEntry(): JobSftpServerEntry {
   };
 }
 
+/** The identity both zero-setup fixtures carry. The field is required, so a
+ * fixture omitting it would not be the valid intent it claims to be; a test
+ * asserting on the label overrides it rather than reading this. */
+export const ZERO_SETUP_FIXTURE_IDENTITY = "Fixture Party";
+
 /** A valid filedrop zero-setup intent (no shared secret, no linkage terms);
  * overrides merge over the base. */
 export function validZeroSetupIntent(
@@ -121,6 +126,7 @@ export function validZeroSetupIntent(
     mode: "zeroSetup",
     channel: "filedrop",
     inputCsv: "ssn,last_name,date_of_birth\n111223333,smith,1990-01-01\n",
+    identity: ZERO_SETUP_FIXTURE_IDENTITY,
     ...overrides,
   };
 }
@@ -134,6 +140,7 @@ export function validZeroSetupSftpIntent(
     mode: "zeroSetup",
     channel: "sftp",
     inputCsv: "ssn,last_name,date_of_birth\n111223333,smith,1990-01-01\n",
+    identity: ZERO_SETUP_FIXTURE_IDENTITY,
     ...overrides,
   };
 }
@@ -268,6 +275,8 @@ export async function captureZeroSetupArgv(args: {
   connectionArgs: Array<string>;
   optionArgs?: Array<string>;
   eventStream: boolean;
+  /** Defaults to {@link ZERO_SETUP_FIXTURE_IDENTITY}: the driver requires one,
+   * so a caller not asserting on the label still has to send it. */
   identity?: string;
   linkageStrategy?: "cascade" | "single-pass";
   /** The run's diagnostic/recovery controls; defaults to neither, the shape
@@ -292,7 +301,7 @@ export async function captureZeroSetupArgv(args: {
           sweepExchangeFiles: false,
           logFilePath: undefined,
         },
-        ...(args.identity !== undefined ? { identity: args.identity } : {}),
+        identity: args.identity ?? ZERO_SETUP_FIXTURE_IDENTITY,
         ...(args.linkageStrategy !== undefined
           ? { linkageStrategy: args.linkageStrategy }
           : {}),

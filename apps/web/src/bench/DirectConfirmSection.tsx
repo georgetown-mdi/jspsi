@@ -34,6 +34,7 @@ import { overlongColumnsAlert } from "@psi/columnNames";
 
 import {
   DEFAULT_PREVIEW_IDENTITY,
+  DIRECT_IDENTITY_REQUIRED_REASON,
   DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE,
   previewInferredTerms,
 } from "./directExchangeModel";
@@ -46,7 +47,7 @@ import type { ProfiledJobInput } from "@psi/workInputClient";
 
 /**
  * The direct-exchange confirm screen: the committed file's identity and shape, the
- * optional identity field, the linkage-strategy choice, the browser-side preview
+ * required identity field, the linkage-strategy choice, the browser-side preview
  * of the terms the file is EXPECTED to produce, the two fixed symmetry notices,
  * and the trust-model affirmation that gates Run.
  *
@@ -135,8 +136,7 @@ export function DirectConfirmSection({
       : undefined;
 
   // Client-side guard mirroring the intent schema's identity contract, validated on
-  // the value the run actually sends (the trimmed label; a blank field omits identity
-  // and runs as the appliance user, so it is not an error). Naming the fault at the
+  // the value the run actually sends (the trimmed label). Naming the fault at the
   // field keeps a label the schema refuses -- a leading dash, an over-long value, or
   // a control character -- from reaching the server as an opaque 400 that failureFor
   // would misattribute to the file or SFTP destination. The rules are the shared
@@ -152,6 +152,13 @@ export function DirectConfirmSection({
           : IDENTITY_CONTROL_CHAR_PATTERN.test(trimmedIdentity)
             ? "Identity cannot contain control characters (a line break or a tab, for instance)"
             : undefined;
+  // An untouched field is not a typing mistake, so it gates the run rather than
+  // reddening the input the step opens on. It does gate it: the label is what the
+  // partner reads as this party's name, and nothing stands in for it -- a
+  // zero-setup run carries no terms document, and the CLI's own fallback is the
+  // account it runs as, which an appliance container under an unmapped uid does
+  // not have.
+  const identityMissing = trimmedIdentity.length === 0;
 
   return (
     <Stack gap="lg">
@@ -171,8 +178,9 @@ export function DirectConfirmSection({
       </section>
 
       <TextInput
-        label="Your identity (optional)"
-        description="Names you in the disclosure record and rides the exchange. Leave blank to run as this appliance's user."
+        label="Your identity"
+        withAsterisk
+        description="What your partner sees as your name, and what names you in the disclosure record. A name, an organization, a contact address -- whatever your partner will recognize."
         value={identity}
         onChange={(event) => onIdentity(event.currentTarget.value)}
         error={identityError}
@@ -301,6 +309,7 @@ export function DirectConfirmSection({
               !linkable ||
               overlongAlert !== undefined ||
               running ||
+              identityMissing ||
               identityError !== undefined ||
               !online
             }
@@ -311,6 +320,11 @@ export function DirectConfirmSection({
             Back
           </Button>
         </Group>
+        {identityMissing && (
+          <Text size="sm" c="dimmed">
+            {DIRECT_IDENTITY_REQUIRED_REASON}
+          </Text>
+        )}
         {!online && (
           <Text size="sm" c="dimmed">
             {OFFLINE_EXCHANGE_REASON}

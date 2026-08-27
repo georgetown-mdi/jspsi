@@ -1222,7 +1222,7 @@ describe("jobZeroSetupIntentSchema accepts the allowed fields", () => {
     ).toBe(true);
   });
 
-  test("accepts the optional linkageStrategy enum and identity label", () => {
+  test("accepts the optional linkageStrategy enum and the identity label", () => {
     for (const linkageStrategy of ["cascade", "single-pass"] as const)
       expect(
         jobZeroSetupIntentSchema.safeParse(
@@ -1231,10 +1231,27 @@ describe("jobZeroSetupIntentSchema accepts the allowed fields", () => {
       ).toBe(true);
   });
 
+  test("refuses an intent carrying no identity, which the CLI cannot stand in for", () => {
+    // The label is what the partner reads as this party's name, and a zero-setup
+    // run carries no terms document to hold one. The CLI's own fallback -- the
+    // user name of the account it runs as -- is absent in an appliance container
+    // running under a uid its image does not define, so the console supplies the
+    // label or the job does not start.
+    const { identity: _omitted, ...withoutIdentity } = validZeroSetupIntent();
+    expect(jobZeroSetupIntentSchema.safeParse(withoutIdentity).success).toBe(
+      false,
+    );
+    expect(
+      jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ identity: "" }))
+        .success,
+    ).toBe(false);
+  });
+
   test("accepts a mounted inputFile reference in place of inputCsv", () => {
     const intent = {
       mode: "zeroSetup",
       channel: "filedrop",
+      identity: "county-health",
       inputFile: SAMPLE_INPUT_FILE_REF,
     };
     expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(true);

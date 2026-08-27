@@ -244,8 +244,11 @@ function buildExchangeHandoffTemplate(
  * Compose the zero-setup mode's portable command tokens: `psilink` plus the
  * connection portion (the sftp arm's `sftp://` URL and `--server-*` flags with the
  * credential `@path` placeholdered, or the filedrop arm's placeholder `file://`
- * locator), the run's tuning flags, its identity and linkage-strategy
- * selectors when set, and the input/output positionals. The sftp arm reuses
+ * locator), the run's tuning flags, its identity, its linkage-strategy selector
+ * when set, and the input/output positionals. The identity is always carried: the
+ * graduated command reads no configuration document, and the account a scheduled
+ * container runs as may have no user name for the CLI to fall back on.
+ * The sftp arm reuses
  * {@link zeroSetupSftpArgv} against a placeholder-credential entry, so the URL,
  * username, and mandatory fingerprint pin are exactly what ran while no credential
  * `@path` is emitted. The tuning flags come from {@link zeroSetupOptionsArgv} --
@@ -281,7 +284,7 @@ function buildZeroSetupHandoffTemplate(
     "psilink",
     ...connectionArgs,
     ...zeroSetupOptionsArgv(intent.options),
-    ...(intent.identity !== undefined ? [`--identity=${intent.identity}`] : []),
+    `--identity=${intent.identity}`,
     ...(intent.linkageStrategy !== undefined
       ? [`--linkage-strategy=${intent.linkageStrategy}`]
       : []),
