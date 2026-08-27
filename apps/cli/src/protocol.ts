@@ -1653,14 +1653,22 @@ export async function runProtocol(
           // take the recipient from the operator's own notes. Warn rather than
           // inform for that one case, and say what follows from it in the same
           // line -- an unnamed partner is the ordinary shape of a quick run, so
-          // the copy states the consequence and stops there.
+          // the copy states the consequence and stops there. It also rides the
+          // machine-interface warning event, for the same unattended-supervisor
+          // reason as SIGNING_WITHOUT_RECORD_WARNING: a job runner that discards
+          // stderr on success must still see the one control that catches an
+          // accounting gap before it compounds run after run.
           const line = [
             "terms agreed, partner identity:",
             redactAndDisplayPartyIdentity(partnerTerms.identity),
           ] as const;
-          if (recordOutput !== undefined && partnerTerms.identity === undefined)
+          if (
+            recordOutput !== undefined &&
+            partnerTerms.identity === undefined
+          ) {
             log.warn(...line, UNNAMED_PARTNER_ACCOUNTING_NOTE);
-          else log.info(...line);
+            emit((e) => e.warning(UNNAMED_PARTNER_ACCOUNTING_NOTE));
+          } else log.info(...line);
           log.info("role:", resolvedRole);
         },
       },

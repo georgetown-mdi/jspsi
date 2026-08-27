@@ -386,6 +386,36 @@ describe("zero-setup", () => {
     const recordUnnamed = path.join(work, "unnamed-record.json");
 
     const stdio = captureStdio();
+    // Both parties also run under --event-stream, so the same run pins the
+    // accounting note's machine-interface parity: intercept fs.writeSync for
+    // EVENT_STREAM_FD (every other fd passes through to the real
+    // implementation) and make fstatSync succeed for it so the fail-closed
+    // preflight passes without a real pipe -- the same technique
+    // apps/cli/test/unit/protocol.test.ts uses for its fd-3 tests. Each event is
+    // flushed by a single synchronous writeSync call, so the two parties'
+    // concurrent writes to the shared capture never interleave mid-line.
+    const eventStreamFd = 3;
+    const fd3Chunks: Buffer[] = [];
+    const realWriteSync = fs.writeSync;
+    const writeSyncSpy = vi.spyOn(fs, "writeSync").mockImplementation(((
+      fd: number,
+      ...args: unknown[]
+    ) => {
+      if (fd === eventStreamFd) {
+        const [buffer, offset, length] = args as [Buffer, number, number];
+        fd3Chunks.push(Buffer.from(buffer.subarray(offset, offset + length)));
+        return length;
+      }
+      return (realWriteSync as (...a: unknown[]) => number)(fd, ...args);
+    }) as typeof fs.writeSync);
+    const realFstatSync = fs.fstatSync;
+    const fstatSyncSpy = vi.spyOn(fs, "fstatSync").mockImplementation(((
+      fd: number,
+      ...rest: unknown[]
+    ) => {
+      if (fd === eventStreamFd) return {} as fs.Stats;
+      return (realFstatSync as (...a: unknown[]) => fs.Stats)(fd, ...rest);
+    }) as typeof fs.fstatSync);
     try {
       await runBoth(
         [
@@ -402,6 +432,7 @@ describe("zero-setup", () => {
           `${PEER_TIMEOUT_SECONDS}s`,
           "--log-level",
           "info",
+          "--event-stream",
         ],
         [
           url,
@@ -415,10 +446,13 @@ describe("zero-setup", () => {
           `${PEER_TIMEOUT_SECONDS}s`,
           "--log-level",
           "info",
+          "--event-stream",
         ],
       );
     } finally {
       stdio.restore();
+      writeSyncSpy.mockRestore();
+      fstatSyncSpy.mockRestore();
     }
 
     const named = JSON.parse(fs.readFileSync(recordNamed, "utf8")) as Record<
@@ -455,5 +489,19 @@ describe("zero-setup", () => {
     expect(diagnostics).not.toContain(
       `party-a ${UNNAMED_PARTNER_ACCOUNTING_NOTE}`,
     );
+
+    // Machine-interface parity: the same note rides a fd-3 warning event for
+    // the party that read an unnamed partner (party-a, above), and for no one
+    // else -- in particular not for party-b, whose partner is named.
+    const events = Buffer.concat(fd3Chunks)
+      .toString("utf8")
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as { type: string; message?: string });
+    const accountingNoteWarnings = events.filter(
+      (e) =>
+        e.type === "warning" && e.message === UNNAMED_PARTNER_ACCOUNTING_NOTE,
+    );
+    expect(accountingNoteWarnings).toHaveLength(1);
   }, 90_000);
 });
