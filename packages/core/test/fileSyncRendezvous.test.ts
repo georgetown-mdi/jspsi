@@ -863,7 +863,9 @@ describe("FileSyncRendezvous identity reset per rejected path", () => {
     placePeerHello(files, "aaa-2", flags);
     const p = makeParty("aaa", flags, files);
 
-    await expect(p.rdv.run(p.scope)).rejects.toMatchObject({
+    const rejection = p.rdv.run(p.scope);
+    await expect(rejection).rejects.toBeInstanceOf(UsageError);
+    await expect(rejection).rejects.toMatchObject({
       message: expect.stringContaining("share a prefix at a '-' boundary"),
     });
     // The lock-joiner prefix guard fires BEFORE the identity commit, so it

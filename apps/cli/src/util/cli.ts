@@ -267,10 +267,10 @@ export const INTERNAL_FAULT_EXIT_CODE = 70;
  * at the same altitude, rather than being left to the 69 default. The remedy for
  * a `usage` kind is a caller, protocol, or terms correction that a re-run cannot
  * supply: 69 tells an unattended supervisor to retry, and each retry re-fires the
- * same deterministic refusal after conducting another whole exchange. The other kinds keep 69: `transport` and `closed` are
- * availability conditions a retry can clear, `security` and `protocol` are
- * observable in the terminal event's category rather than in the exit code (see
- * docs/spec/CLI_EVENTS.md).
+ * same deterministic refusal after conducting another whole exchange. The other
+ * kinds keep 69: `transport` and `closed` are availability conditions a retry can
+ * clear, `security` and `protocol` are observable in the terminal event's
+ * category rather than in the exit code (see docs/spec/CLI_EVENTS.md).
  *
  * The own-`exitCode` rung is load-bearing in both directions. `openInputSource`
  * and `buildDataSpec` throw plain `Error`s carrying `exitCode`, so a missing
