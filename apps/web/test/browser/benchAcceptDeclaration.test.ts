@@ -10,18 +10,32 @@ import { createElement } from "react";
 // other bench component suites do.
 import "@mantine/core/styles.css";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
+  MAX_NAME_LENGTH,
+  MAX_PAYLOAD_ENTRIES,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
+import {
+  AcceptorColumnsStep,
+  MAX_DECLARED_NAMES_SHOWN,
+} from "@bench/AcceptorColumnsStep";
 import {
   acceptorColumnsEditorState,
   acceptorInitialColumnsState,
   acceptorVerdict,
 } from "@bench/acceptorColumnsModel";
-import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
 
 // The grid labels its controls through this helper, so a query for one derives the
 // expected label from it rather than restating the isolate as literal characters.
 import { isolatedColumnName } from "@components/ColumnName";
+
+// The seam the grid's own "How it is used" control edits through, so a test that
+// opens on a column set to something other than "sent" reaches that state the way
+// the operator would rather than by hand-writing role/isPayload.
+import { applyDisclosure } from "@psi/metadataEditing";
 
 import { createAppMount } from "./renderApp";
 
@@ -64,6 +78,22 @@ const acceptorTerms: LinkageTerms = {
 // wherever it is rendered unescaped and uncontained.
 const RLO = "\u202E";
 
+// Ordinary content rather than an attack, and outside printable ASCII: U+00E9 LATIN
+// SMALL LETTER E WITH ACUTE is what a real header and a real declaration both carry,
+// which is what makes it the character the two treatments on this screen disagree
+// about. Written as an escape for the reason RLO above is.
+const NON_ASCII = "\u00E9";
+
+// What the conflict notice may paint with the declaration flooded. An ABSOLUTE
+// number, deliberately not derived from MAX_DECLARED_NAMES_SHOWN: a ceiling that
+// scaled with the cap would hold at any cap, including none, which is the change
+// this check exists to catch. It leaves headroom over what the notice measures
+// today (a few more names' worth) so ordinary copy edits do not trip it, and stays
+// hundreds of times under the megabyte the same declaration paints uncapped -- the
+// difference between scrolling past the notice to reach the grid and the launch
+// control, and not reaching them.
+const NOTICE_CEILING = 4_000;
+
 // The over-declared half's remedies as the notice states them: the partner's first,
 // then the local widening and what it costs. Pinned once, since the two tests that
 // read it drive the offer over columns sitting at different uses -- what it costs
@@ -75,9 +105,23 @@ const WIDENING_OFFER =
   "have marked so far, and each column has a single use, so sending it " +
   "replaces the use it has now.";
 
-function mountStep(linkageTerms: LinkageTerms, columns: Array<string>) {
+function mountStep(
+  linkageTerms: LinkageTerms,
+  columns: Array<string>,
+  // Columns the step opens with set to "Not used", the state a column has to be in
+  // to sit in the declared-but-not-sent half while the file still carries it.
+  unsent: ReadonlyArray<string> = [],
+) {
   const rows = [Object.fromEntries(columns.map((c) => [c, "x"]))];
-  const columnsState = acceptorInitialColumnsState(columns);
+  const inferred = acceptorInitialColumnsState(columns);
+  const columnsState = {
+    ...inferred,
+    metadata: inferred.metadata.map((column) =>
+      unsent.includes(column.name)
+        ? applyDisclosure(column, "ignored")
+        : column,
+    ),
+  };
   const editorState = acceptorColumnsEditorState(
     columnsState,
     linkageTerms,
@@ -98,6 +142,17 @@ function mountStep(linkageTerms: LinkageTerms, columns: Array<string>) {
       onBack: noop,
     }),
   );
+}
+
+// The declaration-conflict notice as one element, for an assertion about its whole
+// rendered content rather than the page's. The step gives three advisories the
+// role -- this one, the dead-key note, and the overlong-name note -- and neither of
+// the other two holds in any scenario below, so the count is asserted rather than
+// assumed: a second one appearing would otherwise silently redirect the query.
+function declarationNotice(): HTMLElement {
+  const notices = app.container.querySelectorAll<HTMLElement>('[role="note"]');
+  expect(notices).toHaveLength(1);
+  return notices[0];
 }
 
 describe("acceptor columns step: a disagreeing non-empty declaration", () => {
@@ -224,5 +279,87 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
       `[aria-label="How column ${isolatedColumnName("record_id")} is used"]`,
     );
     expect(use?.value).toBe("Unique record identifier - not sent");
+  });
+
+  test("bounds the declared-name list, and counts the rest, when the declaration is flooded", async () => {
+    // The declaration at core's own ceiling, every name long enough to spend the
+    // whole escaped display allowance: the shape that decides whether the operator
+    // can still reach the grid and the launch control below this notice.
+    const flooded = Array.from(
+      { length: MAX_PAYLOAD_ENTRIES },
+      (_, index) => `${index}-${NON_ASCII.repeat(MAX_NAME_LENGTH)}`,
+    );
+    // The premise, asserted rather than assumed: each of those names spends the
+    // whole per-value allowance at this sink and is cut at it, so what is measured
+    // below is the worst case and not a mild one.
+    const escaped = sanitizeForDisplay(flooded[0]);
+    expect(escaped.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(true);
+    expect(escaped.length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
+    mountStep(
+      {
+        ...acceptorTerms,
+        payload: { receive: flooded.map((name) => ({ name })) },
+      },
+      // No column of this file is marked to send, so the declared half is the only
+      // direction that holds and every list item in the notice is a declared name.
+      ["first_name", "last_name"],
+    );
+    await expect
+      .element(
+        page.getByText("Your partner expects columns you are not sending"),
+      )
+      .toBeInTheDocument();
+
+    // What the same declaration would paint uncapped, measured rather than
+    // asserted from the constants: the notice's bound is only worth pinning
+    // against the size it replaces.
+    const uncappedSize = flooded.reduce(
+      (total, name) => total + sanitizeForDisplay(name).length,
+      0,
+    );
+    expect(uncappedSize).toBeGreaterThan(1_000_000);
+
+    const notice = declarationNotice();
+    expect(notice.querySelectorAll("li")).toHaveLength(
+      MAX_DECLARED_NAMES_SHOWN,
+    );
+    expect(notice.textContent).toContain(
+      `and ${MAX_PAYLOAD_ENTRIES - MAX_DECLARED_NAMES_SHOWN} more not shown here.`,
+    );
+    expect(notice.textContent.length).toBeLessThanOrEqual(NOTICE_CEILING);
+  });
+
+  test("escapes a declared name the file also carries, while the grid row it points at renders that header verbatim", async () => {
+    // The one column two provenances meet on: the invitation declares it and the
+    // operator's file carries a header of the same bytes. The notice escapes the
+    // partner's copy -- it is text this operator cannot inspect -- while the grid
+    // row it sends them to renders their own header as itself inside its isolate,
+    // so the same name reaches the operator in two forms on one screen.
+    const shared = `notes${NON_ASCII}`;
+    mountStep(
+      { ...acceptorTerms, payload: { receive: [{ name: shared }] } },
+      ["first_name", "last_name", shared],
+      [shared],
+    );
+    await expect
+      .element(
+        page.getByText("Your partner expects a column you are not sending"),
+      )
+      .toBeInTheDocument();
+
+    const notice = declarationNotice();
+    expect(notice.textContent).toContain(sanitizeForDisplay(shared));
+    expect(notice.textContent).not.toContain(shared);
+    // The column IS in the file, so the notice offers the local widening rather
+    // than the absent-column line -- the half of the collision that makes the grid
+    // row below a place the operator is actually sent.
+    expect(notice.textContent).toContain(WIDENING_OFFER);
+    expect(notice.textContent).not.toContain("not a column in this file");
+
+    const rowHeaders = Array.from(
+      app.container.querySelectorAll<HTMLElement>('th[scope="row"] bdi'),
+    ).map((header) => header.textContent);
+    expect(rowHeaders).toContain(shared);
+    expect(rowHeaders).not.toContain(sanitizeForDisplay(shared));
   });
 });
