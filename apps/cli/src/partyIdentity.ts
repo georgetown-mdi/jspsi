@@ -44,6 +44,17 @@ export const IDENTITY_STILL_PLACEHOLDER =
   `yours to choose: pass ${IDENTITY_FLAG_HELP} naming this party.`;
 
 /**
+ * Why a label typed at one invocation cannot stand in for a configured one --
+ * the clause every refusal that reads a label out of a configuration file ends
+ * on. The file persists unchanged and supplies the terms of every run under the
+ * partnership, so a label given for this one invocation would name the party
+ * here and leave it named otherwise everywhere after.
+ */
+const FLAG_CANNOT_STAND_IN =
+  `${IDENTITY_FLAG_HELP} cannot stand in, because the configuration persists ` +
+  "unchanged and is what every exchange under this partnership sends.";
+
+/**
  * The refusal a command raises when no identity was supplied for a run that
  * authors its own linkage terms.
  */
@@ -68,16 +79,33 @@ export function configuredIdentityRequired(configPath: string): string {
   return (
     `no identity for this party: ${configPath} carries no ` +
     `linkage_terms.identity, and it is the source of this invitation's terms. ` +
-    `${PARTNER_READS_IT}, so set it there -- ${IDENTITY_FLAG_HELP} cannot ` +
-    "stand in, because the configuration persists unchanged and is what every " +
-    "exchange under this partnership sends."
+    `${PARTNER_READS_IT}, so set it there -- ${FLAG_CANNOT_STAND_IN}`
   );
 }
 
 /**
- * The refusal {@link resolveInvitationIdentity} raises when the configuration
- * still carries the template placeholder, naming the field to edit and the file
- * it sits in.
+ * The refusal {@link resolveKeptConfigurationIdentity} raises, naming the
+ * configuration this acceptance keeps as the file that was expected to carry the
+ * label.
+ *
+ * The path composes RAW, for the reason and with the single escape
+ * {@link configuredIdentityRequired} documents.
+ */
+export function keptConfigurationIdentityRequired(configPath: string): string {
+  return (
+    `no identity for this party: ${configPath} carries no ` +
+    "linkage_terms.identity, and this acceptance keeps that configuration " +
+    `rather than writing one. ${PARTNER_READS_IT}, so set it there -- ` +
+    FLAG_CANNOT_STAND_IN
+  );
+}
+
+/**
+ * The refusal both configured-label resolvers raise when the configuration still
+ * carries the template placeholder, naming the field to edit and the file it
+ * sits in. One wording serves both: the placeholder is refused for the same
+ * reason wherever a file supplies the label, and neither command can replace it
+ * from the command line.
  *
  * The path composes RAW, for the reason and with the single escape
  * {@link configuredIdentityRequired} documents.
@@ -88,9 +116,7 @@ export function configuredIdentityStillPlaceholder(configPath: string): string {
     `"${PLACEHOLDER_IDENTITY}", the placeholder psilink init writes where a ` +
     "name belongs, so it is refused exactly as an absent one. " +
     `${PARTNER_READS_IT}, so replace it there with this party's name, ` +
-    `organization, and contact -- ${IDENTITY_FLAG_HELP} cannot stand in, ` +
-    "because the configuration persists unchanged and is what every exchange " +
-    "under this partnership sends."
+    `organization, and contact -- ${FLAG_CANNOT_STAND_IN}`
   );
 }
 
@@ -246,8 +272,53 @@ export function resolveInvitationIdentity(
   configuredIdentity: string | undefined,
   configPath: string,
 ): string {
+  return resolveConfiguredIdentity(
+    configuredIdentity,
+    configPath,
+    configuredIdentityRequired,
+  );
+}
+
+/**
+ * This party's identity label for an acceptance that keeps the configuration
+ * already at the path: that file's own `linkage_terms.identity`.
+ *
+ * Such an acceptance writes no configuration, so the label it presents has to be
+ * the one the kept file carries: `psilink exchange` reads that file for every
+ * run the partnership makes, and under `signing.mode: certificate` the label in
+ * the agreed terms is what a receipt is verified against -- so a run under any
+ * other label would name this party one way for the acceptance and another way
+ * for the partnership it belongs to. `--identity` is not an alternative for the
+ * same reason it is not one when inviting from a configuration; renaming the
+ * party is an edit of that file.
+ *
+ * Blank and {@link PLACEHOLDER_IDENTITY} are refused, and the value comes back
+ * VERBATIM, exactly as {@link resolveInvitationIdentity} treats them and for the
+ * reasons recorded there.
+ */
+export function resolveKeptConfigurationIdentity(
+  configuredIdentity: string | undefined,
+  configPath: string,
+): string {
+  return resolveConfiguredIdentity(
+    configuredIdentity,
+    configPath,
+    keptConfigurationIdentityRequired,
+  );
+}
+
+/**
+ * The body both configured-label resolvers share. `required` is the whole
+ * difference between them: why THIS command reads the label out of a file rather
+ * than off the command line, which is what its refusal has to say.
+ */
+function resolveConfiguredIdentity(
+  configuredIdentity: string | undefined,
+  configPath: string,
+  required: (configPath: string) => string,
+): string {
   if (configuredIdentity === undefined || configuredIdentity.trim() === "")
-    throw new UsageError(configuredIdentityRequired(configPath));
+    throw new UsageError(required(configPath));
   if (isPlaceholderIdentity(configuredIdentity))
     throw new UsageError(configuredIdentityStillPlaceholder(configPath));
   return configuredIdentity;

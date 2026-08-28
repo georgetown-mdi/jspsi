@@ -39,6 +39,7 @@ import {
   askIdentityAtPrompt,
   identityFromFlagOrPrompt,
   resolveIdentity,
+  resolveKeptConfigurationIdentity,
 } from "../partyIdentity";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { decodeAndValidateInvitation } from "../invitationDecode";
@@ -46,6 +47,7 @@ import {
   consentSurfaceSink,
   displayInvitation,
   renderDialedBroker,
+  type ConsentSurfaceSink,
 } from "../invitationDisplay";
 import {
   assertNoUnknownOptions,
@@ -302,7 +304,9 @@ type AcceptReady = {
  * cannot be collected later, at the confirmation prompt, without validating the
  * acceptance twice. It is asked after the invitation has decoded and validated
  * and after the key-file conflict gate, so nobody types a name for an
- * acceptance that was never going to proceed.
+ * acceptance that was never going to proceed. An acceptance that keeps a
+ * configuration already at the path neither asks nor reads the flag: its label
+ * is that file's own (see {@link keptConfigurationIdentity}).
  *
  * @internal exported for testing
  */
@@ -347,20 +351,40 @@ export async function validateAccept(params: {
     ["key"],
   );
 
-  // A configuration already at the path is either kept as it stands or aborts
-  // the acceptance below, and neither writes one -- so there is nowhere for an
-  // answer to be remembered, and the label a later run sends is that file's own.
-  // Asking there would collect a value this command has no place to put. The
-  // same lstat reconcileAcceptConfig gates reuse on, read here because the
-  // question comes before the terms the reconcile compares.
-  const willWriteConfig =
-    detectFileConflicts([options.configFile]).length === 0;
-  const myIdentity = resolveIdentity(
-    await identityFromFlagOrPrompt(
-      options.identity,
-      willWriteConfig ? askIdentity : undefined,
-    ),
+  // A configuration already at the path either aborts the acceptance below or
+  // is kept and reused (its consent record refreshed in place, docs/CLI.md
+  // under Existing files, but never its linkage_terms.identity -- see the
+  // "handler: accept-reuse leaves the kept configuration's identity untouched"
+  // test) -- so the label this party runs under is that file's own, and there
+  // is nothing to ask: an answer would have nowhere to be remembered, and a
+  // flag has nowhere to be written. This is the acceptance's one read of that
+  // file: the label is an input to the terms reconcileAcceptConfig compares,
+  // so the parsed spec is threaded into it rather than read a second time
+  // there.
+  const keptConfig = readExistingAcceptConfig(
+    options.configFile,
+    reconciliationSources(resolved.mode === "online"),
   );
+  const myIdentity =
+    keptConfig !== undefined
+      ? keptConfigurationIdentity({
+          configured: keptConfig.linkageTerms.identity,
+          supplied: options.identity,
+          configPath: options.configFile,
+          // The same sink resolution the terms display below takes, on the same
+          // two inputs: acceptance prompts exactly where `--consent-to-terms`
+          // did not declare the run unattended, so the notice reaches the
+          // terminal the y/N is asked on wherever the operator routed the log.
+          notify: consentSurfaceSink({
+            log,
+            logFile: options.logFile,
+            willPrompt: !consentToTerms,
+            level: "warn",
+          }),
+        })
+      : resolveIdentity(
+          await identityFromFlagOrPrompt(options.identity, askIdentity),
+        );
   // Adopt the invitation's agreed linkage fields/keys/algorithm, but record this
   // party's own identity (the invitation's identity is the inviter's) and MIRROR
   // the output direction rather than copying it: validateCompatibility compares
@@ -440,6 +464,7 @@ export async function validateAccept(params: {
     const { reuse: reuseExistingConfig, existingOutputShares } =
       reconcileAcceptConfig({
         configPath: options.configFile,
+        existing: keptConfig,
         myTerms,
         consentedPayloadColumns: token.disclosedPayloadColumns,
         target: connection,
@@ -519,6 +544,7 @@ export async function validateAccept(params: {
   const { reuse: reuseExistingConfig, existingOutputShares } =
     reconcileAcceptConfig({
       configPath: options.configFile,
+      existing: keptConfig,
       myTerms,
       consentedPayloadColumns: token.disclosedPayloadColumns,
       log,
@@ -652,53 +678,104 @@ export async function validateAccept(params: {
 }
 
 /**
- * Reconcile a pre-existing configuration file against an acceptance. Returns
- * `false` when no config exists at `configPath` (a fresh one will be written);
- * `true` when a config exists and agrees with the invitation (and, online, the
- * URL), so it is kept and only the key file is written. Throws a
- * {@link UsageError} -- before the prompt and before any network activity -- when
- * a config exists but disagrees, or cannot be parsed to compare, showing the
- * user exactly what to resolve.
+ * This party's label for an acceptance that keeps the configuration already at
+ * the path: that file's own `linkage_terms.identity`, with a `--identity` given
+ * alongside it reported as having no effect.
  *
- * Both accept-reuse paths -- offline, and online ahead of any network activity --
- * reach the received-payload warning below through this one call, so a single
- * wording covers both and lands before the confirmation prompt, where the
- * operator can still decline what it reports.
+ * The stored label wins because the kept file governs every exchange under the
+ * partnership, and under `signing.mode: certificate` the label in the agreed
+ * terms is what a receipt is verified against -- so a flag that quietly renamed
+ * the party for one run would put the name the partner reads on this run at odds
+ * with the one the file keeps sending. Renaming is an edit of that file, which
+ * is what the notice says.
+ *
+ * This acceptance does refresh the kept file's consent record in place
+ * (docs/CLI.md, under Existing files), but never `linkage_terms.identity`
+ * itself (see the "handler: accept-reuse leaves the kept configuration's
+ * identity untouched" test) -- so the label a certificate was issued against
+ * never moves under it.
+ *
+ * The notice reads as the one `psilink invite` gives on its own
+ * config-as-source path, and is escaped the same way: both labels and the path
+ * are free text reaching the consent surface's sink, which is their boundary
+ * (CONTRIBUTING.md, Operator-facing escaping). What triggers it deliberately
+ * diverges. Invite warns on any non-blank flag, this one only where the flag
+ * also differs from the stored label: a flag naming exactly that label asks for
+ * what the run already does, so reporting it as ineffective would misdescribe an
+ * acceptance that does run under the name the operator typed. A blank flag --
+ * what a scripted `--identity "$ORG"` sends with `ORG` unset -- names nothing to
+ * begin with, and is silent on both commands. Align the two only on a decision
+ * to change that behavior, not to make the pair look uniform.
+ *
+ * `notify` is the consent surface's own sink rather than the logger, because
+ * this notice is part of what the operator answers for: it says the name the
+ * partner will read is not the name this invocation typed, and the y/N over
+ * that name comes a screen later. A plain `log.warn` would let `--log-file` or
+ * a level above `warn` carry it away from the terminal the question is asked
+ * on, which is the routing {@link consentSurfaceSink} exists to survive
+ * (docs/CLI.md, under acceptance).
  */
-function reconcileAcceptConfig(params: {
+function keptConfigurationIdentity(params: {
+  configured: string | undefined;
+  supplied: string | undefined;
   configPath: string;
-  myTerms: LinkageTerms;
-  /**
-   * The disclosed subset this acceptance consents to, from the invitation token.
-   * Compared against the kept config's recorded lock-in only to warn about a
-   * removal; what is persisted is decided by the caller's own write (see
-   * {@link persistExpectedPayloadColumns}).
-   */
-  consentedPayloadColumns: string[] | undefined;
-  target?: RunnableConnectionConfig;
-  log: ReturnType<typeof getLogger>;
-}): { reuse: boolean; existingOutputShares?: boolean } {
-  const { configPath, myTerms, consentedPayloadColumns, target, log } = params;
-  if (detectFileConflicts([configPath]).length === 0) return { reuse: false };
+  notify: ConsentSurfaceSink;
+}): string {
+  const { configured, supplied, configPath, notify } = params;
+  const identity = resolveKeptConfigurationIdentity(configured, configPath);
+  const stated = supplied?.trim();
+  if (stated !== undefined && stated !== "" && stated !== identity)
+    notify(
+      `--identity "${redactAndSanitizeForDisplay(stated)}" has no effect on an ` +
+        "acceptance that keeps the existing configuration file; that file's " +
+        "linkage_terms.identity " +
+        `("${redactAndSanitizeForDisplay(identity)}") names this party in the ` +
+        "terms this acceptance agrees to, and in every exchange the file " +
+        "governs. Edit linkage_terms.identity in " +
+        `${redactAndSanitizeForDisplay(configPath)} to change it.`,
+    );
+  return identity;
+}
 
-  // Reference to the source(s) compared against, woven into the messages so the
-  // online ("invitation and URL") and offline ("invitation") cases read right.
-  // A `target` connection is present only online.
-  const against =
-    target !== undefined
-      ? "the invitation and the connection URL"
-      : "the invitation";
-  const retryWith =
-    target !== undefined
-      ? "the same URL and invitation"
-      : "the same invitation";
+/**
+ * What a pre-existing configuration is compared against, woven into every
+ * message about it so the online case ("the invitation and the connection URL")
+ * and the offline one ("the invitation") each read right.
+ */
+function reconciliationSources(comparesConnectionUrl: boolean): {
+  against: string;
+  retryWith: string;
+} {
+  return comparesConnectionUrl
+    ? {
+        against: "the invitation and the connection URL",
+        retryWith: "the same URL and invitation",
+      }
+    : { against: "the invitation", retryWith: "the same invitation" };
+}
 
-  // Parse, then validate, in two steps. The YAML parse can echo source bytes (an
-  // inline credential) and warn to stderr, so it routes through the sensitive-
-  // file chokepoint (see sensitiveFile.ts); on any parse failure this reports the
-  // path and reconciliation guidance, never the parser's message. A schema
-  // failure from parseExchangeSpec (Zod) names field paths and issue kinds, not
-  // the offending values, so its message is safe to surface (below).
+/**
+ * The configuration already at `configPath`, parsed, or `undefined` where no
+ * file is there. Throws a {@link UsageError} naming the path and what to do
+ * about it when a file is there but cannot be read as an exchange spec.
+ *
+ * Called once per acceptance, by {@link validateAccept}, which threads the
+ * result to everything that needs it: the label the run proceeds under and the
+ * terms {@link reconcileAcceptConfig} compares then act on one read of one file.
+ *
+ * Parse, then validate, in two steps. The YAML parse can echo source bytes (an
+ * inline credential) and warn to stderr, so it routes through the sensitive-file
+ * chokepoint (see sensitiveFile.ts); on any parse failure this reports the path
+ * and reconciliation guidance, never the parser's message. A schema failure from
+ * parseExchangeSpec (Zod) names field paths and issue kinds, not the offending
+ * values, so its message is safe to surface.
+ */
+function readExistingAcceptConfig(
+  configPath: string,
+  sources: { against: string; retryWith: string },
+): ExchangeSpec | undefined {
+  if (detectFileConflicts([configPath]).length === 0) return undefined;
+  const { against, retryWith } = sources;
   let parsed: unknown;
   try {
     // The chokepoint's own path-only message is discarded by the catch below,
@@ -715,9 +792,8 @@ function reconcileAcceptConfig(params: {
         `or pass --config-file to write elsewhere, then retry with ${retryWith}.`,
     );
   }
-  let existing: ExchangeSpec;
   try {
-    existing = parseExchangeSpec(parsed);
+    return parseExchangeSpec(parsed);
   } catch (err) {
     throw new UsageError(
       `a configuration file already exists at ${configPath} but could not be ` +
@@ -727,6 +803,53 @@ function reconcileAcceptConfig(params: {
         `retry with ${retryWith}.`,
     );
   }
+}
+
+/**
+ * Reconcile a pre-existing configuration file against an acceptance. Returns
+ * `false` when no config was at `configPath` (a fresh one will be written);
+ * `true` when one was and it agrees with the invitation (and, online, the URL),
+ * so it is kept and only the key file is written. Throws a {@link UsageError} --
+ * before the prompt and before any network activity -- when it disagrees,
+ * showing the user exactly what to resolve.
+ *
+ * Both accept-reuse paths -- offline, and online ahead of any network activity --
+ * reach the received-payload warning below through this one call, so a single
+ * wording covers both and lands before the confirmation prompt, where the
+ * operator can still decline what it reports.
+ */
+function reconcileAcceptConfig(params: {
+  configPath: string;
+  /**
+   * The configuration already at `configPath` as {@link validateAccept} read
+   * it, or `undefined` where none is there. Passed in rather than read here so
+   * the label this acceptance runs under and the terms compared below come from
+   * one read of one file.
+   */
+  existing: ExchangeSpec | undefined;
+  myTerms: LinkageTerms;
+  /**
+   * The disclosed subset this acceptance consents to, from the invitation token.
+   * Compared against the kept config's recorded lock-in only to warn about a
+   * removal; what is persisted is decided by the caller's own write (see
+   * {@link persistExpectedPayloadColumns}).
+   */
+  consentedPayloadColumns: string[] | undefined;
+  target?: RunnableConnectionConfig;
+  log: ReturnType<typeof getLogger>;
+}): { reuse: boolean; existingOutputShares?: boolean } {
+  const {
+    configPath,
+    existing,
+    myTerms,
+    consentedPayloadColumns,
+    target,
+    log,
+  } = params;
+  if (existing === undefined) return { reuse: false };
+  // A `target` connection is present only online, which is what decides the
+  // source(s) every message here names.
+  const { against, retryWith } = reconciliationSources(target !== undefined);
 
   // Reported ahead of the reconciliation below, so a kept config's stale
   // citation reaches the operator whether or not its terms agree with the

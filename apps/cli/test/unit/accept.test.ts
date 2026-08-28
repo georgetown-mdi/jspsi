@@ -15,6 +15,7 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   encodeInvitation,
   getDefaultLinkageTerms,
+  getDiagnosticSink,
   getLogger,
   inferMetadata,
   LINKAGE_RULE_SET_VERDICT_COPY,
@@ -23,6 +24,7 @@ import {
   reconcileReceivedPayload,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
+  setDiagnosticSink,
   summarizeInvitation,
   UNRECOGNIZED_TRANSFORM_NOTE,
   UsageError,
@@ -1525,6 +1527,10 @@ test("validateAccept: a webrtc acceptance over a kept configuration keeps the tw
   writeExistingConfig(options.configFile);
   const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
   const messages: string[] = [];
+  // The kept configuration's label differs from this run's flag, so the
+  // no-effect notice writes where the prompt asks; capture it here rather than
+  // in the suite's own output.
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation(
       sampleToken(FUTURE(), WEBRTC_ENDPOINT),
@@ -1546,6 +1552,7 @@ test("validateAccept: a webrtc acceptance over a kept configuration keeps the tw
       ),
     ).toBe(true);
   } finally {
+    stdio.restore();
     fs.rmSync(options.configFile, { force: true });
     fs.rmSync(input, { force: true });
   }
@@ -1689,6 +1696,9 @@ function writeExistingConfig(
 test("validateAccept: offline reuses a config whose linkage terms match the invitation", async () => {
   const options = testOptions();
   writeExistingConfig(options.configFile);
+  // The flag and the kept file name this party differently, so the no-effect
+  // notice reaches the prompt's own sink; keep it out of the suite's output.
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
     const ready = await validateAccept({
@@ -1699,33 +1709,301 @@ test("validateAccept: offline reuses a config whose linkage terms match the invi
     expect(ready.reuseExistingConfig).toBe(true);
     expect(ready.mode).toBe("offline");
   } finally {
+    stdio.restore();
     fs.rmSync(options.configFile, { force: true });
   }
 });
 
-test("validateAccept: an acceptance that keeps an existing config asks for nothing", async () => {
+test("validateAccept: an acceptance that keeps an existing config takes its label and asks nothing", async () => {
   // The question exists to be remembered in the configuration the acceptance
   // writes, and this one writes none: the kept file's own linkage terms govern
-  // every later run, so there is nowhere to put an answer. The standing refusal
-  // stands in its place -- what a kept configuration does with a label supplied
-  // by flag is decided elsewhere.
+  // every later run, so that file's label is what this acceptance proceeds
+  // under, and there is nothing to ask.
   const options = testOptions({ identity: undefined });
   writeExistingConfig(options.configFile);
   const askIdentity = vi.fn().mockResolvedValue("Agency B");
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
-    await expect(
-      validateAccept({
-        resolved: { mode: "offline", invitation: encoded },
-        options,
-        askIdentity,
-        log: silentLog,
-      }),
-    ).rejects.toThrow(IDENTITY_REQUIRED);
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded },
+      options,
+      askIdentity,
+      log: silentLog,
+    });
     expect(askIdentity).not.toHaveBeenCalled();
+    expect(ready.reuseExistingConfig).toBe(true);
+    expect(ready.dataSpec.linkageTerms.identity).toBe("Acceptor Org");
   } finally {
     fs.rmSync(options.configFile, { force: true });
   }
+});
+
+/**
+ * Accept over a configuration already at the path, in either reuse mode,
+ * reporting the prepared acceptance alongside every line it emitted -- the calls
+ * it made on the logger, the lines that survived the level to reach the log's
+ * own sink, and what it wrote where the confirmation prompt asks. The saved
+ * connection agrees with the online URL, so the reuse verdict carries no
+ * connection divergence of its own and the only notice a case can raise is the
+ * one it is about.
+ *
+ * `logLevel` and `logFile` are the routing the operator chose, which is what
+ * decides whether a consent line needs a copy where the prompt asks; the
+ * diagnostic sink is captured for the same run rather than left to the suite's
+ * own output, so a case can compare the two destinations.
+ */
+async function acceptOverKeptConfig(params: {
+  terms: LinkageTerms;
+  identity: string | undefined;
+  loggerName: string;
+  mode?: "online" | "offline";
+  logLevel?: "silent" | "error" | "warn";
+  logFile?: string;
+  consentToTerms?: boolean;
+}): Promise<{
+  ready: Awaited<ReturnType<typeof validateAccept>>;
+  warnings: string[];
+  logged: string[];
+  promptWrites: string;
+}> {
+  const {
+    terms,
+    identity,
+    loggerName,
+    mode = "offline",
+    logLevel = "silent",
+    logFile,
+    consentToTerms = false,
+  } = params;
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-kept-"));
+  const configFile = path.join(dir, "psilink.yaml");
+  const keyFile = path.join(dir, ".psilink.key");
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
+  );
+  saveConfig(configFile, {
+    connection: { channel: "sftp", server: { host: "host" } },
+    linkageTerms: terms,
+  });
+  const log = getLogger(loggerName);
+  log.setLevel(logLevel);
+  const warnSpy = vi.spyOn(log, "warn");
+  const logged: string[] = [];
+  const previousSink = getDiagnosticSink();
+  setDiagnosticSink((_method, _prefix, args) => {
+    logged.push(args.map((arg) => String(arg)).join(" "));
+  });
+  const stdio = captureStdio();
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const ready = await validateAccept({
+      resolved:
+        mode === "online"
+          ? {
+              mode: "online",
+              url: new URL("sftp://host"),
+              invitation: encoded,
+              input,
+            }
+          : { mode: "offline", invitation: encoded, input },
+      options: testOptions({ configFile, keyFile, identity, logFile }),
+      consentToTerms,
+      log,
+    });
+    return {
+      ready,
+      warnings: warnSpy.mock.calls.map((c) => String(c[0])),
+      logged,
+      promptWrites: stdio.stderrWrites.join(""),
+    };
+  } finally {
+    stdio.restore();
+    setDiagnosticSink(previousSink);
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** The distinctive clause of the flag-had-no-effect notice. */
+const IDENTITY_NO_EFFECT_CLAUSE = "has no effect on an acceptance that keeps";
+
+/** The one no-effect notice in `warnings`, asserted to be exactly one. */
+function identityNoEffectNotice(warnings: string[]): string {
+  const notices = warnings.filter((m) => m.includes(IDENTITY_NO_EFFECT_CLAUSE));
+  expect(notices).toHaveLength(1);
+  return notices[0];
+}
+
+test("validateAccept: offline reuse runs under the stored label, reporting the flag as having none", async () => {
+  // The kept file governs every exchange under the partnership, so a flag cannot
+  // rename the party in passing: the acceptance proceeds under the stored label
+  // and says so, naming both values and the field to edit.
+  const { ready, warnings } = await acceptOverKeptConfig({
+    terms: sampleTerms("Acceptor Org"),
+    identity: "Agency B",
+    loggerName: "accept-kept-identity-offline",
+  });
+  expect(ready.reuseExistingConfig).toBe(true);
+  expect(ready.dataSpec.linkageTerms.identity).toBe("Acceptor Org");
+  const notice = identityNoEffectNotice(warnings);
+  expect(notice).toContain('"Agency B"');
+  expect(notice).toContain('"Acceptor Org"');
+  expect(notice).toContain("Edit linkage_terms.identity");
+});
+
+test("validateAccept: online reuse presents the stored label to the partner", async () => {
+  // The path the divergence would have shown on: this run conducts the exchange
+  // itself, so the name the partner reads is the prepared exchange's -- and it
+  // has to be the one the kept configuration goes on sending, not a label
+  // supplied for this invocation alone.
+  const { ready, warnings } = await acceptOverKeptConfig({
+    terms: sampleTerms("Acceptor Org"),
+    identity: "Agency B",
+    loggerName: "accept-kept-identity-online",
+    mode: "online",
+  });
+  expect(ready.reuseExistingConfig).toBe(true);
+  expect(ready.mode).toBe("online");
+  if (ready.mode !== "online") return;
+  expect(ready.prepared.linkageTerms.identity).toBe("Acceptor Org");
+  expect(ready.dataSpec.linkageTerms.identity).toBe("Acceptor Org");
+  expect(identityNoEffectNotice(warnings)).toContain('"Acceptor Org"');
+});
+
+test("validateAccept: a flag that asks for the stored label reports nothing", async () => {
+  // Nothing diverged, so there is nothing to report: the notice exists to name a
+  // difference between what was typed and what the run sends. A blank flag --
+  // what `--identity "$ORG"` sends with ORG unset -- names nothing either. On
+  // neither destination: a suppressed notice reaches the prompt's own sink no
+  // more than it reaches the log.
+  for (const identity of [
+    "Acceptor Org",
+    "  Acceptor Org  ",
+    "   ",
+    undefined,
+  ]) {
+    const { warnings, promptWrites } = await acceptOverKeptConfig({
+      terms: sampleTerms("Acceptor Org"),
+      identity,
+      loggerName: `accept-kept-identity-agrees-${String(identity)}`,
+    });
+    expect(
+      warnings.filter((m) => m.includes(IDENTITY_NO_EFFECT_CLAUSE)),
+    ).toEqual([]);
+    expect(promptWrites).not.toContain(IDENTITY_NO_EFFECT_CLAUSE);
+  }
+});
+
+test("validateAccept: the no-effect notice reaches the prompt whatever the log routing", async () => {
+  // The operator answers the y/N for the name this notice reports, so it takes
+  // the consent surface's routing rather than a plain diagnostic's: a
+  // --log-file carries the log's copy off the terminal the question is asked
+  // on, and a level above `warn` drops that copy altogether. Under either, the
+  // notice is still written where the prompt asks -- the promise docs/CLI.md
+  // makes under acceptance. The `--log-file` value is what the sink reads to
+  // decide that, so nothing has to be written at the path for the case to hold.
+  for (const routing of [
+    { logLevel: "warn" as const, logFile: path.join(tmpdir(), "accept.log") },
+    { logLevel: "error" as const, logFile: undefined },
+  ]) {
+    const { promptWrites } = await acceptOverKeptConfig({
+      terms: sampleTerms("Acceptor Org"),
+      identity: "Agency B",
+      loggerName: `accept-kept-identity-routed-${routing.logLevel}`,
+      ...routing,
+    });
+    expect(promptWrites).toContain(IDENTITY_NO_EFFECT_CLAUSE);
+    expect(promptWrites).toContain('"Agency B"');
+    expect(promptWrites).toContain('"Acceptor Org"');
+  }
+});
+
+test("validateAccept: on the default routing the notice is logged once, not copied", async () => {
+  // The log's own line already lands on the terminal the prompt asks on, so a
+  // second copy would print the notice twice.
+  const { logged, promptWrites } = await acceptOverKeptConfig({
+    terms: sampleTerms("Acceptor Org"),
+    identity: "Agency B",
+    loggerName: "accept-kept-identity-default-routing",
+    logLevel: "warn",
+  });
+  expect(
+    logged.filter((line) => line.includes(IDENTITY_NO_EFFECT_CLAUSE)),
+  ).toHaveLength(1);
+  expect(promptWrites).not.toContain(IDENTITY_NO_EFFECT_CLAUSE);
+});
+
+test("validateAccept: an unattended acceptance keeps the notice in the log alone", async () => {
+  // --consent-to-terms asks nothing, so there is no question for the notice to
+  // accompany and it stays diagnostic output on the routing the operator chose
+  // -- at `warn`, which a level that drops the terms display still records. The
+  // routing here is the one that forces a prompt copy on an asking run, so what
+  // this measures is the unattended path declining to write one.
+  const { logged, promptWrites } = await acceptOverKeptConfig({
+    terms: sampleTerms("Acceptor Org"),
+    identity: "Agency B",
+    loggerName: "accept-kept-identity-unattended",
+    logLevel: "warn",
+    logFile: path.join(tmpdir(), "accept-unattended.log"),
+    consentToTerms: true,
+  });
+  expect(
+    logged.filter((line) => line.includes(IDENTITY_NO_EFFECT_CLAUSE)),
+  ).toHaveLength(1);
+  expect(promptWrites).toBe("");
+});
+
+test("validateAccept: a kept configuration carrying no identity refuses the acceptance", async () => {
+  // The acceptance writes no configuration, so a label supplied here would name
+  // this party for one run and leave every later one unnamed -- which is the
+  // refusal rather than something a flag can paper over.
+  for (const stored of [undefined, "   "])
+    await expect(
+      acceptOverKeptConfig({
+        terms: { ...sampleTerms("Acceptor Org"), identity: stored },
+        identity: "Agency B",
+        loggerName: "accept-kept-identity-absent",
+      }),
+    ).rejects.toThrow("carries no linkage_terms.identity");
+});
+
+test("validateAccept: a kept configuration still carrying the placeholder refuses", async () => {
+  // The template's own instruction to name the party is not a name, and reading
+  // the label out of a file rather than off the command line does not make it
+  // one.
+  await expect(
+    acceptOverKeptConfig({
+      terms: { ...sampleTerms("Acceptor Org"), identity: PLACEHOLDER_IDENTITY },
+      identity: undefined,
+      loggerName: "accept-kept-identity-placeholder",
+    }),
+  ).rejects.toThrow(`is still "${PLACEHOLDER_IDENTITY}"`);
+});
+
+test("validateAccept: the no-effect notice escapes both labels it reports", async () => {
+  // Neither value is psilink's: one was typed at the command line and one read
+  // out of a file, and the consent-surface sink this notice takes is their
+  // display boundary.
+  const flag = `Agency B${ESC}[0m`;
+  const stored = `Acceptor Org${RLO}`;
+  const { warnings, promptWrites } = await acceptOverKeptConfig({
+    terms: sampleTerms(stored),
+    identity: flag,
+    loggerName: "accept-kept-identity-escaping",
+  });
+  const notice = identityNoEffectNotice(warnings);
+  expect(notice).toContain(sanitizeForDisplay(flag));
+  expect(notice).toContain(sanitizeForDisplay(stored));
+  expect(notice).not.toContain(ESC);
+  expect(notice).not.toContain(RLO);
+  // The prompt's own sink runs no pass of its own, so the copy the question is
+  // answered against is escaped only because the notice was composed that way.
+  expect(promptWrites).toContain(sanitizeForDisplay(flag));
+  expect(promptWrites).toContain(sanitizeForDisplay(stored));
+  expect(promptWrites).not.toContain(ESC);
+  expect(promptWrites).not.toContain(RLO);
 });
 
 /** The default terms with their first two keys swapped: rules that no longer
@@ -1749,6 +2027,9 @@ test("validateAccept: a reused config's rule-set citation is checked against its
   const log = getLogger("accept-citation-drift");
   log.setLevel("silent");
   const warnSpy = vi.spyOn(log, "warn");
+  // This run's flag names the party differently from the kept file, so the
+  // no-effect notice reaches the prompt's own sink as well as the log.
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation({
       ...sampleToken(FUTURE()),
@@ -1766,6 +2047,7 @@ test("validateAccept: a reused config's rule-set citation is checked against its
     expect(drifted).toHaveLength(1);
     expect(drifted[0]).toContain(options.configFile);
   } finally {
+    stdio.restore();
     warnSpy.mockRestore();
     fs.rmSync(options.configFile, { force: true });
   }
@@ -1894,6 +2176,10 @@ test("validateAccept: online aborts (no acceptance sent) when the connection blo
       server: { host: "other-host", username: "alice" },
     },
   });
+  // The flag names this party differently from the kept file, so each run below
+  // writes the no-effect notice where the prompt asks; keep it out of the
+  // suite's own output.
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
     const run = () =>
@@ -1912,6 +2198,7 @@ test("validateAccept: online aborts (no acceptance sent) when the connection blo
     await expect(run()).rejects.toBeInstanceOf(UsageError);
     await expect(run()).rejects.toThrow(/connection\.server\.host/);
   } finally {
+    stdio.restore();
     fs.rmSync(options.configFile, { force: true });
   }
 });
@@ -1936,6 +2223,10 @@ test("validateAccept: online reuse warns (does not abort) on a differing --serve
   log.setLevel("silent");
   const warnSpy = vi.spyOn(log, "warn");
   const infoSpy = vi.spyOn(log, "info");
+  // The kept file's label differs from this run's flag, so the no-effect notice
+  // reaches the prompt's own sink; capture it here rather than in the suite's
+  // output.
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
     const ready = await validateAccept({
@@ -1962,6 +2253,7 @@ test("validateAccept: online reuse warns (does not abort) on a differing --serve
       ),
     ).toBe(false);
   } finally {
+    stdio.restore();
     warnSpy.mockRestore();
     infoSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -4271,6 +4563,48 @@ test("handler: without --consent-to-terms the prompt runs and a decline writes n
   }
 });
 
+test("handler: a config appearing during the prompt is refused, not overwritten", async () => {
+  // The acceptance reads the configuration path once, before the terms are
+  // displayed, so a file that appears while the operator is answering the y/N
+  // was never reconciled against this invitation. The write refuses rather than
+  // clobbering it: exit 64 naming the path, the planted bytes untouched, and no
+  // key file left beside a configuration this run never agreed with.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const planted = "# authored while the prompt was open\n";
+  promptConfirmMock.mockImplementation(async () => {
+    fs.writeFileSync(configFile, planted);
+    return true;
+  });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const { stderrWrites, restore } = captureStdio();
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      identity: "Agency B",
+      args: [encoded, input],
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "error",
+      record: false,
+    } as unknown as Arguments);
+    restore();
+    expect(promptConfirmMock).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(64);
+    expect(stderrWrites.join("")).toContain("refusing to overwrite");
+    expect(stderrWrites.join("")).toContain(configFile);
+    expect(fs.readFileSync(configFile, "utf8")).toBe(planted);
+    expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    restore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- handler: the consent surface reaches wherever the prompt asks ------------
 
 const SURFACE_HEADING = "Invitation details:";
@@ -4996,6 +5330,28 @@ test("handler: offline accept-reuse refreshes a stale lock-in, preserving operat
   }
 });
 
+test("handler: accept-reuse leaves the kept configuration's identity untouched", async () => {
+  // The other half of the stored label winning: the acceptance runs under the
+  // file's label and leaves the file as it found it. A flag that rewrote the
+  // field here would rename the party for every later `psilink exchange`, out of
+  // a run whose one intended effect is a new key file.
+  const { dir, input, configFile } = offlineAcceptFixture();
+  try {
+    writeExistingConfig(configFile);
+    const raw = await runOfflineAcceptReuse({
+      configFile,
+      input,
+      disclosed: ["diagnosis"],
+    });
+    expect(parseExchangeSpec(YAML.parse(raw)).linkageTerms.identity).toBe(
+      "Acceptor Org",
+    );
+    expect(raw).not.toContain("Agency B");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("handler: offline accept-reuse fixes the false-abort a stale lock-in would have caused", async () => {
   // The end-to-end failure this task closes. Before the refresh the config holds
   // the partner's OLD disclosed set; the partner now discloses a new set, so a
@@ -5250,6 +5606,10 @@ async function reuseLockInWarnings(params: {
   const log = getLogger(loggerName);
   log.setLevel("silent");
   const warnSpy = vi.spyOn(log, "warn");
+  // These options carry the default flag identity, which the kept file does not
+  // match, so every case here also raises the no-effect notice on the prompt's
+  // own sink; capture it rather than leaving it in the suite's output.
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation({
       ...sampleToken(FUTURE()),
@@ -5273,6 +5633,7 @@ async function reuseLockInWarnings(params: {
     expect(ready.reuseExistingConfig).toBe(true);
     return warnSpy.mock.calls.map((c) => String(c[0]));
   } finally {
+    stdio.restore();
     warnSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }
