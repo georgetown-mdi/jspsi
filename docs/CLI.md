@@ -625,7 +625,7 @@ If one party fails to write the rotated token to its key file - whether due to a
 
 To recognize failed rotations, the error messages for exchanges that fail key-exchange authentication instruct users how they can generate and accept new invitation strings, and encourage them to contact their partners out-of-band. Connection information has already been shared, so recovery re-establishes the shared secret alone, through the [offline invitation](#offline-invitation) pair:
 
-1. **Both parties remove their key file** (`.psilink.key`, or the `--key-file` path). `invite` and `accept` each refuse to overwrite an existing one with a usage error (exit 64), so the out-of-sync token has to go before either command will run.
+1. **Both parties remove their key file** (`.psilink.key`, or the `--key-file` path). The offline `invite` and `accept` used below each refuse to overwrite an existing one with a usage error (exit 64), so the out-of-sync token has to go before either command will run.
 2. **The inviting party runs `psilink invite`** -- the offline form, with no URL. Its pre-existing `psilink.yaml` supplies the linkage terms; the command writes a fresh key file and prints a new invitation to forward out-of-band.
 3. **The partner runs `psilink accept INVITATION [INPUT_FILE]`**, which reuses their own `psilink.yaml` the same way and writes their key file.
 4. **Both parties run `psilink exchange`** at their convenience, as for any [recurring exchange](#recurring-exchange).
@@ -634,7 +634,7 @@ Each side's configuration is reused throughout; only the key file is recreated. 
 
 The [online invitation](#online-invitation) is not a recovery route. It reports a pre-existing configuration file as a conflict and aborts before minting a token, and that configuration is exactly what recovery keeps -- so the inviting party cannot reach the single command that invites, waits, and exchanges together, and the partner has no rendezvous to accept at. Recovery runs the separate offline commands above instead.
 
-A party that already holds its configuration and needs only the new secret can instead re-provision offline with [`psilink exchange --invitation`](#provisioning-the-key-file-from-an-invitation), which writes the key file and runs the exchange in one command, replacing steps 3 and 4.
+A party that already holds its configuration and needs only the new secret can instead re-provision offline with [`psilink exchange --invitation`](#provisioning-the-key-file-from-an-invitation), which writes the key file and runs the exchange in one command -- replacing that party's step 3 and their own run in step 4; the other party still runs `psilink exchange`.
 
 ### Token loss
 
