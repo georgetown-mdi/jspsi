@@ -450,7 +450,9 @@ export function catchUpManagedSchedule(
  * A wall-clock time the local zone skips (the hour a spring-forward transition
  * removes) has no instant to resolve to; the platform maps it forward into the
  * post-transition offset, which the entry surface shows back as the resolved
- * instant.
+ * instant. A wall-clock time the zone repeats (the hour a fall-back transition
+ * adds) names two instants; the platform resolves it to the first,
+ * pre-transition occurrence, likewise shown back as the resolved instant.
  *
  * @throws {RangeError} if a component is out of range, if it names a date the
  *   calendar does not have, or if the local resolution falls outside the range a

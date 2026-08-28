@@ -266,8 +266,13 @@ policy needs.
 
 Window *n* is the half-open interval from `anchor + n * intervalDays` to
 `windowSeconds` later: an instant exactly at the close belongs to no window, so
-a window is elapsed the moment it closes and two consecutive windows never both
-contain the same instant. Every open is computed by fixed-millisecond arithmetic
+a window is elapsed the moment it closes and, while `windowSeconds` does not
+exceed the period `intervalDays` spans, two consecutive windows never both
+contain the same instant. The schema does not yet tie the two fields together,
+so a hand-edited or imported schedule can carry overlapping windows; there a
+run's instant is credited to the latest window containing it, and an earlier
+overlapping window it also fell in still counts as missed. Every open is
+computed by fixed-millisecond arithmetic
 from the stored UTC `anchor`, never by a local-calendar date add -- a calendar
 add moves the instant by the offset change on the week a party's zone shifts,
 which is exactly when two runners can least afford to stop overlapping. The host
