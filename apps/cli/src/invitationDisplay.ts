@@ -563,22 +563,6 @@ export function logDecisionFacts(
     emit(`    ${CONSENT_FACTS.countOnlyInputChoice.note}`);
   }
 
-  // What outlives the run, which is why it sits in the decision block rather than
-  // among the terms: an acceptor is agreeing to a permanent transcript at the
-  // rendezvous location, and the run is over by the time anything else would tell
-  // them. Printed wherever the invitation discloses retain mode -- declared, or
-  // entailed by a split-directory endpoint this accept would seed the mode from.
-  // An invitation that declares delete mode, or declares nothing, and names no
-  // such endpoint prints nothing here, since neither absence is a cleanup this
-  // transport promises (see the shared table's entry).
-  if (summary.disclosesRetainedFiles) {
-    emit(
-      `  ${marked("exchange files", "retainedFiles")}: kept as a permanent ` +
-        "transcript, not deleted after the run",
-    );
-    emit(`    ${CONSENT_FACTS.retainedFiles.note}`);
-  }
-
   // A citation this build resolved and DISPROVED, repeated here for the reason
   // the whole block is repeated: the terms run well past a screen, and this fact
   // has scrolled away by the time the prompt is answered. Accepting writes the
@@ -596,6 +580,35 @@ export function logDecisionFacts(
       citation.fieldSet.verdict === "contradicted")
   )
     displayRuleSetCitation(emit, citation, ["contradicted"]);
+
+  // What outlives the run, which is why it sits in the decision block rather than
+  // among the terms: an acceptor is agreeing to a permanent transcript at the
+  // rendezvous location, and the run is over by the time anything else would tell
+  // them. Printed wherever the invitation discloses retain mode -- declared, or
+  // entailed by a split-directory endpoint this accept would seed the mode from.
+  // An invitation that declares delete mode, or declares nothing, and names no
+  // such endpoint prints nothing here, since neither absence is a cleanup this
+  // transport promises (see the shared table's entry).
+  //
+  // The fact is repeated; its caveat is not. That note runs to ten wrapped lines
+  // on an eighty-column terminal, which at two printings is what pushes the
+  // outbound-send list -- the acceptor's hardest-to-undo consent, and the reason
+  // this block leads with it -- off a short screen at the prompt: it drops the
+  // point past which the repetition scrolls an eighty-by-twenty-four terminal
+  // from roughly seventeen disclosed columns to seven. So the block carries the
+  // line the acceptor decides on, and displayInvitation prints the caveat once
+  // beneath this block's first printing. Nothing shortened stands in for it here:
+  // an abridgement is a second account of the fact, which is what the two
+  // printings being one wording exists to rule out.
+  //
+  // Last of the block so that caveat lands directly under the line it explains,
+  // whatever else the block reached above it -- an adjacency the accept unit
+  // suite checks rather than this comment asserting it.
+  if (summary.disclosesRetainedFiles)
+    emit(
+      `  ${marked("exchange files", "retainedFiles")}: kept as a permanent ` +
+        "transcript, not deleted after the run",
+    );
 }
 
 /**
@@ -664,6 +677,14 @@ export function displayInvitation(params: {
     logAcceptanceRunsExchange(emit, runsExchangeThrough, promptFollows);
   emit("Invitation details:");
   logDecisionFacts(emit, summary, ownOutboundSend);
+  // The retain fact's shared caveat, once, under the block's own last line, which
+  // is the fact it explains. It is the half of that fact the run does not hold --
+  // what becomes of the transcript afterwards, and what the location shows anyone
+  // who can read it -- so it belongs in the outline an acceptor reads through
+  // rather than in the block, which carries the fact itself at one line. What its
+  // length costs there is stated with the emit above.
+  if (summary.disclosesRetainedFiles)
+    emit(`    ${CONSENT_FACTS.retainedFiles.note}`);
   // The linkage strategy is a mandatory-consistency term (like the algorithm),
   // and single-pass is disclosure-affecting -- it is the load-bearing thing the
   // acceptor consents to here -- so show it plainly and, for single-pass, the

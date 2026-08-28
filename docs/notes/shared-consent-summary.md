@@ -693,28 +693,13 @@ repetition is seven lines at three disclosed columns, forty-four at forty, and a
 hundred and twenty-four at a hundred and twenty; past roughly nineteen columns it
 scrolls on an eighty-by-twenty-four terminal, and the first thing to go is the
 outbound-send list, which is the acceptor's hardest-to-undo consent. Where the
-invitation also discloses retained files, the `exchange files` line adds its own
-weight: the note behind it is 726 characters, roughly eleven wrapped lines with
-its label, printed at both points the decision block appears, so the fixed
-portion grows from four lines to roughly fifteen and the point past which the
-repetition scrolls drops to roughly eight disclosed columns. That count comes
-from the operator's own file and not from the partner, so it is a limit of the
-mitigation rather than something a partner can drive. No check holds a bound
+invitation also discloses retained files the block carries one line more, about
+two more wrapped, and the scroll point moves in to roughly seventeen. That count
+comes from the operator's own file and not from the partner, so it is a limit of
+the mitigation rather than something a partner can drive. No check holds a bound
 here, because there is no bound to hold: the honest reading is that the
 repetition helps most for the ordinary handful of disclosed columns and helps
 less as that list grows.
-
-That is the same tradeoff this note declined the other way just above: the
-single-pass disclosure note is 423 characters and was kept out of the repetition
-on length grounds alone, while the retain note is over half again as long and
-prints at both points the block appears, roughly twenty-two wrapped lines the
-repetition now carries unconditionally whenever retention is disclosed. The
-retain fact earns the length the single-pass note was refused because it is a
-decision the operator makes at this exact prompt, not a qualification of a term
-the block already names -- but the length is spent regardless, and what scrolls
-away first is still the acceptor's own outbound-send list. Whether the repeated
-block should carry a shortened retain rendering instead of the full note is an
-open design question this note deliberately leaves unsettled.
 
 Only the heading above the second printing depends on the path. Without
 `--consent-to-terms` a prompt follows and the heading says so; with it nothing is
@@ -732,3 +717,47 @@ both are live -- the surface reaches the operator through the log on the default
 routing and through the prompt's own stream where the log would miss it -- so a
 check watching only one would pass while the other pushed the block off the
 screen.
+
+### A fact repeated, a caveat stated once
+
+The block's budget and the length of a classified fact's caveat were weighed
+against each other at the retain declaration, the one entry whose caveat is long
+enough to decide the question. That sentence is 726 characters, ten wrapped lines
+beneath the line it explains, so carrying it at both printings spends twenty
+wrapped lines on a single fact -- enough on its own to move the scroll point from
+roughly nineteen disclosed columns to seven, with the outbound-send list the
+first thing over the edge. So the block repeats the FACT, at the one line that
+states it, and the caveat is printed once, in the outline, directly beneath the
+block's first printing.
+
+The split follows from what each half is. The fact -- that the exchange keeps
+its files as a permanent transcript rather than emptying the location as each
+message is consumed -- is a decision the operator makes at this exact prompt, so
+it belongs where the decision is answered. The caveat is the half the run does
+not hold: what becomes of the transcript afterwards, and what the rendezvous
+shows anyone who can read it. That is what an acceptor reads the outline for, and
+meeting it a second time at the prompt buys them nothing the scrolled-away column
+list does not cost them.
+
+Nothing shortened stands in for the caveat in the block. An abridged sentence is
+a second account of the fact, and a second account can state something the first
+did not -- the defect the byte-identical repetition exists to make
+unrepresentable, and one this surface has made before. So the line the block
+repeats is the fact's own label and value and nothing new: one wording, at both
+printings, with no abridgement for it to drift from.
+
+The retain line is last in the block so the caveat lands under the line it
+explains. Printed under whatever else the block reached, it would read as the
+count-only tier's or the disproved citation's. That adjacency is a check rather
+than a sentence here.
+
+The single-pass disclosure note lands where it does under the same rule, and
+lands differently because its two halves are not the retain entry's two halves.
+Its fact is the linkage strategy, and `linkage strategy: single-pass` states no
+disclosure on its own -- what the acceptor consents to is entirely in the 423
+characters under it. There is no one-line half to repeat: a block carrying the
+label alone would put a word in front of the operator that says nothing, and one
+carrying the note would be back to lengthening the block. So both halves stay in
+the outline, and the limit that leaves -- an operator who reads only the
+repetition has not seen every disclosure-affecting term -- is stated in
+[CLI.md](../CLI.md#offline-acceptance) rather than closed here.

@@ -3225,7 +3225,7 @@ test("displayInvitation: a deduplicating term states its disclosure under single
   expect(singlePass).toContain(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
 });
 
-test("displayInvitation: the retain line is printed at both decision blocks, and only where retention is disclosed", () => {
+test("displayInvitation: the retain line is printed at both decision blocks, its caveat once, and neither where retention is undisclosed", () => {
   const log = getLogger("accept-display-retain-test");
   log.setLevel("silent");
   const base = sampleToken(FUTURE());
@@ -3239,14 +3239,31 @@ test("displayInvitation: the retain line is printed at both decision blocks, and
     ...base,
     inviterRetainsFiles: true,
   });
-  const retainLines = retaining
-    .split("\n")
-    .filter((line) => line.startsWith(RETAIN_LABEL));
-  expect(retainLines).toHaveLength(2);
-  expect(retainLines[0]).toBe(
-    `${RETAIN_LABEL}kept as a permanent transcript, not deleted after the run`,
-  );
-  expect(retaining).toContain(`    ${CONSENT_FACTS.retainedFiles.note}`);
+  const lines = retaining.split("\n");
+  const retainAt = lines
+    .map((line, index) => (line.startsWith(RETAIN_LABEL) ? index : -1))
+    .filter((index) => index >= 0);
+  expect(retainAt).toHaveLength(2);
+  for (const index of retainAt)
+    expect(lines[index]).toBe(
+      `${RETAIN_LABEL}kept as a permanent transcript, not deleted after the run`,
+    );
+
+  // The caveat is the half the run does not hold, and it is printed ONCE, in the
+  // outline, rather than at both printings of the block: ten wrapped lines twice
+  // over is what pushes the outbound-send list -- the first line of the block, and
+  // the acceptor's hardest-to-undo consent -- off a short terminal at the prompt.
+  // No shortened wording stands in for it in the block, since an abridgement is a
+  // second account of the fact this shape exists to keep to one.
+  const noteLine = `    ${CONSENT_FACTS.retainedFiles.note}`;
+  expect(lines.filter((line) => line === noteLine)).toHaveLength(1);
+  // Directly under the line it explains. The block emits the retain line last for
+  // this: a caveat printed after whatever else the block reached would read as
+  // that line's instead, and the contradicted-citation lines can be there.
+  expect(lines[retainAt[0] + 1]).toBe(noteLine);
+  // And nothing of it reaches the repetition, whose whole point here is its
+  // length: the tail from the heading down is the block alone.
+  expect(lines.slice(lines.indexOf(REPEAT_HEADING))).not.toContain(noteLine);
 
   // Neither absence renders anything, and the two are not alike by accident: an
   // invitation minted before the field existed made no claim, and one declaring
@@ -3848,12 +3865,23 @@ test("displayInvitation: the decision facts are repeated verbatim immediately be
   const cases: Array<{
     linkageTerms: LinkageTerms;
     ownOutboundSend: ReadonlyArray<string> | undefined;
+    inviterRetainsFiles?: boolean;
   }> = [
     { linkageTerms: defaultTerms, ownOutboundSend: ["diagnosis", "notes"] },
     { linkageTerms: defaultTerms, ownOutboundSend: [] },
     { linkageTerms: defaultTerms, ownOutboundSend: undefined },
     { linkageTerms: CONSENT_PROBE_TERMS, ownOutboundSend: ["diagnosis"] },
     { linkageTerms: COUNT_ONLY_PROBE_TERMS, ownOutboundSend: [] },
+    // A retaining invitation, whose fact is carried in the block while its caveat
+    // is printed once between the two printings. That split is exactly what a
+    // sliding or prefix comparison would miss, so the case belongs here: the
+    // caveat leaking into either printing lengthens it past the independently
+    // rendered block and fails.
+    {
+      linkageTerms: defaultTerms,
+      ownOutboundSend: ["diagnosis"],
+      inviterRetainsFiles: true,
+    },
     // The hostile fixtures, so the repetition is measured on a partner identity
     // carrying escapes rather than only on well-behaved text.
     ...hostileVariants.map(({ source }) => ({
@@ -3862,7 +3890,12 @@ test("displayInvitation: the decision facts are repeated verbatim immediately be
     })),
   ];
 
-  for (const { linkageTerms, ownOutboundSend } of cases) {
+  for (const { linkageTerms, ownOutboundSend, inviterRetainsFiles } of cases) {
+    const token = {
+      ...sampleToken(FUTURE()),
+      linkageTerms,
+      ...(inviterRetainsFiles === undefined ? {} : { inviterRetainsFiles }),
+    };
     // The block is rendered independently rather than read off either printing, so
     // its LENGTH is measured too. Slicing the tail and comparing it to an
     // equal-length window at the head is a sliding comparison: it cannot see a line
@@ -3871,7 +3904,7 @@ test("displayInvitation: the decision facts are repeated verbatim immediately be
     const block: Array<string> = [];
     logDecisionFacts(
       (entry) => block.push(entry),
-      summarizeInvitation({ ...sampleToken(FUTURE()), linkageTerms }),
+      summarizeInvitation(token),
       ownOutboundSend,
     );
 
@@ -3886,7 +3919,7 @@ test("displayInvitation: the decision facts are repeated verbatim immediately be
     ] as const) {
       const lines = renderDisplayInvitation(
         log,
-        { ...sampleToken(FUTURE()), linkageTerms },
+        token,
         ownOutboundSend,
         promptFollows,
       ).split("\n");
