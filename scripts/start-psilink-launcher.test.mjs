@@ -254,6 +254,81 @@ const FATAL = {
   ],
 };
 
+// The two verdicts `psilink doctor mount` returns for a folder that can be read
+// and not written, and for one that cannot be read at all, as the real battery
+// wrote them: the launcher's answer to the first is what separates the input
+// folder from the folders the console writes in.
+const READABLE_NOT_WRITABLE = {
+  version: 1,
+  mode: "mount",
+  overall: "fix_and_retry",
+  checks: [
+    { id: "mount_readable", status: "ok" },
+    {
+      id: "marker",
+      status: "skipped",
+      meaning:
+        "does not apply to the inputs given: no marker and token were supplied.",
+    },
+    {
+      id: "write_rename",
+      status: "fail",
+      meaning:
+        "the mount reached a folder but psilink cannot write in it. Either " +
+        "the account this container runs as does not own the folder, or it " +
+        "can open the folder but not create files in it, or the share is out " +
+        "of space.",
+      action:
+        "see the troubleshooting page, 'The folder cannot be written to'.",
+    },
+    {
+      id: "exclusive_create",
+      status: "skipped",
+      meaning:
+        "an earlier check failed and stopped the battery before this one, so " +
+        "nothing was established about it.",
+    },
+    {
+      id: "rename_onto_existing",
+      status: "skipped",
+      meaning:
+        "an earlier check failed and stopped the battery before this one, so " +
+        "nothing was established about it.",
+    },
+  ],
+};
+
+const UNREADABLE = {
+  version: 1,
+  mode: "mount",
+  overall: "fatal",
+  checks: [
+    {
+      id: "mount_readable",
+      status: "fail",
+      meaning:
+        "the folder the exchange runs in is not there, or is not a directory " +
+        "this process can list. Nothing about the share itself has been " +
+        "established.",
+      action:
+        "check that the volume is mounted at this path and that the container " +
+        "was started with it attached.",
+    },
+    ...[
+      "marker",
+      "write_rename",
+      "exclusive_create",
+      "rename_onto_existing",
+    ].map((id) => ({
+      id,
+      status: "skipped",
+      meaning:
+        "an earlier check failed and stopped the battery before this one, " +
+        "so nothing was established about it.",
+    })),
+  ],
+};
+
 describe("the release stamp", () => {
   it("refuses to run an unstamped copy, before touching the engine", () => {
     const workspace = makeWorkspace();
@@ -581,6 +656,31 @@ describe("the verdict reader", () => {
     expect(run.stdout).toMatch(/WARN\s+marker/);
     expect(run.stdout).toMatch(/a marker from another run\./);
   });
+
+  it("reads one check's status by id, and says when there is none", () => {
+    // What a folder the console only reads is judged on, so an absent check
+    // has to read as absent rather than as a status.
+    const workspace = makeWorkspace();
+    const document = JSON.stringify({
+      version: 1,
+      checks: [
+        { id: "added_later", status: "warn" },
+        { id: "mount_readable", status: "ok" },
+      ],
+    });
+    const run = read(
+      workspace,
+      document,
+      [
+        'checks=$(psilink_json_member "$PSILINK_JSON_SKELETON" checks)',
+        'psilink_check_status "$checks" mount_readable',
+        "echo",
+        'psilink_check_status "$checks" marker || echo ABSENT',
+      ].join("\n"),
+    );
+
+    expect(run.stdout.trim().split("\n")).toEqual(["ok", "ABSENT"]);
+  });
 });
 
 describe("the doctor loop", () => {
@@ -707,9 +807,9 @@ describe("the doctor loop", () => {
   });
 
   it("runs the mount battery against every folder the console is given", () => {
-    // The console reads and writes all of them, so a fault in any one of them
-    // is a reason not to start. Checking the shared folder alone leaves the
-    // other two to fail as an EACCES after the browser has opened.
+    // A fault in any one of them is a reason not to start. Checking the shared
+    // folder alone leaves the other two to fail as an EACCES after the browser
+    // has opened.
     const workspace = makeWorkspace();
     installEngine(workspace, "docker");
     const inputDir = join(workspace.root, "input");
@@ -773,6 +873,166 @@ describe("the doctor loop", () => {
       .split("\n")
       .filter((line) => line.includes("doctor"));
     expect(doctorRuns).toHaveLength(1);
+  });
+});
+
+describe("what each folder has to answer", () => {
+  // The console writes in the working and rendezvous folders and only reads the
+  // input folder: it lists the CSVs there, and the exchange reads the selected
+  // one in place. Mounting that folder read-only is a documented setup, so the
+  // battery's write verdict must not decide whether the console starts.
+  const WRITE_ACTION = READABLE_NOT_WRITABLE.checks.find(
+    (check) => check.id === "write_rename",
+  ).action;
+
+  /** A workspace with an engine installed and a folder made per name. */
+  function withFolders(names) {
+    const workspace = makeWorkspace();
+    installEngine(workspace, "docker");
+    const folders = {};
+    for (const name of names) {
+      folders[name] = join(workspace.root, name);
+      mkdirSync(folders[name]);
+    }
+    return { workspace, folders };
+  }
+
+  it("starts past an input folder it can read and cannot write", () => {
+    const { workspace, folders } = withFolders(["input", "shared"]);
+    stageVerdict(workspace, 1, 0, ALL_OK);
+    stageVerdict(workspace, 2, 78, READABLE_NOT_WRITABLE);
+    // The rendezvous folder is what stops this run, so the flow is observed
+    // past the input folder without the console being started.
+    stageVerdict(workspace, 3, 78, FIX_AND_RETRY);
+    const launcher = stampedLauncher(workspace);
+
+    const run = runLauncher(
+      workspace,
+      launcher,
+      [
+        "--data-root",
+        workspace.dataDir,
+        "--input-dir",
+        folders.input,
+        "--rendezvous-dir",
+        folders.shared,
+        "--no-browser",
+      ],
+      "n\n",
+    );
+
+    const doctorRuns = engineCalls(workspace)
+      .split("\n")
+      .filter((line) => line.includes("doctor"));
+    expect(doctorRuns).toHaveLength(3);
+    expect(doctorRuns[1]).toContain(`--volume ${folders.input}:/rz`);
+    expect(run.stdout).toMatch(/The console can read this folder/);
+    // The refused write is not put to the operator as something to fix: it is
+    // the folder they mounted read-only, doing what they asked of it.
+    expect(run.stdout).not.toContain(WRITE_ACTION);
+    // The rendezvous folder is held to the whole battery, and this run stopped
+    // there rather than at the input folder.
+    expect(run.stdout).toContain(
+      'ACTION:  ask for write permission on "the folder".',
+    );
+  });
+
+  it("stops on an input folder it cannot read", () => {
+    // Unreadable is a fault whatever the folder is for: the console lists the
+    // CSVs there, and nothing about the folder was established either way.
+    const { workspace, folders } = withFolders(["input"]);
+    stageVerdict(workspace, 1, 0, ALL_OK);
+    stageVerdict(workspace, 2, 69, UNREADABLE);
+    const launcher = stampedLauncher(workspace);
+
+    const run = runLauncher(workspace, launcher, [
+      "--data-root",
+      workspace.dataDir,
+      "--input-dir",
+      folders.input,
+      "--no-browser",
+    ]);
+
+    expect(run.status).not.toBe(0);
+    const doctorRuns = engineCalls(workspace)
+      .split("\n")
+      .filter((line) => line.includes("doctor"));
+    expect(doctorRuns).toHaveLength(2);
+    expect(run.stdout).toMatch(/is not there, or is not a directory/);
+    expect(run.stdout).toMatch(/nothing was established/);
+    expect(run.stdout).toMatch(/troubleshooting\.md/);
+    expect(engineCalls(workspace)).not.toMatch(/serve/);
+  });
+
+  it("stops on a battery that could not be run, read or no read", () => {
+    // A `fatal` verdict says the battery never finished, so what a check that
+    // did run reported is not a verdict on the folder. The read is taken only
+    // out of a battery that ran to a verdict, whatever else it found.
+    const { workspace, folders } = withFolders(["input"]);
+    stageVerdict(workspace, 1, 0, ALL_OK);
+    stageVerdict(workspace, 2, 69, {
+      version: 1,
+      mode: "mount",
+      overall: "fatal",
+      checks: [
+        { id: "mount_readable", status: "ok" },
+        {
+          id: "write_rename",
+          status: "fail",
+          meaning: "the battery stopped before it established anything.",
+          action: "there is nothing to do about this one.",
+        },
+      ],
+    });
+    const launcher = stampedLauncher(workspace);
+
+    const run = runLauncher(workspace, launcher, [
+      "--data-root",
+      workspace.dataDir,
+      "--input-dir",
+      folders.input,
+      "--no-browser",
+    ]);
+
+    expect(run.status).not.toBe(0);
+    expect(run.stdout).toMatch(/nothing was established/);
+    expect(run.stdout).not.toMatch(/The console can read this folder/);
+    expect(engineCalls(workspace)).not.toMatch(/serve/);
+  });
+
+  it("holds a folder given as input and rendezvous to the writes", () => {
+    // The same folder for both is the partner's rendezvous as well, and that
+    // one is written: the stricter requirement is the one that applies, and it
+    // is checked once rather than twice.
+    const { workspace, folders } = withFolders(["shared"]);
+    stageVerdict(workspace, 1, 0, ALL_OK);
+    stageVerdict(workspace, 2, 78, READABLE_NOT_WRITABLE);
+    const launcher = stampedLauncher(workspace);
+
+    const run = runLauncher(
+      workspace,
+      launcher,
+      [
+        "--data-root",
+        workspace.dataDir,
+        "--input-dir",
+        folders.shared,
+        "--rendezvous-dir",
+        folders.shared,
+        "--no-browser",
+      ],
+      "n\n",
+    );
+
+    expect(run.status).not.toBe(0);
+    const doctorRuns = engineCalls(workspace)
+      .split("\n")
+      .filter((line) => line.includes("doctor"));
+    expect(doctorRuns).toHaveLength(2);
+    expect(doctorRuns[1]).toContain(`--volume ${folders.shared}:/rz`);
+    expect(run.stdout).toContain(WRITE_ACTION);
+    expect(run.stdout).not.toMatch(/The console can read this folder/);
+    expect(engineCalls(workspace)).not.toMatch(/serve/);
   });
 });
 

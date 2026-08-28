@@ -239,9 +239,10 @@ not retried; a refused verdict version; the docker-then-podman order; the
 account the container is run as and the pasted-credential scratch override that
 travels with it, with the host's own kind stubbed each way; a battery per folder
 the console is given, and one battery when the same folder was given for all of
-them; and one
-pass reaching the console. Nothing there pulls the real image, opens a browser,
-or reaches a network.
+them; what each folder has to answer -- an input folder that reads and will not
+write carrying on, an unreadable one stopping, and a folder given as both the
+input and the rendezvous held to the writes; and one pass reaching the console.
+Nothing there pulls the real image, opens a browser, or reaches a network.
 
 **What the identity route has not been driven against is an engine.**
 `start-psilink.sh` runs the container as the operator's own account on a Linux

@@ -253,6 +253,11 @@ account the image ships with, numbered 1000, which cannot write a folder
 belonging to anyone else; pass `--user "$(id -u):$(id -g)"` and it runs as you
 do.
 
+The launcher asks this of the folders the console writes in: the working folder
+and the folder shared with your partner. Your input folder is only read from --
+your CSVs are read where they are and nothing is written back to them -- so one
+you cannot write in passes its check, and a read-only mount is fine there.
+
 ## The volume will not mount
 
 `permission denied`, `host is down`, or `operation not supported` at part 4,

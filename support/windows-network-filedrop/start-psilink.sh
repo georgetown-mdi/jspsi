@@ -480,12 +480,33 @@ PSILINK_CHECKS
   return $shown
 }
 
-# Run one battery and classify it. Sets PSILINK_VERDICT_OVERALL and returns:
+# The status of the check carrying this id, or failure when the verdict holds no
+# such check. Found by id, as the display is: the spec fixes the id set a battery
+# reports, and nothing about where in the array a check sits.
+psilink_check_status() {
+  local checks="$1" wanted="$2"
+  local element='' identifier=''
+
+  while IFS= read -r element; do
+    [ -n "$element" ] || continue
+    identifier=$(psilink_json_text "$(psilink_json_member "$element" id)") || continue
+    [ "$identifier" = "$wanted" ] || continue
+    psilink_json_text "$(psilink_json_member "$element" status)" || return 1
+    return 0
+  done <<PSILINK_CHECKS
+$(psilink_json_elements "$checks")
+PSILINK_CHECKS
+  return 1
+}
+
+# Run one battery and classify it against what the folder has to answer --
+# `writable` for a folder the console writes in, `readable` for one it only reads
+# from. Sets PSILINK_VERDICT_OVERALL and returns:
 #   0  a verdict was read, and PSILINK_VERDICT_OVERALL says what it was
 #   1  nothing was established (the engine, the version, or a line that is not
 #      a verdict this launcher understands)
 psilink_run_doctor_mount() {
-  local label="$1" directory="$2"
+  local label="$1" directory="$2" requirement="$3"
   local verdict='' status=0 version='' overall='' checks=''
   local -a arguments
 
@@ -536,6 +557,25 @@ psilink_run_doctor_mount() {
   checks=$(psilink_json_member "$PSILINK_JSON_SKELETON" checks) || checks='[]'
   overall=$(psilink_json_text "$(psilink_json_member "$PSILINK_JSON_SKELETON" overall)") || overall=''
 
+  # A folder the console only reads passes on the read alone: nothing is written
+  # back to the input folder, so writes it refuses are a read-only mount doing
+  # its job rather than a fault to stop on. There is no lighter battery to run,
+  # so the read is taken from its own check rather than from the roll-up, which
+  # speaks for the writes as well -- and only from a battery that ran to a
+  # verdict, since a fatal one establishes nothing about anything.
+  if [ "$requirement" = 'readable' ] && [ "$overall" = 'fix_and_retry' ]; then
+    case "$(psilink_check_status "$checks" mount_readable)" in
+      ok | warn)
+        psilink_show_checks_with_status "$checks" warn && psilink_say ''
+        psilink_good 'The console can read this folder, which is all it needs.'
+        psilink_note 'Your CSVs are read where they are and nothing is written'
+        psilink_note 'back to this folder, so a read-only one is fine here.'
+        PSILINK_VERDICT_OVERALL='ok'
+        return 0
+        ;;
+    esac
+  fi
+
   case "$overall" in
     ok)
       # A warn does not stop an exchange and still has to be read, so it is
@@ -577,10 +617,10 @@ psilink_run_doctor_mount() {
 # write, the exclusive create and the rename onto an existing file that
 # psilink's rendezvous is built on.
 psilink_doctor_loop() {
-  local label="$1" directory="$2"
+  local label="$1" directory="$2" requirement="$3"
 
   while :; do
-    if ! psilink_run_doctor_mount "$label" "$directory"; then
+    if ! psilink_run_doctor_mount "$label" "$directory" "$requirement"; then
       return 1
     fi
     case "$PSILINK_VERDICT_OVERALL" in
@@ -597,22 +637,41 @@ psilink_doctor_loop() {
 }
 
 # Every folder the console is given, checked in turn rather than the shared one
-# alone: the console reads and writes all of them, and a folder it cannot use is
-# a reason not to start at all. Left to the console, the same fault arrives as an
-# EACCES in the middle of an exchange, after the browser has opened. A layout
-# that gives one folder for everything checks it once.
+# alone: a folder the console cannot use is a reason not to start at all, and
+# left to it the same fault arrives as an EACCES in the middle of an exchange,
+# after the browser has opened. A layout that gives one folder for everything
+# checks it once.
+#
+# What each folder has to answer differs. The working folder takes the key file
+# and the results, and the rendezvous folder takes the messages both sides write,
+# so those two are checked for the writes psilink makes. The input folder is read
+# in place and nothing is written back to it, so it is checked for the read
+# alone: an operator who mounts their CSVs read-only has a working console, and
+# stopping them would be refusing a setup psilink documents.
 psilink_check_console_directories() {
-  psilink_doctor_loop 'working folder' "$PSILINK_DATA_ROOT" || return 1
+  local input_label='input folder' input_requirement='readable'
+
+  # One folder given as both is the rendezvous folder as well, and that one is
+  # written: the stricter of the two requirements is the one that applies.
+  if [ -n "$PSILINK_INPUT_DIR" ] &&
+    [ "$PSILINK_INPUT_DIR" = "$PSILINK_RENDEZVOUS_DIR" ]; then
+    input_label='input and rendezvous folder'
+    input_requirement='writable'
+  fi
+
+  psilink_doctor_loop 'working folder' "$PSILINK_DATA_ROOT" writable || return 1
   if [ -n "$PSILINK_INPUT_DIR" ] &&
     [ "$PSILINK_INPUT_DIR" != "$PSILINK_DATA_ROOT" ]; then
     psilink_say ''
-    psilink_doctor_loop 'input folder' "$PSILINK_INPUT_DIR" || return 1
+    psilink_doctor_loop "$input_label" "$PSILINK_INPUT_DIR" \
+      "$input_requirement" || return 1
   fi
   if [ -n "$PSILINK_RENDEZVOUS_DIR" ] &&
     [ "$PSILINK_RENDEZVOUS_DIR" != "$PSILINK_DATA_ROOT" ] &&
     [ "$PSILINK_RENDEZVOUS_DIR" != "$PSILINK_INPUT_DIR" ]; then
     psilink_say ''
-    psilink_doctor_loop 'rendezvous folder' "$PSILINK_RENDEZVOUS_DIR" || return 1
+    psilink_doctor_loop 'rendezvous folder' "$PSILINK_RENDEZVOUS_DIR" \
+      writable || return 1
   fi
   return 0
 }
