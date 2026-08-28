@@ -1,7 +1,7 @@
 ---
 title: "PSI-Link Compliance"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-27"
+last_reviewed: "2026-08-28"
 ---
 
 # PSI-Link compliance
@@ -93,6 +93,8 @@ The table below maps PSI-Link's design to relevant control families of [NIST SP 
 | IA-3 | Device Identification and Authentication | The explicit, role-asymmetric mutual key confirmation in the P-256 authenticated key exchange authenticates both parties before any data is exchanged. |
 | IA-5 | Authenticator Management | The shared secret is a 256-bit cryptographically random credential stored in a key file with owner-only permissions; it rotates automatically after every successful exchange. |
 | IA-5(1) | Authenticator Management: Password-Based Authentication | The shared secret is a 256-bit cryptographically-random value from `crypto.getRandomValues`, not a human-memorable password, so its full entropy -- not a stretched low-entropy passphrase -- authenticates the exchange and password-stretching controls do not apply. It is consumed by the P-256 authenticated key exchange (see [PROTOCOL.md](spec/PROTOCOL.md#p-256-authenticated-key-exchange)), not by a password-hashing path. |
+| IR-4 | Incident Handling | PSI-Link is software an agency runs rather than a service the project operates, so the incident this project handles is a vulnerability reported against the software itself. [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md) sequences that handling -- intake and acknowledgement, triage and the severity call, the affected-version determination, a fix developed out of public view and shipped as a hotfix release, advisory publication with CVE assignment, and close-out -- together with the message the reporter receives at each milestone and a co-owner path for a report arriving while the maintainer is unavailable. An incident inside an agency's own deployment is the agency's to detect and respond to; the operator-side procedure for a leaked shared secret is [SECURITY_DESIGN.md#compromise-response](SECURITY_DESIGN.md#compromise-response), and the split is stated per deployment in [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md). |
+| IR-8 | Incident Response Plan | The plan is [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md), published in this repository with a named review owner and a last-reviewed date: the two roles it assigns, the preconditions it confirms annually, its numbered steps, the maintainer-unavailable path, and the reporter-facing timelines that [SECURITY.md](../SECURITY.md#response-timeline) is the authority on. It is walked once a year against a simulated report, and again after any change to the release or disclosure process that would alter the sequence; each walk is dated in the [exercise record](INCIDENT_RESPONSE.md#exercise-record) with the scenario it used, the findings it produced, and whether each was fixed in the runbook or referred to the maintainer. |
 | RA-3 | Risk Assessment | Threat model, adversary capabilities, privacy guarantees, and known limitations are documented in [SECURITY_DESIGN.md#threat-model](SECURITY_DESIGN.md#threat-model). |
 | SA-22 | Unsupported System Components | The supported-version and end-of-life policy is defined in [SECURITY.md](../SECURITY.md). |
 | SC-8 | Transmission Confidentiality and Integrity | On a recurring (authenticated) exchange over SFTP or filedrop, everything that crosses the network after the key exchange -- protocol messages and exchange data alike -- is wrapped in AES-256-GCM AEAD keyed from the P-256 key-exchange session key. The key-exchange handshake frames precede that wrap and are not covered by it; see [FIPS 140](#fips-140) for what the wrap does and does not cover. Zero-setup exchanges on those channels carry no application-layer AEAD at all and rely on the channel's transport encryption (for SFTP, the SSH session; for filedrop, whatever protects the synced folder). WebRTC channels use DTLS end-to-end. |
@@ -300,5 +302,6 @@ If a reviewer identifies a compliance-relevant gap that is not addressed here, p
 - [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md) - constraining an SFTP exchange's SSH layer to approved algorithms
 - [RELEASES.md](RELEASES.md) - release artifacts, signing, and SBOM
 - [SECURITY.md](../SECURITY.md) - vulnerability reporting and response
+- [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md) - the responder-side runbook behind that policy, and the dated tabletop exercise record
 - [PRIVACY.md](../PRIVACY.md) - the project's privacy posture, by deployment, and what supporting services can observe
 - [NOTICE](../NOTICE) - third-party component attributions

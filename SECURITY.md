@@ -1,7 +1,7 @@
 ---
 title: "Security Policy"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-22"
+last_reviewed: "2026-08-28"
 ---
 
 # Security Policy
@@ -64,12 +64,14 @@ The following are in scope for this policy:
 - PSI protocol correctness: a result that leaks more than the agreed intersection
 - Authentication bypass or impersonation between exchange partners
 - Data confidentiality during transport for any supported channel
+- At-rest permissions of the artifacts PSI-Link writes owner-only -- among them the key file, the signing identity, the self-attested exchange record, and the result CSV -- where one is left readable or writable by another account on the same host. The write construction and the artifacts it covers are specified in [docs/spec/CREDENTIAL_STORAGE.md](docs/spec/CREDENTIAL_STORAGE.md).
 
 The following are out of scope:
 
 - Fundamental cryptographic flaws in the PSI primitive itself -- report those to [OpenMined/PSI](https://github.com/OpenMined/PSI) directly, then notify us so we can coordinate an update to the vendored copy. PSI-Link is responsible for updating the vendored copy when security patches are released upstream and will do so as part of normal maintenance.
 - Denial-of-service attacks against shared infrastructure (SFTP servers, STUN/TURN relays, peer coordination servers)
-- Attacks that require an adversary to have already compromised the host running PSI-Link
+- Attacks that require an adversary to have already compromised the host running PSI-Link. A second, unprivileged account on that host reading a file PSI-Link wrote owner-only is the at-rest permissions item above rather than this one.
+- The absence of at-rest encryption. PSI-Link encrypts nothing on disk by design: it applies owner-only permissions and leaves at-rest confidentiality to the deploying agency's storage or full-disk encryption (see [docs/COMPLIANCE.md](docs/COMPLIANCE.md#nist-sp-800-53), control SC-28).
 - Social engineering
 
 ## Cryptographic Dependencies
