@@ -275,8 +275,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
     let dataExchangeStarted = false;
     void (async () => {
       // The record the store holds at this launch, read before the run so this
-      // run's own bookkeeping stamp cannot be in it. A rejected read leaves the
-      // surface's held record standing in for this run.
+      // run's own bookkeeping stamp cannot be in it. A rejected read, or one that
+      // finds no record, leaves the surface's held record standing in for this run.
       let launched = record;
       try {
         launched =

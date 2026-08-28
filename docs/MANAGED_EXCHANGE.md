@@ -724,8 +724,8 @@ is the standing reason the next run in the same visit weighs. Where that
 persist failure's own bookkeeping write did not land -- the write is
 best-effort, and the storage that failed the rotation can fail it too -- there
 is no standing reason to read, and the no-show reads as itself. Where the
-launch read itself fails, the run falls back to the record the run surface
-already holds, for that run alone.
+launch read itself fails, or finds no record to read, the run falls back to
+the record the run surface already holds, for that run alone.
 
 A no-show's own bookkeeping entry replaces the previous one and records no
 failure kind, so a one-sided persist failure is no longer in the record for
