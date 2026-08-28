@@ -455,6 +455,7 @@ describe("atomic schedule advance", () => {
     const written = await persistManagedExchangeScheduleAdvance(created.id, {
       schedule: advanced,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
       lastRun: missedRun,
     });
     expect(written.schedule).toEqual(advanced);
@@ -476,6 +477,7 @@ describe("atomic schedule advance", () => {
     const written = await persistManagedExchangeScheduleAdvance(created.id, {
       schedule: advanced,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
       lastRun: missedRun,
     });
     expect(written.sharedSecret).toBe(rotatedSecret);
@@ -488,6 +490,7 @@ describe("atomic schedule advance", () => {
     const written = await persistManagedExchangeScheduleAdvance(created.id, {
       schedule: advanced,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
       lastRun: missedRun,
     });
     expect(written).not.toHaveProperty("schedule");
@@ -505,14 +508,33 @@ describe("atomic schedule advance", () => {
     await persistManagedExchangeScheduleAdvance(created.id, {
       schedule: newer,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
     });
     const written = await persistManagedExchangeScheduleAdvance(created.id, {
       schedule: advanced,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
       lastRun: missedRun,
     });
     expect(written.schedule).toEqual(newer);
     expect(await rawStored(created.id)).toMatchObject({ schedule: newer });
+    expect(await rawStored(created.id)).not.toHaveProperty("lastRun");
+  });
+
+  test("a count the operator cleared survives a wake that read the old one", async () => {
+    const created = await createManagedExchange(
+      newExchange({ schedule: { ...schedule, consecutiveMisses: 3 } }),
+    );
+    const cleared = { ...schedule, consecutiveMisses: 0 };
+    await updateManagedExchangeLocalFields(created.id, { schedule: cleared });
+    const written = await persistManagedExchangeScheduleAdvance(created.id, {
+      schedule: { ...advanced, consecutiveMisses: 4 },
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: 3,
+      lastRun: missedRun,
+    });
+    expect(written.schedule).toEqual(cleared);
+    expect(await rawStored(created.id)).toMatchObject({ schedule: cleared });
     expect(await rawStored(created.id)).not.toHaveProperty("lastRun");
   });
 
@@ -522,6 +544,7 @@ describe("atomic schedule advance", () => {
       persistManagedExchangeScheduleAdvance(created.id, {
         schedule: { ...advanced, consecutiveMisses: -1 },
         fromNextWindow: schedule.nextWindow,
+        fromConsecutiveMisses: schedule.consecutiveMisses,
         lastRun: missedRun,
       }),
     ).rejects.toThrow();
@@ -535,6 +558,7 @@ describe("atomic schedule advance", () => {
       persistManagedExchangeScheduleAdvance("no-such-id", {
         schedule: advanced,
         fromNextWindow: schedule.nextWindow,
+        fromConsecutiveMisses: schedule.consecutiveMisses,
       }),
     ).rejects.toThrow();
   });

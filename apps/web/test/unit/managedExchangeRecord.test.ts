@@ -21,6 +21,7 @@ import {
   parseManagedExchangeRecord,
   safeParseManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
+import { withTimeZone } from "../utils/hostTimeZone";
 
 import type {
   ManagedExchangeLastRun,
@@ -652,6 +653,7 @@ describe("applyManagedExchangeScheduleAdvance", () => {
     const advanced = applyManagedExchangeScheduleAdvance(record, {
       schedule: advancedSchedule,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
       lastRun: missedRun,
     });
     expect(advanced.schedule).toEqual(advancedSchedule);
@@ -666,6 +668,7 @@ describe("applyManagedExchangeScheduleAdvance", () => {
     const advanced = applyManagedExchangeScheduleAdvance(scheduled(), {
       schedule: advancedSchedule,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
     });
     expect(advanced.schedule).toEqual(advancedSchedule);
     expect(advanced).not.toHaveProperty("lastRun");
@@ -678,6 +681,7 @@ describe("applyManagedExchangeScheduleAdvance", () => {
     const advanced = applyManagedExchangeScheduleAdvance(record, {
       schedule: advancedSchedule,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
       lastRun: missedRun,
     });
     expect(advanced).not.toHaveProperty("schedule");
@@ -691,6 +695,7 @@ describe("applyManagedExchangeScheduleAdvance", () => {
     const advanced = applyManagedExchangeScheduleAdvance(record, {
       schedule: advancedSchedule,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
       lastRun: missedRun,
     });
     // The planned window the advance carries was derived from the replaced
@@ -709,6 +714,7 @@ describe("applyManagedExchangeScheduleAdvance", () => {
         {
           schedule: advancedSchedule,
           fromNextWindow: schedule.nextWindow,
+          fromConsecutiveMisses: schedule.consecutiveMisses,
           lastRun: missedRun,
         },
       );
@@ -729,10 +735,12 @@ describe("applyManagedExchangeScheduleAdvance", () => {
         consecutiveMisses: 2,
       },
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
     });
     const applied = applyManagedExchangeScheduleAdvance(newer, {
       schedule: advancedSchedule,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
       lastRun: missedRun,
     });
     expect(applied.schedule).toEqual({
@@ -758,9 +766,31 @@ describe("applyManagedExchangeScheduleAdvance", () => {
     const advanced = applyManagedExchangeScheduleAdvance(record, {
       schedule: advancedSchedule,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
       lastRun: missedRun,
     });
     expect(advanced.schedule).toEqual(replanned);
+    expect(advanced).not.toHaveProperty("lastRun");
+  });
+
+  test("a count the operator cleared is not restored by a wake that read it", () => {
+    // The wake read a count of 3 and computed a fourth miss; the operator
+    // cleared the count from another tab while the window ran, leaving the plan
+    // itself untouched, so the count alone tells the stale advance from a live
+    // one -- and the count is what the two-miss escalation reads.
+    const counted = { ...schedule, consecutiveMisses: 3 };
+    const cleared = { ...schedule, consecutiveMisses: 0 };
+    const record = applyManagedExchangeLocalEdits(
+      buildManagedExchangeRecord(newExchange({ schedule: counted })),
+      { schedule: cleared },
+    );
+    const advanced = applyManagedExchangeScheduleAdvance(record, {
+      schedule: { ...advancedSchedule, consecutiveMisses: 4 },
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: counted.consecutiveMisses,
+      lastRun: missedRun,
+    });
+    expect(advanced.schedule).toEqual(cleared);
     expect(advanced).not.toHaveProperty("lastRun");
   });
 
@@ -779,6 +809,7 @@ describe("applyManagedExchangeScheduleAdvance", () => {
     const advanced = applyManagedExchangeScheduleAdvance(record, {
       schedule: advancedSchedule,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
       lastRun: missedRun,
     });
     expect(advanced.schedule).toEqual(advancedSchedule);
@@ -793,6 +824,7 @@ describe("applyManagedExchangeScheduleAdvance", () => {
       const advanced = applyManagedExchangeScheduleAdvance(scheduled(), {
         schedule: advancedSchedule,
         fromNextWindow,
+        fromConsecutiveMisses: schedule.consecutiveMisses,
         lastRun: missedRun,
       });
       expect(advanced.schedule).toEqual(schedule);
@@ -810,6 +842,7 @@ describe("applyManagedExchangeScheduleAdvance", () => {
     const advanced = applyManagedExchangeScheduleAdvance(record, {
       schedule: advancedSchedule,
       fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
       lastRun: missedRun,
     });
     expect(advanced.schedule).toEqual(advancedSchedule);
@@ -819,11 +852,46 @@ describe("applyManagedExchangeScheduleAdvance", () => {
     });
   });
 
+  test("a stored stamp with no UTC designator compares as no run, not host-local", () => {
+    const offsetless = "2026-01-13T18:00:00";
+    const moments = ["UTC", "America/New_York"].map((zone) =>
+      withTimeZone(zone, () => Date.parse(offsetless)),
+    );
+    // The stamp really is host-sensitive, so nothing below passes vacuously:
+    // read against the host zone it names a different moment per machine, and
+    // either reading would rank it newer than the window's own entry and
+    // suppress it.
+    expect(moments[0]).not.toBe(moments[1]);
+    expect(moments[0]).toBeGreaterThan(Date.parse(missedRun.at));
+    expect(moments[1]).toBeGreaterThan(Date.parse(missedRun.at));
+
+    // A record only a hand edit or a tampered artifact produces: the schema
+    // admits no such stamp, and the monotonicity guard must not be the one place
+    // that reads it against whatever zone the browser runs in.
+    const record: ManagedExchangeRecord = {
+      ...scheduled(),
+      lastRun: { at: offsetless, outcome: "succeeded" },
+    };
+    for (const zone of ["UTC", "America/New_York"]) {
+      const advanced = withTimeZone(zone, () =>
+        applyManagedExchangeScheduleAdvance(record, {
+          schedule: advancedSchedule,
+          fromNextWindow: schedule.nextWindow,
+          fromConsecutiveMisses: schedule.consecutiveMisses,
+          lastRun: missedRun,
+        }),
+      );
+      expect(advanced.schedule).toEqual(advancedSchedule);
+      expect(advanced.lastRun).toEqual(missedRun);
+    }
+  });
+
   test("an advance the schema would reject writes nothing", () => {
     expect(() =>
       applyManagedExchangeScheduleAdvance(scheduled(), {
         schedule: { ...advancedSchedule, consecutiveMisses: -1 },
         fromNextWindow: schedule.nextWindow,
+        fromConsecutiveMisses: schedule.consecutiveMisses,
       }),
     ).toThrow();
   });

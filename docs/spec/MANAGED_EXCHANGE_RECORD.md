@@ -319,9 +319,13 @@ entry. The same reading settles the window still open at the wake: a
 `"succeeded"` run inside it satisfies it, so `nextWindow` advances past without
 an attempt -- which is how an attended run inside an agreed window discharges
 that window -- while a run that failed inside it does not, leaving the rest of
-the window attemptable. A window that has not opened yet is not that window: a
-run bookkeeping entry stamped ahead of the wake instant discharges nothing, and
-the schedule keeps planning the window it names.
+the window attemptable. Bookkeeping the wake cannot stand behind settles
+nothing: a `lastRun` whose `at` is stamped ahead of the wake instant -- a
+forward-skewed clock, or a hand-edited record -- discharges no window, whether
+the window it names has opened or not, so the schedule keeps planning that
+window and attempts it while it is open. Deferring the verdict to a later wake
+is the conservative direction: no agreed window is skipped on a stamp from the
+future, and none is counted as missed before its close.
 
 Catch-up applies these verdicts **window by window, oldest first**, never as a
 net over the span: a `"succeeded"` window resets `consecutiveMisses` to 0 and
@@ -338,13 +342,14 @@ never (see
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)).
 
 The wake's bookkeeping write is **conditioned on the plan it read**: it lands
-only while the stored `anchor`, `intervalDays`, `windowSeconds`, and
-`nextWindow` are still the ones the catch-up computed against, and is dropped
-whole otherwise. Nothing serializes one wake's write against another's, or
-against an operator's edit, so an unconditioned write could rewind `nextWindow`
-and lower `consecutiveMisses` behind newer bookkeeping -- deferring the two-miss
-escalation by exactly the misses it erased -- or overwrite a re-plan the
-operator had just made. A dropped write costs nothing: the next wake recomputes
+only while the stored `anchor`, `intervalDays`, `windowSeconds`, `nextWindow`,
+and `consecutiveMisses` are still the ones the catch-up computed against, and is
+dropped whole otherwise. Nothing serializes one wake's write against another's,
+or against an operator's edit, so an unconditioned write could rewind
+`nextWindow` and lower `consecutiveMisses` behind newer bookkeeping -- deferring
+the two-miss escalation by exactly the misses it erased -- overwrite a re-plan
+the operator had just made, or restore a count they had just cleared on the plan
+the wake was running. A dropped write costs nothing: the next wake recomputes
 the same rule against the stored plan.
 
 The import path is the rule's second consumer: an imported backup carries the

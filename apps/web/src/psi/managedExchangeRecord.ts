@@ -584,6 +584,11 @@ export interface ManagedExchangeScheduleAdvance {
    * one exactly as the cadence is: the advance is the successor of that one
    * plan, so it lands only while the record still carries it. */
   fromNextWindow: string;
+  /** The `consecutiveMisses` the advance was computed FROM, matched the same
+   * way: the count is the escalation's own input, and an operator may clear it
+   * on the plan the wake is running, so an advance that counted from the old
+   * value must not restore it. */
+  fromConsecutiveMisses: number;
   /** The window's run bookkeeping. Omitted when the window produced none -- one
    * the single-writer lock was held through, or one a run already recorded its
    * own outcome for. */
@@ -599,12 +604,14 @@ export interface ManagedExchangeScheduleAdvance {
  * Conditioned on the whole stored plan, which the operator may edit and another
  * wake may advance at any time: the write lands only while the record still
  * carries the cadence the advance was computed against (`anchor`,
- * `intervalDays`, `windowSeconds`) AND still plans the `nextWindow` it was
- * computed from. Any other stored schedule -- a re-entered cadence, a plan some
- * other write already moved, or none at all -- leaves the record entirely
- * unchanged. Writing regardless would resurrect a schedule the operator dropped,
- * overwrite a re-entered cadence with a planned window derived from the replaced
- * one, or -- the tails of two wakes being no more serialized than two runs' (see
+ * `intervalDays`, `windowSeconds`) AND still plans the `nextWindow` and carries
+ * the `consecutiveMisses` it was computed from. Any other stored schedule -- a
+ * re-entered cadence, a plan some other write already moved, a count the
+ * operator cleared, or none at all -- leaves the record entirely unchanged.
+ * Writing regardless would resurrect a schedule the operator dropped, overwrite
+ * a re-entered cadence with a planned window derived from the replaced one,
+ * restore a count the operator cleared on the plan the wake was running, or --
+ * the tails of two wakes being no more serialized than two runs' (see
  * {@link applyManagedExchangeLastRun}) -- rewind `nextWindow` and LOWER
  * `consecutiveMisses` behind a newer advance, deferring the escalation two
  * consecutive misses fire. A wake against the stored plan recomputes both
@@ -616,7 +623,12 @@ export interface ManagedExchangeScheduleAdvance {
  * `lastRun` alone stays monotonic on `at` exactly as
  * {@link applyManagedExchangeLastRun}: the schedule advance still applies -- the
  * window did close, whatever landed afterwards -- while a bookkeeping entry
- * staler than the stored one is dropped rather than masking a newer outcome. */
+ * staler than the stored one is dropped rather than masking a newer outcome.
+ * Both stamps are read through {@link parseStoredInstant} rather than
+ * `Date.parse`, so one carrying no UTC designator is not measured against the
+ * host's zone: it compares as no run at all, which lets the window's own
+ * bookkeeping land over it -- the same conservative direction the catch-up walk
+ * takes for a stamp it cannot read. */
 export function applyManagedExchangeScheduleAdvance(
   record: ManagedExchangeRecord,
   advance: ManagedExchangeScheduleAdvance,
@@ -627,7 +639,8 @@ export function applyManagedExchangeScheduleAdvance(
     !sameStoredInstant(stored.anchor, advance.schedule.anchor) ||
     stored.intervalDays !== advance.schedule.intervalDays ||
     stored.windowSeconds !== advance.schedule.windowSeconds ||
-    !sameStoredInstant(stored.nextWindow, advance.fromNextWindow)
+    !sameStoredInstant(stored.nextWindow, advance.fromNextWindow) ||
+    stored.consecutiveMisses !== advance.fromConsecutiveMisses
   )
     return parseManagedExchangeRecord(record);
   const next: ManagedExchangeRecord = { ...record, schedule: advance.schedule };
@@ -635,7 +648,8 @@ export function applyManagedExchangeScheduleAdvance(
     advance.lastRun !== undefined &&
     !(
       record.lastRun !== undefined &&
-      Date.parse(record.lastRun.at) > Date.parse(advance.lastRun.at)
+      parseStoredInstant(record.lastRun.at) >
+        parseStoredInstant(advance.lastRun.at)
     )
   )
     next.lastRun = advance.lastRun;

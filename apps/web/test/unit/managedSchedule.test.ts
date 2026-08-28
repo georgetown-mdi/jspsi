@@ -13,11 +13,13 @@ import {
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
+  scheduleSchema,
 } from "@psi/managedExchangeRecord";
 import {
   encodeManagedExchangeArtifact,
   reconstructRecordFromArtifact,
 } from "@psi/managedExchangeArtifact";
+import { withTimeZone } from "../utils/hostTimeZone";
 
 import type {
   ManagedExchangeRecord,
@@ -44,20 +46,6 @@ const weekly: ManagedExchangeSchedule = {
 
 function at(instant: string): number {
   return Date.parse(instant);
-}
-
-/** Run `body` with the process time zone pinned, restoring whatever was set
- * before. Node resolves the zone per Date operation, so the pin takes effect
- * inside the call and leaks nothing after it. */
-function withTimeZone<T>(zone: string, body: () => T): T {
-  const original = process.env.TZ;
-  process.env.TZ = zone;
-  try {
-    return body();
-  } finally {
-    if (original === undefined) delete process.env.TZ;
-    else process.env.TZ = original;
-  }
 }
 
 function requireSchedule(
@@ -150,6 +138,36 @@ describe("window geometry", () => {
       ),
     ).toThrow(RangeError);
   });
+
+  test("a window the stored instant form cannot carry is refused, not expanded", () => {
+    const lateInYear9999: ManagedExchangeSchedule = {
+      ...weekly,
+      anchor: "9999-12-28T14:00:00.000Z",
+      nextWindow: "9999-12-28T14:00:00.000Z",
+    };
+    // Well inside the range a `Date` represents, and past the four-digit year
+    // the record's validator admits: written out it is an expanded-year string
+    // the schema would refuse, so it is refused where it would be rendered.
+    expect(
+      new Date(
+        managedScheduleWindow(lateInYear9999, 1).opensAtMs,
+      ).toISOString(),
+    ).toBe("+010000-01-04T14:00:00.000Z");
+    expect(() =>
+      advanceManagedScheduleAfterWindow(
+        lateInYear9999,
+        managedScheduleWindow(lateInYear9999, 0),
+        "missed",
+      ),
+    ).toThrow(RangeError);
+    expect(() =>
+      catchUpManagedSchedule(
+        lateInYear9999,
+        undefined,
+        at("9999-12-28T18:00:00.000Z"),
+      ),
+    ).toThrow(RangeError);
+  });
 });
 
 describe("daylight saving", () => {
@@ -228,52 +246,66 @@ describe("daylight saving", () => {
     expect(withTimeZone("Australia/Lord_Howe", compute)).toEqual(eastern);
   });
 
-  test("an instant with no UTC designator is refused, not read host-local", () => {
-    const offsetless = "2026-03-03T09:00:00";
-    // The string really is host-sensitive, so nothing below passes vacuously:
-    // read without a designator it names a different moment per zone, which is a
-    // different set of windows for the same stored record.
-    expect(
-      withTimeZone("America/New_York", () => Date.parse(offsetless)),
-    ).not.toBe(withTimeZone("UTC", () => Date.parse(offsetless)));
+  // One offsetless string, driven under both zones below in every position a
+  // record carries an instant. Nothing here passes vacuously: the two tests
+  // after the measurement drive the SAME string it measured as divergent.
+  const offsetless = "2026-03-10T15:00:00";
+  const divergingZones = ["UTC", "America/New_York"];
 
-    expect(() =>
-      managedScheduleWindow({ ...march, anchor: offsetless }, 1),
-    ).toThrow(RangeError);
-    expect(() =>
-      nextManagedScheduleWindowAfter(
-        { ...march, anchor: offsetless },
-        at("2026-03-17T15:00:00.000Z"),
-      ),
-    ).toThrow(RangeError);
-    expect(() =>
-      advanceManagedScheduleAfterWindow(
-        { ...march, anchor: offsetless },
-        managedScheduleWindow(march, 1),
-        "missed",
-      ),
-    ).toThrow(RangeError);
-    expect(() =>
-      catchUpManagedSchedule(
-        { ...march, nextWindow: offsetless },
-        undefined,
-        at("2026-03-17T15:00:00.000Z"),
-      ),
-    ).toThrow(RangeError);
+  test("an offsetless instant names a different moment in each zone driven", () => {
+    const moments = divergingZones.map((zone) =>
+      withTimeZone(zone, () => Date.parse(offsetless)),
+    );
+    expect(moments[0]).not.toBe(moments[1]);
+    // Read host-local the same stamp lands inside window 1 on one machine and in
+    // the gap after it on the other -- the same stored record, two different
+    // verdicts -- which is what refusing the string rather than reading it
+    // against the host zone prevents.
+    const window = managedScheduleWindow(march, 1);
+    expect(managedScheduleWindowStateAt(window, moments[0])).toBe("open");
+    expect(managedScheduleWindowStateAt(window, moments[1])).toBe("elapsed");
   });
 
-  test("run bookkeeping with no UTC designator is read as no run at all", () => {
-    // A stamp the host zone would place inside window 1 on a UTC machine and
-    // outside it elsewhere: read as evidence it is refused either way, so the
-    // window counts as missed rather than as met by whichever zone read it.
-    const caught = () =>
-      catchUpManagedSchedule(
-        march,
-        { at: "2026-03-10T15:00:00", outcome: "succeeded" },
-        at("2026-03-10T18:00:00.000Z"),
+  test("an anchor or planned window with no UTC designator is refused in either zone", () => {
+    for (const zone of divergingZones)
+      withTimeZone(zone, () => {
+        expect(() =>
+          managedScheduleWindow({ ...march, anchor: offsetless }, 1),
+        ).toThrow(RangeError);
+        expect(() =>
+          nextManagedScheduleWindowAfter(
+            { ...march, anchor: offsetless },
+            at("2026-03-17T15:00:00.000Z"),
+          ),
+        ).toThrow(RangeError);
+        expect(() =>
+          advanceManagedScheduleAfterWindow(
+            { ...march, anchor: offsetless },
+            managedScheduleWindow(march, 1),
+            "missed",
+          ),
+        ).toThrow(RangeError);
+        expect(() =>
+          catchUpManagedSchedule(
+            { ...march, nextWindow: offsetless },
+            undefined,
+            at("2026-03-17T15:00:00.000Z"),
+          ),
+        ).toThrow(RangeError);
+      });
+  });
+
+  test("run bookkeeping with no UTC designator is read as no run at all in either zone", () => {
+    for (const zone of divergingZones) {
+      const walked = withTimeZone(zone, () =>
+        catchUpManagedSchedule(
+          march,
+          { at: offsetless, outcome: "succeeded" },
+          at("2026-03-10T18:00:00.000Z"),
+        ),
       );
-    for (const zone of ["UTC", "America/New_York"]) {
-      const walked = withTimeZone(zone, caught);
+      // Window 1 is the one the UTC read would have discharged; refused as
+      // evidence, both elapsed windows count as missed on either machine.
       expect(walked.missedWindows).toBe(2);
       expect(walked.schedule.consecutiveMisses).toBe(2);
     }
@@ -523,6 +555,31 @@ describe("catch-up on wake", () => {
     expect(caught.missedWindows).toBe(0);
   });
 
+  test("a success stamped ahead of the wake does not discharge the open window", () => {
+    const caught = catchUpManagedSchedule(
+      { ...weekly, nextWindow: "2026-01-27T14:00:00.000Z" },
+      { at: "2026-01-27T16:30:00.000Z", outcome: "succeeded" },
+      at("2026-01-27T14:00:00.000Z"),
+    );
+    // Two and a half hours ahead of the wake, inside the window that has just
+    // opened: a forward-skewed clock or an edited record, not a window met, so
+    // the window is attempted rather than silently advanced past.
+    expect(caught.dueWindow?.index).toBe(3);
+    expect(caught.schedule.nextWindow).toBe("2026-01-27T14:00:00.000Z");
+    expect(caught.missedWindows).toBe(0);
+    expect(caught.schedule.consecutiveMisses).toBe(0);
+
+    // The boundary: a stamp at the wake instant itself is a run that just
+    // happened, and discharges the window as any earlier one does.
+    const atWake = catchUpManagedSchedule(
+      { ...weekly, nextWindow: "2026-01-27T14:00:00.000Z" },
+      { at: "2026-01-27T14:30:00.000Z", outcome: "succeeded" },
+      at("2026-01-27T14:30:00.000Z"),
+    );
+    expect(atWake.dueWindow).toBeUndefined();
+    expect(atWake.schedule.nextWindow).toBe("2026-02-03T14:00:00.000Z");
+  });
+
   test("a failure inside the open window leaves the rest of it attemptable", () => {
     const caught = catchUpManagedSchedule(
       { ...weekly, nextWindow: "2026-01-27T14:00:00.000Z" },
@@ -557,16 +614,22 @@ describe("catch-up on wake", () => {
   });
 
   test("the walk reports the plan it read, verbatim", () => {
-    // What the bookkeeping write is conditioned on: the stored instant this walk
-    // computed against, not the one it computed.
-    const stored = { ...weekly, nextWindow: "2026-01-13T14:00:00.000Z" };
+    // What the bookkeeping write is conditioned on: the stored instant and count
+    // this walk computed against, not the ones it computed.
+    const stored = {
+      ...weekly,
+      nextWindow: "2026-01-13T14:00:00.000Z",
+      consecutiveMisses: 2,
+    };
     const caught = catchUpManagedSchedule(
       stored,
       undefined,
       at("2026-01-20T18:00:00.000Z"),
     );
     expect(caught.fromNextWindow).toBe(stored.nextWindow);
+    expect(caught.fromConsecutiveMisses).toBe(stored.consecutiveMisses);
     expect(caught.schedule.nextWindow).toBe("2026-01-27T14:00:00.000Z");
+    expect(caught.schedule.consecutiveMisses).toBe(4);
   });
 
   test("does not mutate the schedule it reads", () => {
@@ -748,6 +811,39 @@ describe("resolveLocalCadenceAnchor", () => {
         minute: 0,
       }),
     ).toThrow(RangeError);
+  });
+
+  test("a resolution the stored instant form cannot carry is refused", () => {
+    const lateInYear9999 = {
+      year: 9999,
+      month: 12,
+      day: 31,
+      hour: 21,
+      minute: 0,
+    };
+    withTimeZone("America/New_York", () => {
+      // The resolution really does leave the form, so nothing here passes
+      // vacuously: a zone behind UTC carries that wall clock into year 10000,
+      // which renders only as the expanded-year ISO string.
+      const expanded = new Date(9999, 11, 31, 21, 0, 0, 0).toISOString();
+      expect(expanded).toBe("+010000-01-01T02:00:00.000Z");
+      // Why returning it would be wrong rather than merely unusual: the record's
+      // own validator refuses it, so the anchor would surface as a validation
+      // failure at the write instead of a RangeError at the entry surface.
+      expect(
+        scheduleSchema.safeParse({ ...weekly, anchor: expanded }).success,
+      ).toBe(false);
+      expect(() => resolveLocalCadenceAnchor(lateInYear9999)).toThrow(
+        RangeError,
+      );
+    });
+    // The same cadence in a zone ahead of UTC stays inside the form, so it is
+    // the resolved instant that is refused rather than the year entered.
+    withTimeZone("Asia/Kolkata", () => {
+      expect(resolveLocalCadenceAnchor(lateInYear9999)).toBe(
+        "9999-12-31T15:30:00.000Z",
+      );
+    });
   });
 
   test("a date the calendar does not have is refused, not rolled over", () => {

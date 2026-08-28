@@ -39,9 +39,19 @@ const MS_PER_DAY = 86_400_000;
 
 const MS_PER_SECOND = 1000;
 
-/** The largest instant an ECMAScript `Date` represents; an arithmetic result
- * outside it has no ISO 8601 rendering. */
+/** The largest instant an ECMAScript `Date` represents; a value outside it is
+ * not a clock reading at all. */
 const MAX_TIME_VALUE = 8.64e15;
+
+/** The instants a stored UTC instant carries: the record's validator admits a
+ * four-digit year alone, so anything before year 0 or after year 9999 has only
+ * the expanded-year ISO rendering (`+010000-01-01T00:00:00.000Z`) the schema
+ * refuses (see {@link ./managedExchangeRecord.ts}'s `scheduleSchema`). An
+ * instant this module computes is destined for `anchor` or `nextWindow`, so one
+ * outside the pair is refused where it would be rendered rather than surfacing
+ * as a validation failure at the write. */
+const MIN_STORED_INSTANT_MS = -62_167_219_200_000;
+const MAX_STORED_INSTANT_MS = 253_402_300_799_999;
 
 /** The most windows one catch-up walks before refusing the record. The walk
  * crosses one window per elapsed period, so the daily cadence -- the shortest
@@ -91,6 +101,10 @@ export interface ManagedScheduleCatchUp {
    * (see {@link ./managedExchangeRecord.ts}'s
    * `applyManagedExchangeScheduleAdvance`). */
   fromNextWindow: string;
+  /** The `consecutiveMisses` this walk read, echoed verbatim and conditioned on
+   * by the same write: an operator who cleared the count while the window ran
+   * must not have it restored by a walk that counted from the old one. */
+  fromConsecutiveMisses: number;
   /** How many fully-elapsed windows passed unattempted -- one miss each,
    * whichever side was absent. Zero when the wake found nothing elapsed. */
   missedWindows: number;
@@ -146,9 +160,13 @@ function parseScheduleInstant(value: string, field: string): number {
 }
 
 function toScheduleInstant(ms: number): string {
-  if (!Number.isFinite(ms) || Math.abs(ms) > MAX_TIME_VALUE)
+  if (
+    !Number.isFinite(ms) ||
+    ms < MIN_STORED_INSTANT_MS ||
+    ms > MAX_STORED_INSTANT_MS
+  )
     throw new RangeError(
-      "managed schedule window falls outside the representable instant range",
+      "managed schedule instant falls outside the range a stored UTC instant carries",
     );
   return new Date(ms).toISOString();
 }
@@ -271,7 +289,7 @@ export function nextConsecutiveMisses(
  * the window handed in.
  *
  * @throws {RangeError} if the schedule's lattice is unusable or the following
- *   window falls outside the representable instant range.
+ *   window falls outside the range a stored UTC instant carries.
  */
 export function advanceManagedScheduleAfterWindow(
   schedule: ManagedExchangeSchedule,
@@ -317,15 +335,21 @@ export function advanceManagedScheduleAfterWindow(
  * `lastRun` is read as evidence, never validated: an entry whose `at` is not a
  * UTC instant -- unparseable, or carrying no designator to read it against -- is
  * treated as no recorded run at all, the conservative direction (an extra miss
- * counted, never a miss suppressed).
+ * counted, never a miss suppressed). An entry stamped AHEAD of the wake instant
+ * is read the same way and discharges nothing: a stamp in the future is a
+ * forward-skewed clock or an edited record rather than a window met, so the
+ * window it names stays planned, and stays due once open. That defers the
+ * verdict to a later wake instead of counting a miss on the spot -- the walk
+ * never suppresses a window's accounting on evidence it cannot stand behind.
  *
  * @param schedule The stored schedule, whose `nextWindow` is the first window
  *   not yet accounted for.
  * @param lastRun The record's run bookkeeping, if any.
  * @param nowMs The wake instant, UTC milliseconds.
  * @throws {RangeError} if the schedule's lattice is unusable, if the wake
- *   instant or the resumed window falls outside the representable instant range,
- *   or if the span from `nextWindow` to the wake exceeds the walk's bound.
+ *   instant is not a representable one, if the resumed window falls outside the
+ *   range a stored UTC instant carries, or if the span from `nextWindow` to the
+ *   wake exceeds the walk's bound.
  */
 export function catchUpManagedSchedule(
   schedule: ManagedExchangeSchedule,
@@ -351,11 +375,14 @@ export function catchUpManagedSchedule(
     Math.ceil((plannedMs - geometry.anchorMs) / geometry.periodMs),
   );
   // The one window the recorded run speaks for. A run whose stamp does not
-  // parse, or that landed in the gap between two windows, speaks for none.
+  // parse, that landed in the gap between two windows, or that is stamped ahead
+  // of the wake speaks for none.
+  const recordedMs =
+    lastRun === undefined ? Number.NaN : parseStoredInstant(lastRun.at);
   const recordedIndex =
-    lastRun === undefined
+    recordedMs > nowMs
       ? undefined
-      : windowIndexContaining(geometry, parseStoredInstant(lastRun.at));
+      : windowIndexContaining(geometry, recordedMs);
 
   let consecutiveMisses = schedule.consecutiveMisses;
   let missedWindows = 0;
@@ -397,6 +424,7 @@ export function catchUpManagedSchedule(
       consecutiveMisses,
     },
     fromNextWindow: schedule.nextWindow,
+    fromConsecutiveMisses: schedule.consecutiveMisses,
     missedWindows,
     ...(dueWindow !== undefined ? { dueWindow } : {}),
     ...(missedCloseMs !== undefined
@@ -424,8 +452,11 @@ export function catchUpManagedSchedule(
  * post-transition offset, which the entry surface shows back as the resolved
  * instant.
  *
- * @throws {RangeError} if a component is out of range or names a date the
- *   calendar does not have.
+ * @throws {RangeError} if a component is out of range, if it names a date the
+ *   calendar does not have, or if the local resolution falls outside the range a
+ *   stored UTC instant carries: a late-December year-9999 cadence in a zone
+ *   behind UTC resolves into year 10000, which has only the expanded-year ISO
+ *   form the record's validator refuses.
  */
 export function resolveLocalCadenceAnchor(
   cadence: LocalWallClockCadence,
