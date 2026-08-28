@@ -35,12 +35,20 @@
  *   loader warn-and-strips the key-file-injected `shared_secret`/`expires`, and
  *   the block is a strict object, so a typo fails closed rather than silently
  *   disabling max-age enforcement.
- * - It REFUSES a record whose document is not a webrtc connection, the way the
- *   re-run dispatch gate refuses one ({@link ./managedRendezvous.ts}). No UI path
- *   composes such a record -- a managed connection is a credential-free webrtc
- *   locator by composition -- so the shape is reachable only by importing a
- *   hand-crafted artifact, and a document arriving that way could carry another
- *   machine's credential `@path` that this export would otherwise republish.
+ * - It REFUSES any stored document the app could not have composed: a connection
+ *   on another channel (the way the re-run dispatch gate refuses one,
+ *   {@link ./managedRendezvous.ts}), a webrtc connection carrying a field outside
+ *   the credential-free locator subset, and an `authentication` block on the
+ *   stored document. None of the three is composable through the app -- a managed
+ *   connection is a credential-free webrtc locator by composition and the record
+ *   read path refines an `authentication` block away -- so each is reachable only
+ *   by importing a hand-crafted artifact, whose embedded document is validated
+ *   against the full exchange schema. That schema CAN represent a TURN
+ *   `credential`, an opaque `provider_options` map, an `ice_provision` auth block,
+ *   a PeerJS `server.key`/`server.username`, and a shared secret, and the CLI
+ *   resolves an `@path` in the file it loads (`apps/cli/src/util/atSignRefs.ts`),
+ *   so republishing one would aim the operator's own scheduled run at another
+ *   party's credential file.
  *
  * The key file is a plaintext credential handed over under the CLI key file's own
  * trust model: custody and storage permissions, never a passphrase (the spec's
@@ -50,7 +58,11 @@
  * differently once they land.
  */
 
-import { ExchangeSpecSchema } from "@psilink/core";
+import {
+  ExchangeSpecSchema,
+  connectionFromLocator,
+  snakeizeKey,
+} from "@psilink/core";
 
 import {
   keyFileFieldsFromRecord,
@@ -110,14 +122,83 @@ export interface ManagedCronExport {
 }
 
 /**
- * Narrow a record's stored connection to the webrtc arm, refusing any other
- * channel. Mirrors the re-run dispatch gate (`assertManagedRerunDispatchable`,
- * ./managedRendezvous.ts): an allowlist on the `channel` discriminant, read
- * before anything is composed, so a record the app could not have created is
- * refused rather than exported. The refusal names the stored channel, a
- * schema-validated discriminant rather than free text.
+ * The field names a credential-free webrtc locator expands to, at the connection
+ * and at its nested `server`. Read off {@link connectionFromLocator}'s own webrtc
+ * arm rather than restated, so the allowlist IS the composition rule the stored
+ * document's credential-freedom rests on (docs/spec/MANAGED_EXCHANGE_RECORD.md,
+ * "The connection block: credential-free by composition") and cannot drift from
+ * it: a locator field that expansion starts writing is admitted here with no
+ * second list to update, and every other field the shared webrtc connection
+ * schema can represent is outside the subset by construction. The probe locator
+ * carries each optional field so the expansion writes its widest shape.
  */
-function webrtcConnectionOrRefuse(
+function credentialFreeLocatorFields(): {
+  connection: ReadonlySet<string>;
+  server: ReadonlySet<string>;
+} {
+  const composed = connectionFromLocator({
+    channel: "webrtc",
+    host: "locator.invalid",
+    port: 443,
+    path: "/",
+  });
+  if (composed.channel !== "webrtc")
+    throw new Error(
+      "the credential-free locator expansion did not compose a webrtc " +
+        "connection from a webrtc locator",
+    );
+  return {
+    connection: new Set(Object.keys(composed)),
+    server: new Set(Object.keys(composed.server)),
+  };
+}
+
+const CREDENTIAL_FREE_LOCATOR_FIELDS = credentialFreeLocatorFields();
+
+/**
+ * The stored connection's fields that a credential-free locator does not expand
+ * to, named in the operator's own snake_case spelling so a refusal points at the
+ * lines to remove. Names only -- a field's VALUE is the credential (a TURN
+ * secret, a bearer token, an `@path` naming another machine's file) and never
+ * enters the message.
+ */
+function fieldsOutsideLocatorSubset(
+  connection: WebRTCConnectionConfig,
+): Array<string> {
+  const outside = Object.keys(connection).filter(
+    (field) => !CREDENTIAL_FREE_LOCATOR_FIELDS.connection.has(field),
+  );
+  // Typed as required, but this gate runs on a record shape that reached the
+  // composer without the read path's validation, so the nested object is read
+  // defensively: a missing `server` is the exchange schema's refusal to make,
+  // not a TypeError here.
+  const server: unknown = connection.server;
+  const serverFields =
+    typeof server === "object" && server !== null ? Object.keys(server) : [];
+  return [
+    ...outside.map((field) => snakeizeKey(field)),
+    ...serverFields
+      .filter((field) => !CREDENTIAL_FREE_LOCATOR_FIELDS.server.has(field))
+      .map((field) => `server.${snakeizeKey(field)}`),
+  ].sort();
+}
+
+/**
+ * Narrow a record's stored connection to the credential-free webrtc locator the
+ * app composes, refusing any other channel and any field outside that locator's
+ * expansion. The channel arm mirrors the re-run dispatch gate
+ * (`assertManagedRerunDispatchable`, ./managedRendezvous.ts): an allowlist on the
+ * `channel` discriminant, read before anything is composed. The field arm holds
+ * an imported document to the composition rule the exchange-file schema alone
+ * does not enforce -- that schema admits the credential-bearing webrtc fields, so
+ * an artifact carrying them imports cleanly and would otherwise be republished
+ * verbatim into the emitted `psilink.yaml`.
+ *
+ * A hard refusal rather than a warning: this is remote content the operator
+ * cannot inspect (the partner's or a third party's hand-crafted artifact), not
+ * the operator's own choice about their own machine.
+ */
+function webrtcLocatorConnectionOrRefuse(
   exchangeFile: ExchangeSpec,
 ): WebRTCConnectionConfig {
   const connection = exchangeFile.connection;
@@ -128,7 +209,36 @@ function webrtcConnectionOrRefuse(
         "is " +
         connection.channel,
     );
+  const outside = fieldsOutsideLocatorSubset(connection);
+  if (outside.length > 0)
+    throw new Error(
+      "a managed exchange is exported to the command line only from the " +
+        "credential-free webrtc locator this app composes (the signaling " +
+        "server's host, port, and path); the stored connection carries " +
+        "field(s) outside it, which the exported psilink.yaml would republish " +
+        "for the CLI to resolve. Remove: " +
+        outside.join(", "),
+    );
   return connection;
+}
+
+/**
+ * Refuse a stored document carrying an `authentication` block. The composed
+ * document's block is injected from the record's local max-age policy alone, so
+ * a stored one would ride the document spread into the configuration half --
+ * `shared_secret` and all -- beside or instead of the policy. The record read
+ * path refines such a document away ({@link ./managedExchangeRecord.ts}), so this
+ * is that invariant as a check on the shape the composer is actually handed
+ * rather than a comment asserting the read path already ran.
+ */
+function assertNoStoredAuthentication(exchangeFile: ExchangeSpec): void {
+  if (exchangeFile.authentication !== undefined)
+    throw new Error(
+      "a managed exchange's stored document carries no authentication block; " +
+        "the exported configuration's block is composed from the local " +
+        "max-age policy alone, so a stored one is refused rather than " +
+        "republished",
+    );
 }
 
 /**
@@ -140,13 +250,15 @@ function webrtcConnectionOrRefuse(
  * exchange-file schema would not accept fails here, on the composing side, rather
  * than at the operator's first scheduled run.
  *
- * @throws {Error} if the stored connection is not the webrtc channel.
+ * @throws {Error} if the stored connection is not a credential-free webrtc
+ *   locator, or the stored document carries an `authentication` block.
  * @throws {ZodError} if the composed document fails exchange-file validation.
  */
 function composeCronExportDocument(
   record: ManagedExchangeRecord,
 ): ExchangeSpec {
-  const connection = webrtcConnectionOrRefuse(record.exchangeFile);
+  const connection = webrtcLocatorConnectionOrRefuse(record.exchangeFile);
+  assertNoStoredAuthentication(record.exchangeFile);
   return ExchangeSpecSchema.parse({
     ...record.exchangeFile,
     connection: { ...connection, role: record.side },
@@ -177,7 +289,8 @@ function serializeKeyFile(fields: ManagedExchangeArtifactKey): string {
  * (`apps/cli/src/commands/exchange.ts`) -- so it carries no flag the CLI does not
  * have and no path from any machine.
  *
- * @throws {Error} if the record's stored connection is not the webrtc channel.
+ * @throws {Error} if the record's stored connection is not a credential-free
+ *   webrtc locator, or its stored document carries an `authentication` block.
  * @throws {ZodError} if the composed document fails exchange-file validation.
  */
 export function composeManagedCronExport(

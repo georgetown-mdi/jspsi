@@ -17,13 +17,23 @@ import {
   composeManagedCronExport,
 } from "@psi/managedCronExport";
 import {
+  MANAGED_EXCHANGE_ARTIFACT_VERSION,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   keyFileFieldsSchema,
   parseManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
+import {
+  importManagedExchangeArtifact,
+  serializeExchangeDocument,
+} from "@psi/managedExchangeArtifact";
 
-import type { ExchangeLocator, WebRTCExchangeLocator } from "@psilink/core";
+import type {
+  ExchangeLocator,
+  ExchangeSpec,
+  WebRTCConnectionConfig,
+  WebRTCExchangeLocator,
+} from "@psilink/core";
 import type {
   ManagedExchangeRecord,
   ManagedExchangeSide,
@@ -256,6 +266,231 @@ describe("a record that is not a webrtc exchange", () => {
       expect(() => composeManagedCronExport(record)).toThrow(
         new RegExp(`webrtc[\\s\\S]*${channel}`),
       );
+    },
+  );
+});
+
+/** A record as a hand-crafted artifact import produces one. The import path
+ * validates the embedded document with the FULL exchange schema rather than the
+ * credential-free locator composition, so a connection the app itself could
+ * never compose reaches a record this way -- each import below succeeding is the
+ * reachability half of the refusal the test then asserts. */
+function importedRecordWithConnection(
+  connection: WebRTCConnectionConfig,
+): ManagedExchangeRecord {
+  return importManagedExchangeArtifact(
+    JSON.stringify({
+      artifactVersion: MANAGED_EXCHANGE_ARTIFACT_VERSION,
+      exchangeDocument: serializeExchangeDocument(
+        assembleExchangeSpec({ connection, linkageTerms }),
+      ),
+      key: { sharedSecret: generateSharedSecret() },
+      local: { label: "Imported quarterly", side: "inviter" },
+    }),
+  );
+}
+
+/** The message the export refuses a record with, failing the test if it composed
+ * one instead. */
+function exportRefusal(record: ManagedExchangeRecord): string {
+  try {
+    composeManagedCronExport(record);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error("the export composed a record it was expected to refuse");
+}
+
+describe("a webrtc connection outside the credential-free locator subset", () => {
+  const locatorServer = {
+    host: "signaling.example.org",
+    port: 3000,
+    path: "/api/",
+  };
+
+  // Each row is a field the shared webrtc connection schema can represent and
+  // the locator expansion never writes: the export must name it and republish
+  // none of it. The value column is what the emitted psilink.yaml would have
+  // handed the CLI to resolve, and is what the refusal must not echo back.
+  const outsideLocatorSubset: Array<
+    [string, WebRTCConnectionConfig, string, string]
+  > = [
+    [
+      "a TURN relay credential",
+      {
+        channel: "webrtc",
+        server: locatorServer,
+        turn: [
+          {
+            url: "turn:relay.example.org",
+            username: "relay-account",
+            credential: "@/home/other/turn.secret",
+          },
+        ],
+      },
+      "turn",
+      "@/home/other/turn.secret",
+    ],
+    [
+      "an opaque provider-options token",
+      {
+        channel: "webrtc",
+        server: locatorServer,
+        providerOptions: { token: "@/home/other/peerjs.token" },
+      },
+      "provider_options",
+      "@/home/other/peerjs.token",
+    ],
+    [
+      "an ICE-provision auth block",
+      {
+        channel: "webrtc",
+        server: locatorServer,
+        iceProvision: {
+          host: "ice.example.org",
+          auth: { bearer: "@/home/other/ice.bearer" },
+        },
+      },
+      "ice_provision",
+      "@/home/other/ice.bearer",
+    ],
+    [
+      "a PeerJS server key",
+      {
+        channel: "webrtc",
+        server: { ...locatorServer, key: "@/home/other/peerjs.key" },
+      },
+      "server.key",
+      "@/home/other/peerjs.key",
+    ],
+    [
+      "a server username",
+      {
+        channel: "webrtc",
+        server: { ...locatorServer, username: "other-machine-account" },
+      },
+      "server.username",
+      "other-machine-account",
+    ],
+    [
+      "a server provisioning endpoint's auth",
+      {
+        channel: "webrtc",
+        server: {
+          ...locatorServer,
+          provision: {
+            host: "provision.example.org",
+            auth: { bearer: "@/home/other/provision.bearer" },
+          },
+        },
+      },
+      "server.provision",
+      "@/home/other/provision.bearer",
+    ],
+    [
+      "a stun list the locator never carried",
+      {
+        channel: "webrtc",
+        server: locatorServer,
+        stun: ["stun:stun.example.org"],
+      },
+      "stun",
+      "stun:stun.example.org",
+    ],
+    [
+      "a document-carried role",
+      { channel: "webrtc", server: locatorServer, role: "acceptor" },
+      "role",
+      "acceptor",
+    ],
+  ];
+
+  test.each(outsideLocatorSubset)(
+    "is refused rather than republished (%s)",
+    (_case, connection, field, value) => {
+      const record = importedRecordWithConnection(connection);
+      const message = exportRefusal(record);
+      expect(message).toContain(field);
+      // Named in kind: the field, never what it holds.
+      expect(message).not.toContain(value);
+    },
+  );
+
+  test("names every offending field at once, and no value", () => {
+    const record = importedRecordWithConnection({
+      channel: "webrtc",
+      server: { ...locatorServer, key: "@/home/other/peerjs.key" },
+      turn: [
+        {
+          url: "turn:relay.example.org",
+          username: "relay-account",
+          credential: "@/home/other/turn.secret",
+        },
+      ],
+      providerOptions: { token: "@/home/other/peerjs.token" },
+    });
+    const message = exportRefusal(record);
+    // The whole list, in one deterministic order, and nothing else named.
+    expect(message).toContain("Remove: provider_options, server.key, turn");
+    for (const value of [
+      "@/home/other/peerjs.key",
+      "@/home/other/peerjs.token",
+      "@/home/other/turn.secret",
+    ])
+      expect(message).not.toContain(value);
+  });
+
+  test("admits a locator that carries only the optional fields it composed", () => {
+    // The allowlist is the expansion's own output, so an omitted optional
+    // locator field is admitted exactly as a present one is.
+    const record = managedRecord({
+      exchangeFile: composeManagedExchangeFile({
+        connection: { channel: "webrtc", host: "signaling.example.org" },
+        linkageTerms,
+      }),
+    });
+    expect(parseExportedConfig(record).connection).toEqual({
+      channel: "webrtc",
+      server: { host: "signaling.example.org" },
+      role: record.side,
+    });
+  });
+});
+
+describe("an authentication block on the stored document", () => {
+  function recordCarrying(
+    authentication: ExchangeSpec["authentication"],
+    overrides: Partial<NewManagedExchange> = {},
+  ): ManagedExchangeRecord {
+    const record = managedRecord(overrides);
+    return {
+      ...record,
+      exchangeFile: { ...record.exchangeFile, authentication },
+    };
+  }
+
+  test("is not a record shape the read path admits", () => {
+    // The refusals below are the composer holding its own contract on the shape
+    // it is handed, not a second copy of this rule.
+    expect(() =>
+      parseManagedExchangeRecord(recordCarrying({ tokenMaxAgeDays: 30 })),
+    ).toThrow();
+  });
+
+  test.each([
+    ["no max-age policy is set", {}],
+    ["a max-age policy is set", { tokenMaxAgeDays: 90 }],
+  ] as Array<[string, Partial<NewManagedExchange>]>)(
+    "cannot reach the configuration half when %s",
+    (_case, overrides) => {
+      const secret = generateSharedSecret();
+      const record = recordCarrying(
+        { sharedSecret: secret, expires: "2026-04-06T14:00:00.000Z" },
+        overrides,
+      );
+      const message = exportRefusal(record);
+      expect(message).toContain("authentication");
+      expect(message).not.toContain(secret);
     },
   );
 });
