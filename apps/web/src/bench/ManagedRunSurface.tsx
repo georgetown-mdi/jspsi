@@ -314,6 +314,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
         // clears, no error UI, unhandled rejection), fall back to the closure's own
         // record and no sibling state, so the original error still surfaces through
         // the generic tier.
+        //
+        // The classification also gets the record as it stood when this run
+        // launched -- the closure's own, taken before the run could stamp anything.
+        // A no-show's stamp replaces `lastRun` and carries no failureKind, so the
+        // reloaded record alone cannot say whether a standing desync signal was
+        // there to outrank the benign no-show reading.
         const [reloaded, local] = await Promise.all([
           getManagedExchange(record.id),
           getManagedLocalState(record.id),
@@ -331,7 +337,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
         setFailure(
           classifyManagedRunFailure(
             error,
-            reloaded ?? record,
+            { atLaunch: record, afterRun: reloaded ?? record },
             local,
             Date.now(),
             dataExchangeStarted,

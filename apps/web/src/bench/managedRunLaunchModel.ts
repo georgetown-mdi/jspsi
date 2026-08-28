@@ -73,6 +73,23 @@ import type { ManagedLocalState } from "@psi/managedLocalState";
 export type ManagedRunRecovery =
   "reinvite" | "retry" | "wait" | "confirm" | "reconfirm" | "restate" | "none";
 
+/** The two readings of a record a live launch failure is classified against. They
+ * differ because a failed run stamps its own `lastRun` before the host reloads, and
+ * that stamp REPLACES the entry rather than merging into it: a no-show's stamp
+ * carries no `failureKind` at all, so a kind standing before the run is not in the
+ * reloaded record to read. */
+export interface ManagedRunRecordReadings {
+  /** The record as the host held it when the run launched: the standing evidence
+   * this run's own bookkeeping stamp cannot have erased. The no-show state is read
+   * against it ({@link missedFailure}). */
+  atLaunch: ManagedExchangeRecord;
+  /** The record reloaded after the failure, carrying whatever `lastRun` this run
+   * just stamped -- the evidence every derived tier reads. The host falls back to
+   * the at-launch record when the reload rejects, so the two can be the same
+   * record. */
+  afterRun: ManagedExchangeRecord;
+}
+
 /** A classified launch state, ready to render: the state's kind (the pre-connection
  * benign states plus the derived tiers), its plain copy, and the recovery affordance
  * the host renders. */
@@ -325,9 +342,9 @@ function tierFailure(
 }
 
 /** The tiers whose framing outranks the benign no-show reading, each a Tier-1
- * desync signal the record already carries and each recovered by re-invite. A
- * no-show is what a pair that can no longer meet looks like from this device: the
- * managed rendezvous derives both peer ids from the shared secret (see
+ * desync signal the record carries as the run launches and each recovered by
+ * re-invite. A no-show is what a pair that can no longer meet looks like from this
+ * device: the managed rendezvous derives both peer ids from the shared secret (see
  * {@link ../psi/managedRunDriver.ts}), so a side holding a secret the partnership
  * has moved past dials and listens on addresses nobody answers, and spends its
  * whole budget exactly as an absent partner does. Where the record's own
@@ -344,23 +361,24 @@ const MISSED_OUTRANKED_BY: ReadonlyArray<ManagedFailureTier> = [
   "imported",
 ];
 
-/** The no-show state, read against the desync evidence the record already holds
- * ({@link MISSED_OUTRANKED_BY}).
+/** The no-show state, read against the desync evidence the record holds
+ * ({@link MISSED_OUTRANKED_BY}) as of the launch
+ * ({@link ManagedRunRecordReadings.atLaunch}) -- the one reading this run's own
+ * `"missed"` stamp cannot have erased, since that stamp replaces `lastRun` and
+ * carries no `failureKind`.
  *
- * The import marker is read directly as well as through the derived tier: this
- * run's own no-show stamps a `"missed"` outcome, and the derivation reads
- * `lastRun` before it reaches the marker, so the tier alone would answer
- * `"missed"` for exactly the record that carries a standing restore. The tier is
- * still consulted first, because it is what surfaces a signal this run's stamp did
- * not overwrite (its write is best-effort, and the host classifies against its
- * pre-run record when the post-failure reload rejects). */
+ * The import marker is read directly as well as through the derived tier: the
+ * derivation short-circuits on a `"missed"` outcome before it reaches the marker,
+ * so a record whose LAST run was itself a no-show would tier as `"missed"` while
+ * carrying a standing restore. The tier is consulted first because it carries what
+ * the marker cannot -- the lapse check and the recorded persist failure. */
 function missedFailure(
-  record: ManagedExchangeRecord,
+  atLaunch: ManagedExchangeRecord,
   local: ManagedLocalState | undefined,
   now: number,
 ): ManagedRunFailure {
-  const tier = deriveManagedFailureTier(record, local, now);
-  if (MISSED_OUTRANKED_BY.includes(tier)) return tierFailure(tier, record);
+  const tier = deriveManagedFailureTier(atLaunch, local, now);
+  if (MISSED_OUTRANKED_BY.includes(tier)) return tierFailure(tier, atLaunch);
   if (importedSinceLastSuccess(local)) return IMPORTED_FAILURE;
   return MISSED_FAILURE;
 }
@@ -375,8 +393,15 @@ function missedFailure(
  * record's own bookkeeping (which the runner and the critical section already stamped
  * before this classification runs): {@link deriveManagedFailureTier} reads the tier,
  * and {@link tierFailure} maps it to copy. `now` and `local` are passed so the tier
- * derivation reads expiry and the import marker; the record is the freshly-reloaded
- * one carrying the just-stamped `lastRun`.
+ * derivation reads expiry and the import marker.
+ *
+ * Which of the two record readings ({@link ManagedRunRecordReadings}) answers is
+ * decided by whose evidence the state rests on. A derived tier rests on what THIS
+ * run stamped, so it reads the record reloaded after the run. The no-show rests on
+ * what stood BEFORE it: a no-show stamps `"missed"` with no `failureKind`, and the
+ * stamp replaces `lastRun` rather than merging into it, so the reloaded record
+ * cannot say whether a Tier-1 desync signal was standing -- the at-launch reading
+ * is what {@link missedFailure} weighs.
  *
  * `dataExchangeStarted` is THIS run's phase boundary, reported by the run through
  * its `onDataExchangeStart` option and passed through to
@@ -395,7 +420,7 @@ function missedFailure(
  */
 export function classifyManagedRunFailure(
   error: unknown,
-  record: ManagedExchangeRecord,
+  records: ManagedRunRecordReadings,
   local: ManagedLocalState | undefined,
   now: number,
   dataExchangeStarted: boolean,
@@ -406,8 +431,9 @@ export function classifyManagedRunFailure(
   if (benign === "already-running") return ALREADY_RUNNING_FAILURE;
   if (benign === "input") return INPUT_FAILURE;
   if (benign === "terms-shortfall") return TERMS_SHORTFALL_FAILURE;
-  if (benign === "missed") return missedFailure(record, local, now);
-  return tierFailure(deriveManagedFailureTier(record, local, now), record);
+  if (benign === "missed") return missedFailure(records.atLaunch, local, now);
+  const { afterRun } = records;
+  return tierFailure(deriveManagedFailureTier(afterRun, local, now), afterRun);
 }
 
 /**

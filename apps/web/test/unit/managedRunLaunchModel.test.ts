@@ -15,18 +15,21 @@ import {
 
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
+  applyManagedExchangeLastRun,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
 import { ManagedExchangeExpiredError } from "@psi/managedExpiry";
 import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeRun";
 import { ManagedInputError } from "@psi/managedInputGuard";
 import { PartnerNoShowError } from "@psi/waitForConnection";
+import { missedRun } from "@psi/managedRunRotate";
 
 import type {
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
 import type { ManagedLocalState } from "@psi/managedLocalState";
+import type { ManagedRunFailure } from "@bench/managedRunLaunchModel";
 
 // The launch surface's failure classification, tested in Node: the pre-connection
 // benign states come from the error; a failed-closed handshake and every other
@@ -59,9 +62,33 @@ function failed(
   return { at: "2026-07-14T09:00:00.000Z", outcome: "failed", failureKind };
 }
 
+/** Classify a launch failure with one record standing for both readings the
+ * classification takes -- the shape of a run whose own bookkeeping stamp did not
+ * change what the classification reads, and of the host's fallback when the
+ * post-failure reload rejects. The tests that turn on the difference between the
+ * two readings build them separately. */
+function classifyAgainstOneRecord(
+  error: unknown,
+  recordForBothReadings: ManagedExchangeRecord,
+  local: ManagedLocalState | undefined,
+  now: number,
+  dataExchangeStarted: boolean,
+): ManagedRunFailure {
+  return classifyManagedRunFailure(
+    error,
+    {
+      atLaunch: recordForBothReadings,
+      afterRun: recordForBothReadings,
+    },
+    local,
+    now,
+    dataExchangeStarted,
+  );
+}
+
 describe("classifyManagedRunFailure: pre-connection benign states from the error", () => {
   test("a lapsed secret is the benign expiry state with re-invite copy naming the lapse", () => {
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new ManagedExchangeExpiredError("2026-07-01T00:00:00.000Z"),
       record(),
       undefined,
@@ -76,7 +103,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
   });
 
   test("an unreadable input is the benign input state, retried in place", () => {
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new ManagedInputError({
         reason: "acquire",
         cause: new Error("NotFoundError"),
@@ -103,7 +130,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
       }),
       new LinkageTermsUnsatisfiableError("refused at the run boundary"),
     ]) {
-      const failure = classifyManagedRunFailure(
+      const failure = classifyAgainstOneRecord(
         error,
         record(),
         undefined,
@@ -119,7 +146,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
   });
 
   test("a run in progress elsewhere is the benign already-running state", () => {
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new ManagedExchangeLockUnavailableError("id"),
       record(),
       undefined,
@@ -134,7 +161,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     // The defect this closes: a no-show used to fall through to the transport
     // state, whose copy sends the operator to check their own connection for a
     // partner who was simply not there.
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new PartnerNoShowError("timed out waiting for the other party"),
       record(),
       undefined,
@@ -156,7 +183,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     // be the whole of what the operator is told: the copy names the re-invite for
     // the partner who WAS at their machine at an agreed time, in the same register
     // the storage and imported states use.
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new PartnerNoShowError("timed out waiting for the other party"),
       record(),
       undefined,
@@ -169,11 +196,11 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     expect(failure.message).toMatch(/only replaces the secret/i);
   });
 
-  test("a live no-show reads the no-show state against the record it just stamped", () => {
-    // The record the host reloads after a no-show carries the outcome this very run
-    // stamped, so the ordinary shape -- live error and fresh bookkeeping agreeing --
-    // must still read as the no-show rather than as anything the tiering derives.
-    const failure = classifyManagedRunFailure(
+  test("a live no-show against a standing missed outcome keeps the no-show state", () => {
+    // The repeat case: the run before this one also ended with nobody there, so
+    // the record carries a missed outcome of its own and the live error agrees
+    // with it. Nothing the tiering derives from that displaces the no-show's copy.
+    const failure = classifyAgainstOneRecord(
       new PartnerNoShowError("timed out waiting for the other party"),
       record({
         lastRun: { at: "2026-07-14T09:00:00.000Z", outcome: "missed" },
@@ -195,7 +222,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     // THIS run failed at the handshake or mid-data-exchange. Neither phase lets the
     // record license the claim, so both are driven here.
     for (const dataExchangeStarted of [false, true]) {
-      const failure = classifyManagedRunFailure(
+      const failure = classifyAgainstOneRecord(
         new Error("data channel dropped"),
         record({
           lastRun: { at: "2026-07-14T09:00:00.000Z", outcome: "missed" },
@@ -215,7 +242,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     // channel, and this is the check that holds that rather than a comment
     // asserting it: past the boundary the run cannot attest that nothing left this
     // device, whatever the error's type says, so the neutral copy stands.
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new PartnerNoShowError("timed out waiting for the other party"),
       record(),
       undefined,
@@ -230,7 +257,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     // The twin guard: the shortfall state's copy makes the same disclosure claim,
     // and core raises the refusal inside the pre-connection prepare, so the phase
     // rather than the error's type is what licenses the copy.
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new LinkageTermsUnsatisfiableError("refused at the run boundary"),
       record(),
       undefined,
@@ -252,10 +279,11 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
     // exactly this shape: the restored copy holds a secret the partnership moved
     // past, both rendezvous ids derive from that secret, so the dial answers
     // peer-unavailable to the end of the budget and the run raises a no-show. The
-    // marker survives the run (only a rotation consumes it), and this run's own
-    // "missed" stamp is the freshest lastRun, so the tier derivation alone would
-    // answer "missed" and the operator would be told nothing is wrong here.
-    const failure = classifyManagedRunFailure(
+    // marker survives the run (only a rotation consumes it) and the restored copy
+    // no-shows every time, so the freshest lastRun is itself a no-show and the tier
+    // derivation alone would answer "missed" -- leaving the operator told nothing
+    // is wrong here.
+    const failure = classifyAgainstOneRecord(
       new PartnerNoShowError("timed out waiting for the other party"),
       record({
         lastRun: { at: "2026-07-14T09:00:00.000Z", outcome: "missed" },
@@ -275,7 +303,7 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
     // record the host holds: this run's own missed stamp is best-effort, and the
     // host classifies against its pre-run record when the post-failure reload
     // rejects, so the storage kind can still be what the record says.
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new PartnerNoShowError("timed out waiting for the other party"),
       record({ lastRun: failed("storage") }),
       undefined,
@@ -286,10 +314,45 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
     expect(failure.recovery).toBe("reinvite");
   });
 
+  test("this run's own missed stamp does not erase the evidence it is read against", () => {
+    // The sequence the host actually takes, with the run's own bookkeeping applied
+    // through the real monotonic write: a standing persist failure, then this
+    // run's no-show stamp, which REPLACES `lastRun` with an entry carrying no
+    // failureKind at all. Read from the reloaded record alone, the storage tier is
+    // gone and the operator is told nothing on this device is at fault -- for the
+    // one-sided desync that is precisely what produces a no-show every time.
+    const atLaunch = record({ lastRun: failed("storage") });
+    const afterRun = applyManagedExchangeLastRun(
+      atLaunch,
+      missedRun(Date.parse("2026-07-14T11:00:00.000Z")),
+    );
+    expect(afterRun.lastRun?.outcome).toBe("missed");
+    expect(afterRun.lastRun?.failureKind).toBeUndefined();
+
+    const failure = classifyManagedRunFailure(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      { atLaunch, afterRun },
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("storage");
+    expect(failure.recovery).toBe("reinvite");
+    expect(managedRunReinvites(failure)).toBe(true);
+    expect(failure.title).not.toMatch(/partner did not arrive/i);
+
+    // Where the guarantee ends: it is the LIVE classification's. The stored record
+    // a later visit reads carries the no-show alone, so the list line and the run
+    // history name that rather than the persist failure standing behind it.
+    expect(
+      managedRunFailureFromRecord(afterRun, undefined, NOW),
+    ).toBeUndefined();
+  });
+
   test("a lapsed bound frames the no-show as the expiry state, naming the lapse", () => {
     // A bound that lapses during the wait: running again cannot succeed, so the
     // no-show's "run it again when they are ready" would be the wrong instruction.
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new PartnerNoShowError("timed out waiting for the other party"),
       record({ expires: "2026-07-01T00:00:00.000Z" }),
       undefined,
@@ -305,7 +368,7 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
     // The exclusion the tiering rests on: no handshake ran, so nothing failed
     // closed, and a no-show is not the evidence the out-of-band confirmation is
     // reserved for. Only the Tier-1 re-invite states outrank the no-show reading.
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new PartnerNoShowError("timed out waiting for the other party"),
       record({ lastRun: failed("auth") }),
       undefined,
@@ -328,7 +391,7 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
       failed("transport"),
       failed("cancelled"),
     ]) {
-      const failure = classifyManagedRunFailure(
+      const failure = classifyAgainstOneRecord(
         new PartnerNoShowError("timed out waiting for the other party"),
         record(lastRun === undefined ? {} : { lastRun }),
         undefined,
@@ -342,7 +405,7 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
 
 describe("classifyManagedRunFailure: the recorded tiers from the record's bookkeeping", () => {
   test("a recorded storage failure is the Tier-1 storage state with re-invite", () => {
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new Error("handshake failed"),
       record({ lastRun: failed("storage") }),
       undefined,
@@ -358,7 +421,7 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
     const local: ManagedLocalState = {
       imported: { importedAt: "2026-07-13T00:00:00.000Z" },
     };
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new Error("handshake failed"),
       record({ lastRun: failed("auth") }),
       local,
@@ -371,7 +434,7 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
   });
 
   test("a recorded auth failure with no explanation is the unexplained confirmation state", () => {
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new Error("handshake failed"),
       record({ lastRun: failed("auth") }),
       undefined,
@@ -386,7 +449,7 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
   });
 
   test("a transport drop is the retryable transport state, never attack framing", () => {
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new Error("data channel dropped"),
       record({ lastRun: failed("transport") }),
       undefined,
@@ -399,7 +462,7 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
   });
 
   test("a recorded consent refusal is its own benign state naming what it sends", () => {
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new Error("refused before connecting"),
       record({ lastRun: failed("consent") }),
       undefined,
@@ -524,7 +587,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
   test("input and transport are retryable in place; the re-invite tiers are not", () => {
     expect(
       managedRunRetryable(
-        classifyManagedRunFailure(
+        classifyAgainstOneRecord(
           new ManagedInputError({ reason: "acquire", cause: new Error("x") }),
           record(),
           undefined,
@@ -535,7 +598,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
     ).toBe(true);
     expect(
       managedRunRetryable(
-        classifyManagedRunFailure(
+        classifyAgainstOneRecord(
           new Error("drop"),
           record({ lastRun: failed("transport") }),
           undefined,
@@ -546,7 +609,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
     ).toBe(true);
     expect(
       managedRunRetryable(
-        classifyManagedRunFailure(
+        classifyAgainstOneRecord(
           new ManagedExchangeExpiredError("2026-07-01T00:00:00.000Z"),
           record(),
           undefined,
@@ -560,7 +623,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
   test("a consent refusal is neither retryable in place nor a direct re-invite", () => {
     // The remedy is settling what this exchange sends; retrying the same input
     // refuses identically, and re-minting the secret does not touch the disclosure.
-    const failure = classifyManagedRunFailure(
+    const failure = classifyAgainstOneRecord(
       new Error("refused before connecting"),
       record({ lastRun: failed("consent") }),
       undefined,
@@ -574,7 +637,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
   test("the storage and imported tiers re-invite; the unexplained tier does not (it gates first)", () => {
     expect(
       managedRunReinvites(
-        classifyManagedRunFailure(
+        classifyAgainstOneRecord(
           new Error("x"),
           record({ lastRun: failed("storage") }),
           undefined,
@@ -585,7 +648,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
     ).toBe(true);
     expect(
       managedRunReinvites(
-        classifyManagedRunFailure(
+        classifyAgainstOneRecord(
           new Error("x"),
           record({ lastRun: failed("auth") }),
           undefined,

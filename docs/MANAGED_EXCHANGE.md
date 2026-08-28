@@ -716,6 +716,17 @@ no-show state names the persistent case in its own copy, so a partner who was
 demonstrably at their machine at an agreed time and still never arrived is
 pointed at a re-invite rather than at another wait.
 
+That outranking belongs to the run that meets the no-show, and it weighs the
+standing reason as it stood when that run launched. A no-show's own bookkeeping
+entry replaces the previous one and records no failure kind, so a one-sided
+persist failure is no longer in the record for anything reading it afterwards:
+the recurring-exchanges list line, the run history, and a later run all name
+the no-show. The other two reasons live outside that entry -- a lapsed bound is
+the record's own `expires`, and a restore since the last success its import
+marker -- so they keep reading through. An operator whose last run could not
+save its rotated secret is therefore told so on the run that meets the
+no-show.
+
 A pattern of missed windows is a coordination problem, resolved out-of-band
 where the schedule itself was agreed -- surfaced, not auto-paused (see [Retry
 and repeated misses](#retry-and-repeated-misses)).
