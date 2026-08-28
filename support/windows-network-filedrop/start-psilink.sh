@@ -196,6 +196,16 @@ psilink_select_engine() {
 # results already are, and the console refuses to start on that.
 PSILINK_CREDENTIAL_SCRATCH_DIR='/tmp/psilink-sftp-credentials'
 
+# Whether a digits-only value is zero, however it is written: `00` is zero as
+# surely as `0` is, and an engine reads either as root. A `[ -eq ]` compare says
+# the same until the value is too long for the shell's integers -- which the
+# environment this reads from can supply, and a length guard there would have to
+# let a long run of zeros through.
+psilink_number_is_zero() {
+  case "$1" in *[!0]*) return 1 ;; esac
+  return 0
+}
+
 # The operator's own uid:gid where the engine carries host ownership into the
 # container, and nothing where it does not.
 #
@@ -220,7 +230,9 @@ PSILINK_CREDENTIAL_SCRATCH_DIR='/tmp/psilink-sftp-credentials'
 # with privileges the image's posture says neither role has, and leave every
 # folder it wrote owned by root. sudo names the account it came from, so that is
 # the one to run as; with no such account named there is nothing here to pass,
-# and the image's own unprivileged account runs the container.
+# and the image's own unprivileged account runs the container. Each number is
+# held to that on its own: a container given group 0 leaves what it writes to the
+# root group whichever account it ran as.
 psilink_container_identity() {
   local uid='' gid=''
   [ "$(uname -s 2>/dev/null)" = 'Linux' ] || return 0
@@ -229,10 +241,12 @@ psilink_container_identity() {
   if [ "$uid" = '0' ]; then
     uid="${SUDO_UID:-}"
     gid="${SUDO_GID:-}"
-    [ "$uid" != '0' ] || return 0
   fi
   case "$uid" in '' | *[!0-9]*) return 0 ;; esac
   case "$gid" in '' | *[!0-9]*) return 0 ;; esac
+  if psilink_number_is_zero "$uid" || psilink_number_is_zero "$gid"; then
+    return 0
+  fi
   printf '%s:%s' "$uid" "$gid"
 }
 

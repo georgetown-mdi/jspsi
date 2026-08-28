@@ -549,10 +549,13 @@ describe("the account the container runs as", () => {
     );
   });
 
-  it("passes no identity for a root run naming no other account", () => {
+  it("passes no identity for a root run naming no account outside root", () => {
     // With nothing to run as but root, nothing is passed at all and the image's
     // own unprivileged account runs the container -- which owns the scratch
     // directory the image built, so the override must not travel here either.
+    // Root is more than the string `0`: an engine reads `00` as uid 0 just as
+    // readily, and the group is its own case, a container given group 0 writing
+    // to that group whatever account it ran as.
     for (const environment of [
       {},
       { SUDO_UID: "", SUDO_GID: "" },
@@ -561,6 +564,11 @@ describe("the account the container runs as", () => {
       { SUDO_UID: "root", SUDO_GID: "root" },
       { SUDO_UID: "1000 2000", SUDO_GID: "1000" },
       { SUDO_UID: "0", SUDO_GID: "0" },
+      { SUDO_UID: "00", SUDO_GID: "00" },
+      { SUDO_UID: "0000", SUDO_GID: "0000" },
+      { SUDO_UID: "00", SUDO_GID: "1000" },
+      { SUDO_UID: "1000", SUDO_GID: "0" },
+      { SUDO_UID: "1000", SUDO_GID: "00" },
     ]) {
       const workspace = makeWorkspace();
       stubUname(workspace, "Linux");

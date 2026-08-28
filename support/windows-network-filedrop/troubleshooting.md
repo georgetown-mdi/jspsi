@@ -266,6 +266,15 @@ it runs as the account the image ships with, numbered 1000, which cannot write a
 folder belonging to anyone else; pass `--user "$(id -u):$(id -g)"` and it runs
 as you do -- carrying the same one group, for the same reason.
 
+**If your engine is podman, `--user` may not be the end of it.** A rootless
+podman run is described as giving the container a number of its own on the host
+rather than the one it was handed, which would refuse the write with the
+folder's ownership right and both checks above clean. `--userns=keep-id`
+alongside `--user` is the thing to try, starting the container by hand as above:
+the launcher has no option that adds it. We have not run this against podman
+ourselves -- Docker on Linux is what the launcher was written for -- so trust
+your screen over this paragraph, and a correction is welcome.
+
 The launcher asks this of the folders the console writes in: the working folder
 and the folder shared with your partner. Your input folder is only read from --
 your CSVs are read where they are and nothing is written back to them -- so one

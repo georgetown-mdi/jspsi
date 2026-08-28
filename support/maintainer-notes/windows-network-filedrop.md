@@ -239,10 +239,11 @@ not retried; a refused verdict version; the docker-then-podman order; the
 account the container is run as and the pasted-credential scratch override that
 travels with it, with the host's own kind stubbed each way and `id` stubbed at
 root, where a sudo run takes the account sudo names and a root run naming none
-passes no identity and no override at all; the read-only bind on the input
-mount, and the writable rendezvous bind beside it when one folder was given as
-both; a battery per folder the console is given, and one battery when the same
-folder was given for all of them; what each folder has to answer -- an input
+-- or naming root in either number, however that number is spelled -- passes no
+identity and no override at all; the read-only bind on the input mount, and the
+writable rendezvous bind beside it when one folder was given as both; a battery
+per folder the console is given, and one battery when the same folder was given
+for all of them; what each folder has to answer -- an input
 folder that reads and will not write carrying on, an unreadable one stopping,
 and a folder given as both the input and the rendezvous held to the writes; and
 one pass reaching the console. Nothing there pulls the real image, opens a
@@ -256,6 +257,8 @@ answers; what it cannot say is what a real one does with it. Rootless podman is
 the case to drive first: it maps a container account into a subordinate range
 rather than onto the host account of the same number, so `--user` there may need
 `--userns=keep-id` beside it or instead of it, and only a run settles which.
+That is why the troubleshooting page offers that flag as something to try rather
+than as the fix, and says there that we have not run it.
 Docker Engine on Linux, where the route was chosen, has been reasoned about and
 not run either. The macOS branch passes no identity at all, which is what it did
 before this, so nothing there is newly unmeasured. The read-only bind on the
