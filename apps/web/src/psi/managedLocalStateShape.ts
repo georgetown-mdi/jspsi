@@ -17,13 +17,24 @@ import { z } from "zod";
 import type { ManagedBackupMarker } from "./managedBackupState";
 import type { ZodType } from "zod";
 
-/** This device's spent state for a record: set by a migration export, which hands
- * the copy off and transitions the source to a visible spent state (no Run
- * affordance, no scheduled runs). A plain handoff timestamp -- no secret material,
- * no rotation epoch. Cleared by importing the artifact back (a revive). */
+/** Which export handed a spent copy off, where that is not the device migration.
+ * `"command-line"` is the command-line export's confirmed hand-off: the exchange
+ * runs from the exported `psilink.yaml` and `.psilink.key` on some machine, which
+ * the import flow does not accept, so that hand-off leaves nothing of its own to
+ * import back. */
+export type ManagedSpentHandoff = "command-line";
+
+/** This device's spent state for a record: set by an export that hands the copy
+ * off and transitions the source to a visible spent state (no Run affordance, no
+ * scheduled runs). A plain handoff timestamp beside the hand-off's route -- no
+ * secret material, no rotation epoch. */
 export interface ManagedSpentState {
-  /** ISO 8601 UTC instant the copy was handed off by a migration export. */
+  /** ISO 8601 UTC instant the copy was handed off. */
   spentAt: string;
+  /** The hand-off that spent the copy, when it was not the device migration (see
+   * {@link ManagedSpentHandoff}). Absent means a migration export -- the only
+   * writer that leaves it absent, and the one whose own artifact revives it. */
+  handoff?: ManagedSpentHandoff;
 }
 
 /** This device's import marker for a record: stamped when the record was installed
@@ -46,8 +57,8 @@ export interface ManagedLocalState {
   /** When a backup was last taken (see {@link ManagedBackupMarker}); absent until
    * the first export. */
   backup?: ManagedBackupMarker;
-  /** This device's spent state (see {@link ManagedSpentState}); absent unless a
-   * migration export handed the copy off. */
+  /** This device's spent state (see {@link ManagedSpentState}); absent unless an
+   * export handed the copy off. */
   spent?: ManagedSpentState;
   /** When this device installed or revived the record from a backup (see
    * {@link ManagedImportMarker}); absent for a record created by an invite/accept
@@ -60,7 +71,13 @@ export interface ManagedLocalState {
 export const managedLocalStateSchema: ZodType<ManagedLocalState> = z
   .object({
     backup: z.object({ backedUpAt: z.iso.datetime() }).strict().optional(),
-    spent: z.object({ spentAt: z.iso.datetime() }).strict().optional(),
+    spent: z
+      .object({
+        spentAt: z.iso.datetime(),
+        handoff: z.literal("command-line").optional(),
+      })
+      .strict()
+      .optional(),
     imported: z.object({ importedAt: z.iso.datetime() }).strict().optional(),
   })
   .strict();

@@ -369,6 +369,34 @@ describe("saved list route: delete is a first-class, always-available action", (
       .toBeInTheDocument();
     // A spent row does not offer Run.
     expect(page.getByRole("button", { name: "Run" }).query()).toBeNull();
+    // A migration spend is the one an import brings back.
+    await expect
+      .element(page.getByText("Import the backup", { exact: false }))
+      .toBeInTheDocument();
+  });
+
+  test("a command-line hand-off names its own recovery, not the import", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Handed off partnership" }),
+    );
+    await markManagedExchangeSpent(
+      created.id,
+      "2026-07-12T09:00:00.000Z",
+      "command-line",
+    );
+
+    app.render(createElement(SavedExchanges));
+
+    await expect
+      .element(
+        page.getByText("Handed off to the command line", { exact: false }),
+      )
+      .toBeInTheDocument();
+    // The exported psilink.yaml and .psilink.key are not the artifact the import
+    // flow accepts, so this row must not point the operator at one.
+    expect(page.getByText("Import the backup", { exact: false }).query()).toBe(
+      null,
+    );
   });
 
   test("a rejected delete surfaces an error and leaves the row standing", async () => {

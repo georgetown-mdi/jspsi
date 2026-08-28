@@ -557,10 +557,14 @@ record, in a separate origin-local store keyed by the record `id`, and are
   "backup needed". "Taken since the last rotation" is enforced **structurally**, not
   re-derived from `lastRun`, by two write-side rules:
   - **Export binds the marker to the bytes it serialized.** Every export reads the
-    current record and stamps the marker in one atomic store step (a cross-store
-    read-and-mark), then downloads exactly the bytes it read, so the marker can only
-    ever attest the secret the file carries. A stale tab or a stale in-memory record
-    cannot mark a secret it did not serialize.
+    current record, serializes the bytes it will download, and stamps the marker in
+    one atomic store step (a cross-store read-compose-and-mark), then downloads
+    exactly those bytes, so the marker can only ever attest the secret the file
+    carries. A stale tab or a stale in-memory record cannot mark a secret it did not
+    serialize. Serializing inside the step is what binds the marker to bytes that
+    exist: a composition that refuses the record it read -- the command-line export
+    refuses one this app could not have composed -- throws inside the step and aborts
+    it, so no marker survives an export that produced no file.
   - **Rotation clears the marker.** The persist-before-success rotation write clears
     the marker in the **same** transaction that advances the secret, so a rotation
     stales any prior export the instant it lands -- independent of how the run is
@@ -573,20 +577,45 @@ record, in a separate origin-local store keyed by the record `id`, and are
   epoch. `navigator.storage.persisted()` is never an input to the derivation, so a
   granted persist cannot suppress the actionable "backup needed" state (see
   [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges)).
-- **The spent state** (`spentAt`, an ISO 8601 UTC instant) records that a
-  migration export handed this device's copy off. It transitions the source to a
-  visible spent state -- no Run affordance, no scheduled runs, labeled with the
-  handoff date -- so the operator-cooperation invalidation is legible at the one
-  moment it is violable. The spend is **operator-attested, not dispatch-anchored**:
-  a download dispatch (`anchor.click()`) gives no landing signal, so a cancelled or
-  failed save must not spend the source. The migration export downloads the artifact
-  and marks the source backed-up on dispatch (a spent source has a current artifact
-  by construction), then writes `spentAt` only after the operator confirms the file
-  is saved; a dismissed dialog leaves the source live and recoverable. It too is a
-  plain timestamp, no secret material and no epoch; importing the artifact back
-  clears it (a **revive-in-place**: an import whose secret matches the spent record's
-  updates that record's fields, keeps its `id` and input handle, clears the spent
-  state, and marks it imported and backed-up, rather than installing a duplicate).
+- **The spent state** (`spentAt`, an ISO 8601 UTC instant, and an optional
+  `handoff` discriminator) records that an export handed this device's copy off.
+  Two exports write it, and the discriminator is which one did:
+  - the **migration export** ("take over on another device"), which writes
+    `spentAt` alone, so an absent `handoff` reads as a migration spend;
+  - the **command-line export**'s confirmed hand-off, which writes
+    `handoff: "command-line"` beside it.
+
+  Either way it transitions the source to a visible spent state -- no Run
+  affordance, no scheduled runs, labeled with the handoff date -- so the
+  operator-cooperation invalidation is legible at the one moment it is violable.
+  The spend is **operator-attested, not dispatch-anchored**: a download dispatch
+  (`anchor.click()`) gives no landing signal, so a cancelled or failed save must not
+  spend the source. Each export downloads its files and marks the source backed-up
+  on dispatch (a spent source has a current export by construction), then writes the
+  spent state only after the operator confirms the files are saved; a dismissed
+  dialog leaves the source live and recoverable. It carries no secret material and
+  no epoch.
+
+  **Revive by import is the migration spend's recovery, and only its.** The
+  migration export downloads the artifact that clears its own spend (a
+  **revive-in-place**: an import whose secret matches the spent record's updates
+  that record's fields, keeps its `id` and input handle, clears the spent state,
+  and marks it imported and backed-up, rather than installing a duplicate). The
+  command-line export downloads the CLI's `psilink.yaml` and `.psilink.key`, which
+  the import flow does not accept, so that hand-off leaves nothing of its own to
+  import back: the two files are the exchange's backup of record, on the machine
+  that runs it. That is why the surfaces reading the spent state branch on the
+  discriminator rather than naming one recovery for both -- a spent copy is told
+  the recovery its hand-off actually has.
+
+  The revive-in-place match itself is `spent` plus a secret match, not the
+  discriminator: an artifact the operator exported from this browser BEFORE a
+  command-line hand-off still carries the secret that record was spent holding, so
+  importing that older artifact revives the copy. Nothing in the protocol prevents
+  it, exactly as nothing prevents a copied artifact or a profile snapshot
+  resurrecting a migrated one -- the same operator-cooperation caveat, with the same
+  response (see
+  [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect)).
 - **The import marker** (`importedAt`, an ISO 8601 UTC instant) records that this
   device installed or revived the record from a backup artifact. It is the evidence
   the desync tiering reads to tell an **import/restore since the last successful run**

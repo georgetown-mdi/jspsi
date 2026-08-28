@@ -535,18 +535,27 @@ function clearRotationSiblingsOnLocalStore(
 }
 
 /**
- * Read the current stored record for `id` AND stamp its backup marker as of
- * `backedUpAt`, both inside one transaction spanning the record and sibling stores,
- * returning the record read. This is the atomic read-and-mark every export binds
- * to: the bytes an export serializes come from the record this call returns, and the
- * marker it writes attests exactly those bytes, so a stale-tab or stale-React-state
- * export cannot stamp a marker over a secret it did not serialize. Because the mark
- * is cross-store-atomic with the read, a rotation write (which clears the marker in
- * its own cross-store transaction) that lands first is never masked: either this
- * transaction reads the pre-rotation record and marks it -- then the rotation clears
- * that marker -- or it reads the rotated record and marks the rotated secret. The
- * marker advances only when it is set to a later instant, so a slow export's late
- * mark cannot revert a newer one; the spent state is left untouched.
+ * Read the current stored record for `id`, compose the export's bytes from it, AND
+ * stamp its backup marker as of `backedUpAt`, all inside one transaction spanning
+ * the record and sibling stores, returning the record read. This is the atomic
+ * read-compose-and-mark every export binds to: the bytes an export serializes come
+ * from the record this call returns, and the marker it writes attests exactly those
+ * bytes, so a stale-tab or stale-React-state export cannot stamp a marker over a
+ * secret it did not serialize. Because the mark is cross-store-atomic with the read,
+ * a rotation write (which clears the marker in its own cross-store transaction) that
+ * lands first is never masked: either this transaction reads the pre-rotation record
+ * and marks it -- then the rotation clears that marker -- or it reads the rotated
+ * record and marks the rotated secret. The marker advances only when it is set to a
+ * later instant, so a slow export's late mark cannot revert a newer one; the spent
+ * state is left untouched.
+ *
+ * `composeExport` is the export's own serialization of the record, run
+ * synchronously here and BEFORE the mark is issued: an export that refuses the
+ * record it read (a command-line export of a record this app could not have
+ * composed) throws from it, and that throw aborts the whole transaction, so no
+ * marker survives an export that produced no bytes. It must stay synchronous and
+ * store-free -- an await or a further request would let the transaction commit out
+ * from under it.
  *
  * @throws {Error} if no record with `id` exists.
  * @throws {ZodError} if the stored record or sibling entry is invalid.
@@ -554,6 +563,7 @@ function clearRotationSiblingsOnLocalStore(
 export async function readRecordAndMarkBackedUp(
   id: string,
   backedUpAt: string,
+  composeExport: (record: ManagedExchangeRecord) => void,
 ): Promise<ManagedExchangeRecord> {
   const db = await openManagedExchangeDatabase();
   try {
@@ -576,6 +586,7 @@ export async function readRecordAndMarkBackedUp(
           if (read.result === undefined)
             throw new Error(`no managed exchange with id ${id}`);
           record = parseManagedExchangeRecord(read.result);
+          composeExport(record);
           markBackupOnLocalStore(local, id, readLocal.result, backedUpAt);
         } catch (error) {
           failure = error;

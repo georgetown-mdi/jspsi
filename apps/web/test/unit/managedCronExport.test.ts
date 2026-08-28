@@ -222,6 +222,17 @@ describe("the exported key file", () => {
   });
 });
 
+describe("neither exported file is an importable artifact", () => {
+  test("the import flow refuses both", () => {
+    // The hand-off's surfaces say these two files are the exchange's backup of
+    // record, and name no import recovery -- because there is nothing here the
+    // import flow takes. That is this check rather than a sentence in the copy.
+    const exported = composeManagedCronExport(managedRecord());
+    for (const file of [exported.config, exported.key])
+      expect(() => importManagedExchangeArtifact(file.text)).toThrow();
+  });
+});
+
 describe("the source record", () => {
   test("is not mutated by an export", () => {
     const record = managedRecord({

@@ -1,11 +1,17 @@
+import {
+  assembleExchangeSpec,
+  connectionFromLocator,
+  generateSharedSecret,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 import { describe, expect, test, vi } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
 import {
+  dispatchManagedCronExport,
   dispatchManagedMigration,
   exportManagedBackup,
   managedBackupFileName,
@@ -16,16 +22,20 @@ import {
 } from "@psi/managedExchangeArtifact";
 
 import type {
+  ManagedCronExportDeps,
   ManagedExportDeps,
   ManagedMigrationDeps,
 } from "@psi/managedExchangeExport";
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
+import type { ManagedSpentHandoff } from "@psi/managedLocalState";
 
-// The two export intents, tested in Node with injected seams. Every export reads the
-// record fresh and marks it in one atomic step (readAndMark), so what it serializes
-// is what the marker attests; a backup leaves the source live; a migration downloads
-// and returns a confirm handle, spending the source only when the operator attests
-// the file is saved (a dismissed save leaves it live).
+// The three export intents, tested in Node with injected seams. Every export reads
+// the record fresh, composes what it will download, and marks it in one atomic step
+// (readAndMark), so what it serializes is what the marker attests and a composition
+// that refuses the record leaves no marker behind; a backup leaves the source live;
+// a migration and a command-line export download and return a confirm handle,
+// spending the source only when the operator attests the files are saved (a
+// dismissed save leaves it live).
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
@@ -48,9 +58,17 @@ function backupDeps(rec: ManagedExchangeRecord): ManagedExportDeps & {
   const downloaded: Array<{ fileName: string; content: string }> = [];
   return {
     downloaded,
-    // The atomic read-and-mark: returns the fresh record the export serializes.
-    readAndMark: vi.fn((_id: string, _backedUpAt: string) =>
-      Promise.resolve(rec),
+    // The atomic read-compose-and-mark: hands the fresh record to the export's own
+    // composition, then marks, as the store's step does.
+    readAndMark: vi.fn(
+      (
+        _id: string,
+        _backedUpAt: string,
+        composeExport: (read: ManagedExchangeRecord) => void,
+      ) => {
+        composeExport(rec);
+        return Promise.resolve(rec);
+      },
     ),
     download: (fileName, content) => downloaded.push({ fileName, content }),
     now: () => new Date("2026-07-14T12:00:00.000Z"),
@@ -75,6 +93,7 @@ describe("exportManagedBackup", () => {
     expect(deps.readAndMark).toHaveBeenCalledWith(
       rec.id,
       "2026-07-14T12:00:00.000Z",
+      expect.any(Function),
     );
     // The result threads the one clock read and the record exported.
     expect(result.backedUpAt.toISOString()).toBe("2026-07-14T12:00:00.000Z");
@@ -103,10 +122,17 @@ describe("dispatchManagedMigration", () => {
     return {
       downloaded,
       order,
-      readAndMark: vi.fn((_id: string, _backedUpAt: string) => {
-        order.push("readAndMark");
-        return Promise.resolve(rec);
-      }),
+      readAndMark: vi.fn(
+        (
+          _id: string,
+          _backedUpAt: string,
+          composeExport: (read: ManagedExchangeRecord) => void,
+        ) => {
+          order.push("readAndMark");
+          composeExport(rec);
+          return Promise.resolve(rec);
+        },
+      ),
       download: (fileName, content) => {
         order.push("download");
         downloaded.push({ fileName, content });
@@ -128,6 +154,7 @@ describe("dispatchManagedMigration", () => {
     expect(deps.readAndMark).toHaveBeenCalledWith(
       rec.id,
       "2026-07-14T12:00:00.000Z",
+      expect.any(Function),
     );
     // The spend is operator-attested: not written until confirm() is called.
     expect(deps.markSpent).not.toHaveBeenCalled();
@@ -167,5 +194,192 @@ describe("dispatchManagedMigration", () => {
     expect(() =>
       parseManagedExchangeArtifact(deps.downloaded[0].content),
     ).not.toThrow();
+  });
+});
+
+describe("dispatchManagedCronExport", () => {
+  /** The record shapes the command-line composition refuses, each with the part of
+   * its refusal this dispatch must propagate. None is composable through the app --
+   * they reach a record by importing a hand-crafted artifact, which the composer's
+   * own suite pins -- so what is measured here is the dispatch's effect on the
+   * store when the composition throws inside its read-and-mark step. */
+  const refusedRecords: Array<[string, () => ManagedExchangeRecord, RegExp]> = [
+    [
+      "a connection on another channel",
+      () =>
+        buildManagedExchangeRecord({
+          label: "Riverbend quarterly",
+          exchangeFile: assembleExchangeSpec({
+            connection: connectionFromLocator({
+              channel: "filedrop",
+              path: "/srv/exchange",
+            }),
+            linkageTerms,
+          }),
+          side: "inviter",
+          sharedSecret: generateSharedSecret(),
+        }),
+      /stored connection channel is filedrop/,
+    ],
+    [
+      "an authentication block on the stored document",
+      () => {
+        const rec = record();
+        return {
+          ...rec,
+          exchangeFile: {
+            ...rec.exchangeFile,
+            authentication: {
+              sharedSecret: generateSharedSecret(),
+              expires: "2026-04-06T14:00:00.000Z",
+            },
+          },
+        };
+      },
+      /authentication block/,
+    ],
+    [
+      "a top-level field outside the composition",
+      () =>
+        buildManagedExchangeRecord({
+          label: "Riverbend quarterly",
+          exchangeFile: assembleExchangeSpec({
+            connection: connectionFromLocator({
+              channel: "webrtc",
+              host: "signaling.example.org",
+            }),
+            linkageTerms,
+            signing: {
+              mode: "certificate",
+              identityFile: "@/home/other/psilink-signing.identity",
+              partnerFingerprint: "0123456789012345678901234567890123456789abA",
+              receiptOutput: "/home/other/receipts/planted-receipt.json",
+            },
+          }),
+          side: "inviter",
+          sharedSecret: generateSharedSecret(),
+        }),
+      /Remove: signing/,
+    ],
+  ];
+
+  function cronDeps(rec: ManagedExchangeRecord): ManagedCronExportDeps & {
+    downloaded: Array<{ fileName: string; content: string; mimeType: string }>;
+    marked: Array<string>;
+    order: Array<string>;
+    markSpent: ReturnType<typeof vi.fn>;
+  } {
+    const order: Array<string> = [];
+    const marked: Array<string> = [];
+    const downloaded: Array<{
+      fileName: string;
+      content: string;
+      mimeType: string;
+    }> = [];
+    return {
+      downloaded,
+      marked,
+      order,
+      // The store's atomic step, modelled: the composition runs on the record read
+      // and the marker is written only once it returns, so a refusal thrown out of
+      // it leaves nothing marked -- the transaction the real store aborts.
+      readAndMark: (
+        _id: string,
+        backedUpAt: string,
+        composeExport: (read: ManagedExchangeRecord) => void,
+      ) => {
+        order.push("compose");
+        composeExport(rec);
+        order.push("mark");
+        marked.push(backedUpAt);
+        return Promise.resolve(rec);
+      },
+      download: (fileName, content, mimeType) => {
+        order.push("download");
+        downloaded.push({ fileName, content, mimeType });
+      },
+      markSpent: vi.fn(
+        (_id: string, _spentAt: string, _handoff: ManagedSpentHandoff) =>
+          Promise.resolve(),
+      ),
+      now: () => new Date("2026-07-14T12:00:00.000Z"),
+    };
+  }
+
+  test("downloads both CLI files and marks backed-up, without spending", async () => {
+    const rec = record();
+    const deps = cronDeps(rec);
+    const dispatch = await dispatchManagedCronExport(rec.id, deps);
+
+    expect(deps.downloaded.map((file) => file.fileName)).toEqual([
+      "psilink.yaml",
+      ".psilink.key",
+    ]);
+    expect(deps.marked).toEqual(["2026-07-14T12:00:00.000Z"]);
+    // The spend is operator-attested: not written until confirm() is called.
+    expect(deps.markSpent).not.toHaveBeenCalled();
+    expect(dispatch.record).toBe(rec);
+    expect(dispatch.composed.command).toBe(
+      "psilink exchange input.csv results.csv",
+    );
+  });
+
+  test("composes before any durable write, then downloads", async () => {
+    const rec = record();
+    const deps = cronDeps(rec);
+    await dispatchManagedCronExport(rec.id, deps);
+    expect(deps.order).toEqual(["compose", "mark", "download", "download"]);
+  });
+
+  test("confirm spends the source as a command-line hand-off", async () => {
+    // The instant is the operator's confirmation, and the hand-off is recorded
+    // beside it: a migration's spent state is revived by importing the artifact
+    // back, and this one has no artifact to import, so the durable spent surfaces
+    // must be able to tell the two apart.
+    const rec = record();
+    const deps = cronDeps(rec);
+    const dispatch = await dispatchManagedCronExport(rec.id, deps);
+    await dispatch.confirm(new Date("2026-07-14T13:30:00.000Z"));
+    expect(deps.markSpent).toHaveBeenCalledWith(
+      rec.id,
+      "2026-07-14T13:30:00.000Z",
+      "command-line",
+    );
+  });
+
+  test.each(refusedRecords)(
+    "a refused record marks nothing and leaves the record untouched (%s)",
+    async (_shape, build, refusal) => {
+      const rec = build();
+      const before = structuredClone(rec);
+      const deps = cronDeps(rec);
+
+      await expect(dispatchManagedCronExport(rec.id, deps)).rejects.toThrow(
+        refusal,
+      );
+      // The refusal aborts the step it was composed inside: no marker, no bytes,
+      // no spend, and the record the step read still equals its snapshot.
+      expect(deps.marked).toEqual([]);
+      expect(deps.downloaded).toEqual([]);
+      expect(deps.markSpent).not.toHaveBeenCalled();
+      expect(rec).toEqual(before);
+    },
+  );
+
+  test("a step that marks without composing is refused, not downloaded", async () => {
+    // The binding is only as good as the step honoring it, so a seam that resolves
+    // having skipped the composition fails the export rather than downloading bytes
+    // no marker attests.
+    const rec = record();
+    const deps = {
+      ...cronDeps(rec),
+      readAndMark: () => Promise.resolve(rec),
+    };
+
+    await expect(dispatchManagedCronExport(rec.id, deps)).rejects.toThrow(
+      /without composing the export/,
+    );
+    expect(deps.downloaded).toEqual([]);
+    expect(deps.markSpent).not.toHaveBeenCalled();
   });
 });

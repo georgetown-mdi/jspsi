@@ -258,12 +258,15 @@ function StorageUnavailable() {
 
 /** The per-row backup line: a quiet "backed up as of <date>" when a current export
  * exists, or the actionable "Back up this exchange" when none does. A spent row
- * names its handoff and the recovery instead. */
+ * names its handoff instead, with the recovery that hand-off actually has: a
+ * migration's artifact imports back, while the command-line files do not. */
 function BackupLine({ row }: { row: SavedExchangeRow }) {
   if (row.spentAsOf !== undefined)
     return (
       <span className={`${styles.small} ${styles.sub}`}>
-        Handed off {row.spentAsOf}. Import the backup to run it here again.
+        {row.spentHandoff === "command-line"
+          ? `Handed off to the command line ${row.spentAsOf}. It runs from the files you saved.`
+          : `Handed off ${row.spentAsOf}. Import the backup to run it here again.`}
       </span>
     );
   if (row.backup.kind === "backed-up")

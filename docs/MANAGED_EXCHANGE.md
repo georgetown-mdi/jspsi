@@ -669,6 +669,65 @@ out-of-band, re-invite). Why the protocol cannot detect that resurrection, and
 the deferred hardening that would, are in
 [SECURITY_DESIGN.md](SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect).
 
+### Exporting to the command line
+
+The graduation the calibration in [Who this is for](#who-this-is-for) names has
+its own action on the exchange's detail surface: a collapsed **Run this from the
+command line instead** panel, beside the backup panel. It hands the exchange to
+`psilink exchange` under the host's own scheduler, and it is a migration by
+another route -- the single-owner rule applies to it unchanged.
+
+It downloads **two files rather than one archive**, because the two are handled
+differently once they land:
+
+- `psilink.yaml` -- the agreed terms and the rendezvous address. No secret.
+- `.psilink.key` -- this exchange's shared secret, in plain text, under the key
+  file's own custody rules ([Key file
+  security](SECURITY_DESIGN.md#key-file-security)).
+
+Saved into one folder, the two are what the emitted invocation opens: the CLI
+reads both at its default paths, so the command carries no path from any machine
+and needs no flag. The panel shows that invocation beside the cron and Task
+Scheduler lines that run it daily.
+
+The spend is **operator-attested**, exactly as a device migration's is: two
+downloads are two chances for a save to fail, and a click gives no landing
+signal, so the browser copy stays live and runnable until the operator confirms
+both files landed. Confirming spends it; declining keeps the exchange here, and
+the operator can export again. No path hands the secret to a scheduler and leaves
+a second live owner behind.
+
+On every later visit the browser names that hand-off rather than a migration's:
+the recovery a migration has -- import the artifact back -- has nothing to act on
+here, because the two files are the CLI's own, not the artifact. The exchange
+runs on the machine holding them from then on.
+
+Two things do not travel with the files:
+
+- **The schedule.** The agreed run window is a browser-record field the CLI does
+  not read, so the cron entry or scheduled task is the schedule from then on --
+  set to the window the partner expects.
+- **The accounting of disclosures**, as with a device migration: export it as CSV
+  before confirming if it is needed.
+
+The STUN disclosure moves rather than begins. A managed connection names no STUN
+server -- it is a credential-free rendezvous locator by composition -- so a
+managed run already falls back to a built-in STUN default to discover its own
+public address, in this browser as on the command line, disclosing that address
+and the fact of a session to that server (no exchange content). What the hand-off
+changes is **whose** address is disclosed -- the scheduling machine's rather than
+this browser's -- and that the CLI names it in a warning on every run. Naming a
+`stun` server in the exported `psilink.yaml` is what replaces the default.
+
+The two files carry the current secret, so taking the export marks the exchange
+backed up like the other two exports do. It is a backup for the command line, not
+for this browser: reconstituting a browser copy after an eviction is the artifact
+import ([Eviction recovery is the import
+flow](#eviction-recovery-is-the-import-flow)), which these two files are not. An
+operator who declines the hand-off and keeps running here should take an ordinary
+backup as well; one who confirms it has handed the exchange over, and the two
+files are its backup of record from then on.
+
 ## Desync detection and recovery
 
 A rotation desync is the failure the contract above is built to avoid, but it

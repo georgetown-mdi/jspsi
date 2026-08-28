@@ -22,8 +22,11 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSide,
 } from "@psi/managedExchangeRecord";
+import type {
+  ManagedLocalState,
+  ManagedSpentHandoff,
+} from "@psi/managedLocalState";
 import type { ManagedFailureTier } from "@psi/managedFailureTiers";
-import type { ManagedLocalState } from "@psi/managedLocalState";
 
 /** This party's side, as the run list names it: the operator recognizes "you
  * invite" / "you accept" more readily than the wire roles. Shared with the
@@ -56,10 +59,15 @@ export interface SavedExchangeRow {
   expired: boolean;
   /** The derived backup state for the row (see {@link SavedExchangeBackup}). */
   backup: SavedExchangeBackup;
-  /** When set, this device's copy was handed off by a migration export as of this
-   * date phrase: the row shows no Run affordance and names the handoff. Deleting or
-   * importing the artifact back is the only path forward. */
+  /** When set, this device's copy was handed off by an export as of this date
+   * phrase: the row shows no Run affordance and names the handoff. Deleting is the
+   * only path forward, beside the recovery {@link spentHandoff} names. */
   spentAsOf?: string;
+  /** Which hand-off spent the copy, when it was not the device migration: the two
+   * have different recoveries (a migration's artifact imports back; the
+   * command-line files do not), so the row names the one that applies. Absent on a
+   * row that is not spent, and on a migration spend. */
+  spentHandoff?: ManagedSpentHandoff;
 }
 
 /** The one-line status a failure tier reads as in the list -- a specific but quiet
@@ -134,9 +142,9 @@ function backupFor(local: ManagedLocalState | undefined): SavedExchangeBackup {
  * Derive the display row for a stored record as of `now`, given its local sibling
  * state (the backup marker and any spent state). The last-run status carries a
  * lapsed-`expires` note when the secret has lapsed; the backup state is derived from
- * the marker's presence; a spent record names its handoff date and the list
- * suppresses its run action. `now` is injected so the expiry note is pure and
- * testable.
+ * the marker's presence; a spent record names its handoff date and which hand-off it
+ * was, and the list suppresses its run action. `now` is injected so the expiry note
+ * is pure and testable.
  */
 export function savedExchangeRow(
   record: ManagedExchangeRecord,
@@ -151,7 +159,12 @@ export function savedExchangeRow(
     expired: managedExchangeLapsed(record, now),
     backup: backupFor(local),
     ...(local?.spent !== undefined
-      ? { spentAsOf: dateLabel(new Date(local.spent.spentAt)) }
+      ? {
+          spentAsOf: dateLabel(new Date(local.spent.spentAt)),
+          ...(local.spent.handoff !== undefined
+            ? { spentHandoff: local.spent.handoff }
+            : {}),
+        }
       : {}),
   };
 }
