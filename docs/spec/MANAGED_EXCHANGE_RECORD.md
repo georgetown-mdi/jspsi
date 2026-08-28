@@ -686,6 +686,104 @@ dropped entry would falsify the account. Deleting the managed exchange deletes
 its accounting in the same one-step delete, so an operator who must keep it
 exports it first.
 
+### What an exchange-record version bump does to a stored accounting
+
+An entry is an exchange record, and the record format's version literal moves
+with its field set; a reader rejects an unrecognized version rather than
+migrating it, and no migration is offered pre-release (see
+[EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)). So a bump of
+`EXCHANGE_RECORD_VERSION` invalidates the entries of every accounting already at
+rest. Two consequences follow, and the second is the one that compounds:
+
+- **The read refuses the whole value**, per the Shape rule above, so the
+  accounting renders as unreadable rather than as an empty or shortened one.
+- **The append refuses it too.** A run files its entry by reading the current
+  accounting, appending, and writing back within one transaction, so the read
+  failure is a write failure: the exchange goes on running and disclosing, and
+  files nothing. A scheduled run's failed append raises the same notice any
+  failed append raises, on a completion surface an unattended run does not open.
+
+**The stored form survives the bump.** The accounting's own `version` is a
+separate literal from the entries', and the envelope is validated without looking
+inside an entry, so a bump leaves the envelope readable and the stored entries
+returned verbatim. Only the per-entry validation refuses. This is what recovery
+rests on, and it is pinned by a test driving both parses against a moved version
+rather than asserted here.
+
+**The unreadable state is a value in hand, not a failure to read.** One read
+obtains the stored value in a single round trip and classifies it: a store that
+does not open -- private mode with storage blocked, an engine without IndexedDB,
+or a version-change open transiently held off by another tab's older connection
+-- and a read transaction that does not complete are both *store-unavailable*,
+which offers neither arm below. Only a value that was obtained and then refused by
+the parses is *unreadable*. The split is the one the saved-exchanges list already
+makes between a failed open and a failed read after one, and it is load-bearing
+twice over: the blocked-open condition is transient and self-healing, so routing
+it to the reset would offer to destroy records over a condition that clears when
+the other tab yields; and reading once means the validating parse and the
+envelope-only parse see the same bytes, so the two readings of an accounting
+cannot disagree.
+
+**A refused value is then split by which side is behind.** A bump strands entries
+only in one direction, and the refused entries' own `version` literals -- carried
+in the same raw value the envelope parse returned -- say which one this is. Where
+an entry names a LATER record format than the reading build admits, the entries
+are not stranded: a build that reads them exists, and this page is running older
+code than it. That is reachable in the deployed app, not hypothetical: the service
+worker does not swap code under a running page (see
+[../MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)), so a tab left open across a
+deployment reads what the newer build filed. It classifies as *stale-page*, whose
+remedy is a reload; offering the reset there would destroy records the current
+build reads. Only entries the reading build is AHEAD of are the *unreadable* state
+the recovery below belongs to. A literal that cannot be ordered against this
+build's -- another family, or no ordinal -- is not later, so a value nothing can
+be concluded about keeps the reading that offers a way out. The append refuses in
+both directions alike, since it re-reads through the same validating parse: a run
+from a stale page discloses and files nothing, which is why that state's copy
+carries the consequence and not only the remedy.
+
+The direction split reads only as far as an envelope this build admits. The
+entry literals that decide it are carried by the envelope-only parse, so a
+later build that reshapes the envelope itself -- a bumped accounting `version`
+literal, or any added envelope key, which the strict envelope schema refuses --
+classifies here as *unreadable*, reset offered, even when its entries are newer
+than this build. Nothing pins the envelope's shape across builds (the recovery
+check pins the entry version literal alone), so an envelope change is a
+compatibility decision that change must itself carry: route the new envelope
+through this direction split, or accept that pages of this build offer the
+reset over the value it writes.
+
+**The recovery offered is export then reset**, in that order, from the unreadable
+state, and it never removes the exchange:
+
+| Arm | What it does | What it does not do |
+| --- | --- | --- |
+| Stored-form export | Writes the envelope and its entries out as JSON, verbatim | Does not restore appendability, and asserts nothing about the entries |
+| Accounting-scoped reset | Deletes the accounting value alone, so the next run starts a fresh accounting and the exchange can file again | Does not retain the entries; they are destroyed |
+
+Neither alone covers the failure, which is why the surface orders them: the
+export is the only thing that retains the record, and the reset is the only thing
+that restores appendability. The reset is confirmed explicitly, names what is
+destroyed and what is kept, and is never a read's side effect. When the stored
+value is damaged past its envelope -- corruption rather than a version bump --
+there is nothing to export and the surface says so rather than offering a
+download it cannot honor. The export arm alone is offered from the stale-page
+state as well: handing back stored bytes asserts nothing in either direction,
+where the reset belongs to the direction that has records stranded.
+
+Two shapes are deliberately not offered. **Migration** would rewrite a
+self-attested artifact into a version it was not written under, which the
+reader-rejects-unknown rule and the pre-release no-migration rule both exclude. A
+**read-only legacy view** would render an earlier record's absent fields through
+the current version's meaning of their absence -- the quietly false account the
+whole-read rejection above exists to prevent. The export hands over stored bytes
+and makes no claim about them; an extracted entry is an archival artifact, and a
+build that does not recognize its version will not re-check it.
+
+A bump is held to re-taking this decision by `npm run check:disclosure-recovery`,
+which pins the record version literal and fails the move rather than letting it
+ship past the obligation.
+
 ## See also
 
 - [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md) - the managed exchange lifecycle: who it serves, the automation goal and platform envelope, durability contract, single-owner invariant, desync story, eviction survival, and the moment-anchored backup surfaces

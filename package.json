@@ -36,6 +36,7 @@
     "check:web-config-native-load": "node scripts/check-web-config-native-load.mjs",
     "check:vectors": "node scripts/check-vectors-generators.mjs",
     "check:protocol-version-bump": "node scripts/check-protocol-version-bump.mjs",
+    "check:disclosure-recovery": "node scripts/check-disclosure-recovery.mjs",
     "check:zero-setup-keys": "node scripts/check-zero-setup-keys.mjs",
     "check:built-in-set-versions": "node scripts/check-built-in-set-versions.mjs",
     "check:release-version": "node scripts/check-release-version.mjs",

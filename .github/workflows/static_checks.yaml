@@ -225,6 +225,18 @@ jobs:
       # checkout has no tags to read one from.
       - name: Protocol version bump
         run: npm run check:protocol-version-bump
+      # A managed web exchange's accounting of disclosures holds its runs'
+      # exchange records verbatim, and the reader rejects an unrecognized record
+      # version rather than migrating it -- so moving EXCHANGE_RECORD_VERSION
+      # invalidates, on every device holding one, a HIPAA/FERPA disclosure source
+      # nothing else holds a copy of, and stops the accounting accruing for the
+      # unattended runs it exists to cover. The recovery for that state is built,
+      # but its export arm rests on a premise only the current format has been
+      # driven against. This pins that literal so the move re-takes the decision
+      # instead of shipping past it, and fails when the recovery path it defers
+      # to is no longer there.
+      - name: Disclosure accounting recovery
+        run: npm run check:disclosure-recovery
       # A zero-setup exchange authors no linkage terms: each party derives them
       # from its own file, and the built-in keys work with no authoring only
       # because every one of them is built from the guaranteed-minimum PII both

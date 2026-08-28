@@ -25,11 +25,14 @@ import {
   getManagedLocalState,
   markManagedExchangeSpent,
 } from "@psi/managedLocalState";
+import {
+  readDisclosureAccounting,
+  resetDisclosureAccounting,
+} from "@psi/disclosureAccountingStore";
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managedExchangeArtifact";
 import { canReinviteFromRecord } from "@psi/managedReinvite";
 import { deriveManagedBackupState } from "@psi/managedBackupState";
 import { fileSystemAccessSupported } from "@psi/managedInputHandle";
-import { getDisclosureAccounting } from "@psi/disclosureAccountingStore";
 import { managedRerunCompletion } from "@psi/managedCompletionSurface";
 import { reinviteManagedExchange } from "@psi/managedReinviteDriver";
 import { runManagedExchangeInBrowser } from "@psi/managedRunDriver";
@@ -63,7 +66,7 @@ import type {
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
-import type { DisclosureAccounting } from "@psi/disclosureAccounting";
+import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { ManagedBackupMarker } from "@psi/managedBackupState";
 import type { ManagedInputSource } from "@psi/managedInputHandle";
 import type { ManagedMigrationDispatch } from "@psi/managedExchangeExport";
@@ -97,11 +100,17 @@ export function ManagedRunSurface({ id }: { id: string }) {
   >();
   const [spentAt, setSpentAt] = useState<string>();
   const [backupMarker, setBackupMarker] = useState<ManagedBackupMarker>();
-  // This exchange's accounting of disclosures, and whether reading it failed. The
-  // two are separate state, never one optional value: an unreadable accounting must
-  // not render as an empty one, which would read as "nothing was disclosed".
-  const [accounting, setAccounting] = useState<DisclosureAccounting>();
-  const [accountingUnreadable, setAccountingUnreadable] = useState(false);
+  // This exchange's accounting of disclosures as its own read classified it, one
+  // value rather than an accounting beside flags: an unreadable accounting must
+  // not render as an empty one (which would read as "nothing was disclosed"), and
+  // a store that did not answer must not render as either. `undefined` while the
+  // read is in flight.
+  const [accountingRead, setAccountingRead] =
+    useState<DisclosureAccountingRead>();
+  // Bumped to re-read the accounting: after a reset, so the surface shows what the
+  // store actually holds rather than assuming the delete took, and on an explicit
+  // retry of a read that never reached the store.
+  const [accountingReads, setAccountingReads] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
   // A dispatched migration whose download fired but whose spend awaits the operator
@@ -187,24 +196,28 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // load above: an unreadable accounting must not present the exchange as
   // unloadable, and an unloadable record must not hide a readable accounting.
   // Keyed on the completion instant as well as the id, so the entry a finished run
-  // just filed is read back without a reload.
+  // just filed is read back without a reload. The read is total (see
+  // {@link readDisclosureAccounting}), so what lands here is a classified state to
+  // render rather than an error to interpret -- in particular, a store that did
+  // not open is its own transient state, not the destructive-recovery one.
   useEffect(() => {
     let live = true;
-    getDisclosureAccounting(id)
-      .then((loaded) => {
-        if (!live) return;
-        setAccounting(loaded);
-        setAccountingUnreadable(false);
+    void readDisclosureAccounting(id)
+      .then((read) => {
+        if (live) setAccountingRead(read);
       })
+      // The read classifies every failure rather than rejecting, so this is the
+      // backstop for that contract lapsing rather than a second failure path.
+      // Unavailable is the safe landing: it claims nothing about what is stored
+      // and offers no destructive arm, where an unhandled rejection would strand
+      // the section on its spinner.
       .catch(() => {
-        if (!live) return;
-        setAccounting(undefined);
-        setAccountingUnreadable(true);
+        if (live) setAccountingRead({ kind: "unavailable" });
       });
     return () => {
       live = false;
     };
-  }, [id, finishedAt]);
+  }, [id, finishedAt, accountingReads]);
 
   // Revoke the run's object URLs when they are replaced or the surface unmounts:
   // the results blob is matched-record PII and the keys blob is private material.
@@ -472,6 +485,31 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setRecord(updated);
   }
 
+  // Queue a fresh read of the accounting, dropping the standing verdict as it
+  // goes: the section returns to its in-flight state rather than rendering the
+  // previous verdict and its buttons under a click that has already been taken --
+  // which reads as an inert control, beside an irreversible one.
+  function readAccountingAgain(): void {
+    setAccountingRead(undefined);
+    setAccountingReads((reads) => reads + 1);
+  }
+
+  // Destroy the accounting this build cannot read, then re-read it: the surface
+  // shows what the store holds afterwards, so a delete that did not take leaves
+  // the unreadable state standing rather than a stale empty one.
+  async function resetAccounting(): Promise<void> {
+    await resetDisclosureAccounting(id);
+    readAccountingAgain();
+  }
+
+  // Read the accounting again after a read that never reached the store. It is
+  // offered instead of asking for a page reload because a reload ends a run in
+  // progress, while the blocked-open condition this recovers from clears on its
+  // own as soon as the other tab's connection yields.
+  function retryAccountingRead(): void {
+    readAccountingAgain();
+  }
+
   return (
     <BenchPage>
       <main className={styles.lobby}>
@@ -716,8 +754,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
             />
             <ManagedExchangeDetail
               record={record}
-              accounting={accounting}
-              accountingUnreadable={accountingUnreadable}
+              accountingRead={accountingRead}
+              onResetAccounting={resetAccounting}
+              onRetryAccountingRead={retryAccountingRead}
               onSaveLocalFields={saveLocalFields}
               onReinviteToChangeTerms={() => reinviteNow("detail")}
               canReinvite={canReinviteFromRecord(record)}

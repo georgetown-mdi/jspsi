@@ -30,16 +30,21 @@ import {
 } from "@psi/managedExchangeRecord";
 import {
   appendDisclosureRecordToStore,
-  getDisclosureAccounting,
+  readDisclosureAccounting,
+  resetDisclosureAccounting,
 } from "@psi/disclosureAccountingStore";
 import {
   getManagedLocalState,
   markManagedExchangeBackedUp,
   markManagedExchangeSpent,
 } from "@psi/managedLocalState";
+import { DISCLOSURE_ACCOUNTING_VERSION } from "@psi/disclosureAccounting";
 import { buildManagedDeposit } from "@bench/manageOfferModel";
 
-import { disclosureRecord } from "../utils/disclosureFixtures";
+import {
+  disclosureRecord,
+  neighbouringRecordVersion,
+} from "../utils/disclosureFixtures";
 
 import type { ExchangeRecord, WebRTCExchangeLocator } from "@psilink/core";
 import type {
@@ -142,6 +147,45 @@ async function rawDisclosureStored(id: string): Promise<unknown> {
   } finally {
     db.close();
   }
+}
+
+/** Put a value into the accounting store past the write path's validation, so a
+ * test can stage what an app upgrade LEAVES at rest -- entries admitted by the
+ * exchange-record format current when they were written, which this build's
+ * format no longer admits. The append path cannot write one by construction, so a
+ * recovery test has no other way to reach that state. */
+async function putRawDisclosureStored(
+  id: string,
+  value: unknown,
+): Promise<void> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(
+        MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
+        "readwrite",
+      );
+      transaction
+        .objectStore(MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME)
+        .put(value, id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** The entries of an exchange's accounting, through the production read. Asserts
+ * the read classified as an accounting first, so a caller asserting on entries can
+ * never be silently reading a classified failure as an empty history. */
+async function accountingEntries(
+  id: string,
+): Promise<ReadonlyArray<ExchangeRecord>> {
+  const read = await readDisclosureAccounting(id);
+  expect(read.kind).toBe("accounting");
+  return read.kind === "accounting" ? read.accounting.entries : [];
 }
 
 /** Overwrite the stored value under a key with an arbitrary object, so a test can
@@ -713,7 +757,9 @@ describe("one-step delete leaves nothing behind", () => {
     expect(await rawLocalStored(created.id)).toBeUndefined();
     expect(await getManagedLocalState(created.id)).toBeUndefined();
     expect(await rawDisclosureStored(created.id)).toBeUndefined();
-    expect(await getDisclosureAccounting(created.id)).toBeUndefined();
+    expect(await readDisclosureAccounting(created.id)).toEqual({
+      kind: "none",
+    });
     await root.removeEntry("managed-input.csv");
   });
 
@@ -735,10 +781,9 @@ describe("the accounting of disclosures accumulates each run's record", () => {
     await appendDisclosureRecordToStore(created.id, first);
     await appendDisclosureRecordToStore(created.id, second);
 
-    const accounting = await getDisclosureAccounting(created.id);
     // Verbatim through the structured clone and the validating read: the entry is
     // the record the run produced, not a summary of it.
-    expect(accounting?.entries).toEqual([first, second]);
+    expect(await accountingEntries(created.id)).toEqual([first, second]);
   });
 
   test("re-filing one run's record does not double its entry", async () => {
@@ -748,15 +793,17 @@ describe("the accounting of disclosures accumulates each run's record", () => {
     await appendDisclosureRecordToStore(created.id, record);
     await appendDisclosureRecordToStore(created.id, record);
 
-    expect((await getDisclosureAccounting(created.id))?.entries).toHaveLength(
-      1,
-    );
+    expect(await accountingEntries(created.id)).toHaveLength(1);
   });
 
   test("an exchange that has never completed a run has no accounting", async () => {
     const created = await createManagedExchange(newExchange());
 
-    expect(await getDisclosureAccounting(created.id)).toBeUndefined();
+    // Classified as an empty store rather than as a failure: this is the only
+    // state the surface may render as "nothing was disclosed".
+    expect(await readDisclosureAccounting(created.id)).toEqual({
+      kind: "none",
+    });
   });
 
   test("an entry is stored as the reader admits it, without a caller's extra key", async () => {
@@ -779,6 +826,223 @@ describe("the accounting of disclosures accumulates each run's record", () => {
   });
 });
 
+/**
+ * Recovering an accounting this build can no longer read, against real IndexedDB.
+ * The staged state is what an app upgrade that moved the exchange-record version
+ * leaves behind: entries admissible when they were written, refused by this build.
+ *
+ * The read classifies that state in ONE round trip, which is what keeps the two
+ * readings of an accounting from disagreeing, and what separates a value refused
+ * by the parsers from a store that never yielded one -- only the first may reach
+ * the destructive arm. The two arms are then tested for what each one alone does
+ * NOT do, since that is why the surface offers both: the recovered entries retain
+ * the record and leave the store un-appendable, and the reset restores
+ * appendability and destroys them.
+ */
+describe("an unreadable accounting recovers without deleting the exchange", () => {
+  /** A stored accounting whose entries carry a record version this build does not
+   * admit, staged under an exchange that otherwise stands. */
+  async function strandedAccounting(): Promise<{
+    id: string;
+    entries: Array<unknown>;
+  }> {
+    const created = await createManagedExchange(newExchange());
+    const record = await disclosureRecord();
+    const entries = [
+      { ...record, version: `${record.version}-moved` } as unknown,
+    ];
+    await putRawDisclosureStored(created.id, {
+      version: DISCLOSURE_ACCOUNTING_VERSION,
+      entries,
+    });
+    // The premise of the whole recovery, restated against the real store: the
+    // read refuses to vouch for this, so the exchange is in the stranded state.
+    expect((await readDisclosureAccounting(created.id)).kind).toBe(
+      "unreadable",
+    );
+    return { id: created.id, entries };
+  }
+
+  test("the one read that refuses the entries hands back the stored form", async () => {
+    const { id, entries } = await strandedAccounting();
+
+    const read = await readDisclosureAccounting(id);
+
+    // Verbatim through the structured clone: what the operator is handed is what
+    // is at rest, not a reading of it -- and it comes from the same round trip
+    // that refused it, so a second read cannot disagree about what is stored.
+    expect(read).toEqual({
+      kind: "unreadable",
+      stored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
+    });
+  });
+
+  test("an accounting damaged past its envelope leaves nothing to hand back", async () => {
+    const created = await createManagedExchange(newExchange());
+    await putRawDisclosureStored(created.id, {
+      version: DISCLOSURE_ACCOUNTING_VERSION,
+      entries: "one disclosure",
+    });
+
+    // Still the unreadable state -- the value was read and refused -- but with no
+    // export to offer, which is the distinction the surface renders.
+    expect(await readDisclosureAccounting(created.id)).toEqual({
+      kind: "unreadable",
+      stored: undefined,
+    });
+  });
+
+  test("an accounting this version can read classifies as an accounting, not a recovery", async () => {
+    const created = await createManagedExchange(newExchange());
+    const record = await disclosureRecord();
+    await appendDisclosureRecordToStore(created.id, record);
+
+    expect(await readDisclosureAccounting(created.id)).toEqual({
+      kind: "accounting",
+      accounting: {
+        version: DISCLOSURE_ACCOUNTING_VERSION,
+        entries: [record],
+      },
+    });
+  });
+
+  test("a store that will not open is transient, never the unreadable state", async () => {
+    // The real blocked open, driven as the store's own suite drives it: an older
+    // connection that never yields holds off this build's version-change open.
+    // Whatever else is true, the accounting was never READ -- so classifying this
+    // as unreadable would offer the irreversible reset over a condition that
+    // clears when the other tab closes, and classifying it as "none" would claim
+    // nothing was disclosed.
+    await deleteDatabase();
+    const held = await openRawHeldConnection(IDB_VERSION - 1);
+    try {
+      expect(await readDisclosureAccounting("any-exchange")).toEqual({
+        kind: "unavailable",
+      });
+    } finally {
+      held.close();
+    }
+  });
+
+  test("a stranded accounting cannot be appended to until it is reset", async () => {
+    const { id } = await strandedAccounting();
+
+    // The consequence the reset exists for: the read failure is an append failure
+    // too, so a still-scheduled exchange keeps disclosing and files nothing.
+    await expect(
+      appendDisclosureRecordToStore(id, await disclosureRecord()),
+    ).rejects.toThrow();
+
+    await resetDisclosureAccounting(id);
+    const filed = await disclosureRecord();
+    await appendDisclosureRecordToStore(id, filed);
+
+    expect(await accountingEntries(id)).toEqual([filed]);
+  });
+
+  test("the reset destroys the accounting and nothing else the browser holds", async () => {
+    const { id } = await strandedAccounting();
+    await markManagedExchangeBackedUp(id, "2026-08-01T09:00:00.000Z");
+    const before = await getManagedExchange(id);
+    expect(before).toBeDefined();
+
+    await resetDisclosureAccounting(id);
+
+    // Gone from the store, not merely absent through a validating read.
+    expect(await rawDisclosureStored(id)).toBeUndefined();
+    expect(await readDisclosureAccounting(id)).toEqual({ kind: "none" });
+    // The exchange itself stands: the record under its key, byte for byte, and
+    // the sibling local state beside it. This is the whole point of scoping the
+    // delete to the one store -- an operator recovers an accounting without
+    // losing the partnership.
+    expect(await getManagedExchange(id)).toEqual(before);
+    expect((await getManagedLocalState(id))?.backup).toBeDefined();
+    expect((await listManagedExchanges()).map((entry) => entry.id)).toEqual([
+      id,
+    ]);
+  });
+
+  test("the reset of an exchange with no accounting is idempotent", async () => {
+    const created = await createManagedExchange(newExchange());
+
+    await expect(
+      resetDisclosureAccounting(created.id),
+    ).resolves.toBeUndefined();
+    expect(await getManagedExchange(created.id)).toBeDefined();
+  });
+
+  test("the reset is scoped to its own exchange, leaving another's accounting alone", async () => {
+    const { id } = await strandedAccounting();
+    const other = await createManagedExchange(newExchange());
+    const otherRecord = await disclosureRecord();
+    await appendDisclosureRecordToStore(other.id, otherRecord);
+
+    await resetDisclosureAccounting(id);
+
+    expect(await accountingEntries(other.id)).toEqual([otherRecord]);
+  });
+});
+
+/**
+ * Which way the refusal points, against the real store. A refused value means one
+ * of two opposite things -- this build is ahead of the entries, or behind them --
+ * and only the destructive recovery belongs to the first. The reverse skew is
+ * live in this app: a new deployment activates while a tab goes on running the
+ * code it loaded with, so a stale tab can read entries a newer build filed.
+ */
+describe("a refused accounting is classified by which side is behind", () => {
+  /** Stage an accounting whose entries carry a record version `offset` ordinals
+   * from this build's, under an exchange that otherwise stands. */
+  async function accountingFromNeighbouringBuild(offset: number): Promise<{
+    id: string;
+    entries: Array<unknown>;
+  }> {
+    const created = await createManagedExchange(newExchange());
+    const record = await disclosureRecord();
+    const entries = [
+      { ...record, version: neighbouringRecordVersion(offset) } as unknown,
+    ];
+    await putRawDisclosureStored(created.id, {
+      version: DISCLOSURE_ACCOUNTING_VERSION,
+      entries,
+    });
+    return { id: created.id, entries };
+  }
+
+  test("entries from a later record format read as a stale page, not a stranded accounting", async () => {
+    const { id, entries } = await accountingFromNeighbouringBuild(1);
+
+    // The reset is the wrong recovery here by construction: these entries are
+    // readable by a build that already exists, so clearing them would destroy
+    // records over a tab running older code. The state carries the stored value
+    // all the same -- handing back stored bytes claims nothing either way.
+    expect(await readDisclosureAccounting(id)).toEqual({
+      kind: "stale-page",
+      stored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
+    });
+  });
+
+  test("entries from an earlier record format stay the stranded accounting", async () => {
+    const { id, entries } = await accountingFromNeighbouringBuild(-1);
+
+    expect(await readDisclosureAccounting(id)).toEqual({
+      kind: "unreadable",
+      stored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
+    });
+  });
+
+  test("a stale page's entries are still not appendable, so neither state files quietly", async () => {
+    const { id } = await accountingFromNeighbouringBuild(1);
+
+    // The append re-reads through the validating parse, so this build files
+    // nothing here either. What differs is the remedy the surface offers, not
+    // what the store does.
+    await expect(
+      appendDisclosureRecordToStore(id, await disclosureRecord()),
+    ).rejects.toThrow();
+  });
+});
+
 describe("clearing the store leaves no accounting behind", () => {
   test("a cleared store takes every accounting of disclosures with it", async () => {
     const created = await createManagedExchange(newExchange());
@@ -791,7 +1055,9 @@ describe("clearing the store leaves no accounting behind", () => {
     // a clear that spared the accounting would leave cleartext partner and
     // agreement metadata under an id no record surfaces any more.
     expect(await rawDisclosureStored(created.id)).toBeUndefined();
-    expect(await getDisclosureAccounting(created.id)).toBeUndefined();
+    expect(await readDisclosureAccounting(created.id)).toEqual({
+      kind: "none",
+    });
     expect(await listManagedExchanges()).toEqual([]);
   });
 });

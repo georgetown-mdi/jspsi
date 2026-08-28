@@ -937,6 +937,78 @@ exchange's own page, below its run history.
   the exchange; the record files offered at a run's completion stand in only for
   the runs somebody was there to download one from.
 
+### When an app upgrade leaves an accounting unreadable
+
+An upgrade can change the format of the records an accounting is made of. When
+that happens the accounting page says so instead of showing entries, because a
+partly-read accounting would understate what was disclosed. Two things are true
+in that state, and the second is the one to act on:
+
+- The entries are still stored. They were valid when they were written; this
+  version of the app will not read them.
+- The exchange cannot add to them either. It keeps running and keeps disclosing,
+  and none of those runs files a record here until the accounting is cleared.
+
+The page offers the way out, in the order to take it. Neither step alone is
+enough: the download is the only way to keep the records, and clearing is the
+only way to let the exchange file again.
+
+1. **Download the stored records.** You get the accounting in the form it was
+   stored in, with nothing lost. It is a file for your own records -- keep it
+   with your compliance material. It is not a run's record file, so neither the
+   verify page nor this app will read it back.
+2. **Start a fresh accounting.** This deletes the stored records permanently and
+   lets the exchange file its disclosures again from its next run. It asks you to
+   confirm, and it keeps the exchange itself -- the agreed terms, the stored
+   secret, the schedule, and the run history are untouched. You do not have to
+   delete the exchange to recover its accounting.
+
+A cleared accounting reads as empty until the next run files into it. Where the
+run history beside it records a completed run, the page names the two ways an
+accounting is emptied -- clearing it here, or restoring the exchange from an
+export or backup file, which does not carry one -- rather than reporting that no
+run has completed.
+
+Occasionally the stored records are damaged past the point where even that
+download is possible. The page says so rather than offering a download it cannot
+deliver; what remains is any record file you downloaded when a run finished, and
+clearing the accounting still lets the exchange file again.
+
+### When the accounting could not be read right now
+
+A different message -- that the accounting could not be read **right now** --
+means this browser's storage did not answer, not that anything is wrong with what
+it holds. The usual cause is another tab running an older version of the app,
+which holds the storage for a while and then lets go.
+
+Nothing is offered to clear, because nothing is known to be damaged. Close any
+other tab this app is open in and use the page's own "try reading it again"; a
+page reload works too, but it would end a run in progress.
+
+### When this page is the older version
+
+The skew runs both ways. A new deployment does not replace the code of a page that
+is already open, so a tab left open across one goes on running what it loaded
+with. If a newer version has filed records for this exchange since, that page
+cannot read them -- and says so as what it is: **this page is running an older
+version of psilink**.
+
+Nothing is wrong with the records, and clearing them is not offered here: a
+version of the app that reads them exists, and this page is not it. Reload the
+page to use it, and reload before running -- a run started from a page in this
+state discloses and files no record, the same way the stranded state above does.
+If a run is under way, reloading ends it. The stored-records download stays
+available in the meantime; it is for your own files, and this page cannot read it
+back.
+
+If a reload lands this page again, the newer version is no longer being served
+-- a deployment rolled back past the record-format change -- and the reload
+remedy cannot converge. Every further run from this build keeps disclosing and
+filing nothing, so do not leave the exchange running in this state. Take the
+stored-records download first; after that, deleting the exchange is the one
+exit this build offers, and the downloaded records stay intact for a build that
+reads them.
+
 ## Surviving storage eviction
 
 Browser storage is not durable the way a file on disk is. The design must survive
