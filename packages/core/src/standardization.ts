@@ -2877,6 +2877,26 @@ export function parseDateInputDropsEveryRecord(
 }
 
 /**
+ * Whether a step is a `coalesce` that can actually substitute its fallback: one
+ * whose declared `default` is a string, the only shape {@link compileStep} turns
+ * into a substitution value. Wire params are `z.unknown()` with no per-function
+ * shape, so a partner can declare `default` as any JSON value (or omit it); every
+ * non-string behaves as an absent default, which {@link applyStep}'s coalesce
+ * branch runs as a pass-through -- the step substitutes nothing and collapses
+ * nothing.
+ *
+ * Shared so every terms-level reading of a coalesce's effect -- the dead-pipeline
+ * rescue in {@link pipelineAlwaysDrops}, and the consent header's collapse marker
+ * in `invitationSummary.ts` -- turns on one predicate rather than a restated type
+ * test that could drift from the runtime.
+ */
+export function coalesceSubstitutesConstant(step: TransformStep): boolean {
+  return (
+    step.function === "coalesce" && typeof step.params?.default === "string"
+  );
+}
+
+/**
  * Whether a transform/standardization pipeline produces NO value for every
  * possible input -- a self-defeating "dead" pipeline, determinable from the terms
  * alone without any data. Today the only value-INDEPENDENT drop core recognizes is
@@ -2905,7 +2925,7 @@ export function pipelineAlwaysDrops(
     if (step.function === "coalesce") {
       // A string default substitutes a constant for a dropped value, rescuing it;
       // an undefined or non-string default leaves a dropped value dropped.
-      if (dropped && typeof step.params?.default === "string") dropped = false;
+      if (dropped && coalesceSubstitutesConstant(step)) dropped = false;
       continue;
     }
     // A non-coalesce step null-propagates a dropped value, so once dropped the

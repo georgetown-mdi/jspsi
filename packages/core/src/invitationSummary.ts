@@ -1,5 +1,6 @@
 import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
+  coalesceSubstitutesConstant,
   dateFormatComponents,
   describeTransformCoercions,
   FAN_OUT_FUNCTION_NAMES,
@@ -1030,10 +1031,12 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *   record that carries an identifier is truncated literally -- unlike `pad_left`,
  *   which rewrites the value of every record -- and the substitution is
  *   order-independent, so suppressing here would mark `[coalesce, substring]` and
- *   `[substring, coalesce]` differently for the same matching behavior. The header
- *   still shows the coalesce's own "fallback" for that compound: the truncation is
- *   real, but the collapse outranks it (see the ranking below), and it does so in
- *   both orders.
+ *   `[substring, coalesce]` differently for the same matching behavior. Where the
+ *   coalesce can actually substitute, the header shows its own "fallback" for that
+ *   compound: the truncation is real, but the collapse outranks it (see the ranking
+ *   below), and it does so in both orders. Where it cannot -- a `default` that is
+ *   absent or not a string, which core runs as a pass-through -- it collapses
+ *   nothing and the truncation's "partial" is what the compound shows.
  * - `split_on` never reaches this rule: it is a fan-out, decided above.
  *
  * This mirrors the detail row's position-aware literal ({@link substringEffect} /
@@ -1057,7 +1060,12 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *    (every record) then "fallback" (every record whose field is absent). A
  *    collapse leaves the records it touches matching each other whatever else the
  *    pipeline does to that constant, so a coarsening word below would understate
- *    it -- the reassuring direction on a consent surface.
+ *    it -- the reassuring direction on a consent surface. This tier speaks only
+ *    for a coalesce that can actually substitute (core's
+ *    {@link coalesceSubstitutesConstant}); one whose declared `default` is absent
+ *    or not a string runs as a pass-through, collapses nothing, and contributes
+ *    nothing to the chain -- over-alarming misstates the terms as surely as
+ *    understating them.
  * 4. The remaining effect-named rules, which coarsen rather than collapse: a
  *    truncating substring's "partial", "fuzzy", "sound-alike", and last a
  *    component-dropping `parse_date`'s "partial".
@@ -1104,15 +1112,18 @@ function elementBreadthMarker(
   // handled below at the parse_date position.)
   const parseDateBreadths = steps.map(parseDateBreadth);
   if (parseDateBreadths.includes("any date")) return displayText`any date`;
-  // A `coalesce` substitutes one constant for every record whose field is absent,
-  // so all of those records collide on that value and match each other -- the same
-  // collapse "any date" names, bounded to the absent-field records rather than all
-  // of them. It therefore outranks the coarsening effects below: once a set of
-  // records is one value, truncating or fuzzing that value leaves them collapsed,
-  // so a coarsening word would understate the terms in the reassuring direction.
-  // Keyed on the declared rule, as the standalone marker already is, rather than
-  // on the default's type (the acceptConsent header tests pin that verdict).
-  if (functions.has("coalesce")) return displayText`fallback`;
+  // A `coalesce` that can substitute puts one constant on every record whose field
+  // is absent, so all of those records collide on that value and match each other
+  // -- the same collapse "any date" names, bounded to the absent-field records
+  // rather than all of them. It therefore outranks the coarsening effects below:
+  // once a set of records is one value, truncating or fuzzing that value leaves
+  // them collapsed, so a coarsening word would understate the terms in the
+  // reassuring direction. Gated on core's own predicate rather than on the
+  // function name: the wire schema puts no per-function shape on `params`, so a
+  // partner can declare a `default` that is absent or not a string, which core
+  // runs as a pass-through -- no constant is substituted, nothing collapses, and
+  // the chain below names what the element's other rules actually do.
+  if (steps.some(coalesceSubstitutesConstant)) return displayText`fallback`;
   // Effect named where the direction is determinable from the terms. "partial"
   // is a literal truncation, so a substring counts only where the value it slices
   // is still composed of the acceptor's identifier -- not after a step that

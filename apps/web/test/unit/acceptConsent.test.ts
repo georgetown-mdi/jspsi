@@ -1795,12 +1795,20 @@ describe("summarizeInvitation", () => {
     expect(headerFor([coalesce, { function: "phonetic" }])).toBe(
       "last name (fallback)",
     );
-    // The marker is keyed on the declared rule, as the standalone one is: a
-    // coalesce whose default is not a string substitutes nothing when the pipeline
-    // runs, and the header names the rule the terms declare either way.
-    expect(headerFor([{ function: "coalesce", params: {} }, slice])).toBe(
-      "last name (fallback)",
-    );
+    // The collapse tier is gated on a default that can actually substitute. The
+    // wire schema puts no per-function shape on params, so a partner can declare a
+    // default that is absent or not a string; core then runs the step as a
+    // pass-through, nothing collapses, and the chain names what the element's other
+    // rules do -- a bare one earning no marker at all. Over-alarming misstates the
+    // terms as surely as understating them.
+    const inertCoalesce = { function: "coalesce", params: {} };
+    const nonStringCoalesce = { function: "coalesce", params: { default: 7 } };
+    expect(headerFor([inertCoalesce, slice])).toBe("last name (partial)");
+    expect(headerFor([slice, inertCoalesce])).toBe("last name (partial)");
+    expect(headerFor([nonStringCoalesce, slice])).toBe("last name (partial)");
+    expect(headerFor([slice, nonStringCoalesce])).toBe("last name (partial)");
+    expect(headerFor([inertCoalesce])).toBe("last name");
+    expect(headerFor([nonStringCoalesce])).toBe("last name");
     expect(
       summarizeInvitation(
         makeToken({
@@ -1839,7 +1847,7 @@ describe("summarizeInvitation", () => {
         coalesce,
       ]),
     ).toBe("last name (not supported)");
-    // The single-step markers the rank move leaves alone.
+    // Single-step markers, pinned so compound precedence cannot change them.
     expect(headerFor([coalesce])).toBe("last name (fallback)");
     expect(headerFor([slice])).toBe("last name (partial)");
     expect(headerFor([{ function: "phonetic" }])).toBe(
@@ -1885,7 +1893,7 @@ describe("summarizeInvitation", () => {
     expect(headerFor([pad, slice, { function: "phonetic" }])).toBe(
       "last name (sound-alike)",
     );
-    // The single-step markers the rank move leaves alone, padding included.
+    // Single-step markers, pinned so compound precedence cannot change them.
     expect(headerFor([nullIf])).toBe("last name (excludes values)");
     expect(headerFor([filterRegex])).toBe("last name (pattern filter)");
     expect(headerFor([pad])).toBe("last name");
@@ -2122,7 +2130,9 @@ describe("summarizeInvitation", () => {
       // coalesce leaves the truncation faithful too -- it substitutes only where
       // there is no identifier to truncate -- but the header shows its own
       // collapse of every absent-field record onto one constant, which outranks
-      // the coarsening the slice describes.
+      // the coarsening the slice describes. The table declares a string default,
+      // so the step can substitute; one that cannot collapses nothing and leaves
+      // the slice's "partial" (pinned with the collapse ranking).
       coalesce: "fallback",
       // These three derive a value the identifier need not compose, so the
       // slice is not a truncation of it and each falls through to the honest
@@ -2185,12 +2195,20 @@ describe("summarizeInvitation", () => {
       pad_left: null,
       parse_date: null,
     };
+    // The params each marked function needs to reach its baseline: a substring
+    // that actually truncates, and a coalesce whose string default can actually
+    // substitute. Every other function's baseline needs none.
+    const BASELINE_PARAMS: Record<string, Record<string, unknown> | undefined> =
+      {
+        substring: { start: 1, length: 3 },
+        coalesce: { default: "X" },
+      };
     // Two-directional: the classification covers exactly core's function set.
     expect(Object.keys(EXPECTED).sort()).toEqual(
       [...STANDARDIZATION_FUNCTION_NAMES].sort(),
     );
     for (const [fn, marker] of Object.entries(EXPECTED)) {
-      const params = fn === "substring" ? { start: 1, length: 3 } : undefined;
+      const params = BASELINE_PARAMS[fn];
       const entry = summarizeInvitation(
         makeToken({
           linkageFields: [{ name: "ln", type: "last_name" }],
