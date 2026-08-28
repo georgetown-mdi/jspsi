@@ -122,25 +122,51 @@ export interface ManagedExchangeArtifact {
 }
 
 /**
+ * Serialize a validated exchange-file document to the snake_case YAML the CLI
+ * loads, through the same {@link snakeizeKeys} + yaml `stringify` discipline the
+ * mint layer applies to its validated spec. The one place a browser-held document
+ * becomes `psilink.yaml` text: the artifact's embedded half and the CLI cron
+ * export's config file share it rather than running two serializers that could
+ * drift on the encoding a CLI load depends on.
+ */
+export function serializeExchangeDocument(exchangeFile: ExchangeSpec): string {
+  return stringifyYaml(snakeizeKeys(exchangeFile));
+}
+
+/**
+ * Derive the `.psilink.key` pair from a record: the current shared secret and,
+ * when a bound is in force, the `expires` it lapses at. The one place a record's
+ * secret half becomes the key file's fields, shared by the artifact's `key` block
+ * and the CLI cron export's key file so neither can grow a field the other lacks.
+ * An absent bound is an omitted key, never an explicit `undefined` a serialize
+ * step would render.
+ */
+export function keyFileFieldsFromRecord(
+  record: ManagedExchangeRecord,
+): ManagedExchangeArtifactKey {
+  return {
+    sharedSecret: record.sharedSecret,
+    ...(record.expires !== undefined ? { expires: record.expires } : {}),
+  };
+}
+
+/**
  * Encode a stored record as the export artifact. The exchange-file document is
- * serialized to the snake_case YAML the CLI loads (the same
- * {@link snakeizeKeys} + yaml `stringify` discipline the mint layer applies to its
- * validated spec), so the embedded half is a valid `psilink.yaml`; the secret and
- * any `expires` become the key pair; and the browser-only fields become the local
- * block. The input-file handle is dropped -- it does not serialize and the first
- * run after an import re-acquires one. The record's `id` is not carried: an import
- * is a take-over that mints a fresh local record, not a copy of this one.
+ * serialized to the snake_case YAML the CLI loads (see
+ * {@link serializeExchangeDocument}), so the embedded half is a valid
+ * `psilink.yaml`; the secret and any `expires` become the key pair; and the
+ * browser-only fields become the local block. The input-file handle is dropped --
+ * it does not serialize and the first run after an import re-acquires one. The
+ * record's `id` is not carried: an import is a take-over that mints a fresh local
+ * record, not a copy of this one.
  */
 export function encodeManagedExchangeArtifact(
   record: ManagedExchangeRecord,
 ): ManagedExchangeArtifact {
   return {
     artifactVersion: MANAGED_EXCHANGE_ARTIFACT_VERSION,
-    exchangeDocument: stringifyYaml(snakeizeKeys(record.exchangeFile)),
-    key: {
-      sharedSecret: record.sharedSecret,
-      ...(record.expires !== undefined ? { expires: record.expires } : {}),
-    },
+    exchangeDocument: serializeExchangeDocument(record.exchangeFile),
+    key: keyFileFieldsFromRecord(record),
     local: {
       label: record.label,
       side: record.side,
