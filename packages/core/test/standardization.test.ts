@@ -1073,9 +1073,11 @@ describe("pipelineAlwaysDrops rescue equivalence", () => {
   // Two changes make it red, both wanting a fresh look at the rescue. A second
   // source of `dropped` -- a value-independent drop other than an always-dropping
   // parse_date -- reaches the rescue from a position the weaker rescue below does
-  // not model. And a function moved into VALUE_PRESERVING_FUNCTION_NAMES can
-  // withhold the position half from a coalesce that would otherwise rescue,
-  // turning a live pipeline into a dead one on the consent surface.
+  // not model. And allowlisting a function that sets `dropped` (parse_date today)
+  // withholds the position half from a coalesce that would otherwise rescue,
+  // turning a live pipeline into a dead one on the consent surface. Allowlisting
+  // a function that never sets `dropped` leaves this sweep green; that
+  // misclassification is the value-emptying classification test's to catch.
   const FALLBACK_DEFAULT = "ZZZ_FALLBACK";
 
   // The rescue with no position half: the declared default's shape alone. A local
