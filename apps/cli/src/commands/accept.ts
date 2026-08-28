@@ -353,9 +353,10 @@ export async function validateAccept(params: {
   // A configuration already at the path is either kept as it stands or aborts
   // the acceptance below, and neither writes one -- so the label this party runs
   // under is that file's own, and there is nothing to ask: an answer would have
-  // nowhere to be remembered, and a flag has nowhere to be written. The same
-  // file reconcileAcceptConfig gates reuse on, read here because the label is an
-  // input to the terms the reconcile compares.
+  // nowhere to be remembered, and a flag has nowhere to be written. This is the
+  // acceptance's one read of that file: the label is an input to the terms
+  // reconcileAcceptConfig compares, so the parsed spec is threaded into it
+  // rather than read a second time there.
   const keptConfig = readExistingAcceptConfig(
     options.configFile,
     reconciliationSources(resolved.mode === "online"),
@@ -450,6 +451,7 @@ export async function validateAccept(params: {
     const { reuse: reuseExistingConfig, existingOutputShares } =
       reconcileAcceptConfig({
         configPath: options.configFile,
+        existing: keptConfig,
         myTerms,
         consentedPayloadColumns: token.disclosedPayloadColumns,
         target: connection,
@@ -529,6 +531,7 @@ export async function validateAccept(params: {
   const { reuse: reuseExistingConfig, existingOutputShares } =
     reconcileAcceptConfig({
       configPath: options.configFile,
+      existing: keptConfig,
       myTerms,
       consentedPayloadColumns: token.disclosedPayloadColumns,
       log,
@@ -673,12 +676,17 @@ export async function validateAccept(params: {
  * put the name the partner reads on this run at odds with the one the file keeps
  * sending. Renaming is an edit of that file, which is what the notice says.
  *
- * The notice is the one `psilink invite` gives on its own config-as-source path,
- * escaped the same way: both labels and the path are free text reaching a `log`
- * sink, which is their display boundary (CONTRIBUTING.md, Operator-facing
- * escaping). A flag naming exactly the stored label is nothing to report -- it
- * asks for what the run already does -- and a blank one, what a scripted
- * `--identity "$ORG"` sends with `ORG` unset, names nothing to begin with.
+ * The notice reads as the one `psilink invite` gives on its own
+ * config-as-source path, and is escaped the same way: both labels and the path
+ * are free text reaching a `log` sink, which is their display boundary
+ * (CONTRIBUTING.md, Operator-facing escaping). What triggers it deliberately
+ * diverges. Invite warns on any non-blank flag, this one only where the flag
+ * also differs from the stored label: a flag naming exactly that label asks for
+ * what the run already does, so reporting it as ineffective would misdescribe an
+ * acceptance that does run under the name the operator typed. A blank flag --
+ * what a scripted `--identity "$ORG"` sends with `ORG` unset -- names nothing to
+ * begin with, and is silent on both commands. Align the two only on a decision
+ * to change that behavior, not to make the pair look uniform.
  */
 function keptConfigurationIdentity(params: {
   configured: string | undefined;
@@ -724,13 +732,9 @@ function reconciliationSources(comparesConnectionUrl: boolean): {
  * file is there. Throws a {@link UsageError} naming the path and what to do
  * about it when a file is there but cannot be read as an exchange spec.
  *
- * Called twice per acceptance: once for the label the run proceeds under, and
- * once by {@link reconcileAcceptConfig} for the terms it compares, each acting
- * on the file as it read it. The reconcile's read is what decides whether the
- * configuration is kept, so a file appearing between the two would be reconciled
- * without having supplied the label -- the same check-not-a-lock race
- * {@link assertNoProvisionConflicts} documents for the paths it gates, and
- * immaterial for the same reason.
+ * Called once per acceptance, by {@link validateAccept}, which threads the
+ * result to everything that needs it: the label the run proceeds under and the
+ * terms {@link reconcileAcceptConfig} compares then act on one read of one file.
  *
  * Parse, then validate, in two steps. The YAML parse can echo source bytes (an
  * inline credential) and warn to stderr, so it routes through the sensitive-file
@@ -776,12 +780,11 @@ function readExistingAcceptConfig(
 
 /**
  * Reconcile a pre-existing configuration file against an acceptance. Returns
- * `false` when no config exists at `configPath` (a fresh one will be written);
- * `true` when a config exists and agrees with the invitation (and, online, the
- * URL), so it is kept and only the key file is written. Throws a
- * {@link UsageError} -- before the prompt and before any network activity -- when
- * a config exists but disagrees, or cannot be parsed to compare, showing the
- * user exactly what to resolve.
+ * `false` when no config was at `configPath` (a fresh one will be written);
+ * `true` when one was and it agrees with the invitation (and, online, the URL),
+ * so it is kept and only the key file is written. Throws a {@link UsageError} --
+ * before the prompt and before any network activity -- when it disagrees,
+ * showing the user exactly what to resolve.
  *
  * Both accept-reuse paths -- offline, and online ahead of any network activity --
  * reach the received-payload warning below through this one call, so a single
@@ -790,6 +793,13 @@ function readExistingAcceptConfig(
  */
 function reconcileAcceptConfig(params: {
   configPath: string;
+  /**
+   * The configuration already at `configPath` as {@link validateAccept} read
+   * it, or `undefined` where none is there. Passed in rather than read here so
+   * the label this acceptance runs under and the terms compared below come from
+   * one read of one file.
+   */
+  existing: ExchangeSpec | undefined;
   myTerms: LinkageTerms;
   /**
    * The disclosed subset this acceptance consents to, from the invitation token.
@@ -801,13 +811,18 @@ function reconcileAcceptConfig(params: {
   target?: RunnableConnectionConfig;
   log: ReturnType<typeof getLogger>;
 }): { reuse: boolean; existingOutputShares?: boolean } {
-  const { configPath, myTerms, consentedPayloadColumns, target, log } = params;
+  const {
+    configPath,
+    existing,
+    myTerms,
+    consentedPayloadColumns,
+    target,
+    log,
+  } = params;
+  if (existing === undefined) return { reuse: false };
   // A `target` connection is present only online, which is what decides the
   // source(s) every message here names.
-  const sources = reconciliationSources(target !== undefined);
-  const existing = readExistingAcceptConfig(configPath, sources);
-  if (existing === undefined) return { reuse: false };
-  const { against, retryWith } = sources;
+  const { against, retryWith } = reconciliationSources(target !== undefined);
 
   // Reported ahead of the reconciliation below, so a kept config's stale
   // citation reaches the operator whether or not its terms agree with the
