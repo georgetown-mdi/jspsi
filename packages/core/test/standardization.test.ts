@@ -23,6 +23,11 @@ import {
   StandardizedDataset,
   accumulationFateAtCharge,
   canProduceMultipleValues,
+  coalesceSubstitutesConstant,
+  stepCanEmptyRealizedValue,
+  pipelineAlwaysDrops,
+  parseDateInputDropsEveryRecord,
+  STANDARDIZATION_FUNCTION_NAMES,
 } from "../src/standardization";
 import * as standardizationModule from "../src/standardization";
 import { ESC, PRINTABLE_ASCII, RLO } from "../src/displayEscapingFixtures";
@@ -50,6 +55,7 @@ import type {
   LinkageKey,
   LinkageKeyElement,
   LinkageTerms,
+  TransformStep,
 } from "../src/config/linkageTerms";
 import type { ColumnMetadata, Metadata } from "../src/config/metadata";
 import {
@@ -877,6 +883,281 @@ describe("runPipeline — coalesce", () => {
         JSON.stringify(badDefault),
       ).toBe("SMITH");
     }
+  });
+});
+
+// --- coalesceSubstitutesConstant ---------------------------------------------
+
+describe("coalesceSubstitutesConstant", () => {
+  // The fallback a coalesce declares, distinctive enough that its presence in a
+  // pipeline's output can only be the substitution.
+  const FALLBACK = "ZZZ_FALLBACK";
+  const fallbackStep = {
+    function: "coalesce",
+    params: { default: FALLBACK },
+  };
+  // One step per core function, with params that let it do its job. The values
+  // below are chosen so every function that CAN empty a value does so for at
+  // least one of them.
+  const PARAMS: Record<string, Record<string, unknown> | undefined> = {
+    substring: { start: 1, length: 3 },
+    pad_left: { length: 9 },
+    parse_date: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+    null_if: { values: ["EXCLUDED"] },
+    replace_regex: { pattern: "[A-Z]+", replacement: "" },
+    extract_regex: { pattern: "([0-9]+)" },
+    filter_regex: { pattern: "^[0-9]+$" },
+    split_on: { delimiter: " " },
+    coalesce: { default: FALLBACK },
+  };
+  const stepFor = (fn: string) => ({
+    function: fn,
+    ...(PARAMS[fn] && { params: PARAMS[fn] }),
+  });
+  const VALUES = [
+    "SMITH",
+    "",
+    "   ",
+    "!!!",
+    "12/31/1999",
+    "EXCLUDED",
+    "123",
+    "Ana-Maria",
+    "0",
+    "a b",
+  ];
+  const realized = (result: ReturnType<typeof runPipeline>): string[] =>
+    result === null ? [] : result instanceof Set ? [...result] : [result];
+
+  test("the value-emptying classification matches what each function does", () => {
+    // The classification decides whether a coalesce after a step can ever
+    // substitute, so hold it to the real functions rather than to a reading of
+    // them: each is driven alone over the value corpus, and a function classified
+    // value-preserving that returns null for any of them fails here. One
+    // direction is exact -- a witness proves a function can empty a value -- and
+    // the other is corpus-bounded: it is a backstop against a misclassification,
+    // not a proof that no input anywhere empties a preserved function's value.
+    for (const fn of STANDARDIZATION_FUNCTION_NAMES) {
+      const step = stepFor(fn);
+      const emptiesSomeValue = VALUES.some(
+        (value) => runPipeline(value, [step]) === null,
+      );
+      expect(emptiesSomeValue, fn).toBe(stepCanEmptyRealizedValue(step));
+    }
+    // A pattern rule that erases the whole value is NOT emptying it: the coalesce
+    // branch fires on a null value or an empty candidate set, and the empty string
+    // is neither -- the case the name-only classification would get wrong if it
+    // reasoned from "removes characters".
+    expect(runPipeline("SMITH", [stepFor("replace_regex")])).toBe("");
+    // A name this build does not recognize is read as able to empty a value: the
+    // fail-safe direction on a consent surface, where understating a coalesce's
+    // reach is the harmful one.
+    expect(stepCanEmptyRealizedValue({ function: "not_a_real_function" })).toBe(
+      true,
+    );
+  });
+
+  test("the verdict matches whether the declared fallback is ever substituted", () => {
+    // The predicate against the runtime, for every core function in front of a
+    // coalesce: the fallback reaches the output exactly where the predicate says
+    // the step substitutes. The coalesce is last so the constant is observable
+    // rather than transformed by a later step.
+    for (const fn of STANDARDIZATION_FUNCTION_NAMES) {
+      const preceding = [stepFor(fn)];
+      const substituted = VALUES.some((value) =>
+        realized(runPipeline(value, [...preceding, fallbackStep])).includes(
+          FALLBACK,
+        ),
+      );
+      expect(substituted, fn).toBe(
+        coalesceSubstitutesConstant(fallbackStep, preceding),
+      );
+    }
+    // As the FIRST step it substitutes for nothing: a pipeline is handed a value,
+    // so the branch that substitutes is never reached.
+    expect(coalesceSubstitutesConstant(fallbackStep, [])).toBe(false);
+    for (const value of VALUES)
+      expect(realized(runPipeline(value, [fallbackStep])), value).not.toContain(
+        FALLBACK,
+      );
+  });
+
+  test("a default core cannot substitute is no substitution at any position", () => {
+    // Wire params are z.unknown(), so a partner can declare `default` as any JSON
+    // value or omit it; every non-string runs as an absent default.
+    const emptying = [stepFor("substring")];
+    for (const badDefault of [null, 42, [], {}, true]) {
+      const step = { function: "coalesce", params: { default: badDefault } };
+      expect(
+        coalesceSubstitutesConstant(step, emptying),
+        JSON.stringify(badDefault),
+      ).toBe(false);
+    }
+    expect(
+      coalesceSubstitutesConstant({ function: "coalesce" }, emptying),
+    ).toBe(false);
+    // And no other function is ever the substituting step, whatever precedes it.
+    for (const fn of STANDARDIZATION_FUNCTION_NAMES.filter(
+      (name) => name !== "coalesce",
+    ))
+      expect(coalesceSubstitutesConstant(stepFor(fn), emptying), fn).toBe(
+        false,
+      );
+  });
+
+  test("the real builder substitutes for no absent or blank field (differential)", () => {
+    // The position half's premise, held to the key builder rather than asserted:
+    // a record whose field is missing or blank never reaches the coalesce, so its
+    // declared fallback appears in no key string. buildKeyStrings drops the row
+    // for the key when the field realizes no value, and an element pipeline runs
+    // on the value the field DID realize.
+    const terms: LinkageTerms = {
+      version: "1.0.0",
+      identity: "Party",
+      date: "2025-01-01",
+      algorithm: "psi",
+      linkageStrategy: "cascade",
+      output: { expectsOutput: true, shareWithPartner: false },
+      deduplicate: false,
+      linkageFields: [{ name: "last_name", type: "last_name" }],
+      linkageKeys: [
+        {
+          name: "LN",
+          elements: [{ field: "last_name", transform: [fallbackStep] }],
+        },
+      ],
+    };
+    const rows = [{ last_name: "Smith" }, { last_name: "" }, {}];
+    const dataset = buildStandardizedDataset(
+      undefined,
+      rows,
+      inferMetadata(["last_name"]),
+      terms,
+    );
+    const keyStrings = rows.flatMap((_, index) => [
+      ...(buildKeyStrings(terms.linkageKeys[0], dataset, index) ?? []),
+    ]);
+    // Not vacuous: the record that carries a value does key, unsubstituted.
+    expect(keyStrings.length).toBeGreaterThan(0);
+    expect(keyStrings.some((key) => key.includes(FALLBACK))).toBe(false);
+  });
+
+  test("the dead-pipeline rescue reads the same verdicts through the predicate", () => {
+    // pipelineAlwaysDrops shares the predicate, and its rescue is unmoved by the
+    // position half: wherever it asks, the parse_date that emptied every record is
+    // itself a step ahead of the coalesce.
+    const dead = { function: "parse_date", params: { inputFormat: "MM/DD" } };
+    expect(pipelineAlwaysDrops([dead])).toBe(true);
+    expect(pipelineAlwaysDrops([dead, fallbackStep])).toBe(false);
+    expect(pipelineAlwaysDrops([fallbackStep, dead])).toBe(true);
+    expect(pipelineAlwaysDrops([dead, { function: "coalesce" }])).toBe(true);
+    expect(
+      pipelineAlwaysDrops([dead, { function: "coalesce" }, fallbackStep]),
+    ).toBe(false);
+    expect(pipelineAlwaysDrops([dead, fallbackStep, dead])).toBe(true);
+    expect(pipelineAlwaysDrops([fallbackStep])).toBe(false);
+  });
+});
+
+// --- pipelineAlwaysDrops rescue equivalence ----------------------------------
+
+describe("pipelineAlwaysDrops rescue equivalence", () => {
+  // pipelineAlwaysDrops rescues a dropped value through the shared predicate,
+  // whose position half -- some earlier step can empty the value -- is inert on
+  // that path: every rescue the loop reaches already has an emptying step ahead
+  // of it. This sweep is what holds that claim, rather than a comment asserting
+  // it. Each pipeline the alphabet below spells goes through the shipped function
+  // and through a rescue testing the declared default alone, and any pipeline
+  // whose verdicts differ is reported.
+  //
+  // Two changes make it red, both wanting a fresh look at the rescue. A second
+  // source of `dropped` -- a value-independent drop other than an always-dropping
+  // parse_date -- reaches the rescue from a position the weaker rescue below does
+  // not model. And allowlisting a function that sets `dropped` (parse_date today)
+  // withholds the position half from a coalesce that would otherwise rescue,
+  // turning a live pipeline into a dead one on the consent surface. Allowlisting
+  // a function that never sets `dropped` leaves this sweep green; that
+  // misclassification is the value-emptying classification test's to catch.
+  const FALLBACK_DEFAULT = "ZZZ_FALLBACK";
+
+  // The rescue with no position half: the declared default's shape alone. A local
+  // transcription rather than a call into core, since a differential against the
+  // shipped predicate would compare it to itself.
+  const dropsUnderDefaultShapeRescue = (
+    steps: ReadonlyArray<TransformStep>,
+  ): boolean => {
+    let dropped = false;
+    for (const step of steps) {
+      if (step.function === "coalesce") {
+        if (dropped && typeof step.params?.default === "string")
+          dropped = false;
+        continue;
+      }
+      if (dropped) continue;
+      if (
+        step.function === "parse_date" &&
+        parseDateInputDropsEveryRecord(step.params)
+      )
+        dropped = true;
+    }
+    return dropped;
+  };
+
+  // Every function core knows, bare, plus the parse_date and coalesce shapes the
+  // two formulations turn on: a wire step's params are z.unknown(), so the
+  // non-string and null spellings are reachable from a partner's terms.
+  const ALPHABET: ReadonlyArray<TransformStep> = [
+    ...STANDARDIZATION_FUNCTION_NAMES.map((fn) => ({ function: fn })),
+    { function: "parse_date", params: {} },
+    { function: "parse_date", params: { inputFormat: "MM/DD" } },
+    { function: "parse_date", params: { inputFormat: "MM/DD/YYYY" } },
+    { function: "parse_date", params: { inputFormat: null } },
+    { function: "parse_date", params: { inputFormat: 42 } },
+    { function: "coalesce", params: {} },
+    { function: "coalesce", params: { default: FALLBACK_DEFAULT } },
+    { function: "coalesce", params: { default: 42 } },
+    { function: "coalesce", params: { default: null } },
+    { function: "not_a_real_function" },
+  ];
+  const MAX_PIPELINE_LENGTH = 4;
+
+  const forEachPipeline = (
+    visit: (pipeline: TransformStep[]) => void,
+  ): void => {
+    const extend = (prefix: TransformStep[]): void => {
+      if (prefix.length === MAX_PIPELINE_LENGTH) return;
+      for (const step of ALPHABET) {
+        const pipeline = [...prefix, step];
+        visit(pipeline);
+        extend(pipeline);
+      }
+    };
+    extend([]);
+  };
+
+  test("the position half withholds no rescue the prior formulation makes", () => {
+    const divergent: string[] = [];
+    let examined = 0;
+    let deadVerdicts = 0;
+    forEachPipeline((pipeline) => {
+      examined += 1;
+      const drops = pipelineAlwaysDrops(pipeline);
+      if (drops) deadVerdicts += 1;
+      if (drops !== dropsUnderDefaultShapeRescue(pipeline))
+        divergent.push(JSON.stringify(pipeline));
+    });
+    // Two assertions so a failure carries witnesses as well as its scale: the
+    // whole divergent list is elided in the diff once it runs to thousands.
+    expect(divergent.slice(0, 3)).toEqual([]);
+    expect(divergent).toHaveLength(0);
+    // Not vacuous: the sweep is the full enumeration and reaches both verdicts.
+    const enumeratedPipelines = Array.from(
+      { length: MAX_PIPELINE_LENGTH },
+      (_, index) => ALPHABET.length ** (index + 1),
+    ).reduce((total, count) => total + count, 0);
+    expect(examined).toBe(enumeratedPipelines);
+    expect(deadVerdicts).toBeGreaterThan(0);
+    expect(deadVerdicts).toBeLessThan(examined);
   });
 });
 

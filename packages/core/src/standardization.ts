@@ -1106,7 +1106,7 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     name: "coalesce",
     label: "Coalesce",
     blurb:
-      "Substitute a fallback value for an empty field, which can create matches that would not otherwise occur.",
+      "Substitute a fallback value where an earlier rule left the value empty, which can create matches that would not otherwise occur.",
     tier: "standard",
     params: z.object({
       default: z.string().optional(),
@@ -2877,6 +2877,95 @@ export function parseDateInputDropsEveryRecord(
 }
 
 /**
+ * The functions whose compiled step returns a value for EVERY value it is handed:
+ * it may fold, erase to the empty string, pad, or expand that value, but it never
+ * returns null (and never empties a candidate set, since erasing every candidate
+ * to the empty string leaves the set non-empty). Every other function can leave a
+ * realized value empty, which is the only way the substituting branch of a later
+ * `coalesce` is ever reached.
+ *
+ * An ALLOWLIST rather than a list of the emptying functions, so a function added
+ * to {@link STANDARDIZING_FUNCTIONS} without a decision here reads as able to
+ * empty a value -- as does a name this build does not recognize at all. That
+ * over-states a `coalesce`'s reach on a consent surface, where understating it is
+ * the harmful direction.
+ *
+ * Name-only, not params-aware: a `null_if` with an empty exclusion list and a
+ * `filter_regex` matching everything drop nothing in practice, and each is still
+ * classified as able to. Pinned to the real functions by a drift test that drives
+ * every one of them over a value corpus.
+ */
+const VALUE_PRESERVING_FUNCTION_NAMES: ReadonlySet<string> = new Set([
+  "remove_non_ascii",
+  "replace_separators_with_spaces",
+  "squash_spaces",
+  "remove_punctuation",
+  "remove_dashes",
+  "trim_whitespace",
+  "to_upper_case",
+  "to_lower_case",
+  "remove_accents",
+  "remove_affixes",
+  "pad_left",
+  "replace_regex",
+  "split_on",
+  "coalesce",
+]);
+
+/**
+ * Whether `step` can leave a value the record realized empty -- the position half
+ * of {@link coalesceSubstitutesConstant}, since a `coalesce` substitutes only
+ * where some earlier step has emptied the value.
+ *
+ * @internal exported so the drift test can hold this classification to the real
+ * functions: each is driven over a value corpus, and one classified
+ * value-preserving that returns null for any of them fails.
+ */
+export function stepCanEmptyRealizedValue(step: TransformStep): boolean {
+  return !VALUE_PRESERVING_FUNCTION_NAMES.has(step.function);
+}
+
+/**
+ * Whether the `coalesce` step at a given position actually substitutes its
+ * fallback there. Two conditions, both necessary:
+ *
+ * - Its declared `default` is a string, the only shape {@link compileStep} turns
+ *   into a substitution value. Wire params are `z.unknown()` with no per-function
+ *   shape, so a partner can declare `default` as any JSON value (or omit it);
+ *   every non-string behaves as an absent default, which {@link applyStep}'s
+ *   coalesce branch runs as a pass-through.
+ * - Some step BEFORE it can empty the value ({@link stepCanEmptyRealizedValue}).
+ *   The branch that substitutes fires on a null value or an empty candidate set,
+ *   and a pipeline starts from a non-null string -- {@link applyElementTransform}
+ *   and {@link runCompiledPipeline} both take one -- so a coalesce reached with a
+ *   value still in hand returns that value untouched. An ABSENT field never
+ *   reaches the step either: {@link buildKeyStrings} drops the whole row for the
+ *   key when the field realizes no value, and a field whose column is missing
+ *   realizes none without running its pipeline at all. So the records a
+ *   substituting coalesce puts on one constant are the ones an earlier RULE
+ *   emptied, never the ones whose field is absent.
+ *
+ * `precedingSteps` are the steps that run before `step` in the same pipeline,
+ * required rather than defaulted: the verdict is a property of the position, not
+ * of the step alone.
+ *
+ * Shared so every terms-level reading of a coalesce's effect -- the dead-pipeline
+ * rescue in {@link pipelineAlwaysDrops}, and the consent header's collapse marker
+ * and per-step detail copy in `invitationSummary.ts` -- turns on one predicate
+ * rather than a restated test that could drift from the runtime.
+ */
+export function coalesceSubstitutesConstant(
+  step: TransformStep,
+  precedingSteps: ReadonlyArray<TransformStep>,
+): boolean {
+  return (
+    step.function === "coalesce" &&
+    typeof step.params?.default === "string" &&
+    precedingSteps.some(stepCanEmptyRealizedValue)
+  );
+}
+
+/**
  * Whether a transform/standardization pipeline produces NO value for every
  * possible input -- a self-defeating "dead" pipeline, determinable from the terms
  * alone without any data. Today the only value-INDEPENDENT drop core recognizes is
@@ -2901,11 +2990,16 @@ export function pipelineAlwaysDrops(
 ): boolean {
   if (steps === undefined) return false;
   let dropped = false;
-  for (const step of steps) {
+  for (const [index, step] of steps.entries()) {
     if (step.function === "coalesce") {
       // A string default substitutes a constant for a dropped value, rescuing it;
-      // an undefined or non-string default leaves a dropped value dropped.
-      if (dropped && typeof step.params?.default === "string") dropped = false;
+      // an undefined or non-string default leaves a dropped value dropped. The
+      // shared predicate also tests a position half this loop's own reasoning does
+      // not need; that it withholds no rescue here is held by the differential
+      // sweep in standardization.test.ts ("pipelineAlwaysDrops rescue
+      // equivalence") rather than asserted in this comment.
+      if (dropped && coalesceSubstitutesConstant(step, steps.slice(0, index)))
+        dropped = false;
       continue;
     }
     // A non-coalesce step null-propagates a dropped value, so once dropped the

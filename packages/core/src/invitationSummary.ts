@@ -1,5 +1,6 @@
 import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
+  coalesceSubstitutesConstant,
   dateFormatComponents,
   describeTransformCoercions,
   FAN_OUT_FUNCTION_NAMES,
@@ -140,8 +141,23 @@ export const TRANSFORM_FUNCTION_GLOSSARY: Record<string, string> = {
     "Splits the value into several candidates, each able to match " +
     "independently, so a record matches when any one of them does.",
   coalesce:
-    "Substitutes a fallback value for an empty field, which can create matches that would not otherwise occur.",
+    "Substitutes a fallback value where an earlier rule left the value empty, " +
+    "which can create matches that would not otherwise occur.",
 };
+
+/**
+ * The description a `coalesce` step earns where it cannot substitute anything
+ * (core's {@link coalesceSubstitutesConstant} is false for it): a declared
+ * `default` that is not text, a position no emptying rule precedes, or both. The
+ * glossary line above would assert a substitution this step never performs -- the
+ * claim the header's own marker is gated on -- so the detail row states what runs
+ * instead, and names both conditions rather than the one that happens to fail, so
+ * one line covers every non-substituting shape.
+ */
+const COALESCE_WITHOUT_SUBSTITUTION_DESCRIPTION =
+  "Declares a fallback value but substitutes nothing here: a value is replaced " +
+  "only where an earlier rule left it empty, and only by a text default. " +
+  "Records pass through this step unchanged.";
 
 /** Legal-agreement context, with the partner-controlled free text sanitized. */
 export interface InvitationLegalAgreementSummary {
@@ -275,7 +291,10 @@ export interface InvitationTransformSummary {
    * Plain-language description of what this function does to matching, from
    * {@link TRANSFORM_FUNCTION_GLOSSARY}. Fixed copy keyed by the recognized
    * function name (not partner-controlled), so it is safe to render verbatim.
-   * Absent when the declared function name is one core does not recognize.
+   * Absent when the declared function name is one core does not recognize. One
+   * function's copy turns on its position as well as its name: a `coalesce` that
+   * substitutes nothing where it sits takes the description for that, since the
+   * glossary line would assert a substitution the run never performs.
    */
   description?: string;
   /**
@@ -786,11 +805,14 @@ function substringEffect(
  * sanitized as a whole (so a parameter key or value cannot carry control, bidi,
  * or homoglyph characters, and is truncated), and the entry count is capped.
  * `positionalSafe` lets a recognized `substring` lead with a literal slice phrase
- * (see {@link substringEffect}) on a name field.
+ * (see {@link substringEffect}) on a name field. `substitutesFallback` is core's
+ * verdict on whether a `coalesce` substitutes where this step sits, which parts
+ * its two descriptions; it is false for every other function.
  */
 function summarizeTransform(
   step: TransformStep,
   positionalSafe: boolean,
+  substitutesFallback: boolean,
 ): InvitationTransformSummary {
   const entries = Object.entries(step.params ?? {});
   const shown = entries.slice(0, MAX_DISPLAYED_PARAMS);
@@ -809,9 +831,14 @@ function summarizeTransform(
   // The glossary lookup uses the RAW function name and the hasOwn guard (not a
   // bare index) so the absent case stays visible to the type system -- the
   // partner-controlled name may match no entry, which the Record index signature
-  // alone would silently type as string.
+  // alone would silently type as string. A coalesce that substitutes nothing where
+  // it sits takes the description for that instead of the glossary's, so this row
+  // cannot assert a substitution the header's marker (gated on the same core
+  // predicate) has already declined to name.
   const effect = substringEffect(step, positionalSafe);
   if (effect !== undefined) summary.effect = effect;
+  else if (step.function === "coalesce" && !substitutesFallback)
+    summary.description = COALESCE_WITHOUT_SUBSTITUTION_DESCRIPTION;
   else if (Object.hasOwn(TRANSFORM_FUNCTION_GLOSSARY, step.function))
     summary.description = TRANSFORM_FUNCTION_GLOSSARY[step.function];
   // Surface each runtime-coerced param as its own note rather than folded into
@@ -959,7 +986,7 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * partner-authored pattern or value list -- or a fill whose reach into the sliced
  * value is a property of each record rather than of the terms -- makes the
  * direction indeterminate it names the RULE directly ("pattern replacement",
- * "pattern extraction", "pattern filter", "excludes values", "padded slice").
+ * "pattern extraction", "padded slice", "pattern filter", "excludes values").
  * Informative, not a broaden-only warning: `filter_regex` and `null_if` narrow
  * matching but are still surfaced. "fuzzy" is reserved for the genuine
  * fuzzy-comparison expansion, distinct from `substring`'s "partial". None of the
@@ -1026,11 +1053,16 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *   every plain format. Keeping it also stops a date-collapsing slice from
  *   showing NO marker, since a merely reformatting `parse_date` earns none of
  *   its own.
- * - `coalesce` keeps it. It substitutes only where the value is ABSENT, so a
- *   record that carries an identifier is truncated literally -- unlike `pad_left`,
- *   which rewrites the value of every record -- and the substitution is
- *   order-independent, so suppressing here would mark `[coalesce, substring]` and
- *   `[substring, coalesce]` differently for the same matching behavior.
+ * - `coalesce` keeps it. It substitutes only where an earlier rule has EMPTIED the
+ *   value, so a record that still carries an identifier is truncated literally --
+ *   unlike `pad_left`, which rewrites the value of every record. The two orders are
+ *   not the same element, and the header parts them: `[substring, coalesce]`
+ *   substitutes for every record the slice emptied, and that collapse outranks the
+ *   truncation (see the ranking below), so it shows "fallback"; `[coalesce,
+ *   substring]` reaches its coalesce with the value still in hand, substitutes
+ *   nothing, and shows the truncation's own "partial". A `default` that is absent
+ *   or not a string collapses nothing in either order -- core runs the step as a
+ *   pass-through -- and leaves "partial" as well.
  * - `split_on` never reaches this rule: it is a fan-out, decided above.
  *
  * This mirrors the detail row's position-aware literal ({@link substringEffect} /
@@ -1044,13 +1076,46 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *
  * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
  * header is deliberately terse, so an element carrying more than one rule shows
- * just the first -- the fan-out rule ranks first, whichever of its two markers it
- * earns, then the maximal-breadth "any date" collapse, then the other
- * effect-named rules, then the directly-named ones, of which the padded slice is
- * last since it is the only one naming a compound rather than a single step --
- * while its complete rule set is carried on
- * {@link InvitationKeySummary.elements} for the renderer's per-key
- * detail. The element stays flagged either way.
+ * just the first, while its complete rule set is carried on
+ * {@link InvitationKeySummary.elements} for the renderer's per-key detail. The
+ * element stays flagged either way. The ranking, in order:
+ *
+ * 1. The fan-out rule, whichever of its two markers it earns.
+ * 2. The dead-pipeline suppression, which silences every marker below it.
+ * 3. The rules that COLLAPSE records onto one constant, widest first: "any date"
+ *    (every record) then "fallback" (every record an earlier rule of the element
+ *    emptied). A collapse leaves the records it touches matching each other
+ *    whatever else the pipeline does to that constant, so a coarsening word below
+ *    would understate it -- the reassuring direction on a consent surface. This
+ *    tier speaks only for a coalesce that substitutes WHERE IT SITS (core's
+ *    {@link coalesceSubstitutesConstant}, which reads both the declared `default`
+ *    and the steps ahead of it); one whose default cannot substitute, or that no
+ *    emptying step precedes, collapses nothing and contributes nothing to the
+ *    chain -- over-alarming misstates the terms as surely as understating them.
+ * 4. The remaining effect-named rules, which coarsen rather than collapse: a
+ *    truncating substring's "partial", "fuzzy", "sound-alike", and last a
+ *    component-dropping `parse_date`'s "partial".
+ * 5. The directly-named rules, where a partner-authored pattern or value list
+ *    leaves the direction indeterminate. The padded slice sits inside this group
+ *    rather than at its end: it names a determinate collapse of every short
+ *    record, so it outranks the two rules that only NARROW ("pattern filter",
+ *    "excludes values"), which substitute nothing and so leave the compound
+ *    exactly true beside them. It stays below the two value-REWRITING rules
+ *    ("pattern replacement", "pattern extraction"), since a rewrite between the
+ *    pad and the slice can dissolve the padding, leaving the compound no longer
+ *    established by the terms; the check reads the declared function set and not
+ *    where the rewrite sits, so the padded slice yields whenever one is declared.
+ *
+ * A stated limit of that order: because the padded slice is ranked last, a marker
+ * from tier 3 or 4 MASKS it, and the masking word can be the milder one. A
+ * `[pad_left, substring, parse_date]` whose output drops a date component, and a
+ * `[substring, pad_left, substring]`, each render "partial" although a window
+ * landing in the fill collapses every short record onto one constant -- a
+ * coarsening word over a collapse, the reassuring direction. Neither shape is
+ * reachable from the built-in key sets (only `substring` and `swap` appear there),
+ * so it is recorded here as a known understatement for an expert-authored
+ * compound rather than re-cut: the header names ONE marker, and every re-ordering
+ * that closes this case masks some other element's honest one.
  */
 function elementBreadthMarker(
   element: LinkageKeyElement,
@@ -1084,6 +1149,24 @@ function elementBreadthMarker(
   // handled below at the parse_date position.)
   const parseDateBreadths = steps.map(parseDateBreadth);
   if (parseDateBreadths.includes("any date")) return displayText`any date`;
+  // A `coalesce` that substitutes puts one constant on every record an earlier
+  // rule of this element emptied, so all of those records collide on that value
+  // and match each other -- the same collapse "any date" names, bounded to the
+  // emptied records rather than all of them. It therefore outranks the coarsening
+  // effects below: once a set of records is one value, truncating or fuzzing that
+  // value leaves them collapsed, so a coarsening word would understate the terms
+  // in the reassuring direction. Gated on core's own position-aware predicate
+  // rather than on the function name, so the marker fires exactly where the
+  // substitution does: a `default` that is absent or not a string runs as a
+  // pass-through, and a coalesce with no emptying step before it never reaches its
+  // substituting branch at all. Either way no constant is substituted, nothing
+  // collapses, and the chain below names what the element's other rules do.
+  if (
+    steps.some((step, index) =>
+      coalesceSubstitutesConstant(step, steps.slice(0, index)),
+    )
+  )
+    return displayText`fallback`;
   // Effect named where the direction is determinable from the terms. "partial"
   // is a literal truncation, so a substring counts only where the value it slices
   // is still composed of the acceptor's identifier -- not after a step that
@@ -1100,18 +1183,20 @@ function elementBreadthMarker(
   if (truncatesLiteral) return displayText`partial`;
   if (element.generateFuzzyComparisons !== undefined) return displayText`fuzzy`;
   if (functions.has("phonetic")) return displayText`sound-alike`;
-  if (functions.has("coalesce")) return displayText`fallback`;
   // parse_date is routine date canonicalization UNLESS its output layout narrows
   // matching: an output that keeps a date token but drops a component its input
   // carries matches on only part of the date ("partial"). The tokenless
   // every-date-to-one case is the stronger "any date", handled at the top.
   if (parseDateBreadths.includes("partial")) return displayText`partial`;
   // Rule named directly where a partner-authored pattern or value list makes the
-  // matching direction indeterminate from the terms alone.
+  // matching direction indeterminate from the terms alone. The two that REWRITE
+  // the value rank above the padded slice: such a rewrite between the pad and the
+  // slice can dissolve the padding, so the compound below would assert a collapse
+  // the terms no longer establish. This reads the declared function set rather
+  // than where the rewrite sits, so the padded slice yields to either of them
+  // wherever one appears.
   if (functions.has("replace_regex")) return displayText`pattern replacement`;
   if (functions.has("extract_regex")) return displayText`pattern extraction`;
-  if (functions.has("filter_regex")) return displayText`pattern filter`;
-  if (functions.has("null_if")) return displayText`excludes values`;
   // The fall-through for the one breaking function with no marker of its own:
   // padding alone is routine canonicalization, so a `pad_left` that suppressed a
   // later substring's "partial" would otherwise leave a compound that does loosen
@@ -1124,6 +1209,12 @@ function elementBreadthMarker(
       steps.slice(0, index).some((prior) => prior.function === "pad_left"),
   );
   if (slicesPaddedValue) return displayText`padded slice`;
+  // The two record-DROPPING rules rank below it: each passes the original value
+  // through or drops the record, substituting nothing, so the padded slice stays
+  // exactly true beside them -- and each names a narrowing, which is the milder
+  // claim of the two on a surface where over-matching is the acceptor's concern.
+  if (functions.has("filter_regex")) return displayText`pattern filter`;
+  if (functions.has("null_if")) return displayText`excludes values`;
   return undefined;
 }
 
@@ -1163,14 +1254,21 @@ function summarizeKey(
       // a positional phrase there would be unverifiable; summarizeTransform falls
       // back to the glossary description for it.
       const positionalSafe = type === "first_name" || type === "last_name";
+      const steps = element.transform ?? [];
       return {
         fieldLabel: labelForField(element.field),
         // The substring literal is faithful only on a name field's FIRST step: a
         // later step runs on a value an earlier one already rewrote (e.g.
         // phonetic then substring takes the first N of the sound-alike code, not
         // the name), so "the first N characters" of the original would be wrong.
-        transforms: (element.transform ?? []).map((step, stepIndex) =>
-          summarizeTransform(step, positionalSafe && stepIndex === 0),
+        // A coalesce's description is position-dependent for the same reason: what
+        // it does turns on what the steps before it can leave for it.
+        transforms: steps.map((step, stepIndex) =>
+          summarizeTransform(
+            step,
+            positionalSafe && stepIndex === 0,
+            coalesceSubstitutesConstant(step, steps.slice(0, stepIndex)),
+          ),
         ),
         fuzzyComparison:
           element.generateFuzzyComparisons !== undefined
