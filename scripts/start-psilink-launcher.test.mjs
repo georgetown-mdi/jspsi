@@ -120,13 +120,35 @@ function stubUname(workspace, system) {
   chmodSync(target, 0o755);
 }
 
+/**
+ * An `id` ahead of the real one, answering with `uid` and `gid`. The launcher
+ * reads them to decide which account to run the container as, so stubbing it is
+ * what lets a root run be driven from an ordinary account.
+ */
+function stubId(workspace, uid, gid) {
+  const target = join(workspace.binDir, "id");
+  writeFileSync(
+    target,
+    [
+      "#!/bin/sh",
+      'case "$1" in',
+      `  -u) echo ${uid} ;;`,
+      `  -g) echo ${gid} ;;`,
+      "  *) exit 1 ;;",
+      "esac",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(target, 0o755);
+}
+
 /** The account the launcher runs the container as on a host that carries
  * ownership through: the one running this suite. */
 const OPERATOR_IDENTITY = `${process.getuid()}:${process.getgid()}`;
 
 /** The console argument vector the launcher would hand the engine, one argument
  * per line, for the folders given. */
-function consoleArguments(workspace, folders) {
+function consoleArguments(workspace, folders, environment = {}) {
   const assignments = Object.entries(folders)
     .map(([name, value]) => `${name}='${value}'`)
     .join("\n");
@@ -134,9 +156,21 @@ function consoleArguments(workspace, folders) {
     workspace,
     `${assignments}\nPSILINK_CONTAINER_NAME=psilink-console-1\nPSILINK_PORT=3000\n` +
       'psilink_build_console_arguments\nprintf "%s\\n" "${PSILINK_CONSOLE_ARGUMENTS[@]}"',
+    environment,
   );
   expect(run.status).toBe(0);
   return run.stdout.trim().split("\n");
+}
+
+/** Every `--volume` spec an argument vector carries, in order. */
+function volumeSpecs(args) {
+  return args.filter((value, index) => args[index - 1] === "--volume");
+}
+
+/** The container-side path of a volume spec, with any mount options stripped. */
+function mountTarget(spec) {
+  const withoutOptions = spec.replace(/:(ro|rw)$/, "");
+  return withoutOptions.slice(withoutOptions.lastIndexOf(":") + 1);
 }
 
 function breakEngine(workspace, name) {
@@ -169,12 +203,19 @@ function stampedLauncher(workspace) {
   return target;
 }
 
-function launcherEnvironment(workspace) {
-  return {
+function launcherEnvironment(workspace, extra = {}) {
+  const environment = {
     ...process.env,
     PATH: `${workspace.binDir}:${process.env.PATH}`,
     PSILINK_STUB_DIR: workspace.stubDir,
+    ...extra,
   };
+  // The launcher reads these to find the account a sudo run came from, so a
+  // case that does not name them must not inherit them from whatever invoked
+  // this suite.
+  for (const name of ["SUDO_UID", "SUDO_GID"])
+    if (!(name in extra)) delete environment[name];
+  return environment;
 }
 
 function runLauncher(workspace, script, args, input = "") {
@@ -195,11 +236,11 @@ function engineCalls(workspace) {
 }
 
 /** Run a shell snippet with the launcher sourced, as the suite's own harness. */
-function sourced(workspace, snippet) {
+function sourced(workspace, snippet, environment = {}) {
   return spawnSync(BASH, ["-c", `. '${LAUNCHER}'\n${snippet}`], {
     encoding: "utf8",
     timeout: 30_000,
-    env: launcherEnvironment(workspace),
+    env: launcherEnvironment(workspace, environment),
   });
 }
 
@@ -458,10 +499,7 @@ describe("the account the container runs as", () => {
     );
     expect(override).toBeDefined();
     const scratch = override.slice("JOB_SFTP_CREDENTIAL_DIR=".length);
-    const mountPoints = args
-      .map((value, index) => (args[index - 1] === "--volume" ? value : null))
-      .filter((value) => value !== null)
-      .map((value) => value.slice(value.lastIndexOf(":") + 1));
+    const mountPoints = volumeSpecs(args).map(mountTarget);
     expect(mountPoints).toEqual(["/data", "/input", "/rendezvous"]);
     // The console refuses to start when the scratch directory is, contains, or
     // sits inside a mounted folder: a pasted secret there would land where the
@@ -488,6 +526,57 @@ describe("the account the container runs as", () => {
     expect(args.join(" ")).not.toContain("JOB_SFTP_CREDENTIAL_DIR");
   });
 
+  it("runs a sudo-invoked launcher as the account sudo came from", () => {
+    // `sudo ./start-psilink.sh` is the standard workaround for an account that
+    // is not in the docker group, which this launcher's own message points at.
+    // Root is not the account to run the container as: it would write the
+    // operator's folders as root and hold privileges the image's posture says
+    // neither of its roles has.
+    const workspace = makeWorkspace();
+    stubUname(workspace, "Linux");
+    stubId(workspace, 0, 0);
+
+    const args = consoleArguments(
+      workspace,
+      { PSILINK_DATA_ROOT: "/home/dana/psilink-work" },
+      { SUDO_UID: "1000", SUDO_GID: "2000" },
+    );
+
+    expect(args).toContain("--user");
+    expect(args[args.indexOf("--user") + 1]).toBe("1000:2000");
+    expect(args).toContain(
+      "JOB_SFTP_CREDENTIAL_DIR=/tmp/psilink-sftp-credentials",
+    );
+  });
+
+  it("passes no identity for a root run naming no other account", () => {
+    // With nothing to run as but root, nothing is passed at all and the image's
+    // own unprivileged account runs the container -- which owns the scratch
+    // directory the image built, so the override must not travel here either.
+    for (const environment of [
+      {},
+      { SUDO_UID: "", SUDO_GID: "" },
+      { SUDO_UID: "1000" },
+      { SUDO_GID: "1000" },
+      { SUDO_UID: "root", SUDO_GID: "root" },
+      { SUDO_UID: "1000 2000", SUDO_GID: "1000" },
+      { SUDO_UID: "0", SUDO_GID: "0" },
+    ]) {
+      const workspace = makeWorkspace();
+      stubUname(workspace, "Linux");
+      stubId(workspace, 0, 0);
+
+      const args = consoleArguments(
+        workspace,
+        { PSILINK_DATA_ROOT: "/home/dana/psilink-work" },
+        environment,
+      );
+
+      expect(args).not.toContain("--user");
+      expect(args.join(" ")).not.toContain("JOB_SFTP_CREDENTIAL_DIR");
+    }
+  });
+
   it("runs the checks as the account the console will run as", () => {
     // A battery run as some other account reports on that account: the check
     // and the console it gates have to be the same one.
@@ -508,6 +597,42 @@ describe("the account the container runs as", () => {
       .split("\n")
       .find((line) => line.includes("doctor"));
     expect(doctorRun).toContain(`--user ${OPERATOR_IDENTITY}`);
+  });
+});
+
+describe("what the console may write through each mount", () => {
+  it("binds the input folder read-only", () => {
+    // The console lists the CSVs there and the exchange reads the chosen one in
+    // place; nothing is written back. The mount is what holds the console to
+    // that, rather than the prose saying so.
+    const args = consoleArguments(makeWorkspace(), {
+      PSILINK_DATA_ROOT: "/home/dana/work",
+      PSILINK_INPUT_DIR: "/home/dana/input",
+      PSILINK_RENDEZVOUS_DIR: "/home/dana/shared",
+    });
+
+    expect(volumeSpecs(args)).toEqual([
+      "/home/dana/work:/data",
+      "/home/dana/input:/input:ro",
+      "/home/dana/shared:/rendezvous",
+    ]);
+  });
+
+  it("keeps a folder given as both input and rendezvous writable", () => {
+    // The rendezvous is written by both sides, and it is bound separately: the
+    // read-only input view of that folder does not reach the writes psilink
+    // makes through /rendezvous.
+    const args = consoleArguments(makeWorkspace(), {
+      PSILINK_DATA_ROOT: "/home/dana/work",
+      PSILINK_INPUT_DIR: "/home/dana/shared",
+      PSILINK_RENDEZVOUS_DIR: "/home/dana/shared",
+    });
+
+    expect(volumeSpecs(args)).toEqual([
+      "/home/dana/work:/data",
+      "/home/dana/shared:/input:ro",
+      "/home/dana/shared:/rendezvous",
+    ]);
   });
 });
 

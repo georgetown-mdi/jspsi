@@ -213,11 +213,24 @@ PSILINK_CREDENTIAL_SCRATCH_DIR='/tmp/psilink-sftp-credentials'
 # Prints nothing when there is no identity to pass, which is also what a host
 # whose `id` does not answer gets: a value that could not be read must not become
 # an argument.
+#
+# Root is never that identity. A run under sudo is the ordinary way to arrive
+# here -- it is what a missing docker group gets worked around with, which this
+# script's own message points at -- and handing the container 0:0 would run it
+# with privileges the image's posture says neither role has, and leave every
+# folder it wrote owned by root. sudo names the account it came from, so that is
+# the one to run as; with no such account named there is nothing here to pass,
+# and the image's own unprivileged account runs the container.
 psilink_container_identity() {
   local uid='' gid=''
   [ "$(uname -s 2>/dev/null)" = 'Linux' ] || return 0
   uid=$(id -u 2>/dev/null) || return 0
   gid=$(id -g 2>/dev/null) || return 0
+  if [ "$uid" = '0' ]; then
+    uid="${SUDO_UID:-}"
+    gid="${SUDO_GID:-}"
+    [ "$uid" != '0' ] || return 0
+  fi
   case "$uid" in '' | *[!0-9]*) return 0 ;; esac
   case "$gid" in '' | *[!0-9]*) return 0 ;; esac
   printf '%s:%s' "$uid" "$gid"
@@ -885,8 +898,15 @@ psilink_build_console_arguments() {
       --env "JOB_SFTP_CREDENTIAL_DIR=$PSILINK_CREDENTIAL_SCRATCH_DIR"
     )
   fi
+  # Read-only, which is the whole of what the console asks of this folder: it
+  # lists the CSVs there and the exchange reads the chosen one in place. The
+  # mount is what holds that to the folder rather than the prose. One folder
+  # given as both input and rendezvous is bound again below, writable, at
+  # /rendezvous -- the rendezvous is what writes it.
   if [ -n "$PSILINK_INPUT_DIR" ]; then
-    PSILINK_CONSOLE_ARGUMENTS+=(--env JOB_INPUT_DIR=/input --volume "$PSILINK_INPUT_DIR:/input")
+    PSILINK_CONSOLE_ARGUMENTS+=(
+      --env JOB_INPUT_DIR=/input --volume "$PSILINK_INPUT_DIR:/input:ro"
+    )
   fi
   if [ -n "$PSILINK_RENDEZVOUS_DIR" ]; then
     PSILINK_CONSOLE_ARGUMENTS+=(
