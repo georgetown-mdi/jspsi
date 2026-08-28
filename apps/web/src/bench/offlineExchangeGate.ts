@@ -10,7 +10,15 @@
  * says an interface exists, not that the partner or the coordination server is
  * reachable (see `apps/web/src/utils/networkStatus.ts`), so no surface reads it
  * as a promise that a run will work.
+ *
+ * Those surfaces span every channel psilink runs -- a browser exchange reaching
+ * the partner's browser, a console SFTP run reaching the server the two parties
+ * agreed on, and a console shared-folder run reaching the mount a sync tool
+ * keeps in step -- so the sentence names the network the run needs rather than a
+ * connection to the partner, which only one of them makes. The simultaneity is
+ * what all of them do share, so it is stated outright.
  */
 export const OFFLINE_EXCHANGE_REASON =
-  "This device is offline, so an exchange cannot run: it connects straight to " +
-  "your partner, who has to be running their side at the same time.";
+  "This device is offline, so an exchange cannot run: it needs the network for " +
+  "the whole run -- to your partner's browser, an agreed server, or a shared " +
+  "folder -- and your partner has to be running their side at the same time.";
