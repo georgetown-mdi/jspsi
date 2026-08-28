@@ -549,6 +549,65 @@ export function applyManagedExchangeLastRun(
   return parseManagedExchangeRecord({ ...record, lastRun });
 }
 
+/** The schedule bookkeeping one closed window produces, written as a unit: the
+ * advanced schedule and, when the window earned one, the run entry that goes with
+ * it. `nextWindow`, `consecutiveMisses`, and `lastRun` describe a single window's
+ * disposition, so a reader must never see a count advanced past a window whose
+ * planned attempt has not moved, or the reverse. */
+export interface ManagedExchangeScheduleAdvance {
+  /** The schedule with `nextWindow` and `consecutiveMisses` advanced. Its
+   * `anchor`, `intervalDays`, and `windowSeconds` are the cadence the advance was
+   * computed against, and are matched against the stored record rather than
+   * written (see {@link applyManagedExchangeScheduleAdvance}). */
+  schedule: ManagedExchangeSchedule;
+  /** The window's run bookkeeping. Omitted when the window produced none -- one
+   * the single-writer lock was held through, or one a run already recorded its
+   * own outcome for. */
+  lastRun?: ManagedExchangeLastRun;
+}
+
+/** Apply a scheduled window's bookkeeping to a record, producing a validated new
+ * record with `schedule` and `lastRun` advanced together and everything else --
+ * the document, the secret, the handle -- carried through untouched. The input
+ * record is not mutated. This is the runner's write; the attended run path
+ * records `lastRun` alone and never touches `schedule`.
+ *
+ * Conditioned on the stored cadence, which the operator may edit at any time from
+ * another tab: a record whose `schedule` is absent, or whose `anchor`,
+ * `intervalDays`, or `windowSeconds` no longer match the ones the advance was
+ * computed against, is left entirely unchanged. Writing anyway would resurrect a
+ * schedule the operator dropped, or overwrite a re-entered cadence with a planned
+ * window derived from the replaced one; a wake against the current cadence
+ * recomputes both honestly.
+ *
+ * `lastRun` alone stays monotonic on `at` exactly as
+ * {@link applyManagedExchangeLastRun}: the schedule advance still applies -- the
+ * window did close, whatever landed afterwards -- while a bookkeeping entry
+ * staler than the stored one is dropped rather than masking a newer outcome. */
+export function applyManagedExchangeScheduleAdvance(
+  record: ManagedExchangeRecord,
+  advance: ManagedExchangeScheduleAdvance,
+): ManagedExchangeRecord {
+  const stored = record.schedule;
+  if (
+    stored === undefined ||
+    stored.anchor !== advance.schedule.anchor ||
+    stored.intervalDays !== advance.schedule.intervalDays ||
+    stored.windowSeconds !== advance.schedule.windowSeconds
+  )
+    return parseManagedExchangeRecord(record);
+  const next: ManagedExchangeRecord = { ...record, schedule: advance.schedule };
+  if (
+    advance.lastRun !== undefined &&
+    !(
+      record.lastRun !== undefined &&
+      Date.parse(record.lastRun.at) > Date.parse(advance.lastRun.at)
+    )
+  )
+    next.lastRun = advance.lastRun;
+  return parseManagedExchangeRecord(next);
+}
+
 /**
  * Apply an input-file handle to a record, producing a validated new record with
  * only `inputFileHandle` changed -- the document, the secret, and the bookkeeping

@@ -27,6 +27,7 @@ import {
   applyManagedExchangeLocalEdits,
   applyManagedExchangeReinviteRotation,
   applyManagedExchangeRotation,
+  applyManagedExchangeScheduleAdvance,
   buildManagedExchangeRecord,
   diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
@@ -39,6 +40,7 @@ import type {
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
   ManagedExchangeRotation,
+  ManagedExchangeScheduleAdvance,
   NewManagedExchange,
 } from "./managedExchangeRecord";
 
@@ -730,6 +732,35 @@ export async function recordManagedExchangeLastRun(
       throw new Error(`no managed exchange with id ${id}`);
     const existing = parseManagedExchangeRecord(stored);
     return applyManagedExchangeLastRun(existing, lastRun);
+  });
+}
+
+/**
+ * Persist a scheduled window's bookkeeping to the stored record: `nextWindow`,
+ * `consecutiveMisses`, and the window's `lastRun` advance in ONE strict-durability
+ * readwrite transaction ({@link readModifyWriteRecord}), leaving the rotated
+ * secret and the document untouched. Atomicity is the point rather than a
+ * side-effect: split across two writes, a wake interrupted between them would
+ * leave a planned window that has moved past a count that has not (or the
+ * reverse), and the next wake would recount or skip the difference. The
+ * application is field-scoped through {@link applyManagedExchangeScheduleAdvance}
+ * (which re-validates), so a window's bookkeeping is structurally incapable of
+ * carrying a stale secret or a stale document back over a concurrent rotation
+ * write, and it is conditioned on the stored cadence, so it cannot overwrite a
+ * schedule the operator edited or dropped from another tab while the window ran.
+ *
+ * @throws {Error} if no record with `id` exists.
+ * @throws {ZodError} if the stored value or the resulting record is invalid.
+ */
+export async function persistManagedExchangeScheduleAdvance(
+  id: string,
+  advance: ManagedExchangeScheduleAdvance,
+): Promise<ManagedExchangeRecord> {
+  return readModifyWriteRecord(id, (stored) => {
+    if (stored === undefined)
+      throw new Error(`no managed exchange with id ${id}`);
+    const existing = parseManagedExchangeRecord(stored);
+    return applyManagedExchangeScheduleAdvance(existing, advance);
   });
 }
 

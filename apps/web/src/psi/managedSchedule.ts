@@ -1,0 +1,422 @@
+/**
+ * The managed exchange's schedule arithmetic: where a recurrence's run windows
+ * fall, which window an instant sits in, and the catch-up and advance rules that
+ * move `nextWindow` and `consecutiveMisses`. The normative rules -- the field
+ * layout, the catch-up rule, and the `consecutiveMisses` outcome table -- are in
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, "The schedule object" and "Catch-up on
+ * wake"; this module implements them and the checks below carry only the
+ * constraints the code shows.
+ *
+ * Every instant here is UTC milliseconds computed from the record's stored-UTC
+ * `anchor` and its whole-day integer period, so window n opens at `anchor + n *
+ * intervalDays` in fixed milliseconds and never by a local-calendar date add. A
+ * calendar add shifts the instant by the offset change across a daylight-saving
+ * transition, which would move an unattended window by an hour on one machine
+ * and not the other -- two runners that no longer overlap, recorded as mutual
+ * misses. Nothing below reads the host zone: the operator's local wall-clock
+ * cadence is resolved to the UTC anchor exactly once, by
+ * {@link resolveLocalCadenceAnchor} at save and again only when the operator
+ * edits the schedule.
+ *
+ * `now` is injected rather than read, matching the clock discipline of the rest
+ * of the managed modules, so every rule here is a pure function of its inputs.
+ */
+
+import type {
+  ManagedExchangeLastRun,
+  ManagedExchangeRunOutcome,
+  ManagedExchangeSchedule,
+} from "./managedExchangeRecord";
+
+/** Milliseconds in a day, matching {@link ./managedRunRotate.ts}'s `MS_PER_DAY`:
+ * the recurrence period is a whole number of these, never a calendar day. */
+const MS_PER_DAY = 86_400_000;
+
+const MS_PER_SECOND = 1000;
+
+/** The largest instant an ECMAScript `Date` represents; an arithmetic result
+ * outside it has no ISO 8601 rendering. */
+const MAX_TIME_VALUE = 8.64e15;
+
+/** A single run window on the recurrence lattice, in UTC milliseconds. */
+export interface ManagedScheduleWindow {
+  /** Zero-based recurrence index counted from the anchor: window 0 opens at the
+   * anchor itself. */
+  index: number;
+  /** The window's open instant, UTC milliseconds. */
+  opensAtMs: number;
+  /** The window's close instant, UTC milliseconds, EXCLUSIVE: the window is the
+   * half-open interval `[opensAtMs, closesAtMs)`, so an instant exactly at the
+   * close belongs to no window and the window counts as elapsed there. */
+  closesAtMs: number;
+}
+
+/** Where an instant sits relative to a window: `"before"` it opens, `"open"`
+ * inside it, `"elapsed"` at or after its close. */
+export type ManagedScheduleWindowState = "before" | "open" | "elapsed";
+
+/**
+ * What a window's occupancy produced, as the advance rules read it. The run
+ * outcomes are the record's own closed enum; `"unattempted"` is the extra case
+ * the record deliberately cannot hold -- a window this runner never attempted,
+ * because the single-writer lock was held elsewhere -- which advances the
+ * schedule past the window while recording neither an attempt nor a miss.
+ */
+export type ManagedScheduleWindowDisposition =
+  ManagedExchangeRunOutcome | "unattempted";
+
+/** The schedule state a wake computes, ready for one atomic bookkeeping write. */
+export interface ManagedScheduleCatchUp {
+  /** The schedule with `nextWindow` advanced to the first window not yet closed
+   * (past a window a recorded success already satisfied) and
+   * `consecutiveMisses` carrying every elapsed window's verdict. */
+  schedule: ManagedExchangeSchedule;
+  /** How many fully-elapsed windows passed unattempted -- one miss each,
+   * whichever side was absent. Zero when the wake found nothing elapsed. */
+  missedWindows: number;
+  /** The window to attempt immediately: the first window not yet closed, when
+   * `now` falls inside it and no recorded success has already satisfied it.
+   * Absent when that window has not opened yet. */
+  dueWindow?: ManagedScheduleWindow;
+  /** The `"missed"` bookkeeping the most recent elapsed window earns, stamped at
+   * that window's close. Absent when no window elapsed, or when the most recent
+   * elapsed one carries a recorded run whose own bookkeeping is the honest
+   * latest. */
+  missedLastRun?: ManagedExchangeLastRun;
+}
+
+/**
+ * An operator's cadence as they enter it: a calendar date and wall-clock time of
+ * day in the host's own zone, which {@link resolveLocalCadenceAnchor} resolves to
+ * the stored UTC anchor. A weekly "09:00 Tuesdays" is a Tuesday's date here plus
+ * an `intervalDays` of 7 -- the recurrence carries no weekday of its own.
+ */
+export interface LocalWallClockCadence {
+  /** Local calendar year of the first agreed window (1 through 9999). */
+  year: number;
+  /** Local calendar month of the first agreed window, 1 through 12. */
+  month: number;
+  /** Local calendar day of the first agreed window, 1 through the month's
+   * length. */
+  day: number;
+  /** Local wall-clock hour the window opens, 0 through 23. */
+  hour: number;
+  /** Local wall-clock minute the window opens, 0 through 59. */
+  minute: number;
+}
+
+/** The recurrence lattice a schedule defines, reduced to milliseconds once so
+ * every rule below is integer arithmetic. */
+interface ScheduleGeometry {
+  anchorMs: number;
+  periodMs: number;
+  widthMs: number;
+}
+
+function parseScheduleInstant(value: string, field: string): number {
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed))
+    throw new RangeError(`managed schedule ${field} is not a usable instant`);
+  return parsed;
+}
+
+function toScheduleInstant(ms: number): string {
+  if (!Number.isFinite(ms) || Math.abs(ms) > MAX_TIME_VALUE)
+    throw new RangeError(
+      "managed schedule window falls outside the representable instant range",
+    );
+  return new Date(ms).toISOString();
+}
+
+/**
+ * Reduce a schedule to its lattice, rejecting a period or width the record's
+ * schema would not admit. The schema is the first line of defense
+ * (`intervalDays` and `windowSeconds` at least 1, both integers), so this
+ * repeats it where the division happens: a zero period would divide to
+ * `Infinity` and an unparseable anchor to `NaN`, either of which would silently
+ * carry a nonsense instant into the bookkeeping write instead of aborting it.
+ */
+function readScheduleGeometry(
+  schedule: ManagedExchangeSchedule,
+): ScheduleGeometry {
+  if (!Number.isInteger(schedule.intervalDays) || schedule.intervalDays < 1)
+    throw new RangeError(
+      "managed schedule intervalDays must be a whole number of days, at least 1",
+    );
+  if (!Number.isInteger(schedule.windowSeconds) || schedule.windowSeconds < 1)
+    throw new RangeError(
+      "managed schedule windowSeconds must be a whole number of seconds, at least 1",
+    );
+  return {
+    anchorMs: parseScheduleInstant(schedule.anchor, "anchor"),
+    periodMs: schedule.intervalDays * MS_PER_DAY,
+    widthMs: schedule.windowSeconds * MS_PER_SECOND,
+  };
+}
+
+function windowAt(
+  geometry: ScheduleGeometry,
+  index: number,
+): ManagedScheduleWindow {
+  const opensAtMs = geometry.anchorMs + index * geometry.periodMs;
+  return { index, opensAtMs, closesAtMs: opensAtMs + geometry.widthMs };
+}
+
+/** The index of the window containing `atMs`, or `undefined` when the instant
+ * falls before the first window or in the gap after one closed. */
+function windowIndexContaining(
+  geometry: ScheduleGeometry,
+  atMs: number,
+): number | undefined {
+  if (Number.isNaN(atMs)) return undefined;
+  const index = Math.floor((atMs - geometry.anchorMs) / geometry.periodMs);
+  if (index < 0) return undefined;
+  return atMs < windowAt(geometry, index).closesAtMs ? index : undefined;
+}
+
+/**
+ * The run window at a zero-based recurrence index: window 0 opens at the anchor
+ * and window n opens `n * intervalDays` later, in fixed milliseconds.
+ *
+ * @throws {RangeError} if the schedule's anchor is not a usable instant or its
+ *   period or width is not the whole positive number the schema requires.
+ */
+export function managedScheduleWindow(
+  schedule: ManagedExchangeSchedule,
+  index: number,
+): ManagedScheduleWindow {
+  return windowAt(readScheduleGeometry(schedule), index);
+}
+
+/** Where `atMs` sits relative to `window`, reading the window as the half-open
+ * interval `[opensAtMs, closesAtMs)`. */
+export function managedScheduleWindowStateAt(
+  window: ManagedScheduleWindow,
+  atMs: number,
+): ManagedScheduleWindowState {
+  if (atMs < window.opensAtMs) return "before";
+  return atMs < window.closesAtMs ? "open" : "elapsed";
+}
+
+/**
+ * The first window that opens strictly after `atMs`, never earlier than window 0.
+ * An instant exactly at a window's open therefore yields the FOLLOWING window,
+ * which is what an advance past a window just occupied wants.
+ *
+ * @throws {RangeError} if the schedule's lattice is unusable (see
+ *   {@link managedScheduleWindow}).
+ */
+export function nextManagedScheduleWindowAfter(
+  schedule: ManagedExchangeSchedule,
+  atMs: number,
+): ManagedScheduleWindow {
+  const geometry = readScheduleGeometry(schedule);
+  const index = Math.max(
+    0,
+    Math.floor((atMs - geometry.anchorMs) / geometry.periodMs) + 1,
+  );
+  return windowAt(geometry, index);
+}
+
+/**
+ * The `consecutiveMisses` a window's disposition leaves behind, per the spec's
+ * outcome table: a success resets the count, a miss increments it, and every
+ * other disposition leaves it untouched -- a handshake that ran and failed means
+ * the two runners DID meet, so it is a desync question rather than a
+ * coordination-drift one, and a window this runner never attempted is neither.
+ */
+export function nextConsecutiveMisses(
+  consecutiveMisses: number,
+  disposition: ManagedScheduleWindowDisposition,
+): number {
+  if (disposition === "succeeded") return 0;
+  if (disposition === "missed") return consecutiveMisses + 1;
+  return consecutiveMisses;
+}
+
+/**
+ * Advance the schedule past a window the runner has finished with: `nextWindow`
+ * becomes the following window's open, and `consecutiveMisses` takes the
+ * disposition's verdict (see {@link nextConsecutiveMisses}). The anchor, period,
+ * and width are carried through untouched -- an advance is bookkeeping, never a
+ * reschedule -- and the input schedule is not mutated.
+ *
+ * The occupied window positions the advance by its `index` alone, so the instant
+ * written is re-derived on the schedule's own lattice rather than measured off
+ * the window handed in.
+ *
+ * @throws {RangeError} if the schedule's lattice is unusable or the following
+ *   window falls outside the representable instant range.
+ */
+export function advanceManagedScheduleAfterWindow(
+  schedule: ManagedExchangeSchedule,
+  window: ManagedScheduleWindow,
+  disposition: ManagedScheduleWindowDisposition,
+): ManagedExchangeSchedule {
+  const geometry = readScheduleGeometry(schedule);
+  return {
+    ...schedule,
+    nextWindow: toScheduleInstant(
+      windowAt(geometry, window.index + 1).opensAtMs,
+    ),
+    consecutiveMisses: nextConsecutiveMisses(
+      schedule.consecutiveMisses,
+      disposition,
+    ),
+  };
+}
+
+/**
+ * Apply the catch-up rule at a wake: count every fully-elapsed window the
+ * bookkeeping has not accounted for, advance `nextWindow` onto a window that is
+ * still live, and report whether one is open right now. This is the rule a
+ * runtime applies before attempting anything -- on the ordinary wake and, with a
+ * restored backup's stale `nextWindow`, on the first wake after an import.
+ *
+ * An elapsed window counts as one miss unless `lastRun` falls inside it: a run
+ * recorded in the window means the partnership met there, and its own outcome
+ * decides the count (see {@link nextConsecutiveMisses}). A window still open
+ * whose `lastRun` succeeded is likewise satisfied and advanced past, so an
+ * attended run inside an agreed window is not re-run by the schedule; a window
+ * whose recorded run FAILED is not satisfied, leaving the rest of the window
+ * available for another attempt.
+ *
+ * `lastRun` is read as evidence, never validated: an entry whose `at` does not
+ * parse is treated as no recorded run at all, the conservative direction (an
+ * extra miss counted, never a miss suppressed).
+ *
+ * @param schedule The stored schedule, whose `nextWindow` is the first window
+ *   not yet accounted for.
+ * @param lastRun The record's run bookkeeping, if any.
+ * @param nowMs The wake instant, UTC milliseconds.
+ * @throws {RangeError} if the schedule's lattice is unusable or the resumed
+ *   window falls outside the representable instant range.
+ */
+export function catchUpManagedSchedule(
+  schedule: ManagedExchangeSchedule,
+  lastRun: ManagedExchangeLastRun | undefined,
+  nowMs: number,
+): ManagedScheduleCatchUp {
+  const geometry = readScheduleGeometry(schedule);
+  const plannedMs = parseScheduleInstant(schedule.nextWindow, "nextWindow");
+
+  // The first window the bookkeeping has not accounted for. Rounding UP off a
+  // `nextWindow` that does not sit on the lattice -- a hand-edited record, or a
+  // backup restored beside a since-edited cadence -- keeps catch-up from
+  // re-counting a window the stored instant already covers.
+  const firstUnaccounted = Math.max(
+    0,
+    Math.ceil((plannedMs - geometry.anchorMs) / geometry.periodMs),
+  );
+  // Window i has fully closed by `now` when anchor + i * period + width <= now.
+  const lastElapsed = Math.floor(
+    (nowMs - geometry.widthMs - geometry.anchorMs) / geometry.periodMs,
+  );
+  const elapsedCount = Math.max(0, lastElapsed - firstUnaccounted + 1);
+
+  const attemptedIndex =
+    lastRun === undefined
+      ? undefined
+      : windowIndexContaining(geometry, Date.parse(lastRun.at));
+  const attemptedElapsed =
+    attemptedIndex !== undefined &&
+    attemptedIndex >= firstUnaccounted &&
+    attemptedIndex <= lastElapsed;
+
+  // The elapsed windows apply their verdicts in order, which for a single
+  // `lastRun` closes to: the misses before the attempted window, then that
+  // window's own outcome, then the misses after it.
+  const consecutiveMisses =
+    attemptedElapsed && lastRun !== undefined
+      ? nextConsecutiveMisses(
+          schedule.consecutiveMisses + (attemptedIndex - firstUnaccounted),
+          lastRun.outcome,
+        ) +
+        (lastElapsed - attemptedIndex)
+      : schedule.consecutiveMisses + elapsedCount;
+
+  let resumeIndex = Math.max(firstUnaccounted, lastElapsed + 1);
+  if (lastRun?.outcome === "succeeded" && attemptedIndex === resumeIndex)
+    resumeIndex += 1;
+  const resume = windowAt(geometry, resumeIndex);
+
+  const missedMostRecent = elapsedCount > 0 && attemptedIndex !== lastElapsed;
+  return {
+    schedule: {
+      ...schedule,
+      nextWindow: toScheduleInstant(resume.opensAtMs),
+      consecutiveMisses,
+    },
+    missedWindows: elapsedCount - (attemptedElapsed ? 1 : 0),
+    ...(managedScheduleWindowStateAt(resume, nowMs) === "open"
+      ? { dueWindow: resume }
+      : {}),
+    ...(missedMostRecent
+      ? {
+          missedLastRun: {
+            at: toScheduleInstant(windowAt(geometry, lastElapsed).closesAtMs),
+            outcome: "missed" as const,
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * Resolve an operator's local wall-clock cadence to the UTC anchor the record
+ * stores. This is the ONE place the host's zone is read: it runs at save and
+ * again only when the operator edits the schedule, so a daylight-saving shift
+ * between two windows moves neither of them -- the stored anchor fixes the
+ * instant, and a cadence entered as "09:00" reads an hour differently on the
+ * local clock after a transition rather than silently sliding the agreed window
+ * away from the partner's.
+ *
+ * A wall-clock time the local zone skips (the hour a spring-forward transition
+ * removes) has no instant to resolve to; the platform maps it forward into the
+ * post-transition offset, which the entry surface shows back as the resolved
+ * instant.
+ *
+ * @throws {RangeError} if a component is out of range or names a date the
+ *   calendar does not have.
+ */
+export function resolveLocalCadenceAnchor(
+  cadence: LocalWallClockCadence,
+): string {
+  requireComponentInRange(cadence.year, 1, 9999, "year");
+  requireComponentInRange(cadence.month, 1, 12, "month");
+  requireComponentInRange(cadence.day, 1, 31, "day");
+  requireComponentInRange(cadence.hour, 0, 23, "hour");
+  requireComponentInRange(cadence.minute, 0, 59, "minute");
+  // Validate the calendar date in UTC, where no zone rule can shift the day the
+  // check reads back, before the local resolution below interprets it. The
+  // fields are SET rather than passed to `Date.UTC`, whose two-digit year
+  // mapping would read year 26 as 1926 and reject 29 February 2026 on 1926's
+  // calendar.
+  const calendar = new Date(0);
+  calendar.setUTCFullYear(cadence.year, cadence.month - 1, cadence.day);
+  if (
+    calendar.getUTCFullYear() !== cadence.year ||
+    calendar.getUTCMonth() !== cadence.month - 1 ||
+    calendar.getUTCDate() !== cadence.day
+  )
+    throw new RangeError(
+      "managed schedule cadence names a date the calendar does not have",
+    );
+
+  const resolved = new Date(0);
+  resolved.setFullYear(cadence.year, cadence.month - 1, cadence.day);
+  resolved.setHours(cadence.hour, cadence.minute, 0, 0);
+  return toScheduleInstant(resolved.getTime());
+}
+
+function requireComponentInRange(
+  value: number,
+  low: number,
+  high: number,
+  field: string,
+): void {
+  if (!Number.isInteger(value) || value < low || value > high)
+    throw new RangeError(
+      `managed schedule cadence ${field} must be a whole number between ${low} and ${high}`,
+    );
+}

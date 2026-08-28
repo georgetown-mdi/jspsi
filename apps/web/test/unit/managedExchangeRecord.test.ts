@@ -14,6 +14,7 @@ import {
   applyManagedExchangeLocalEdits,
   applyManagedExchangeReinviteRotation,
   applyManagedExchangeRotation,
+  applyManagedExchangeScheduleAdvance,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   diagnoseManagedExchangeRecord,
@@ -23,6 +24,7 @@ import {
 
 import type {
   ManagedExchangeLastRun,
+  ManagedExchangeRecord,
   ManagedExchangeSchedule,
   NewManagedExchange,
 } from "@psi/managedExchangeRecord";
@@ -627,6 +629,110 @@ describe("applyManagedExchangeLastRun", () => {
     expect(
       applyManagedExchangeLastRun(record, wholeSecondOlder).lastRun,
     ).toEqual(fractionalNewer);
+  });
+});
+
+describe("applyManagedExchangeScheduleAdvance", () => {
+  const advancedSchedule: ManagedExchangeSchedule = {
+    ...schedule,
+    nextWindow: "2026-01-20T14:00:00.000Z",
+    consecutiveMisses: 1,
+  };
+  const missedRun: ManagedExchangeLastRun = {
+    at: "2026-01-13T17:00:00.000Z",
+    outcome: "missed",
+  };
+
+  function scheduled(): ManagedExchangeRecord {
+    return buildManagedExchangeRecord(newExchange({ schedule }));
+  }
+
+  test("moves the planned window, the count, and the outcome together", () => {
+    const record = scheduled();
+    const advanced = applyManagedExchangeScheduleAdvance(record, {
+      schedule: advancedSchedule,
+      lastRun: missedRun,
+    });
+    expect(advanced.schedule).toEqual(advancedSchedule);
+    expect(advanced.lastRun).toEqual(missedRun);
+    expect(advanced.sharedSecret).toBe(record.sharedSecret);
+    expect(advanced.exchangeFile).toEqual(record.exchangeFile);
+    // The input record is not mutated.
+    expect(record.schedule).toEqual(schedule);
+  });
+
+  test("advances the schedule alone when the window produced no bookkeeping", () => {
+    const advanced = applyManagedExchangeScheduleAdvance(scheduled(), {
+      schedule: advancedSchedule,
+    });
+    expect(advanced.schedule).toEqual(advancedSchedule);
+    expect(advanced).not.toHaveProperty("lastRun");
+  });
+
+  test("a record whose schedule was dropped is left entirely unchanged", () => {
+    // The operator reverted the exchange to attended-only from another tab while
+    // the window ran; the advance must not resurrect the schedule.
+    const record = buildManagedExchangeRecord(newExchange());
+    const advanced = applyManagedExchangeScheduleAdvance(record, {
+      schedule: advancedSchedule,
+      lastRun: missedRun,
+    });
+    expect(advanced).not.toHaveProperty("schedule");
+    expect(advanced).not.toHaveProperty("lastRun");
+  });
+
+  test("a cadence the operator re-entered is not overwritten", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ schedule: { ...schedule, intervalDays: 14 } }),
+    );
+    const advanced = applyManagedExchangeScheduleAdvance(record, {
+      schedule: advancedSchedule,
+      lastRun: missedRun,
+    });
+    // The planned window the advance carries was derived from the replaced
+    // cadence, so neither half of it lands.
+    expect(advanced.schedule).toEqual({ ...schedule, intervalDays: 14 });
+    expect(advanced).not.toHaveProperty("lastRun");
+  });
+
+  test("an anchor or width change also holds the advance off", () => {
+    for (const stored of [
+      { ...schedule, anchor: "2026-01-07T14:00:00.000Z" },
+      { ...schedule, windowSeconds: 7200 },
+    ]) {
+      const advanced = applyManagedExchangeScheduleAdvance(
+        buildManagedExchangeRecord(newExchange({ schedule: stored })),
+        { schedule: advancedSchedule, lastRun: missedRun },
+      );
+      expect(advanced.schedule).toEqual(stored);
+      expect(advanced).not.toHaveProperty("lastRun");
+    }
+  });
+
+  test("a stale outcome is dropped while the schedule still advances", () => {
+    // A run that landed after the window closed already recorded the newer
+    // outcome; the window's own miss must not mask it, but the window did close.
+    const record = applyManagedExchangeLastRun(scheduled(), {
+      at: "2026-01-13T18:00:00.000Z",
+      outcome: "succeeded",
+    });
+    const advanced = applyManagedExchangeScheduleAdvance(record, {
+      schedule: advancedSchedule,
+      lastRun: missedRun,
+    });
+    expect(advanced.schedule).toEqual(advancedSchedule);
+    expect(advanced.lastRun).toEqual({
+      at: "2026-01-13T18:00:00.000Z",
+      outcome: "succeeded",
+    });
+  });
+
+  test("an advance the schema would reject writes nothing", () => {
+    expect(() =>
+      applyManagedExchangeScheduleAdvance(scheduled(), {
+        schedule: { ...advancedSchedule, consecutiveMisses: -1 },
+      }),
+    ).toThrow();
   });
 });
 

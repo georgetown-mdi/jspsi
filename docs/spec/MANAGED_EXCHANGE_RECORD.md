@@ -264,6 +264,16 @@ determine every past and future window, and `lastRun` already carries the most
 recent outcome. `consecutiveMisses` is the only cross-window state the retry
 policy needs.
 
+Window *n* is the half-open interval from `anchor + n * intervalDays` to
+`windowSeconds` later: an instant exactly at the close belongs to no window, so
+a window is elapsed the moment it closes and two consecutive windows never both
+contain the same instant. Every open is computed by fixed-millisecond arithmetic
+from the stored UTC `anchor`, never by a local-calendar date add -- a calendar
+add moves the instant by the offset change on the week a party's zone shifts,
+which is exactly when two runners can least afford to stop overlapping. The host
+zone is read once, at entry, to resolve a local wall-clock cadence into `anchor`
+(see the `anchor` row); no later computation reads it.
+
 The schedule is a **local-only** field, not part of the persisted
 `exchangeFile` document: a reschedule is neither a terms change nor a credential,
 so it must not force the re-invite a document change requires (see [Record
@@ -297,6 +307,16 @@ On wake, before attempting anything, the runner applies one catch-up rule:
   yet closed: if the current instant falls inside that window, the runner
   attempts it immediately; otherwise `nextWindow` is the first window opening
   after the current instant.
+
+A window is **unattempted** when no run bookkeeping falls inside it. A window
+that does carry a `lastRun` was met, so it takes that entry's verdict from the
+`consecutiveMisses` row above rather than counting as a miss, and its own
+bookkeeping stands rather than being overwritten by the catch-up's `"missed"`
+entry. The same reading settles the window still open at the wake: a
+`"succeeded"` run inside it satisfies it, so `nextWindow` advances past without
+an attempt -- which is how an attended run inside an agreed window discharges
+that window -- while a run that failed inside it does not, leaving the rest of
+the window attemptable.
 
 The rule keeps both fields honest. `consecutiveMisses` reflects the true count
 of elapsed misses whichever side was absent, and the runner lands on a live
