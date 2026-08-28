@@ -178,8 +178,9 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
   // Whether the data exchange began before the failure -- captured at the phase
   // boundary runManagedExchange marks, consumed by the classification below so a
   // tier that claims nothing was disclosed (a security-kind error's "auth", a
-  // disclosure refusal's "consent") is stamped only pre-data-exchange, and a
-  // failure once payload flow could have started records "transport".
+  // disclosure refusal's "consent", a linkage refusal's "terms-shortfall") is
+  // stamped only pre-data-exchange, and a failure once payload flow could have
+  // started records "transport".
   let dataExchangeStarted = false;
 
   // The input guard, the single-writer lock, the persist-before-success rotation,
@@ -278,14 +279,14 @@ export function remapLapsedRunFailure(
  *   best-effort inside the critical section (the tier
  *   {@link managedInputFailureKind} reads off the rejection, and the `storage`
  *   tier).
- * - A core {@link LinkageTermsUnsatisfiableError}: the benign `"terms-shortfall"`
- *   tier, stamped here because the refusal comes out of the pre-connection prepare
- *   rather than the input guard, which stamps the same kind for its own column
- *   rejection. This run's file cannot supply every linkage key the standing terms
- *   declare, which no amount of reconnecting changes, so it must not land in the
- *   retryable transport bucket where a scheduled run would repeat it every cycle --
- *   nor in the `"input"` tier, whose remedy is re-picking a file that refuses
- *   identically.
+ * - A core {@link LinkageTermsUnsatisfiableError} raised BEFORE the data exchange
+ *   began: the benign `"terms-shortfall"` tier, stamped here because the refusal
+ *   comes out of the pre-connection prepare rather than the input guard, which
+ *   stamps the same kind for its own column rejection. This run's file cannot
+ *   supply every linkage key the standing terms declare, which no amount of
+ *   reconnecting changes, so it must not land in the retryable transport bucket
+ *   where a scheduled run would repeat it every cycle -- nor in the `"input"`
+ *   tier, whose remedy is re-picking a file that refuses identically.
  * - {@link ManagedExchangeExpiredError} and
  *   {@link ManagedExchangeLockUnavailableError}: deliberately unrecorded -- no
  *   run began, and a lapse is already carried by the record's own `expires`.
@@ -301,11 +302,11 @@ export function remapLapsedRunFailure(
  * error on a cancelled run is not misread. A `security`-kind
  * {@link ConnectionError} likewise records `"auth"` only when it fired before the
  * data exchange began -- the authenticated handshake failing closed, which provably
- * precedes any payload. Both guards carry the same weight: `"consent"` and `"auth"`
- * are the two tiers whose copy tells the operator nothing left this device, so
- * neither is stamped on a failure the phase boundary says could have followed
- * payload flow. A refusal or security-kind error once payload flow could have
- * started (core's `EncryptedMessageConnection` raising on a tampered frame
+ * precedes any payload. All three guards carry the same weight: `"terms-shortfall"`,
+ * `"consent"`, and `"auth"` are the tiers whose copy tells the operator nothing left
+ * this device, so none is stamped on a failure the phase boundary says could have
+ * followed payload flow. A refusal or security-kind error once payload flow could
+ * have started (core's `EncryptedMessageConnection` raising on a tampered frame
  * mid-exchange) records `"transport"` (the neither-way disclosure bucket), as does
  * any other failure. The outcome is always `"failed"` -- `"desynced"` is the later
  * desync-tiering item's call, not this classifier's.
@@ -323,7 +324,7 @@ export function rerunFailureLastRun(
     error instanceof RotationPersistError
   )
     return undefined;
-  if (error instanceof LinkageTermsUnsatisfiableError)
+  if (error instanceof LinkageTermsUnsatisfiableError && !dataExchangeStarted)
     return failedRun(at, "failed", "terms-shortfall");
   if (error instanceof OutboundDisclosureRefusalError && !dataExchangeStarted)
     return failedRun(at, "failed", "consent");

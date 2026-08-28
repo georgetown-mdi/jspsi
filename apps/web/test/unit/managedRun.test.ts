@@ -392,6 +392,19 @@ describe("a run refused for terms this file cannot satisfy", () => {
     });
   });
 
+  test("a linkage refusal after the data exchange began records transport, not terms-shortfall", () => {
+    // The "terms-shortfall" tier's copy tells the operator nothing left this device,
+    // which only the phase boundary can prove. Core raises this refusal inside the
+    // pre-connection prepare today; this pins that the tier depends on the boundary
+    // rather than on where the refusal happens to be raised, so a later call site
+    // past the boundary falls through to the neither-way transport bucket.
+    expect(rerunFailureLastRun(refusal(), AT, false, true)).toEqual({
+      at: new Date(AT).toISOString(),
+      outcome: "failed",
+      failureKind: "transport",
+    });
+  });
+
   test("keeps the terms-shortfall tier even on a cancelled run", () => {
     // The refusal is a deterministic local state read before the connection, so
     // it is not a teardown-provoked error the cancellation could explain.
