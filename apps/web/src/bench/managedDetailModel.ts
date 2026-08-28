@@ -267,3 +267,26 @@ export function runHistoryEntries(
     },
   ];
 }
+
+/**
+ * Whether the record's own bookkeeping records a run that COMPLETED -- the only
+ * kind that files an entry in the accounting of disclosures, since a run that
+ * stopped earlier has no disclosure to file (see {@link runHistoryEntries}).
+ *
+ * The accounting view reads this to keep its empty state honest. An accounting
+ * holding nothing is not evidence that nothing was disclosed: the accounting-scoped
+ * reset destroys the stored entries and leaves the record standing, and the
+ * export/import artifact carries the runnable exchange without its accounting. So
+ * where the record itself remembers a completed run, "no run has completed" is a
+ * claim the record beside it refutes, and the copy names the emptiness and its
+ * causes instead.
+ *
+ * ONE-WAY: the record keeps only the most recent run (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), so `true` means a run
+ * completed while `false` means only that the retained run is not a completed one.
+ */
+export function completedRunRecorded(
+  record: Pick<ManagedExchangeRecord, "lastRun">,
+): boolean {
+  return record.lastRun?.outcome === "succeeded";
+}

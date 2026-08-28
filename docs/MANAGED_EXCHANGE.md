@@ -962,6 +962,12 @@ only way to let the exchange file again.
    secret, the schedule, and the run history are untouched. You do not have to
    delete the exchange to recover its accounting.
 
+A cleared accounting reads as empty until the next run files into it. Where the
+run history beside it records a completed run, the page names the two ways an
+accounting is emptied -- clearing it here, or restoring the exchange from an
+export or backup file, which does not carry one -- rather than reporting that no
+run has completed.
+
 Occasionally the stored records are damaged past the point where even that
 download is possible. The page says so rather than offering a download it cannot
 deliver; what remains is any record file you downloaded when a run finished, and

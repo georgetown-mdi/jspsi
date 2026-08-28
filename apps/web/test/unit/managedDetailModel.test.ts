@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   SIDE_LABELS,
+  completedRunRecorded,
   connectionRows,
   linkageTermsRows,
   runHistoryEntries,
@@ -267,6 +268,43 @@ describe("runHistoryEntries renders around the most recent run", () => {
       expect(entries[0].disclosure).not.toContain("Nothing was disclosed");
       expect(entries[0].disclosure).toContain("did not complete");
       expect(entries[0].disclosure).toContain("authoritative account");
+    },
+  );
+});
+
+// What the accounting view reads to keep an empty accounting honest: an accounting
+// holding nothing is not evidence that nothing has completed, since the reset
+// destroys the entries and leaves the record standing.
+describe("completedRunRecorded reads the record's own bookkeeping", () => {
+  test("a never-run exchange records no completed run", () => {
+    expect(completedRunRecorded(record("inviter"))).toBe(false);
+  });
+
+  test("a succeeded run is a completed one", () => {
+    const lastRun: ManagedExchangeLastRun = {
+      at: "2026-07-01T09:00:00.000Z",
+      outcome: "succeeded",
+    };
+    expect(completedRunRecorded(record("inviter", { lastRun }))).toBe(true);
+  });
+
+  // One-way: the record keeps only the most recent run, so a completed run followed
+  // by a non-completing one reads as false. The copy this drives is written to that
+  // -- the completed-run reading appears only where the record proves it, and the
+  // plain empty state stands everywhere else.
+  test.each([
+    { outcome: "failed" as const, failureKind: "transport" as const },
+    { outcome: "missed" as const, failureKind: undefined },
+    { outcome: "desynced" as const, failureKind: undefined },
+  ])(
+    "a $outcome most-recent run records no completed run",
+    ({ outcome, failureKind }) => {
+      const lastRun: ManagedExchangeLastRun = {
+        at: "2026-07-01T09:00:00.000Z",
+        outcome,
+        ...(failureKind !== undefined ? { failureKind } : {}),
+      };
+      expect(completedRunRecorded(record("acceptor", { lastRun }))).toBe(false);
     },
   );
 });

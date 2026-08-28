@@ -89,8 +89,12 @@ export type DisclosureAccountingRead =
    * {@link ./managedExchangeStore.ts}), or the read transaction did not complete.
    * Nothing is known about what is stored, so no recovery is offered on it. */
   | { kind: "unavailable" }
-  /** The store was read and holds no accounting for this exchange: no run has
-   * completed here. */
+  /** The store was read and holds no accounting for this exchange: nothing has
+   * been filed here, or what was filed has been cleared by
+   * {@link resetDisclosureAccounting}. Empty is not the same as never-run, so the
+   * surface reading this states the emptiness against the record's own run
+   * bookkeeping (see {@link ../bench/managedDetailModel.ts},
+   * `completedRunRecorded`). */
   | { kind: "none" }
   /** The stored accounting, validated through {@link parseDisclosureAccounting}. */
   | { kind: "accounting"; accounting: DisclosureAccounting }

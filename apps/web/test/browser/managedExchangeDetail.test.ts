@@ -424,6 +424,70 @@ describe("managed exchange detail accounting of disclosures", () => {
     ).toBeNull();
   });
 
+  test("an accounting emptied beside a completed run states the emptiness, not an absence of runs", async () => {
+    // What a recovery reset leaves: the entries destroyed, the record's own run
+    // history still holding the run that filed them. An auditor reads this surface,
+    // so the copy must not read a deliberate destruction as "nothing has run".
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter", {
+          lastRun: { at: "2026-07-01T09:00:00.000Z", outcome: "succeeded" },
+        }),
+        accountingRead: { kind: "none" },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    // The run the record remembers is on the same screen, which is what makes the
+    // flat claim false here.
+    await expect
+      .element(page.getByText("Succeeded", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByText("No run of this exchange has completed", { exact: false })
+        .query(),
+    ).toBeNull();
+    // What is true instead: the copy is empty, and the two ways an operator
+    // reaches an empty copy after a run has filed one.
+    await expect
+      .element(
+        page.getByText(
+          "This browser's copy of the accounting is empty, while the run history above records a completed run",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText('destroyed by "Start a fresh accounting"', {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("restored from an export or backup file", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    // The state is still an empty one: nothing to export, and no recovery arm --
+    // the read succeeded and refused nothing.
+    expect(
+      page.getByRole("button", { name: /Export this accounting/ }).query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: "Start a fresh accounting" }).query(),
+    ).toBeNull();
+  });
+
   test("a filed disclosure opens to the facts of that run, with the partner escaped", async () => {
     // The record keeps the partner's identity byte-exact for the cross-party
     // validation, so this surface is where the bidi override becomes visible.
@@ -1143,5 +1207,80 @@ describe("an accounting that could not be read at all", () => {
     await vi.waitFor(() =>
       expect(onRetryAccountingRead).toHaveBeenCalledTimes(1),
     );
+  });
+});
+
+/**
+ * The read still in flight, which every mount of this surface passes through and
+ * every retry returns to. No classification has landed, so the surface knows
+ * nothing about the accounting yet -- least of all that it is empty, which is the
+ * one reading that claims nothing was disclosed.
+ */
+describe("an accounting read still in flight", () => {
+  const inFlight = () =>
+    createElement(ManagedExchangeDetail, {
+      record: record("inviter"),
+      accountingRead: undefined,
+      onResetAccounting: () => Promise.resolve(),
+      onRetryAccountingRead: () => undefined,
+      onSaveLocalFields: () => Promise.resolve(),
+      onReinviteToChangeTerms: () => undefined,
+      canReinvite: true,
+      reinviting: false,
+      reinviteFailed: false,
+    });
+
+  test("says the read is under way and claims nothing about what is stored", async () => {
+    app.render(inFlight());
+
+    await expect
+      .element(
+        page.getByText("Reading this browser's copy of the accounting", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    // The empty-accounting copy, in either reading, would make a claim on a read
+    // that has not happened.
+    expect(
+      page
+        .getByText("copy of the accounting is empty", { exact: false })
+        .query(),
+    ).toBeNull();
+    expect(
+      page
+        .getByText("No run of this exchange has completed", { exact: false })
+        .query(),
+    ).toBeNull();
+    // Nor is it either failed state: nothing here says the records are stranded or
+    // that the store refused.
+    expect(
+      page.getByText("could not be read", { exact: false }).query(),
+    ).toBeNull();
+  });
+
+  test("offers no affordance, destructive or otherwise", async () => {
+    app.render(inFlight());
+
+    // The section itself is on screen, so the absences below are absences from a
+    // rendered accounting rather than from an unrendered one.
+    await expect
+      .element(page.getByText("Reading this browser's copy", { exact: false }))
+      .toBeInTheDocument();
+    // Every arm belongs to a read that reached a verdict: the CSV export speaks
+    // for entries, the recovery pair for a value refused, the retry for a store
+    // that did not answer.
+    expect(
+      page.getByRole("button", { name: /Export this accounting/ }).query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: /Download the stored records/ }).query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: "Start a fresh accounting" }).query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: "Try reading it again" }).query(),
+    ).toBeNull();
   });
 });

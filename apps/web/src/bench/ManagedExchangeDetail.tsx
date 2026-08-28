@@ -4,6 +4,7 @@ import {
   Alert,
   Button,
   Checkbox,
+  Loader,
   Modal,
   NumberInput,
   TextInput,
@@ -32,6 +33,7 @@ import {
 } from "./manageOfferModel";
 import {
   SIDE_LABELS,
+  completedRunRecorded,
   connectionRows,
   linkageTermsRows,
   runHistoryEntries,
@@ -122,6 +124,7 @@ export function ManagedExchangeDetail({
       <RunHistory record={record} />
       <DisclosureAccountingView
         read={accountingRead}
+        completedRunOnRecord={completedRunRecorded(record)}
         onReset={onResetAccounting}
         onRetryRead={onRetryAccountingRead}
       />
@@ -452,6 +455,11 @@ function factRow(fact: DisclosureFact): ConfigRow {
  * partner, so a long history stays scannable and the reader opens the run they
  * came for.
  *
+ * A read still IN FLIGHT is its own state for the same reason: an absent
+ * classification is not the `"none"` one, so the empty accounting must not stand in
+ * for it while the store has yet to answer. It carries no affordance either -- the
+ * recovery arms belong to a read that reached a verdict.
+ *
  * Every count and empty state here speaks for THIS browser's copy and says so: the
  * export/import artifact migrates the runnable exchange without its accounting
  * (see {@link ../psi/managedExchangeStore.ts}), so a device that imported one
@@ -460,10 +468,15 @@ function factRow(fact: DisclosureFact): ConfigRow {
  */
 function DisclosureAccountingView({
   read,
+  completedRunOnRecord,
   onReset,
   onRetryRead,
 }: {
   read: DisclosureAccountingRead | undefined;
+  /** Whether the record beside this accounting remembers a completed run, which
+   * an empty accounting has to be honest about (see
+   * {@link EmptyAccountingNotice}). */
+  completedRunOnRecord: boolean;
   onReset: () => Promise<void>;
   onRetryRead: () => void;
 }) {
@@ -492,19 +505,19 @@ function DisclosureAccountingView({
         deliberately unsigned: an honest local account, not a signed or
         non-repudiable receipt.
       </p>
-      {read?.kind === "unavailable" ? (
+      {read === undefined ? (
+        <>
+          <Loader size="sm" />
+          <p className={styles.small}>
+            Reading this browser&apos;s copy of the accounting.
+          </p>
+        </>
+      ) : read.kind === "unavailable" ? (
         <UnavailableAccountingNotice onRetryRead={onRetryRead} />
-      ) : read?.kind === "unreadable" ? (
+      ) : read.kind === "unreadable" ? (
         <UnreadableAccountingRecovery stored={read.stored} onReset={onReset} />
       ) : entries.length === 0 ? (
-        <p className={styles.small}>
-          No run of this exchange has completed in this browser, so this
-          browser&apos;s copy of the accounting is empty. That is not
-          necessarily the exchange&apos;s whole history: an exchange imported
-          from a backup file arrives without the accounting kept on the device
-          it came from. Each run this browser completes will file its record
-          here.
-        </p>
+        <EmptyAccountingNotice completedRunOnRecord={completedRunOnRecord} />
       ) : (
         <>
           <p className={`${styles.small} ${styles.sub}`}>
@@ -546,6 +559,50 @@ function DisclosureAccountingView({
         <Link to="/verify">verify page</Link> and drop it in.
       </p>
     </div>
+  );
+}
+
+/**
+ * The store was read and holds no accounting for this exchange, said in the terms
+ * the record beside it supports.
+ *
+ * An empty accounting is not by itself evidence that no run has completed: the
+ * recovery reset destroys the entries and leaves the exchange -- run history
+ * included -- standing, and the export/import artifact carries the runnable
+ * exchange without its accounting. So where the record remembers a completed run,
+ * this states the emptiness as the fact it is and names the two ways an operator
+ * reaches it, rather than reporting an absence of runs the record beside it
+ * refutes. Where the record remembers no completed run there is nothing to refute,
+ * and the plain empty state stands.
+ *
+ * Neither reading claims the exchange disclosed nothing: both speak for this
+ * browser's copy, since the accounting does not travel with the exchange.
+ */
+function EmptyAccountingNotice({
+  completedRunOnRecord,
+}: {
+  completedRunOnRecord: boolean;
+}) {
+  if (completedRunOnRecord)
+    return (
+      <p className={styles.small}>
+        This browser&apos;s copy of the accounting is empty, while the run
+        history above records a completed run -- so it is not an account of
+        everything this exchange has disclosed. Records filed here are destroyed
+        by &quot;Start a fresh accounting&quot;, and an exchange restored from
+        an export or backup file arrives without the accounting kept on the
+        device it came from. Each run this browser completes files its record
+        here.
+      </p>
+    );
+  return (
+    <p className={styles.small}>
+      No run of this exchange has completed in this browser, so this
+      browser&apos;s copy of the accounting is empty. That is not necessarily
+      the exchange&apos;s whole history: an exchange imported from a backup file
+      arrives without the accounting kept on the device it came from. Each run
+      this browser completes will file its record here.
+    </p>
   );
 }
 
