@@ -24,10 +24,12 @@ export const SFTP_CREDENTIAL_SCRATCH_DIR = "/run/psilink/sftp-credentials";
  * A server-side override for the scratch directory, defaulting to
  * {@link SFTP_CREDENTIAL_SCRATCH_DIR}. The container image ships that default
  * directory owned by the unprivileged account it runs as, so it uses the default;
- * a deployment running under some other account (or the integration harness, which
- * runs the built server as an ordinary user) points it at a writable,
- * non-partner-syncable location instead, since the fixed default sits under
- * root-owned `/run` and cannot be created at boot. It is server-side
+ * a deployment running under some other account -- a container started with
+ * `--user`, which is how the console launcher runs one against a data root the
+ * operator owns -- or the integration harness, which runs the built server as an
+ * ordinary user, points it at a writable, non-partner-syncable location instead,
+ * since the fixed default sits under root-owned `/run` and cannot be created at
+ * boot. It is server-side
  * configuration, never derived from a request, and the boot containment assertion
  * guards it exactly as it does the default -- a value inside the data root or
  * rendezvous mount refuses the boot.
@@ -229,9 +231,16 @@ function intendedRealpath(target: string): string {
   }
 }
 
-/** Wrap a scratch-directory filesystem failure as the typed {@link
+/**
+ * Wrap a scratch-directory filesystem failure as the typed {@link
  * JobApiConfigError} the boot expects, naming the (server-side, non-secret)
- * scratch path and the errno. */
+ * scratch path, the errno, and the override that relocates it. The override is
+ * named because the reader who meets this most is the one the path and errno
+ * leave nowhere to go: an appliance run as an account other than the one the
+ * image built the default directory for, where the default under root-owned
+ * `/run` cannot be created, every operator mount is excluded, and this variable
+ * is the only thing left that moves it.
+ */
 function scratchFsError(
   scratchPath: string,
   action: string,
@@ -243,7 +252,9 @@ function scratchFsError(
       : "unknown";
   return new JobApiConfigError(
     `the pasted-credential scratch directory ${scratchPath} could not be ` +
-      `${action} (${code})`,
+      `${action} (${code}); set ${JOB_SFTP_CREDENTIAL_DIR_ENV} to a directory ` +
+      "the account this server runs as can create, outside every mounted " +
+      "folder",
   );
 }
 

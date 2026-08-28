@@ -235,9 +235,38 @@ both sides; the verdict reader (absent versus null, prose holding a brace, a
 comma and a quote, an escaped control character rendered as a space, a check
 found by id rather than by position); a `fix_and_retry` loop printing MEANING
 and ACTION verbatim and running again; a declined retry; a `fatal` stop that is
-not retried; a refused verdict version; the docker-then-podman order; and one
-pass reaching the console. Nothing there pulls the real image, opens a browser,
-or reaches a network.
+not retried; a refused verdict version; the docker-then-podman order; the
+account the container is run as and the pasted-credential scratch override that
+travels with it, with the host's own kind stubbed each way and `id` stubbed at
+root, where a sudo run takes the account sudo names and a root run naming none
+-- or naming root in either number, however that number is spelled -- passes no
+identity and no override at all; the read-only bind on the input mount, and the
+writable rendezvous bind beside it when one folder was given as both; a battery
+per folder the console is given, and one battery when the same folder was given
+for all of them; what each folder has to answer -- an input
+folder that reads and will not write carrying on, an unreadable one stopping,
+and a folder given as both the input and the rendezvous held to the writes; and
+one pass reaching the console. Nothing there pulls the real image, opens a
+browser, or reaches a network.
+
+**What the identity route has not been driven against is an engine.**
+`start-psilink.sh` runs the container as the operator's own account on a Linux
+host, which is the answer to a bind mount carrying host ownership through to an
+image that runs as a fixed number. The stub engine reads the argument vector and
+answers; what it cannot say is what a real one does with it. Rootless podman is
+the case to drive first: it maps a container account into a subordinate range
+rather than onto the host account of the same number, so `--user` there may need
+`--userns=keep-id` beside it or instead of it, and only a run settles which.
+That is why the troubleshooting page offers that flag as something to try rather
+than as the fix, and says there that we have not run it.
+Docker Engine on Linux, where the route was chosen, has been reasoned about and
+not run either. The macOS branch passes no identity at all, which is what it did
+before this, so nothing there is newly unmeasured. The read-only bind on the
+input mount belongs to the same list: the suite asserts that `:ro` is in the
+argument vector, and what an engine refuses through it is a question only a run
+answers. So does the troubleshooting page's account of a folder writable only
+through a supplementary group -- what `--user` does with the other groups a
+login carries has been reasoned about here and not run.
 
 `Start-Psilink.ps1` is covered by `Start-Psilink.Tests.ps1`, most of it purely:
 the verdict reader against the same fixtures, the release stamp, the DFS

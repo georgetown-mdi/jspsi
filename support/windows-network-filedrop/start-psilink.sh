@@ -43,6 +43,7 @@ PSILINK_DEFAULT_PORT='3000'
 PSILINK_CONSOLE_WAIT_SECONDS='600'
 
 PSILINK_ENGINE=''
+PSILINK_CONTAINER_IDENTITY=''
 PSILINK_PORT="$PSILINK_DEFAULT_PORT"
 PSILINK_OPEN_BROWSER='yes'
 PSILINK_HELP_ONLY='no'
@@ -180,6 +181,82 @@ psilink_select_engine() {
   psilink_note 'again. If one is installed and running, your account may not be'
   psilink_note 'allowed to use it -- on Linux that is the docker group.'
   return 1
+}
+
+# ===========================================================================
+# The account the container runs as
+# ===========================================================================
+
+# Where the console puts an SFTP credential the operator pastes into it. The
+# image's own default lives under /run, a directory only the image's own account
+# may create in, so a container running as anyone else needs to be told somewhere
+# it can. This path is inside the container and goes away with it, and it is
+# deliberately none of the mounted folders: a scratch directory that resolved
+# inside one would put the secret where the partner's sync or the operator's
+# results already are, and the console refuses to start on that.
+PSILINK_CREDENTIAL_SCRATCH_DIR='/tmp/psilink-sftp-credentials'
+
+# Whether a digits-only value is zero, however it is written: `00` is zero as
+# surely as `0` is, and an engine reads either as root. A `[ -eq ]` compare says
+# the same until the value is too long for the shell's integers -- which the
+# environment this reads from can supply, and a length guard there would have to
+# let a long run of zeros through.
+psilink_number_is_zero() {
+  case "$1" in *[!0]*) return 1 ;; esac
+  return 0
+}
+
+# The operator's own uid:gid where the engine carries host ownership into the
+# container, and nothing where it does not.
+#
+# On Linux a bind mount keeps its host directory's ownership, so a container
+# running as the image's own fixed account can write only what that account's
+# number owns. An agency workstation numbers its accounts from a directory
+# service, so that number is rarely the operator's -- and asking them to hand
+# their own folders to it is the wrong way round. Running the container as the
+# operator makes ownership a question that does not arise.
+#
+# macOS is left as it stands: its engines run the container in a virtual machine
+# and present a bind mount to whichever account the container runs as, so there
+# is no ownership to match and nothing here to gain.
+#
+# Prints nothing when there is no identity to pass, which is also what a host
+# whose `id` does not answer gets: a value that could not be read must not become
+# an argument.
+#
+# Root is never that identity. A run under sudo is the ordinary way to arrive
+# here -- it is what a missing docker group gets worked around with, which this
+# script's own message points at -- and handing the container 0:0 would run it
+# with privileges the image's posture says neither role has, and leave every
+# folder it wrote owned by root. sudo names the account it came from, so that is
+# the one to run as; with no such account named there is nothing here to pass,
+# and the image's own unprivileged account runs the container. Each number is
+# held to that on its own: a container given group 0 leaves what it writes to the
+# root group whichever account it ran as.
+psilink_container_identity() {
+  local uid='' gid=''
+  [ "$(uname -s 2>/dev/null)" = 'Linux' ] || return 0
+  uid=$(id -u 2>/dev/null) || return 0
+  gid=$(id -g 2>/dev/null) || return 0
+  if [ "$uid" = '0' ]; then
+    uid="${SUDO_UID:-}"
+    gid="${SUDO_GID:-}"
+  fi
+  case "$uid" in '' | *[!0-9]*) return 0 ;; esac
+  case "$gid" in '' | *[!0-9]*) return 0 ;; esac
+  if psilink_number_is_zero "$uid" || psilink_number_is_zero "$gid"; then
+    return 0
+  fi
+  printf '%s:%s' "$uid" "$gid"
+}
+
+# Sets PSILINK_CONTAINER_IDENTITY, empty when the container is left to run as the
+# image's own account. Every container this launcher starts runs under it, the
+# checks included: a battery run as a different account answers about that
+# account rather than about the one the console will be.
+psilink_resolve_container_identity() {
+  PSILINK_CONTAINER_IDENTITY="$(psilink_container_identity)"
+  return 0
 }
 
 # ===========================================================================
@@ -430,18 +507,45 @@ PSILINK_CHECKS
   return $shown
 }
 
-# Run one battery and classify it. Sets PSILINK_VERDICT_OVERALL and returns:
+# The status of the check carrying this id, or failure when the verdict holds no
+# such check. Found by id, as the display is: the spec fixes the id set a battery
+# reports, and nothing about where in the array a check sits.
+psilink_check_status() {
+  local checks="$1" wanted="$2"
+  local element='' identifier=''
+
+  while IFS= read -r element; do
+    [ -n "$element" ] || continue
+    identifier=$(psilink_json_text "$(psilink_json_member "$element" id)") || continue
+    [ "$identifier" = "$wanted" ] || continue
+    psilink_json_text "$(psilink_json_member "$element" status)" || return 1
+    return 0
+  done <<PSILINK_CHECKS
+$(psilink_json_elements "$checks")
+PSILINK_CHECKS
+  return 1
+}
+
+# Run one battery and classify it against what the folder has to answer --
+# `writable` for a folder the console writes in, `readable` for one it only reads
+# from. Sets PSILINK_VERDICT_OVERALL and returns:
 #   0  a verdict was read, and PSILINK_VERDICT_OVERALL says what it was
 #   1  nothing was established (the engine, the version, or a line that is not
 #      a verdict this launcher understands)
 psilink_run_doctor_mount() {
-  local directory="$1"
+  local label="$1" directory="$2" requirement="$3"
   local verdict='' status=0 version='' overall='' checks=''
+  local -a arguments
 
   PSILINK_VERDICT_OVERALL=''
-  psilink_say "Checking $directory with the container's own checks..."
-  verdict=$("$PSILINK_ENGINE" run --rm --volume "$directory:/rz" "$(psilink_image)" \
-    doctor mount /rz --json)
+  psilink_resolve_container_identity
+  psilink_say "Checking the $label ($directory) with the container's own checks..."
+  arguments=(run --rm)
+  if [ -n "$PSILINK_CONTAINER_IDENTITY" ]; then
+    arguments+=(--user "$PSILINK_CONTAINER_IDENTITY")
+  fi
+  arguments+=(--volume "$directory:/rz" "$(psilink_image)" doctor mount /rz --json)
+  verdict=$("$PSILINK_ENGINE" "${arguments[@]}")
   status=$?
 
   # Docker reserves 125 and above for its own failure to start a container, and
@@ -480,6 +584,25 @@ psilink_run_doctor_mount() {
   checks=$(psilink_json_member "$PSILINK_JSON_SKELETON" checks) || checks='[]'
   overall=$(psilink_json_text "$(psilink_json_member "$PSILINK_JSON_SKELETON" overall)") || overall=''
 
+  # A folder the console only reads passes on the read alone: nothing is written
+  # back to the input folder, so writes it refuses are a read-only mount doing
+  # its job rather than a fault to stop on. There is no lighter battery to run,
+  # so the read is taken from its own check rather than from the roll-up, which
+  # speaks for the writes as well -- and only from a battery that ran to a
+  # verdict, since a fatal one establishes nothing about anything.
+  if [ "$requirement" = 'readable' ] && [ "$overall" = 'fix_and_retry' ]; then
+    case "$(psilink_check_status "$checks" mount_readable)" in
+      ok | warn)
+        psilink_show_checks_with_status "$checks" warn && psilink_say ''
+        psilink_good 'The console can read this folder, which is all it needs.'
+        psilink_note 'Your CSVs are read where they are and nothing is written'
+        psilink_note 'back to this folder, so a read-only one is fine here.'
+        PSILINK_VERDICT_OVERALL='ok'
+        return 0
+        ;;
+    esac
+  fi
+
   case "$overall" in
     ok)
       # A warn does not stop an exchange and still has to be read, so it is
@@ -516,15 +639,15 @@ psilink_run_doctor_mount() {
 
 # The mount battery is the one that applies here. `doctor probe` asks an SMB
 # server directly, over credentials this launcher never collects; on macOS and
-# Linux the rendezvous folder is bind-mounted as the host already sees it, so
-# the kernel's view is the only view there is. That is what `doctor mount`
-# checks -- the write, the exclusive create and the rename onto an existing file
-# that psilink's rendezvous is built on.
+# Linux a folder is bind-mounted as the host already sees it, so the kernel's
+# view is the only view there is. That is what `doctor mount` checks -- the
+# write, the exclusive create and the rename onto an existing file that
+# psilink's rendezvous is built on.
 psilink_doctor_loop() {
-  local directory="$1"
+  local label="$1" directory="$2" requirement="$3"
 
   while :; do
-    if ! psilink_run_doctor_mount "$directory"; then
+    if ! psilink_run_doctor_mount "$label" "$directory" "$requirement"; then
       return 1
     fi
     case "$PSILINK_VERDICT_OVERALL" in
@@ -538,6 +661,46 @@ psilink_doctor_loop() {
       return 1
     fi
   done
+}
+
+# Every folder the console is given, checked in turn rather than the shared one
+# alone: a folder the console cannot use is a reason not to start at all, and
+# left to it the same fault arrives as an EACCES in the middle of an exchange,
+# after the browser has opened. A layout that gives one folder for everything
+# checks it once.
+#
+# What each folder has to answer differs. The working folder takes the key file
+# and the results, and the rendezvous folder takes the messages both sides write,
+# so those two are checked for the writes psilink makes. The input folder is read
+# in place and nothing is written back to it, so it is checked for the read
+# alone: an operator who mounts their CSVs read-only has a working console, and
+# stopping them would be refusing a setup psilink documents.
+psilink_check_console_directories() {
+  local input_label='input folder' input_requirement='readable'
+
+  # One folder given as both is the rendezvous folder as well, and that one is
+  # written: the stricter of the two requirements is the one that applies.
+  if [ -n "$PSILINK_INPUT_DIR" ] &&
+    [ "$PSILINK_INPUT_DIR" = "$PSILINK_RENDEZVOUS_DIR" ]; then
+    input_label='input and rendezvous folder'
+    input_requirement='writable'
+  fi
+
+  psilink_doctor_loop 'working folder' "$PSILINK_DATA_ROOT" writable || return 1
+  if [ -n "$PSILINK_INPUT_DIR" ] &&
+    [ "$PSILINK_INPUT_DIR" != "$PSILINK_DATA_ROOT" ]; then
+    psilink_say ''
+    psilink_doctor_loop "$input_label" "$PSILINK_INPUT_DIR" \
+      "$input_requirement" || return 1
+  fi
+  if [ -n "$PSILINK_RENDEZVOUS_DIR" ] &&
+    [ "$PSILINK_RENDEZVOUS_DIR" != "$PSILINK_DATA_ROOT" ] &&
+    [ "$PSILINK_RENDEZVOUS_DIR" != "$PSILINK_INPUT_DIR" ]; then
+    psilink_say ''
+    psilink_doctor_loop 'rendezvous folder' "$PSILINK_RENDEZVOUS_DIR" \
+      writable || return 1
+  fi
+  return 0
 }
 
 # ===========================================================================
@@ -733,13 +896,31 @@ psilink_stop_console() {
 # and everything the exchange produces is in the operator's own folders.
 psilink_build_console_arguments() {
   local rendezvous_name
+  psilink_resolve_container_identity
   PSILINK_CONSOLE_ARGUMENTS=(
     run --rm --name "$PSILINK_CONTAINER_NAME"
     --publish "127.0.0.1:$PSILINK_PORT:3000"
     --env JOB_DATA_ROOT=/data --volume "$PSILINK_DATA_ROOT:/data"
   )
+  # The two travel together: running as the operator is what makes the mounted
+  # folders writable, and the scratch override is what gives the console
+  # somewhere to put a pasted SFTP credential once it is no longer the account
+  # the image built that directory for. Without it the console refuses to start.
+  if [ -n "$PSILINK_CONTAINER_IDENTITY" ]; then
+    PSILINK_CONSOLE_ARGUMENTS+=(
+      --user "$PSILINK_CONTAINER_IDENTITY"
+      --env "JOB_SFTP_CREDENTIAL_DIR=$PSILINK_CREDENTIAL_SCRATCH_DIR"
+    )
+  fi
+  # Read-only, which is the whole of what the console asks of this folder: it
+  # lists the CSVs there and the exchange reads the chosen one in place. The
+  # mount is what holds that to the folder rather than the prose. One folder
+  # given as both input and rendezvous is bound again below, writable, at
+  # /rendezvous -- the rendezvous is what writes it.
   if [ -n "$PSILINK_INPUT_DIR" ]; then
-    PSILINK_CONSOLE_ARGUMENTS+=(--env JOB_INPUT_DIR=/input --volume "$PSILINK_INPUT_DIR:/input")
+    PSILINK_CONSOLE_ARGUMENTS+=(
+      --env JOB_INPUT_DIR=/input --volume "$PSILINK_INPUT_DIR:/input:ro"
+    )
   fi
   if [ -n "$PSILINK_RENDEZVOUS_DIR" ]; then
     PSILINK_CONSOLE_ARGUMENTS+=(
@@ -877,7 +1058,7 @@ psilink_main() {
   psilink_collect_directories || return 1
 
   psilink_head 'Checking the folders'
-  psilink_doctor_loop "$(psilink_rendezvous_directory)" || return 1
+  psilink_check_console_directories || return 1
 
   psilink_start_console
 }

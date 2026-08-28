@@ -244,6 +244,42 @@ first cause: they decide which account the mount is presented to, which is a
 question the server does not answer. Neither does `-Dialect` fix any of this: if
 the share was reached, the dialect is not what is refusing you.
 
+**On macOS and Linux there is no volume.** `start-psilink.sh` mounts each folder
+as your machine already sees it and runs the container as your own account, so a
+refused write there is about what that account reaches. Two things to check, in
+this order:
+
+- **Who owns the folder and what it grants,** on the machine you are running
+  from. `ls -ld` the folder. This is the ordinary case, and the answer is the
+  ordinary one: use a folder you own, or ask for write access to this one.
+- **Whether your own write goes through a group you are only a member of.** The
+  container is given your user number and your main group number, and nothing
+  else: the other groups your login carries do not go in with it. A folder that
+  is writable to you through one of them -- a shared agency folder, mode `0770`
+  and owned by a team group -- is writable in your own shell and refused inside
+  the container. Compare the folder's group in `ls -ld` with the number `id -g`
+  prints, which is the only group the container gets. Point the launcher at a
+  folder your own account owns, or ask for the folder to be given to you.
+
+Starting the container by hand is the other way to meet this. Without `--user`
+it runs as the account the image ships with, numbered 1000, which cannot write a
+folder belonging to anyone else; pass `--user "$(id -u):$(id -g)"` and it runs
+as you do -- carrying the same one group, for the same reason.
+
+**If your engine is podman, `--user` may not be the end of it.** A rootless
+podman run is described as giving the container a number of its own on the host
+rather than the one it was handed, which would refuse the write with the
+folder's ownership right and both checks above clean. `--userns=keep-id`
+alongside `--user` is the thing to try, starting the container by hand as above:
+the launcher has no option that adds it. We have not run this against podman
+ourselves -- Docker on Linux is what the launcher was written for -- so trust
+your screen over this paragraph, and a correction is welcome.
+
+The launcher asks this of the folders the console writes in: the working folder
+and the folder shared with your partner. Your input folder is only read from --
+your CSVs are read where they are and nothing is written back to them -- so one
+you cannot write in passes its check, and a read-only mount is fine there.
+
 ## The volume will not mount
 
 `permission denied`, `host is down`, or `operation not supported` at part 4,
