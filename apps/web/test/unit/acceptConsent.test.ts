@@ -1782,6 +1782,116 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (excludes values)");
   });
 
+  test("ranks a collapse onto one constant above a coarsening effect", () => {
+    // A coalesce puts every absent-field record on one constant, so those records
+    // match each other however the pipeline coarsens that constant afterwards.
+    // Each marker it outranks names a coarsening, which would understate the
+    // collapse in the reassuring direction on the surface where the acceptor
+    // consents.
+    const slice = { function: "substring", params: { start: 1, length: 3 } };
+    const coalesce = { function: "coalesce", params: { default: "X" } };
+    expect(headerFor([coalesce, slice])).toBe("last name (fallback)");
+    expect(headerFor([slice, coalesce])).toBe("last name (fallback)");
+    expect(headerFor([coalesce, { function: "phonetic" }])).toBe(
+      "last name (fallback)",
+    );
+    // The marker is keyed on the declared rule, as the standalone one is: a
+    // coalesce whose default is not a string substitutes nothing when the pipeline
+    // runs, and the header names the rule the terms declare either way.
+    expect(headerFor([{ function: "coalesce", params: {} }, slice])).toBe(
+      "last name (fallback)",
+    );
+    expect(
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "ln", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [
+                {
+                  field: "ln",
+                  transform: [coalesce],
+                  generateFuzzyComparisons: "adjacent_years",
+                },
+              ],
+            },
+          ],
+        }),
+      ).linkageKeys[0].headerFields[0],
+    ).toBe("last name (fallback)");
+    // The wider collapse still wins: a tokenless parse_date output puts EVERY
+    // record on one value, not only the absent-field ones.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
+        },
+        coalesce,
+      ]),
+    ).toBe("last name (any date)");
+    // A refused fan-out still outranks every breadth marker: there is no run to
+    // describe a breadth of.
+    expect(
+      headerFor([
+        { function: "split_on", params: { delimiter: " " } },
+        coalesce,
+      ]),
+    ).toBe("last name (not supported)");
+    // The single-step markers the rank move leaves alone.
+    expect(headerFor([coalesce])).toBe("last name (fallback)");
+    expect(headerFor([slice])).toBe("last name (partial)");
+    expect(headerFor([{ function: "phonetic" }])).toBe(
+      "last name (sound-alike)",
+    );
+  });
+
+  test("ranks the padded slice above the rules that only narrow", () => {
+    // A window landing in the fill collapses every short record onto one constant,
+    // a broadening the terms establish. filter_regex and null_if name a NARROWING
+    // and substitute nothing a slice could read, so the compound stays exactly true
+    // beside them -- showing their milder word would hide the collapse.
+    const pad = { function: "pad_left", params: { length: 9 } };
+    const slice = { function: "substring", params: { start: 1, length: 3 } };
+    const nullIf = { function: "null_if", params: { values: ["x"] } };
+    const filterRegex = { function: "filter_regex", params: { pattern: ".*" } };
+    expect(headerFor([pad, slice, nullIf])).toBe("last name (padded slice)");
+    expect(headerFor([nullIf, pad, slice])).toBe("last name (padded slice)");
+    expect(headerFor([pad, slice, filterRegex])).toBe(
+      "last name (padded slice)",
+    );
+    // The two value-REWRITING pattern rules keep their rank above it: a rewrite
+    // can dissolve the padding before the slice reads it, so the compound is no
+    // longer established by the terms and the indeterminate rule is named instead.
+    expect(
+      headerFor([
+        pad,
+        {
+          function: "replace_regex",
+          params: { pattern: "a", replacement: "b" },
+        },
+        slice,
+      ]),
+    ).toBe("last name (pattern replacement)");
+    expect(
+      headerFor([
+        pad,
+        slice,
+        { function: "extract_regex", params: { pattern: "(.*)" } },
+      ]),
+    ).toBe("last name (pattern extraction)");
+    // An effect-named rule still outranks the whole directly-named group.
+    expect(headerFor([pad, slice, { function: "phonetic" }])).toBe(
+      "last name (sound-alike)",
+    );
+    // The single-step markers the rank move leaves alone, padding included.
+    expect(headerFor([nullIf])).toBe("last name (excludes values)");
+    expect(headerFor([filterRegex])).toBe("last name (pattern filter)");
+    expect(headerFor([pad])).toBe("last name");
+    expect(headerFor([pad, slice])).toBe("last name (padded slice)");
+  });
+
   test("does not mark a phonetic-then-substring element as a literal truncation", () => {
     // The bug: a substring after a value-recoding phonetic step slices the
     // sound-alike code, not the literal name, so "partial" (a literal truncation)
@@ -1895,14 +2005,17 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (partial)");
 
     // coalesce substitutes only for an absent value, so a record carrying an
-    // identifier is truncated literally. Its substitution is order-independent,
-    // and both orders are pinned to the same marker so the two cannot drift apart.
+    // identifier is truncated literally and the truncation rule is not suppressed
+    // here. The header shows the coalesce because its collapse outranks the
+    // truncation (its own case below), not because the slice stopped counting. Its
+    // substitution is order-independent, and both orders are pinned to the same
+    // marker so the two cannot drift apart.
     expect(
       headerFor([{ function: "coalesce", params: { default: "X" } }, slice]),
-    ).toBe("last name (partial)");
+    ).toBe("last name (fallback)");
     expect(
       headerFor([slice, { function: "coalesce", params: { default: "X" } }]),
-    ).toBe("last name (partial)");
+    ).toBe("last name (fallback)");
 
     // split_on never reaches the truncation rule: it is a fan-out, decided above
     // every breadth marker -- refused under cascade, and named for the candidate
@@ -2000,14 +2113,17 @@ describe("summarizeInvitation", () => {
       remove_affixes: "partial",
       // Likewise for the value-deriving steps that still derive from the value: a
       // slice of a slice, a captured run of the value's own characters, a
-      // pass-through-or-drop, a date laid out from its own components, and a
-      // substitution that fires only where there is no identifier to truncate.
+      // pass-through-or-drop, and a date laid out from its own components.
       substring: "partial",
       extract_regex: "partial",
       filter_regex: "partial",
       null_if: "partial",
       parse_date: "partial",
-      coalesce: "partial",
+      // coalesce leaves the truncation faithful too -- it substitutes only where
+      // there is no identifier to truncate -- but the header shows its own
+      // collapse of every absent-field record onto one constant, which outranks
+      // the coarsening the slice describes.
+      coalesce: "fallback",
       // These three derive a value the identifier need not compose, so the
       // slice is not a truncation of it and each falls through to the honest
       // marker for what the element actually does.

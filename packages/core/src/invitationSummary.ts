@@ -959,7 +959,7 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * partner-authored pattern or value list -- or a fill whose reach into the sliced
  * value is a property of each record rather than of the terms -- makes the
  * direction indeterminate it names the RULE directly ("pattern replacement",
- * "pattern extraction", "pattern filter", "excludes values", "padded slice").
+ * "pattern extraction", "padded slice", "pattern filter", "excludes values").
  * Informative, not a broaden-only warning: `filter_regex` and `null_if` narrow
  * matching but are still surfaced. "fuzzy" is reserved for the genuine
  * fuzzy-comparison expansion, distinct from `substring`'s "partial". None of the
@@ -1030,7 +1030,10 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *   record that carries an identifier is truncated literally -- unlike `pad_left`,
  *   which rewrites the value of every record -- and the substitution is
  *   order-independent, so suppressing here would mark `[coalesce, substring]` and
- *   `[substring, coalesce]` differently for the same matching behavior.
+ *   `[substring, coalesce]` differently for the same matching behavior. The header
+ *   still shows the coalesce's own "fallback" for that compound: the truncation is
+ *   real, but the collapse outranks it (see the ranking below), and it does so in
+ *   both orders.
  * - `split_on` never reaches this rule: it is a fan-out, decided above.
  *
  * This mirrors the detail row's position-aware literal ({@link substringEffect} /
@@ -1044,13 +1047,30 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *
  * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
  * header is deliberately terse, so an element carrying more than one rule shows
- * just the first -- the fan-out rule ranks first, whichever of its two markers it
- * earns, then the maximal-breadth "any date" collapse, then the other
- * effect-named rules, then the directly-named ones, of which the padded slice is
- * last since it is the only one naming a compound rather than a single step --
- * while its complete rule set is carried on
- * {@link InvitationKeySummary.elements} for the renderer's per-key
- * detail. The element stays flagged either way.
+ * just the first, while its complete rule set is carried on
+ * {@link InvitationKeySummary.elements} for the renderer's per-key detail. The
+ * element stays flagged either way. The ranking, in order:
+ *
+ * 1. The fan-out rule, whichever of its two markers it earns.
+ * 2. The dead-pipeline suppression, which silences every marker below it.
+ * 3. The rules that COLLAPSE records onto one constant, widest first: "any date"
+ *    (every record) then "fallback" (every record whose field is absent). A
+ *    collapse leaves the records it touches matching each other whatever else the
+ *    pipeline does to that constant, so a coarsening word below would understate
+ *    it -- the reassuring direction on a consent surface.
+ * 4. The remaining effect-named rules, which coarsen rather than collapse: a
+ *    truncating substring's "partial", "fuzzy", "sound-alike", and last a
+ *    component-dropping `parse_date`'s "partial".
+ * 5. The directly-named rules, where a partner-authored pattern or value list
+ *    leaves the direction indeterminate. The padded slice sits inside this group
+ *    rather than at its end: it names a determinate collapse of every short
+ *    record, so it outranks the two rules that only NARROW ("pattern filter",
+ *    "excludes values"), which substitute nothing and so leave the compound
+ *    exactly true beside them. It stays below the two value-REWRITING rules
+ *    ("pattern replacement", "pattern extraction"), since a rewrite between the
+ *    pad and the slice can dissolve the padding, leaving the compound no longer
+ *    established by the terms; the check reads the declared function set and not
+ *    where the rewrite sits, so the padded slice yields whenever one is declared.
  */
 function elementBreadthMarker(
   element: LinkageKeyElement,
@@ -1084,6 +1104,15 @@ function elementBreadthMarker(
   // handled below at the parse_date position.)
   const parseDateBreadths = steps.map(parseDateBreadth);
   if (parseDateBreadths.includes("any date")) return displayText`any date`;
+  // A `coalesce` substitutes one constant for every record whose field is absent,
+  // so all of those records collide on that value and match each other -- the same
+  // collapse "any date" names, bounded to the absent-field records rather than all
+  // of them. It therefore outranks the coarsening effects below: once a set of
+  // records is one value, truncating or fuzzing that value leaves them collapsed,
+  // so a coarsening word would understate the terms in the reassuring direction.
+  // Keyed on the declared rule, as the standalone marker already is, rather than
+  // on the default's type (the acceptConsent header tests pin that verdict).
+  if (functions.has("coalesce")) return displayText`fallback`;
   // Effect named where the direction is determinable from the terms. "partial"
   // is a literal truncation, so a substring counts only where the value it slices
   // is still composed of the acceptor's identifier -- not after a step that
@@ -1100,18 +1129,20 @@ function elementBreadthMarker(
   if (truncatesLiteral) return displayText`partial`;
   if (element.generateFuzzyComparisons !== undefined) return displayText`fuzzy`;
   if (functions.has("phonetic")) return displayText`sound-alike`;
-  if (functions.has("coalesce")) return displayText`fallback`;
   // parse_date is routine date canonicalization UNLESS its output layout narrows
   // matching: an output that keeps a date token but drops a component its input
   // carries matches on only part of the date ("partial"). The tokenless
   // every-date-to-one case is the stronger "any date", handled at the top.
   if (parseDateBreadths.includes("partial")) return displayText`partial`;
   // Rule named directly where a partner-authored pattern or value list makes the
-  // matching direction indeterminate from the terms alone.
+  // matching direction indeterminate from the terms alone. The two that REWRITE
+  // the value rank above the padded slice: such a rewrite between the pad and the
+  // slice can dissolve the padding, so the compound below would assert a collapse
+  // the terms no longer establish. This reads the declared function set rather
+  // than where the rewrite sits, so the padded slice yields to either of them
+  // wherever one appears.
   if (functions.has("replace_regex")) return displayText`pattern replacement`;
   if (functions.has("extract_regex")) return displayText`pattern extraction`;
-  if (functions.has("filter_regex")) return displayText`pattern filter`;
-  if (functions.has("null_if")) return displayText`excludes values`;
   // The fall-through for the one breaking function with no marker of its own:
   // padding alone is routine canonicalization, so a `pad_left` that suppressed a
   // later substring's "partial" would otherwise leave a compound that does loosen
@@ -1124,6 +1155,12 @@ function elementBreadthMarker(
       steps.slice(0, index).some((prior) => prior.function === "pad_left"),
   );
   if (slicesPaddedValue) return displayText`padded slice`;
+  // The two record-DROPPING rules rank below it: each passes the original value
+  // through or drops the record, substituting nothing, so the padded slice stays
+  // exactly true beside them -- and each names a narrowing, which is the milder
+  // claim of the two on a surface where over-matching is the acceptor's concern.
+  if (functions.has("filter_regex")) return displayText`pattern filter`;
+  if (functions.has("null_if")) return displayText`excludes values`;
   return undefined;
 }
 
