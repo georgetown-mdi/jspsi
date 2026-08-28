@@ -17,11 +17,16 @@
 // neither may import the other, and it holds only the row declarations: an anchor
 // is an app's own symbol, and `packages/` cannot import `apps/`.
 //
-// Stated limit, since a backstop is not a guarantee: the CLI leg's closure test
+// Stated limits, since a backstop is not a guarantee: the CLI leg's closure test
 // enumerates the modules whose whole purpose is preflight plus the `warn`-prefixed
 // exports of the CLI's option surface. A check written inline in a command module,
 // rather than as an export of one of those, is outside what it can see -- three
-// rows below are already of that shape, anchored by behaviour instead.
+// rows below are already of that shape, anchored by behaviour instead. The console
+// leg binds each `authored` row to a symbol and verifies the symbol exists; only
+// the three credential and retain rows are additionally driven through behaviour,
+// so a row's `how` prose describes the bound surface without the binding proving
+// it -- read a row as "this symbol carries the concern", not as a verified
+// transcript of what it does.
 
 /** One row of the inventory. Adding a member here fails BOTH legs to compile
  * until the check is anchored on the CLI side and dispositioned on the console
