@@ -169,8 +169,9 @@ export function ManagedCronExportPanel({
                     title="That export could not be completed"
                     mb="sm"
                   >
-                    The files could not be saved. Nothing changed here; try
-                    again.
+                    This export did not finish, so one or both files may be
+                    missing. Check your browser&apos;s downloads and download
+                    again; nothing is handed off until you confirm it.
                   </Alert>
                 )}
                 <Button mt="sm" onClick={downloadFiles} loading={busy}>

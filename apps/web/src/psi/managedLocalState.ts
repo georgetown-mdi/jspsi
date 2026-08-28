@@ -1,15 +1,15 @@
 /**
  * The local sibling state a managed exchange carries beside its record: the backup
- * marker (when a backup was last taken) and the spent state (a migration export
- * handed this device's copy off). Both are deliberately NOT record fields and NOT
- * in the export artifact:
+ * marker (when a backup was last taken) and the spent state (an export handed this
+ * device's copy off, and which one did). Both are deliberately NOT record fields
+ * and NOT in the export artifact:
  *
  * - The backup marker is derived-currency input the record must not carry -- a
  *   secret-derived or record-embedded "when I last backed up" would either force a
  *   new record `schemaVersion` (reader-rejects-unknown) or leak into the artifact;
  *   keeping it a sibling makes its non-inclusion structural (see
  *   {@link ./managedBackupState.ts}).
- * - The spent state is this device's own status after a migration export, and an
+ * - The spent state is this device's own status after a hand-off export, and an
  *   imported copy is a fresh live owner -- so the spent flag must not travel in the
  *   artifact either. It is a plain timestamp (the handoff date), no secret material
  *   and no rotation epoch (source invalidation is operator cooperation, not
@@ -33,11 +33,15 @@ import {
 } from "./managedExchangeStore";
 import { managedLocalStateSchema } from "./managedLocalStateShape";
 
-import type { ManagedLocalState } from "./managedLocalStateShape";
+import type {
+  ManagedLocalState,
+  ManagedSpentHandoff,
+} from "./managedLocalStateShape";
 
 export type {
   ManagedImportMarker,
   ManagedLocalState,
+  ManagedSpentHandoff,
   ManagedSpentState,
 } from "./managedLocalStateShape";
 
@@ -204,18 +208,24 @@ export async function markManagedExchangeBackedUp(
 }
 
 /**
- * Mark a record spent as of `spentAt` -- a migration export handed this device's
- * copy off. Advances only the spent state, leaving the backup marker untouched.
- * Cleared by importing the artifact back, which revives the record in place (see
- * {@link ./managedExchangeStore.ts}, `reviveSpentManagedExchange`).
+ * Mark a record spent as of `spentAt` -- an export handed this device's copy off.
+ * Advances only the spent state, leaving the backup marker untouched.
+ *
+ * `handoff` records WHICH export spent it, because the two leave the operator with
+ * different recoveries and the surfaces reading this state say so: a migration
+ * spend (the default, `handoff` omitted) downloaded the artifact that clears it,
+ * reviving the record in place (see {@link ./managedExchangeStore.ts},
+ * `reviveSpentManagedExchange`), while a `"command-line"` hand-off downloaded the
+ * CLI's own two files, which the import flow does not accept.
  */
 export async function markManagedExchangeSpent(
   id: string,
   spentAt: string,
+  handoff?: ManagedSpentHandoff,
 ): Promise<void> {
   await readModifyWriteLocalState(id, (current) => ({
     ...current,
-    spent: { spentAt },
+    spent: { spentAt, ...(handoff !== undefined ? { handoff } : {}) },
   }));
 }
 

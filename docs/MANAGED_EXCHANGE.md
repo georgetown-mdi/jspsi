@@ -688,6 +688,11 @@ both files landed. Confirming spends it; declining keeps the exchange here, and
 the operator can export again. No path hands the secret to a scheduler and leaves
 a second live owner behind.
 
+On every later visit the browser names that hand-off rather than a migration's:
+the recovery a migration has -- import the artifact back -- has nothing to act on
+here, because the two files are the CLI's own, not the artifact. The exchange
+runs on the machine holding them from then on.
+
 Two things do not travel with the files:
 
 - **The schedule.** The agreed run window is a browser-record field the CLI does
@@ -696,12 +701,14 @@ Two things do not travel with the files:
 - **The accounting of disclosures**, as with a device migration: export it as CSV
   before confirming if it is needed.
 
-One thing changes about what a run discloses. A managed connection names no STUN
-server -- it is a credential-free rendezvous locator by composition -- so each
-command-line run falls back to the CLI's built-in STUN default to discover that
-machine's public address, discloses the address and the fact of a session to that
-server, and warns about it on every run. Naming a `stun` server in the exported
-`psilink.yaml` is what replaces the default.
+The STUN disclosure moves rather than begins. A managed connection names no STUN
+server -- it is a credential-free rendezvous locator by composition -- so a
+managed run already falls back to a built-in STUN default to discover its own
+public address, in this browser as on the command line, disclosing that address
+and the fact of a session to that server (no exchange content). What the hand-off
+changes is **whose** address is disclosed -- the scheduling machine's rather than
+this browser's -- and that the CLI names it in a warning on every run. Naming a
+`stun` server in the exported `psilink.yaml` is what replaces the default.
 
 The two files carry the current secret, so taking the export marks the exchange
 backed up like the other two exports do. It is a backup for the command line, not

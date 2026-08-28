@@ -206,6 +206,20 @@ describe("savedExchangeRow spent state", () => {
     };
     const row = savedExchangeRow(record(), local, NOW);
     expect(row.spentAsOf).toBeDefined();
+    // A migration spend carries no hand-off: it is the one an import revives, and
+    // the row's recovery line says so.
+    expect(row.spentHandoff).toBeUndefined();
+  });
+
+  test("a command-line hand-off is named as one", () => {
+    // The two spends have different recoveries, so the row carries which one it
+    // was rather than one "handed off" line for both.
+    const local: ManagedLocalState = {
+      spent: { spentAt: "2026-07-12T09:00:00.000Z", handoff: "command-line" },
+    };
+    const row = savedExchangeRow(record(), local, NOW);
+    expect(row.spentAsOf).toBeDefined();
+    expect(row.spentHandoff).toBe("command-line");
   });
 
   test("a live record carries no spent date", () => {

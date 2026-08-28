@@ -73,6 +73,7 @@ import type { ManagedInputSource } from "@psi/managedInputHandle";
 import type { ManagedMigrationDispatch } from "@psi/managedExchangeExport";
 import type { ManagedReinvite } from "@psi/managedReinvite";
 import type { ManagedRunFailure } from "./managedRunLaunchModel";
+import type { ManagedSpentState } from "@psi/managedLocalState";
 import type { RunOutputs } from "./runOutputs";
 
 /**
@@ -92,14 +93,18 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // undefined -- deleted or cleared); an UNLOADABLE one (the read rejects: a stored
   // record this app version can no longer load, the documented app-upgrade case,
   // whose recovery is re-invite -- see docs/spec/MANAGED_EXCHANGE_RECORD.md,
-  // "Versioning"); and SPENT (a migration export handed this device's copy off, so
-  // it has no Run affordance and revives only by importing the artifact back). Spent
-  // is a load state, not a disabled button: no code path from a spent record reaches
-  // the run controls or run(), the structural guard the migration invariant needs.
+  // "Versioning"); and SPENT (an export handed this device's copy off, so it has no
+  // Run affordance, and what runs in its place depends on which export did it).
+  // Spent is a load state, not a disabled button: no code path from a spent record
+  // reaches the run controls or run(), the structural guard the migration invariant
+  // needs.
   const [loadFailure, setLoadFailure] = useState<
     "missing" | "unloadable" | "spent"
   >();
-  const [spentAt, setSpentAt] = useState<string>();
+  // The stored spent state behind that load state, carried whole: its date and the
+  // hand-off that wrote it are what the spent surface reads, and a migration's
+  // recovery (import the artifact back) is not a command-line hand-off's.
+  const [spent, setSpent] = useState<ManagedSpentState>();
   const [backupMarker, setBackupMarker] = useState<ManagedBackupMarker>();
   // This exchange's accounting of disclosures as its own read classified it, one
   // value rather than an accounting beside flags: an unreadable accounting must
@@ -180,7 +185,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
         } else if (local?.spent !== undefined) {
           // A spent record never reaches the run controls: the guard is the load
           // state, not a hidden button.
-          setSpentAt(local.spent.spentAt);
+          setSpent(local.spent);
           setLoadFailure("spent");
         } else {
           setBackupMarker(local?.backup);
@@ -538,18 +543,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
             <SavedExchangesFoot />
           </>
         ) : loadFailure === "spent" ? (
-          <>
-            <h1>This exchange was handed off</h1>
-            <p className={styles.sub}>
-              You exported this exchange to take over on another device
-              {spentAt !== undefined
-                ? ` on ${dateLabel(new Date(spentAt))}`
-                : ""}
-              , so it can no longer run here. Import the backup to run it on
-              this device again.
-            </p>
-            <SavedExchangesFoot />
-          </>
+          <SpentSurface spent={spent} />
         ) : record === undefined ? (
           <>
             <h1>Loading exchange</h1>
@@ -1098,6 +1092,43 @@ function BackupPanel({
         Move to another device
       </Button>
     </div>
+  );
+}
+
+/** The durable surface of a spent copy, read from the stored spent state on every
+ * later visit -- so it must say what THAT hand-off left the operator with. A
+ * migration copy is somewhere an import can bring back; a command-line hand-off
+ * produced the CLI's two files, which the import flow does not accept, so the
+ * exchange runs from those files and they are its backup of record. `spent` is
+ * undefined only if the
+ * sibling entry vanished between the load and this render, which costs the date, not
+ * the state. */
+function SpentSurface({ spent }: { spent: ManagedSpentState | undefined }) {
+  const on =
+    spent === undefined ? "" : ` on ${dateLabel(new Date(spent.spentAt))}`;
+  return spent?.handoff === "command-line" ? (
+    <>
+      <h1>This exchange was handed off</h1>
+      <p className={styles.sub}>
+        You handed this exchange to the command line{on}, so it no longer runs
+        here. It runs from the psilink.yaml and .psilink.key you saved, on the
+        machine you saved them to.
+      </p>
+      <p className={styles.small}>
+        Those two files are this exchange&apos;s backup of record. Keep them
+        somewhere only you can read.
+      </p>
+      <SavedExchangesFoot />
+    </>
+  ) : (
+    <>
+      <h1>This exchange was handed off</h1>
+      <p className={styles.sub}>
+        You exported this exchange to take over on another device{on}, so it can
+        no longer run here. Import the backup to run it on this device again.
+      </p>
+      <SavedExchangesFoot />
+    </>
   );
 }
 

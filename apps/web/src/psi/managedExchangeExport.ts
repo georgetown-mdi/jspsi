@@ -46,6 +46,7 @@ import { composeManagedCronExport } from "./managedCronExport";
 
 import type { ManagedCronExport } from "./managedCronExport";
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
+import type { ManagedSpentHandoff } from "./managedLocalStateShape";
 
 /** The download filename `psilink-managed-backup-<date>.json`, the date the local
  * calendar day of `at`, mirroring the exchange-file filename discipline so repeated
@@ -211,14 +212,22 @@ export async function dispatchManagedMigration(
 }
 
 /** The platform seams the command-line export drives. The migration's seams, with a
- * download that carries each composed file's own media type: the two files land as
- * the YAML and JSON documents the CLI opens, not as one artifact blob. */
+ * download that carries each composed file's own media type -- the two files land as
+ * the YAML and JSON documents the CLI opens, not as one artifact blob -- and a spend
+ * that records which hand-off spent the copy, so the durable spent state does not
+ * read as a migration's. */
 export interface ManagedCronExportDeps extends Omit<
   ManagedMigrationDeps,
-  "download"
+  "download" | "markSpent"
 > {
   /** Trigger a client-side download of one composed file. */
   download: (fileName: string, content: string, mimeType: string) => void;
+  /** Mark the record spent as of `spentAt`, under the hand-off that spent it. */
+  markSpent: (
+    id: string,
+    spentAt: string,
+    handoff: ManagedSpentHandoff,
+  ) => Promise<void>;
 }
 
 /** A dispatched command-line export awaiting the operator's "the files are saved"
@@ -232,10 +241,16 @@ export interface ManagedCronExportDispatch {
   record: ManagedExchangeRecord;
   /** What the two downloads carried, and the invocation that runs them. */
   composed: ManagedCronExport;
-  /** Spend the source as of `spentAt` (the operator's confirmation instant).
-   * Called only after the operator confirms both files are saved. */
+  /** Spend the source as of `spentAt` (the operator's confirmation instant), under
+   * the command-line hand-off. Called only after the operator confirms both files
+   * are saved. */
   confirm: (spentAt: Date) => Promise<void>;
 }
+
+/** The hand-off a confirmed command-line export records on the spent state, so the
+ * durable spent surfaces name the CLI files the exchange runs from rather than a
+ * migration artifact this export never wrote. */
+const CRON_EXPORT_HANDOFF: ManagedSpentHandoff = "command-line";
 
 /**
  * Dispatch a COMMAND-LINE export: read the current record, compose the CLI's two
@@ -256,6 +271,11 @@ export interface ManagedCronExportDispatch {
  * which is the fork single-device ownership forbids (docs/MANAGED_EXCHANGE.md,
  * "Single-device ownership").
  *
+ * The spend records the command-line hand-off ({@link ManagedSpentHandoff}) rather
+ * than a bare instant: this export produces the CLI's two files, which the import
+ * flow does not accept, so the durable spent state must not read as a migration's
+ * -- whose surfaces send the operator to an import that has no artifact here.
+ *
  * @throws {Error} if no record with `id` exists, or if the record is one the
  *   command-line export refuses ({@link composeManagedCronExport}).
  * @throws {ZodError} if the stored record or its sibling entry is invalid.
@@ -275,6 +295,7 @@ export async function dispatchManagedCronExport(
     backedUpAt,
     record,
     composed,
-    confirm: (spentAt) => deps.markSpent(id, spentAt.toISOString()),
+    confirm: (spentAt) =>
+      deps.markSpent(id, spentAt.toISOString(), CRON_EXPORT_HANDOFF),
   };
 }

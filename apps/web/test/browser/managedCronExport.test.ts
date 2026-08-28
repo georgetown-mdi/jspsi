@@ -212,11 +212,106 @@ describe("the source is spent only on the operator's attestation", () => {
       await expect
         .element(page.getByText("Handed off to the command line"))
         .toBeInTheDocument();
-      expect((await getManagedLocalState(created.id))?.spent).toBeDefined();
+      // The spend records WHICH hand-off spent it, not just when: a migration's
+      // spent state is revived by importing the artifact back, and this one has no
+      // artifact to import.
+      expect((await getManagedLocalState(created.id))?.spent).toMatchObject({
+        handoff: "command-line",
+      });
       // The run controls are gone with the copy they would have run.
       await expect
         .element(page.getByRole("button", { name: "Run exchange" }))
         .not.toBeInTheDocument();
+    } finally {
+      downloads.restore();
+    }
+  });
+});
+
+describe("the durable spent surface names the hand-off that spent it", () => {
+  // The "Handed off to the command line" surface a confirmation leaves on screen is
+  // session state. What a LATER VISIT shows is read back from the sibling store, so
+  // the stored spend is what has to carry the hand-off: a remount is the only way to
+  // see the copy the operator actually lives with.
+
+  /** Mount the run surface again from nothing, as a later visit does: the surface
+   * re-reads the record and its sibling state rather than keeping what the
+   * confirmation put in React state. */
+  function remount(id: string): void {
+    app.unmount();
+    app.render(createElement(ManagedRunSurface, { id }));
+  }
+
+  test("a command-line hand-off remounts into the command-line copy", async () => {
+    const created = await createManagedExchange(newExchange());
+    const downloads = captureDownloads();
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      await openExportPanel();
+      await downloadBothFiles(downloads.captured);
+      await page
+        .getByRole("button", {
+          name: "I saved both files; hand off this exchange",
+        })
+        .click();
+      await expect
+        .element(page.getByText("Handed off to the command line"))
+        .toBeInTheDocument();
+
+      remount(created.id);
+
+      await expect
+        .element(
+          page.getByText("handed this exchange to the command line", {
+            exact: false,
+          }),
+        )
+        .toBeInTheDocument();
+      await expect
+        .element(page.getByText("backup of record", { exact: false }))
+        .toBeInTheDocument();
+      // Neither half of the migration copy is true here: no other device holds
+      // this exchange, and the two files it runs from are not the artifact the
+      // import flow accepts.
+      expect(app.container.textContent).not.toContain("another device");
+      expect(app.container.textContent).not.toContain("Import the backup");
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("a device migration remounts into the migration copy", async () => {
+    // The path the discriminator must leave alone: a migration writes no hand-off,
+    // and its spent copy still points at the import that revives it.
+    const created = await createManagedExchange(newExchange());
+    const downloads = captureDownloads();
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      await page
+        .getByRole("button", { name: "Move to another device" })
+        .click();
+      await page
+        .getByRole("button", {
+          name: "I saved the file; hand off this exchange",
+        })
+        .click();
+      await expect
+        .element(page.getByText("Handed off to another device"))
+        .toBeInTheDocument();
+      expect(
+        (await getManagedLocalState(created.id))?.spent?.handoff,
+      ).toBeUndefined();
+
+      remount(created.id);
+
+      await expect
+        .element(
+          page.getByText("to take over on another device", { exact: false }),
+        )
+        .toBeInTheDocument();
+      await expect
+        .element(page.getByText("Import the backup", { exact: false }))
+        .toBeInTheDocument();
     } finally {
       downloads.restore();
     }
@@ -275,6 +370,7 @@ describe("a record this app could not have composed", () => {
     // against real IndexedDB: no backup marker, no spend, no record change.
     const created = await createManagedExchange(refusedExchange());
     const downloaded: Array<string> = [];
+    const before = await getManagedExchange(created.id);
 
     await expect(
       dispatchManagedCronExport(created.id, {
@@ -287,8 +383,8 @@ describe("a record this app could not have composed", () => {
 
     expect(downloaded).toEqual([]);
     expect(await getManagedLocalState(created.id)).toBeUndefined();
-    expect(await getManagedExchange(created.id)).toMatchObject({
-      sharedSecret: created.sharedSecret,
-    });
+    // Not just the secret: the whole stored record is what it was before the
+    // dispatch, since the refusal aborted the transaction it was composed inside.
+    expect(await getManagedExchange(created.id)).toEqual(before);
   });
 });
