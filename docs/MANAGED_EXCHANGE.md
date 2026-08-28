@@ -717,15 +717,30 @@ demonstrably at their machine at an agreed time and still never arrived is
 pointed at a re-invite rather than at another wait.
 
 That outranking belongs to the run that meets the no-show, and it weighs the
-standing reason as it stood when that run launched. A no-show's own bookkeeping
-entry replaces the previous one and records no failure kind, so a one-sided
-persist failure is no longer in the record for anything reading it afterwards:
-the recurring-exchanges list line, the run history, and a later run all name
-the no-show. The other two reasons live outside that entry -- a lapsed bound is
-the record's own `expires`, and a restore since the last success its import
-marker -- so they keep reading through. An operator whose last run could not
-save its rotated secret is therefore told so on the run that meets the
-no-show.
+standing reason as the stored record holds it at that run's launch -- read
+before the run, so the run's own bookkeeping is never what it reads. The
+reading is therefore per run, not per visit: a persist failure one run records
+is the standing reason the next run in the same visit weighs. Where that
+persist failure's own bookkeeping write did not land -- the write is
+best-effort, and the storage that failed the rotation can fail it too -- there
+is no standing reason to read, and the no-show reads as itself. Where the
+launch read itself fails, the run falls back to the record the run surface
+already holds, for that run alone.
+
+A no-show's own bookkeeping entry replaces the previous one and records no
+failure kind, so a one-sided persist failure is no longer in the record for
+anything reading it afterwards: the recurring-exchanges list line, the run
+history, and a later run all name the no-show. A recorded failed handshake goes
+the same way: a record whose last run was a no-show reads as that no-show
+rather than as the unexplained state, so the next visit does not put the
+out-of-band confirmation in front of the operator. The other two reasons live
+outside that entry -- a lapsed bound is the record's own `expires`, and a
+restore since the last success its import marker. The lapsed bound reads
+through everywhere; the import marker is read by the run that meets the
+no-show, and not by the recurring-exchanges list line or a later visit's launch
+state, whose reading stops at the recorded no-show. An operator whose last run
+could not save its rotated secret is therefore told so on the run that meets
+the no-show.
 
 A pattern of missed windows is a coordination problem, resolved out-of-band
 where the schedule itself was agreed -- surfaced, not auto-paused (see [Retry

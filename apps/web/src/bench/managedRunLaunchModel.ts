@@ -79,7 +79,7 @@ export type ManagedRunRecovery =
  * carries no `failureKind` at all, so a kind standing before the run is not in the
  * reloaded record to read. */
 export interface ManagedRunRecordReadings {
-  /** The record as the host held it when the run launched: the standing evidence
+  /** The record as the STORE held it at the run's launch: the standing evidence
    * this run's own bookkeeping stamp cannot have erased. The no-show state is read
    * against it ({@link missedFailure}). */
   atLaunch: ManagedExchangeRecord;

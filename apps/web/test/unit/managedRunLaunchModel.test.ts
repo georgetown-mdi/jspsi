@@ -18,11 +18,15 @@ import {
   applyManagedExchangeLastRun,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
+import {
+  RotationPersistError,
+  missedRun,
+  storageFailureRun,
+} from "@psi/managedRunRotate";
 import { ManagedExchangeExpiredError } from "@psi/managedExpiry";
 import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeRun";
 import { ManagedInputError } from "@psi/managedInputGuard";
 import { PartnerNoShowError } from "@psi/waitForConnection";
-import { missedRun } from "@psi/managedRunRotate";
 
 import type {
   ManagedExchangeLastRun,
@@ -347,6 +351,54 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
     expect(
       managedRunFailureFromRecord(afterRun, undefined, NOW),
     ).toBeUndefined();
+  });
+
+  test("a second run in one visit reads the evidence the first run left", () => {
+    // Two runs in one mounted visit, each run's bookkeeping applied through the
+    // real monotonic write. Nothing stands at the mount, so the first run's own
+    // persist failure is the whole of the standing evidence the second run's
+    // no-show is read against -- and the second run's stamp erases it as it goes.
+    const persistFailedAt = Date.parse("2026-07-14T10:00:00.000Z");
+    const atMount = record();
+    const afterPersistFailure = applyManagedExchangeLastRun(
+      atMount,
+      storageFailureRun(persistFailedAt),
+    );
+    const afterNoShow = applyManagedExchangeLastRun(
+      afterPersistFailure,
+      missedRun(Date.parse("2026-07-14T11:00:00.000Z")),
+    );
+
+    const firstRun = classifyManagedRunFailure(
+      new RotationPersistError(persistFailedAt, new Error("the write failed")),
+      { atLaunch: atMount, afterRun: afterPersistFailure },
+      undefined,
+      NOW,
+      false,
+    );
+    expect(firstRun.kind).toBe("storage");
+
+    const secondRun = classifyManagedRunFailure(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      { atLaunch: afterPersistFailure, afterRun: afterNoShow },
+      undefined,
+      NOW,
+      false,
+    );
+    expect(secondRun.kind).toBe("storage");
+    expect(secondRun.recovery).toBe("reinvite");
+
+    // Which reading the at-launch record has to be: the mount's copy predates the
+    // first run's failure, so a no-show read against it tells the operator nothing
+    // on this device is at fault.
+    const readAgainstTheMount = classifyManagedRunFailure(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      { atLaunch: atMount, afterRun: afterNoShow },
+      undefined,
+      NOW,
+      false,
+    );
+    expect(readAgainstTheMount.kind).toBe("missed");
   });
 
   test("a lapsed bound frames the no-show as the expiry state, naming the lapse", () => {

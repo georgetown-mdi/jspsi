@@ -36,8 +36,19 @@ import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 // stamp carries no `failureKind` -- so a surface handing the reload to both
 // readings shows the benign copy while the model itself stays correct and every
 // model test stays green.
+//
+// The second case pins where that reading is taken from. A surface reading its own
+// mounted React state weighs the evidence as of the MOUNT, so a run that fails to
+// persist and a no-show after it -- two runs in one visit, which the run control
+// allows -- would show the benign copy over evidence the first run itself left in
+// the store.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
+
+// The stubbed run's script for one test, reset per test: how many runs it has served
+// and whether the first of them is the rotation persist failure rather than a
+// no-show.
+const driver = vi.hoisted(() => ({ runs: 0, persistFailsFirstRun: false }));
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -47,19 +58,33 @@ vi.mock("@psi/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
-// The driver is stubbed to the failing half of a real no-show run: the run's own
+// The driver is stubbed to the failing half of a real run: the run's own
 // best-effort bookkeeping stamp through the store's real monotonic write, then the
-// no-show rethrown for the surface to classify. Nothing dials a partner; the stamp
-// and the error are what a `PartnerNoShowError` out of `runManagedRerun` produces.
+// error rethrown for the surface to classify. Nothing dials a partner; the stamp
+// and the error are what a `PartnerNoShowError` out of `runManagedRerun` produces,
+// and what its `RotationPersistError` produces for the run that rotates but cannot
+// save.
 vi.mock("@psi/managedRunDriver", async () => {
   const { PartnerNoShowError } = await import("@psi/waitForConnection");
-  const { missedRun } = await import("@psi/managedRunRotate");
+  const rotate = await import("@psi/managedRunRotate");
   const store = await import("@psi/managedExchangeStore");
   return {
     runManagedExchangeInBrowser: async (config: { record: { id: string } }) => {
+      driver.runs += 1;
+      const at = Date.now();
+      if (driver.persistFailsFirstRun && driver.runs === 1) {
+        await store.recordManagedExchangeLastRun(
+          config.record.id,
+          rotate.storageFailureRun(at),
+        );
+        throw new rotate.RotationPersistError(
+          at,
+          new Error("the write failed"),
+        );
+      }
       await store.recordManagedExchangeLastRun(
         config.record.id,
-        missedRun(Date.now()),
+        rotate.missedRun(at),
       );
       throw new PartnerNoShowError("timed out waiting for the other party");
     },
@@ -109,6 +134,8 @@ async function runUntilItNoShows(): Promise<string> {
 }
 
 beforeEach(async () => {
+  driver.runs = 0;
+  driver.persistFailsFirstRun = false;
   await clearManagedExchanges();
 });
 
@@ -141,6 +168,54 @@ describe("a live no-show is read against the evidence standing at launch", () =>
     // reads carries the no-show alone, so the list line and the run history name
     // that rather than the persist failure standing behind it.
     const stored = await getManagedExchange(id);
+    expect(stored?.lastRun?.outcome).toBe("missed");
+    expect(stored?.lastRun?.failureKind).toBeUndefined();
+  });
+
+  test("a persist failure earlier in this visit outranks a later run's no-show", async () => {
+    // Two runs in one mounted visit, which the run control allows: the first
+    // rotates and cannot save, the second meets the no-show that a pair left on
+    // different secrets produces every time. Nothing is seeded, so the only
+    // standing evidence the second run can be read against is what the first run
+    // itself wrote -- which a surface weighing its mount-time record never sees.
+    driver.persistFailsFirstRun = true;
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    const runButton = page.getByRole("button", { name: "Run exchange" });
+    await expect.element(runButton).toBeEnabled();
+
+    await runButton.click();
+    await expect
+      .element(page.getByText("The last run could not be saved"))
+      .toBeInTheDocument();
+    await expect.element(runButton).toBeEnabled();
+
+    await runButton.click();
+    await vi.waitFor(() => {
+      expect(driver.runs).toBe(2);
+    });
+    // The run control is disabled for the length of a run, so its return to
+    // enabled is the second run's classification having rendered.
+    await expect.element(runButton).toBeEnabled();
+    await flushPendingUpdates();
+
+    await expect
+      .element(page.getByText("The last run could not be saved"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Create a fresh invitation" }))
+      .toBeInTheDocument();
+    expect(app.container.textContent).not.toContain(
+      "Your partner did not arrive",
+    );
+    expect(app.container.textContent).not.toContain("nothing left this device");
+
+    // The second run reached the store and stamped its own no-show over the
+    // storage entry: without this the assertions above would pass against the
+    // first run's alert, which renders the same copy and is still on screen.
+    const stored = await getManagedExchange(created.id);
     expect(stored?.lastRun?.outcome).toBe("missed");
     expect(stored?.lastRun?.failureKind).toBeUndefined();
   });
