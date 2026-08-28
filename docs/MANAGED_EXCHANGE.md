@@ -465,8 +465,10 @@ An attended re-run has a third ending: the wait for the partner runs out and
 nobody arrives, so no handshake is attempted and nothing leaves this device.
 That is the benign no-show a missed window records, and the surface names it as
 one -- the partner was not there, this device is not at fault -- rather than
-sending the operator to check their own connection (see [A missed window is
-neither desync nor attack](#a-missed-window-is-neither-desync-nor-attack)).
+sending the operator to check their own connection. Where this device already
+holds a reason its stored secret may no longer be the partnership's, that
+reason is what the run surfaces instead (see [A missed window is neither desync
+nor attack](#a-missed-window-is-neither-desync-nor-attack)).
 
 ### The input file each run
 
@@ -697,13 +699,26 @@ with the partner's runner absent; an attended run reaches the same state when
 its own wait for the partner expires with the operator watching. Either way it
 is recorded as its own benign outcome in the run bookkeeping (a `"missed"`
 outcome; see [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)),
-and it never enters the desync/attack framing below -- exactly as expiry never
-does. Only a handshake that actually ran and failed reaches that framing. The
-recovery is another attempt with both parties present: the next agreed window's
-automatic retry, or the operator running the exchange again once their partner
-is ready. A pattern of missed windows is a coordination problem, resolved
-out-of-band where the schedule itself was agreed -- surfaced, not auto-paused
-(see [Retry and repeated misses](#retry-and-repeated-misses)).
+and it never reaches the out-of-band confirmation the tiering below reserves
+for a handshake that ran and failed closed. The recovery is another attempt
+with both parties present: the next agreed window's automatic retry, or the
+operator running the exchange again once their partner is ready.
+
+A no-show is no evidence of a desync -- and no evidence against one. Both
+rendezvous ids derive from the shared secret, so two sides holding different
+secrets wait on addresses the other is not using, and each records a no-show,
+every time, for as long as the desync stands. The no-show is therefore the
+reading of last resort: where this device already holds a standing reason its
+secret may no longer be the partnership's -- a restore since the last
+successful run, a one-sided persist failure, or a lapsed bound -- the run
+surfaces that state and its re-invite recovery instead. Where it does not, the
+no-show state names the persistent case in its own copy, so a partner who was
+demonstrably at their machine at an agreed time and still never arrived is
+pointed at a re-invite rather than at another wait.
+
+A pattern of missed windows is a coordination problem, resolved out-of-band
+where the schedule itself was agreed -- surfaced, not auto-paused (see [Retry
+and repeated misses](#retry-and-repeated-misses)).
 
 ### The grace window
 

@@ -150,6 +150,25 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     expect(managedRunReinvites(failure)).toBe(false);
   });
 
+  test("the no-show copy points a repeat no-show at a re-invite", () => {
+    // A pair holding different secrets no-shows every time, and this device cannot
+    // tell that from an absent partner. The reassuring reading must therefore not
+    // be the whole of what the operator is told: the copy names the re-invite for
+    // the partner who WAS at their machine at an agreed time, in the same register
+    // the storage and imported states use.
+    const failure = classifyManagedRunFailure(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      record(),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("missed");
+    expect(failure.message).toMatch(/keeps happening/i);
+    expect(failure.message).toMatch(/re-invite your partner to reconnect/i);
+    expect(failure.message).toMatch(/only replaces the secret/i);
+  });
+
   test("a live no-show reads the no-show state against the record it just stamped", () => {
     // The record the host reloads after a no-show carries the outcome this very run
     // stamped, so the ordinary shape -- live error and fresh bookkeeping agreeing --
@@ -220,6 +239,104 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     );
     expect(failure.kind).toBe("transport");
     expect(failure.message).not.toMatch(/nothing left this device/i);
+  });
+});
+
+describe("classifyManagedRunFailure: a no-show read against standing desync evidence", () => {
+  const importMarker: ManagedLocalState = {
+    imported: { importedAt: "2026-07-13T00:00:00.000Z" },
+  };
+
+  test("a standing import marker frames the no-show as the restored state", () => {
+    // The desync case the import marker exists to steer to re-invite produces
+    // exactly this shape: the restored copy holds a secret the partnership moved
+    // past, both rendezvous ids derive from that secret, so the dial answers
+    // peer-unavailable to the end of the budget and the run raises a no-show. The
+    // marker survives the run (only a rotation consumes it), and this run's own
+    // "missed" stamp is the freshest lastRun, so the tier derivation alone would
+    // answer "missed" and the operator would be told nothing is wrong here.
+    const failure = classifyManagedRunFailure(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      record({
+        lastRun: { at: "2026-07-14T09:00:00.000Z", outcome: "missed" },
+      }),
+      importMarker,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("imported");
+    expect(failure.recovery).toBe("reinvite");
+    expect(managedRunReinvites(failure)).toBe(true);
+    expect(failure.title).not.toMatch(/partner did not arrive/i);
+  });
+
+  test("a standing persist failure frames the no-show as the storage state", () => {
+    // The other one-sided-desync signal, reaching the classification through the
+    // record the host holds: this run's own missed stamp is best-effort, and the
+    // host classifies against its pre-run record when the post-failure reload
+    // rejects, so the storage kind can still be what the record says.
+    const failure = classifyManagedRunFailure(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      record({ lastRun: failed("storage") }),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("storage");
+    expect(failure.recovery).toBe("reinvite");
+  });
+
+  test("a lapsed bound frames the no-show as the expiry state, naming the lapse", () => {
+    // A bound that lapses during the wait: running again cannot succeed, so the
+    // no-show's "run it again when they are ready" would be the wrong instruction.
+    const failure = classifyManagedRunFailure(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      record({ expires: "2026-07-01T00:00:00.000Z" }),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("expired");
+    expect(failure.recovery).toBe("reinvite");
+    expect(failure.message).toMatch(/2026/);
+  });
+
+  test("a standing auth failure does not escalate a no-show to the attack framing", () => {
+    // The exclusion the tiering rests on: no handshake ran, so nothing failed
+    // closed, and a no-show is not the evidence the out-of-band confirmation is
+    // reserved for. Only the Tier-1 re-invite states outrank the no-show reading.
+    const failure = classifyManagedRunFailure(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      record({ lastRun: failed("auth") }),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("missed");
+    expect(failure.recovery).toBe("none");
+    expect(failure.message).not.toMatch(/attack|tamper|impersonat/i);
+  });
+
+  test("a no-show with nothing standing keeps the benign state", () => {
+    // The evidence has to be the record's own: a clean record reads as the
+    // no-show, so the desync framings above are never the default reading of an
+    // absent partner.
+    for (const lastRun of [
+      undefined,
+      { at: "2026-07-14T09:00:00.000Z", outcome: "missed" } as const,
+      { at: "2026-07-14T09:00:00.000Z", outcome: "succeeded" } as const,
+      failed("transport"),
+      failed("cancelled"),
+    ]) {
+      const failure = classifyManagedRunFailure(
+        new PartnerNoShowError("timed out waiting for the other party"),
+        record(lastRun === undefined ? {} : { lastRun }),
+        undefined,
+        NOW,
+        false,
+      );
+      expect(failure.kind).toBe("missed");
+    }
   });
 });
 

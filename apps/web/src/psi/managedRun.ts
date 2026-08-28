@@ -398,23 +398,34 @@ export type BenignRerunOutcome =
  * the state a live launch showed rather than a coarser one.
  *
  * `dataExchangeStarted` is the run's own phase boundary, reported by
- * {@link ManagedRerunOptions.onDataExchangeStart}. The two outcomes whose copy
- * tells the operator nothing left this device -- `"terms-shortfall"` and
- * `"missed"` -- carry it as the same guard their bookkeeping counterparts do
- * ({@link rerunFailureLastRun}), so the state a surface shows and the outcome the
- * record carries cannot disagree about a disclosure. Neither error can be raised
- * past the boundary today (core refuses an unsatisfiable shortfall inside the
+ * {@link ManagedRerunOptions.onDataExchangeStart}. Every outcome whose copy tells
+ * the operator nothing left this device -- `"missed"`, and `"terms-shortfall"`
+ * from either of its two raisers (core's refusal in the pre-connection prepare,
+ * and the input guard's own column grading) -- carries it as the same guard its
+ * bookkeeping counterpart does ({@link rerunFailureLastRun}), so the state a
+ * surface shows and the outcome the record carries cannot disagree about a
+ * disclosure. The input-guard arm is gated whole rather than on the kind it
+ * grades to, so a grading that gains a kind does not have to re-derive the guard.
+ * None of these errors can be raised past the boundary today (the input guard
+ * runs before any connection, core refuses an unsatisfiable shortfall inside the
  * pre-connection prepare, and the no-show is raised only by a wait that never
  * opened a channel), and the guard is what keeps that a check rather than a
  * standing assumption: one delivered past the boundary is not a benign outcome
  * here, and falls through to the caller's generic transport path.
+ *
+ * The guard binds the outcomes read here off THIS run's error, and nothing
+ * further: a surface state derived instead from the record's stored bookkeeping
+ * ({@link ./managedFailureTiers.ts}, read by
+ * {@link ../bench/managedRunLaunchModel.ts}) rests on the guard the run that
+ * stamped the kind applied, so a stored `"consent"` or `"terms-shortfall"` kind
+ * carries its non-disclosure copy from that stamp alone.
  */
 export function benignRerunOutcome(
   error: unknown,
   dataExchangeStarted: boolean,
 ): BenignRerunOutcome | undefined {
   if (error instanceof ManagedExchangeExpiredError) return "expired";
-  if (error instanceof ManagedInputError)
+  if (error instanceof ManagedInputError && !dataExchangeStarted)
     return managedInputFailureKind(error.rejection);
   if (error instanceof LinkageTermsUnsatisfiableError && !dataExchangeStarted)
     return "terms-shortfall";

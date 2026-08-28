@@ -238,6 +238,29 @@ describe("benignRerunOutcome", () => {
     ).toBeUndefined();
   });
 
+  test("an input rejection past the data-exchange boundary is not a benign outcome", () => {
+    // The input guard's own column grading raises the same non-disclosure outcome
+    // core's refusal does, so it carries the same boundary guard rather than
+    // reaching the surface's "nothing left this device" copy on the strength of
+    // the error's type. The guard runs before any connection, and this is the
+    // check that holds that rather than a docstring asserting it.
+    expect(
+      benignRerunOutcome(
+        new ManagedInputError({
+          reason: "columns",
+          unsatisfied: [{ name: "ssn", type: "ssn" }],
+        }),
+        true,
+      ),
+    ).toBeUndefined();
+    expect(
+      benignRerunOutcome(
+        new ManagedInputError({ reason: "acquire", cause: new Error("x") }),
+        true,
+      ),
+    ).toBeUndefined();
+  });
+
   test("a linkage shortfall past the data-exchange boundary is not a benign outcome", () => {
     // The same guard, for the same reason: the shortfall state's copy tells the
     // operator the run stopped before connecting and nothing left this device, and
