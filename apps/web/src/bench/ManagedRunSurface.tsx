@@ -54,6 +54,7 @@ import {
 import { dateLabel, dateTimeLabel } from "./inviterModel";
 import { BenchPage } from "./BenchPage";
 import { DeleteExchangeButton } from "./SavedExchanges";
+import { ManagedCronExportPanel } from "./ManagedCronExportPanel";
 import { ManagedExchangeDetail } from "./ManagedExchangeDetail";
 import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import { appendSanitizedRunWarning } from "./runWarnings";
@@ -118,6 +119,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [migrationDispatch, setMigrationDispatch] =
     useState<ManagedMigrationDispatch>();
   const [migrated, setMigrated] = useState(false);
+  // The invocation a confirmed command-line export handed over, present once this
+  // browser's copy is spent that way: like a migration, the record no longer runs
+  // here, and the surface names what runs in its place.
+  const [commandLineHandoff, setCommandLineHandoff] = useState<string>();
   const [reselected, setReselected] = useState<File>();
   const [running, setRunning] = useState(false);
   // The record, its detail, and the backup affordances all read the browser's own
@@ -613,6 +618,21 @@ export function ManagedRunSurface({ id }: { id: string }) {
             )}
             <SavedExchangesFoot />
           </>
+        ) : commandLineHandoff !== undefined ? (
+          <>
+            <h1>Handed off to the command line</h1>
+            <p className={styles.sub}>
+              You exported this exchange&apos;s psilink.yaml and .psilink.key,
+              so it no longer runs here. Run it on the machine you saved them
+              to:
+            </p>
+            <p className={styles.mono}>{commandLineHandoff}</p>
+            <p className={styles.small}>
+              Those two files are this exchange&apos;s backup of record. Keep
+              them somewhere only you can read.
+            </p>
+            <SavedExchangesFoot />
+          </>
         ) : migrated ? (
           <>
             <h1>Handed off to another device</h1>
@@ -751,6 +771,13 @@ export function ManagedRunSurface({ id }: { id: string }) {
               failed={exportFailed}
               onBackUp={backUp}
               onMigrate={migrate}
+            />
+            <ManagedCronExportPanel
+              record={record}
+              onBackedUp={(backedUpAt) =>
+                setBackupMarker({ backedUpAt: backedUpAt.toISOString() })
+              }
+              onHandedOff={setCommandLineHandoff}
             />
             <ManagedExchangeDetail
               record={record}

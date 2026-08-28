@@ -1,7 +1,8 @@
 /**
- * The two managed-exchange export intents, wired over the pure artifact encoder,
- * the blob download, and the local sibling-state writes. One format, two intents
- * (see docs/MANAGED_EXCHANGE.md, "Export/import is migration, not sync"):
+ * The managed-exchange export intents, wired over the pure artifact encoder, the
+ * blob download, and the local sibling-state writes. Two of them share one
+ * artifact format (see docs/MANAGED_EXCHANGE.md, "Export/import is migration, not
+ * sync"):
  *
  * - A BACKUP export leaves the source live. It reads the current record and stamps
  *   the backup marker in one atomic store step ({@link readRecordAndMarkBackedUp}),
@@ -19,6 +20,13 @@
  *   to its visible spent state. A dismissed dialog leaves the source live and
  *   recoverable.
  *
+ * The third intent exports the exchange to the COMMAND LINE instead of to another
+ * browser: it downloads the CLI's own two files ({@link composeManagedCronExport})
+ * rather than the artifact, and spends the source on the same operator attestation
+ * the migration uses. It is a migration by another route -- the secret is handed to
+ * a scheduler on some machine -- so it takes the identical read-and-mark-then-attest
+ * shape, and differs only in what lands on disk.
+ *
  * The seams (the fresh read-and-mark, the download, the spend write) are injected so
  * the intents are testable without a real download or database.
  */
@@ -27,7 +35,9 @@ import {
   encodeManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
 } from "./managedExchangeArtifact";
+import { composeManagedCronExport } from "./managedCronExport";
 
+import type { ManagedCronExport } from "./managedCronExport";
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 
 /** The download filename `psilink-managed-backup-<date>.json`, the date the local
@@ -76,6 +86,22 @@ export interface ManagedBackupResult {
 }
 
 /**
+ * The atomic step under every export intent: one clock read, then the store's
+ * read-and-mark by id. Reading by id rather than from a caller-held record is what
+ * keeps a stale tab -- or a stale React snapshot holding a pre-rotation secret --
+ * from being what an export serializes, and binding the marker to that same read is
+ * what keeps the marker unable to attest bytes it did not read.
+ */
+async function readAndMarkForExport(
+  id: string,
+  deps: Pick<ManagedExportDeps, "readAndMark" | "now">,
+): Promise<ManagedBackupResult> {
+  const backedUpAt = deps.now();
+  const record = await deps.readAndMark(id, backedUpAt.toISOString());
+  return { backedUpAt, record };
+}
+
+/**
  * Read the current record, stamp the backup marker, and download the artifact --
  * one atomic read-and-mark, then the download of exactly those bytes. Returns the
  * mark instant and the record read, so the marker and the locally-rendered state
@@ -86,8 +112,7 @@ async function readMarkAndDownload(
   id: string,
   deps: ManagedExportDeps,
 ): Promise<ManagedBackupResult> {
-  const backedUpAt = deps.now();
-  const record = await deps.readAndMark(id, backedUpAt.toISOString());
+  const { backedUpAt, record } = await readAndMarkForExport(id, deps);
   deps.download(
     managedBackupFileName(backedUpAt),
     serializeManagedExchangeArtifact(encodeManagedExchangeArtifact(record)),
@@ -147,6 +172,67 @@ export async function dispatchManagedMigration(
   return {
     backedUpAt,
     record,
+    confirm: (spentAt) => deps.markSpent(id, spentAt.toISOString()),
+  };
+}
+
+/** The platform seams the command-line export drives. The migration's seams, with a
+ * download that carries each composed file's own media type: the two files land as
+ * the YAML and JSON documents the CLI opens, not as one artifact blob. */
+export interface ManagedCronExportDeps extends Omit<
+  ManagedMigrationDeps,
+  "download"
+> {
+  /** Trigger a client-side download of one composed file. */
+  download: (fileName: string, content: string, mimeType: string) => void;
+}
+
+/** A dispatched command-line export awaiting the operator's "the files are saved"
+ * confirmation. Both files are already downloaded and the source marked backed-up;
+ * the source is spent only when {@link confirm} is called, so a dismissed or failed
+ * save leaves it live. */
+export interface ManagedCronExportDispatch {
+  /** The instant the backup marker was stamped, from the caller's `now`. */
+  backedUpAt: Date;
+  /** The record the export composed from (the fresh store read). */
+  record: ManagedExchangeRecord;
+  /** What the two downloads carried, and the invocation that runs them. */
+  composed: ManagedCronExport;
+  /** Spend the source as of `spentAt` (the operator's confirmation instant).
+   * Called only after the operator confirms both files are saved. */
+  confirm: (spentAt: Date) => Promise<void>;
+}
+
+/**
+ * Dispatch a COMMAND-LINE export: read the current record and stamp the backup
+ * marker in the same atomic step every export takes, compose the CLI's two files
+ * from exactly that read, download each under its own name, and return a dispatch
+ * whose {@link ManagedCronExportDispatch.confirm} spends the source.
+ *
+ * The spend is deliberately NOT written here, for the reason
+ * {@link dispatchManagedMigration} defers it: `anchor.click()` gives no landing
+ * signal, and two clicks give two chances to fail, so the source stays live until
+ * the operator attests both files are saved. Handing the secret to a scheduler
+ * without spending the source would leave two live owners of one linear secret,
+ * which is the fork single-device ownership forbids (docs/MANAGED_EXCHANGE.md,
+ * "Single-device ownership").
+ *
+ * @throws {Error} if no record with `id` exists, or if the record is one the
+ *   command-line export refuses ({@link composeManagedCronExport}).
+ * @throws {ZodError} if the stored record or its sibling entry is invalid.
+ */
+export async function dispatchManagedCronExport(
+  id: string,
+  deps: ManagedCronExportDeps,
+): Promise<ManagedCronExportDispatch> {
+  const { backedUpAt, record } = await readAndMarkForExport(id, deps);
+  const composed = composeManagedCronExport(record);
+  for (const file of [composed.config, composed.key])
+    deps.download(file.fileName, file.text, file.mimeType);
+  return {
+    backedUpAt,
+    record,
+    composed,
     confirm: (spentAt) => deps.markSpent(id, spentAt.toISOString()),
   };
 }

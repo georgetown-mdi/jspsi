@@ -110,13 +110,23 @@ export const CRON_EXPORT_INPUT_FILE_NAME = "input.csv";
  * docs/SECURITY_DESIGN.md, "Key file security", Result CSV output). */
 export const CRON_EXPORT_OUTPUT_FILE_NAME = "results.csv";
 
+/** The media type the configuration half is written to disk under: the exchange
+ * document is the YAML the CLI's config loader reads. */
+export const CRON_EXPORT_CONFIG_MIME = "application/yaml";
+
+/** The media type the key half is written to disk under: `.psilink.key` is the
+ * JSON document the CLI's key-file reader parses. */
+export const CRON_EXPORT_KEY_MIME = "application/json";
+
 /** One exported file: the name it must be saved under for the emitted command to
- * find it, and its exact contents. */
+ * find it, its exact contents, and the media type it is written under. */
 export interface ManagedCronExportFile {
   /** The file name the CLI opens this content at. */
   fileName: string;
   /** The file's contents, ready to write verbatim. */
   text: string;
+  /** The media type a download writes the file under. */
+  mimeType: string;
 }
 
 /**
@@ -406,10 +416,12 @@ export function composeManagedCronExport(
     config: {
       fileName: CRON_EXPORT_CONFIG_FILE_NAME,
       text: serializeExchangeDocument(composeCronExportDocument(record)),
+      mimeType: CRON_EXPORT_CONFIG_MIME,
     },
     key: {
       fileName: CRON_EXPORT_KEY_FILE_NAME,
       text: serializeKeyFile(keyFileFieldsFromRecord(record)),
+      mimeType: CRON_EXPORT_KEY_MIME,
     },
     command:
       `psilink exchange ${CRON_EXPORT_INPUT_FILE_NAME} ` +

@@ -1,0 +1,262 @@
+/// <reference types="@vitest/browser-playwright/context" />
+
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  assembleExchangeSpec,
+  connectionFromLocator,
+  generateSharedSecret,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
+
+import { page } from "vitest/browser";
+
+import { createElement } from "react";
+
+import "@mantine/core/styles.css";
+
+import {
+  clearManagedExchanges,
+  createManagedExchange,
+} from "@psi/managedExchangeStore";
+import { ManagedRunSurface } from "@bench/ManagedRunSurface";
+import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+import { getManagedLocalState } from "@psi/managedLocalState";
+
+import { captureDownloads } from "./captureDownloads";
+import { createAppMount } from "./renderApp";
+
+import type { CapturedDownload } from "./captureDownloads";
+import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+
+// The command-line export panel on the run surface, against real Chromium (the
+// record and its sibling stores are the real IndexedDB ones, and the export is the
+// real one: no download or spend is stubbed). What is pinned here is the hand-off
+// invariant -- the two files the CLI opens land, and this browser's copy is spent
+// ONLY on the operator's attestation that they did, so a dismissed save leaves one
+// live owner rather than two.
+
+vi.mock("@tanstack/react-router", async () =>
+  (await import("./moduleMocks")).reactRouterMock(),
+);
+
+vi.mock("@psi/rendezvous", async () =>
+  (await import("./moduleMocks")).rendezvousMock(),
+);
+
+const linkageTerms = getDefaultLinkageTerms("County Health Dept");
+
+function newExchange(
+  overrides: Partial<NewManagedExchange> = {},
+): NewManagedExchange {
+  return {
+    label: "Riverbend quarterly",
+    exchangeFile: composeManagedExchangeFile({
+      connection: {
+        channel: "webrtc",
+        host: "signaling.example.org",
+        port: 3000,
+        path: "/api/",
+      },
+      linkageTerms,
+    }),
+    side: "inviter",
+    sharedSecret: generateSharedSecret(),
+    ...overrides,
+  };
+}
+
+const app = createAppMount();
+
+const exportToggle = () =>
+  page.getByRole("button", { name: /run this from the command line/i });
+
+/** Open the collapsed export panel on a freshly rendered run surface. */
+async function openExportPanel(): Promise<void> {
+  await expect.element(exportToggle()).toBeInTheDocument();
+  expect(exportToggle().element().getAttribute("aria-expanded")).toBe("false");
+  await exportToggle().click();
+  expect(exportToggle().element().getAttribute("aria-expanded")).toBe("true");
+}
+
+/** Click the panel's download action and wait for both files' bytes to be read
+ * back off their object URLs. */
+async function downloadBothFiles(
+  captured: Array<CapturedDownload>,
+): Promise<void> {
+  await page
+    .getByRole("button", { name: "Download psilink.yaml and .psilink.key" })
+    .click();
+  await vi.waitFor(() => {
+    expect(captured).toHaveLength(2);
+    expect(captured.every((file) => file.text !== "")).toBe(true);
+  });
+}
+
+beforeEach(async () => {
+  await clearManagedExchanges();
+});
+
+afterEach(async () => {
+  app.unmount();
+  await clearManagedExchanges();
+});
+
+describe("the command-line export hands over two files", () => {
+  test("the CLI's config and key land, with the secret in the key half only", async () => {
+    const created = await createManagedExchange(newExchange());
+    const downloads = captureDownloads();
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      await openExportPanel();
+      await downloadBothFiles(downloads.captured);
+
+      expect(downloads.captured.map((file) => file.fileName)).toEqual([
+        "psilink.yaml",
+        ".psilink.key",
+      ]);
+      const [config, key] = downloads.captured;
+      expect(config.text).toContain("linkage_terms:");
+      expect(config.text).not.toContain(created.sharedSecret);
+      expect(key.text).toContain(created.sharedSecret);
+      // The panel hands the secret to the operator's disk, never to the screen.
+      expect(app.container.textContent).not.toContain(created.sharedSecret);
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("the panel names the secret, its custody, and the STUN disclosure", async () => {
+    const created = await createManagedExchange(newExchange());
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    await openExportPanel();
+
+    await expect
+      .element(page.getByText("shared secret, in plain text", { exact: false }))
+      .toBeInTheDocument();
+    // The credential-at-rest posture is cited, not restated.
+    await expect
+      .element(page.getByRole("link", { name: "Key file security" }))
+      .toBeInTheDocument();
+    // A managed connection configures no ICE server, so every scheduled run falls
+    // back to the CLI's built-in default and discloses the host's public address.
+    await expect
+      .element(page.getByText("stun:stun.l.google.com:19302", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("backup of record", { exact: false }))
+      .toBeInTheDocument();
+    // The ready-to-run invocation and both schedule lines are on the panel.
+    await expect
+      .element(
+        page.getByText("psilink exchange input.csv results.csv", {
+          exact: true,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("0 2 * * *", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("schtasks /Create", { exact: false }))
+      .toBeInTheDocument();
+  });
+});
+
+describe("the source is spent only on the operator's attestation", () => {
+  test("dismissing the confirmation leaves this browser's copy live", async () => {
+    const created = await createManagedExchange(newExchange());
+    const downloads = captureDownloads();
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      await openExportPanel();
+      await downloadBothFiles(downloads.captured);
+
+      await expect
+        .element(page.getByText("Confirm the hand-off."))
+        .toBeInTheDocument();
+      await page
+        .getByRole("button", { name: "Keep it in this browser" })
+        .click();
+
+      // No spend: the record still runs here, and the run affordance is still up.
+      expect((await getManagedLocalState(created.id))?.spent).toBeUndefined();
+      await expect
+        .element(page.getByRole("button", { name: "Run exchange" }))
+        .toBeInTheDocument();
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("confirming spends the source and takes down the run affordance", async () => {
+    const created = await createManagedExchange(newExchange());
+    const downloads = captureDownloads();
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      await openExportPanel();
+      await downloadBothFiles(downloads.captured);
+
+      expect((await getManagedLocalState(created.id))?.spent).toBeUndefined();
+      await page
+        .getByRole("button", {
+          name: "I saved both files; hand off this exchange",
+        })
+        .click();
+
+      await expect
+        .element(page.getByText("Handed off to the command line"))
+        .toBeInTheDocument();
+      expect((await getManagedLocalState(created.id))?.spent).toBeDefined();
+      // The run controls are gone with the copy they would have run.
+      await expect
+        .element(page.getByRole("button", { name: "Run exchange" }))
+        .not.toBeInTheDocument();
+    } finally {
+      downloads.restore();
+    }
+  });
+});
+
+describe("a record this app could not have composed", () => {
+  test("is refused rather than exported, and the panel says why", async () => {
+    // Reachable only by importing a hand-crafted artifact: the browser composes
+    // webrtc exchanges alone. The panel presents the composer's refusal.
+    const created = await createManagedExchange(
+      newExchange({
+        exchangeFile: assembleExchangeSpec({
+          connection: connectionFromLocator({
+            channel: "filedrop",
+            path: "/srv/exchange",
+          }),
+          linkageTerms,
+        }),
+      }),
+    );
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+
+    await expect.element(exportToggle()).toBeInTheDocument();
+    // The collapsed toggle already says there is nothing here to open into.
+    await expect
+      .element(page.getByText("Not available for this exchange"))
+      .toBeInTheDocument();
+    await exportToggle().click();
+
+    await expect
+      .element(
+        page.getByText("cannot be handed to the command line", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("stored connection channel is filedrop"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: "Download psilink.yaml and .psilink.key",
+        }),
+      )
+      .not.toBeInTheDocument();
+  });
+});
