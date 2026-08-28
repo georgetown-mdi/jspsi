@@ -77,8 +77,9 @@ What managed does **not** add:
 - **No server-side execution.** Automation runs in the operator's own browser
   runtime -- an installed app kept running on the operator's machine -- never
   on a server acting for the party. The installed-software path for scheduled
-  runs remains the CLI plus a host scheduler such as cron. The console appliance
-  is not a scheduling path -- it facilitates a single exchange (see
+  runs remains the CLI plus a host scheduler such as cron (see [Scheduling the
+  run](CLI.md#scheduling-the-run)). The console appliance is not a scheduling
+  path -- it facilitates a single exchange (see
   [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-appliance-trust-boundary)).
 - **No second copy of the input data.** The record never holds the input file's
   contents or any row value. Where the platform allows, it holds a file
