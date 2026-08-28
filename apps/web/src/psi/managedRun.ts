@@ -122,6 +122,16 @@ export interface ManagedRerunOptions {
    * rather than a transport fault. Defaults to never-cancelled.
    */
   aborted?: () => boolean;
+  /**
+   * Called once when the data exchange begins -- the phase boundary past which
+   * payload could have flowed. The run's own failure bookkeeping reads that
+   * boundary ({@link rerunFailureLastRun}), and a caller that classifies the
+   * failure for display needs the same value: every state whose copy tells the
+   * operator nothing left this device is honest only before it (see
+   * {@link benignRerunOutcome}). Optional: a caller that never classifies a
+   * failure omits it.
+   */
+  onDataExchangeStart?: () => void;
 }
 
 /**
@@ -183,7 +193,8 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
   // tier that claims nothing was disclosed (a security-kind error's "auth", a
   // disclosure refusal's "consent", a linkage refusal's "terms-shortfall") is
   // stamped only pre-data-exchange, and a failure once payload flow could have
-  // started records "transport".
+  // started records "transport". The same boundary is reported to the caller, whose
+  // display classification of the failure carries the identical guard.
   let dataExchangeStarted = false;
 
   // The input guard, the single-writer lock, the persist-before-success rotation,
@@ -201,6 +212,7 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
       dataExchange: seams.dataExchange,
       onDataExchangeStart: () => {
         dataExchangeStarted = true;
+        options.onDataExchangeStart?.();
       },
       ...(options.lock !== undefined ? { lock: options.lock } : {}),
       now,
@@ -384,17 +396,32 @@ export type BenignRerunOutcome =
  * the bookkeeping kind of the same name, and the guard's own split is read from
  * {@link managedInputFailureKind} here as well as at the stamp, so a revisit tiers
  * the state a live launch showed rather than a coarser one.
+ *
+ * `dataExchangeStarted` is the run's own phase boundary, reported by
+ * {@link ManagedRerunOptions.onDataExchangeStart}. The two outcomes whose copy
+ * tells the operator nothing left this device -- `"terms-shortfall"` and
+ * `"missed"` -- carry it as the same guard their bookkeeping counterparts do
+ * ({@link rerunFailureLastRun}), so the state a surface shows and the outcome the
+ * record carries cannot disagree about a disclosure. Neither error can be raised
+ * past the boundary today (core refuses an unsatisfiable shortfall inside the
+ * pre-connection prepare, and the no-show is raised only by a wait that never
+ * opened a channel), and the guard is what keeps that a check rather than a
+ * standing assumption: one delivered past the boundary is not a benign outcome
+ * here, and falls through to the caller's generic transport path.
  */
 export function benignRerunOutcome(
   error: unknown,
+  dataExchangeStarted: boolean,
 ): BenignRerunOutcome | undefined {
   if (error instanceof ManagedExchangeExpiredError) return "expired";
   if (error instanceof ManagedInputError)
     return managedInputFailureKind(error.rejection);
-  if (error instanceof LinkageTermsUnsatisfiableError) return "terms-shortfall";
+  if (error instanceof LinkageTermsUnsatisfiableError && !dataExchangeStarted)
+    return "terms-shortfall";
   if (error instanceof ManagedExchangeLockUnavailableError)
     return "already-running";
-  if (error instanceof PartnerNoShowError) return "missed";
+  if (error instanceof PartnerNoShowError && !dataExchangeStarted)
+    return "missed";
   return undefined;
 }
 

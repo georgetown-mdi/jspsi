@@ -6,7 +6,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
 } from "@psilink/core";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
@@ -34,6 +34,37 @@ import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 // the lock, and the benign-outcome classification). The full launch-from-record
 // path through the single-writer lock and the strict-durability store is exercised
 // against real Chromium in test/browser/managedRun.test.ts.
+//
+// One ordering claim does need the run driven end to end: the phase boundary this
+// module reports to its caller, which the caller's failure classification reads to
+// decide whether a state whose copy says nothing left this device can be shown. It
+// is driven here against a stub of the two platform pieces -- the Web Locks
+// acquisition and the store's rotation/bookkeeping writes -- since neither bears on
+// the ordering under test.
+
+vi.mock("@psi/managedExchangeStore", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  persistManagedExchangeRotation: vi.fn(() => Promise.resolve()),
+  recordManagedExchangeLastRun: vi.fn(() => Promise.resolve()),
+}));
+
+/** Grant the run+rotate lock immediately, so a Node test can drive the run through
+ * the critical section the browser's Web Locks owns. */
+function stubGrantingWebLocks(): void {
+  vi.stubGlobal("navigator", {
+    locks: {
+      request: (
+        _name: string,
+        _options: unknown,
+        critical: (lock: object) => Promise<unknown>,
+      ) => critical({}),
+    },
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function record(
   overrides: Partial<ManagedExchangeRecord> = {},
@@ -106,33 +137,126 @@ describe("runManagedRerun: pre-connection expiry", () => {
   });
 });
 
+describe("runManagedRerun: the phase boundary reported to the caller", () => {
+  test("the caller learns the boundary before the data exchange runs", async () => {
+    // The value the surface classifies a failure against: without this report a
+    // classifier would have to take the record's own bookkeeping for the phase,
+    // which is a best-effort write about whichever run last managed to stamp it.
+    stubGrantingWebLocks();
+    let boundaryReported = false;
+    let reportedWhenExchangeRan: boolean | undefined;
+
+    const result = await runManagedRerun(
+      record(),
+      {
+        acquireInput: () => Promise.resolve("rows"),
+        handshake: () =>
+          Promise.resolve({
+            rotatedSecret: generateSharedSecret(),
+            handshake: "carried",
+          }),
+        dataExchange: () => {
+          reportedWhenExchangeRan = boundaryReported;
+          return Promise.resolve("exchanged");
+        },
+      },
+      {
+        onDataExchangeStart: () => {
+          boundaryReported = true;
+        },
+      },
+    );
+
+    expect(reportedWhenExchangeRan).toBe(true);
+    expect(result.exchange).toBe("exchanged");
+  });
+
+  test("a failure before the data exchange leaves the boundary unreported", async () => {
+    // The phase every state whose copy says nothing left this device rests on: a
+    // run that never reached the data exchange must not read as one that did.
+    stubGrantingWebLocks();
+    let boundaryReported = false;
+
+    await expect(
+      runManagedRerun(
+        record(),
+        {
+          acquireInput: () => Promise.resolve("rows"),
+          handshake: () =>
+            Promise.reject(new PartnerNoShowError("nobody arrived")),
+          dataExchange: () => {
+            throw new Error("the data exchange must not run");
+          },
+        },
+        {
+          onDataExchangeStart: () => {
+            boundaryReported = true;
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(PartnerNoShowError);
+
+    expect(boundaryReported).toBe(false);
+  });
+});
+
 describe("benignRerunOutcome", () => {
   test("classifies the benign pre-connection states", () => {
     expect(
       benignRerunOutcome(
         new ManagedExchangeExpiredError("2026-07-01T00:00:00Z"),
+        false,
       ),
     ).toBe("expired");
     expect(
       benignRerunOutcome(
         new ManagedInputError({ reason: "acquire", cause: new Error("x") }),
+        false,
       ),
     ).toBe("input");
     expect(
-      benignRerunOutcome(new ManagedExchangeLockUnavailableError("id")),
+      benignRerunOutcome(new ManagedExchangeLockUnavailableError("id"), false),
     ).toBe("already-running");
   });
 
   test("a partner who never arrived is the benign missed state", () => {
-    expect(benignRerunOutcome(new PartnerNoShowError("nobody came"))).toBe(
-      "missed",
-    );
+    expect(
+      benignRerunOutcome(new PartnerNoShowError("nobody came"), false),
+    ).toBe("missed");
+  });
+
+  test("a no-show past the data-exchange boundary is not a benign outcome", () => {
+    // The classification carries the phase guard its bookkeeping counterpart does
+    // (rerunFailureLastRun records "transport" for this same shape), so the two
+    // cannot disagree about a disclosure. The rendezvous raises the no-show only
+    // from a wait that never opened a channel, and this is the check that holds
+    // that rather than a comment asserting it: a no-show delivered once payload
+    // could have flowed is no longer the state whose copy says nothing left this
+    // device, so it falls through to the caller's generic transport path.
+    expect(
+      benignRerunOutcome(new PartnerNoShowError("nobody came"), true),
+    ).toBeUndefined();
+  });
+
+  test("a linkage shortfall past the data-exchange boundary is not a benign outcome", () => {
+    // The same guard, for the same reason: the shortfall state's copy tells the
+    // operator the run stopped before connecting and nothing left this device, and
+    // core raises it from the pre-connection prepare -- past the boundary that
+    // claim cannot be made, whatever raised it.
+    expect(
+      benignRerunOutcome(
+        new LinkageTermsUnsatisfiableError("refused at the run boundary"),
+        true,
+      ),
+    ).toBeUndefined();
   });
 
   test("a handshake/storage/transport failure is not a benign pre-connection state", () => {
-    expect(benignRerunOutcome(new Error("connection dropped"))).toBeUndefined();
     expect(
-      benignRerunOutcome(new RotationPersistError(0, new Error("db"))),
+      benignRerunOutcome(new Error("connection dropped"), false),
+    ).toBeUndefined();
+    expect(
+      benignRerunOutcome(new RotationPersistError(0, new Error("db")), false),
     ).toBeUndefined();
   });
 });
@@ -412,7 +536,7 @@ describe("a run refused for terms this file cannot satisfy", () => {
     // and it is held apart from the acquisition failure, which putting the file back
     // clears: this one reproduces on every run from the same file, so the surface it
     // reaches must not offer the run again as though it might pass.
-    expect(benignRerunOutcome(refusal())).toBe("terms-shortfall");
+    expect(benignRerunOutcome(refusal(), false)).toBe("terms-shortfall");
   });
 
   test("the input guard's own column rejection reaches the same state, live and recorded", () => {
@@ -424,14 +548,14 @@ describe("a run refused for terms this file cannot satisfy", () => {
       reason: "columns",
       unsatisfied: [],
     });
-    expect(benignRerunOutcome(columns)).toBe("terms-shortfall");
+    expect(benignRerunOutcome(columns, false)).toBe("terms-shortfall");
     expect(managedInputFailureKind(columns.rejection)).toBe("terms-shortfall");
     // An acquisition failure stays the retryable input state.
     const acquire = new ManagedInputError({
       reason: "acquire",
       cause: new Error("gone"),
     });
-    expect(benignRerunOutcome(acquire)).toBe("input");
+    expect(benignRerunOutcome(acquire, false)).toBe("input");
     expect(managedInputFailureKind(acquire.rejection)).toBe("input");
   });
 

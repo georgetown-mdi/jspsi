@@ -95,7 +95,9 @@ export interface ManagedRunDriverConfig {
    * app, a recording fake in tests. */
   urls: ObjectUrls;
   /** Injected clock and lock discipline (the attended path sets `lock.ifAvailable`
-   * so a run already in progress elsewhere surfaces the benign state). */
+   * so a run already in progress elsewhere surfaces the benign state), plus the
+   * `onDataExchangeStart` phase-boundary report a caller classifying the failure
+   * for display reads. */
   options?: ManagedRerunOptions;
   /** A non-fatal, operator-relevant notice raised mid-run -- today only the clean
    * close ending on an exit that carries no delivery signal rather than on the

@@ -128,7 +128,11 @@ const ALREADY_RUNNING_FAILURE: ManagedRunFailure = {
  * own connection for a partner who was simply not there. Recovery is `"none"`:
  * nothing on this device is broken and nothing here is re-settled, and the run
  * control is not gated by a classified state, so the operator runs it again
- * whenever their partner is ready. */
+ * whenever their partner is ready.
+ *
+ * Its disclosure claim is this run's, so it is issued from THIS run's no-show error
+ * alone (see {@link classifyManagedRunFailure}) and never from a record's recorded
+ * outcome, which belongs to whichever run stamped it. */
 const MISSED_FAILURE: ManagedRunFailure = {
   kind: "missed",
   title: "Your partner did not arrive",
@@ -256,13 +260,25 @@ const UNEXPLAINED_FAILURE: ManagedRunFailure = {
 };
 
 /** The surface state for a derived failure tier. The expired tier reads
- * `record.expires` to name the real lapsed instant; the missed tier carries the
- * no-show copy, so a live launch and a next-visit read of the same recorded outcome
- * say the same thing. The none tier maps to the generic transport copy -- a success
- * does not surface as a launch failure ({@link managedRunFailureFromRecord} filters
- * it, along with the missed tier the list surfaces informationally), but
- * {@link classifyManagedRunFailure} can route any tier here, so it is handled
- * explicitly rather than left to fabricate an instant or fall off the end. */
+ * `record.expires` to name the real lapsed instant; the transport, missed, and none
+ * tiers map to the generic transport copy.
+ *
+ * The missed tier deliberately does NOT carry the no-show copy: that copy attests
+ * that nothing left this device, which is a claim about the failure being
+ * classified, while a recorded `"missed"` outcome belongs to whichever run stamped
+ * it -- and a failed run's bookkeeping write is best-effort (see
+ * {@link ../psi/managedRun.ts}) and the host falls back to its pre-run record when
+ * the post-failure reload rejects, so a failure from mid-data-exchange can meet a
+ * standing missed outcome. A next-visit read of that outcome is informational and
+ * phrased by the list and history surfaces (`savedExchangesModel`,
+ * `managedDetailModel`), which name the no-show without claiming anything about
+ * what this run disclosed.
+ *
+ * A success does not surface as a launch failure
+ * ({@link managedRunFailureFromRecord} filters it, along with the missed tier the
+ * list surfaces informationally), but {@link classifyManagedRunFailure} can route
+ * any tier here, so both are handled explicitly rather than left to fabricate an
+ * instant or fall off the end. */
 function tierFailure(
   tier: ManagedFailureTier,
   record: ManagedExchangeRecord,
@@ -288,9 +304,8 @@ function tierFailure(
       return IMPORTED_FAILURE;
     case "unexplained":
       return UNEXPLAINED_FAILURE;
-    case "missed":
-      return MISSED_FAILURE;
     case "transport":
+    case "missed":
     case "none":
       return TRANSPORT_FAILURE;
   }
@@ -308,14 +323,23 @@ function tierFailure(
  * and {@link tierFailure} maps it to copy. `now` and `local` are passed so the tier
  * derivation reads expiry and the import marker; the record is the freshly-reloaded
  * one carrying the just-stamped `lastRun`.
+ *
+ * `dataExchangeStarted` is THIS run's phase boundary, reported by the run through
+ * its `onDataExchangeStart` option and passed through to
+ * {@link benignRerunOutcome}: a benign state whose copy says nothing left this
+ * device is read off the error only from before the boundary. The record cannot
+ * stand in for it -- its `lastRun` is whatever the last write managed to stamp,
+ * which is why the no-show copy is issued from the live error rather than from the
+ * derived missed tier.
  */
 export function classifyManagedRunFailure(
   error: unknown,
   record: ManagedExchangeRecord,
   local: ManagedLocalState | undefined,
   now: number,
+  dataExchangeStarted: boolean,
 ): ManagedRunFailure {
-  const benign = benignRerunOutcome(error);
+  const benign = benignRerunOutcome(error, dataExchangeStarted);
   if (benign === "expired" && error instanceof ManagedExchangeExpiredError)
     return expiredFailure(error.expires);
   if (benign === "already-running") return ALREADY_RUNNING_FAILURE;

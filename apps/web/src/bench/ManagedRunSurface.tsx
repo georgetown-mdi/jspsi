@@ -267,6 +267,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setCompromiseResponse(false);
     setReinvite(undefined);
     setReinviteFailed(false);
+    // This run's phase boundary, read by the failure classification below: a state
+    // whose copy says nothing left this device is only honest before it, and the
+    // record's own bookkeeping cannot stand in (its write is best-effort, and the
+    // fallback path below classifies against a pre-run record). Local to this run,
+    // not React state -- nothing renders from it, and a later run starts fresh.
+    let dataExchangeStarted = false;
     void (async () => {
       try {
         const result = await runManagedExchangeInBrowser({
@@ -279,7 +285,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
           },
           // Attended: fail fast when a run is already in progress elsewhere,
           // surfacing the benign "already running" state rather than waiting.
-          options: { lock: { ifAvailable: true } },
+          options: {
+            lock: { ifAvailable: true },
+            onDataExchangeStart: () => {
+              dataExchangeStarted = true;
+            },
+          },
           onWarning: (message) =>
             setRunWarnings((current) =>
               appendSanitizedRunWarning(current, message),
@@ -323,6 +334,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
             reloaded ?? record,
             local,
             Date.now(),
+            dataExchangeStarted,
           ),
         );
       } finally {

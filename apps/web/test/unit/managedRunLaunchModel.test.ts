@@ -66,6 +66,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
       record(),
       undefined,
       NOW,
+      false,
     );
     expect(failure.kind).toBe("expired");
     expect(failure.recovery).toBe("reinvite");
@@ -83,6 +84,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
       record(),
       undefined,
       NOW,
+      false,
     );
     expect(failure.kind).toBe("input");
     expect(failure.recovery).toBe("retry");
@@ -106,6 +108,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
         record(),
         undefined,
         NOW,
+        false,
       );
       expect(failure.kind).toBe("terms-shortfall");
       expect(failure.recovery).toBe("restate");
@@ -121,6 +124,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
       record(),
       undefined,
       NOW,
+      false,
     );
     expect(failure.kind).toBe("already-running");
     expect(failure.recovery).toBe("wait");
@@ -135,6 +139,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
       record(),
       undefined,
       NOW,
+      false,
     );
     expect(failure.kind).toBe("missed");
     expect(failure.recovery).toBe("none");
@@ -145,25 +150,76 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     expect(managedRunReinvites(failure)).toBe(false);
   });
 
-  test("a live no-show and its recorded outcome read the same", () => {
-    // The bookkeeping the live launch just stamped is what a next visit tiers on,
-    // so the two paths must not diverge: a record carrying the missed outcome
-    // classifies to the same state as the error that produced it.
-    const live = classifyManagedRunFailure(
+  test("a live no-show reads the no-show state against the record it just stamped", () => {
+    // The record the host reloads after a no-show carries the outcome this very run
+    // stamped, so the ordinary shape -- live error and fresh bookkeeping agreeing --
+    // must still read as the no-show rather than as anything the tiering derives.
+    const failure = classifyManagedRunFailure(
       new PartnerNoShowError("timed out waiting for the other party"),
-      record(),
-      undefined,
-      NOW,
-    );
-    const recorded = classifyManagedRunFailure(
-      new Error("some later failure"),
       record({
         lastRun: { at: "2026-07-14T09:00:00.000Z", outcome: "missed" },
       }),
       undefined,
       NOW,
+      false,
     );
-    expect(recorded).toEqual(live);
+    expect(failure.kind).toBe("missed");
+    expect(failure.message).toMatch(/nothing left this device/i);
+  });
+
+  test("an unrelated live failure against a standing missed outcome takes the transport copy", () => {
+    // The no-show copy claims nothing was exchanged and nothing left this device.
+    // That claim belongs to the failure being classified, not to the record: a
+    // failed run's bookkeeping write is best-effort and can be swallowed, and the
+    // host classifies against its pre-run record when the post-failure reload
+    // rejects -- so an earlier run's missed outcome can still be standing while
+    // THIS run failed at the handshake or mid-data-exchange. Neither phase lets the
+    // record license the claim, so both are driven here.
+    for (const dataExchangeStarted of [false, true]) {
+      const failure = classifyManagedRunFailure(
+        new Error("data channel dropped"),
+        record({
+          lastRun: { at: "2026-07-14T09:00:00.000Z", outcome: "missed" },
+        }),
+        undefined,
+        NOW,
+        dataExchangeStarted,
+      );
+      expect(failure.kind).toBe("transport");
+      expect(failure.message).not.toMatch(/nothing left this device/i);
+      expect(failure.message).not.toMatch(/did not arrive|never connected/i);
+    }
+  });
+
+  test("a no-show delivered past the data-exchange boundary takes the transport copy", () => {
+    // The rendezvous raises the no-show only from a wait that never opened a
+    // channel, and this is the check that holds that rather than a comment
+    // asserting it: past the boundary the run cannot attest that nothing left this
+    // device, whatever the error's type says, so the neutral copy stands.
+    const failure = classifyManagedRunFailure(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      record(),
+      undefined,
+      NOW,
+      true,
+    );
+    expect(failure.kind).toBe("transport");
+    expect(failure.message).not.toMatch(/nothing left this device/i);
+  });
+
+  test("a linkage shortfall delivered past the data-exchange boundary takes the transport copy", () => {
+    // The twin guard: the shortfall state's copy makes the same disclosure claim,
+    // and core raises the refusal inside the pre-connection prepare, so the phase
+    // rather than the error's type is what licenses the copy.
+    const failure = classifyManagedRunFailure(
+      new LinkageTermsUnsatisfiableError("refused at the run boundary"),
+      record(),
+      undefined,
+      NOW,
+      true,
+    );
+    expect(failure.kind).toBe("transport");
+    expect(failure.message).not.toMatch(/nothing left this device/i);
   });
 });
 
@@ -174,6 +230,7 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
       record({ lastRun: failed("storage") }),
       undefined,
       NOW,
+      false,
     );
     expect(failure.kind).toBe("storage");
     expect(failure.recovery).toBe("reinvite");
@@ -189,6 +246,7 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
       record({ lastRun: failed("auth") }),
       local,
       NOW,
+      false,
     );
     expect(failure.kind).toBe("imported");
     expect(failure.recovery).toBe("reinvite");
@@ -201,6 +259,7 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
       record({ lastRun: failed("auth") }),
       undefined,
       NOW,
+      false,
     );
     expect(failure.kind).toBe("unexplained");
     expect(failure.recovery).toBe("confirm");
@@ -215,6 +274,7 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
       record({ lastRun: failed("transport") }),
       undefined,
       NOW,
+      false,
     );
     expect(failure.kind).toBe("transport");
     expect(failure.recovery).toBe("retry");
@@ -227,6 +287,7 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
       record({ lastRun: failed("consent") }),
       undefined,
       NOW,
+      false,
     );
     expect(failure.kind).toBe("consent");
     expect(failure.recovery).toBe("reconfirm");
@@ -326,6 +387,10 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
   });
 
   test("a missed window is informational, not a launch failure", () => {
+    // The next-visit read of a recorded no-show is a status line rather than a
+    // launch failure state, so it names the no-show without claiming anything
+    // about what a later failure disclosed (its wording is pinned in
+    // savedExchangesModel.test.ts and managedDetailModel.test.ts).
     expect(
       managedRunFailureFromRecord(
         record({
@@ -347,6 +412,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
           record(),
           undefined,
           NOW,
+          false,
         ),
       ),
     ).toBe(true);
@@ -357,6 +423,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
           record({ lastRun: failed("transport") }),
           undefined,
           NOW,
+          false,
         ),
       ),
     ).toBe(true);
@@ -367,6 +434,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
           record(),
           undefined,
           NOW,
+          false,
         ),
       ),
     ).toBe(false);
@@ -380,6 +448,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
       record({ lastRun: failed("consent") }),
       undefined,
       NOW,
+      false,
     );
     expect(managedRunRetryable(failure)).toBe(false);
     expect(managedRunReinvites(failure)).toBe(false);
@@ -393,6 +462,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
           record({ lastRun: failed("storage") }),
           undefined,
           NOW,
+          false,
         ),
       ),
     ).toBe(true);
@@ -403,6 +473,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
           record({ lastRun: failed("auth") }),
           undefined,
           NOW,
+          false,
         ),
       ),
     ).toBe(false);
