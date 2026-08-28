@@ -264,6 +264,24 @@ determine every past and future window, and `lastRun` already carries the most
 recent outcome. `consecutiveMisses` is the only cross-window state the retry
 policy needs.
 
+Window *n* is the half-open interval from `anchor + n * intervalDays` to
+`windowSeconds` later: an instant exactly at the close belongs to no window, so
+a window is elapsed the moment it closes and, while `windowSeconds` does not
+exceed the period `intervalDays` spans, two consecutive windows never both
+contain the same instant. The schema does not yet tie the two fields together,
+so a hand-edited or imported schedule can carry overlapping windows; there a
+run's instant is credited to the latest window containing it, and an earlier
+overlapping window it also fell in still counts as missed. Every open is
+computed by fixed-millisecond arithmetic
+from the stored UTC `anchor`, never by a local-calendar date add -- a calendar
+add moves the instant by the offset change on the week a party's zone shifts,
+which is exactly when two runners can least afford to stop overlapping. The host
+zone is read once, at entry, to resolve a local wall-clock cadence into `anchor`
+(see the `anchor` row); no later computation reads it. Every stored instant
+carries the UTC designator, and one that does not -- from a hand edit or a
+tampered artifact -- is refused rather than read against the host zone, which
+would otherwise place the same record's windows differently on every machine.
+
 The schedule is a **local-only** field, not part of the persisted
 `exchangeFile` document: a reschedule is neither a terms change nor a credential,
 so it must not force the re-invite a document change requires (see [Record
@@ -298,6 +316,28 @@ On wake, before attempting anything, the runner applies one catch-up rule:
   attempts it immediately; otherwise `nextWindow` is the first window opening
   after the current instant.
 
+A window is **unattempted** when no run bookkeeping falls inside it. A window
+that does carry a `lastRun` was met, so it takes that entry's verdict from the
+`consecutiveMisses` row above rather than counting as a miss, and its own
+bookkeeping stands rather than being overwritten by the catch-up's `"missed"`
+entry. The same reading settles the window still open at the wake: a
+`"succeeded"` run inside it satisfies it, so `nextWindow` advances past without
+an attempt -- which is how an attended run inside an agreed window discharges
+that window -- while a run that failed inside it does not, leaving the rest of
+the window attemptable. Bookkeeping the wake cannot stand behind settles
+nothing: a `lastRun` whose `at` is stamped ahead of the wake instant -- a
+forward-skewed clock, or a hand-edited record -- discharges no window, whether
+the window it names has opened or not, so the schedule keeps planning that
+window and attempts it while it is open. Deferring the verdict to a later wake
+is the conservative direction: no agreed window is skipped on a stamp from the
+future, and none is counted as missed before its close.
+
+Catch-up applies these verdicts **window by window, oldest first**, never as a
+net over the span: a `"succeeded"` window resets `consecutiveMisses` to 0 and
+only the windows after it rebuild the count, wherever in the run that window
+sits -- including the window still open at the wake, whose recorded success
+resets the count the elapsed windows before it raised.
+
 The rule keeps both fields honest. `consecutiveMisses` reflects the true count
 of elapsed misses whichever side was absent, and the runner lands on a live
 window rather than replaying stale past ones. Crossing the two-miss escalation
@@ -305,6 +345,17 @@ threshold during catch-up fires the repeated-miss surface at the wake -- which
 is how a persistently absent party learns of a miss pattern late rather than
 never (see
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)).
+
+The wake's bookkeeping write is **conditioned on the plan it read**: it lands
+only while the stored `anchor`, `intervalDays`, `windowSeconds`, `nextWindow`,
+and `consecutiveMisses` are still the ones the catch-up computed against, and is
+dropped whole otherwise. Nothing serializes one wake's write against another's,
+or against an operator's edit, so an unconditioned write could rewind
+`nextWindow` and lower `consecutiveMisses` behind newer bookkeeping -- deferring
+the two-miss escalation by exactly the misses it erased -- overwrite a re-plan
+the operator had just made, or restore a count they had just cleared on the plan
+the wake was running. A dropped write costs nothing: the next wake recomputes
+the same rule against the stored plan.
 
 The import path is the rule's second consumer: an imported backup carries the
 snapshot's `nextWindow`, typically in the past by the time the artifact is

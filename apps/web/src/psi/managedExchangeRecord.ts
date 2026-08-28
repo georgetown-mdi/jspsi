@@ -194,6 +194,18 @@ export const scheduleSchema: ZodType<ManagedExchangeSchedule> = z.object({
   consecutiveMisses: z.int().min(0),
 });
 
+/** The instant a stored ISO datetime denotes, or `NaN` for a string the
+ * validators above would not admit as one: unparseable, or carrying no UTC
+ * designator (they take `Z` and no bare offset). Without the designator
+ * `Date.parse` reads the wall clock against the HOST zone -- five hours off the
+ * stored moment under America/New_York -- so the same record would name a
+ * different instant on every machine that read it. Shared with the schedule
+ * arithmetic, which reads these same fields and must land on the same moments
+ * (see {@link ./managedSchedule.ts}). */
+export function parseStoredInstant(value: string): number {
+  return value.endsWith("Z") ? Date.parse(value) : Number.NaN;
+}
+
 /** The canonical `lastRun` validator. Exported so the export/import artifact reuses
  * it rather than re-declaring a laxer copy. A record written before a kind was added
  * to the enum still reads: every earlier kind remains a member, so a stored
@@ -547,6 +559,101 @@ export function applyManagedExchangeLastRun(
   )
     return parseManagedExchangeRecord(record);
   return parseManagedExchangeRecord({ ...record, lastRun });
+}
+
+/** Whether two stored instants denote the same moment, compared as parsed
+ * instants for the precision reason {@link applyManagedExchangeLastRun} gives.
+ * A string {@link parseStoredInstant} cannot read matches nothing, itself
+ * included, which holds a conditioned write off a plan it cannot read. */
+function sameStoredInstant(left: string, right: string): boolean {
+  return parseStoredInstant(left) === parseStoredInstant(right);
+}
+
+/** The schedule bookkeeping one closed window produces, written as a unit: the
+ * advanced schedule and, when the window earned one, the run entry that goes with
+ * it. `nextWindow`, `consecutiveMisses`, and `lastRun` describe a single window's
+ * disposition, so a reader must never see a count advanced past a window whose
+ * planned attempt has not moved, or the reverse. */
+export interface ManagedExchangeScheduleAdvance {
+  /** The schedule with `nextWindow` and `consecutiveMisses` advanced. Its
+   * `anchor`, `intervalDays`, and `windowSeconds` are the cadence the advance was
+   * computed against, and are matched against the stored record rather than
+   * written (see {@link applyManagedExchangeScheduleAdvance}). */
+  schedule: ManagedExchangeSchedule;
+  /** The `nextWindow` the advance was computed FROM, matched against the stored
+   * one exactly as the cadence is: the advance is the successor of that one
+   * plan, so it lands only while the record still carries it. */
+  fromNextWindow: string;
+  /** The `consecutiveMisses` the advance was computed FROM, matched the same
+   * way: the count is the escalation's own input, and an operator may clear it
+   * on the plan the wake is running, so an advance that counted from the old
+   * value must not restore it. */
+  fromConsecutiveMisses: number;
+  /** The window's run bookkeeping. Omitted when the window produced none -- one
+   * the single-writer lock was held through, or one a run already recorded its
+   * own outcome for. */
+  lastRun?: ManagedExchangeLastRun;
+}
+
+/** Apply a scheduled window's bookkeeping to a record, producing a validated new
+ * record with `schedule` and `lastRun` advanced together and everything else --
+ * the document, the secret, the handle -- carried through untouched. The input
+ * record is not mutated. This is the runner's write; the attended run path
+ * records `lastRun` alone and never touches `schedule`.
+ *
+ * Conditioned on the whole stored plan, which the operator may edit and another
+ * wake may advance at any time: the write lands only while the record still
+ * carries the cadence the advance was computed against (`anchor`,
+ * `intervalDays`, `windowSeconds`) AND still plans the `nextWindow` and carries
+ * the `consecutiveMisses` it was computed from. Any other stored schedule -- a
+ * re-entered cadence, a plan some other write already moved, a count the
+ * operator cleared, or none at all -- leaves the record entirely unchanged.
+ * Writing regardless would resurrect a schedule the operator dropped, overwrite
+ * a re-entered cadence with a planned window derived from the replaced one,
+ * restore a count the operator cleared on the plan the wake was running, or --
+ * the tails of two wakes being no more serialized than two runs' (see
+ * {@link applyManagedExchangeLastRun}) -- rewind `nextWindow` and LOWER
+ * `consecutiveMisses` behind a newer advance, deferring the escalation two
+ * consecutive misses fire. A wake against the stored plan recomputes both
+ * honestly.
+ *
+ * The stored instants are compared as parsed moments rather than strings, for
+ * the varying-ISO-precision reason {@link applyManagedExchangeLastRun} states.
+ *
+ * `lastRun` alone stays monotonic on `at` exactly as
+ * {@link applyManagedExchangeLastRun}: the schedule advance still applies -- the
+ * window did close, whatever landed afterwards -- while a bookkeeping entry
+ * staler than the stored one is dropped rather than masking a newer outcome.
+ * Both stamps are read through {@link parseStoredInstant} rather than
+ * `Date.parse`, so one carrying no UTC designator is not measured against the
+ * host's zone: it compares as no run at all, which lets the window's own
+ * bookkeeping land over it -- the same conservative direction the catch-up walk
+ * takes for a stamp it cannot read. */
+export function applyManagedExchangeScheduleAdvance(
+  record: ManagedExchangeRecord,
+  advance: ManagedExchangeScheduleAdvance,
+): ManagedExchangeRecord {
+  const stored = record.schedule;
+  if (
+    stored === undefined ||
+    !sameStoredInstant(stored.anchor, advance.schedule.anchor) ||
+    stored.intervalDays !== advance.schedule.intervalDays ||
+    stored.windowSeconds !== advance.schedule.windowSeconds ||
+    !sameStoredInstant(stored.nextWindow, advance.fromNextWindow) ||
+    stored.consecutiveMisses !== advance.fromConsecutiveMisses
+  )
+    return parseManagedExchangeRecord(record);
+  const next: ManagedExchangeRecord = { ...record, schedule: advance.schedule };
+  if (
+    advance.lastRun !== undefined &&
+    !(
+      record.lastRun !== undefined &&
+      parseStoredInstant(record.lastRun.at) >
+        parseStoredInstant(advance.lastRun.at)
+    )
+  )
+    next.lastRun = advance.lastRun;
+  return parseManagedExchangeRecord(next);
 }
 
 /**

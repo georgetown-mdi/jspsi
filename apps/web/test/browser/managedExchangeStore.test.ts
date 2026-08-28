@@ -18,6 +18,7 @@ import {
   listManagedExchangesDiagnostic,
   openManagedExchangeDatabase,
   persistManagedExchangeRotation,
+  persistManagedExchangeScheduleAdvance,
   putManagedExchange,
   recordManagedExchangeLastRun,
   requestPersistentStorage,
@@ -435,6 +436,131 @@ describe("field-scoped lastRun write", () => {
     // The lastRun read the freshest record: the rotated secret survives.
     expect(updated.sharedSecret).toBe(rotatedSecret);
     expect(updated.lastRun?.failureKind).toBe("storage");
+  });
+});
+
+describe("atomic schedule advance", () => {
+  const advanced: ManagedExchangeSchedule = {
+    ...schedule,
+    nextWindow: "2026-01-20T14:00:00.000Z",
+    consecutiveMisses: 1,
+  };
+  const missedRun = {
+    at: "2026-01-13T17:00:00.000Z",
+    outcome: "missed",
+  } as const;
+
+  test("the planned window, the count, and the outcome land in one write", async () => {
+    const created = await createManagedExchange(newExchange({ schedule }));
+    const written = await persistManagedExchangeScheduleAdvance(created.id, {
+      schedule: advanced,
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
+      lastRun: missedRun,
+    });
+    expect(written.schedule).toEqual(advanced);
+    expect(written.lastRun).toEqual(missedRun);
+    // What persists is what the call returned, not a validating read's view.
+    expect(await rawStored(created.id)).toMatchObject({
+      schedule: advanced,
+      lastRun: missedRun,
+    });
+  });
+
+  test("advancing cannot revert a concurrent rotation write", async () => {
+    const created = await createManagedExchange(newExchange({ schedule }));
+    const rotatedSecret = generateSharedSecret();
+    await persistManagedExchangeRotation(created.id, {
+      sharedSecret: rotatedSecret,
+      expires: null,
+    });
+    const written = await persistManagedExchangeScheduleAdvance(created.id, {
+      schedule: advanced,
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
+      lastRun: missedRun,
+    });
+    expect(written.sharedSecret).toBe(rotatedSecret);
+    expect(written.schedule).toEqual(advanced);
+  });
+
+  test("a schedule dropped between the wake and the write is not resurrected", async () => {
+    const created = await createManagedExchange(newExchange({ schedule }));
+    await updateManagedExchangeLocalFields(created.id, { schedule: null });
+    const written = await persistManagedExchangeScheduleAdvance(created.id, {
+      schedule: advanced,
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
+      lastRun: missedRun,
+    });
+    expect(written).not.toHaveProperty("schedule");
+    expect(written).not.toHaveProperty("lastRun");
+    expect(await rawStored(created.id)).not.toHaveProperty("schedule");
+  });
+
+  test("a plan a newer write already moved leaves the stored record alone", async () => {
+    const created = await createManagedExchange(newExchange({ schedule }));
+    const newer = {
+      ...advanced,
+      nextWindow: "2026-01-27T14:00:00.000Z",
+      consecutiveMisses: 2,
+    };
+    await persistManagedExchangeScheduleAdvance(created.id, {
+      schedule: newer,
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
+    });
+    const written = await persistManagedExchangeScheduleAdvance(created.id, {
+      schedule: advanced,
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
+      lastRun: missedRun,
+    });
+    expect(written.schedule).toEqual(newer);
+    expect(await rawStored(created.id)).toMatchObject({ schedule: newer });
+    expect(await rawStored(created.id)).not.toHaveProperty("lastRun");
+  });
+
+  test("a count the operator cleared survives a wake that read the old one", async () => {
+    const created = await createManagedExchange(
+      newExchange({ schedule: { ...schedule, consecutiveMisses: 3 } }),
+    );
+    const cleared = { ...schedule, consecutiveMisses: 0 };
+    await updateManagedExchangeLocalFields(created.id, { schedule: cleared });
+    const written = await persistManagedExchangeScheduleAdvance(created.id, {
+      schedule: { ...advanced, consecutiveMisses: 4 },
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: 3,
+      lastRun: missedRun,
+    });
+    expect(written.schedule).toEqual(cleared);
+    expect(await rawStored(created.id)).toMatchObject({ schedule: cleared });
+    expect(await rawStored(created.id)).not.toHaveProperty("lastRun");
+  });
+
+  test("an advance the record schema rejects aborts the transaction and writes nothing", async () => {
+    const created = await createManagedExchange(newExchange({ schedule }));
+    await expect(
+      persistManagedExchangeScheduleAdvance(created.id, {
+        schedule: { ...advanced, consecutiveMisses: -1 },
+        fromNextWindow: schedule.nextWindow,
+        fromConsecutiveMisses: schedule.consecutiveMisses,
+        lastRun: missedRun,
+      }),
+    ).rejects.toThrow();
+    // Re-read the raw store: neither half of the advance landed.
+    expect(await rawStored(created.id)).toMatchObject({ schedule });
+    expect(await rawStored(created.id)).not.toHaveProperty("lastRun");
+  });
+
+  test("advancing a missing id rejects", async () => {
+    await expect(
+      persistManagedExchangeScheduleAdvance("no-such-id", {
+        schedule: advanced,
+        fromNextWindow: schedule.nextWindow,
+        fromConsecutiveMisses: schedule.consecutiveMisses,
+      }),
+    ).rejects.toThrow();
   });
 });
 
