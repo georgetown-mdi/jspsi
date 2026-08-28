@@ -20,6 +20,7 @@ import {
 import { ManagedExchangeExpiredError } from "@psi/managedExpiry";
 import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeRun";
 import { ManagedInputError } from "@psi/managedInputGuard";
+import { PartnerNoShowError } from "@psi/waitForConnection";
 
 import type {
   ManagedExchangeLastRun,
@@ -123,6 +124,46 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     );
     expect(failure.kind).toBe("already-running");
     expect(failure.recovery).toBe("wait");
+  });
+
+  test("a partner who never arrived is the benign no-show state, not the transport copy", () => {
+    // The defect this closes: a no-show used to fall through to the transport
+    // state, whose copy sends the operator to check their own connection for a
+    // partner who was simply not there.
+    const failure = classifyManagedRunFailure(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      record(),
+      undefined,
+      NOW,
+    );
+    expect(failure.kind).toBe("missed");
+    expect(failure.recovery).toBe("none");
+    expect(failure.title).toMatch(/partner did not arrive/i);
+    expect(failure.message).not.toMatch(/temporary connection problem/);
+    expect(failure.message).not.toMatch(/attack|tamper|impersonat/i);
+    expect(managedRunRetryable(failure)).toBe(false);
+    expect(managedRunReinvites(failure)).toBe(false);
+  });
+
+  test("a live no-show and its recorded outcome read the same", () => {
+    // The bookkeeping the live launch just stamped is what a next visit tiers on,
+    // so the two paths must not diverge: a record carrying the missed outcome
+    // classifies to the same state as the error that produced it.
+    const live = classifyManagedRunFailure(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      record(),
+      undefined,
+      NOW,
+    );
+    const recorded = classifyManagedRunFailure(
+      new Error("some later failure"),
+      record({
+        lastRun: { at: "2026-07-14T09:00:00.000Z", outcome: "missed" },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(recorded).toEqual(live);
   });
 });
 

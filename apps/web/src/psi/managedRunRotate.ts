@@ -96,6 +96,19 @@ export function succeededRun(at: number): ManagedExchangeLastRun {
 }
 
 /**
+ * Record a run whose partner never arrived: the wait for the other party's runner
+ * spent its whole budget with nobody there, so no handshake ran and no payload
+ * left this party. It carries no `failureKind` -- the outcome is the whole account,
+ * and every kind in that enum names a failure of something that did happen, while
+ * a no-show is the absence of a run rather than a run that went wrong. The read
+ * side depends on that: the failure tiering and the "nothing was disclosed" line
+ * both key off the `"missed"` outcome alone.
+ */
+export function missedRun(at: number): ManagedExchangeLastRun {
+  return { at: new Date(at).toISOString(), outcome: "missed" };
+}
+
+/**
  * Record a run that rotated the secret but failed to persist it. This is
  * structured `failureKind: "storage"` bookkeeping precisely so the next handshake
  * failure surfaces through the benign Tier-1 framing (a recorded persist failure

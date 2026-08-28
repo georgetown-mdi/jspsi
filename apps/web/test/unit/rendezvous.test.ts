@@ -5,6 +5,7 @@ import { default as EventEmitter } from "eventemitter3";
 import { deriveRendezvousPeerId, generateSharedSecret } from "@psilink/core";
 
 import { dialAsAcceptor, listenAsInviter } from "../../src/psi/rendezvous.js";
+import { PartnerNoShowError } from "../../src/psi/waitForConnection.js";
 
 import type { DataConnection, PeerOptions } from "peerjs";
 import type Peer from "peerjs";
@@ -285,6 +286,59 @@ describe("dialAsAcceptor", () => {
     expect(fake.destroy).toHaveBeenCalledTimes(1);
   });
 
+  test("a spent retry budget rejects as the no-show condition", async () => {
+    stubWindow();
+    const fake = new FakePeer();
+    const cap = captureFactory(fake);
+    // A backoff wider than the whole budget, so the loop provably cannot fit
+    // another attempt once the first is answered peer-unavailable -- the branch is
+    // taken on the budget, not on a wall-clock race.
+    // The rejection handler is attached before the dial is driven: the budget
+    // expires on a timer of its own, so a handler attached afterwards would race it.
+    const rejection = dialAsAcceptor(generateSharedSecret(), endpoint, {
+      peerFactory: cap.factory,
+      retryDelayMs: 10_000,
+      totalTimeoutMs: 50,
+    }).catch((error: unknown) => error);
+
+    await vi.waitFor(() =>
+      expect(fake.listenerCount("open")).toBeGreaterThan(0),
+    );
+    fake.emit("open", "acceptor");
+
+    // Every attempt the budget allowed was answered "the inviter's id is not
+    // registered": the partner's runner was never there at all.
+    await vi.waitFor(() => expect(fake.connect).toHaveBeenCalledTimes(1));
+    fake.emit("error", { type: "peer-unavailable" });
+
+    expect(await rejection).toBeInstanceOf(PartnerNoShowError);
+    expect(fake.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test("a channel that will not open is a transport fault, not a no-show", async () => {
+    stubWindow();
+    const fake = new FakePeer();
+    const cap = captureFactory(fake);
+    const rejection = dialAsAcceptor(generateSharedSecret(), endpoint, {
+      peerFactory: cap.factory,
+      openTimeoutMs: 5,
+    }).catch((error: unknown) => error);
+
+    await vi.waitFor(() =>
+      expect(fake.listenerCount("open")).toBeGreaterThan(0),
+    );
+    fake.emit("open", "acceptor");
+    // The dial is answered -- no peer-unavailable -- so the inviter IS registered
+    // and present; the channel simply never opens. The partner showed up, so this
+    // must not be recorded as their no-show.
+    await vi.waitFor(() => expect(fake.connect).toHaveBeenCalledTimes(1));
+
+    const settled = await rejection;
+    expect(settled).toBeInstanceOf(Error);
+    expect(settled).not.toBeInstanceOf(PartnerNoShowError);
+    expect((settled as Error).message).toContain("timed out opening");
+  });
+
   test("aborts the dial via the signal and destroys the peer", async () => {
     stubWindow();
     const controller = new AbortController();
@@ -300,7 +354,11 @@ describe("dialAsAcceptor", () => {
     );
     controller.abort();
 
-    await expect(promise).rejects.toThrow("aborted");
+    const rejection = await promise.catch((error: unknown) => error);
+    expect((rejection as Error).message).toContain("aborted");
+    // The dial was stopped rather than answered: the partner's absence was never
+    // established, so this is not the no-show condition.
+    expect(rejection).not.toBeInstanceOf(PartnerNoShowError);
     expect(fake.destroy).toHaveBeenCalledTimes(1);
   });
 

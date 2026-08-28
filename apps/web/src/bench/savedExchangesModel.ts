@@ -87,7 +87,10 @@ function tierStatus(tier: ManagedFailureTier, at: string): string {
     case "transport":
       return `Last run did not complete (${at})`;
     case "missed":
-      return `Last window missed (${at})`;
+      // Phrased without naming a window: the outcome is reached at an agreed window
+      // and by an attended run whose own wait for the partner expired, and the same
+      // line stands for both.
+      return `Your partner did not arrive (${at})`;
     case "none":
       // A "none" tier means never-run or a succeeded last run; the caller phrases
       // those directly and never asks this for them.

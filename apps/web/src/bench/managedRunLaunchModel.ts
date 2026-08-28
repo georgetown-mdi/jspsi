@@ -7,10 +7,10 @@
  *
  * Two layers feed a surface state:
  *
- * - The PRE-CONNECTION benign states, read from the launch error: a lapsed `expires`,
- *   an input problem, or a run already in progress elsewhere. These are unambiguous
- *   (no handshake ran), so they surface as their own plain, non-alarming copy directly
- *   from the error.
+ * - The benign states read from the launch error: a lapsed `expires`, an input
+ *   problem, a run already in progress elsewhere, or a partner who never arrived.
+ *   These are unambiguous (no handshake ran), so they surface as their own plain,
+ *   non-alarming copy directly from the error.
  * - The RECORDED tiers, derived from the record's own structured bookkeeping (see
  *   {@link deriveManagedFailureTier}): a recorded persist failure, a restore/import
  *   since the last success, a pre-connection disclosure refusal or linkage
@@ -74,7 +74,7 @@ export type ManagedRunRecovery =
  * benign states plus the derived tiers), its plain copy, and the recovery affordance
  * the host renders. */
 export interface ManagedRunFailure {
-  /** The state's kind. The three pre-connection benign states, plus the recorded
+  /** The state's kind. The benign states read from the error, plus the recorded
    * tiers derived from the record's bookkeeping. */
   kind:
     | "expired"
@@ -82,6 +82,7 @@ export interface ManagedRunFailure {
     | "terms-shortfall"
     | "consent"
     | "already-running"
+    | "missed"
     | "storage"
     | "imported"
     | "transport"
@@ -119,6 +120,24 @@ const ALREADY_RUNNING_FAILURE: ManagedRunFailure = {
     "A run for this exchange is already in progress in another tab or a " +
     "scheduled run on this device. Wait for it to finish, then try again.",
   recovery: "wait",
+};
+
+/** The benign no-show state: the run spent its whole wait on the partner's runner
+ * and it never connected, so no handshake ran and nothing left this device.
+ * Deliberately not the transport copy, which would send the operator to check their
+ * own connection for a partner who was simply not there. Recovery is `"none"`:
+ * nothing on this device is broken and nothing here is re-settled, and the run
+ * control is not gated by a classified state, so the operator runs it again
+ * whenever their partner is ready. */
+const MISSED_FAILURE: ManagedRunFailure = {
+  kind: "missed",
+  title: "Your partner did not arrive",
+  message:
+    "This run waited for your partner and they never connected, so nothing was " +
+    "exchanged and nothing left this device. That is not a fault on this " +
+    "device: agree a time with your partner over your usual channel, and run " +
+    "this exchange again when they are ready.",
+  recovery: "none",
 };
 
 /** The benign input state's copy. Fixed and non-oracular: an input rejection's
@@ -237,11 +256,13 @@ const UNEXPLAINED_FAILURE: ManagedRunFailure = {
 };
 
 /** The surface state for a derived failure tier. The expired tier reads
- * `record.expires` to name the real lapsed instant; the transport, missed, and none
- * tiers all map to the generic transport copy -- a success and a missed window do not
- * surface as a launch failure ({@link managedRunFailureFromRecord} filters them
- * first), but {@link classifyManagedRunFailure} can route any tier here, so they are
- * handled explicitly rather than left to fabricate an instant or fall off the end. */
+ * `record.expires` to name the real lapsed instant; the missed tier carries the
+ * no-show copy, so a live launch and a next-visit read of the same recorded outcome
+ * say the same thing. The none tier maps to the generic transport copy -- a success
+ * does not surface as a launch failure ({@link managedRunFailureFromRecord} filters
+ * it, along with the missed tier the list surfaces informationally), but
+ * {@link classifyManagedRunFailure} can route any tier here, so it is handled
+ * explicitly rather than left to fabricate an instant or fall off the end. */
 function tierFailure(
   tier: ManagedFailureTier,
   record: ManagedExchangeRecord,
@@ -267,8 +288,9 @@ function tierFailure(
       return IMPORTED_FAILURE;
     case "unexplained":
       return UNEXPLAINED_FAILURE;
-    case "transport":
     case "missed":
+      return MISSED_FAILURE;
+    case "transport":
     case "none":
       return TRANSPORT_FAILURE;
   }
@@ -276,10 +298,10 @@ function tierFailure(
 
 /**
  * Classify a launch failure into the surface's {@link ManagedRunFailure}. The
- * pre-connection benign states are read through {@link benignRerunOutcome} (the single
- * place the benign checks live), each with its own plain copy -- the expiry state
- * names the lapsed instant the error carries, the one non-fixed value, which is the
- * record's own local `expires`, never partner-influenced. Any other failure -- a
+ * benign states are read through {@link benignRerunOutcome} (the single place the
+ * benign checks live), each with its own plain copy -- the expiry state names the
+ * lapsed instant the error carries, the one non-fixed value, which is the record's
+ * own local `expires`, never partner-influenced. Any other failure -- a
  * handshake failed closed, a persist failure, a transport drop -- is tiered from the
  * record's own bookkeeping (which the runner and the critical section already stamped
  * before this classification runs): {@link deriveManagedFailureTier} reads the tier,
@@ -299,6 +321,7 @@ export function classifyManagedRunFailure(
   if (benign === "already-running") return ALREADY_RUNNING_FAILURE;
   if (benign === "input") return INPUT_FAILURE;
   if (benign === "terms-shortfall") return TERMS_SHORTFALL_FAILURE;
+  if (benign === "missed") return MISSED_FAILURE;
   return tierFailure(deriveManagedFailureTier(record, local, now), record);
 }
 
@@ -325,8 +348,9 @@ export function managedRunFailureFromRecord(
  * is re-invite (directly, or through the confirmation gate); a consent refusal and a
  * linkage shortfall are not retried either, because the same input settles the same
  * disclosure and falls the same way short of the same keys however many times it
- * runs; and an in-progress run elsewhere is not this run's to retry until it
- * finishes. */
+ * runs; an in-progress run elsewhere is not this run's to retry until it
+ * finishes; and a no-show is not retried on the spot, because what it waits on is
+ * the partner being at their own machine. */
 export function managedRunRetryable(failure: ManagedRunFailure): boolean {
   return failure.recovery === "retry";
 }

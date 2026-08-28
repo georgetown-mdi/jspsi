@@ -24,6 +24,7 @@ import {
   managedInputFailureKind,
 } from "@psi/managedInputGuard";
 import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeRun";
+import { PartnerNoShowError } from "@psi/waitForConnection";
 import { RotationPersistError } from "@psi/managedRunRotate";
 
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
@@ -120,6 +121,12 @@ describe("benignRerunOutcome", () => {
     expect(
       benignRerunOutcome(new ManagedExchangeLockUnavailableError("id")),
     ).toBe("already-running");
+  });
+
+  test("a partner who never arrived is the benign missed state", () => {
+    expect(benignRerunOutcome(new PartnerNoShowError("nobody came"))).toBe(
+      "missed",
+    );
   });
 
   test("a handshake/storage/transport failure is not a benign pre-connection state", () => {
@@ -228,6 +235,53 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
       false,
     );
     expect(lastRun?.failureKind).toBe("consent");
+  });
+
+  test("a partner who never arrived records the benign missed outcome", () => {
+    // The write this whole path exists for: a no-show is its own outcome, not the
+    // transport fault a fall-through would file it as. No failureKind rides along --
+    // the outcome is the whole account, and the read side keys off it alone.
+    expect(
+      rerunFailureLastRun(
+        new PartnerNoShowError("timed out waiting for the other party"),
+        AT,
+        false,
+        false,
+      ),
+    ).toEqual({ at: new Date(AT).toISOString(), outcome: "missed" });
+  });
+
+  test("a no-show outranks the abort probe", () => {
+    // The rendezvous raises the no-show only on a wait that spent its whole budget,
+    // which an abort cannot manufacture -- an aborted wait rejects through its own
+    // path. So a cancel landing while this run unwinds must not overwrite the one
+    // thing the run did establish: the partner was not there.
+    expect(
+      rerunFailureLastRun(
+        new PartnerNoShowError("timed out waiting for the other party"),
+        AT,
+        true,
+        false,
+      ),
+    ).toEqual({ at: new Date(AT).toISOString(), outcome: "missed" });
+  });
+
+  test("a no-show past the data-exchange boundary records transport, not missed", () => {
+    // The "missed" outcome is what the disclosure copy reads to say nothing left
+    // this device, so it carries the same phase guard as the auth and consent
+    // tiers: past the boundary it cannot make that claim.
+    expect(
+      rerunFailureLastRun(
+        new PartnerNoShowError("timed out waiting for the other party"),
+        AT,
+        false,
+        true,
+      ),
+    ).toEqual({
+      at: new Date(AT).toISOString(),
+      outcome: "failed",
+      failureKind: "transport",
+    });
   });
 
   test("a cancelled run records cancelled, even when the error looks like a trust failure", () => {
