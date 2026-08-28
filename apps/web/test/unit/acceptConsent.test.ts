@@ -527,19 +527,24 @@ describe("summarizeInvitation", () => {
     expect(fuzzyLabelFor("adjacent_years")).toBe("adjacent years");
   });
 
-  // The summary surfaced for a transform declaring `fn`.
-  const transformFor = (fn: string) =>
+  // The per-step detail summaries an element carrying `transform` produces, in
+  // declaration order. The field is an SSN, so no step earns the name-field
+  // literal slice phrase and every one is described by its own copy.
+  const transformsFor = (transform: LinkageKeyElement["transform"]) =>
     summarizeInvitation(
       makeToken({
         linkageFields: [{ name: "ssn", type: "ssn" }],
         linkageKeys: [
           {
             name: "K",
-            elements: [{ field: "ssn", transform: [{ function: fn }] }],
+            elements: [{ field: "ssn", ...(transform && { transform }) }],
           },
         ],
       }),
-    ).linkageKeys[0].elements[0].transforms[0];
+    ).linkageKeys[0].elements[0].transforms;
+
+  // The summary surfaced for a lone transform declaring `fn`.
+  const transformFor = (fn: string) => transformsFor([{ function: fn }])[0];
 
   test("the transform glossary stays in sync with core's function set", () => {
     // Two-directional: every function core recognizes has a description, and the
@@ -554,14 +559,47 @@ describe("summarizeInvitation", () => {
   test("describes a transform's matching effect alongside its name", () => {
     // coalesce is the headline match-widening case: its description must name the
     // consequence (it can create matches that would not otherwise occur), not
-    // restate the name.
-    const coalesce = transformFor("coalesce");
+    // restate the name. Read where the step actually substitutes -- after a rule
+    // that can empty the value -- since one that cannot is described by what it
+    // does instead (its own case below).
+    const coalesce = transformsFor([
+      { function: "substring", params: { start: 1, length: 3 } },
+      { function: "coalesce", params: { default: "X" } },
+    ])[1];
     expect(coalesce.function).toBe("coalesce");
     expect(coalesce.description).toBe(TRANSFORM_FUNCTION_GLOSSARY["coalesce"]);
     expect(coalesce.description).toMatch(/matches that would not otherwise/i);
 
     // A normalizing function is described too, so every step carries context.
     expect(transformFor("to_upper_case").description).toMatch(/case/i);
+  });
+
+  test("does not describe a coalesce as substituting where it cannot", () => {
+    // The header's collapse marker and this row are gated on the same core
+    // predicate, so a step that substitutes nothing says so on both surfaces
+    // rather than promising a fallback the run never applies. Two shapes reach
+    // that state -- a default core cannot substitute (only a string is one), and a
+    // position with no rule ahead of it that can empty a value -- and one line
+    // covers both, since it names the conditions rather than the one that failed.
+    const slice = { function: "substring", params: { start: 1, length: 3 } };
+    const nonStringDefault = transformsFor([
+      { function: "coalesce", params: { default: 7 } },
+    ])[0].description;
+    const firstPosition = transformsFor([
+      { function: "coalesce", params: { default: "X" } },
+      slice,
+    ])[0].description;
+    expect(nonStringDefault).toBe(firstPosition);
+    expect(nonStringDefault).toMatch(/substitutes nothing/i);
+    expect(nonStringDefault).not.toMatch(/matches that would not otherwise/i);
+    // The header agrees on both: neither element carries the collapse marker, and
+    // the second shows what its slice does instead.
+    expect(headerFor([{ function: "coalesce", params: { default: 7 } }])).toBe(
+      "last name",
+    );
+    expect(
+      headerFor([{ function: "coalesce", params: { default: "X" } }, slice]),
+    ).toBe("last name (partial)");
   });
 
   test("omits a description for a function name core does not recognize", () => {
@@ -1485,9 +1523,19 @@ describe("summarizeInvitation", () => {
     expect(
       headerFor([{ function: "split_on", params: { delimiter: " " } }]),
     ).toBe("last name (not supported)");
+    // The collapse a coalesce names needs a rule ahead of it that can empty the
+    // value, which is the only state its substituting branch fires in; as the only
+    // step it substitutes nothing, so it earns no marker (the collapse ranking's
+    // own test pins the position it does earn one in).
+    expect(
+      headerFor([
+        { function: "substring", params: { start: 1, length: 3 } },
+        { function: "coalesce", params: { default: "X" } },
+      ]),
+    ).toBe("last name (fallback)");
     expect(
       headerFor([{ function: "coalesce", params: { default: "X" } }]),
-    ).toBe("last name (fallback)");
+    ).toBe("last name");
 
     // Rule named directly where a partner pattern/value list makes the direction
     // indeterminate -- including the narrowing ones, which are surfaced too.
@@ -1783,33 +1831,50 @@ describe("summarizeInvitation", () => {
   });
 
   test("ranks a collapse onto one constant above a coarsening effect", () => {
-    // A coalesce puts every absent-field record on one constant, so those records
-    // match each other however the pipeline coarsens that constant afterwards.
-    // Each marker it outranks names a coarsening, which would understate the
-    // collapse in the reassuring direction on the surface where the acceptor
-    // consents.
+    // A coalesce that substitutes puts every record an earlier rule emptied on one
+    // constant, so those records match each other however the pipeline coarsens
+    // that constant afterwards. Each marker it outranks names a coarsening, which
+    // would understate the collapse in the reassuring direction on the surface
+    // where the acceptor consents.
     const slice = { function: "substring", params: { start: 1, length: 3 } };
     const coalesce = { function: "coalesce", params: { default: "X" } };
-    expect(headerFor([coalesce, slice])).toBe("last name (fallback)");
     expect(headerFor([slice, coalesce])).toBe("last name (fallback)");
-    expect(headerFor([coalesce, { function: "phonetic" }])).toBe(
+    expect(headerFor([{ function: "phonetic" }, coalesce])).toBe(
       "last name (fallback)",
     );
-    // The collapse tier is gated on a default that can actually substitute. The
-    // wire schema puts no per-function shape on params, so a partner can declare a
+    expect(
+      headerFor([
+        { function: "filter_regex", params: { pattern: ".*" } },
+        coalesce,
+      ]),
+    ).toBe("last name (fallback)");
+    // The other order is a different element, not the same one written twice: the
+    // coalesce is reached with the value still in hand -- an element pipeline
+    // starts from a value the record realized, and a record whose field is absent
+    // is dropped from the key rather than run through the steps -- so it
+    // substitutes nothing and the element shows what its other rule does.
+    expect(headerFor([coalesce, slice])).toBe("last name (partial)");
+    expect(headerFor([coalesce, { function: "phonetic" }])).toBe(
+      "last name (sound-alike)",
+    );
+    expect(headerFor([coalesce])).toBe("last name");
+    // The collapse tier is also gated on a default that can substitute. The wire
+    // schema puts no per-function shape on params, so a partner can declare a
     // default that is absent or not a string; core then runs the step as a
     // pass-through, nothing collapses, and the chain names what the element's other
-    // rules do -- a bare one earning no marker at all. Over-alarming misstates the
-    // terms as surely as understating them.
+    // rules do. Over-alarming misstates the terms as surely as understating them.
     const inertCoalesce = { function: "coalesce", params: {} };
     const nonStringCoalesce = { function: "coalesce", params: { default: 7 } };
-    expect(headerFor([inertCoalesce, slice])).toBe("last name (partial)");
     expect(headerFor([slice, inertCoalesce])).toBe("last name (partial)");
-    expect(headerFor([nonStringCoalesce, slice])).toBe("last name (partial)");
     expect(headerFor([slice, nonStringCoalesce])).toBe("last name (partial)");
+    expect(headerFor([inertCoalesce, slice])).toBe("last name (partial)");
+    expect(headerFor([nonStringCoalesce, slice])).toBe("last name (partial)");
     expect(headerFor([inertCoalesce])).toBe("last name");
     expect(headerFor([nonStringCoalesce])).toBe("last name");
-    expect(
+    // A fuzzy expansion coarsens whatever value it is handed, so the collapse
+    // outranks it too -- and where the coalesce cannot fire, "fuzzy" is the honest
+    // marker the element keeps.
+    const withFuzzy = (transform: LinkageKeyElement["transform"]) =>
       summarizeInvitation(
         makeToken({
           linkageFields: [{ name: "ln", type: "last_name" }],
@@ -1819,17 +1884,19 @@ describe("summarizeInvitation", () => {
               elements: [
                 {
                   field: "ln",
-                  transform: [coalesce],
+                  ...(transform && { transform }),
                   generateFuzzyComparisons: "adjacent_years",
                 },
               ],
             },
           ],
         }),
-      ).linkageKeys[0].headerFields[0],
-    ).toBe("last name (fallback)");
+      ).linkageKeys[0].headerFields[0];
+    expect(withFuzzy([slice, coalesce])).toBe("last name (fallback)");
+    expect(withFuzzy([coalesce])).toBe("last name (fuzzy)");
     // The wider collapse still wins: a tokenless parse_date output puts EVERY
-    // record on one value, not only the absent-field ones.
+    // record on one value, not only the emptied ones (and its own drops are what
+    // the coalesce would substitute for).
     expect(
       headerFor([
         {
@@ -1844,11 +1911,11 @@ describe("summarizeInvitation", () => {
     expect(
       headerFor([
         { function: "split_on", params: { delimiter: " " } },
+        slice,
         coalesce,
       ]),
     ).toBe("last name (not supported)");
     // Single-step markers, pinned so compound precedence cannot change them.
-    expect(headerFor([coalesce])).toBe("last name (fallback)");
     expect(headerFor([slice])).toBe("last name (partial)");
     expect(headerFor([{ function: "phonetic" }])).toBe(
       "last name (sound-alike)",
@@ -1893,6 +1960,24 @@ describe("summarizeInvitation", () => {
     expect(headerFor([pad, slice, { function: "phonetic" }])).toBe(
       "last name (sound-alike)",
     );
+    // The stated limit of that rank, pinned rather than left to the prose: an
+    // effect-named marker MASKS the padded slice, and the masking word can be the
+    // milder one. Each of these collapses every short record onto one constant
+    // through a window landing in the fill, and each renders the coarsening word.
+    // Both are expert-authored shapes, unreachable from the built-in key sets (see
+    // elementBreadthMarker's ranking doc); the ranking is deliberately not re-cut
+    // for them, so this pin records the understatement rather than blessing it.
+    expect(
+      headerFor([
+        pad,
+        slice,
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY" },
+        },
+      ]),
+    ).toBe("last name (partial)");
+    expect(headerFor([slice, pad, slice])).toBe("last name (partial)");
     // Single-step markers, pinned so compound precedence cannot change them.
     expect(headerFor([nullIf])).toBe("last name (excludes values)");
     expect(headerFor([filterRegex])).toBe("last name (pattern filter)");
@@ -2012,15 +2097,15 @@ describe("summarizeInvitation", () => {
       ]),
     ).toBe("last name (partial)");
 
-    // coalesce substitutes only for an absent value, so a record carrying an
-    // identifier is truncated literally and the truncation rule is not suppressed
-    // here. The header shows the coalesce because its collapse outranks the
-    // truncation (its own case below), not because the slice stopped counting. Its
-    // substitution is order-independent, and both orders are pinned to the same
-    // marker so the two cannot drift apart.
+    // coalesce substitutes only where an earlier rule emptied the value, so a
+    // record that still carries an identifier is truncated literally and the
+    // truncation rule is not suppressed. Reached FIRST it substitutes nothing --
+    // the value is still in hand -- so the slice's own "partial" is what the
+    // element shows. The reverse order is a real collapse, which outranks the
+    // truncation (its own case above), so the two orders part here.
     expect(
       headerFor([{ function: "coalesce", params: { default: "X" } }, slice]),
-    ).toBe("last name (fallback)");
+    ).toBe("last name (partial)");
     expect(
       headerFor([slice, { function: "coalesce", params: { default: "X" } }]),
     ).toBe("last name (fallback)");
@@ -2063,7 +2148,8 @@ describe("summarizeInvitation", () => {
     // Each of these steps standing alone still earns its own marker, so the
     // compound rule above reaches no element carrying a single transform --
     // except pad_left, whose standalone padding stays routine, which is why the
-    // compound needs a marker of its own.
+    // compound needs a marker of its own, and coalesce, which as the only step is
+    // reached with the value in hand and substitutes nothing.
     expect(headerFor([{ function: "pad_left", params: { length: 9 } }])).toBe(
       "last name",
     );
@@ -2081,7 +2167,7 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (pattern extraction)");
     expect(
       headerFor([{ function: "coalesce", params: { default: "X" } }]),
-    ).toBe("last name (fallback)");
+    ).toBe("last name");
   });
 
   test("pins what each core function does to a substring that follows it", () => {
@@ -2121,19 +2207,16 @@ describe("summarizeInvitation", () => {
       remove_affixes: "partial",
       // Likewise for the value-deriving steps that still derive from the value: a
       // slice of a slice, a captured run of the value's own characters, a
-      // pass-through-or-drop, and a date laid out from its own components.
+      // pass-through-or-drop, a date laid out from its own components, and a
+      // fallback that substitutes nothing in this leading position (a coalesce
+      // reached with the value still in hand passes it through, so there is
+      // nothing to collapse and the slice's truncation is what the element does).
       substring: "partial",
       extract_regex: "partial",
       filter_regex: "partial",
       null_if: "partial",
       parse_date: "partial",
-      // coalesce leaves the truncation faithful too -- it substitutes only where
-      // there is no identifier to truncate -- but the header shows its own
-      // collapse of every absent-field record onto one constant, which outranks
-      // the coarsening the slice describes. The table declares a string default,
-      // so the step can substitute; one that cannot collapses nothing and leaves
-      // the slice's "partial" (pinned with the collapse ranking).
-      coalesce: "fallback",
+      coalesce: "partial",
       // These three derive a value the identifier need not compose, so the
       // slice is not a truncation of it and each falls through to the honest
       // marker for what the element actually does.
@@ -2168,7 +2251,6 @@ describe("summarizeInvitation", () => {
       // Effect named where the matching direction is determinable.
       substring: "partial",
       phonetic: "sound-alike",
-      coalesce: "fallback",
       // Refused rather than named for a breadth: under these cascade terms the
       // exchange does not run at all with a declared fan-out step. Its other
       // marker, under the strategy that matches the candidate set, has its own
@@ -2194,10 +2276,16 @@ describe("summarizeInvitation", () => {
       remove_affixes: null,
       pad_left: null,
       parse_date: null,
+      // Routine as the only step for a reason of position rather than of kind: a
+      // coalesce is reached with the value the record realized still in hand, so
+      // its substituting branch never fires and nothing collapses. It is shown
+      // below with a string default, the shape that DOES substitute once a rule
+      // that can empty the value runs ahead of it (the collapse ranking's test).
+      coalesce: null,
     };
-    // The params each marked function needs to reach its baseline: a substring
-    // that actually truncates, and a coalesce whose string default can actually
-    // substitute. Every other function's baseline needs none.
+    // The params each function needs to reach its baseline: a substring that
+    // actually truncates, and a coalesce whose default is the substitutable shape.
+    // Every other function's baseline needs none.
     const BASELINE_PARAMS: Record<string, Record<string, unknown> | undefined> =
       {
         substring: { start: 1, length: 3 },
