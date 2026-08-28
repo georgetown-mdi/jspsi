@@ -38,6 +38,15 @@ const MS_PER_SECOND = 1000;
  * outside it has no ISO 8601 rendering. */
 const MAX_TIME_VALUE = 8.64e15;
 
+/** The most windows one catch-up walks before refusing the record. The walk
+ * crosses one window per elapsed period, so the daily cadence -- the shortest
+ * the schema admits -- reaches this only after some 2,700 years dormant: no
+ * cadence an operator entered arrives here, while an anchor a hand edit or a
+ * tampered artifact placed at the far end of the representable range does. The
+ * bound keeps a wake's cost tied to how long the runner really slept rather than
+ * to the anchor the record carries. */
+const MAX_CATCH_UP_WINDOWS = 1_000_000;
+
 /** A single run window on the recurrence lattice, in UTC milliseconds. */
 export interface ManagedScheduleWindow {
   /** Zero-based recurrence index counted from the anchor: window 0 opens at the
@@ -69,7 +78,7 @@ export type ManagedScheduleWindowDisposition =
 export interface ManagedScheduleCatchUp {
   /** The schedule with `nextWindow` advanced to the first window not yet closed
    * (past a window a recorded success already satisfied) and
-   * `consecutiveMisses` carrying every elapsed window's verdict. */
+   * `consecutiveMisses` carrying each window's verdict, applied in order. */
   schedule: ManagedExchangeSchedule;
   /** How many fully-elapsed windows passed unattempted -- one miss each,
    * whichever side was absent. Zero when the wake found nothing elapsed. */
@@ -80,8 +89,11 @@ export interface ManagedScheduleCatchUp {
   dueWindow?: ManagedScheduleWindow;
   /** The `"missed"` bookkeeping the most recent elapsed window earns, stamped at
    * that window's close. Absent when no window elapsed, or when the most recent
-   * elapsed one carries a recorded run whose own bookkeeping is the honest
-   * latest. */
+   * elapsed one carries a recorded run whose own bookkeeping stands. A run
+   * recorded in a LATER window that is still open leaves the stamp in place --
+   * the elapsed window really was missed -- and the write path holds `lastRun`
+   * monotonic on `at` rather than the wake second-guessing which entry is newer
+   * (see `applyManagedExchangeScheduleAdvance`). */
   missedLastRun?: ManagedExchangeLastRun;
 }
 
@@ -267,19 +279,27 @@ export function advanceManagedScheduleAfterWindow(
 }
 
 /**
- * Apply the catch-up rule at a wake: count every fully-elapsed window the
- * bookkeeping has not accounted for, advance `nextWindow` onto a window that is
- * still live, and report whether one is open right now. This is the rule a
- * runtime applies before attempting anything -- on the ordinary wake and, with a
- * restored backup's stale `nextWindow`, on the first wake after an import.
+ * Apply the catch-up rule at a wake: walk forward from the window the stored
+ * `nextWindow` plans, one window at a time, until the walk stands on a window
+ * still live; advance `nextWindow` onto that window and report whether it is
+ * open right now. This is the rule a runtime applies before attempting anything
+ * -- on the ordinary wake and, with a restored backup's stale `nextWindow`, on
+ * the first wake after an import.
  *
- * An elapsed window counts as one miss unless `lastRun` falls inside it: a run
- * recorded in the window means the partnership met there, and its own outcome
- * decides the count (see {@link nextConsecutiveMisses}). A window still open
- * whose `lastRun` succeeded is likewise satisfied and advanced past, so an
- * attended run inside an agreed window is not re-run by the schedule; a window
- * whose recorded run FAILED is not satisfied, leaving the rest of the window
- * available for another attempt.
+ * Every window is read the same way, and `consecutiveMisses` takes its verdict
+ * through {@link nextConsecutiveMisses} once per window, in order: an elapsed
+ * window with no run recorded inside it is one miss, an elapsed window that
+ * carries one takes that run's own outcome, and a window still open whose run
+ * SUCCEEDED is satisfied -- advanced past without an attempt, so an attended run
+ * inside an agreed window is not re-run by the schedule -- while a window still
+ * open that no success discharged is the one to attempt, leaving the rest of it
+ * available. Applying the rule per window rather than to the whole span at once
+ * is what keeps a success anywhere in the run resetting the count the windows
+ * before it built, wherever that success sits.
+ *
+ * The walk is as long as the run of windows real time crossed since the last
+ * wake, one cheap iteration each; a span longer than `MAX_CATCH_UP_WINDOWS` is
+ * refused rather than walked.
  *
  * `lastRun` is read as evidence, never validated: an entry whose `at` does not
  * parse is treated as no recorded run at all, the conservative direction (an
@@ -289,14 +309,22 @@ export function advanceManagedScheduleAfterWindow(
  *   not yet accounted for.
  * @param lastRun The record's run bookkeeping, if any.
  * @param nowMs The wake instant, UTC milliseconds.
- * @throws {RangeError} if the schedule's lattice is unusable or the resumed
- *   window falls outside the representable instant range.
+ * @throws {RangeError} if the schedule's lattice is unusable, if the wake
+ *   instant or the resumed window falls outside the representable instant range,
+ *   or if the span from `nextWindow` to the wake exceeds the walk's bound.
  */
 export function catchUpManagedSchedule(
   schedule: ManagedExchangeSchedule,
   lastRun: ManagedExchangeLastRun | undefined,
   nowMs: number,
 ): ManagedScheduleCatchUp {
+  // The walk reads the wake instant against one window at a time, so a wake
+  // instant that is not a real one would make every window read as elapsed and
+  // the walk run away rather than land anywhere.
+  if (!Number.isFinite(nowMs) || Math.abs(nowMs) > MAX_TIME_VALUE)
+    throw new RangeError(
+      "managed schedule wake instant falls outside the representable instant range",
+    );
   const geometry = readScheduleGeometry(schedule);
   const plannedMs = parseScheduleInstant(schedule.nextWindow, "nextWindow");
 
@@ -308,53 +336,58 @@ export function catchUpManagedSchedule(
     0,
     Math.ceil((plannedMs - geometry.anchorMs) / geometry.periodMs),
   );
-  // Window i has fully closed by `now` when anchor + i * period + width <= now.
-  const lastElapsed = Math.floor(
-    (nowMs - geometry.widthMs - geometry.anchorMs) / geometry.periodMs,
-  );
-  const elapsedCount = Math.max(0, lastElapsed - firstUnaccounted + 1);
-
-  const attemptedIndex =
+  // The one window the recorded run speaks for. A run whose stamp does not
+  // parse, or that landed in the gap between two windows, speaks for none.
+  const recordedIndex =
     lastRun === undefined
       ? undefined
       : windowIndexContaining(geometry, Date.parse(lastRun.at));
-  const attemptedElapsed =
-    attemptedIndex !== undefined &&
-    attemptedIndex >= firstUnaccounted &&
-    attemptedIndex <= lastElapsed;
 
-  // The elapsed windows apply their verdicts in order, which for a single
-  // `lastRun` closes to: the misses before the attempted window, then that
-  // window's own outcome, then the misses after it.
-  const consecutiveMisses =
-    attemptedElapsed && lastRun !== undefined
-      ? nextConsecutiveMisses(
-          schedule.consecutiveMisses + (attemptedIndex - firstUnaccounted),
-          lastRun.outcome,
-        ) +
-        (lastElapsed - attemptedIndex)
-      : schedule.consecutiveMisses + elapsedCount;
+  let consecutiveMisses = schedule.consecutiveMisses;
+  let missedWindows = 0;
+  // The close of the most recent elapsed window that passed unattempted, cleared
+  // by a later elapsed window whose own recorded bookkeeping stands instead.
+  let missedCloseMs: number | undefined;
+  let dueWindow: ManagedScheduleWindow | undefined;
+  let resume = windowAt(geometry, firstUnaccounted);
 
-  let resumeIndex = Math.max(firstUnaccounted, lastElapsed + 1);
-  if (lastRun?.outcome === "succeeded" && attemptedIndex === resumeIndex)
-    resumeIndex += 1;
-  const resume = windowAt(geometry, resumeIndex);
+  for (;;) {
+    const state = managedScheduleWindowStateAt(resume, nowMs);
+    const recorded = resume.index === recordedIndex ? lastRun : undefined;
+    if (state === "before") break;
+    if (state === "open" && recorded?.outcome !== "succeeded") {
+      dueWindow = resume;
+      break;
+    }
+    if (state === "elapsed") {
+      if (recorded === undefined) {
+        missedWindows += 1;
+        missedCloseMs = resume.closesAtMs;
+      } else missedCloseMs = undefined;
+    }
+    consecutiveMisses = nextConsecutiveMisses(
+      consecutiveMisses,
+      recorded?.outcome ?? "missed",
+    );
+    if (resume.index - firstUnaccounted >= MAX_CATCH_UP_WINDOWS)
+      throw new RangeError(
+        "managed schedule catch-up spans more windows than a usable record holds",
+      );
+    resume = windowAt(geometry, resume.index + 1);
+  }
 
-  const missedMostRecent = elapsedCount > 0 && attemptedIndex !== lastElapsed;
   return {
     schedule: {
       ...schedule,
       nextWindow: toScheduleInstant(resume.opensAtMs),
       consecutiveMisses,
     },
-    missedWindows: elapsedCount - (attemptedElapsed ? 1 : 0),
-    ...(managedScheduleWindowStateAt(resume, nowMs) === "open"
-      ? { dueWindow: resume }
-      : {}),
-    ...(missedMostRecent
+    missedWindows,
+    ...(dueWindow !== undefined ? { dueWindow } : {}),
+    ...(missedCloseMs !== undefined
       ? {
           missedLastRun: {
-            at: toScheduleInstant(windowAt(geometry, lastElapsed).closesAtMs),
+            at: toScheduleInstant(missedCloseMs),
             outcome: "missed" as const,
           },
         }

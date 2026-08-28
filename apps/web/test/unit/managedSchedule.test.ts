@@ -431,6 +431,43 @@ describe("catch-up on wake", () => {
     expect(caught.schedule.consecutiveMisses).toBe(0);
   });
 
+  test("a success inside the open window resets the count the elapsed misses raised", () => {
+    const caught = catchUpManagedSchedule(
+      {
+        ...weekly,
+        nextWindow: "2026-01-20T14:00:00.000Z",
+        consecutiveMisses: 3,
+      },
+      { at: "2026-01-27T15:00:00.000Z", outcome: "succeeded" },
+      at("2026-01-27T15:30:00.000Z"),
+    );
+    // Window 2 passed unattempted and raised the stored count to four; window 3
+    // is still open and its recorded success discharges it, so the same reset a
+    // success in an elapsed window earns applies here too.
+    expect(caught.schedule.consecutiveMisses).toBe(0);
+    expect(caught.missedWindows).toBe(1);
+    expect(caught.dueWindow).toBeUndefined();
+    expect(caught.schedule.nextWindow).toBe("2026-02-03T14:00:00.000Z");
+    // Window 2's miss is real bookkeeping the record never recorded; the write
+    // path is what holds `lastRun` monotonic against the newer success.
+    expect(caught.missedLastRun).toEqual({
+      at: "2026-01-20T17:00:00.000Z",
+      outcome: "missed",
+    });
+  });
+
+  test("a run recorded in a window that has not opened does not discharge it", () => {
+    const caught = catchUpManagedSchedule(
+      { ...weekly, nextWindow: "2026-01-27T14:00:00.000Z" },
+      { at: "2026-01-27T15:00:00.000Z", outcome: "succeeded" },
+      at("2026-01-26T00:00:00.000Z"),
+    );
+    // A stamp ahead of the wake instant means a clock moved, not a window met.
+    expect(caught.schedule.nextWindow).toBe("2026-01-27T14:00:00.000Z");
+    expect(caught.dueWindow).toBeUndefined();
+    expect(caught.missedWindows).toBe(0);
+  });
+
   test("a failure inside the open window leaves the rest of it attemptable", () => {
     const caught = catchUpManagedSchedule(
       { ...weekly, nextWindow: "2026-01-27T14:00:00.000Z" },
@@ -468,6 +505,53 @@ describe("catch-up on wake", () => {
     const schedule = { ...weekly };
     catchUpManagedSchedule(schedule, undefined, at("2026-02-10T00:00:00.000Z"));
     expect(schedule).toEqual(weekly);
+  });
+
+  test("years of dormancy count one miss per window all the way to a live one", () => {
+    const daily: ManagedExchangeSchedule = {
+      anchor: "2020-01-06T14:00:00.000Z",
+      intervalDays: 1,
+      windowSeconds: 10_800,
+      nextWindow: "2020-01-06T14:00:00.000Z",
+      consecutiveMisses: 0,
+    };
+    const caught = catchUpManagedSchedule(
+      daily,
+      undefined,
+      at("2026-01-06T15:00:00.000Z"),
+    );
+    // Six years of daily windows, two of them leap years: 2192 windows opened
+    // and closed before the one the wake landed inside.
+    expect(caught.missedWindows).toBe(2192);
+    expect(caught.schedule.consecutiveMisses).toBe(2192);
+    expect(caught.dueWindow?.index).toBe(2192);
+    expect(caught.schedule.nextWindow).toBe("2026-01-06T14:00:00.000Z");
+    expect(caught.missedLastRun?.at).toBe("2026-01-05T17:00:00.000Z");
+  });
+
+  test("a span no stored cadence produces is refused rather than walked", () => {
+    // An anchor at the far end of the representable range: past the schema, but
+    // the arithmetic answers for a hand-edited record too, and a wake must not
+    // spend the run of windows such an anchor implies.
+    expect(() =>
+      catchUpManagedSchedule(
+        {
+          ...weekly,
+          anchor: "-271821-04-20T00:00:00.000Z",
+          intervalDays: 1,
+          nextWindow: "-271821-04-20T00:00:00.000Z",
+        },
+        undefined,
+        at("2026-01-06T14:00:00.000Z"),
+      ),
+    ).toThrow(RangeError);
+  });
+
+  test("a wake instant that is not a usable one is refused", () => {
+    for (const nowMs of [Number.NaN, Infinity, -Infinity, 9e15])
+      expect(() => catchUpManagedSchedule(weekly, undefined, nowMs)).toThrow(
+        RangeError,
+      );
   });
 });
 

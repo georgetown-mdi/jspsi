@@ -316,7 +316,15 @@ entry. The same reading settles the window still open at the wake: a
 `"succeeded"` run inside it satisfies it, so `nextWindow` advances past without
 an attempt -- which is how an attended run inside an agreed window discharges
 that window -- while a run that failed inside it does not, leaving the rest of
-the window attemptable.
+the window attemptable. A window that has not opened yet is not that window: a
+run bookkeeping entry stamped ahead of the wake instant discharges nothing, and
+the schedule keeps planning the window it names.
+
+Catch-up applies these verdicts **window by window, oldest first**, never as a
+net over the span: a `"succeeded"` window resets `consecutiveMisses` to 0 and
+only the windows after it rebuild the count, wherever in the run that window
+sits -- including the window still open at the wake, whose recorded success
+resets the count the elapsed windows before it raised.
 
 The rule keeps both fields honest. `consecutiveMisses` reflects the true count
 of elapsed misses whichever side was absent, and the runner lands on a live
