@@ -564,7 +564,7 @@ Whatever supervises the schedule should act on the [exit code](#exit-codes) rath
 
 #### Windows Task Scheduler
 
-The same rules apply under the Task Scheduler, with the account the task runs as in place of the cron account: it must own `.psilink.key` under an owner-only ACL, own the working directory, and reach the program by its full path. The equivalent of the daily cron line above:
+The same rules apply under the Task Scheduler, with the account the task runs as in place of the cron account: it must own `.psilink.key` under an owner-only ACL, own the working directory, and reach the program -- by its full path, or by having it on that account's `PATH`. The equivalent of the daily cron line above, which assumes psilink is on the task account's `PATH` (name it by full path there otherwise):
 
 ```cmd
 schtasks /Create /TN "psilink exchange" /SC DAILY /ST 02:00 /TR "cmd /c cd /d C:\psilink\agency-b && psilink exchange input.csv results.csv"
