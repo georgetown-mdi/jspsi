@@ -58,8 +58,9 @@ export type ManagedInputRejection =
 /**
  * Raised when the run-start input cannot back the standing terms, carrying the
  * {@link ManagedInputRejection} that discriminates the benign cause. Distinct from
- * a handshake or data-exchange failure so the runner routes it to the `"input"`
- * failure tier and knows no connection was ever attempted. Its base `message` is a
+ * a handshake or data-exchange failure so the runner records the kind
+ * {@link managedInputFailureKind} derives from the rejection and knows no
+ * connection was ever attempted. Its base `message` is a
  * fixed, non-sensitive summary suitable for a log line; the partner-influenced
  * detail (the unsatisfied field names) rides {@link rejection} for the caller to
  * sanitize before display.

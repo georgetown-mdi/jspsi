@@ -225,7 +225,7 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
     record.id,
     async () => {
       // The input guard runs before the handshake opens any connection. A benign
-      // input rejection records the `input` bookkeeping inside the lock (this run's
+      // input rejection records its classified kind inside the lock (this run's
       // record until the lock releases), then re-raises with no handshake attempted.
       let input: TInput;
       try {
