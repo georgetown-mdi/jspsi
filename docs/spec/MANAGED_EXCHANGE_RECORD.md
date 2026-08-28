@@ -239,9 +239,10 @@ re-invite if it lands an already-lapsed bound (the standing recovery for a lapse
 
 ### The schedule object
 
-> **Not yet implemented:** the scheduled runner that reads and advances this
-> object is not yet built. Its shape and schema are in place; the semantics
-> below are the intended design.
+> **Not yet reachable:** the runner that reads and advances this object is
+> built, and executes a due window in an installed app runtime. No surface
+> enters a schedule yet, so no stored record carries one and nothing is due; a
+> record acquires a `schedule` when schedule entry ships.
 
 The optional `schedule` object carries the partnership-agreed run cadence, the
 run window the two runners meet in, and the miss bookkeeping the retry policy
@@ -299,9 +300,9 @@ framing is in
 
 #### Catch-up on wake
 
-> **Not yet implemented:** `nextWindow` and `consecutiveMisses` are persisted
-> by the schema above, but the runner that advances them is not yet built. The
-> catch-up rule below is the intended design.
+> **Not yet reachable:** the runner applying this rule is built and runs in an
+> installed app runtime; until schedule entry ships, no stored record carries a
+> `schedule` for it to advance.
 
 A runner does not tick while its machine sleeps, so a runtime can wake -- a
 laptop reopened after a week on a daily cadence, the app relaunched after a
@@ -362,6 +363,65 @@ snapshot's `nextWindow`, typically in the past by the time the artifact is
 restored, and the first wake after an import applies the same catch-up --
 elapsed windows counted, `nextWindow` advanced to a live window -- before any
 attempt.
+
+#### Occupying a due window
+
+A window catch-up lands on and finds open is **occupied**, not waited out in one
+call. The runner makes bounded re-attempts across it: each attempt waits for the
+partner's runner up to the human-timescale budget both one-shot roles share,
+clamped to what is left of the window, and the next attempt begins no sooner than
+a fixed pacing interval after the last one started, up to a cap on attempts per
+window. One window-long wait would put the whole window on a single broker
+registration surviving that long; the pacing and the cap are what keep an attempt
+that fails immediately from spending the window in a loop.
+
+Two boundaries the occupancy holds:
+
+- **The window's close is reached as a no-show, never as an abort.** The last
+  attempt's wait is clamped to the close, so a window nobody arrived in ends as
+  the partner absence it is. Signalling the close through the run's abort instead
+  would record the operator's own cancellation (see the `lastRun` `failureKind`
+  row), which is a different fact.
+- **Nothing is re-attempted once the data exchange began.** Past that phase
+  boundary this run's payload could already have reached the partner, so a
+  re-attempt would disclose a second time. The boundary gates the retry rather
+  than the failure's kind.
+
+Within those, an attempt is re-made only for a partner who never arrived and for
+a failure with no determinate local cause. A lapsed `expires`, an unusable input,
+a shortfall against the standing terms, a refused disclosure, a failed rotation
+persist, and a handshake that failed closed each reproduce identically on the
+next attempt, so each ends the window's occupancy where it happened.
+
+The window's disposition is its last attempt's verdict, written once for the
+window rather than once per attempt:
+
+| Disposition | The last attempt | `consecutiveMisses` | Advance carries a `lastRun` |
+| ----------- | ---------------- | ------------------- | --------------------------- |
+| `"succeeded"` | completed the exchange | reset to 0 | no -- the run recorded its own |
+| `"missed"` | ended with the partner absent | incremented | no -- the run recorded its own |
+| `"failed"` | failed any other way | unchanged | no -- the run recorded its own |
+| `"unattempted"` | was refused the single-writer lock, held by another context | unchanged | no -- the window has no bookkeeping |
+
+`"unattempted"` is the one disposition that is not an outcome the record can
+hold: another context was running this very record, so the window records
+neither an attempt nor a miss, and the schedule advances past it. Every other
+disposition's `lastRun` is written by the run itself, so the schedule advance
+carries none and cannot contend with it.
+
+Three records are passed over rather than attempted, each leaving its window
+with no disposition at all -- the wake that finds the window elapsed counts it
+exactly as one this runtime slept through:
+
+- One this device handed off by a migration export (its local `spent` state).
+- One with no persisted `inputFileHandle`, which has no unattended read of the
+  input at all.
+- One whose runtime stopped while the window was still open.
+
+The rules above are implemented in `apps/web/src/psi/managedScheduleRunner.ts`;
+the browser host that wakes them, and the installed-runtime gate that decides
+whether it runs at all, are `apps/web/src/psi/managedScheduleRuntime.ts` and
+`apps/web/src/components/ScheduledExchangeRunner.tsx`.
 
 ### Clock skew and the window width
 

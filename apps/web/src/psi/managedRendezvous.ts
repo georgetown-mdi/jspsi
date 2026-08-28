@@ -104,12 +104,23 @@ export type ManagedRendezvousAcquisition =
  * the acceptor's dial endpoint comes from the app's own location, never the
  * stored locator. `signal` cancels the listen/dial; `flows` injects the
  * rendezvous functions for tests.
+ *
+ * `peerWaitTimeoutMs` overrides the ACCEPTOR's no-show budget: how long its dial
+ * keeps retrying an inviter that has not registered. The inviter half of the
+ * same budget is not this function's -- it returns its registered peer before
+ * the inbound wait begins, and the caller bounds that wait itself (see
+ * {@link ./managedRunDriver.ts}). Absent, the dial keeps the flows' shared
+ * default.
  */
 export async function beginManagedRendezvous(
   side: ManagedExchangeSide,
   sharedSecret: string,
   exchangeFile: ExchangeSpec,
-  options: { signal?: AbortSignal; flows?: ManagedRendezvousFlows } = {},
+  options: {
+    signal?: AbortSignal;
+    flows?: ManagedRendezvousFlows;
+    peerWaitTimeoutMs?: number;
+  } = {},
 ): Promise<ManagedRendezvousAcquisition> {
   const flows = options.flows ?? defaultFlows;
   const signal = options.signal;
@@ -121,6 +132,9 @@ export async function beginManagedRendezvous(
   const endpoint = webrtcEndpointFromLocation(invitationLocation());
   const [peer, conn] = await flows.dialAsAcceptor(sharedSecret, endpoint, {
     signal,
+    ...(options.peerWaitTimeoutMs !== undefined
+      ? { totalTimeoutMs: options.peerWaitTimeoutMs }
+      : {}),
   });
   return { side: "acceptor", peer, conn };
 }

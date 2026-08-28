@@ -370,6 +370,11 @@ export interface ServiceWorkerHarness {
   /** The URLs stored in one cache, in insertion order. Empty for a cache that
    * does not exist. */
   cachedUrls: (name: string) => Array<string>;
+  /** Every event type the worker registered a listener for at evaluation, in
+   * registration order. A guard over what the worker can be woken FOR reads it:
+   * a background-wakeup registration the worker must not carry is an event type
+   * that would appear here. */
+  readonly registeredEventTypes: ReadonlyArray<string>;
   /** How many times `skipWaiting()` was called. */
   readonly skipWaitingCalls: number;
   /** How many times `clients.claim()` was called. */
@@ -474,6 +479,7 @@ export function createServiceWorkerHarness(): ServiceWorkerHarness {
   };
 
   const listeners = new Map<string, (event: never) => void>();
+  const registeredEventTypes: Array<string> = [];
   // Reused across fetches rather than replaced, so the array the harness exposes
   // stays the live one; each fetch clears it before the handler runs.
   const heldByLastFetch: Array<Promise<unknown>> = [];
@@ -483,6 +489,7 @@ export function createServiceWorkerHarness(): ServiceWorkerHarness {
   const scope = {
     location: new URL(`${HARNESS_ORIGIN}/serviceWorker.js`),
     addEventListener: (type: string, listener: (event: never) => void) => {
+      registeredEventTypes.push(type);
       listeners.set(type, listener);
     },
     skipWaiting: async () => {
@@ -571,6 +578,7 @@ export function createServiceWorkerHarness(): ServiceWorkerHarness {
     },
     cacheNames: () => [...caches.keys()],
     cachedUrls: (name) => [...(caches.get(name)?.keys() ?? [])],
+    registeredEventTypes,
     get skipWaitingCalls() {
       return skipWaitingCalls;
     },

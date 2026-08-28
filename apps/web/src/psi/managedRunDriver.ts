@@ -99,10 +99,21 @@ export interface ManagedRunDriverConfig {
    * `onDataExchangeStart` phase-boundary report a caller classifying the failure
    * for display reads. */
   options?: ManagedRerunOptions;
-  /** A non-fatal, operator-relevant notice raised mid-run -- today only the clean
-   * close ending on an exit that carries no delivery signal rather than on the
-   * peer's close ({@link CLOSE_OUTCOME_WARNINGS}). Optional: a caller with no
-   * notice surface omits it and the notice is dropped. Never a terminal -- the run
+  /** How long this run waits for the partner's runner before giving up on it as
+   * a no-show, overriding the flows' shared human-timescale ceiling. A scheduled
+   * run sets it so its wait ends at the agreed window's close: reaching the close
+   * as a no-show is what the window's own bookkeeping reads, whereas cutting the
+   * wait with the run's abort signal would record the operator's cancellation
+   * instead ({@link ./managedRun.ts}, `rerunFailureLastRun`). Absent, both flows
+   * keep their default budget. */
+  peerWaitTimeoutMs?: number;
+  /** A non-fatal, operator-relevant notice raised mid-run. Two are raised, and a
+   * caller that treats them as one thing gets one of them wrong: the clean close
+   * ending on an exit that carries no delivery signal rather than on the peer's
+   * close ({@link CLOSE_OUTCOME_WARNINGS}), which speaks to whoever is watching
+   * the run, and {@link DISCLOSURE_NOT_FILED_WARNING}, which reports that this
+   * browser holds no record of what the run disclosed. Optional: a caller with no
+   * notice surface omits it and both are dropped. Never a terminal -- the run
    * still settles exactly once, and a notice raised by the teardown's close
    * arrives after it, since neither teardown is awaited. */
   onWarning?: (message: string) => void;
@@ -129,7 +140,7 @@ export interface ManagedRunDriverConfig {
 export function runManagedExchangeInBrowser(
   config: ManagedRunDriverConfig,
 ): Promise<ManagedExchangeRunResult<RunOutputs>> {
-  const { record, source, signal, urls, onWarning } = config;
+  const { record, source, signal, urls, onWarning, peerWaitTimeoutMs } = config;
   const exchangeRole = HANDSHAKE_ROLE_FOR_SIDE[record.side];
 
   // Two gates on the notices this run's close can raise. This run's own outputs
@@ -181,14 +192,22 @@ export function runManagedExchangeInBrowser(
           record.side,
           record.sharedSecret,
           record.exchangeFile,
-          { signal },
+          {
+            signal,
+            ...(peerWaitTimeoutMs !== undefined ? { peerWaitTimeoutMs } : {}),
+          },
         );
         let peer: Peer;
         let conn: DataConnection;
         try {
           if (acquisition.side === "inviter") {
             peer = acquisition.peer;
-            conn = await waitForIncomingConnection(peer, { signal });
+            conn = await waitForIncomingConnection(peer, {
+              signal,
+              ...(peerWaitTimeoutMs !== undefined
+                ? { timeoutMs: peerWaitTimeoutMs }
+                : {}),
+            });
           } else {
             peer = acquisition.peer;
             conn = acquisition.conn;

@@ -18,6 +18,8 @@
  * the operator is ready.
  */
 
+import { isInstalledRuntime as installedRuntime } from "./installedRuntime";
+
 /** The worker's URL. It is served from `public/`, so its scope is the origin
  * root -- which is what lets it handle navigations to every route. */
 export const SERVICE_WORKER_URL = "/serviceWorker.js";
@@ -132,11 +134,7 @@ export async function registerAppShell(
     (() => {
       window.location.reload();
     });
-  const isInstalledRuntime =
-    options.isInstalledRuntime ??
-    (() =>
-      typeof window !== "undefined" &&
-      window.matchMedia("(display-mode: standalone)").matches);
+  const isInstalledRuntime = options.isInstalledRuntime ?? installedRuntime;
   const onPageUnloading =
     options.onPageUnloading ??
     ((listener: () => void) => {

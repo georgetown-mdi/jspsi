@@ -198,6 +198,10 @@ installed copy must not pin itself to old code:
   operator to confirm a reload pressed while a run is under way. Declining that
   confirmation keeps the run and leaves the new version waiting, so the offer
   stands and reloading later still applies it.
+- A scheduled run never applies a waiting version. Applying one is a reload, and
+  the confirmation a reload raises during a run has nobody to answer it in an
+  unattended runtime, so the offer is left standing for whoever opens the app and
+  the waiting version takes over at the next launch either way.
 - An update replaces the app's cached code, not the browser's own storage: the
   recurring exchanges, their secrets, and the accounting stay in that storage,
   which is not the cache the worker manages. What an upgrade can still cost is a
@@ -249,13 +253,14 @@ layout is in
 For an unattended handshake to happen inside a window, both runners must be
 **awake and in the window at the same time**: each installed app runtime, kept
 running since OS login, wakes at its own computed window open, derives the
-rendezvous id from the current secret, and waits for the peer for the window's
-duration. If both are present and the handshake completes, the run proceeds
-through rotate-and-persist and the data exchange (see [The second
-run](#the-second-run-end-to-end)). If the window elapses with no completed
-handshake -- the peer never arrived, or arrived and left before this side did --
-the window is recorded as **missed** and the runner advances to the next planned
-window.
+rendezvous id from the current secret, and waits for the peer across the window
+-- in repeated bounded waits rather than one wait as long as the window, so no
+window rides on a single rendezvous surviving for hours. If both are present and
+the handshake completes, the run proceeds through rotate-and-persist and the
+data exchange (see [The second run](#the-second-run-end-to-end)). If the window
+elapses with no completed handshake -- the peer never arrived, or arrived and
+left before this side did -- the window is recorded as **missed** and the runner
+advances to the next planned window.
 
 The window width is deliberately generous -- hours, not minutes -- for two
 reasons. It absorbs clock skew between the two machines (the runners never
