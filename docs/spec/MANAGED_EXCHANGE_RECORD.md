@@ -691,6 +691,17 @@ both directions alike, since it re-reads through the same validating parse: a ru
 from a stale page discloses and files nothing, which is why that state's copy
 carries the consequence and not only the remedy.
 
+The direction split reads only as far as an envelope this build admits. The
+entry literals that decide it are carried by the envelope-only parse, so a
+later build that reshapes the envelope itself -- a bumped accounting `version`
+literal, or any added envelope key, which the strict envelope schema refuses --
+classifies here as *unreadable*, reset offered, even when its entries are newer
+than this build. Nothing pins the envelope's shape across builds (the recovery
+check pins the entry version literal alone), so an envelope change is a
+compatibility decision that change must itself carry: route the new envelope
+through this direction split, or accept that pages of this build offer the
+reset over the value it writes.
+
 **The recovery offered is export then reset**, in that order, from the unreadable
 state, and it never removes the exchange:
 

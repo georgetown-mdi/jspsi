@@ -1000,6 +1000,14 @@ If a run is under way, reloading ends it. The stored-records download stays
 available in the meantime; it is for your own files, and this page cannot read it
 back.
 
+If a reload lands this page again, the newer version is no longer being served
+-- a deployment rolled back past the record-format change -- and the reload
+remedy cannot converge. Every further run from this build keeps disclosing and
+filing nothing, so do not leave the exchange running in this state. Take the
+stored-records download first; after that, deleting the exchange is the one
+exit this build offers, and the downloaded records stay intact for a build that
+reads them.
+
 ## Surviving storage eviction
 
 Browser storage is not durable the way a file on disk is. The design must survive
