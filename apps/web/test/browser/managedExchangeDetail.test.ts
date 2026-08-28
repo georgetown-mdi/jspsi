@@ -82,10 +82,9 @@ describe("managed exchange detail configuration", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting: undefined,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -125,10 +124,9 @@ describe("managed exchange detail configuration", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("acceptor"),
-        accounting: undefined,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: false,
@@ -174,10 +172,9 @@ describe("managed exchange detail configuration", () => {
             },
           }),
         }),
-        accounting: undefined,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -211,10 +208,9 @@ describe("managed exchange detail configuration", () => {
       app.render(
         createElement(ManagedExchangeDetail, {
           record: record("inviter"),
-          accounting: undefined,
-          accountingUnreadable: false,
-          accountingStored: undefined,
+          accountingRead: { kind: "none" },
           onResetAccounting: () => Promise.resolve(),
+          onRetryAccountingRead: () => undefined,
           onSaveLocalFields: () => Promise.resolve(),
           onReinviteToChangeTerms: () => {
             reinviting = true;
@@ -269,10 +265,9 @@ describe("managed exchange detail local fields", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting: undefined,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: (edits) => {
           saved.push(edits);
           return Promise.resolve();
@@ -305,10 +300,9 @@ describe("managed exchange detail local fields", () => {
           tokenMaxAgeDays: 90,
           expires: "2026-10-01T00:00:00.000Z",
         }),
-        accounting: undefined,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -328,10 +322,9 @@ describe("managed exchange detail local fields", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting: undefined,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -355,10 +348,9 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting: undefined,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -390,10 +382,9 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting: undefined,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -444,10 +435,9 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -497,10 +487,9 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -537,10 +526,9 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -588,10 +576,9 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -632,10 +619,9 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting: undefined,
-        accountingUnreadable: true,
-        accountingStored: undefined,
+        accountingRead: { kind: "unreadable", stored: undefined },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -664,10 +650,9 @@ describe("managed exchange detail accounting of disclosures", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting: undefined,
-        accountingUnreadable: true,
-        accountingStored: undefined,
+        accountingRead: { kind: "unreadable", stored: undefined },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -747,10 +732,12 @@ describe("recovering an accounting this version cannot read", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting: undefined,
-        accountingUnreadable: true,
-        accountingStored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
+        accountingRead: {
+          kind: "unreadable",
+          stored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
+        },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -792,10 +779,12 @@ describe("recovering an accounting this version cannot read", () => {
       app.render(
         createElement(ManagedExchangeDetail, {
           record: record("inviter"),
-          accounting: undefined,
-          accountingUnreadable: true,
-          accountingStored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
+          accountingRead: {
+            kind: "unreadable",
+            stored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
+          },
           onResetAccounting: () => Promise.resolve(),
+          onRetryAccountingRead: () => undefined,
           onSaveLocalFields: () => Promise.resolve(),
           onReinviteToChangeTerms: () => undefined,
           canReinvite: true,
@@ -831,13 +820,15 @@ describe("recovering an accounting this version cannot read", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting: undefined,
-        accountingUnreadable: true,
-        accountingStored: {
-          version: DISCLOSURE_ACCOUNTING_VERSION,
-          entries: await strandedEntries(),
+        accountingRead: {
+          kind: "unreadable",
+          stored: {
+            version: DISCLOSURE_ACCOUNTING_VERSION,
+            entries: await strandedEntries(),
+          },
         },
         onResetAccounting,
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -874,19 +865,71 @@ describe("recovering an accounting this version cannot read", () => {
     await vi.waitFor(() => expect(onResetAccounting).toHaveBeenCalledTimes(1));
   });
 
+  test("the confirm's re-offered export leaves one button under that name, not two", async () => {
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accountingRead: {
+          kind: "unreadable",
+          stored: {
+            version: DISCLOSURE_ACCOUNTING_VERSION,
+            entries: await strandedEntries(),
+          },
+        },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+    const download = () =>
+      page.getByRole("button", { name: /Download the stored records/ });
+    await expect.element(download()).toBeInTheDocument();
+    expect(download().elements()).toHaveLength(1);
+
+    await page
+      .getByRole("button", { name: "Start a fresh accounting" })
+      .click();
+
+    // The confirm renders OVER the surface rather than replacing it, so leaving
+    // both mounted puts two buttons under one accessible name: a screen reader
+    // user hears the same action twice with nothing to tell them apart, and
+    // cannot know which one the confirm is re-offering. Queried by role and
+    // name, which is how that user reaches it.
+    await expect
+      .element(page.getByRole("button", { name: "Delete these records" }))
+      .toBeInTheDocument();
+    expect(download().elements()).toHaveLength(1);
+
+    // And it is the confirm's own copy that stands beside it, so the one button
+    // left is the re-offer rather than the withdrawn outer one.
+    await expect
+      .element(
+        page.getByText("You have not downloaded the stored records", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
   test("the confirm stops warning about the download once it has been taken", async () => {
     const downloads = captureDownloads();
     try {
       app.render(
         createElement(ManagedExchangeDetail, {
           record: record("inviter"),
-          accounting: undefined,
-          accountingUnreadable: true,
-          accountingStored: {
-            version: DISCLOSURE_ACCOUNTING_VERSION,
-            entries: await strandedEntries(),
+          accountingRead: {
+            kind: "unreadable",
+            stored: {
+              version: DISCLOSURE_ACCOUNTING_VERSION,
+              entries: await strandedEntries(),
+            },
           },
           onResetAccounting: () => Promise.resolve(),
+          onRetryAccountingRead: () => undefined,
           onSaveLocalFields: () => Promise.resolve(),
           onReinviteToChangeTerms: () => undefined,
           canReinvite: true,
@@ -926,13 +969,15 @@ describe("recovering an accounting this version cannot read", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting: undefined,
-        accountingUnreadable: true,
-        accountingStored: {
-          version: DISCLOSURE_ACCOUNTING_VERSION,
-          entries: await strandedEntries(),
+        accountingRead: {
+          kind: "unreadable",
+          stored: {
+            version: DISCLOSURE_ACCOUNTING_VERSION,
+            entries: await strandedEntries(),
+          },
         },
         onResetAccounting: () => Promise.reject(new Error("store failed")),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -960,10 +1005,9 @@ describe("recovering an accounting this version cannot read", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting: undefined,
-        accountingUnreadable: true,
-        accountingStored: undefined,
+        accountingRead: { kind: "unreadable", stored: undefined },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -997,10 +1041,9 @@ describe("recovering an accounting this version cannot read", () => {
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
-        accounting,
-        accountingUnreadable: false,
-        accountingStored: undefined,
+        accountingRead: { kind: "accounting", accounting },
         onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -1020,5 +1063,85 @@ describe("recovering an accounting this version cannot read", () => {
     expect(
       page.getByRole("button", { name: "Start a fresh accounting" }).query(),
     ).toBeNull();
+  });
+});
+
+/**
+ * The state where the accounting was never obtained: the browser's store did not
+ * open, or the read did not complete. Its documented cause is transient (another
+ * tab holding an older version of the store open), and nothing about it says the
+ * stored records are damaged -- so the surface must not route it into the
+ * recovery, whose only irreversible arm destroys exactly those records.
+ */
+describe("an accounting that could not be read at all", () => {
+  const unavailable = (onRetryAccountingRead: () => void) =>
+    createElement(ManagedExchangeDetail, {
+      record: record("inviter"),
+      accountingRead: { kind: "unavailable" },
+      onResetAccounting: () => Promise.resolve(),
+      onRetryAccountingRead,
+      onSaveLocalFields: () => Promise.resolve(),
+      onReinviteToChangeTerms: () => undefined,
+      canReinvite: true,
+      reinviting: false,
+      reinviteFailed: false,
+    });
+
+  test("reads as transient, and offers nothing destructive", async () => {
+    app.render(unavailable(() => undefined));
+
+    await expect
+      .element(page.getByText("could not be read right now", { exact: false }))
+      .toBeInTheDocument();
+    // Nothing was destroyed, and nothing is claimed about what is stored.
+    await expect
+      .element(page.getByText("has been changed or deleted", { exact: false }))
+      .toBeInTheDocument();
+    // The destructive arm is the whole point of the separation: this state has
+    // no evidence the records are damaged, so it must not offer to destroy them
+    // -- nor the export, which it has nothing to fill.
+    expect(
+      page.getByRole("button", { name: "Start a fresh accounting" }).query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: /Download the stored records/ }).query(),
+    ).toBeNull();
+    // And it is not the app-upgrade copy: nothing here says an upgrade stranded
+    // the records or that the exchange can no longer add to them.
+    expect(
+      page.getByText("cannot add to it either", { exact: false }).query(),
+    ).toBeNull();
+  });
+
+  test("never renders as an empty accounting", async () => {
+    app.render(unavailable(() => undefined));
+    await expect
+      .element(page.getByText("could not be read right now", { exact: false }))
+      .toBeInTheDocument();
+
+    // "Nothing was disclosed" is a claim, and a read that never reached the
+    // store cannot make it. The CSV export speaks for entries too, so it is gone
+    // with them.
+    expect(
+      page
+        .getByText("this browser's copy of the accounting is empty", {
+          exact: false,
+        })
+        .query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: /Export this accounting/ }).query(),
+    ).toBeNull();
+  });
+
+  test("the way out is reading again, not a reload that would end a run", async () => {
+    const onRetryAccountingRead = vi.fn();
+    app.render(unavailable(onRetryAccountingRead));
+
+    await page.getByRole("button", { name: "Try reading it again" }).click();
+
+    await vi.waitFor(() =>
+      expect(onRetryAccountingRead).toHaveBeenCalledTimes(1),
+    );
   });
 });

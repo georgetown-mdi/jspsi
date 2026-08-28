@@ -17,11 +17,13 @@
  * A deleted managed exchange takes its accounting with it, in the same one-step
  * delete transaction (see {@link ./managedExchangeStore.ts}).
  *
- * Beside the validating read and the append sit the two recovery operations for a
- * stored accounting this build can no longer read -- get the entries out, then
- * make the store appendable again. They are one ordered pair, not alternatives:
- * the export retains the record but leaves the store un-appendable, and the reset
- * restores appendability but destroys the record.
+ * Beside the read and the append sit the two recovery operations for a stored
+ * accounting this build can no longer read -- get the entries out, then make the
+ * store appendable again. They are one ordered pair, not alternatives: the export
+ * retains the record but leaves the store un-appendable, and the reset restores
+ * appendability but destroys the record. The read classifies which state the
+ * exchange is in, so the recovery is offered on a value in hand and never on a
+ * store that simply did not answer.
  */
 
 import { parseExchangeRecord } from "@psilink/core";
@@ -43,9 +45,11 @@ import type {
 import type { ExchangeRecord } from "@psilink/core";
 
 /** Read the stored accounting value under `id`, unparsed, or `undefined` when the
- * exchange has none. The one place the disclosure store is read from, so the
- * validating read and the recovery read below differ only in what they hold the
- * value to. */
+ * exchange has none. The one place the disclosure store is read from: every
+ * reading of an accounting is this one round trip, held afterwards to whichever
+ * parse the caller needs.
+ *
+ * @throws if the database does not open, or the transaction does not complete. */
 async function readStoredValue(id: string): Promise<unknown> {
   const db = await openManagedExchangeDatabase();
   try {
@@ -71,44 +75,77 @@ async function readStoredValue(id: string): Promise<unknown> {
 }
 
 /**
- * Read one managed exchange's accounting of disclosures, or `undefined` when it
- * has none (no run has completed). The stored value is re-validated through
- * {@link parseDisclosureAccounting}, so a corrupted or app-upgrade-invalidated
- * accounting rejects rather than loading as a shorter, quietly false account.
- *
- * @throws {ZodError} if the stored value is not a valid accounting.
+ * How reading one exchange's accounting turned out. The states are distinct
+ * because their recoveries are: an accounting that could not be OBTAINED is a
+ * condition of the store and says nothing about what is at rest, while one that
+ * was obtained and refused is the app-upgrade case the export-then-reset recovery
+ * exists for. Neither may render as an empty accounting -- "nothing was
+ * disclosed" is a claim, and only `"none"` makes it.
  */
-export async function getDisclosureAccounting(
-  id: string,
-): Promise<DisclosureAccounting | undefined> {
-  const raw = await readStoredValue(id);
-  if (raw === undefined) return undefined;
-  return parseDisclosureAccounting(raw);
+export type DisclosureAccountingRead =
+  /** The stored value could not be obtained: the database did not open (private
+   * mode with storage blocked, an engine without IndexedDB, or a version-change
+   * open transiently held off by another tab's older connection -- see
+   * {@link ./managedExchangeStore.ts}), or the read transaction did not complete.
+   * Nothing is known about what is stored, so no recovery is offered on it. */
+  | { kind: "unavailable" }
+  /** The store was read and holds no accounting for this exchange: no run has
+   * completed here. */
+  | { kind: "none" }
+  /** The stored accounting, validated through {@link parseDisclosureAccounting}. */
+  | { kind: "accounting"; accounting: DisclosureAccounting }
+  /** A stored value the validating parse refused -- the corrupted or
+   * app-upgrade-invalidated accounting. `stored` carries the entries exactly as
+   * they sit at rest when the ENVELOPE still parses (the record-version-bump
+   * case, which is what makes the export arm possible), and is `undefined` when
+   * the envelope is gone too and there is nothing to hand back. */
+  | { kind: "unreadable"; stored: StoredDisclosureAccounting | undefined };
+
+/** The stored value held only to its envelope, or `undefined` when even that
+ * refuses. Never a rendering source: these are the entries the validating parse
+ * declined to vouch for, fit for handing back to the operator as stored bytes and
+ * for nothing else (see {@link parseStoredDisclosureAccounting}). */
+function recoverableStored(
+  raw: unknown,
+): StoredDisclosureAccounting | undefined {
+  try {
+    return parseStoredDisclosureAccounting(raw);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
- * Read one managed exchange's accounting for RECOVERY: the entries exactly as
- * they sit at rest, held only to the envelope, so an accounting whose entries
- * this build's exchange-record format no longer admits can still be got out
- * whole. `undefined` when the exchange has no accounting.
+ * Read one managed exchange's accounting of disclosures and classify the outcome.
+ * ONE round trip: the stored value is read once and both parses are tried on that
+ * same value, so the two readings of an accounting cannot disagree and a store
+ * consulted twice cannot answer differently the second time.
  *
- * Deliberately not the read any rendering surface uses. It returns what
- * {@link getDisclosureAccounting} refused to vouch for, so its result is fit for
- * handing back to the operator as stored bytes and for nothing else -- see
- * {@link parseStoredDisclosureAccounting} for why rendering it would be a
- * quietly false account.
+ * The classification is what keeps a transient store condition off the
+ * destructive recovery. A failed open is separated from a failed PARSE, the same
+ * split {@link ../bench/savedExchangesLoad.ts} makes for the saved-exchanges
+ * list: only a value actually read and then refused reaches `"unreadable"`, so a
+ * blocked open -- which self-heals when the other tab yields -- can never present
+ * as the irreversible-reset case.
  *
- * @throws {ZodError} if the stored value is not even a valid envelope. That is
- *   the corruption case rather than the bump case -- a bump moves the ENTRIES'
- *   version literal, not the accounting's own -- and it leaves no accounting to
- *   hand back at all.
+ * Total: every failure classifies rather than rejecting, so a caller renders an
+ * outcome rather than catching one.
  */
-export async function getStoredDisclosureAccounting(
+export async function readDisclosureAccounting(
   id: string,
-): Promise<StoredDisclosureAccounting | undefined> {
-  const raw = await readStoredValue(id);
-  if (raw === undefined) return undefined;
-  return parseStoredDisclosureAccounting(raw);
+): Promise<DisclosureAccountingRead> {
+  let raw: unknown;
+  try {
+    raw = await readStoredValue(id);
+  } catch {
+    return { kind: "unavailable" };
+  }
+  if (raw === undefined) return { kind: "none" };
+  try {
+    return { kind: "accounting", accounting: parseDisclosureAccounting(raw) };
+  } catch {
+    return { kind: "unreadable", stored: recoverableStored(raw) };
+  }
 }
 
 /**

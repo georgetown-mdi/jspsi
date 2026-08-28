@@ -656,8 +656,22 @@ rest. Two consequences follow, and the second is the one that compounds:
 separate literal from the entries', and the envelope is validated without looking
 inside an entry, so a bump leaves the envelope readable and the stored entries
 returned verbatim. Only the per-entry validation refuses. This is what recovery
-rests on, and it is pinned by a test driving both reads against a moved version
+rests on, and it is pinned by a test driving both parses against a moved version
 rather than asserted here.
+
+**The unreadable state is a value in hand, not a failure to read.** One read
+obtains the stored value in a single round trip and classifies it: a store that
+does not open -- private mode with storage blocked, an engine without IndexedDB,
+or a version-change open transiently held off by another tab's older connection
+-- and a read transaction that does not complete are both *store-unavailable*,
+which offers neither arm below. Only a value that was obtained and then refused by
+the parses is *unreadable*. The split is the one the saved-exchanges list already
+makes between a failed open and a failed read after one, and it is load-bearing
+twice over: the blocked-open condition is transient and self-healing, so routing
+it to the reset would offer to destroy records over a condition that clears when
+the other tab yields; and reading once means the validating parse and the
+envelope-only parse see the same bytes, so the two readings of an accounting
+cannot disagree.
 
 **The recovery offered is export then reset**, in that order, from the unreadable
 state, and it never removes the exchange:

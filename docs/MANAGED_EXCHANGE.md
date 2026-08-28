@@ -967,6 +967,17 @@ download is possible. The page says so rather than offering a download it cannot
 deliver; what remains is any record file you downloaded when a run finished, and
 clearing the accounting still lets the exchange file again.
 
+### When the accounting could not be read right now
+
+A different message -- that the accounting could not be read **right now** --
+means this browser's storage did not answer, not that anything is wrong with what
+it holds. The usual cause is another tab running an older version of the app,
+which holds the storage for a while and then lets go.
+
+Nothing is offered to clear, because nothing is known to be damaged. Close any
+other tab this app is open in and use the page's own "try reading it again"; a
+page reload works too, but it would end a run in progress.
+
 ## Surviving storage eviction
 
 Browser storage is not durable the way a file on disk is. The design must survive

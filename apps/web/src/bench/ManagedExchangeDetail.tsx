@@ -40,15 +40,13 @@ import { dateLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type {
-  DisclosureAccounting,
-  StoredDisclosureAccounting,
-} from "@psi/disclosureAccounting";
-import type {
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
 import type { ConfigRow } from "./managedDetailModel";
+import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { DisclosureFact } from "./disclosureAccountingModel";
+import type { StoredDisclosureAccounting } from "@psi/disclosureAccounting";
 
 /**
  * The managed exchange detail sections composed onto the per-partnership home at
@@ -68,10 +66,9 @@ import type { DisclosureFact } from "./disclosureAccountingModel";
  */
 export function ManagedExchangeDetail({
   record,
-  accounting,
-  accountingUnreadable,
-  accountingStored,
+  accountingRead,
   onResetAccounting,
+  onRetryAccountingRead,
   onSaveLocalFields,
   onReinviteToChangeTerms,
   canReinvite,
@@ -79,24 +76,19 @@ export function ManagedExchangeDetail({
   reinviteFailed,
 }: {
   record: ManagedExchangeRecord;
-  /** This exchange's accounting of disclosures, read from its own sibling store;
-   * `undefined` while it loads, when the exchange has never completed a run, or
-   * when the read failed (which `accountingUnreadable` distinguishes). */
-  accounting: DisclosureAccounting | undefined;
-  /** Whether reading the accounting failed. Distinguished from an empty one so a
-   * failed read can never render as "nothing was disclosed". */
-  accountingUnreadable: boolean;
-  /** The stored entries of an accounting the validating read refused, held only to
-   * the envelope. Present only when the read failed AND the stored form is still
-   * recoverable -- the record-version-bump case, as against corruption, which
-   * takes the envelope with it. Never rendered as an accounting; the recovery
-   * affordance hands it back as a file. */
-  accountingStored: StoredDisclosureAccounting | undefined;
+  /** How reading this exchange's accounting of disclosures turned out;
+   * `undefined` while the read is in flight. One classified outcome rather than an
+   * accounting beside flags, so a failed read can never render as "nothing was
+   * disclosed" and a store that did not answer can never render as a value this
+   * build refused. */
+  accountingRead: DisclosureAccountingRead | undefined;
   /** Destroy the stored accounting so the exchange can file disclosures again,
    * leaving the exchange itself untouched. Offered only from the unreadable state,
    * behind an explicit confirm, and after the export. Rejects on a store failure;
    * the confirm surfaces the failure and stays open. */
   onResetAccounting: () => Promise<void>;
+  /** Read the accounting again, for a read that never reached the store. */
+  onRetryAccountingRead: () => void;
   /** Persist an in-place edit to the local fields (label, max-token-age policy).
    * Rejects on a store failure; the editor surfaces the failure and keeps the
    * form. */
@@ -129,10 +121,9 @@ export function ManagedExchangeDetail({
       <LocalFieldsEditor record={record} onSave={onSaveLocalFields} />
       <RunHistory record={record} />
       <DisclosureAccountingView
-        accounting={accounting}
-        unreadable={accountingUnreadable}
-        stored={accountingStored}
+        read={accountingRead}
         onReset={onResetAccounting}
+        onRetryRead={onRetryAccountingRead}
       />
     </>
   );
@@ -451,11 +442,15 @@ function factRow(fact: DisclosureFact): ConfigRow {
  *
  * A failed read renders as its own state, never as an empty accounting: "nothing
  * was disclosed" is a claim, and this surface must not make it on a read it could
- * not perform. That state carries its own recovery
- * ({@link UnreadableAccountingRecovery}) rather than the CSV export and the
- * footer's offer of it, which speak for entries this read did not obtain. Each
- * entry starts collapsed behind its date and partner, so a long history stays
- * scannable and the reader opens the run they came for.
+ * not perform. Which failed state it is comes from the read's own classification,
+ * not from this view: a stored value this build refused carries the
+ * export-then-reset recovery ({@link UnreadableAccountingRecovery}), while a store
+ * that never yielded one carries the transient notice
+ * ({@link UnavailableAccountingNotice}) and no destructive offer at all. Both
+ * replace the CSV export and the footer's offer of it, which speak for entries
+ * this read did not obtain. Each entry starts collapsed behind its date and
+ * partner, so a long history stays scannable and the reader opens the run they
+ * came for.
  *
  * Every count and empty state here speaks for THIS browser's copy and says so: the
  * export/import artifact migrates the runnable exchange without its accounting
@@ -464,17 +459,18 @@ function factRow(fact: DisclosureFact): ConfigRow {
  * nothing" would read there as the partnership's whole disclosure history.
  */
 function DisclosureAccountingView({
-  accounting,
-  unreadable,
-  stored,
+  read,
   onReset,
+  onRetryRead,
 }: {
-  accounting: DisclosureAccounting | undefined;
-  unreadable: boolean;
-  stored: StoredDisclosureAccounting | undefined;
+  read: DisclosureAccountingRead | undefined;
   onReset: () => Promise<void>;
+  onRetryRead: () => void;
 }) {
   const [openedNonce, setOpenedNonce] = useState<string>();
+  // Entries come only from the validated accounting, so the stored form the
+  // recovery hands back as a file has no path into anything rendered here.
+  const accounting = read?.kind === "accounting" ? read.accounting : undefined;
   const entries = accounting === undefined ? [] : disclosureEntries(accounting);
   const exportCsv = () => {
     if (accounting === undefined) return;
@@ -496,8 +492,10 @@ function DisclosureAccountingView({
         deliberately unsigned: an honest local account, not a signed or
         non-repudiable receipt.
       </p>
-      {unreadable ? (
-        <UnreadableAccountingRecovery stored={stored} onReset={onReset} />
+      {read?.kind === "unavailable" ? (
+        <UnavailableAccountingNotice onRetryRead={onRetryRead} />
+      ) : read?.kind === "unreadable" ? (
+        <UnreadableAccountingRecovery stored={read.stored} onReset={onReset} />
       ) : entries.length === 0 ? (
         <p className={styles.small}>
           No run of this exchange has completed in this browser, so this
@@ -538,7 +536,7 @@ function DisclosureAccountingView({
       <p className={`${styles.small} ${styles.sub}`}>
         This accounting is kept in this browser and is deleted with the
         exchange.{" "}
-        {!unreadable && entries.length > 0 && (
+        {entries.length > 0 && (
           <>
             Export it if you need to keep it, or hand an auditor a run record
             file you downloaded when that run finished.{" "}
@@ -548,6 +546,42 @@ function DisclosureAccountingView({
         <Link to="/verify">verify page</Link> and drop it in.
       </p>
     </div>
+  );
+}
+
+/**
+ * The state where the accounting could not be OBTAINED: the browser's store did
+ * not open, or the read did not complete. Nothing is known about what is stored,
+ * so this state makes no claim about it and offers no arm of the recovery -- in
+ * particular not the reset, which destroys records this read has no evidence are
+ * damaged. The documented cause is transient and self-healing (another tab holding
+ * an older version of the store open; see {@link ../psi/managedExchangeStore.ts}),
+ * so the affordance is to read again.
+ *
+ * Reading again rather than reloading the page: a reload ends a run in progress,
+ * and this section sits below the run controls.
+ */
+function UnavailableAccountingNotice({
+  onRetryRead,
+}: {
+  onRetryRead: () => void;
+}) {
+  return (
+    <Alert color="blue" title="This accounting could not be read right now">
+      <p>
+        The disclosure records stored for this exchange could not be read from
+        this browser&apos;s storage, so they are not shown. This does not mean
+        nothing was disclosed, and nothing stored here has been changed or
+        deleted.
+      </p>
+      <p>
+        A tab running an older version of this app can hold that storage for a
+        while. Close any other tab this app is open in, then try again.
+      </p>
+      <Button variant="default" mt="sm" onClick={onRetryRead}>
+        Try reading it again
+      </Button>
+    </Alert>
   );
 }
 
@@ -652,7 +686,11 @@ function UnreadableAccountingRecovery({
         </p>
       )}
       <div className={styles.savedRowActions} style={{ marginTop: "1rem" }}>
-        {stored !== undefined && (
+        {stored !== undefined && !confirming && (
+          // Withdrawn while the confirm is open, which re-offers the same
+          // download: the modal renders over this rather than replacing it, so
+          // leaving both mounted would put two buttons under one accessible name
+          // in the tree a screen reader walks.
           <Button variant="default" onClick={downloadStored}>
             Download the stored records (JSON)
           </Button>

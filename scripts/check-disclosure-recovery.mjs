@@ -38,15 +38,15 @@
 //   B. THE RECOVERY PATH'S PRESENCE. Part A defers a decision to a recovery path;
 //      a tree that lost that path would pass part A while deferring to nothing.
 //      So the entry points the recovery is built on must be declared: the
-//      envelope-only read the export arm needs, and the store reads and the
-//      accounting-scoped delete behind both arms.
+//      envelope-only parse the export arm needs, the classifying store read that
+//      reaches it, and the accounting-scoped delete behind the other arm.
 //
 // What this check cannot see:
 //   - Whether the recovery still WORKS. It reads declarations, not behaviour. The
 //     behaviour is held by apps/web/test/unit/disclosureAccounting.test.ts (the
 //     envelope-parses/entries-reject split, driven against the real parsers),
-//     apps/web/test/browser/managedExchangeStore.test.ts (the two store
-//     operations against real IndexedDB), and
+//     apps/web/test/browser/managedExchangeStore.test.ts (the read's
+//     classification and the reset against real IndexedDB), and
 //     apps/web/test/browser/managedExchangeDetail.test.ts (both arms reachable
 //     from the unreadable state, in order).
 //   - Whether a recorded new pin was recorded after the decision was taken, or
@@ -82,7 +82,7 @@ export const RECOVERY_ENTRY_POINTS = {
     "parseStoredDisclosureAccounting",
   ],
   "apps/web/src/psi/disclosureAccountingStore.ts": [
-    "getStoredDisclosureAccounting",
+    "readDisclosureAccounting",
     "resetDisclosureAccounting",
   ],
 };
