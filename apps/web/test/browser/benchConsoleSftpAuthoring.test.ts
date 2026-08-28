@@ -787,8 +787,16 @@ describe("console SFTP connection authoring", () => {
     await expect
       .element(page.getByText("warn on a mismatch", { exact: false }))
       .toBeInTheDocument();
-    // The exchange ceremony has NO out-of-band affirmation checkbox.
-    expect(page.getByRole("checkbox").query()).toBeNull();
+    // The exchange ceremony has NO out-of-band affirmation checkbox; the
+    // credential form's keyboard-interactive checkbox renders on a
+    // password-method form, so absence is asserted by name.
+    expect(
+      page
+        .getByRole("checkbox", {
+          name: "I checked this fingerprint against a source other than this connection",
+        })
+        .query(),
+    ).toBeNull();
 
     await page.getByRole("button", { name: "Use this fingerprint" }).click();
     // The field now holds the probed value (comparison, then fill).
