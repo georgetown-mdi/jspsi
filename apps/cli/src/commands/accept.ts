@@ -39,6 +39,7 @@ import {
   askIdentityAtPrompt,
   identityFromFlagOrPrompt,
   resolveIdentity,
+  resolveKeptConfigurationIdentity,
 } from "../partyIdentity";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { decodeAndValidateInvitation } from "../invitationDecode";
@@ -302,7 +303,9 @@ type AcceptReady = {
  * cannot be collected later, at the confirmation prompt, without validating the
  * acceptance twice. It is asked after the invitation has decoded and validated
  * and after the key-file conflict gate, so nobody types a name for an
- * acceptance that was never going to proceed.
+ * acceptance that was never going to proceed. An acceptance that keeps a
+ * configuration already at the path neither asks nor reads the flag: its label
+ * is that file's own (see {@link keptConfigurationIdentity}).
  *
  * @internal exported for testing
  */
@@ -348,19 +351,26 @@ export async function validateAccept(params: {
   );
 
   // A configuration already at the path is either kept as it stands or aborts
-  // the acceptance below, and neither writes one -- so there is nowhere for an
-  // answer to be remembered, and the label a later run sends is that file's own.
-  // Asking there would collect a value this command has no place to put. The
-  // same lstat reconcileAcceptConfig gates reuse on, read here because the
-  // question comes before the terms the reconcile compares.
-  const willWriteConfig =
-    detectFileConflicts([options.configFile]).length === 0;
-  const myIdentity = resolveIdentity(
-    await identityFromFlagOrPrompt(
-      options.identity,
-      willWriteConfig ? askIdentity : undefined,
-    ),
+  // the acceptance below, and neither writes one -- so the label this party runs
+  // under is that file's own, and there is nothing to ask: an answer would have
+  // nowhere to be remembered, and a flag has nowhere to be written. The same
+  // file reconcileAcceptConfig gates reuse on, read here because the label is an
+  // input to the terms the reconcile compares.
+  const keptConfig = readExistingAcceptConfig(
+    options.configFile,
+    reconciliationSources(resolved.mode === "online"),
   );
+  const myIdentity =
+    keptConfig !== undefined
+      ? keptConfigurationIdentity({
+          configured: keptConfig.linkageTerms.identity,
+          supplied: options.identity,
+          configPath: options.configFile,
+          log,
+        })
+      : resolveIdentity(
+          await identityFromFlagOrPrompt(options.identity, askIdentity),
+        );
   // Adopt the invitation's agreed linkage fields/keys/algorithm, but record this
   // party's own identity (the invitation's identity is the inviter's) and MIRROR
   // the output direction rather than copying it: validateCompatibility compares
@@ -652,6 +662,119 @@ export async function validateAccept(params: {
 }
 
 /**
+ * This party's label for an acceptance that keeps the configuration already at
+ * the path: that file's own `linkage_terms.identity`, with a `--identity` given
+ * alongside it reported as having no effect.
+ *
+ * The stored label wins because this acceptance rewrites nothing: the kept file
+ * governs every exchange under the partnership, and under
+ * `signing.mode: certificate` the label in the agreed terms is what a receipt is
+ * verified against -- so a flag that quietly renamed the party for one run would
+ * put the name the partner reads on this run at odds with the one the file keeps
+ * sending. Renaming is an edit of that file, which is what the notice says.
+ *
+ * The notice is the one `psilink invite` gives on its own config-as-source path,
+ * escaped the same way: both labels and the path are free text reaching a `log`
+ * sink, which is their display boundary (CONTRIBUTING.md, Operator-facing
+ * escaping). A flag naming exactly the stored label is nothing to report -- it
+ * asks for what the run already does -- and a blank one, what a scripted
+ * `--identity "$ORG"` sends with `ORG` unset, names nothing to begin with.
+ */
+function keptConfigurationIdentity(params: {
+  configured: string | undefined;
+  supplied: string | undefined;
+  configPath: string;
+  log: ReturnType<typeof getLogger>;
+}): string {
+  const { configured, supplied, configPath, log } = params;
+  const identity = resolveKeptConfigurationIdentity(configured, configPath);
+  const stated = supplied?.trim();
+  if (stated !== undefined && stated !== "" && stated !== identity)
+    log.warn(
+      `--identity "${redactAndSanitizeForDisplay(stated)}" has no effect on an ` +
+        "acceptance that keeps the existing configuration file; that file's " +
+        "linkage_terms.identity " +
+        `("${redactAndSanitizeForDisplay(identity)}") names this party in the ` +
+        "terms this acceptance agrees to, and in every exchange the file " +
+        "governs. Edit linkage_terms.identity in " +
+        `${redactAndSanitizeForDisplay(configPath)} to change it.`,
+    );
+  return identity;
+}
+
+/**
+ * What a pre-existing configuration is compared against, woven into every
+ * message about it so the online case ("the invitation and the connection URL")
+ * and the offline one ("the invitation") each read right.
+ */
+function reconciliationSources(comparesConnectionUrl: boolean): {
+  against: string;
+  retryWith: string;
+} {
+  return comparesConnectionUrl
+    ? {
+        against: "the invitation and the connection URL",
+        retryWith: "the same URL and invitation",
+      }
+    : { against: "the invitation", retryWith: "the same invitation" };
+}
+
+/**
+ * The configuration already at `configPath`, parsed, or `undefined` where no
+ * file is there. Throws a {@link UsageError} naming the path and what to do
+ * about it when a file is there but cannot be read as an exchange spec.
+ *
+ * Called twice per acceptance: once for the label the run proceeds under, and
+ * once by {@link reconcileAcceptConfig} for the terms it compares, each acting
+ * on the file as it read it. The reconcile's read is what decides whether the
+ * configuration is kept, so a file appearing between the two would be reconciled
+ * without having supplied the label -- the same check-not-a-lock race
+ * {@link assertNoProvisionConflicts} documents for the paths it gates, and
+ * immaterial for the same reason.
+ *
+ * Parse, then validate, in two steps. The YAML parse can echo source bytes (an
+ * inline credential) and warn to stderr, so it routes through the sensitive-file
+ * chokepoint (see sensitiveFile.ts); on any parse failure this reports the path
+ * and reconciliation guidance, never the parser's message. A schema failure from
+ * parseExchangeSpec (Zod) names field paths and issue kinds, not the offending
+ * values, so its message is safe to surface.
+ */
+function readExistingAcceptConfig(
+  configPath: string,
+  sources: { against: string; retryWith: string },
+): ExchangeSpec | undefined {
+  if (detectFileConflicts([configPath]).length === 0) return undefined;
+  const { against, retryWith } = sources;
+  let parsed: unknown;
+  try {
+    // The chokepoint's own path-only message is discarded by the catch below,
+    // which re-labels with reconciliation guidance; the label is passed only to
+    // keep the call signature uniform.
+    parsed = parseSensitiveYaml(
+      fs.readFileSync(configPath, "utf8"),
+      `a configuration file at ${configPath}`,
+    );
+  } catch {
+    throw new UsageError(
+      `a configuration file already exists at ${configPath} but is not valid ` +
+        `YAML, so it cannot be compared against ${against}. Fix or remove it, ` +
+        `or pass --config-file to write elsewhere, then retry with ${retryWith}.`,
+    );
+  }
+  try {
+    return parseExchangeSpec(parsed);
+  } catch (err) {
+    throw new UsageError(
+      `a configuration file already exists at ${configPath} but could not be ` +
+        `parsed to compare against ${against}: ` +
+        describeDecodeError(err) +
+        `. Fix or remove it, or pass --config-file to write elsewhere, then ` +
+        `retry with ${retryWith}.`,
+    );
+  }
+}
+
+/**
  * Reconcile a pre-existing configuration file against an acceptance. Returns
  * `false` when no config exists at `configPath` (a fresh one will be written);
  * `true` when a config exists and agrees with the invitation (and, online, the
@@ -679,54 +802,12 @@ function reconcileAcceptConfig(params: {
   log: ReturnType<typeof getLogger>;
 }): { reuse: boolean; existingOutputShares?: boolean } {
   const { configPath, myTerms, consentedPayloadColumns, target, log } = params;
-  if (detectFileConflicts([configPath]).length === 0) return { reuse: false };
-
-  // Reference to the source(s) compared against, woven into the messages so the
-  // online ("invitation and URL") and offline ("invitation") cases read right.
-  // A `target` connection is present only online.
-  const against =
-    target !== undefined
-      ? "the invitation and the connection URL"
-      : "the invitation";
-  const retryWith =
-    target !== undefined
-      ? "the same URL and invitation"
-      : "the same invitation";
-
-  // Parse, then validate, in two steps. The YAML parse can echo source bytes (an
-  // inline credential) and warn to stderr, so it routes through the sensitive-
-  // file chokepoint (see sensitiveFile.ts); on any parse failure this reports the
-  // path and reconciliation guidance, never the parser's message. A schema
-  // failure from parseExchangeSpec (Zod) names field paths and issue kinds, not
-  // the offending values, so its message is safe to surface (below).
-  let parsed: unknown;
-  try {
-    // The chokepoint's own path-only message is discarded by the catch below,
-    // which re-labels with reconciliation guidance; the label is passed only to
-    // keep the call signature uniform.
-    parsed = parseSensitiveYaml(
-      fs.readFileSync(configPath, "utf8"),
-      `a configuration file at ${configPath}`,
-    );
-  } catch {
-    throw new UsageError(
-      `a configuration file already exists at ${configPath} but is not valid ` +
-        `YAML, so it cannot be compared against ${against}. Fix or remove it, ` +
-        `or pass --config-file to write elsewhere, then retry with ${retryWith}.`,
-    );
-  }
-  let existing: ExchangeSpec;
-  try {
-    existing = parseExchangeSpec(parsed);
-  } catch (err) {
-    throw new UsageError(
-      `a configuration file already exists at ${configPath} but could not be ` +
-        `parsed to compare against ${against}: ` +
-        describeDecodeError(err) +
-        `. Fix or remove it, or pass --config-file to write elsewhere, then ` +
-        `retry with ${retryWith}.`,
-    );
-  }
+  // A `target` connection is present only online, which is what decides the
+  // source(s) every message here names.
+  const sources = reconciliationSources(target !== undefined);
+  const existing = readExistingAcceptConfig(configPath, sources);
+  if (existing === undefined) return { reuse: false };
+  const { against, retryWith } = sources;
 
   // Reported ahead of the reconciliation below, so a kept config's stale
   // citation reaches the operator whether or not its terms agree with the

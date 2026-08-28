@@ -1703,29 +1703,189 @@ test("validateAccept: offline reuses a config whose linkage terms match the invi
   }
 });
 
-test("validateAccept: an acceptance that keeps an existing config asks for nothing", async () => {
+test("validateAccept: an acceptance that keeps an existing config takes its label and asks nothing", async () => {
   // The question exists to be remembered in the configuration the acceptance
   // writes, and this one writes none: the kept file's own linkage terms govern
-  // every later run, so there is nowhere to put an answer. The standing refusal
-  // stands in its place -- what a kept configuration does with a label supplied
-  // by flag is decided elsewhere.
+  // every later run, so that file's label is what this acceptance proceeds
+  // under, and there is nothing to ask.
   const options = testOptions({ identity: undefined });
   writeExistingConfig(options.configFile);
   const askIdentity = vi.fn().mockResolvedValue("Agency B");
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
-    await expect(
-      validateAccept({
-        resolved: { mode: "offline", invitation: encoded },
-        options,
-        askIdentity,
-        log: silentLog,
-      }),
-    ).rejects.toThrow(IDENTITY_REQUIRED);
+    const ready = await validateAccept({
+      resolved: { mode: "offline", invitation: encoded },
+      options,
+      askIdentity,
+      log: silentLog,
+    });
     expect(askIdentity).not.toHaveBeenCalled();
+    expect(ready.reuseExistingConfig).toBe(true);
+    expect(ready.dataSpec.linkageTerms.identity).toBe("Acceptor Org");
   } finally {
     fs.rmSync(options.configFile, { force: true });
   }
+});
+
+/**
+ * Accept over a configuration already at the path, in either reuse mode,
+ * reporting the prepared acceptance alongside every warning it emitted. The
+ * saved connection agrees with the online URL, so the reuse verdict carries no
+ * connection divergence of its own and the only notice a case can raise is the
+ * one it is about.
+ */
+async function acceptOverKeptConfig(params: {
+  terms: LinkageTerms;
+  identity: string | undefined;
+  loggerName: string;
+  mode?: "online" | "offline";
+}): Promise<{
+  ready: Awaited<ReturnType<typeof validateAccept>>;
+  warnings: string[];
+}> {
+  const { terms, identity, loggerName, mode = "offline" } = params;
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-kept-"));
+  const configFile = path.join(dir, "psilink.yaml");
+  const keyFile = path.join(dir, ".psilink.key");
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
+  );
+  saveConfig(configFile, {
+    connection: { channel: "sftp", server: { host: "host" } },
+    linkageTerms: terms,
+  });
+  const log = getLogger(loggerName);
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const ready = await validateAccept({
+      resolved:
+        mode === "online"
+          ? {
+              mode: "online",
+              url: new URL("sftp://host"),
+              invitation: encoded,
+              input,
+            }
+          : { mode: "offline", invitation: encoded, input },
+      options: testOptions({ configFile, keyFile, identity }),
+      log,
+    });
+    return { ready, warnings: warnSpy.mock.calls.map((c) => String(c[0])) };
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** The distinctive clause of the flag-had-no-effect notice. */
+const IDENTITY_NO_EFFECT_CLAUSE = "has no effect on an acceptance that keeps";
+
+/** The one no-effect notice in `warnings`, asserted to be exactly one. */
+function identityNoEffectNotice(warnings: string[]): string {
+  const notices = warnings.filter((m) => m.includes(IDENTITY_NO_EFFECT_CLAUSE));
+  expect(notices).toHaveLength(1);
+  return notices[0];
+}
+
+test("validateAccept: offline reuse runs under the stored label, reporting the flag as having none", async () => {
+  // The kept file governs every exchange under the partnership, so a flag cannot
+  // rename the party in passing: the acceptance proceeds under the stored label
+  // and says so, naming both values and the field to edit.
+  const { ready, warnings } = await acceptOverKeptConfig({
+    terms: sampleTerms("Acceptor Org"),
+    identity: "Agency B",
+    loggerName: "accept-kept-identity-offline",
+  });
+  expect(ready.reuseExistingConfig).toBe(true);
+  expect(ready.dataSpec.linkageTerms.identity).toBe("Acceptor Org");
+  const notice = identityNoEffectNotice(warnings);
+  expect(notice).toContain('"Agency B"');
+  expect(notice).toContain('"Acceptor Org"');
+  expect(notice).toContain("Edit linkage_terms.identity");
+});
+
+test("validateAccept: online reuse presents the stored label to the partner", async () => {
+  // The path the divergence would have shown on: this run conducts the exchange
+  // itself, so the name the partner reads is the prepared exchange's -- and it
+  // has to be the one the kept configuration goes on sending, not a label
+  // supplied for this invocation alone.
+  const { ready, warnings } = await acceptOverKeptConfig({
+    terms: sampleTerms("Acceptor Org"),
+    identity: "Agency B",
+    loggerName: "accept-kept-identity-online",
+    mode: "online",
+  });
+  expect(ready.reuseExistingConfig).toBe(true);
+  expect(ready.mode).toBe("online");
+  if (ready.mode !== "online") return;
+  expect(ready.prepared.linkageTerms.identity).toBe("Acceptor Org");
+  expect(ready.dataSpec.linkageTerms.identity).toBe("Acceptor Org");
+  expect(identityNoEffectNotice(warnings)).toContain('"Acceptor Org"');
+});
+
+test("validateAccept: a flag that asks for the stored label reports nothing", async () => {
+  // Nothing diverged, so there is nothing to report: the notice exists to name a
+  // difference between what was typed and what the run sends. A blank flag --
+  // what `--identity "$ORG"` sends with ORG unset -- names nothing either.
+  for (const identity of ["Acceptor Org", "  Acceptor Org  ", "   ", undefined])
+    expect(
+      (
+        await acceptOverKeptConfig({
+          terms: sampleTerms("Acceptor Org"),
+          identity,
+          loggerName: `accept-kept-identity-agrees-${String(identity)}`,
+        })
+      ).warnings.filter((m) => m.includes(IDENTITY_NO_EFFECT_CLAUSE)),
+    ).toEqual([]);
+});
+
+test("validateAccept: a kept configuration carrying no identity refuses the acceptance", async () => {
+  // The acceptance writes no configuration, so a label supplied here would name
+  // this party for one run and leave every later one unnamed -- which is the
+  // refusal rather than something a flag can paper over.
+  for (const stored of [undefined, "   "])
+    await expect(
+      acceptOverKeptConfig({
+        terms: { ...sampleTerms("Acceptor Org"), identity: stored },
+        identity: "Agency B",
+        loggerName: "accept-kept-identity-absent",
+      }),
+    ).rejects.toThrow("carries no linkage_terms.identity");
+});
+
+test("validateAccept: a kept configuration still carrying the placeholder refuses", async () => {
+  // The template's own instruction to name the party is not a name, and reading
+  // the label out of a file rather than off the command line does not make it
+  // one.
+  await expect(
+    acceptOverKeptConfig({
+      terms: { ...sampleTerms("Acceptor Org"), identity: PLACEHOLDER_IDENTITY },
+      identity: undefined,
+      loggerName: "accept-kept-identity-placeholder",
+    }),
+  ).rejects.toThrow(`is still "${PLACEHOLDER_IDENTITY}"`);
+});
+
+test("validateAccept: the no-effect notice escapes both labels it reports", async () => {
+  // Neither value is psilink's: one was typed at the command line and one read
+  // out of a file, and this notice is a log sink, which is their display
+  // boundary.
+  const flag = `Agency B${ESC}[0m`;
+  const stored = `Acceptor Org${RLO}`;
+  const { warnings } = await acceptOverKeptConfig({
+    terms: sampleTerms(stored),
+    identity: flag,
+    loggerName: "accept-kept-identity-escaping",
+  });
+  const notice = identityNoEffectNotice(warnings);
+  expect(notice).toContain(sanitizeForDisplay(flag));
+  expect(notice).toContain(sanitizeForDisplay(stored));
+  expect(notice).not.toContain(ESC);
+  expect(notice).not.toContain(RLO);
 });
 
 /** The default terms with their first two keys swapped: rules that no longer
@@ -4991,6 +5151,28 @@ test("handler: offline accept-reuse refreshes a stale lock-in, preserving operat
     expect(raw).not.toContain("old_col");
     const parsed = parseExchangeSpec(YAML.parse(raw));
     expect(parsed.expectedPayloadColumns).toEqual(["diagnosis", "notes"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: accept-reuse leaves the kept configuration's identity untouched", async () => {
+  // The other half of the stored label winning: the acceptance runs under the
+  // file's label and leaves the file as it found it. A flag that rewrote the
+  // field here would rename the party for every later `psilink exchange`, out of
+  // a run whose one intended effect is a new key file.
+  const { dir, input, configFile } = offlineAcceptFixture();
+  try {
+    writeExistingConfig(configFile);
+    const raw = await runOfflineAcceptReuse({
+      configFile,
+      input,
+      disclosed: ["diagnosis"],
+    });
+    expect(parseExchangeSpec(YAML.parse(raw)).linkageTerms.identity).toBe(
+      "Acceptor Org",
+    );
+    expect(raw).not.toContain("Agency B");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

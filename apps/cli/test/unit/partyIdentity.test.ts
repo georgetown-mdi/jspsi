@@ -13,10 +13,12 @@ import {
   IDENTITY_REQUIRED,
   IDENTITY_STILL_PLACEHOLDER,
   INIT_IDENTITY_QUESTION,
+  keptConfigurationIdentityRequired,
   optionalIdentity,
   PLACEHOLDER_IDENTITY,
   resolveIdentity,
   resolveInvitationIdentity,
+  resolveKeptConfigurationIdentity,
 } from "../../src/partyIdentity";
 
 /** The placeholder as it reaches a resolver: verbatim, and with the whitespace a
@@ -247,6 +249,69 @@ test("the configuration path in the refusal is escaped exactly once", () => {
   );
   expect(withControl).not.toContain("\u001b");
   expect(withControl).toContain(String.raw`\x1b[31mpsilink.yaml`);
+});
+
+test("a kept configuration's identity is returned verbatim", () => {
+  // The label an acceptance over a kept configuration proceeds under is that
+  // file's own bytes, whitespace and all: it writes no configuration, so every
+  // exchange under the partnership goes on sending exactly what is there, and a
+  // certificate authorizes an exact string.
+  expect(
+    resolveKeptConfigurationIdentity("Test Party", "/work/psilink.yaml"),
+  ).toBe("Test Party");
+  expect(
+    resolveKeptConfigurationIdentity("  Test Party  ", "/work/psilink.yaml"),
+  ).toBe("  Test Party  ");
+});
+
+test("an acceptance over a configuration carrying no identity is refused", () => {
+  // The acceptance keeps the file rather than writing one, so there is nowhere
+  // to put a label supplied for this run; the refusal names the file and the
+  // field instead of accepting one the partnership would not go on sending.
+  for (const missing of [undefined, " ", "   ", "\t", "\n"]) {
+    const raised = refusalFrom(() =>
+      resolveKeptConfigurationIdentity(missing, "/work/psilink.yaml"),
+    );
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as Error).message).toBe(
+      keptConfigurationIdentityRequired("/work/psilink.yaml"),
+    );
+  }
+  const message = keptConfigurationIdentityRequired("/work/psilink.yaml");
+  expect(message).toContain("/work/psilink.yaml");
+  expect(message).toContain("linkage_terms.identity");
+  expect(message).toContain('--identity "name, org, contact" cannot stand in');
+});
+
+test("an acceptance over a configuration still carrying the placeholder is refused", () => {
+  // One wording for both files-supply-the-label commands: the placeholder is not
+  // a name whichever command reads it, and neither can replace it from the
+  // command line.
+  for (const form of PLACEHOLDER_FORMS) {
+    const raised = refusalFrom(() =>
+      resolveKeptConfigurationIdentity(form, "/work/psilink.yaml"),
+    );
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as Error).message).toBe(
+      configuredIdentityStillPlaceholder("/work/psilink.yaml"),
+    );
+  }
+  for (const label of REAL_LABELS)
+    expect(resolveKeptConfigurationIdentity(label, "/work/psilink.yaml")).toBe(
+      label,
+    );
+});
+
+test("the kept-configuration refusal escapes its path exactly once", () => {
+  // The display-boundary contract every refusal here holds to: the path is
+  // composed RAW and escaped once by the renderer the CLI shows errors through
+  // (CONTRIBUTING.md, Operator-facing escaping).
+  const windows = String.raw`C:\work\psilink.yaml`;
+  const rendered = sanitizeErrorForDisplay(
+    new UsageError(keptConfigurationIdentityRequired(windows)),
+  );
+  expect(rendered).toContain(String.raw`C:\\work\\psilink.yaml`);
+  expect(rendered).not.toContain(String.raw`C:\\\\work`);
 });
 
 test("an optional identity is trimmed, and blank reads as absent", () => {
