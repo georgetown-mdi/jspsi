@@ -132,10 +132,13 @@ export function addCommonBootstrapOptions(
       describe:
         "identity string for this party (name, org, contact): the label your " +
         "partner reads in the agreed linkage terms. Required by 'invite' and " +
-        "'accept', which author a partnership your partner reads a name off. " +
-        "Optional elsewhere: a run whose terms come from a configuration file " +
-        "takes the label from its linkage_terms.identity, and a quick exchange " +
-        "given none sends none -- psilink names no party you did not name",
+        "'accept', which author a partnership your partner reads a name off -- " +
+        "except over a configuration they keep rather than write, which runs " +
+        "under its linkage_terms.identity and reports this flag as having no " +
+        "effect. Optional elsewhere: a run whose terms come from " +
+        "a configuration file takes the label from its linkage_terms.identity, " +
+        "and a quick exchange given none sends none -- psilink names no party " +
+        "you did not name",
     })
     .option("server-port", {
       type: "number",

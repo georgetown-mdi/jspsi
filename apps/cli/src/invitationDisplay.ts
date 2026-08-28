@@ -40,6 +40,20 @@ import type {
 export type ConsentSurfaceSink = (line: string) => void;
 
 /**
+ * The level a consent line takes in the log, and with it the threshold its
+ * prompt copy is decided against. `info` is the surface itself; `warn` is for a
+ * line an operator has to read even at a level that has already dropped the
+ * surface -- the notice an acceptance raises for an `--identity` its kept
+ * configuration overrides.
+ */
+export type ConsentSurfaceLevel = "info" | "warn";
+
+const CONSENT_SURFACE_LOG_LEVELS: Record<ConsentSurfaceLevel, number> = {
+  info: logLibrary.levels.INFO,
+  warn: logLibrary.levels.WARN,
+};
+
+/**
  * The sink {@link displayInvitation} renders through, resolved from what the
  * operator chose for diagnostics and whether acceptance will stop to ask them.
  *
@@ -50,8 +64,8 @@ export type ConsentSurfaceSink = (line: string) => void;
  * ({@link writePromptLine}) unless the log would already have put it there, so
  * the terms the y/N question asks about cannot have been routed somewhere the
  * question is not. `--log-file` therefore shows the terms on the terminal and
- * still records them in the file; a level that drops `info` still shows them at
- * the prompt and still keeps them out of the log.
+ * still records them in the file; a level above the line's own still shows it at
+ * the prompt and still keeps it out of the log.
  *
  * The extra write is conditional because on the default path -- stderr sink at
  * `info` -- the log's own output already lands where the prompt asks, and an
@@ -61,18 +75,25 @@ export type ConsentSurfaceSink = (line: string) => void;
  * has no such reading available -- an installed diagnostic sink is an opaque
  * function that cannot be asked where it writes -- so it takes the parsed
  * `--log-file`, and a caller must feed that same value to `configureLogging`.
+ *
+ * `level` moves both halves together: a `warn` sink logs at `warn` and compares
+ * the logger's level against `warn`, so a line the log still records is not
+ * copied to the prompt it already reached. A sink of one level per line is what
+ * keeps the two halves from disagreeing about which routing drops it.
  */
 export function consentSurfaceSink(params: {
   log: ReturnType<typeof getLogger>;
   logFile: string | undefined;
   willPrompt: boolean;
+  level?: ConsentSurfaceLevel;
 }): ConsentSurfaceSink {
-  const { log, logFile, willPrompt } = params;
+  const { log, logFile, willPrompt, level = "info" } = params;
   return (line: string) => {
-    log.info(line);
+    log[level](line);
     if (!willPrompt) return;
     const logReachesPrompt =
-      logFile === undefined && log.getLevel() <= logLibrary.levels.INFO;
+      logFile === undefined &&
+      log.getLevel() <= CONSENT_SURFACE_LOG_LEVELS[level];
     if (!logReachesPrompt) writePromptLine(line);
   };
 }

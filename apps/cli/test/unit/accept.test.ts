@@ -15,6 +15,7 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   encodeInvitation,
   getDefaultLinkageTerms,
+  getDiagnosticSink,
   getLogger,
   inferMetadata,
   LINKAGE_RULE_SET_VERDICT_COPY,
@@ -23,6 +24,7 @@ import {
   reconcileReceivedPayload,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
+  setDiagnosticSink,
   summarizeInvitation,
   UNRECOGNIZED_TRANSFORM_NOTE,
   UsageError,
@@ -1525,6 +1527,10 @@ test("validateAccept: a webrtc acceptance over a kept configuration keeps the tw
   writeExistingConfig(options.configFile);
   const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
   const messages: string[] = [];
+  // The kept configuration's label differs from this run's flag, so the
+  // no-effect notice writes where the prompt asks; capture it here rather than
+  // in the suite's own output.
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation(
       sampleToken(FUTURE(), WEBRTC_ENDPOINT),
@@ -1546,6 +1552,7 @@ test("validateAccept: a webrtc acceptance over a kept configuration keeps the tw
       ),
     ).toBe(true);
   } finally {
+    stdio.restore();
     fs.rmSync(options.configFile, { force: true });
     fs.rmSync(input, { force: true });
   }
@@ -1689,6 +1696,9 @@ function writeExistingConfig(
 test("validateAccept: offline reuses a config whose linkage terms match the invitation", async () => {
   const options = testOptions();
   writeExistingConfig(options.configFile);
+  // The flag and the kept file name this party differently, so the no-effect
+  // notice reaches the prompt's own sink; keep it out of the suite's output.
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
     const ready = await validateAccept({
@@ -1699,6 +1709,7 @@ test("validateAccept: offline reuses a config whose linkage terms match the invi
     expect(ready.reuseExistingConfig).toBe(true);
     expect(ready.mode).toBe("offline");
   } finally {
+    stdio.restore();
     fs.rmSync(options.configFile, { force: true });
   }
 });
@@ -1729,21 +1740,41 @@ test("validateAccept: an acceptance that keeps an existing config takes its labe
 
 /**
  * Accept over a configuration already at the path, in either reuse mode,
- * reporting the prepared acceptance alongside every warning it emitted. The
- * saved connection agrees with the online URL, so the reuse verdict carries no
+ * reporting the prepared acceptance alongside every line it emitted -- the calls
+ * it made on the logger, the lines that survived the level to reach the log's
+ * own sink, and what it wrote where the confirmation prompt asks. The saved
+ * connection agrees with the online URL, so the reuse verdict carries no
  * connection divergence of its own and the only notice a case can raise is the
  * one it is about.
+ *
+ * `logLevel` and `logFile` are the routing the operator chose, which is what
+ * decides whether a consent line needs a copy where the prompt asks; the
+ * diagnostic sink is captured for the same run rather than left to the suite's
+ * own output, so a case can compare the two destinations.
  */
 async function acceptOverKeptConfig(params: {
   terms: LinkageTerms;
   identity: string | undefined;
   loggerName: string;
   mode?: "online" | "offline";
+  logLevel?: "silent" | "error" | "warn";
+  logFile?: string;
+  consentToTerms?: boolean;
 }): Promise<{
   ready: Awaited<ReturnType<typeof validateAccept>>;
   warnings: string[];
+  logged: string[];
+  promptWrites: string;
 }> {
-  const { terms, identity, loggerName, mode = "offline" } = params;
+  const {
+    terms,
+    identity,
+    loggerName,
+    mode = "offline",
+    logLevel = "silent",
+    logFile,
+    consentToTerms = false,
+  } = params;
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-kept-"));
   const configFile = path.join(dir, "psilink.yaml");
   const keyFile = path.join(dir, ".psilink.key");
@@ -1757,8 +1788,14 @@ async function acceptOverKeptConfig(params: {
     linkageTerms: terms,
   });
   const log = getLogger(loggerName);
-  log.setLevel("silent");
+  log.setLevel(logLevel);
   const warnSpy = vi.spyOn(log, "warn");
+  const logged: string[] = [];
+  const previousSink = getDiagnosticSink();
+  setDiagnosticSink((_method, _prefix, args) => {
+    logged.push(args.map((arg) => String(arg)).join(" "));
+  });
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
     const ready = await validateAccept({
@@ -1771,11 +1808,19 @@ async function acceptOverKeptConfig(params: {
               input,
             }
           : { mode: "offline", invitation: encoded, input },
-      options: testOptions({ configFile, keyFile, identity }),
+      options: testOptions({ configFile, keyFile, identity, logFile }),
+      consentToTerms,
       log,
     });
-    return { ready, warnings: warnSpy.mock.calls.map((c) => String(c[0])) };
+    return {
+      ready,
+      warnings: warnSpy.mock.calls.map((c) => String(c[0])),
+      logged,
+      promptWrites: stdio.stderrWrites.join(""),
+    };
   } finally {
+    stdio.restore();
+    setDiagnosticSink(previousSink);
     warnSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1830,17 +1875,84 @@ test("validateAccept: online reuse presents the stored label to the partner", as
 test("validateAccept: a flag that asks for the stored label reports nothing", async () => {
   // Nothing diverged, so there is nothing to report: the notice exists to name a
   // difference between what was typed and what the run sends. A blank flag --
-  // what `--identity "$ORG"` sends with ORG unset -- names nothing either.
-  for (const identity of ["Acceptor Org", "  Acceptor Org  ", "   ", undefined])
+  // what `--identity "$ORG"` sends with ORG unset -- names nothing either. On
+  // neither destination: a suppressed notice reaches the prompt's own sink no
+  // more than it reaches the log.
+  for (const identity of [
+    "Acceptor Org",
+    "  Acceptor Org  ",
+    "   ",
+    undefined,
+  ]) {
+    const { warnings, promptWrites } = await acceptOverKeptConfig({
+      terms: sampleTerms("Acceptor Org"),
+      identity,
+      loggerName: `accept-kept-identity-agrees-${String(identity)}`,
+    });
     expect(
-      (
-        await acceptOverKeptConfig({
-          terms: sampleTerms("Acceptor Org"),
-          identity,
-          loggerName: `accept-kept-identity-agrees-${String(identity)}`,
-        })
-      ).warnings.filter((m) => m.includes(IDENTITY_NO_EFFECT_CLAUSE)),
+      warnings.filter((m) => m.includes(IDENTITY_NO_EFFECT_CLAUSE)),
     ).toEqual([]);
+    expect(promptWrites).not.toContain(IDENTITY_NO_EFFECT_CLAUSE);
+  }
+});
+
+test("validateAccept: the no-effect notice reaches the prompt whatever the log routing", async () => {
+  // The operator answers the y/N for the name this notice reports, so it takes
+  // the consent surface's routing rather than a plain diagnostic's: a
+  // --log-file carries the log's copy off the terminal the question is asked
+  // on, and a level above `warn` drops that copy altogether. Under either, the
+  // notice is still written where the prompt asks -- the promise docs/CLI.md
+  // makes under acceptance. The `--log-file` value is what the sink reads to
+  // decide that, so nothing has to be written at the path for the case to hold.
+  for (const routing of [
+    { logLevel: "warn" as const, logFile: path.join(tmpdir(), "accept.log") },
+    { logLevel: "error" as const, logFile: undefined },
+  ]) {
+    const { promptWrites } = await acceptOverKeptConfig({
+      terms: sampleTerms("Acceptor Org"),
+      identity: "Agency B",
+      loggerName: `accept-kept-identity-routed-${routing.logLevel}`,
+      ...routing,
+    });
+    expect(promptWrites).toContain(IDENTITY_NO_EFFECT_CLAUSE);
+    expect(promptWrites).toContain('"Agency B"');
+    expect(promptWrites).toContain('"Acceptor Org"');
+  }
+});
+
+test("validateAccept: on the default routing the notice is logged once, not copied", async () => {
+  // The log's own line already lands on the terminal the prompt asks on, so a
+  // second copy would print the notice twice.
+  const { logged, promptWrites } = await acceptOverKeptConfig({
+    terms: sampleTerms("Acceptor Org"),
+    identity: "Agency B",
+    loggerName: "accept-kept-identity-default-routing",
+    logLevel: "warn",
+  });
+  expect(
+    logged.filter((line) => line.includes(IDENTITY_NO_EFFECT_CLAUSE)),
+  ).toHaveLength(1);
+  expect(promptWrites).not.toContain(IDENTITY_NO_EFFECT_CLAUSE);
+});
+
+test("validateAccept: an unattended acceptance keeps the notice in the log alone", async () => {
+  // --consent-to-terms asks nothing, so there is no question for the notice to
+  // accompany and it stays diagnostic output on the routing the operator chose
+  // -- at `warn`, which a level that drops the terms display still records. The
+  // routing here is the one that forces a prompt copy on an asking run, so what
+  // this measures is the unattended path declining to write one.
+  const { logged, promptWrites } = await acceptOverKeptConfig({
+    terms: sampleTerms("Acceptor Org"),
+    identity: "Agency B",
+    loggerName: "accept-kept-identity-unattended",
+    logLevel: "warn",
+    logFile: path.join(tmpdir(), "accept-unattended.log"),
+    consentToTerms: true,
+  });
+  expect(
+    logged.filter((line) => line.includes(IDENTITY_NO_EFFECT_CLAUSE)),
+  ).toHaveLength(1);
+  expect(promptWrites).toBe("");
 });
 
 test("validateAccept: a kept configuration carrying no identity refuses the acceptance", async () => {
@@ -1872,11 +1984,11 @@ test("validateAccept: a kept configuration still carrying the placeholder refuse
 
 test("validateAccept: the no-effect notice escapes both labels it reports", async () => {
   // Neither value is psilink's: one was typed at the command line and one read
-  // out of a file, and this notice is a log sink, which is their display
-  // boundary.
+  // out of a file, and the consent-surface sink this notice takes is their
+  // display boundary.
   const flag = `Agency B${ESC}[0m`;
   const stored = `Acceptor Org${RLO}`;
-  const { warnings } = await acceptOverKeptConfig({
+  const { warnings, promptWrites } = await acceptOverKeptConfig({
     terms: sampleTerms(stored),
     identity: flag,
     loggerName: "accept-kept-identity-escaping",
@@ -1886,6 +1998,12 @@ test("validateAccept: the no-effect notice escapes both labels it reports", asyn
   expect(notice).toContain(sanitizeForDisplay(stored));
   expect(notice).not.toContain(ESC);
   expect(notice).not.toContain(RLO);
+  // The prompt's own sink runs no pass of its own, so the copy the question is
+  // answered against is escaped only because the notice was composed that way.
+  expect(promptWrites).toContain(sanitizeForDisplay(flag));
+  expect(promptWrites).toContain(sanitizeForDisplay(stored));
+  expect(promptWrites).not.toContain(ESC);
+  expect(promptWrites).not.toContain(RLO);
 });
 
 /** The default terms with their first two keys swapped: rules that no longer
@@ -1909,6 +2027,9 @@ test("validateAccept: a reused config's rule-set citation is checked against its
   const log = getLogger("accept-citation-drift");
   log.setLevel("silent");
   const warnSpy = vi.spyOn(log, "warn");
+  // This run's flag names the party differently from the kept file, so the
+  // no-effect notice reaches the prompt's own sink as well as the log.
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation({
       ...sampleToken(FUTURE()),
@@ -1926,6 +2047,7 @@ test("validateAccept: a reused config's rule-set citation is checked against its
     expect(drifted).toHaveLength(1);
     expect(drifted[0]).toContain(options.configFile);
   } finally {
+    stdio.restore();
     warnSpy.mockRestore();
     fs.rmSync(options.configFile, { force: true });
   }
@@ -2054,6 +2176,10 @@ test("validateAccept: online aborts (no acceptance sent) when the connection blo
       server: { host: "other-host", username: "alice" },
     },
   });
+  // The flag names this party differently from the kept file, so each run below
+  // writes the no-effect notice where the prompt asks; keep it out of the
+  // suite's own output.
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
     const run = () =>
@@ -2072,6 +2198,7 @@ test("validateAccept: online aborts (no acceptance sent) when the connection blo
     await expect(run()).rejects.toBeInstanceOf(UsageError);
     await expect(run()).rejects.toThrow(/connection\.server\.host/);
   } finally {
+    stdio.restore();
     fs.rmSync(options.configFile, { force: true });
   }
 });
@@ -2096,6 +2223,10 @@ test("validateAccept: online reuse warns (does not abort) on a differing --serve
   log.setLevel("silent");
   const warnSpy = vi.spyOn(log, "warn");
   const infoSpy = vi.spyOn(log, "info");
+  // The kept file's label differs from this run's flag, so the no-effect notice
+  // reaches the prompt's own sink; capture it here rather than in the suite's
+  // output.
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
     const ready = await validateAccept({
@@ -2122,6 +2253,7 @@ test("validateAccept: online reuse warns (does not abort) on a differing --serve
       ),
     ).toBe(false);
   } finally {
+    stdio.restore();
     warnSpy.mockRestore();
     infoSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -4431,6 +4563,48 @@ test("handler: without --consent-to-terms the prompt runs and a decline writes n
   }
 });
 
+test("handler: a config appearing during the prompt is refused, not overwritten", async () => {
+  // The acceptance reads the configuration path once, before the terms are
+  // displayed, so a file that appears while the operator is answering the y/N
+  // was never reconciled against this invitation. The write refuses rather than
+  // clobbering it: exit 64 naming the path, the planted bytes untouched, and no
+  // key file left beside a configuration this run never agreed with.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const planted = "# authored while the prompt was open\n";
+  promptConfirmMock.mockImplementation(async () => {
+    fs.writeFileSync(configFile, planted);
+    return true;
+  });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const { stderrWrites, restore } = captureStdio();
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      identity: "Agency B",
+      args: [encoded, input],
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "error",
+      record: false,
+    } as unknown as Arguments);
+    restore();
+    expect(promptConfirmMock).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(64);
+    expect(stderrWrites.join("")).toContain("refusing to overwrite");
+    expect(stderrWrites.join("")).toContain(configFile);
+    expect(fs.readFileSync(configFile, "utf8")).toBe(planted);
+    expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    restore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- handler: the consent surface reaches wherever the prompt asks ------------
 
 const SURFACE_HEADING = "Invitation details:";
@@ -5432,6 +5606,10 @@ async function reuseLockInWarnings(params: {
   const log = getLogger(loggerName);
   log.setLevel("silent");
   const warnSpy = vi.spyOn(log, "warn");
+  // These options carry the default flag identity, which the kept file does not
+  // match, so every case here also raises the no-effect notice on the prompt's
+  // own sink; capture it rather than leaving it in the suite's output.
+  const stdio = captureStdio();
   try {
     const encoded = await encodeInvitation({
       ...sampleToken(FUTURE()),
@@ -5455,6 +5633,7 @@ async function reuseLockInWarnings(params: {
     expect(ready.reuseExistingConfig).toBe(true);
     return warnSpy.mock.calls.map((c) => String(c[0]));
   } finally {
+    stdio.restore();
     warnSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }

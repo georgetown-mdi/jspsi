@@ -47,6 +47,7 @@ import {
   consentSurfaceSink,
   displayInvitation,
   renderDialedBroker,
+  type ConsentSurfaceSink,
 } from "../invitationDisplay";
 import {
   assertNoUnknownOptions,
@@ -367,7 +368,16 @@ export async function validateAccept(params: {
           configured: keptConfig.linkageTerms.identity,
           supplied: options.identity,
           configPath: options.configFile,
-          log,
+          // The same sink resolution the terms display below takes, on the same
+          // two inputs: acceptance prompts exactly where `--consent-to-terms`
+          // did not declare the run unattended, so the notice reaches the
+          // terminal the y/N is asked on wherever the operator routed the log.
+          notify: consentSurfaceSink({
+            log,
+            logFile: options.logFile,
+            willPrompt: !consentToTerms,
+            level: "warn",
+          }),
         })
       : resolveIdentity(
           await identityFromFlagOrPrompt(options.identity, askIdentity),
@@ -678,7 +688,7 @@ export async function validateAccept(params: {
  *
  * The notice reads as the one `psilink invite` gives on its own
  * config-as-source path, and is escaped the same way: both labels and the path
- * are free text reaching a `log` sink, which is their display boundary
+ * are free text reaching the consent surface's sink, which is their boundary
  * (CONTRIBUTING.md, Operator-facing escaping). What triggers it deliberately
  * diverges. Invite warns on any non-blank flag, this one only where the flag
  * also differs from the stored label: a flag naming exactly that label asks for
@@ -687,18 +697,26 @@ export async function validateAccept(params: {
  * what a scripted `--identity "$ORG"` sends with `ORG` unset -- names nothing to
  * begin with, and is silent on both commands. Align the two only on a decision
  * to change that behavior, not to make the pair look uniform.
+ *
+ * `notify` is the consent surface's own sink rather than the logger, because
+ * this notice is part of what the operator answers for: it says the name the
+ * partner will read is not the name this invocation typed, and the y/N over
+ * that name comes a screen later. A plain `log.warn` would let `--log-file` or
+ * a level above `warn` carry it away from the terminal the question is asked
+ * on, which is the routing {@link consentSurfaceSink} exists to survive
+ * (docs/CLI.md, under acceptance).
  */
 function keptConfigurationIdentity(params: {
   configured: string | undefined;
   supplied: string | undefined;
   configPath: string;
-  log: ReturnType<typeof getLogger>;
+  notify: ConsentSurfaceSink;
 }): string {
-  const { configured, supplied, configPath, log } = params;
+  const { configured, supplied, configPath, notify } = params;
   const identity = resolveKeptConfigurationIdentity(configured, configPath);
   const stated = supplied?.trim();
   if (stated !== undefined && stated !== "" && stated !== identity)
-    log.warn(
+    notify(
       `--identity "${redactAndSanitizeForDisplay(stated)}" has no effect on an ` +
         "acceptance that keeps the existing configuration file; that file's " +
         "linkage_terms.identity " +
