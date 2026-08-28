@@ -194,6 +194,18 @@ export const scheduleSchema: ZodType<ManagedExchangeSchedule> = z.object({
   consecutiveMisses: z.int().min(0),
 });
 
+/** The instant a stored ISO datetime denotes, or `NaN` for a string the
+ * validators above would not admit as one: unparseable, or carrying no UTC
+ * designator (they take `Z` and no bare offset). Without the designator
+ * `Date.parse` reads the wall clock against the HOST zone -- five hours off the
+ * stored moment under America/New_York -- so the same record would name a
+ * different instant on every machine that read it. Shared with the schedule
+ * arithmetic, which reads these same fields and must land on the same moments
+ * (see {@link ./managedSchedule.ts}). */
+export function parseStoredInstant(value: string): number {
+  return value.endsWith("Z") ? Date.parse(value) : Number.NaN;
+}
+
 /** The canonical `lastRun` validator. Exported so the export/import artifact reuses
  * it rather than re-declaring a laxer copy. A record written before a kind was added
  * to the enum still reads: every earlier kind remains a member, so a stored
@@ -549,6 +561,14 @@ export function applyManagedExchangeLastRun(
   return parseManagedExchangeRecord({ ...record, lastRun });
 }
 
+/** Whether two stored instants denote the same moment, compared as parsed
+ * instants for the precision reason {@link applyManagedExchangeLastRun} gives.
+ * A string {@link parseStoredInstant} cannot read matches nothing, itself
+ * included, which holds a conditioned write off a plan it cannot read. */
+function sameStoredInstant(left: string, right: string): boolean {
+  return parseStoredInstant(left) === parseStoredInstant(right);
+}
+
 /** The schedule bookkeeping one closed window produces, written as a unit: the
  * advanced schedule and, when the window earned one, the run entry that goes with
  * it. `nextWindow`, `consecutiveMisses`, and `lastRun` describe a single window's
@@ -560,6 +580,10 @@ export interface ManagedExchangeScheduleAdvance {
    * computed against, and are matched against the stored record rather than
    * written (see {@link applyManagedExchangeScheduleAdvance}). */
   schedule: ManagedExchangeSchedule;
+  /** The `nextWindow` the advance was computed FROM, matched against the stored
+   * one exactly as the cadence is: the advance is the successor of that one
+   * plan, so it lands only while the record still carries it. */
+  fromNextWindow: string;
   /** The window's run bookkeeping. Omitted when the window produced none -- one
    * the single-writer lock was held through, or one a run already recorded its
    * own outcome for. */
@@ -572,13 +596,22 @@ export interface ManagedExchangeScheduleAdvance {
  * record is not mutated. This is the runner's write; the attended run path
  * records `lastRun` alone and never touches `schedule`.
  *
- * Conditioned on the stored cadence, which the operator may edit at any time from
- * another tab: a record whose `schedule` is absent, or whose `anchor`,
- * `intervalDays`, or `windowSeconds` no longer match the ones the advance was
- * computed against, is left entirely unchanged. Writing anyway would resurrect a
- * schedule the operator dropped, or overwrite a re-entered cadence with a planned
- * window derived from the replaced one; a wake against the current cadence
- * recomputes both honestly.
+ * Conditioned on the whole stored plan, which the operator may edit and another
+ * wake may advance at any time: the write lands only while the record still
+ * carries the cadence the advance was computed against (`anchor`,
+ * `intervalDays`, `windowSeconds`) AND still plans the `nextWindow` it was
+ * computed from. Any other stored schedule -- a re-entered cadence, a plan some
+ * other write already moved, or none at all -- leaves the record entirely
+ * unchanged. Writing regardless would resurrect a schedule the operator dropped,
+ * overwrite a re-entered cadence with a planned window derived from the replaced
+ * one, or -- the tails of two wakes being no more serialized than two runs' (see
+ * {@link applyManagedExchangeLastRun}) -- rewind `nextWindow` and LOWER
+ * `consecutiveMisses` behind a newer advance, deferring the escalation two
+ * consecutive misses fire. A wake against the stored plan recomputes both
+ * honestly.
+ *
+ * The stored instants are compared as parsed moments rather than strings, for
+ * the varying-ISO-precision reason {@link applyManagedExchangeLastRun} states.
  *
  * `lastRun` alone stays monotonic on `at` exactly as
  * {@link applyManagedExchangeLastRun}: the schedule advance still applies -- the
@@ -591,9 +624,10 @@ export function applyManagedExchangeScheduleAdvance(
   const stored = record.schedule;
   if (
     stored === undefined ||
-    stored.anchor !== advance.schedule.anchor ||
+    !sameStoredInstant(stored.anchor, advance.schedule.anchor) ||
     stored.intervalDays !== advance.schedule.intervalDays ||
-    stored.windowSeconds !== advance.schedule.windowSeconds
+    stored.windowSeconds !== advance.schedule.windowSeconds ||
+    !sameStoredInstant(stored.nextWindow, advance.fromNextWindow)
   )
     return parseManagedExchangeRecord(record);
   const next: ManagedExchangeRecord = { ...record, schedule: advance.schedule };

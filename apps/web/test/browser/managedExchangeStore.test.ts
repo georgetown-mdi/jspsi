@@ -454,6 +454,7 @@ describe("atomic schedule advance", () => {
     const created = await createManagedExchange(newExchange({ schedule }));
     const written = await persistManagedExchangeScheduleAdvance(created.id, {
       schedule: advanced,
+      fromNextWindow: schedule.nextWindow,
       lastRun: missedRun,
     });
     expect(written.schedule).toEqual(advanced);
@@ -474,6 +475,7 @@ describe("atomic schedule advance", () => {
     });
     const written = await persistManagedExchangeScheduleAdvance(created.id, {
       schedule: advanced,
+      fromNextWindow: schedule.nextWindow,
       lastRun: missedRun,
     });
     expect(written.sharedSecret).toBe(rotatedSecret);
@@ -485,6 +487,7 @@ describe("atomic schedule advance", () => {
     await updateManagedExchangeLocalFields(created.id, { schedule: null });
     const written = await persistManagedExchangeScheduleAdvance(created.id, {
       schedule: advanced,
+      fromNextWindow: schedule.nextWindow,
       lastRun: missedRun,
     });
     expect(written).not.toHaveProperty("schedule");
@@ -492,10 +495,46 @@ describe("atomic schedule advance", () => {
     expect(await rawStored(created.id)).not.toHaveProperty("schedule");
   });
 
+  test("a plan a newer write already moved leaves the stored record alone", async () => {
+    const created = await createManagedExchange(newExchange({ schedule }));
+    const newer = {
+      ...advanced,
+      nextWindow: "2026-01-27T14:00:00.000Z",
+      consecutiveMisses: 2,
+    };
+    await persistManagedExchangeScheduleAdvance(created.id, {
+      schedule: newer,
+      fromNextWindow: schedule.nextWindow,
+    });
+    const written = await persistManagedExchangeScheduleAdvance(created.id, {
+      schedule: advanced,
+      fromNextWindow: schedule.nextWindow,
+      lastRun: missedRun,
+    });
+    expect(written.schedule).toEqual(newer);
+    expect(await rawStored(created.id)).toMatchObject({ schedule: newer });
+    expect(await rawStored(created.id)).not.toHaveProperty("lastRun");
+  });
+
+  test("an advance the record schema rejects aborts the transaction and writes nothing", async () => {
+    const created = await createManagedExchange(newExchange({ schedule }));
+    await expect(
+      persistManagedExchangeScheduleAdvance(created.id, {
+        schedule: { ...advanced, consecutiveMisses: -1 },
+        fromNextWindow: schedule.nextWindow,
+        lastRun: missedRun,
+      }),
+    ).rejects.toThrow();
+    // Re-read the raw store: neither half of the advance landed.
+    expect(await rawStored(created.id)).toMatchObject({ schedule });
+    expect(await rawStored(created.id)).not.toHaveProperty("lastRun");
+  });
+
   test("advancing a missing id rejects", async () => {
     await expect(
       persistManagedExchangeScheduleAdvance("no-such-id", {
         schedule: advanced,
+        fromNextWindow: schedule.nextWindow,
       }),
     ).rejects.toThrow();
   });

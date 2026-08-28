@@ -746,8 +746,9 @@ export async function recordManagedExchangeLastRun(
  * application is field-scoped through {@link applyManagedExchangeScheduleAdvance}
  * (which re-validates), so a window's bookkeeping is structurally incapable of
  * carrying a stale secret or a stale document back over a concurrent rotation
- * write, and it is conditioned on the stored cadence, so it cannot overwrite a
- * schedule the operator edited or dropped from another tab while the window ran.
+ * write, and it is conditioned on the stored cadence and planned window, so it
+ * cannot overwrite a schedule the operator edited or dropped from another tab
+ * while the window ran, nor rewind one a newer wake already advanced.
  *
  * @throws {Error} if no record with `id` exists.
  * @throws {ZodError} if the stored value or the resulting record is invalid.

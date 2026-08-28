@@ -16,11 +16,16 @@
  * misses. Nothing below reads the host zone: the operator's local wall-clock
  * cadence is resolved to the UTC anchor exactly once, by
  * {@link resolveLocalCadenceAnchor} at save and again only when the operator
- * edits the schedule.
+ * edits the schedule. Every other instant must carry the UTC designator to be
+ * read at all -- {@link ./managedExchangeRecord.ts}'s `parseStoredInstant`
+ * requires it rather than assuming it -- so the claim holds for a hand-edited or
+ * tampered record too, not only for one the record schema validated.
  *
  * `now` is injected rather than read, matching the clock discipline of the rest
  * of the managed modules, so every rule here is a pure function of its inputs.
  */
+
+import { parseStoredInstant } from "./managedExchangeRecord";
 
 import type {
   ManagedExchangeLastRun,
@@ -80,6 +85,12 @@ export interface ManagedScheduleCatchUp {
    * (past a window a recorded success already satisfied) and
    * `consecutiveMisses` carrying each window's verdict, applied in order. */
   schedule: ManagedExchangeSchedule;
+  /** The `nextWindow` this walk read, echoed verbatim: the bookkeeping write
+   * applies the result only while the record still plans that window, so a walk
+   * whose write lands behind a newer one's is dropped rather than rewinding it
+   * (see {@link ./managedExchangeRecord.ts}'s
+   * `applyManagedExchangeScheduleAdvance`). */
+  fromNextWindow: string;
   /** How many fully-elapsed windows passed unattempted -- one miss each,
    * whichever side was absent. Zero when the wake found nothing elapsed. */
   missedWindows: number;
@@ -126,9 +137,11 @@ interface ScheduleGeometry {
 }
 
 function parseScheduleInstant(value: string, field: string): number {
-  const parsed = Date.parse(value);
+  const parsed = parseStoredInstant(value);
   if (Number.isNaN(parsed))
-    throw new RangeError(`managed schedule ${field} is not a usable instant`);
+    throw new RangeError(
+      `managed schedule ${field} is not a usable UTC instant`,
+    );
   return parsed;
 }
 
@@ -190,8 +203,8 @@ function windowIndexContaining(
  * The run window at a zero-based recurrence index: window 0 opens at the anchor
  * and window n opens `n * intervalDays` later, in fixed milliseconds.
  *
- * @throws {RangeError} if the schedule's anchor is not a usable instant or its
- *   period or width is not the whole positive number the schema requires.
+ * @throws {RangeError} if the schedule's anchor is not a usable UTC instant or
+ *   its period or width is not the whole positive number the schema requires.
  */
 export function managedScheduleWindow(
   schedule: ManagedExchangeSchedule,
@@ -301,9 +314,10 @@ export function advanceManagedScheduleAfterWindow(
  * wake, one cheap iteration each; a span longer than `MAX_CATCH_UP_WINDOWS` is
  * refused rather than walked.
  *
- * `lastRun` is read as evidence, never validated: an entry whose `at` does not
- * parse is treated as no recorded run at all, the conservative direction (an
- * extra miss counted, never a miss suppressed).
+ * `lastRun` is read as evidence, never validated: an entry whose `at` is not a
+ * UTC instant -- unparseable, or carrying no designator to read it against -- is
+ * treated as no recorded run at all, the conservative direction (an extra miss
+ * counted, never a miss suppressed).
  *
  * @param schedule The stored schedule, whose `nextWindow` is the first window
  *   not yet accounted for.
@@ -341,7 +355,7 @@ export function catchUpManagedSchedule(
   const recordedIndex =
     lastRun === undefined
       ? undefined
-      : windowIndexContaining(geometry, Date.parse(lastRun.at));
+      : windowIndexContaining(geometry, parseStoredInstant(lastRun.at));
 
   let consecutiveMisses = schedule.consecutiveMisses;
   let missedWindows = 0;
@@ -382,6 +396,7 @@ export function catchUpManagedSchedule(
       nextWindow: toScheduleInstant(resume.opensAtMs),
       consecutiveMisses,
     },
+    fromNextWindow: schedule.nextWindow,
     missedWindows,
     ...(dueWindow !== undefined ? { dueWindow } : {}),
     ...(missedCloseMs !== undefined

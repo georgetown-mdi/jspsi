@@ -272,7 +272,10 @@ from the stored UTC `anchor`, never by a local-calendar date add -- a calendar
 add moves the instant by the offset change on the week a party's zone shifts,
 which is exactly when two runners can least afford to stop overlapping. The host
 zone is read once, at entry, to resolve a local wall-clock cadence into `anchor`
-(see the `anchor` row); no later computation reads it.
+(see the `anchor` row); no later computation reads it. Every stored instant
+carries the UTC designator, and one that does not -- from a hand edit or a
+tampered artifact -- is refused rather than read against the host zone, which
+would otherwise place the same record's windows differently on every machine.
 
 The schedule is a **local-only** field, not part of the persisted
 `exchangeFile` document: a reschedule is neither a terms change nor a credential,
@@ -333,6 +336,16 @@ threshold during catch-up fires the repeated-miss surface at the wake -- which
 is how a persistently absent party learns of a miss pattern late rather than
 never (see
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)).
+
+The wake's bookkeeping write is **conditioned on the plan it read**: it lands
+only while the stored `anchor`, `intervalDays`, `windowSeconds`, and
+`nextWindow` are still the ones the catch-up computed against, and is dropped
+whole otherwise. Nothing serializes one wake's write against another's, or
+against an operator's edit, so an unconditioned write could rewind `nextWindow`
+and lower `consecutiveMisses` behind newer bookkeeping -- deferring the two-miss
+escalation by exactly the misses it erased -- or overwrite a re-plan the
+operator had just made. A dropped write costs nothing: the next wake recomputes
+the same rule against the stored plan.
 
 The import path is the rule's second consumer: an imported backup carries the
 snapshot's `nextWindow`, typically in the past by the time the artifact is

@@ -206,9 +206,13 @@ describe("daylight saving", () => {
       outcome: "failed" as const,
     };
     const now = at("2026-03-17T15:00:00.000Z");
+    // Every export the module has bar `resolveLocalCadenceAnchor`, which is the
+    // one that reads the zone deliberately and is driven on its own below.
     const compute = () => ({
       window: managedScheduleWindow(march, 2),
+      state: managedScheduleWindowStateAt(managedScheduleWindow(march, 2), now),
       next: nextManagedScheduleWindowAfter(march, now),
+      misses: nextConsecutiveMisses(1, "missed"),
       caught: catchUpManagedSchedule(march, lastRun, now),
       advanced: advanceManagedScheduleAfterWindow(
         march,
@@ -222,6 +226,57 @@ describe("daylight saving", () => {
     expect(withTimeZone("Asia/Kolkata", compute)).toEqual(eastern);
     // A zone whose saving shift is half an hour, not a whole one.
     expect(withTimeZone("Australia/Lord_Howe", compute)).toEqual(eastern);
+  });
+
+  test("an instant with no UTC designator is refused, not read host-local", () => {
+    const offsetless = "2026-03-03T09:00:00";
+    // The string really is host-sensitive, so nothing below passes vacuously:
+    // read without a designator it names a different moment per zone, which is a
+    // different set of windows for the same stored record.
+    expect(
+      withTimeZone("America/New_York", () => Date.parse(offsetless)),
+    ).not.toBe(withTimeZone("UTC", () => Date.parse(offsetless)));
+
+    expect(() =>
+      managedScheduleWindow({ ...march, anchor: offsetless }, 1),
+    ).toThrow(RangeError);
+    expect(() =>
+      nextManagedScheduleWindowAfter(
+        { ...march, anchor: offsetless },
+        at("2026-03-17T15:00:00.000Z"),
+      ),
+    ).toThrow(RangeError);
+    expect(() =>
+      advanceManagedScheduleAfterWindow(
+        { ...march, anchor: offsetless },
+        managedScheduleWindow(march, 1),
+        "missed",
+      ),
+    ).toThrow(RangeError);
+    expect(() =>
+      catchUpManagedSchedule(
+        { ...march, nextWindow: offsetless },
+        undefined,
+        at("2026-03-17T15:00:00.000Z"),
+      ),
+    ).toThrow(RangeError);
+  });
+
+  test("run bookkeeping with no UTC designator is read as no run at all", () => {
+    // A stamp the host zone would place inside window 1 on a UTC machine and
+    // outside it elsewhere: read as evidence it is refused either way, so the
+    // window counts as missed rather than as met by whichever zone read it.
+    const caught = () =>
+      catchUpManagedSchedule(
+        march,
+        { at: "2026-03-10T15:00:00", outcome: "succeeded" },
+        at("2026-03-10T18:00:00.000Z"),
+      );
+    for (const zone of ["UTC", "America/New_York"]) {
+      const walked = withTimeZone(zone, caught);
+      expect(walked.missedWindows).toBe(2);
+      expect(walked.schedule.consecutiveMisses).toBe(2);
+    }
   });
 });
 
@@ -498,6 +553,19 @@ describe("catch-up on wake", () => {
     // Window 1 is covered by the stored instant, so only window 2 is elapsed and
     // unaccounted for.
     expect(caught.missedWindows).toBe(1);
+    expect(caught.schedule.nextWindow).toBe("2026-01-27T14:00:00.000Z");
+  });
+
+  test("the walk reports the plan it read, verbatim", () => {
+    // What the bookkeeping write is conditioned on: the stored instant this walk
+    // computed against, not the one it computed.
+    const stored = { ...weekly, nextWindow: "2026-01-13T14:00:00.000Z" };
+    const caught = catchUpManagedSchedule(
+      stored,
+      undefined,
+      at("2026-01-20T18:00:00.000Z"),
+    );
+    expect(caught.fromNextWindow).toBe(stored.nextWindow);
     expect(caught.schedule.nextWindow).toBe("2026-01-27T14:00:00.000Z");
   });
 
