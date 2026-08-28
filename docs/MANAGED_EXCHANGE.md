@@ -462,6 +462,15 @@ at the moment the close resolves, so it is a completion-surface notice for
 whoever is present rather than a state the next visit reads -- the run
 bookkeeping carries no close outcome.
 
+An attended re-run has a third ending: the wait for the partner runs out and
+nobody arrives, so no handshake is attempted and nothing leaves this device.
+That is the benign no-show a missed window records, and the surface names it as
+one -- the partner was not there, this device is not at fault -- rather than
+sending the operator to check their own connection. Where this device already
+holds a reason its stored secret may no longer be the partnership's, that
+reason is what the run surfaces instead (see [A missed window is neither desync
+nor attack](#a-missed-window-is-neither-desync-nor-attack)).
+
 ### The input file each run
 
 Where the File System Access API exists (Chromium), the record persists the
@@ -684,16 +693,59 @@ normal operation, not a one-time setup slip.
 
 ### A missed window is neither desync nor attack
 
-A scheduled run the partner's runner never arrives for is a **no-show, not a
-failed handshake**: nothing authenticated and nothing failed closed, because
-there was no one to fail against. It is recorded as its own benign outcome in
-the run bookkeeping (a `"missed"` outcome; see
-[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)) and retried at
-the next agreed window, and it never enters the desync/attack framing below --
-exactly as expiry never does. Only a handshake that actually ran and failed
-reaches that framing. A pattern of missed windows is a coordination problem,
-resolved out-of-band where the schedule itself was agreed -- surfaced, not
-auto-paused (see [Retry and repeated misses](#retry-and-repeated-misses)).
+A run the partner never arrives for is a **no-show, not a failed handshake**:
+nothing authenticated and nothing failed closed, because there was no one to
+fail against. A scheduled run reaches that state when an agreed window passes
+with the partner's runner absent; an attended run reaches the same state when
+its own wait for the partner expires with the operator watching. Either way it
+is recorded as its own benign outcome in the run bookkeeping (a `"missed"`
+outcome; see [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)),
+and it never reaches the out-of-band confirmation the tiering below reserves
+for a handshake that ran and failed closed. The recovery is another attempt
+with both parties present: the next agreed window's automatic retry, or the
+operator running the exchange again once their partner is ready.
+
+A no-show is no evidence of a desync -- and no evidence against one. Both
+rendezvous ids derive from the shared secret, so two sides holding different
+secrets wait on addresses the other is not using, and each records a no-show,
+every time, for as long as the desync stands. The no-show is therefore the
+reading of last resort: where this device already holds a standing reason its
+secret may no longer be the partnership's -- a restore since the last
+successful run, a one-sided persist failure, or a lapsed bound -- the run
+surfaces that state and its re-invite recovery instead. Where it does not, the
+no-show state names the persistent case in its own copy, so a partner who was
+demonstrably at their machine at an agreed time and still never arrived is
+pointed at a re-invite rather than at another wait.
+
+That outranking belongs to the run that meets the no-show, and it weighs the
+standing reason as the stored record holds it at that run's launch -- read
+before the run, so the run's own bookkeeping is never what it reads. The
+reading is therefore per run, not per visit: a persist failure one run records
+is the standing reason the next run in the same visit weighs. Where that
+persist failure's own bookkeeping write did not land -- the write is
+best-effort, and the storage that failed the rotation can fail it too -- there
+is no standing reason to read, and the no-show reads as itself. Where the
+launch read itself fails, or finds no record to read, the run falls back to
+the record the run surface already holds, for that run alone.
+
+A no-show's own bookkeeping entry replaces the previous one and records no
+failure kind, so a one-sided persist failure is no longer in the record for
+anything reading it afterwards: the recurring-exchanges list line, the run
+history, and a later run all name the no-show. A recorded failed handshake goes
+the same way: a record whose last run was a no-show reads as that no-show
+rather than as the unexplained state, so the next visit does not put the
+out-of-band confirmation in front of the operator. The other two reasons live
+outside that entry -- a lapsed bound is the record's own `expires`, and a
+restore since the last success its import marker. The lapsed bound reads
+through everywhere; the import marker is read by the run that meets the
+no-show, and not by the recurring-exchanges list line or a later visit's launch
+state, whose reading stops at the recorded no-show. An operator whose last run
+could not save its rotated secret is therefore told so on the run that meets
+the no-show.
+
+A pattern of missed windows is a coordination problem, resolved out-of-band
+where the schedule itself was agreed -- surfaced, not auto-paused (see [Retry
+and repeated misses](#retry-and-repeated-misses)).
 
 ### The grace window
 

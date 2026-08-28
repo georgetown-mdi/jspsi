@@ -14,12 +14,15 @@ import {
   FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
   FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
 } from "../../src/psi/exchangeLifecycle.js";
+import {
+  PartnerNoShowError,
+  waitForIncomingConnection,
+} from "../../src/psi/waitForConnection.js";
 import { appendDisclosureRecordToStore } from "../../src/psi/disclosureAccountingStore.js";
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { beginManagedRendezvous } from "../../src/psi/managedRendezvous.js";
 import { disclosureRecord } from "../utils/disclosureFixtures.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
-import { waitForIncomingConnection } from "../../src/psi/waitForConnection.js";
 
 import type { ManagedExchangeRecord } from "../../src/psi/managedExchangeRecord.js";
 import type { ManagedInputSource } from "../../src/psi/managedInputHandle.js";
@@ -102,7 +105,10 @@ vi.mock("../../src/psi/managedRendezvous.js", () => ({
 vi.mock("../../src/psi/peerMessageConnection.js", () => ({
   openPeerMessageConnection: vi.fn(),
 }));
-vi.mock("../../src/psi/waitForConnection.js", () => ({
+// Only the inbound wait is faked; PartnerNoShowError stays the real class, because
+// the classification downstream of this wiring is an instanceof check on it.
+vi.mock("../../src/psi/waitForConnection.js", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   waitForIncomingConnection: vi.fn(),
 }));
 vi.mock("../../src/psi/managedInputHandle.js", () => ({
@@ -279,6 +285,25 @@ describe("runManagedExchangeInBrowser", () => {
       );
     },
   );
+
+  test("a partner who never arrives reaches the classifier unchanged", async () => {
+    // The wiring's rendezvous catch frees the peer and rethrows. Rethrowing the
+    // SAME error is what the bookkeeping downstream depends on: it classifies the
+    // benign "missed" outcome by instanceof, so a wrap here would file an absent
+    // partner as a transport fault again.
+    const { peer } = acquireResources("inviter");
+    const noShow = new PartnerNoShowError("nobody arrived");
+    mockedWaitForIncoming.mockRejectedValue(noShow);
+
+    const rejection = await runDriver(
+      new AbortController().signal,
+      undefined,
+      recordForSide("inviter"),
+    ).catch((error: unknown) => error);
+
+    expect(rejection).toBe(noShow);
+    expect(peer.destroy).toHaveBeenCalledTimes(1);
+  });
 
   test("yields its outputs while the close is still draining", async () => {
     // The defect this pins: a peer that answers ICE but never reads the close

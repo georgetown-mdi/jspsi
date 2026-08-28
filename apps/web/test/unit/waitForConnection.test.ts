@@ -2,7 +2,10 @@ import { describe, expect, test } from "vitest";
 
 import { default as EventEmitter } from "eventemitter3";
 
-import { waitForIncomingConnection } from "../../src/psi/waitForConnection.js";
+import {
+  PartnerNoShowError,
+  waitForIncomingConnection,
+} from "../../src/psi/waitForConnection.js";
 
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
@@ -31,6 +34,30 @@ describe("waitForIncomingConnection", () => {
     await expect(
       waitForIncomingConnection(peer, { timeoutMs: 10 }),
     ).rejects.toThrow("timed out waiting for the other party to connect");
+  });
+
+  test("a spent wait rejects as the no-show condition, not a generic error", async () => {
+    // The inviter's half of the no-show: the whole wait ran with nobody arriving.
+    // The distinct type is what lets a managed re-run record the benign "missed"
+    // outcome instead of filing an absent partner as a transport fault.
+    await expect(
+      waitForIncomingConnection(makePeer().peer, { timeoutMs: 10 }),
+    ).rejects.toBeInstanceOf(PartnerNoShowError);
+  });
+
+  test("an aborted wait is not the no-show condition", async () => {
+    // The operator (or, later, a runner closing its window) stopped the wait; the
+    // partner's absence was never established, so this must not read as a no-show.
+    const controller = new AbortController();
+    const promise = waitForIncomingConnection(makePeer().peer, {
+      timeoutMs: 10_000,
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    const rejection = await promise.catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(Error);
+    expect(rejection).not.toBeInstanceOf(PartnerNoShowError);
   });
 
   test("detaches the connection listener on timeout", async () => {

@@ -23,7 +23,9 @@
  *   is the benign `"input"` or `"terms-shortfall"` state, split by which remedy it
  *   calls for; neither is routed through desync/attack framing. The lock's own
  *   unavailability (another tab is running) is a benign state of its own beside
- *   them.
+ *   them, as is a partner who never arrives in the rendezvous wait -- the benign
+ *   `"missed"` outcome, held apart from a transport fault (a connection that was
+ *   made and broke) and from the operator's own cancellation.
  * - **Persist-before-success is {@link runManagedExchange}'s**, unchanged: this
  *   module only supplies the phases it gates.
  */
@@ -47,7 +49,8 @@ import {
   ManagedInputError,
   managedInputFailureKind,
 } from "./managedInputGuard";
-import { RotationPersistError, failedRun } from "./managedRunRotate";
+import { RotationPersistError, failedRun, missedRun } from "./managedRunRotate";
+import { PartnerNoShowError } from "./waitForConnection";
 import { hasRecoveryHint } from "./authenticateExchange";
 import { recordManagedExchangeLastRun } from "./managedExchangeStore";
 
@@ -119,6 +122,16 @@ export interface ManagedRerunOptions {
    * rather than a transport fault. Defaults to never-cancelled.
    */
   aborted?: () => boolean;
+  /**
+   * Called once when the data exchange begins -- the phase boundary past which
+   * payload could have flowed. The run's own failure bookkeeping reads that
+   * boundary ({@link rerunFailureLastRun}), and a caller that classifies the
+   * failure for display needs the same value: every state whose copy tells the
+   * operator nothing left this device is honest only before it (see
+   * {@link benignRerunOutcome}). Optional: a caller that never classifies a
+   * failure omits it.
+   */
+  onDataExchangeStart?: () => void;
 }
 
 /**
@@ -180,7 +193,8 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
   // tier that claims nothing was disclosed (a security-kind error's "auth", a
   // disclosure refusal's "consent", a linkage refusal's "terms-shortfall") is
   // stamped only pre-data-exchange, and a failure once payload flow could have
-  // started records "transport".
+  // started records "transport". The same boundary is reported to the caller, whose
+  // display classification of the failure carries the identical guard.
   let dataExchangeStarted = false;
 
   // The input guard, the single-writer lock, the persist-before-success rotation,
@@ -198,6 +212,7 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
       dataExchange: seams.dataExchange,
       onDataExchangeStart: () => {
         dataExchangeStarted = true;
+        options.onDataExchangeStart?.();
       },
       ...(options.lock !== undefined ? { lock: options.lock } : {}),
       now,
@@ -298,18 +313,27 @@ export function remapLapsedRunFailure(
  * BEFORE the abort probe: unlike a teardown-provoked error it is a deterministic
  * local state that refuses identically on the next run, so attributing it to the
  * operator's cancellation would drop the only remedy the record can name. A
+ * {@link PartnerNoShowError} is read before that probe for the same reason and
+ * records the benign `"missed"` outcome ({@link missedRun}): the rendezvous raises
+ * it only when the wait spent its whole budget with the partner absent, which an
+ * abort cannot manufacture (an aborted wait rejects through its own abort path),
+ * so a cancel landing in the same tick as the budget's end must not overwrite the
+ * one thing this run established. It carries the same `!dataExchangeStarted`
+ * guard as the tiers beside it, because the `"missed"` outcome is what the
+ * disclosure copy reads to say nothing left this device. A
  * cancelled run (`aborted`) then records `"cancelled"`, so a teardown-provoked
  * error on a cancelled run is not misread. A `security`-kind
  * {@link ConnectionError} likewise records `"auth"` only when it fired before the
  * data exchange began -- the authenticated handshake failing closed, which provably
- * precedes any payload. All three guards carry the same weight: `"terms-shortfall"`,
- * `"consent"`, and `"auth"` are the tiers whose copy tells the operator nothing left
- * this device, so none is stamped on a failure the phase boundary says could have
- * followed payload flow. A refusal or security-kind error once payload flow could
- * have started (core's `EncryptedMessageConnection` raising on a tampered frame
- * mid-exchange) records `"transport"` (the neither-way disclosure bucket), as does
- * any other failure. The outcome is always `"failed"` -- `"desynced"` is the later
- * desync-tiering item's call, not this classifier's.
+ * precedes any payload. All four guards carry the same weight: `"terms-shortfall"`,
+ * `"consent"`, `"auth"`, and the `"missed"` outcome are what tell the operator
+ * nothing left this device, so none is stamped on a failure the phase boundary says
+ * could have followed payload flow. A refusal or security-kind error once payload
+ * flow could have started (core's `EncryptedMessageConnection` raising on a tampered
+ * frame mid-exchange) records `"transport"` (the neither-way disclosure bucket), as
+ * does any other failure. Every outcome this classifier writes is `"failed"` apart
+ * from the no-show's `"missed"` -- `"desynced"` is the later desync-tiering item's
+ * call, not this classifier's.
  */
 export function rerunFailureLastRun(
   error: unknown,
@@ -328,6 +352,8 @@ export function rerunFailureLastRun(
     return failedRun(at, "failed", "terms-shortfall");
   if (error instanceof OutboundDisclosureRefusalError && !dataExchangeStarted)
     return failedRun(at, "failed", "consent");
+  if (error instanceof PartnerNoShowError && !dataExchangeStarted)
+    return missedRun(at);
   if (aborted) return failedRun(at, "failed", "cancelled");
   if (
     error instanceof ConnectionError &&
@@ -338,17 +364,26 @@ export function rerunFailureLastRun(
   return failedRun(at, "failed", "transport");
 }
 
-/** The benign, pre-connection outcomes of a launch a surface classifies without
- * attack framing: a lapsed bound, an unusable input, an input the standing terms
- * cannot be run against, or a run already in progress elsewhere. */
+/** The benign outcomes of a launch a surface classifies without attack framing: a
+ * lapsed bound, an unusable input, an input the standing terms cannot be run
+ * against, a run already in progress elsewhere, or a partner who never arrived.
+ * The first four are read before any connection; the last is read when no
+ * connection was ever made. */
 export type BenignRerunOutcome =
-  "expired" | "input" | "terms-shortfall" | "already-running";
+  "expired" | "input" | "terms-shortfall" | "already-running" | "missed";
 
-/** Classify a launch failure into the benign pre-connection outcome it carries,
- * or `undefined` for a failure that is not one of these states (a handshake
- * failure, a storage failure, a data-exchange drop) -- which the caller surfaces
- * through the existing generic path. Keeps the benign-state checks in one place so
- * a surface cannot mis-order or omit one.
+/** Classify a launch failure into the benign outcome it carries, or `undefined`
+ * for a failure that is not one of these states (a handshake failure, a storage
+ * failure, a data-exchange drop) -- which the caller surfaces through the existing
+ * generic path. Keeps the benign-state checks in one place so a surface cannot
+ * mis-order or omit one.
+ *
+ * `"missed"` is the one state here a connection attempt reaches: the wait for the
+ * partner's runner spent its whole budget with nobody arriving. It belongs beside
+ * the pre-connection states because it shares their property -- no handshake ran,
+ * so nothing left this device -- and it is held apart from the transport bucket a
+ * fall-through would put it in, whose copy would send an operator to check their
+ * own connection for a partner who was simply not there.
  *
  * The two input states are split by what the operator can do about them, since
  * both are read before any connection and only one is worth offering the run again
@@ -361,16 +396,43 @@ export type BenignRerunOutcome =
  * the bookkeeping kind of the same name, and the guard's own split is read from
  * {@link managedInputFailureKind} here as well as at the stamp, so a revisit tiers
  * the state a live launch showed rather than a coarser one.
+ *
+ * `dataExchangeStarted` is the run's own phase boundary, reported by
+ * {@link ManagedRerunOptions.onDataExchangeStart}. Every outcome whose copy tells
+ * the operator nothing left this device -- `"missed"`, and `"terms-shortfall"`
+ * from either of its two raisers (core's refusal in the pre-connection prepare,
+ * and the input guard's own column grading) -- carries it as the same guard its
+ * bookkeeping counterpart does ({@link rerunFailureLastRun}), so the state a
+ * surface shows and the outcome the record carries cannot disagree about a
+ * disclosure. The input-guard arm is gated whole rather than on the kind it
+ * grades to, so a grading that gains a kind does not have to re-derive the guard.
+ * None of these errors can be raised past the boundary today (the input guard
+ * runs before any connection, core refuses an unsatisfiable shortfall inside the
+ * pre-connection prepare, and the no-show is raised only by a wait that never
+ * opened a channel), and the guard is what keeps that a check rather than a
+ * standing assumption: one delivered past the boundary is not a benign outcome
+ * here, and falls through to the caller's generic transport path.
+ *
+ * The guard binds the outcomes read here off THIS run's error, and nothing
+ * further: a surface state derived instead from the record's stored bookkeeping
+ * ({@link ./managedFailureTiers.ts}, read by
+ * {@link ../bench/managedRunLaunchModel.ts}) rests on the guard the run that
+ * stamped the kind applied, so a stored `"consent"` or `"terms-shortfall"` kind
+ * carries its non-disclosure copy from that stamp alone.
  */
 export function benignRerunOutcome(
   error: unknown,
+  dataExchangeStarted: boolean,
 ): BenignRerunOutcome | undefined {
   if (error instanceof ManagedExchangeExpiredError) return "expired";
-  if (error instanceof ManagedInputError)
+  if (error instanceof ManagedInputError && !dataExchangeStarted)
     return managedInputFailureKind(error.rejection);
-  if (error instanceof LinkageTermsUnsatisfiableError) return "terms-shortfall";
+  if (error instanceof LinkageTermsUnsatisfiableError && !dataExchangeStarted)
+    return "terms-shortfall";
   if (error instanceof ManagedExchangeLockUnavailableError)
     return "already-running";
+  if (error instanceof PartnerNoShowError && !dataExchangeStarted)
+    return "missed";
   return undefined;
 }
 

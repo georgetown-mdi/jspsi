@@ -6,11 +6,14 @@ import { isDiagnosticMode, whenDiagnostic } from "@utils/diagnostics";
 import { ConfigManager } from "@utils/clientConfig";
 
 import {
+  DEFAULT_PEER_WAIT_TIMEOUT_MS,
+  PartnerNoShowError,
+} from "./waitForConnection";
+import {
   createRedactingLogFunction,
   redactErrorIds,
   resolvePeerDebugLevel,
 } from "./peerLogging";
-import { DEFAULT_PEER_WAIT_TIMEOUT_MS } from "./waitForConnection";
 
 import type { DataConnection, PeerOptions } from "peerjs";
 import type { WebRTCEndpoint } from "@psilink/core";
@@ -274,6 +277,12 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
  * attempt as a retry; any other peer error is fatal and rejects the dial. A
  * per-attempt listener would leave the backoff windows uncovered, silently
  * dropping a fatal broker error that fired between attempts.
+ *
+ * A spent budget is the {@link PartnerNoShowError} no-show condition: every attempt
+ * it made was answered `peer-unavailable`, so the inviter never registered its
+ * derived id at all. The per-attempt open timeout is held apart from it and stays a
+ * plain error, because reaching that one means the inviter's id IS registered and
+ * the channel will not open -- a transport fault, not an absent partner.
  */
 async function dialInviterWithRetry(
   peer: Peer,
@@ -371,14 +380,18 @@ async function dialInviterWithRetry(
       if (fatalError !== undefined) throw asError(fatalError);
       const remaining = deadline - Date.now();
       if (remaining <= 0)
-        throw new Error("timed out waiting for the inviter to come online");
+        throw new PartnerNoShowError(
+          "timed out waiting for the inviter to come online",
+        );
       // Clamp the per-attempt open timeout to the remaining budget so an attempt
       // started near the deadline cannot run up to openTimeoutMs past it: the
       // total budget is the hard ceiling, shared with the inviter's inbound wait.
       const attempt = await runAttempt(Math.min(openTimeoutMs, remaining));
       if (attempt.outcome === "open") return attempt.conn;
       if (Date.now() + retryDelayMs >= deadline)
-        throw new Error("timed out waiting for the inviter to come online");
+        throw new PartnerNoShowError(
+          "timed out waiting for the inviter to come online",
+        );
       log.info("inviter not yet listening; retrying");
       await delay(retryDelayMs, signal);
     }

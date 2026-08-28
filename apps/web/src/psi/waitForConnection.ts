@@ -14,8 +14,32 @@ import type Peer from "peerjs";
 export const DEFAULT_PEER_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
+ * Raised when the wait for the other party spent its whole budget without them
+ * arriving -- the no-show condition. Both roles raise it from their half of the
+ * shared {@link DEFAULT_PEER_WAIT_TIMEOUT_MS} budget: the inviter's inbound wait
+ * ({@link waitForIncomingConnection}) expiring with no connection, and the
+ * acceptor's dial-retry budget (`dialAsAcceptor`) expiring while the broker still
+ * reported the inviter's derived id unregistered.
+ *
+ * It is deliberately NOT raised for a partner who was reached: an inviter whose id
+ * IS registered but whose channel will not open, a fatal broker error, and an
+ * operator abort each reject with a plain error, because each is a transport fault
+ * or a cancellation rather than an absent partner. That separation is what lets a
+ * managed re-run record the benign `"missed"` outcome for this condition alone (see
+ * {@link ./managedRun.ts}, `rerunFailureLastRun`), instead of filing every unmet
+ * rendezvous as a transport fault.
+ */
+export class PartnerNoShowError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PartnerNoShowError";
+  }
+}
+
+/**
  * Resolves with the first incoming {@link DataConnection} on `peer`, or rejects
- * if none arrives within `timeoutMs`, or if `signal` aborts first.
+ * with a {@link PartnerNoShowError} if none arrives within `timeoutMs`, or with a
+ * plain abort error if `signal` aborts first.
  *
  * A settle-once guard makes the first of {connection, timeout, abort} win: it
  * runs the helper-local cleanup (drop the `connection` listener, clear the
@@ -54,7 +78,11 @@ export function waitForIncomingConnection(
     const timer = setTimeout(
       () =>
         settle(() =>
-          reject(new Error("timed out waiting for the other party to connect")),
+          reject(
+            new PartnerNoShowError(
+              "timed out waiting for the other party to connect",
+            ),
+          ),
         ),
       timeoutMs,
     );

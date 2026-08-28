@@ -205,7 +205,7 @@ describe("runHistoryEntries renders around the most recent run", () => {
   // disclosed; a run that failed after the handshake, where the record cannot prove
   // whether payload reached the partner, must not assert either way.
   test.each([
-    { outcome: "missed" as const, label: "Missed window" },
+    { outcome: "missed" as const, label: "Partner did not arrive" },
     { outcome: "desynced" as const, label: "Out of sync" },
     {
       outcome: "failed" as const,

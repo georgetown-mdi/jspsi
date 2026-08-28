@@ -147,7 +147,7 @@ export interface RunHistoryEntry {
   at: string;
   /** The run instant phrased for display. */
   when: string;
-  /** The outcome phrased for display, e.g. "Succeeded", "Missed window". */
+  /** The outcome phrased for display, e.g. "Succeeded", "Partner did not arrive". */
   outcome: string;
   /** The plain, honest disclosure line for this entry. The run bookkeeping carries
    * no match result, count, or row value (it is closed enums and a timestamp), so
@@ -155,12 +155,14 @@ export interface RunHistoryEntry {
   disclosure: string;
 }
 
-/** The display outcome for each run outcome the bookkeeping records. */
+/** The display outcome for each run outcome the bookkeeping records. The no-show
+ * label names the partner rather than a window: the outcome is reached at an agreed
+ * window and by an attended run whose own wait for the partner expired. */
 const OUTCOME_LABELS: Record<ManagedExchangeLastRun["outcome"], string> = {
   succeeded: "Succeeded",
   failed: "Failed",
   desynced: "Out of sync",
-  missed: "Missed window",
+  missed: "Partner did not arrive",
 };
 
 /** The disclosure line for a succeeded run. */

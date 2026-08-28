@@ -280,10 +280,24 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setCompromiseResponse(false);
     setReinvite(undefined);
     setReinviteFailed(false);
+    // This run's phase boundary, read by the failure classification below: a state
+    // whose copy says nothing left this device is only honest before it, and the
+    // record's own bookkeeping cannot stand in (its write is best-effort, and the
+    // fallback path below classifies against a pre-run record). Local to this run,
+    // not React state -- nothing renders from it, and a later run starts fresh.
+    let dataExchangeStarted = false;
     void (async () => {
+      // The record the store holds at this launch, read before the run so this
+      // run's own bookkeeping stamp cannot be in it. A rejected read, or one that
+      // finds no record, leaves the surface's held record standing in for this run.
+      let launched = record;
       try {
+        launched =
+          (await getManagedExchange(record.id).catch(() => undefined)) ??
+          record;
+        if (controller.signal.aborted) return;
         const result = await runManagedExchangeInBrowser({
-          record,
+          record: launched,
           source,
           signal: controller.signal,
           urls: {
@@ -292,12 +306,21 @@ export function ManagedRunSurface({ id }: { id: string }) {
           },
           // Attended: fail fast when a run is already in progress elsewhere,
           // surfacing the benign "already running" state rather than waiting.
-          options: { lock: { ifAvailable: true } },
+          options: {
+            lock: { ifAvailable: true },
+            onDataExchangeStart: () => {
+              dataExchangeStarted = true;
+            },
+          },
           onWarning: (message) =>
             setRunWarnings((current) =>
               appendSanitizedRunWarning(current, message),
             ),
         });
+        // The run can resolve after the surface unmounts; the getter can flip true
+        // across the await even though the launch check above narrowed it (ESLint
+        // models the getter as a literal, hence the disable).
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (controller.signal.aborted) return;
         setOutputs(result.exchange);
         setFinishedAt(new Date());
@@ -313,9 +336,15 @@ export function ManagedRunSurface({ id }: { id: string }) {
         // classifying -- an unattended run's failure would surface through the same
         // tiers at the next visit. A corrupted record or sibling entry makes the
         // reload reject (a ZodError); rather than skip setFailure entirely (spinner
-        // clears, no error UI, unhandled rejection), fall back to the closure's own
-        // record and no sibling state, so the original error still surfaces through
-        // the generic tier.
+        // clears, no error UI, unhandled rejection), fall back to the launch
+        // reading and no sibling state, so the original error still surfaces
+        // through the generic tier.
+        //
+        // The classification also gets the record as the store held it at this
+        // launch, read before the run so this run's own stamp is not in it. A
+        // no-show's stamp replaces `lastRun` and carries no failureKind, so the
+        // reloaded record alone cannot say whether a standing desync signal was
+        // there to outrank the benign no-show reading.
         const [reloaded, local] = await Promise.all([
           getManagedExchange(record.id),
           getManagedLocalState(record.id),
@@ -333,9 +362,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
         setFailure(
           classifyManagedRunFailure(
             error,
-            reloaded ?? record,
+            { atLaunch: launched, afterRun: reloaded ?? launched },
             local,
             Date.now(),
+            dataExchangeStarted,
           ),
         );
       } finally {

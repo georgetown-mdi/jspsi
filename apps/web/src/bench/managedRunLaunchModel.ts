@@ -7,10 +7,10 @@
  *
  * Two layers feed a surface state:
  *
- * - The PRE-CONNECTION benign states, read from the launch error: a lapsed `expires`,
- *   an input problem, or a run already in progress elsewhere. These are unambiguous
- *   (no handshake ran), so they surface as their own plain, non-alarming copy directly
- *   from the error.
+ * - The benign states read from the launch error: a lapsed `expires`, an input
+ *   problem, a run already in progress elsewhere, or a partner who never arrived.
+ *   These are unambiguous (no handshake ran), so they surface as their own plain,
+ *   non-alarming copy directly from the error.
  * - The RECORDED tiers, derived from the record's own structured bookkeeping (see
  *   {@link deriveManagedFailureTier}): a recorded persist failure, a restore/import
  *   since the last success, a pre-connection disclosure refusal or linkage
@@ -35,8 +35,11 @@ import {
   ManagedExchangeExpiredError,
   benignRerunOutcome,
 } from "@psi/managedRun";
+import {
+  deriveManagedFailureTier,
+  importedSinceLastSuccess,
+} from "@psi/managedFailureTiers";
 import { canReinviteFromRecord } from "@psi/managedReinvite";
-import { deriveManagedFailureTier } from "@psi/managedFailureTiers";
 
 import { dateTimeLabel } from "./inviterModel";
 
@@ -70,11 +73,28 @@ import type { ManagedLocalState } from "@psi/managedLocalState";
 export type ManagedRunRecovery =
   "reinvite" | "retry" | "wait" | "confirm" | "reconfirm" | "restate" | "none";
 
+/** The two readings of a record a live launch failure is classified against. They
+ * differ because a failed run stamps its own `lastRun` before the host reloads, and
+ * that stamp REPLACES the entry rather than merging into it: a no-show's stamp
+ * carries no `failureKind` at all, so a kind standing before the run is not in the
+ * reloaded record to read. */
+export interface ManagedRunRecordReadings {
+  /** The record as the STORE held it at the run's launch: the standing evidence
+   * this run's own bookkeeping stamp cannot have erased. The no-show state is read
+   * against it ({@link missedFailure}). */
+  atLaunch: ManagedExchangeRecord;
+  /** The record reloaded after the failure, carrying whatever `lastRun` this run
+   * just stamped -- the evidence every derived tier reads. The host falls back to
+   * the at-launch record when the reload rejects, so the two can be the same
+   * record. */
+  afterRun: ManagedExchangeRecord;
+}
+
 /** A classified launch state, ready to render: the state's kind (the pre-connection
  * benign states plus the derived tiers), its plain copy, and the recovery affordance
  * the host renders. */
 export interface ManagedRunFailure {
-  /** The state's kind. The three pre-connection benign states, plus the recorded
+  /** The state's kind. The benign states read from the error, plus the recorded
    * tiers derived from the record's bookkeeping. */
   kind:
     | "expired"
@@ -82,6 +102,7 @@ export interface ManagedRunFailure {
     | "terms-shortfall"
     | "consent"
     | "already-running"
+    | "missed"
     | "storage"
     | "imported"
     | "transport"
@@ -119,6 +140,38 @@ const ALREADY_RUNNING_FAILURE: ManagedRunFailure = {
     "A run for this exchange is already in progress in another tab or a " +
     "scheduled run on this device. Wait for it to finish, then try again.",
   recovery: "wait",
+};
+
+/** The benign no-show state: the run spent its whole wait on the partner's runner
+ * and it never connected, so no handshake ran and nothing left this device.
+ * Deliberately not the transport copy, which would send the operator to check their
+ * own connection for a partner who was simply not there. Recovery is `"none"`:
+ * nothing on this device is broken and nothing here is re-settled, and the run
+ * control is not gated by a classified state, so the operator runs it again
+ * whenever their partner is ready.
+ *
+ * The copy carries the persistent case rather than stopping at the reassuring
+ * reading, because a no-show is also what a partnership that can no longer meet
+ * looks like from here: a re-invite is named for the operator whose partner WAS at
+ * their machine at an agreed time and still never arrived. It stays out of the
+ * recovery affordance -- one absent partner is not worth putting a fresh secret on
+ * the out-of-band channel -- so the pointer is the copy's, phrased as the storage
+ * and imported states phrase theirs.
+ *
+ * Its disclosure claim is this run's, so it is issued from THIS run's no-show error
+ * alone (see {@link classifyManagedRunFailure}) and never from a record's recorded
+ * outcome, which belongs to whichever run stamped it. */
+const MISSED_FAILURE: ManagedRunFailure = {
+  kind: "missed",
+  title: "Your partner did not arrive",
+  message:
+    "This run waited for your partner and they never connected, so nothing was " +
+    "exchanged and nothing left this device. That is not a fault on this " +
+    "device: agree a time with your partner over your usual channel, and run " +
+    "this exchange again when they are ready. If they were running their side " +
+    "at a time you agreed and this keeps happening, re-invite your partner to " +
+    "reconnect; the exchange keeps your terms and only replaces the secret.",
+  recovery: "none",
 };
 
 /** The benign input state's copy. Fixed and non-oracular: an input rejection's
@@ -238,10 +291,24 @@ const UNEXPLAINED_FAILURE: ManagedRunFailure = {
 
 /** The surface state for a derived failure tier. The expired tier reads
  * `record.expires` to name the real lapsed instant; the transport, missed, and none
- * tiers all map to the generic transport copy -- a success and a missed window do not
- * surface as a launch failure ({@link managedRunFailureFromRecord} filters them
- * first), but {@link classifyManagedRunFailure} can route any tier here, so they are
- * handled explicitly rather than left to fabricate an instant or fall off the end. */
+ * tiers map to the generic transport copy.
+ *
+ * The missed tier deliberately does NOT carry the no-show copy: that copy attests
+ * that nothing left this device, which is a claim about the failure being
+ * classified, while a recorded `"missed"` outcome belongs to whichever run stamped
+ * it -- and a failed run's bookkeeping write is best-effort (see
+ * {@link ../psi/managedRun.ts}) and the host falls back to its pre-run record when
+ * the post-failure reload rejects, so a failure from mid-data-exchange can meet a
+ * standing missed outcome. A next-visit read of that outcome is informational and
+ * phrased by the list and history surfaces (`savedExchangesModel`,
+ * `managedDetailModel`), which name the no-show without claiming anything about
+ * what this run disclosed.
+ *
+ * A success does not surface as a launch failure
+ * ({@link managedRunFailureFromRecord} filters it, along with the missed tier the
+ * list surfaces informationally), but {@link classifyManagedRunFailure} can route
+ * any tier here, so both are handled explicitly rather than left to fabricate an
+ * instant or fall off the end. */
 function tierFailure(
   tier: ManagedFailureTier,
   record: ManagedExchangeRecord,
@@ -274,32 +341,99 @@ function tierFailure(
   }
 }
 
+/** The tiers whose framing outranks the benign no-show reading, each a Tier-1
+ * desync signal the record carries as the run launches and each recovered by
+ * re-invite. A no-show is what a pair that can no longer meet looks like from this
+ * device: the managed rendezvous derives both peer ids from the shared secret (see
+ * {@link ../psi/managedRunDriver.ts}), so a side holding a secret the partnership
+ * has moved past dials and listens on addresses nobody answers, and spends its
+ * whole budget exactly as an absent partner does. Where the record's own
+ * bookkeeping already explains that -- a restore since the last success, a
+ * one-sided persist failure, a lapsed bound -- its framing and its re-invite
+ * recovery win, rather than the operator being told nothing is wrong here.
+ *
+ * The Tier-2 unexplained framing is deliberately NOT here: no handshake ran, so
+ * nothing failed closed, and a no-show is not the evidence that framing rests on
+ * (see docs/MANAGED_EXCHANGE.md, "A missed window is neither desync nor attack"). */
+const MISSED_OUTRANKED_BY: ReadonlyArray<ManagedFailureTier> = [
+  "expired",
+  "storage",
+  "imported",
+];
+
+/** The no-show state, read against the desync evidence the record holds
+ * ({@link MISSED_OUTRANKED_BY}) as of the launch
+ * ({@link ManagedRunRecordReadings.atLaunch}) -- the one reading this run's own
+ * `"missed"` stamp cannot have erased, since that stamp replaces `lastRun` and
+ * carries no `failureKind`.
+ *
+ * The import marker is read directly as well as through the derived tier: the
+ * derivation short-circuits on a `"missed"` outcome before it reaches the marker,
+ * so a record whose LAST run was itself a no-show would tier as `"missed"` while
+ * carrying a standing restore. The tier is consulted first because it carries what
+ * the marker cannot -- the lapse check and the recorded persist failure. */
+function missedFailure(
+  atLaunch: ManagedExchangeRecord,
+  local: ManagedLocalState | undefined,
+  now: number,
+): ManagedRunFailure {
+  const tier = deriveManagedFailureTier(atLaunch, local, now);
+  if (MISSED_OUTRANKED_BY.includes(tier)) return tierFailure(tier, atLaunch);
+  if (importedSinceLastSuccess(local)) return IMPORTED_FAILURE;
+  return MISSED_FAILURE;
+}
+
 /**
  * Classify a launch failure into the surface's {@link ManagedRunFailure}. The
- * pre-connection benign states are read through {@link benignRerunOutcome} (the single
- * place the benign checks live), each with its own plain copy -- the expiry state
- * names the lapsed instant the error carries, the one non-fixed value, which is the
- * record's own local `expires`, never partner-influenced. Any other failure -- a
+ * benign states are read through {@link benignRerunOutcome} (the single place the
+ * benign checks live), each with its own plain copy -- the expiry state names the
+ * lapsed instant the error carries, the one non-fixed value, which is the record's
+ * own local `expires`, never partner-influenced. Any other failure -- a
  * handshake failed closed, a persist failure, a transport drop -- is tiered from the
  * record's own bookkeeping (which the runner and the critical section already stamped
  * before this classification runs): {@link deriveManagedFailureTier} reads the tier,
  * and {@link tierFailure} maps it to copy. `now` and `local` are passed so the tier
- * derivation reads expiry and the import marker; the record is the freshly-reloaded
- * one carrying the just-stamped `lastRun`.
+ * derivation reads expiry and the import marker.
+ *
+ * Which of the two record readings ({@link ManagedRunRecordReadings}) answers is
+ * decided by whose evidence the state rests on. A derived tier rests on what THIS
+ * run stamped, so it reads the record reloaded after the run. The no-show rests on
+ * what stood BEFORE it: a no-show stamps `"missed"` with no `failureKind`, and the
+ * stamp replaces `lastRun` rather than merging into it, so the reloaded record
+ * cannot say whether a Tier-1 desync signal was standing -- the at-launch reading
+ * is what {@link missedFailure} weighs.
+ *
+ * `dataExchangeStarted` is THIS run's phase boundary, reported by the run through
+ * its `onDataExchangeStart` option and passed through to
+ * {@link benignRerunOutcome}: a benign state whose copy says nothing left this
+ * device is read off the error only from before the boundary. The record cannot
+ * stand in for it -- its `lastRun` is whatever the last write managed to stamp,
+ * which is why the no-show copy is issued from the live error rather than from the
+ * derived missed tier. The boundary guards the states read off the error and
+ * nothing further: a `"consent"` or `"terms-shortfall"` tier read from the
+ * record's stored kind carries the guard the run that stamped it applied, so this
+ * run's boundary does not gate that copy.
+ *
+ * A no-show is the one benign state that does not simply win: it is read against
+ * the desync evidence the record already holds ({@link missedFailure}), because
+ * the same symptom is what a pair holding different secrets produces every time.
  */
 export function classifyManagedRunFailure(
   error: unknown,
-  record: ManagedExchangeRecord,
+  records: ManagedRunRecordReadings,
   local: ManagedLocalState | undefined,
   now: number,
+  dataExchangeStarted: boolean,
 ): ManagedRunFailure {
-  const benign = benignRerunOutcome(error);
+  const benign = benignRerunOutcome(error, dataExchangeStarted);
   if (benign === "expired" && error instanceof ManagedExchangeExpiredError)
     return expiredFailure(error.expires);
   if (benign === "already-running") return ALREADY_RUNNING_FAILURE;
   if (benign === "input") return INPUT_FAILURE;
   if (benign === "terms-shortfall") return TERMS_SHORTFALL_FAILURE;
-  return tierFailure(deriveManagedFailureTier(record, local, now), record);
+  if (benign === "missed") return missedFailure(records.atLaunch, local, now);
+  const { afterRun } = records;
+  return tierFailure(deriveManagedFailureTier(afterRun, local, now), afterRun);
 }
 
 /**
@@ -325,8 +459,9 @@ export function managedRunFailureFromRecord(
  * is re-invite (directly, or through the confirmation gate); a consent refusal and a
  * linkage shortfall are not retried either, because the same input settles the same
  * disclosure and falls the same way short of the same keys however many times it
- * runs; and an in-progress run elsewhere is not this run's to retry until it
- * finishes. */
+ * runs; an in-progress run elsewhere is not this run's to retry until it
+ * finishes; and a no-show is not retried on the spot, because what it waits on is
+ * the partner being at their own machine. */
 export function managedRunRetryable(failure: ManagedRunFailure): boolean {
   return failure.recovery === "retry";
 }
