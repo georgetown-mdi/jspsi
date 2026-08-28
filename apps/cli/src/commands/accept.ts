@@ -351,13 +351,16 @@ export async function validateAccept(params: {
     ["key"],
   );
 
-  // A configuration already at the path is either kept as it stands or aborts
-  // the acceptance below, and neither writes one -- so the label this party runs
-  // under is that file's own, and there is nothing to ask: an answer would have
-  // nowhere to be remembered, and a flag has nowhere to be written. This is the
-  // acceptance's one read of that file: the label is an input to the terms
-  // reconcileAcceptConfig compares, so the parsed spec is threaded into it
-  // rather than read a second time there.
+  // A configuration already at the path either aborts the acceptance below or
+  // is kept and reused (its consent record refreshed in place, docs/CLI.md
+  // under Existing files, but never its linkage_terms.identity -- see the
+  // "handler: accept-reuse leaves the kept configuration's identity untouched"
+  // test) -- so the label this party runs under is that file's own, and there
+  // is nothing to ask: an answer would have nowhere to be remembered, and a
+  // flag has nowhere to be written. This is the acceptance's one read of that
+  // file: the label is an input to the terms reconcileAcceptConfig compares,
+  // so the parsed spec is threaded into it rather than read a second time
+  // there.
   const keptConfig = readExistingAcceptConfig(
     options.configFile,
     reconciliationSources(resolved.mode === "online"),
@@ -679,12 +682,18 @@ export async function validateAccept(params: {
  * the path: that file's own `linkage_terms.identity`, with a `--identity` given
  * alongside it reported as having no effect.
  *
- * The stored label wins because this acceptance rewrites nothing: the kept file
- * governs every exchange under the partnership, and under
- * `signing.mode: certificate` the label in the agreed terms is what a receipt is
- * verified against -- so a flag that quietly renamed the party for one run would
- * put the name the partner reads on this run at odds with the one the file keeps
- * sending. Renaming is an edit of that file, which is what the notice says.
+ * The stored label wins because the kept file governs every exchange under the
+ * partnership, and under `signing.mode: certificate` the label in the agreed
+ * terms is what a receipt is verified against -- so a flag that quietly renamed
+ * the party for one run would put the name the partner reads on this run at odds
+ * with the one the file keeps sending. Renaming is an edit of that file, which
+ * is what the notice says.
+ *
+ * This acceptance does refresh the kept file's consent record in place
+ * (docs/CLI.md, under Existing files), but never `linkage_terms.identity`
+ * itself (see the "handler: accept-reuse leaves the kept configuration's
+ * identity untouched" test) -- so the label a certificate was issued against
+ * never moves under it.
  *
  * The notice reads as the one `psilink invite` gives on its own
  * config-as-source path, and is escaped the same way: both labels and the path
