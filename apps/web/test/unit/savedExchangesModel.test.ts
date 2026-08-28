@@ -114,6 +114,24 @@ describe("savedExchangeRow", () => {
     expect(row.status).not.toMatch(/attack|tamper|desync|connection/i);
   });
 
+  test("a linkage shortfall reads as its own quiet line, not the input file's", () => {
+    const row = savedExchangeRow(
+      record({
+        lastRun: {
+          at: "2026-07-10T09:00:00.000Z",
+          outcome: "failed",
+          failureKind: "terms-shortfall",
+        },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.status).toMatch(/settle the terms/i);
+    // Not the input tier's line: putting the file back is not this state's remedy.
+    expect(row.status).not.toMatch(/could not use your input file/i);
+    expect(row.status).not.toMatch(/attack|tamper|desync/i);
+  });
+
   test("an auth failure on a restored record reads as the benign restore line", () => {
     const local: ManagedLocalState = {
       imported: { importedAt: "2026-07-09T00:00:00.000Z" },

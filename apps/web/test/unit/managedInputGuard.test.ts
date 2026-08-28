@@ -9,6 +9,7 @@ import { describe, expect, test } from "vitest";
 import {
   ManagedInputError,
   assessManagedInputColumns,
+  managedInputFailureKind,
 } from "@psi/managedInputGuard";
 
 import type { ExchangeSpec, WebRTCExchangeLocator } from "@psilink/core";
@@ -109,5 +110,25 @@ describe("ManagedInputError", () => {
     expect(error.message).toBe(
       "managed exchange input cannot satisfy the standing linkage terms",
     );
+  });
+});
+
+describe("managedInputFailureKind: the recorded kind for each rejection", () => {
+  test("an acquire rejection is the retryable input kind", () => {
+    expect(
+      managedInputFailureKind({ reason: "acquire", cause: new Error("gone") }),
+    ).toBe("input");
+  });
+
+  test("a columns rejection is the terms-shortfall kind, not the input kind", () => {
+    // The two remedies differ: the acquisition failure is cleared by putting the
+    // file back, the shortfall only by a conforming file or re-agreed terms. A
+    // record stamping one kind for both would offer the wrong one at the next
+    // visit, which is exactly what an unattended run leaves behind.
+    const rejection = assessManagedInputColumns(standingExchangeFile(), [
+      "nope",
+    ]);
+    if (rejection === undefined) throw new Error("expected a rejection");
+    expect(managedInputFailureKind(rejection)).toBe("terms-shortfall");
   });
 });

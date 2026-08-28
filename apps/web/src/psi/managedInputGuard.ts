@@ -1,15 +1,15 @@
 /**
  * The pure, platform-free half of the managed (recurring) exchange's run-start
  * input guard: deciding whether a read input's columns can back the standing
- * terms, and classifying an input-acquisition failure into the benign `"input"`
- * bookkeeping -- so both decisions are unit-testable in Node without a file handle,
+ * terms, and classifying a rejection into the benign bookkeeping kind that names
+ * its remedy -- so both decisions are unit-testable in Node without a file handle,
  * a permission prompt, or a database. The platform half (reading the file through
  * the persisted `FileSystemFileHandle`, the read/query permission layer, and the
  * handle persistence) is in {@link ./managedInputHandle.ts}.
  *
  * Both decisions run BEFORE any connection on every run path -- unattended,
- * one-action, and re-selection -- and each produces a benign `"input"`-kind
- * failure, never the desync/attack framing (see docs/MANAGED_EXCHANGE.md, "The
+ * one-action, and re-selection -- and each produces a benign pre-run failure,
+ * never the desync/attack framing (see docs/MANAGED_EXCHANGE.md, "The
  * input file each run", and docs/spec/MANAGED_EXCHANGE_RECORD.md, the
  * `inputFileHandle` and `lastRun` rows). The column check reuses core's
  * {@link decideLinkageTermsVerdict} rather than re-deriving the verdict, and holds
@@ -23,8 +23,8 @@ import type { ExchangeSpec, LinkageField } from "@psilink/core";
 
 /**
  * Why the run-start input could not back the standing terms. Both variants are a
- * benign pre-run problem the runner records as an `"input"`-kind failure and never
- * routes through desync/attack framing:
+ * benign pre-run problem, recorded as their own failure kind
+ * ({@link managedInputFailureKind}) and never routed through desync/attack framing:
  *
  * - `"acquire"` -- the file could not be read at run start: the entry is missing
  *   (deleted, moved, or renamed away), the read permission is gone, no handle is
@@ -58,8 +58,9 @@ export type ManagedInputRejection =
 /**
  * Raised when the run-start input cannot back the standing terms, carrying the
  * {@link ManagedInputRejection} that discriminates the benign cause. Distinct from
- * a handshake or data-exchange failure so the runner routes it to the `"input"`
- * failure tier and knows no connection was ever attempted. Its base `message` is a
+ * a handshake or data-exchange failure so the runner records the kind
+ * {@link managedInputFailureKind} derives from the rejection and knows no
+ * connection was ever attempted. Its base `message` is a
  * fixed, non-sensitive summary suitable for a log line; the partner-influenced
  * detail (the unsatisfied field names) rides {@link rejection} for the caller to
  * sanitize before display.
@@ -80,6 +81,24 @@ export class ManagedInputError extends Error {
 }
 
 /**
+ * The `lastRun` failure kind a rejection records, and the single place the two
+ * benign pre-run input states are told apart. An `"acquire"` rejection is the
+ * retryable `"input"` state -- putting the file back clears it -- while a
+ * `"columns"` rejection is the `"terms-shortfall"` state: the same file falls the
+ * same way short of the same agreed keys however many times it runs, so its remedy
+ * is a conforming file or terms re-agreed with the partner, never another attempt.
+ *
+ * Both the bookkeeping stamp the critical section writes and the live launch's
+ * benign-outcome classification read this one function, so a record's tier at the
+ * next visit cannot diverge from what the operator saw at the moment of failure.
+ */
+export function managedInputFailureKind(
+  rejection: ManagedInputRejection,
+): "input" | "terms-shortfall" {
+  return rejection.reason === "columns" ? "terms-shortfall" : "input";
+}
+
+/**
  * Grade a read input's `columns` against a record's standing terms, the guard every
  * run path applies before any connection. Reuses core's
  * {@link decideLinkageTermsVerdict} over the persisted document's linkage terms,
@@ -90,9 +109,9 @@ export class ManagedInputError extends Error {
  * refused unless the terms declare at least one linkage key and the input can
  * satisfy every one of them. That is the rule `assertLinkageTermsSatisfiable`
  * enforces at the run boundary inside `prepareForExchange`, whose refusal
- * `managedRun.ts` routes to this same benign `"input"` failure tier -- so this is
- * advance notice of the same decision, before any connection, rather than a looser
- * pre-check the boundary can still overturn.
+ * `managedRun.ts` routes to this same benign `"terms-shortfall"` failure tier -- so
+ * this is advance notice of the same decision, before any connection, rather than a
+ * looser pre-check the boundary can still overturn.
  *
  * Returns `undefined` when the input may run; returns a `"columns"`
  * {@link ManagedInputRejection} carrying the unproducible linkage fields otherwise.

@@ -13,8 +13,8 @@
  * at the next visit. The evidence is:
  *
  * - `lastRun.failureKind` -- the structured enum the runner and the critical section
- *   stamp (`auth` \| `transport` \| `storage` \| `input` \| `consent` \|
- *   `cancelled`);
+ *   stamp (`auth` \| `transport` \| `storage` \| `input` \| `terms-shortfall` \|
+ *   `consent` \| `cancelled`);
  * - a lapsed `expires` (its own state, detected before any connection; handled by the
  *   pre-connection check, mirrored here for a next-visit read);
  * - an import/restore since the last successful run -- the local `imported` sibling
@@ -47,8 +47,14 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
  *   recovery: re-invite). Detected before any connection, so a live launch reaches it
  *   through the pre-connection check; carried here for a next-visit read of a record
  *   whose bound lapsed while dormant.
- * - `"input"` -- a benign pre-run input problem the last run recorded (a missing file
- *   or a rejected column shape; recovery: fix the input and retry).
+ * - `"input"` -- a benign pre-run input problem the last run recorded: the file was
+ *   missing, unreadable, or gone from under its handle (recovery: put the file back
+ *   and retry).
+ * - `"terms-shortfall"` -- the last run read its input and refused before connecting
+ *   because the file cannot supply every linkage key the standing terms declare
+ *   (recovery: a file covering every agreed key, or terms re-agreed with the
+ *   partner; never a retry or a bare re-pick, since the same file refuses
+ *   identically at the next window).
  * - `"consent"` -- a benign pre-run refusal by one of the send-side disclosure gates:
  *   what this run would send is not the set the exchange recorded agreeing to send
  *   (recovery: re-confirm the disclosure; never a retry, since the same input refuses
@@ -70,6 +76,7 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
 export type ManagedFailureTier =
   | "expired"
   | "input"
+  | "terms-shortfall"
   | "consent"
   | "missed"
   | "storage"
@@ -124,6 +131,11 @@ export function deriveManagedFailureTier(
 
   // A recorded benign pre-run input problem: its own tier, never desync/attack.
   if (lastRun.failureKind === "input") return "input";
+  // A recorded pre-run linkage shortfall: benign like the input tier and equally
+  // far from desync/attack, but held apart from it because re-picking the file the
+  // input tier offers is not its remedy -- the same file refuses identically, so
+  // this tier's copy names a conforming file or terms re-agreed with the partner.
+  if (lastRun.failureKind === "terms-shortfall") return "terms-shortfall";
   // A recorded pre-run disclosure refusal: likewise its own benign tier, and kept
   // out of the retryable transport bucket -- its remedy is re-confirming what this
   // exchange sends, which no amount of reconnecting supplies.

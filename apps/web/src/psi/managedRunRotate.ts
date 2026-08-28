@@ -112,9 +112,9 @@ export function storageFailureRun(at: number): ManagedExchangeLastRun {
 
 /** Record a non-succeeded run with the given outcome and failure kind. Used for
  * the failure paths the runner classifies (an `auth`/`security` handshake
- * failure, a `transport` drop, a benign `input` problem, a `consent` refusal, a
- * `cancelled` run); `succeededRun` and `storageFailureRun` are the two the
- * critical section itself decides. */
+ * failure, a `transport` drop, a benign `input` problem, a `terms-shortfall`
+ * refusal, a `consent` refusal, a `cancelled` run); `succeededRun` and
+ * `storageFailureRun` are the two the critical section itself decides. */
 export function failedRun(
   at: number,
   outcome: Exclude<ManagedExchangeLastRun["outcome"], "succeeded">,

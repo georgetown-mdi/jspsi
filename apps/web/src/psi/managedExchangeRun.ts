@@ -14,8 +14,9 @@
  * - **Input guard before connection.** The input file is acquired and its columns
  *   validated against the standing terms BEFORE the handshake opens any connection;
  *   the guard's result is the handshake's argument, so a runner cannot reorder the
- *   guard after the handshake. A benign input rejection (missing file, gone
- *   permission, unsatisfiable columns) records the `"input"` bookkeeping and
+ *   guard after the handshake. A benign input rejection records the bookkeeping
+ *   kind its remedy calls for -- `"input"` for a missing file or a gone permission,
+ *   `"terms-shortfall"` for columns the standing terms cannot be run against -- and
  *   re-raises with no connection attempted, never through desync/attack framing.
  *
  * - **Single-writer exclusion.** A Web Locks lock keyed to the record's id is held
@@ -36,6 +37,10 @@
  */
 
 import {
+  ManagedInputError,
+  managedInputFailureKind,
+} from "./managedInputGuard";
+import {
   RotationPersistError,
   failedRun,
   runRotationCriticalSection,
@@ -45,7 +50,6 @@ import {
   persistManagedExchangeRotation,
   recordManagedExchangeLastRun,
 } from "./managedExchangeStore";
-import { ManagedInputError } from "./managedInputGuard";
 
 import type { ManagedExchangeLastRun } from "./managedExchangeRecord";
 import type { RotationWriteBack } from "./managedRunRotate";
@@ -125,7 +129,7 @@ export interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
    * Acquire and validate the input file BEFORE any connection: read it through the
    * persisted handle (or the re-selected file), then reject a missing file, a gone
    * permission, or a column shape the standing terms cannot satisfy as a benign
-   * pre-run `"input"` failure (the `acquireValidatedManagedInput` seam in
+   * pre-run failure (the `acquireValidatedManagedInput` seam in
    * {@link ./managedInputHandle.ts} raises a {@link ManagedInputError} for each).
    * Its result is handed to {@link handshake}, so the handshake -- and the
    * connection it opens -- is structurally unreachable until the guard passes: a
@@ -180,11 +184,10 @@ export interface ManagedExchangeRunResult<TExchange> {
  *
  * The input guard runs FIRST, before the handshake opens any connection: its
  * result is the handshake's argument, so a runner structurally cannot reorder the
- * guard after the handshake. A benign {@link ManagedInputError} (a missing file, a
- * gone permission, or a column shape the standing terms cannot satisfy) records the
- * `"input"`-kind `lastRun` inside the lock, best-effort, and re-raises without a
- * handshake -- never routed through desync/attack framing, and no connection is
- * attempted.
+ * guard after the handshake. A benign {@link ManagedInputError} records the
+ * `lastRun` kind {@link managedInputFailureKind} reads off its rejection inside the
+ * lock, best-effort, and re-raises without a handshake -- never routed through
+ * desync/attack framing, and no connection is attempted.
  *
  * A persist failure after rotation records a `storage`-kind `lastRun` inside the
  * lock, best-effort (so the next handshake failure surfaces through the benign
@@ -202,8 +205,9 @@ export interface ManagedExchangeRunResult<TExchange> {
  * @throws {ManagedExchangeLockUnavailableError} if `lock.ifAvailable` is set and a
  *   run is already in progress on this device.
  * @throws {ManagedInputError} if the input guard rejects (a missing file, a gone
- *   permission, or an unsatisfiable column shape); the benign `"input"` `lastRun`
- *   is recorded best-effort before this propagates, and no connection was made.
+ *   permission, or an unsatisfiable column shape); the benign `lastRun` for that
+ *   rejection is recorded best-effort before this propagates, and no connection was
+ *   made.
  * @throws {RotationPersistError} if the rotation write fails; the `storage`
  *   `lastRun` is recorded best-effort before this propagates, and the error
  *   carries it either way -- a bookkeeping-write failure never replaces this
@@ -221,7 +225,7 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
     record.id,
     async () => {
       // The input guard runs before the handshake opens any connection. A benign
-      // input rejection records the `input` bookkeeping inside the lock (this run's
+      // input rejection records its classified kind inside the lock (this run's
       // record until the lock releases), then re-raises with no handshake attempted.
       let input: TInput;
       try {
@@ -232,7 +236,14 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
           // bookkeeping write must not replace the ManagedInputError the runner
           // classifies on.
           try {
-            await recordLastRun(record.id, failedRun(now(), "failed", "input"));
+            await recordLastRun(
+              record.id,
+              failedRun(
+                now(),
+                "failed",
+                managedInputFailureKind(error.rejection),
+              ),
+            );
           } catch {
             // Swallowed: the ManagedInputError still reaches the runner on the rethrow.
           }

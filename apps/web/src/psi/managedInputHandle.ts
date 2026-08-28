@@ -287,7 +287,9 @@ export async function acquireManagedInput(
  * its columns when the input is accepted, for the runner to feed the exchange.
  *
  * @throws {ManagedInputError} an `"acquire"` or `"columns"` rejection, both benign
- *   `"input"`-kind failures detected before any connection.
+ *   pre-run failures detected before any connection and recorded under the kind
+ *   each one's remedy calls for (`managedInputFailureKind` in
+ *   {@link ./managedInputGuard.ts}).
  */
 export async function acquireValidatedManagedInput(
   exchangeFile: ExchangeSpec,
