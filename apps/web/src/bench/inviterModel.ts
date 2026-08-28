@@ -29,6 +29,7 @@ import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
 import { isolatedColumnName } from "@components/ColumnName";
 
+import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import { selectExchangeDriver } from "./exchangeDriverSelection";
 
 import type {
@@ -1374,6 +1375,108 @@ export function spineProblems(
     problems.push({ message, target: FIELD_TARGETS[field as AdvancedField] });
   }
   return problems;
+}
+
+/** What holds the create on the review step, in the reading order of the screen
+ * itself: the blocker no edit here clears, then the transport's own setup, then
+ * the cards below it, and the spine's outstanding problems last. */
+export interface InviterCreateGates {
+  /** The device reports no network and the chosen transport begins a live run
+   * (a save-a-file transport connects to nothing, so it is never held). */
+  offlineBlocked: boolean;
+  /** An SFTP exchange chosen to run here has no connection authored yet. */
+  connectionIncomplete: boolean;
+  /** Why the split rendezvous and the retain choice disagree, `undefined` when
+   * they do not. Already a whole sentence naming its own remedy, so it is stated
+   * as it stands rather than restated per surface. */
+  splitDirectoryProblem: string | undefined;
+  /** Whether the file-handling card holds a combination core refuses. */
+  exchangeFilesBlocked: boolean;
+  /** Whether the connection-tuning card holds a value the run would refuse. */
+  connectionTuningBlocked: boolean;
+  /** Whether the diagnostics-and-recovery card holds an unconfirmed sweep. */
+  runDiagnosticsBlocked: boolean;
+  /** Whether the receipts card holds a combination the run would refuse. */
+  receiptsBlocked: boolean;
+  /** How many spine problems the draft carries; they are named last because the
+   * cards above are collapsed disclosures whose own notice is invisible until
+   * opened, while a spine problem is already listed in the work column. */
+  problemCount: number;
+}
+
+/** The create gate and the two sentences that state it: what the step shows
+ * beside the button, and what it announces to assistive tech at the button. */
+export interface InviterCreateStatus {
+  /** Whether every gate is clear, which is what the create action enables on. */
+  ready: boolean;
+  /** The visible line under the create action. */
+  statusLine: string;
+  /** The live-region sentence, which names the action in full because it is read
+   * apart from the button it sits beside. */
+  announcement: string;
+}
+
+function heldCreate(
+  statusLine: string,
+  announcement: string,
+): InviterCreateStatus {
+  return { ready: false, statusLine, announcement };
+}
+
+/**
+ * The review step's create gate with both of its sentences, derived together so
+ * that the button's enabled state, the line beside it, and the announcement
+ * cannot disagree -- a gate reachable by only one of the three is
+ * unrepresentable here rather than merely tested against. The visible line and
+ * the announcement differ in wording alone: the line sits beside an action that
+ * names itself, and the announcement is read on its own.
+ *
+ * The chain follows the screen's reading order, so an operator working down it is
+ * sent to the first unresolved surface they meet, and each sentence names the
+ * card to open. Every gate but the offline one is cleared on this step.
+ */
+export function inviterCreateStatus(
+  gates: InviterCreateGates,
+): InviterCreateStatus {
+  if (gates.offlineBlocked)
+    return heldCreate(OFFLINE_EXCHANGE_REASON, OFFLINE_EXCHANGE_REASON);
+  if (gates.connectionIncomplete)
+    return heldCreate(
+      "Set up the SFTP connection above to continue.",
+      "Set up the SFTP connection above before you can create.",
+    );
+  if (gates.splitDirectoryProblem !== undefined)
+    return heldCreate(gates.splitDirectoryProblem, gates.splitDirectoryProblem);
+  if (gates.exchangeFilesBlocked)
+    return heldCreate(
+      "Resolve the file-handling settings above to continue.",
+      "Resolve the file-handling settings above before you can create.",
+    );
+  if (gates.connectionTuningBlocked)
+    return heldCreate(
+      "Resolve the connection-tuning settings above to continue.",
+      "Resolve the connection-tuning settings above before you can create.",
+    );
+  if (gates.runDiagnosticsBlocked)
+    return heldCreate(
+      "Resolve the diagnostics-and-recovery settings above to continue.",
+      "Resolve the diagnostics-and-recovery settings above before you can create.",
+    );
+  if (gates.receiptsBlocked)
+    return heldCreate(
+      "Resolve the receipts-and-record-keeping settings above to continue.",
+      "Resolve the receipts-and-record-keeping settings above before you can create.",
+    );
+  if (gates.problemCount > 0)
+    return heldCreate(
+      `Resolve ${gates.problemCount === 1 ? "the problem" : `the ${gates.problemCount} problems`} above to continue.`,
+      `${gates.problemCount === 1 ? "A problem" : `${gates.problemCount} problems`} above must be resolved before you can create.`,
+    );
+  return {
+    ready: true,
+    statusLine: "Ready to create.",
+    announcement: "Ready to create the invitation.",
+  };
 }
 
 /** One check-your-answers row: the term, its display value, and either the

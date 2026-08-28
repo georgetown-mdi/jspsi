@@ -11,6 +11,10 @@ import "@mantine/core/styles.css";
 
 import { decodeInvitation } from "@psilink/core";
 
+import {
+  SWEEP_CONFIRMATION_LABEL,
+  SWEEP_CONTROL_LABEL,
+} from "@bench/runDiagnosticsModel";
 import { InviterBench } from "@bench/InviterBench";
 import { RECEIPT_MISSING_LEAD } from "@bench/ReceiptDownload";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
@@ -293,8 +297,7 @@ async function openExchangeFiles() {
 }
 
 /**
- * Drive the retain-mode checkbox on the open file-handling card to `on`, from
- * whichever state it is in.
+ * Drive a checkbox on an open card to `on`, from whichever state it is in.
  *
  * The click sits inside the poll rather than ahead of it because a click the
  * browser reports as delivered can leave this control in the state it started in
@@ -305,18 +308,23 @@ async function openExchangeFiles() {
  * retried. The intended state is the only exit, so a UI that genuinely refuses
  * the change still fails here.
  */
-async function setRetainMode(on: boolean) {
-  const retain = page.getByLabelText("Keep every exchange file");
-  const checked = () => (retain.element() as HTMLInputElement).checked;
+async function setCheckbox(label: string, on: boolean) {
+  const box = page.getByLabelText(label);
+  const checked = () => (box.element() as HTMLInputElement).checked;
   await expect
     .poll(
       async () => {
-        if (checked() !== on) await retain.click();
+        if (checked() !== on) await box.click();
         return checked();
       },
       { interval: 500, timeout: 5_000 },
     )
     .toBe(on);
+}
+
+/** Drive the retain-mode checkbox on the open file-handling card to `on`. */
+async function setRetainMode(on: boolean) {
+  await setCheckbox("Keep every exchange file", on);
 }
 
 /** Turn retain mode on the way an operator does: the file-handling card on
@@ -595,6 +603,57 @@ describe("console inviter file-handling gate", () => {
       page.getByLabelText("Timestamped filenames"),
       "auto",
     );
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeEnabled();
+    await expect
+      .element(page.getByText("Ready to create."))
+      .toBeInTheDocument();
+  });
+});
+
+describe("console inviter diagnostics gate", () => {
+  const RUN_HERE_SFTP = {
+    configured: true,
+    host: "dr.example.gov",
+    port: 2222,
+    path: "/drops/psilink",
+  };
+
+  test("an unconfirmed sweep blocks the mint and names the card in both places", async () => {
+    stubJobApi({ sftp: RUN_HERE_SFTP });
+    app.render(createElement(InviterBench));
+    await reachReviewCreate();
+    await page
+      .getByRole("button", { name: /Diagnostics and recovery/ })
+      .click();
+
+    // A sweep deletes what a crashed run left behind, so it runs only on the
+    // operator's word that nothing else is using the directory. Asking for one
+    // without giving that word is a form problem, caught before the mint.
+    await setCheckbox(SWEEP_CONTROL_LABEL, true);
+
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeDisabled();
+    // Shown beside the action, and voiced for a screen reader at the button.
+    await expect
+      .element(
+        page.getByText(
+          "Resolve the diagnostics-and-recovery settings above to continue.",
+        ),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          "Resolve the diagnostics-and-recovery settings above before you can create.",
+        ),
+      )
+      .toBeInTheDocument();
+
+    await setCheckbox(SWEEP_CONFIRMATION_LABEL, true);
+
     await expect
       .element(page.getByRole("button", { name: "Create the invitation" }))
       .toBeEnabled();

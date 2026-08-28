@@ -28,12 +28,12 @@ import {
   answersRows,
   availableTransports,
   expiryLabel,
+  inviterCreateStatus,
   transportChooserCopy,
   transportRunMode,
 } from "./inviterModel";
 import { ConnectionTuningCard } from "./ConnectionTuningCard";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
-import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import { ReceiptsCard } from "./ReceiptsCard";
 import { RunDiagnosticsCard } from "./RunDiagnosticsCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
@@ -279,37 +279,22 @@ export function ReviewCreateSection({
   // is no promise the partner is there (see @utils/networkStatus).
   const offlineBlocked =
     !online && transportRunMode(available, transport) !== "save-file";
-  const canCreate =
-    problems.length === 0 &&
-    !minting &&
-    !offlineBlocked &&
-    !connectionIncomplete &&
-    splitDirectoryProblem === undefined &&
-    !exchangeFilesBlocked &&
-    !connectionTuningBlocked &&
-    !runDiagnosticsBlocked &&
-    !receiptsBlocked;
+  const createStatus = inviterCreateStatus({
+    offlineBlocked,
+    connectionIncomplete,
+    splitDirectoryProblem,
+    exchangeFilesBlocked,
+    connectionTuningBlocked,
+    runDiagnosticsBlocked,
+    receiptsBlocked,
+    problemCount: problems.length,
+  });
+  // A mint already under way is the one hold with nothing to say: the button
+  // carries it as its own loading state.
+  const canCreate = createStatus.ready && !minting;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
-  const readiness = useDeferredAnnouncement(
-    offlineBlocked
-      ? OFFLINE_EXCHANGE_REASON
-      : connectionIncomplete
-        ? "Set up the SFTP connection above before you can create."
-        : splitDirectoryProblem !== undefined
-          ? splitDirectoryProblem
-          : exchangeFilesBlocked
-            ? "Resolve the file-handling settings above before you can create."
-            : connectionTuningBlocked
-              ? "Resolve the connection-tuning settings above before you can create."
-              : runDiagnosticsBlocked
-                ? "Resolve the diagnostics-and-recovery settings above before you can create."
-                : receiptsBlocked
-                  ? "Resolve the receipts-and-record-keeping settings above before you can create."
-                  : problems.length === 0
-                    ? "Ready to create the invitation."
-                    : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
-  );
+  const readiness = useDeferredAnnouncement(createStatus.announcement);
   return (
     <>
       <p className={styles.eyebrow}>Step 3 of 3</p>
@@ -509,21 +494,7 @@ export function ReviewCreateSection({
               : `${styles.statusLine} ${styles.statusLineDanger}`
           }
         >
-          {offlineBlocked
-            ? OFFLINE_EXCHANGE_REASON
-            : connectionIncomplete
-              ? "Set up the SFTP connection above to continue."
-              : splitDirectoryProblem !== undefined
-                ? splitDirectoryProblem
-                : exchangeFilesBlocked
-                  ? "Resolve the file-handling settings above to continue."
-                  : connectionTuningBlocked
-                    ? "Resolve the connection-tuning settings above to continue."
-                    : receiptsBlocked
-                      ? "Resolve the receipts-and-record-keeping settings above to continue."
-                      : problems.length === 0
-                        ? "Ready to create."
-                        : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
+          {createStatus.statusLine}
         </p>
       </div>
     </>

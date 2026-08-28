@@ -31,6 +31,7 @@ import {
   identifierProblem,
   invitationUsable,
   inviterCleaningAttention,
+  inviterCreateStatus,
   inviterLedgerRows,
   inviterRailFacts,
   isCliTransport,
@@ -45,13 +46,16 @@ import {
   unsealEditor,
 } from "@bench/inviterModel";
 
+import { OFFLINE_EXCHANGE_REASON } from "@bench/offlineExchangeGate";
+import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
+
 // The send-row expectation derives its form from this function, so it pins that
 // the row carries the same form the step's chips do, not what that form is; the
 // literal FSI/PDI expectations live in
 // apps/web/test/unit/columnNameDisplay.test.ts.
 import { isolatedColumnName } from "@components/ColumnName";
 
-import type { AcquiredCsv } from "@bench/inviterModel";
+import type { AcquiredCsv, InviterCreateGates } from "@bench/inviterModel";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 // A right-to-left override, written as an escape so the source carries no raw
@@ -368,6 +372,144 @@ describe("review and create", () => {
     const rows = inviterLedgerRows(editor, "2026-07-08T19:32:00.000Z");
     const expires = rows.find((row) => row.label === "Expires");
     expect(expires?.value).toContain("July 8, 2026");
+  });
+});
+
+// The create gate is stated twice on the step -- the line under the button and
+// the live-region sentence beside it -- so each case below reads both. A gate
+// named in one place and silent in the other is the failure this covers: it
+// leaves a disabled button under a line that says the step is ready.
+describe("the create gate and the two sentences that state it", () => {
+  const clearGates: InviterCreateGates = {
+    offlineBlocked: false,
+    connectionIncomplete: false,
+    splitDirectoryProblem: undefined,
+    exchangeFilesBlocked: false,
+    connectionTuningBlocked: false,
+    runDiagnosticsBlocked: false,
+    receiptsBlocked: false,
+    problemCount: 0,
+  };
+
+  /** One gate raised on its own, with the sentence each surface then shows.
+   * `gate` names the field it raises, so the coverage test below can hold the
+   * cases to the interface. */
+  const cases: ReadonlyArray<{
+    gate: keyof InviterCreateGates;
+    gates: InviterCreateGates;
+    statusLine: string;
+    announcement: string;
+  }> = [
+    {
+      gate: "offlineBlocked",
+      gates: { ...clearGates, offlineBlocked: true },
+      statusLine: OFFLINE_EXCHANGE_REASON,
+      announcement: OFFLINE_EXCHANGE_REASON,
+    },
+    {
+      gate: "connectionIncomplete",
+      gates: { ...clearGates, connectionIncomplete: true },
+      statusLine: "Set up the SFTP connection above to continue.",
+      announcement: "Set up the SFTP connection above before you can create.",
+    },
+    {
+      gate: "splitDirectoryProblem",
+      gates: {
+        ...clearGates,
+        splitDirectoryProblem: SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT,
+      },
+      statusLine: SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT,
+      announcement: SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT,
+    },
+    {
+      gate: "exchangeFilesBlocked",
+      gates: { ...clearGates, exchangeFilesBlocked: true },
+      statusLine: "Resolve the file-handling settings above to continue.",
+      announcement:
+        "Resolve the file-handling settings above before you can create.",
+    },
+    {
+      gate: "connectionTuningBlocked",
+      gates: { ...clearGates, connectionTuningBlocked: true },
+      statusLine: "Resolve the connection-tuning settings above to continue.",
+      announcement:
+        "Resolve the connection-tuning settings above before you can create.",
+    },
+    {
+      gate: "runDiagnosticsBlocked",
+      gates: { ...clearGates, runDiagnosticsBlocked: true },
+      statusLine:
+        "Resolve the diagnostics-and-recovery settings above to continue.",
+      announcement:
+        "Resolve the diagnostics-and-recovery settings above before you can create.",
+    },
+    {
+      gate: "receiptsBlocked",
+      gates: { ...clearGates, receiptsBlocked: true },
+      statusLine:
+        "Resolve the receipts-and-record-keeping settings above to continue.",
+      announcement:
+        "Resolve the receipts-and-record-keeping settings above before you can create.",
+    },
+    {
+      gate: "problemCount",
+      gates: { ...clearGates, problemCount: 1 },
+      statusLine: "Resolve the problem above to continue.",
+      announcement: "A problem above must be resolved before you can create.",
+    },
+  ];
+
+  test.each(cases)(
+    "$gate names itself under the button and in the announcement",
+    ({ gates, statusLine, announcement }) => {
+      const status = inviterCreateStatus(gates);
+      expect(status.ready).toBe(false);
+      expect(status.statusLine).toBe(statusLine);
+      expect(status.announcement).toBe(announcement);
+    },
+  );
+
+  test("every gate the step carries is covered above", () => {
+    expect(new Set(cases.map((one) => one.gate))).toEqual(
+      new Set(Object.keys(clearGates)),
+    );
+  });
+
+  test("clear gates read as ready in both places, and enable the create", () => {
+    const status = inviterCreateStatus(clearGates);
+    expect(status.ready).toBe(true);
+    expect(status.statusLine).toBe("Ready to create.");
+    expect(status.announcement).toBe("Ready to create the invitation.");
+  });
+
+  test("several outstanding problems are counted, one is not", () => {
+    const many = inviterCreateStatus({ ...clearGates, problemCount: 3 });
+    expect(many.statusLine).toBe("Resolve the 3 problems above to continue.");
+    expect(many.announcement).toBe(
+      "3 problems above must be resolved before you can create.",
+    );
+  });
+
+  test("offline speaks ahead of the settings no edit here can outrun", () => {
+    const status = inviterCreateStatus({
+      ...clearGates,
+      offlineBlocked: true,
+      runDiagnosticsBlocked: true,
+      problemCount: 2,
+    });
+    expect(status.statusLine).toBe(OFFLINE_EXCHANGE_REASON);
+    expect(status.announcement).toBe(OFFLINE_EXCHANGE_REASON);
+  });
+
+  test("a blocked card speaks ahead of the spine problems listed elsewhere", () => {
+    const status = inviterCreateStatus({
+      ...clearGates,
+      runDiagnosticsBlocked: true,
+      problemCount: 2,
+    });
+    expect(status.statusLine).toBe(
+      "Resolve the diagnostics-and-recovery settings above to continue.",
+    );
   });
 });
 
