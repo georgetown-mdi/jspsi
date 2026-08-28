@@ -106,7 +106,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
         undefined,
         NOW,
       );
-      expect(failure.kind).toBe("input");
+      expect(failure.kind).toBe("terms-shortfall");
       expect(failure.recovery).toBe("restate");
       expect(managedRunRetryable(failure)).toBe(false);
       expect(failure.message).not.toMatch(/ssn/);
@@ -215,6 +215,39 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
     );
     expect(failure?.kind).toBe("consent");
     expect(failure?.recovery).toBe("reconfirm");
+  });
+
+  test("a stored terms shortfall surfaces its own tier, not the input re-pick", () => {
+    // The case the split exists for: nobody was present when the unattended run
+    // was refused, so the record alone decides what the next visit is told. The
+    // remedy it names is a conforming file or re-agreed terms -- never a retry,
+    // and never the file picker the input tier offers, which refuses identically.
+    const failure = managedRunFailureFromRecord(
+      record({ lastRun: failed("terms-shortfall") }),
+      undefined,
+      NOW,
+    );
+    if (failure === undefined) throw new Error("expected a failure state");
+    expect(failure.kind).toBe("terms-shortfall");
+    expect(failure.recovery).toBe("restate");
+    expect(managedRunRetryable(failure)).toBe(false);
+    expect(managedRunReinvites(failure)).toBe(false);
+    expect(failure.message).toMatch(/every linkage key/);
+    expect(failure.message).toMatch(/not a connection problem/i);
+    // Benign, exactly as the consent tier is: no desync or attack framing.
+    expect(failure.message).not.toMatch(/attack|tamper|desync|impersonat/i);
+  });
+
+  test("a record written before the kind existed still reads as the input tier", () => {
+    // A shortfall an earlier build recorded as "input" keeps loading and reading
+    // through the generic input state, whose copy covers the column case too.
+    const failure = managedRunFailureFromRecord(
+      record({ lastRun: failed("input") }),
+      undefined,
+      NOW,
+    );
+    expect(failure?.kind).toBe("input");
+    expect(failure?.recovery).toBe("retry");
   });
 
   test("a stored storage failure surfaces the storage tier at the next visit", () => {

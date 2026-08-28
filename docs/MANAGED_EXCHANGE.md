@@ -516,6 +516,13 @@ it stays enabled on the input source and the device's connectivity alone, the
 same as any other state. The copy names no key or field: the shortfall's detail
 is partner-authored.
 
+It is a state of its own in the run bookkeeping too -- its own `failureKind`,
+distinct from the unreadable file's (see
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)) -- so an
+unattended run that met it surfaces the same two ways forward at the operator's
+next visit, rather than the re-pick that would refuse identically. That is the
+case the split exists for: nobody was watching when it failed.
+
 ## The durability and crash-consistency contract
 
 The persisted secret is a **linear resource**: after each successful run both

@@ -13,8 +13,9 @@
  *   from the error.
  * - The RECORDED tiers, derived from the record's own structured bookkeeping (see
  *   {@link deriveManagedFailureTier}): a recorded persist failure, a restore/import
- *   since the last success, a pre-connection disclosure refusal, a transport drop, or
- *   -- only when nothing else explains a failed-closed handshake -- the unexplained
+ *   since the last success, a pre-connection disclosure refusal or linkage
+ *   shortfall, a transport drop, or -- only when nothing else explains a
+ *   failed-closed handshake -- the unexplained
  *   tier that carries the full out-of-band confirmation. The tier is derived from the
  *   record's evidence, never the live error, so a failure from an unattended run
  *   surfaces through the same tiers at the next visit.
@@ -78,6 +79,7 @@ export interface ManagedRunFailure {
   kind:
     | "expired"
     | "input"
+    | "terms-shortfall"
     | "consent"
     | "already-running"
     | "storage"
@@ -136,12 +138,14 @@ const INPUT_FAILURE: ManagedRunFailure = {
  * connecting. Fixed and non-oracular like the input state's -- the shortfall names
  * partner-authored keys and fields, and the copy states the condition instead. It
  * is deliberately not the retry state: the same file refuses identically, so the
- * only ways forward are a conforming file or terms settled with the partner. */
+ * only ways forward are a conforming file or terms settled with the partner. Its
+ * own recorded tier reaches it too, so an unattended run's shortfall reads here at
+ * the next visit rather than through the input state's re-pick. */
 const TERMS_SHORTFALL_FAILURE: ManagedRunFailure = {
-  kind: "input",
+  kind: "terms-shortfall",
   title: "Your input file cannot match on everything this exchange agreed to",
   message:
-    "This run stopped before connecting because your input file cannot supply " +
+    "The run stopped before connecting because your input file cannot supply " +
     "every linkage key this exchange agreed to match on, and nothing left this " +
     "device. Running it again with the same file stops the same way - this is " +
     "not a connection problem. Run it with a file that covers every agreed key, " +
@@ -253,6 +257,8 @@ function tierFailure(
         : TRANSPORT_FAILURE;
     case "input":
       return INPUT_FAILURE;
+    case "terms-shortfall":
+      return TERMS_SHORTFALL_FAILURE;
     case "consent":
       return CONSENT_FAILURE;
     case "storage":

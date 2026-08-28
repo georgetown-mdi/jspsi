@@ -19,8 +19,11 @@ import {
   rerunFailureLastRun,
   runManagedRerun,
 } from "@psi/managedRun";
+import {
+  ManagedInputError,
+  managedInputFailureKind,
+} from "@psi/managedInputGuard";
 import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeRun";
-import { ManagedInputError } from "@psi/managedInputGuard";
 import { RotationPersistError } from "@psi/managedRunRotate";
 
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
@@ -358,37 +361,42 @@ describe("a run refused for terms this file cannot satisfy", () => {
     expect(benignRerunOutcome(refusal())).toBe("terms-shortfall");
   });
 
-  test("the input guard's own column rejection reaches the same state", () => {
+  test("the input guard's own column rejection reaches the same state, live and recorded", () => {
     // The guard grades ahead of the prepare, on the same rule, so its rejection and
-    // core's refusal are one state rather than two the surface must reconcile.
-    expect(
-      benignRerunOutcome(
-        new ManagedInputError({ reason: "columns", unsatisfied: [] }),
-      ),
-    ).toBe("terms-shortfall");
+    // core's refusal are one state rather than two the surface must reconcile. The
+    // kind the critical section stamps for it comes from the same classifier, so a
+    // revisit cannot read a state the live launch never showed.
+    const columns = new ManagedInputError({
+      reason: "columns",
+      unsatisfied: [],
+    });
+    expect(benignRerunOutcome(columns)).toBe("terms-shortfall");
+    expect(managedInputFailureKind(columns.rejection)).toBe("terms-shortfall");
     // An acquisition failure stays the retryable input state.
-    expect(
-      benignRerunOutcome(
-        new ManagedInputError({ reason: "acquire", cause: new Error("gone") }),
-      ),
-    ).toBe("input");
+    const acquire = new ManagedInputError({
+      reason: "acquire",
+      cause: new Error("gone"),
+    });
+    expect(benignRerunOutcome(acquire)).toBe("input");
+    expect(managedInputFailureKind(acquire.rejection)).toBe("input");
   });
 
-  test("records the input tier so a scheduled run does not repeat it as a drop", () => {
-    // The transport tier is retried in place; this refusal reproduces on every
-    // run from the same file, so recording it there would loop an unattended run.
+  test("records its own tier, not the transport drop and not the input problem", () => {
+    // The transport tier is retried in place and the input tier is re-picked in
+    // place; this refusal reproduces on every run from the same file, so either
+    // would send the next visit after a remedy that refuses identically.
     expect(rerunFailureLastRun(refusal(), AT, false, false)).toEqual({
       at: new Date(AT).toISOString(),
       outcome: "failed",
-      failureKind: "input",
+      failureKind: "terms-shortfall",
     });
   });
 
-  test("keeps the input tier even on a cancelled run", () => {
+  test("keeps the terms-shortfall tier even on a cancelled run", () => {
     // The refusal is a deterministic local state read before the connection, so
     // it is not a teardown-provoked error the cancellation could explain.
     expect(rerunFailureLastRun(refusal(), AT, true, false)?.failureKind).toBe(
-      "input",
+      "terms-shortfall",
     );
   });
 });

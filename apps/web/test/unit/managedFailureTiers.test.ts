@@ -1,7 +1,9 @@
 import {
   ConnectionError,
+  LinkageTermsUnsatisfiableError,
   generateSharedSecret,
   getDefaultLinkageTerms,
+  inferMetadata,
 } from "@psilink/core";
 import { describe, expect, test } from "vitest";
 
@@ -9,6 +11,10 @@ import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
+import {
+  assessManagedInputColumns,
+  managedInputFailureKind,
+} from "@psi/managedInputGuard";
 import {
   deriveManagedFailureTier,
   importedSinceLastSuccess,
@@ -207,6 +213,71 @@ describe("deriveManagedFailureTier: the consent tier, from the real send-side ga
     expect(lastRun?.failureKind).toBe("transport");
     expect(deriveManagedFailureTier(record({ lastRun }), undefined, NOW)).toBe(
       "transport",
+    );
+  });
+});
+
+describe("deriveManagedFailureTier: the terms-shortfall tier, from the real refusals", () => {
+  // Both refusals are driven for real -- the run-start guard's own grading and
+  // core's refusal at the run boundary -- and tiered from what each stamped, so
+  // the chain from an input that cannot match on every agreed key to the
+  // operator-facing tier is pinned rather than a hand-built failureKind.
+  const agreedColumns = ["ssn", "first_name", "last_name", "date_of_birth"];
+  const shortColumns = ["first_name", "last_name", "date_of_birth"];
+  const shortRows: Array<CSVRow> = [
+    { first_name: "Ada", last_name: "Lovelace", date_of_birth: "12/10/1815" },
+  ];
+
+  /** A stored document whose standing terms are the defaults over the full agreed
+   * column set, so a refresh that dropped one of them falls short of a key. */
+  function agreedExchangeFile(): ManagedExchangeRecord["exchangeFile"] {
+    return composeManagedExchangeFile({
+      connection: { channel: "webrtc", host: "signaling.example.org" },
+      linkageTerms: getDefaultLinkageTerms(
+        "County Health Dept",
+        inferMetadata(agreedColumns),
+      ),
+    });
+  }
+
+  test("the guard's own column rejection tiers as terms-shortfall", () => {
+    const rejection = assessManagedInputColumns(
+      agreedExchangeFile(),
+      shortColumns,
+    );
+    if (rejection === undefined) throw new Error("expected a rejection");
+    const lastRun: ManagedExchangeLastRun = {
+      at: RUN_AT,
+      outcome: "failed",
+      failureKind: managedInputFailureKind(rejection),
+    };
+    expect(lastRun.failureKind).toBe("terms-shortfall");
+    expect(deriveManagedFailureTier(record({ lastRun }), undefined, NOW)).toBe(
+      "terms-shortfall",
+    );
+  });
+
+  test("core's own run-boundary refusal tiers as terms-shortfall", () => {
+    let thrown: unknown;
+    try {
+      prepareManagedRerunExchange(
+        agreedExchangeFile(),
+        shortRows,
+        shortColumns,
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(LinkageTermsUnsatisfiableError);
+    const lastRun = rerunFailureLastRun(
+      thrown,
+      Date.parse(RUN_AT),
+      false,
+      false,
+    );
+    expect(lastRun?.failureKind).toBe("terms-shortfall");
+    expect(deriveManagedFailureTier(record({ lastRun }), undefined, NOW)).toBe(
+      "terms-shortfall",
     );
   });
 });

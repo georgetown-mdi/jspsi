@@ -212,6 +212,60 @@ describe("parseManagedExchangeRecord reader-rejects-unknown", () => {
     const record = buildManagedExchangeRecord(newExchange());
     expect(safeParseManagedExchangeRecord(record).success).toBe(true);
   });
+
+  test("reads back every recorded failure kind, the terms shortfall included", () => {
+    const kinds: Array<ManagedExchangeLastRun["failureKind"]> = [
+      "auth",
+      "transport",
+      "storage",
+      "input",
+      "terms-shortfall",
+      "consent",
+      "cancelled",
+    ];
+    for (const failureKind of kinds) {
+      const record = buildManagedExchangeRecord(
+        newExchange({
+          lastRun: {
+            at: "2026-07-14T09:00:00.000Z",
+            outcome: "failed",
+            failureKind,
+          },
+        }),
+      );
+      expect(parseManagedExchangeRecord(record).lastRun?.failureKind).toBe(
+        failureKind,
+      );
+    }
+  });
+
+  test("a record written before a kind existed still reads unchanged", () => {
+    // Widening the enum only adds members, so a stored entry an earlier build
+    // wrote -- a linkage shortfall recorded as "input" -- loads and reads as it did.
+    const legacy = {
+      ...buildManagedExchangeRecord(newExchange()),
+      lastRun: {
+        at: "2026-07-14T09:00:00.000Z",
+        outcome: "failed",
+        failureKind: "input",
+      },
+    };
+    expect(parseManagedExchangeRecord(legacy).lastRun).toEqual(legacy.lastRun);
+  });
+
+  test("rejects a failure kind it does not recognize rather than dropping it", () => {
+    // The reader-rejects-unknown rule's converse: a kind a later build added is
+    // refused whole and loudly, never read with the kind silently absent.
+    const future = {
+      ...buildManagedExchangeRecord(newExchange()),
+      lastRun: {
+        at: "2026-07-14T09:00:00.000Z",
+        outcome: "failed",
+        failureKind: "kind-from-a-later-build",
+      },
+    };
+    expect(safeParseManagedExchangeRecord(future).success).toBe(false);
+  });
 });
 
 describe("applyManagedExchangeLocalEdits", () => {

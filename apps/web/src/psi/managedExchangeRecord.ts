@@ -100,13 +100,23 @@ export interface ManagedExchangeSchedule {
 export type ManagedExchangeRunOutcome =
   "succeeded" | "failed" | "desynced" | "missed";
 
-/** For a non-succeeded outcome, the kind of failure. Closed enum: the two benign
- * pre-run problems -- an `"input"` problem (a missing file or a rejected column
- * shape) and a `"consent"` refusal (this run's outbound disclosure is not the set
- * this exchange recorded agreeing to send) -- are detected before any connection
- * and never routed through desync/attack framing. */
+/** For a non-succeeded outcome, the kind of failure. Closed enum: the three benign
+ * pre-run problems -- an `"input"` problem (the file missing, unreadable, or gone
+ * from under its handle), a `"terms-shortfall"` refusal (the file was read and
+ * cannot satisfy every linkage key the standing terms declare) and a `"consent"`
+ * refusal (this run's outbound disclosure is not the set this exchange recorded
+ * agreeing to send) -- are detected before any connection and never routed through
+ * desync/attack framing. Each is its own kind because each has its own remedy:
+ * putting the file back, a conforming file or terms re-agreed with the partner, and
+ * re-settling what the exchange sends. */
 export type ManagedExchangeFailureKind =
-  "auth" | "transport" | "storage" | "input" | "consent" | "cancelled";
+  | "auth"
+  | "transport"
+  | "storage"
+  | "input"
+  | "terms-shortfall"
+  | "consent"
+  | "cancelled";
 
 /** Run bookkeeping the backup state and the desync UX read. Every field is a
  * timestamp or a closed enum -- deliberately no free-text field, so the record
@@ -185,12 +195,25 @@ export const scheduleSchema: ZodType<ManagedExchangeSchedule> = z.object({
 });
 
 /** The canonical `lastRun` validator. Exported so the export/import artifact reuses
- * it rather than re-declaring a laxer copy. */
+ * it rather than re-declaring a laxer copy. A record written before a kind was added
+ * to the enum still reads: every earlier kind remains a member, so a stored
+ * `"input"` entry loads and tiers exactly as it did. The converse is the
+ * reader-rejects-unknown rule's own consequence -- an artifact carrying a kind this
+ * reader does not know is refused whole, loudly, rather than read with the kind
+ * dropped. */
 export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
   at: z.iso.datetime(),
   outcome: z.enum(["succeeded", "failed", "desynced", "missed"]),
   failureKind: z
-    .enum(["auth", "transport", "storage", "input", "consent", "cancelled"])
+    .enum([
+      "auth",
+      "transport",
+      "storage",
+      "input",
+      "terms-shortfall",
+      "consent",
+      "cancelled",
+    ])
     .optional(),
 });
 

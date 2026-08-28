@@ -20,9 +20,10 @@
  *   from the record.
  * - **The pre-connection checks run in order -- expiry, then input -- before any
  *   connection.** A lapsed `expires` is the benign expiry state; an input problem
- *   is the benign `"input"` state; neither is routed through desync/attack
- *   framing. The lock's own unavailability (another tab is running) is the third
- *   benign "already running" state.
+ *   is the benign `"input"` or `"terms-shortfall"` state, split by which remedy it
+ *   calls for; neither is routed through desync/attack framing. The lock's own
+ *   unavailability (another tab is running) is a benign state of its own beside
+ *   them.
  * - **Persist-before-success is {@link runManagedExchange}'s**, unchanged: this
  *   module only supplies the phases it gates.
  */
@@ -42,8 +43,11 @@ import {
   ManagedExchangeLockUnavailableError,
   runManagedExchange,
 } from "./managedExchangeRun";
+import {
+  ManagedInputError,
+  managedInputFailureKind,
+} from "./managedInputGuard";
 import { RotationPersistError, failedRun } from "./managedRunRotate";
-import { ManagedInputError } from "./managedInputGuard";
 import { hasRecoveryHint } from "./authenticateExchange";
 import { recordManagedExchangeLastRun } from "./managedExchangeStore";
 
@@ -128,9 +132,9 @@ export interface ManagedRerunOptions {
  *    framing.
  * 2. **Input, then the run.** {@link runManagedExchange} acquires and validates the
  *    input before the handshake opens any connection (a {@link ManagedInputError}
- *    is its benign `"input"` tier), holds the single-writer lock across the
- *    handshake and the durable rotation persist, then runs the data exchange and
- *    records success.
+ *    is its benign `"input"` or `"terms-shortfall"` tier), holds the single-writer
+ *    lock across the handshake and the durable rotation persist, then runs the
+ *    data exchange and records success.
  *
  * The lock's own unavailability ({@link ManagedExchangeLockUnavailableError}: a run
  * is already in progress in another tab) propagates for the caller to surface as
@@ -204,7 +208,7 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
     const lapsed = remapLapsedRunFailure(error, record, now());
     if (lapsed !== undefined) throw lapsed;
     // The bookkeeping boundary: the critical section records its own tiers
-    // best-effort (the benign `input` rejection and the `storage` persist
+    // best-effort (the benign input-guard rejection and the `storage` persist
     // failure); a pre-run expiry and a lock already held stay deliberately
     // unrecorded (no run began, and the record's own `expires` already carries a
     // lapse). Everything else -- the consent refusal the pre-connection prepare
@@ -271,13 +275,17 @@ export function remapLapsedRunFailure(
  * deliberately absent:
  *
  * - {@link ManagedInputError} and {@link RotationPersistError}: recorded
- *   best-effort inside the critical section (the `input` and `storage` tiers).
- * - A core {@link LinkageTermsUnsatisfiableError}: the same benign `"input"` tier,
- *   stamped here because the refusal comes out of the pre-connection prepare
- *   rather than the input guard. This run's file cannot supply every linkage key
- *   the standing terms declare, which no amount of reconnecting changes, so it
- *   must not land in the retryable transport bucket where a scheduled run would
- *   repeat it every cycle.
+ *   best-effort inside the critical section (the tier
+ *   {@link managedInputFailureKind} reads off the rejection, and the `storage`
+ *   tier).
+ * - A core {@link LinkageTermsUnsatisfiableError}: the benign `"terms-shortfall"`
+ *   tier, stamped here because the refusal comes out of the pre-connection prepare
+ *   rather than the input guard, which stamps the same kind for its own column
+ *   rejection. This run's file cannot supply every linkage key the standing terms
+ *   declare, which no amount of reconnecting changes, so it must not land in the
+ *   retryable transport bucket where a scheduled run would repeat it every cycle --
+ *   nor in the `"input"` tier, whose remedy is re-picking a file that refuses
+ *   identically.
  * - {@link ManagedExchangeExpiredError} and
  *   {@link ManagedExchangeLockUnavailableError}: deliberately unrecorded -- no
  *   run began, and a lapse is already carried by the record's own `expires`.
@@ -316,7 +324,7 @@ export function rerunFailureLastRun(
   )
     return undefined;
   if (error instanceof LinkageTermsUnsatisfiableError)
-    return failedRun(at, "failed", "input");
+    return failedRun(at, "failed", "terms-shortfall");
   if (error instanceof OutboundDisclosureRefusalError && !dataExchangeStarted)
     return failedRun(at, "failed", "consent");
   if (aborted) return failedRun(at, "failed", "cancelled");
@@ -348,16 +356,17 @@ export type BenignRerunOutcome =
  * that cannot supply every linkage key the standing terms declare, raised either by
  * the input guard's own grading or by core's refusal inside the pre-connection
  * prepare: the same file refuses identically every time, so its remedy is a
- * conforming file or terms settled with the partner, never a retry. Both record the
- * same `"input"` bookkeeping tier, which carries no such distinction -- so a
- * revisit reads the generic input copy where a live launch reads the specific one.
+ * conforming file or terms settled with the partner, never a retry. Each records
+ * the bookkeeping kind of the same name, and the guard's own split is read from
+ * {@link managedInputFailureKind} here as well as at the stamp, so a revisit tiers
+ * the state a live launch showed rather than a coarser one.
  */
 export function benignRerunOutcome(
   error: unknown,
 ): BenignRerunOutcome | undefined {
   if (error instanceof ManagedExchangeExpiredError) return "expired";
   if (error instanceof ManagedInputError)
-    return error.rejection.reason === "columns" ? "terms-shortfall" : "input";
+    return managedInputFailureKind(error.rejection);
   if (error instanceof LinkageTermsUnsatisfiableError) return "terms-shortfall";
   if (error instanceof ManagedExchangeLockUnavailableError)
     return "already-running";

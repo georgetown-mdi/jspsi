@@ -459,7 +459,7 @@ describe("run seam composition: the input guard gates the handshake", () => {
     expect(stored?.sharedSecret).toBe(created.sharedSecret);
   });
 
-  test("a column-shape rejection records a benign input failure and never handshakes", async () => {
+  test("a column-shape rejection records the terms-shortfall failure and never handshakes", async () => {
     const handle = await trackedOpfsFile("drifted.csv", DRIFTED_CSV);
     const created = await createManagedExchange(
       newExchange({ inputFileHandle: handle }),
@@ -493,7 +493,9 @@ describe("run seam composition: the input guard gates the handshake", () => {
     expect((error as ManagedInputError).rejection.reason).toBe("columns");
     expect(handshakeRan).toBe(false);
     const stored = await getManagedExchange(created.id);
-    expect(stored?.lastRun?.failureKind).toBe("input");
+    // Held apart from the acquisition failure above: the next visit must not be
+    // offered the file picker for a file that refuses identically.
+    expect(stored?.lastRun?.failureKind).toBe("terms-shortfall");
     expect(stored?.sharedSecret).toBe(created.sharedSecret);
   });
 
