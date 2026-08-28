@@ -272,21 +272,27 @@ describe("a record that is not a webrtc exchange", () => {
 
 /** A record as a hand-crafted artifact import produces one. The import path
  * validates the embedded document with the FULL exchange schema rather than the
- * credential-free locator composition, so a connection the app itself could
- * never compose reaches a record this way -- each import below succeeding is the
+ * credential-free locator composition, so a document the app itself could never
+ * compose reaches a record this way -- each import below succeeding is the
  * reachability half of the refusal the test then asserts. */
-function importedRecordWithConnection(
-  connection: WebRTCConnectionConfig,
+function importedRecordWithDocument(
+  exchangeFile: ExchangeSpec,
 ): ManagedExchangeRecord {
   return importManagedExchangeArtifact(
     JSON.stringify({
       artifactVersion: MANAGED_EXCHANGE_ARTIFACT_VERSION,
-      exchangeDocument: serializeExchangeDocument(
-        assembleExchangeSpec({ connection, linkageTerms }),
-      ),
+      exchangeDocument: serializeExchangeDocument(exchangeFile),
       key: { sharedSecret: generateSharedSecret() },
       local: { label: "Imported quarterly", side: "inviter" },
     }),
+  );
+}
+
+function importedRecordWithConnection(
+  connection: WebRTCConnectionConfig,
+): ManagedExchangeRecord {
+  return importedRecordWithDocument(
+    assembleExchangeSpec({ connection, linkageTerms }),
   );
 }
 
@@ -471,9 +477,15 @@ describe("an authentication block on the stored document", () => {
 
   test("is not a record shape the read path admits", () => {
     // The refusals below are the composer holding its own contract on the shape
-    // it is handed, not a second copy of this rule.
+    // it is handed, not a second copy of this rule -- so this measures the same
+    // secret-bearing block they do.
     expect(() =>
-      parseManagedExchangeRecord(recordCarrying({ tokenMaxAgeDays: 30 })),
+      parseManagedExchangeRecord(
+        recordCarrying({
+          sharedSecret: generateSharedSecret(),
+          expires: "2026-04-06T14:00:00.000Z",
+        }),
+      ),
     ).toThrow();
   });
 
@@ -493,4 +505,88 @@ describe("an authentication block on the stored document", () => {
       expect(message).not.toContain(secret);
     },
   );
+});
+
+describe("a signing block on the stored document", () => {
+  // Every field here is live on the operator's scheduled CLI run: identityFile
+  // is opened as this party's private signing identity, receiptOutput is a
+  // verbatim local write path, and partnerFingerprint is the pin a presented
+  // partner certificate is trusted against.
+  const signing = {
+    mode: "certificate",
+    identityFile: "@/home/other/psilink-signing.identity",
+    partnerFingerprint: "0123456789012345678901234567890123456789abA",
+    receiptOutput: "/home/other/receipts/planted-receipt.json",
+  } as const;
+
+  function importedRecordWithSigning(): ManagedExchangeRecord {
+    return importedRecordWithDocument(
+      assembleExchangeSpec({
+        connection: connectionFromLocator(webrtcLocator),
+        linkageTerms,
+        signing,
+      }),
+    );
+  }
+
+  test("rides a hand-crafted artifact into a record the read path admits", () => {
+    // Unreachable through the app: the record composer's input has no signing
+    // field, and the read path refines away only an authentication block. So the
+    // import succeeds and the export is the only gate between the block and the
+    // emitted psilink.yaml.
+    const record = importedRecordWithSigning();
+    expect(record.exchangeFile.signing).toEqual(signing);
+    expect(() => parseManagedExchangeRecord(record)).not.toThrow();
+  });
+
+  test("is refused rather than republished, naming the block and no value", () => {
+    const message = exportRefusal(importedRecordWithSigning());
+    expect(message).toContain("signing");
+    for (const value of [
+      signing.identityFile,
+      signing.partnerFingerprint,
+      signing.receiptOutput,
+    ])
+      expect(message).not.toContain(value);
+  });
+});
+
+describe("the exportable top-level document fields", () => {
+  test("admit every field the record composer itself writes", () => {
+    // The allowlist is the composer's own output, so a document carrying each
+    // optional block exports rather than being refused as unrecognized.
+    const record = managedRecord({
+      exchangeFile: composeManagedExchangeFile({
+        connection: webrtcLocator,
+        linkageTerms,
+        metadata: [
+          { name: "SSN", type: "ssn", role: "linkage", isPayload: false },
+        ],
+        standardization: [{ output: "ssn", input: "SSN" }],
+        disclosedPayloadColumns: ["program"],
+        expectedPayloadColumns: ["enrollment"],
+        expectedPartnerDeduplicate: true,
+        outboundPayloadConsent: { status: "confirmed", columns: ["program"] },
+      }),
+    });
+    expect(parseExportedConfig(record)).toEqual({
+      ...record.exchangeFile,
+      connection: { ...record.exchangeFile.connection, role: record.side },
+    });
+  });
+
+  test("admit the retention note the record spec sanctions", () => {
+    const retentionDisposition =
+      "Filed with the county records office; disposed after seven years.";
+    const record = importedRecordWithDocument(
+      assembleExchangeSpec({
+        connection: connectionFromLocator(webrtcLocator),
+        linkageTerms,
+        retentionDisposition,
+      }),
+    );
+    expect(parseExportedConfig(record).retentionDisposition).toBe(
+      retentionDisposition,
+    );
+  });
 });
