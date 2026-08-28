@@ -39,7 +39,10 @@ import type {
   ExchangeRecord,
   RecordLinkageRuleSet,
 } from "@psilink/core";
-import type { DisclosureAccounting } from "@psi/disclosureAccounting";
+import type {
+  DisclosureAccounting,
+  StoredDisclosureAccounting,
+} from "@psi/disclosureAccounting";
 
 /**
  * One fact of one disclosure: its first-party label, the display values it carries
@@ -368,4 +371,39 @@ export function disclosureAccountingCsv(
  */
 export function disclosureAccountingFileName(exportedAt: Date): string {
   return `psilink-disclosures-${recordFileStamp(exportedAt.toISOString())}.csv`;
+}
+
+/** The MIME type of a stored-form export: the stored accounting as JSON. */
+export const DISCLOSURE_STORED_EXPORT_MIME = "application/json";
+
+/**
+ * The stored accounting as the file an operator recovers it into: the envelope
+ * and its entries, serialized as they sit at rest.
+ *
+ * This is the ONE export shape for an accounting this build's exchange-record
+ * format can no longer read, and it is deliberately not a reading of the entries.
+ * The CSV above reads each record's fields and names what a fact's absence means,
+ * which is exactly what an entry written under an earlier record version does not
+ * license: the version literal moves with the field set, so an earlier record's
+ * silence is not what the current format's silence means (see
+ * docs/spec/EXCHANGE_RECORD.md). Handing over the stored form asserts nothing
+ * about the entries; rendering them would assert the current format's meaning.
+ *
+ * Pretty-printed with a trailing newline: the file is an archival artifact a
+ * person may open, and the bytes carry no other framing to read it by.
+ */
+export function storedDisclosureAccountingDocument(
+  stored: StoredDisclosureAccounting,
+): string {
+  return `${JSON.stringify({ version: stored.version, entries: stored.entries }, undefined, 2)}\n`;
+}
+
+/**
+ * The download name for a stored-form export, stamped like the CSV's so repeated
+ * exports accumulate rather than collide, and distinct from it so the two forms
+ * of the same accounting do not sit in a downloads folder telling the same story
+ * under one name.
+ */
+export function storedDisclosureAccountingFileName(exportedAt: Date): string {
+  return `psilink-disclosures-stored-${recordFileStamp(exportedAt.toISOString())}.json`;
 }

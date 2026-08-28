@@ -17,6 +17,11 @@ import {
   exportManagedBackup,
 } from "@psi/managedExchangeExport";
 import {
+  getDisclosureAccounting,
+  getStoredDisclosureAccounting,
+  resetDisclosureAccounting,
+} from "@psi/disclosureAccountingStore";
+import {
   getManagedExchange,
   readRecordAndMarkBackedUp,
   updateManagedExchangeLocalFields,
@@ -29,7 +34,6 @@ import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managedExchangeArtifact";
 import { canReinviteFromRecord } from "@psi/managedReinvite";
 import { deriveManagedBackupState } from "@psi/managedBackupState";
 import { fileSystemAccessSupported } from "@psi/managedInputHandle";
-import { getDisclosureAccounting } from "@psi/disclosureAccountingStore";
 import { managedRerunCompletion } from "@psi/managedCompletionSurface";
 import { reinviteManagedExchange } from "@psi/managedReinviteDriver";
 import { runManagedExchangeInBrowser } from "@psi/managedRunDriver";
@@ -60,10 +64,13 @@ import { useBeforeUnloadPrompt } from "./useUnloadGuard";
 import type { Ref } from "react";
 
 import type {
+  DisclosureAccounting,
+  StoredDisclosureAccounting,
+} from "@psi/disclosureAccounting";
+import type {
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
-import type { DisclosureAccounting } from "@psi/disclosureAccounting";
 import type { ManagedBackupMarker } from "@psi/managedBackupState";
 import type { ManagedInputSource } from "@psi/managedInputHandle";
 import type { ManagedMigrationDispatch } from "@psi/managedExchangeExport";
@@ -102,6 +109,15 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // not render as an empty one, which would read as "nothing was disclosed".
   const [accounting, setAccounting] = useState<DisclosureAccounting>();
   const [accountingUnreadable, setAccountingUnreadable] = useState(false);
+  // The stored entries behind a FAILED read, held only to the envelope, so the
+  // unreadable state can hand them back. Present only when the stored form is
+  // still recoverable -- a record-version bump leaves the envelope parsable, while
+  // corruption of the envelope leaves nothing to offer.
+  const [accountingStored, setAccountingStored] =
+    useState<StoredDisclosureAccounting>();
+  // Bumped after the accounting is reset, so the surface re-reads what the store
+  // actually holds rather than assuming the delete took.
+  const [accountingReads, setAccountingReads] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
   // A dispatched migration whose download fired but whose spend awaits the operator
@@ -195,16 +211,29 @@ export function ManagedRunSurface({ id }: { id: string }) {
         if (!live) return;
         setAccounting(loaded);
         setAccountingUnreadable(false);
+        setAccountingStored(undefined);
       })
       .catch(() => {
         if (!live) return;
         setAccounting(undefined);
         setAccountingUnreadable(true);
+        // Only once the validating read has failed: the recovery read returns
+        // entries this build refused to vouch for, so it must never be the source
+        // anything renders as an accounting. Its own failure is not a second
+        // failure to report -- the unreadable state already stands -- it only
+        // means there is nothing to hand back.
+        void getStoredDisclosureAccounting(id)
+          .then((recoverable) => {
+            if (live) setAccountingStored(recoverable);
+          })
+          .catch(() => {
+            if (live) setAccountingStored(undefined);
+          });
       });
     return () => {
       live = false;
     };
-  }, [id, finishedAt]);
+  }, [id, finishedAt, accountingReads]);
 
   // Revoke the run's object URLs when they are replaced or the surface unmounts:
   // the results blob is matched-record PII and the keys blob is private material.
@@ -472,6 +501,14 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setRecord(updated);
   }
 
+  // Destroy the accounting this build cannot read, then re-read it: the surface
+  // shows what the store holds afterwards, so a delete that did not take leaves
+  // the unreadable state standing rather than a stale empty one.
+  async function resetAccounting(): Promise<void> {
+    await resetDisclosureAccounting(id);
+    setAccountingReads((reads) => reads + 1);
+  }
+
   return (
     <BenchPage>
       <main className={styles.lobby}>
@@ -718,6 +755,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
               record={record}
               accounting={accounting}
               accountingUnreadable={accountingUnreadable}
+              accountingStored={accountingStored}
+              onResetAccounting={resetAccounting}
               onSaveLocalFields={saveLocalFields}
               onReinviteToChangeTerms={() => reinviteNow("detail")}
               canReinvite={canReinviteFromRecord(record)}

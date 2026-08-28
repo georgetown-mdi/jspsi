@@ -1,6 +1,13 @@
 import { useState } from "react";
 
-import { Alert, Button, Checkbox, NumberInput, TextInput } from "@mantine/core";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Modal,
+  NumberInput,
+  TextInput,
+} from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 
 import { DisclosureSection } from "@components/DisclosureSection";
@@ -8,9 +15,12 @@ import { triggerBlobDownload } from "@components/blobDownload";
 
 import {
   DISCLOSURE_EXPORT_MIME,
+  DISCLOSURE_STORED_EXPORT_MIME,
   disclosureAccountingCsv,
   disclosureAccountingFileName,
   disclosureEntries,
+  storedDisclosureAccountingDocument,
+  storedDisclosureAccountingFileName,
 } from "./disclosureAccountingModel";
 import {
   LABEL_GUIDANCE,
@@ -30,11 +40,14 @@ import { dateLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type {
+  DisclosureAccounting,
+  StoredDisclosureAccounting,
+} from "@psi/disclosureAccounting";
+import type {
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
 import type { ConfigRow } from "./managedDetailModel";
-import type { DisclosureAccounting } from "@psi/disclosureAccounting";
 import type { DisclosureFact } from "./disclosureAccountingModel";
 
 /**
@@ -57,6 +70,8 @@ export function ManagedExchangeDetail({
   record,
   accounting,
   accountingUnreadable,
+  accountingStored,
+  onResetAccounting,
   onSaveLocalFields,
   onReinviteToChangeTerms,
   canReinvite,
@@ -71,6 +86,17 @@ export function ManagedExchangeDetail({
   /** Whether reading the accounting failed. Distinguished from an empty one so a
    * failed read can never render as "nothing was disclosed". */
   accountingUnreadable: boolean;
+  /** The stored entries of an accounting the validating read refused, held only to
+   * the envelope. Present only when the read failed AND the stored form is still
+   * recoverable -- the record-version-bump case, as against corruption, which
+   * takes the envelope with it. Never rendered as an accounting; the recovery
+   * affordance hands it back as a file. */
+  accountingStored: StoredDisclosureAccounting | undefined;
+  /** Destroy the stored accounting so the exchange can file disclosures again,
+   * leaving the exchange itself untouched. Offered only from the unreadable state,
+   * behind an explicit confirm, and after the export. Rejects on a store failure;
+   * the confirm surfaces the failure and stays open. */
+  onResetAccounting: () => Promise<void>;
   /** Persist an in-place edit to the local fields (label, max-token-age policy).
    * Rejects on a store failure; the editor surfaces the failure and keeps the
    * form. */
@@ -105,6 +131,8 @@ export function ManagedExchangeDetail({
       <DisclosureAccountingView
         accounting={accounting}
         unreadable={accountingUnreadable}
+        stored={accountingStored}
+        onReset={onResetAccounting}
       />
     </>
   );
@@ -423,10 +451,11 @@ function factRow(fact: DisclosureFact): ConfigRow {
  *
  * A failed read renders as its own state, never as an empty accounting: "nothing
  * was disclosed" is a claim, and this surface must not make it on a read it could
- * not perform. The footer drops its export offer in that state for the same
- * reason it renders no export button there -- there is nothing to export from a
- * read that failed. Each entry starts collapsed behind its date and partner, so a
- * long history stays scannable and the reader opens the run they came for.
+ * not perform. That state carries its own recovery
+ * ({@link UnreadableAccountingRecovery}) rather than the CSV export and the
+ * footer's offer of it, which speak for entries this read did not obtain. Each
+ * entry starts collapsed behind its date and partner, so a long history stays
+ * scannable and the reader opens the run they came for.
  *
  * Every count and empty state here speaks for THIS browser's copy and says so: the
  * export/import artifact migrates the runnable exchange without its accounting
@@ -437,9 +466,13 @@ function factRow(fact: DisclosureFact): ConfigRow {
 function DisclosureAccountingView({
   accounting,
   unreadable,
+  stored,
+  onReset,
 }: {
   accounting: DisclosureAccounting | undefined;
   unreadable: boolean;
+  stored: StoredDisclosureAccounting | undefined;
+  onReset: () => Promise<void>;
 }) {
   const [openedNonce, setOpenedNonce] = useState<string>();
   const entries = accounting === undefined ? [] : disclosureEntries(accounting);
@@ -464,14 +497,7 @@ function DisclosureAccountingView({
         non-repudiable receipt.
       </p>
       {unreadable ? (
-        <Alert color="red" title="This accounting could not be read">
-          The disclosure records stored for this exchange could not be read, so
-          they are not shown. This does not mean nothing was disclosed. An app
-          upgrade can leave a stored accounting unreadable to this version of
-          the app, and there is no export of it from here. What remains is any
-          record file you downloaded yourself when a run finished; a run that
-          finished unattended left none.
-        </Alert>
+        <UnreadableAccountingRecovery stored={stored} onReset={onReset} />
       ) : entries.length === 0 ? (
         <p className={styles.small}>
           No run of this exchange has completed in this browser, so this
@@ -522,5 +548,185 @@ function DisclosureAccountingView({
         <Link to="/verify">verify page</Link> and drop it in.
       </p>
     </div>
+  );
+}
+
+/**
+ * The recovery affordance for an accounting this build can no longer read, which
+ * an app upgrade that moved the exchange-record format produces: the stored
+ * entries stay at rest, admissible under the format current when they were
+ * written, and the validating read refuses them wholesale.
+ *
+ * Two arms, offered in one fixed order, because neither alone covers the failure.
+ * The EXPORT is the only thing that retains the record -- the accounting is a
+ * HIPAA/FERPA disclosure source and nothing else holds it -- and it hands over the
+ * stored form rather than a reading of it, since this build cannot say what an
+ * earlier record's fields meant. The RESET is the only thing that restores
+ * appendability: the read failure is an append failure too, so a still-scheduled
+ * exchange keeps disclosing and files nothing until the stored value is cleared.
+ * Export first, then reset: the export does not restore appendability, and the
+ * reset destroys what the export would have saved.
+ *
+ * Whether the export is offered is read off the stored value rather than assumed.
+ * A record-version bump leaves the envelope parsable and the entries not, so the
+ * entries come back whole; corruption that takes the envelope leaves nothing to
+ * hand over, and that state says so instead of offering a download it cannot
+ * honor. The reset is offered either way -- it is what makes the exchange able to
+ * file again -- but it never fires as a read's side effect: it takes an explicit
+ * confirm that names what is destroyed and what is kept.
+ */
+function UnreadableAccountingRecovery({
+  stored,
+  onReset,
+}: {
+  stored: StoredDisclosureAccounting | undefined;
+  onReset: () => Promise<void>;
+}) {
+  // Whether the download was TAKEN here, not whether the file landed: the browser
+  // writes it after the click and reports nothing back. It drives a prompt to check
+  // for the file, never a claim that it is saved.
+  const [downloadTaken, setDownloadTaken] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetFailed, setResetFailed] = useState(false);
+
+  function downloadStored() {
+    if (stored === undefined) return;
+    triggerBlobDownload(
+      storedDisclosureAccountingFileName(new Date()),
+      storedDisclosureAccountingDocument(stored),
+      DISCLOSURE_STORED_EXPORT_MIME,
+    );
+    setDownloadTaken(true);
+  }
+
+  function confirmReset() {
+    setResetting(true);
+    setResetFailed(false);
+    void onReset()
+      .then(() => setConfirming(false))
+      .catch(() => {
+        // A rejected delete leaves the accounting standing: keep the modal open and
+        // surface the failure, so the operator retries rather than believing a
+        // destructive step took that did not.
+        setResetFailed(true);
+      })
+      .finally(() => setResetting(false));
+  }
+
+  return (
+    <>
+      <Alert color="red" title="This accounting could not be read">
+        <p>
+          The disclosure records stored for this exchange could not be read, so
+          they are not shown. This does not mean nothing was disclosed. An app
+          upgrade can leave a stored accounting unreadable to this version of
+          the app.
+        </p>
+        <p>
+          Until it is cleared, this exchange cannot add to it either: every run
+          still discloses, and none of them files a record here.
+        </p>
+        {stored !== undefined ? (
+          <p>
+            The records themselves are still stored, in the form the app that
+            wrote them used. Download them first -- that is the only way to keep
+            them -- and then start a fresh accounting, which destroys them and
+            lets this exchange file its disclosures again.
+          </p>
+        ) : (
+          <p>
+            What is stored could not be read even in its stored form, so there
+            is no export of it from here. What remains is any record file you
+            downloaded yourself when a run finished; a run that finished
+            unattended left none. Starting a fresh accounting destroys what is
+            stored and lets this exchange file its disclosures again.
+          </p>
+        )}
+      </Alert>
+      {stored !== undefined && (
+        <p className={`${styles.small} ${styles.sub}`}>
+          The downloaded file is the stored form of this accounting, for your
+          own records. It is not a run&apos;s record file, and this app version
+          cannot read it back or check it.
+        </p>
+      )}
+      <div className={styles.savedRowActions} style={{ marginTop: "1rem" }}>
+        {stored !== undefined && (
+          <Button variant="default" onClick={downloadStored}>
+            Download the stored records (JSON)
+          </Button>
+        )}
+        <Button
+          variant="subtle"
+          color="red"
+          disabled={resetting}
+          onClick={() => {
+            setResetFailed(false);
+            setConfirming(true);
+          }}
+        >
+          Start a fresh accounting
+        </Button>
+      </div>
+      <Modal
+        opened={confirming}
+        onClose={() => setConfirming(false)}
+        title="Start a fresh accounting"
+        centered
+        transitionProps={{ duration: 0 }}
+      >
+        <p>
+          Delete the disclosure records stored for this exchange? They are
+          destroyed permanently, this browser holds no other copy, and it cannot
+          be undone.
+        </p>
+        <p className={`${styles.small} ${styles.sub}`}>
+          The exchange itself is kept: its agreed terms, its stored secret, its
+          schedule, and its run history are untouched. Its next completed run
+          files the first entry of the new accounting.
+        </p>
+        {stored !== undefined ? (
+          <>
+            <p className={`${styles.small} ${styles.sub}`}>
+              {downloadTaken
+                ? "Check that the download reached your downloads folder before continuing."
+                : "You have not downloaded the stored records from here. Download them first if you need to keep them."}
+            </p>
+            <Button variant="default" onClick={downloadStored}>
+              Download the stored records (JSON)
+            </Button>
+          </>
+        ) : (
+          <p className={`${styles.small} ${styles.sub}`}>
+            There is nothing to download first: what is stored could not be read
+            even in its stored form.
+          </p>
+        )}
+        {resetFailed && (
+          <Alert
+            color="red"
+            title="That accounting could not be reset"
+            mt="sm"
+            mb="sm"
+          >
+            The stored records were not deleted. Nothing changed; try again.
+          </Alert>
+        )}
+        <div className={styles.savedRowActions} style={{ marginTop: "1rem" }}>
+          <Button variant="default" onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+          <Button
+            color="red"
+            variant="light"
+            loading={resetting}
+            onClick={confirmReset}
+          >
+            Delete these records
+          </Button>
+        </div>
+      </Modal>
+    </>
   );
 }

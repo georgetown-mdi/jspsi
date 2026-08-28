@@ -1,9 +1,12 @@
 import { describe, expect, test } from "vitest";
 
+import { EXCHANGE_RECORD_VERSION } from "@psilink/core";
+
 import {
   DISCLOSURE_ACCOUNTING_VERSION,
   appendDisclosureRecord,
   parseDisclosureAccounting,
+  parseStoredDisclosureAccounting,
 } from "../../src/psi/disclosureAccounting.js";
 
 import { disclosureRecord } from "../utils/disclosureFixtures.js";
@@ -133,6 +136,138 @@ describe("reading a stored accounting", () => {
 
     expect(() =>
       parseDisclosureAccounting({ ...accounting, retainUntil: "2030-01-01" }),
+    ).toThrow();
+  });
+});
+
+/**
+ * The premise the recovery affordance rests on, driven against the real parsers
+ * rather than asserted in prose: a move of the exchange-record version literal
+ * invalidates the stored ENTRIES and leaves the ENVELOPE intact, so the stored
+ * entries come back whole through the envelope-only read.
+ *
+ * This is the tripwire. If a future record format is ever reached whose bump also
+ * takes the accounting envelope with it -- or whose stored entries the envelope
+ * read no longer returns verbatim -- the recovery has no export arm, and this is
+ * what fails rather than an operator discovering it while stranded. The
+ * complementary check, that the version literal cannot move without the decision
+ * being re-taken, is scripts/check-disclosure-recovery.mjs.
+ *
+ * A bump is simulated by presenting a stored entry under a literal that is not the
+ * current one, which is parse-identical to the app's own constant moving forward.
+ * The simulated literal is derived from core's constant rather than written out,
+ * so it stays a NON-current version when core's does move. Its stated limit: a
+ * real bump also moves the record's field set, so an entry under it would raise
+ * whatever the new field set requires ON TOP of the version issue. That widens
+ * what the entry read rejects and reaches the envelope not at all, since the
+ * envelope schema looks inside no entry -- which is what these tests pin.
+ */
+describe("a moved exchange-record version leaves the stored entries recoverable", () => {
+  /** A stored accounting whose entries carry a record version this build does not
+   * admit, as an app upgrade that moved the literal would leave at rest. */
+  async function accountingFromAnotherRecordVersion(): Promise<unknown> {
+    const record = await disclosureRecord();
+    expect(record.version).toBe(EXCHANGE_RECORD_VERSION);
+    return {
+      version: DISCLOSURE_ACCOUNTING_VERSION,
+      entries: [{ ...record, version: `${EXCHANGE_RECORD_VERSION}-moved` }],
+    };
+  }
+
+  test("the entries reject and the envelope does not, which is what makes an export possible", async () => {
+    const stored = await accountingFromAnotherRecordVersion();
+
+    // One value, two reads: the validating read refuses it wholesale -- the state
+    // an operator is stranded in -- while the envelope read returns it.
+    expect(() => parseDisclosureAccounting(stored)).toThrow();
+    expect(() => parseStoredDisclosureAccounting(stored)).not.toThrow();
+  });
+
+  test("the envelope read hands back every stored entry verbatim", async () => {
+    const stored = (await accountingFromAnotherRecordVersion()) as {
+      version: string;
+      entries: Array<unknown>;
+    };
+
+    const recovered = parseStoredDisclosureAccounting(stored);
+
+    // Deep equality against what is at rest, not a count: an export that dropped
+    // or reshaped an entry would hand the operator a shorter account of what was
+    // disclosed, which is the failure the validating read exists to prevent.
+    expect(recovered.entries).toEqual(stored.entries);
+    expect(recovered.version).toBe(DISCLOSURE_ACCOUNTING_VERSION);
+  });
+
+  test("a mix of admissible and inadmissible entries comes back whole", async () => {
+    // The realistic post-upgrade shape: runs filed before the bump and runs filed
+    // after it, in one accounting. The export must carry both.
+    const current = await disclosureRecord();
+    const earlier = {
+      ...(await disclosureRecord()),
+      version: `${EXCHANGE_RECORD_VERSION}-moved`,
+    };
+    const stored = {
+      version: DISCLOSURE_ACCOUNTING_VERSION,
+      entries: [earlier, current],
+    };
+
+    expect(() => parseDisclosureAccounting(stored)).toThrow();
+    expect(parseStoredDisclosureAccounting(stored).entries).toEqual([
+      earlier,
+      current,
+    ]);
+  });
+});
+
+describe("the envelope-only read is scoped to the envelope, not an escape hatch", () => {
+  test("an accounting this version can read is returned unchanged by it", async () => {
+    const accounting = appendDisclosureRecord(
+      undefined,
+      await disclosureRecord(),
+    );
+
+    expect(parseStoredDisclosureAccounting(accounting).entries).toEqual(
+      accounting.entries,
+    );
+  });
+
+  test("rejects an unrecognized accounting version, exactly as the validating read does", async () => {
+    const accounting = appendDisclosureRecord(
+      undefined,
+      await disclosureRecord(),
+    );
+
+    expect(() =>
+      parseStoredDisclosureAccounting({
+        ...accounting,
+        version: "psilink-disclosure-accounting/v2",
+      }),
+    ).toThrow();
+  });
+
+  test("rejects an unknown key on the envelope", async () => {
+    const accounting = appendDisclosureRecord(
+      undefined,
+      await disclosureRecord(),
+    );
+
+    expect(() =>
+      parseStoredDisclosureAccounting({
+        ...accounting,
+        retainUntil: "2030-01-01",
+      }),
+    ).toThrow();
+  });
+
+  test("rejects a value whose entries are not a list, so a corrupted envelope offers nothing", () => {
+    // The state the recovery surface must distinguish from a version bump: there
+    // is no export to offer, and the surface says so rather than handing over a
+    // shape it cannot vouch for at all.
+    expect(() =>
+      parseStoredDisclosureAccounting({
+        version: DISCLOSURE_ACCOUNTING_VERSION,
+        entries: "one disclosure",
+      }),
     ).toThrow();
   });
 });

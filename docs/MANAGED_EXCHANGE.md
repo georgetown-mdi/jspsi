@@ -936,6 +936,37 @@ exchange's own page, below its run history.
   the exchange; the record files offered at a run's completion stand in only for
   the runs somebody was there to download one from.
 
+### When an app upgrade leaves an accounting unreadable
+
+An upgrade can change the format of the records an accounting is made of. When
+that happens the accounting page says so instead of showing entries, because a
+partly-read accounting would understate what was disclosed. Two things are true
+in that state, and the second is the one to act on:
+
+- The entries are still stored. They were valid when they were written; this
+  version of the app will not read them.
+- The exchange cannot add to them either. It keeps running and keeps disclosing,
+  and none of those runs files a record here until the accounting is cleared.
+
+The page offers the way out, in the order to take it. Neither step alone is
+enough: the download is the only way to keep the records, and clearing is the
+only way to let the exchange file again.
+
+1. **Download the stored records.** You get the accounting in the form it was
+   stored in, with nothing lost. It is a file for your own records -- keep it
+   with your compliance material. It is not a run's record file, so neither the
+   verify page nor this app will read it back.
+2. **Start a fresh accounting.** This deletes the stored records permanently and
+   lets the exchange file its disclosures again from its next run. It asks you to
+   confirm, and it keeps the exchange itself -- the agreed terms, the stored
+   secret, the schedule, and the run history are untouched. You do not have to
+   delete the exchange to recover its accounting.
+
+Occasionally the stored records are damaged past the point where even that
+download is possible. The page says so rather than offering a download it cannot
+deliver; what remains is any record file you downloaded when a run finished, and
+clearing the accounting still lets the exchange file again.
+
 ## Surviving storage eviction
 
 Browser storage is not durable the way a file on disk is. The design must survive

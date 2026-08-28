@@ -16,6 +16,12 @@
  *
  * A deleted managed exchange takes its accounting with it, in the same one-step
  * delete transaction (see {@link ./managedExchangeStore.ts}).
+ *
+ * Beside the validating read and the append sit the two recovery operations for a
+ * stored accounting this build can no longer read -- get the entries out, then
+ * make the store appendable again. They are one ordered pair, not alternatives:
+ * the export retains the record but leaves the store un-appendable, and the reset
+ * restores appendability but destroys the record.
  */
 
 import { parseExchangeRecord } from "@psilink/core";
@@ -27,25 +33,23 @@ import {
 import {
   appendDisclosureRecord,
   parseDisclosureAccounting,
+  parseStoredDisclosureAccounting,
 } from "./disclosureAccounting";
 
-import type { DisclosureAccounting } from "./disclosureAccounting";
+import type {
+  DisclosureAccounting,
+  StoredDisclosureAccounting,
+} from "./disclosureAccounting";
 import type { ExchangeRecord } from "@psilink/core";
 
-/**
- * Read one managed exchange's accounting of disclosures, or `undefined` when it
- * has none (no run has completed). The stored value is re-validated through
- * {@link parseDisclosureAccounting}, so a corrupted or app-upgrade-invalidated
- * accounting rejects rather than loading as a shorter, quietly false account.
- *
- * @throws {ZodError} if the stored value is not a valid accounting.
- */
-export async function getDisclosureAccounting(
-  id: string,
-): Promise<DisclosureAccounting | undefined> {
+/** Read the stored accounting value under `id`, unparsed, or `undefined` when the
+ * exchange has none. The one place the disclosure store is read from, so the
+ * validating read and the recovery read below differ only in what they hold the
+ * value to. */
+async function readStoredValue(id: string): Promise<unknown> {
   const db = await openManagedExchangeDatabase();
   try {
-    const raw = await new Promise<unknown>((resolve, reject) => {
+    return await new Promise<unknown>((resolve, reject) => {
       const transaction = db.transaction(
         MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
         "readonly",
@@ -61,8 +65,87 @@ export async function getDisclosureAccounting(
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
     });
-    if (raw === undefined) return undefined;
-    return parseDisclosureAccounting(raw);
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Read one managed exchange's accounting of disclosures, or `undefined` when it
+ * has none (no run has completed). The stored value is re-validated through
+ * {@link parseDisclosureAccounting}, so a corrupted or app-upgrade-invalidated
+ * accounting rejects rather than loading as a shorter, quietly false account.
+ *
+ * @throws {ZodError} if the stored value is not a valid accounting.
+ */
+export async function getDisclosureAccounting(
+  id: string,
+): Promise<DisclosureAccounting | undefined> {
+  const raw = await readStoredValue(id);
+  if (raw === undefined) return undefined;
+  return parseDisclosureAccounting(raw);
+}
+
+/**
+ * Read one managed exchange's accounting for RECOVERY: the entries exactly as
+ * they sit at rest, held only to the envelope, so an accounting whose entries
+ * this build's exchange-record format no longer admits can still be got out
+ * whole. `undefined` when the exchange has no accounting.
+ *
+ * Deliberately not the read any rendering surface uses. It returns what
+ * {@link getDisclosureAccounting} refused to vouch for, so its result is fit for
+ * handing back to the operator as stored bytes and for nothing else -- see
+ * {@link parseStoredDisclosureAccounting} for why rendering it would be a
+ * quietly false account.
+ *
+ * @throws {ZodError} if the stored value is not even a valid envelope. That is
+ *   the corruption case rather than the bump case -- a bump moves the ENTRIES'
+ *   version literal, not the accounting's own -- and it leaves no accounting to
+ *   hand back at all.
+ */
+export async function getStoredDisclosureAccounting(
+  id: string,
+): Promise<StoredDisclosureAccounting | undefined> {
+  const raw = await readStoredValue(id);
+  if (raw === undefined) return undefined;
+  return parseStoredDisclosureAccounting(raw);
+}
+
+/**
+ * Delete one managed exchange's accounting of disclosures, leaving the exchange
+ * itself -- its terms, its stored secret, its schedule, its run bookkeeping, and
+ * its local sibling state -- untouched. Scoped to the disclosure store alone,
+ * unlike {@link ./managedExchangeStore.ts}'s delete, which removes the exchange
+ * and takes the accounting with it.
+ *
+ * This is the second half of the recovery from a stored accounting this build
+ * cannot read: the read failure is also an APPEND failure (the append re-reads
+ * the accounting through the validating read inside its own transaction), so
+ * every later run of a still-live exchange discloses and files nothing. Clearing
+ * the unreadable value restores appendability; the next run starts a fresh
+ * accounting.
+ *
+ * DESTRUCTIVE and irreversible: the entries are the exchange's disclosure history
+ * and nothing else holds them. It is never a read's side effect -- the surface
+ * that offers it confirms explicitly and offers the export first. Idempotent: a
+ * reset of an exchange with no accounting resolves without error.
+ */
+export async function resetDisclosureAccounting(id: string): Promise<void> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(
+        MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
+        "readwrite",
+        { durability: "strict" },
+      );
+      transaction
+        .objectStore(MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME)
+        .delete(id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
   } finally {
     db.close();
   }

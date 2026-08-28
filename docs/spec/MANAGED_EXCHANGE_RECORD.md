@@ -635,6 +635,59 @@ dropped entry would falsify the account. Deleting the managed exchange deletes
 its accounting in the same one-step delete, so an operator who must keep it
 exports it first.
 
+### What an exchange-record version bump does to a stored accounting
+
+An entry is an exchange record, and the record format's version literal moves
+with its field set; a reader rejects an unrecognized version rather than
+migrating it, and no migration is offered pre-release (see
+[EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)). So a bump of
+`EXCHANGE_RECORD_VERSION` invalidates the entries of every accounting already at
+rest. Two consequences follow, and the second is the one that compounds:
+
+- **The read refuses the whole value**, per the Shape rule above, so the
+  accounting renders as unreadable rather than as an empty or shortened one.
+- **The append refuses it too.** A run files its entry by reading the current
+  accounting, appending, and writing back within one transaction, so the read
+  failure is a write failure: the exchange goes on running and disclosing, and
+  files nothing. A scheduled run's failed append raises the same notice any
+  failed append raises, on a completion surface an unattended run does not open.
+
+**The stored form survives the bump.** The accounting's own `version` is a
+separate literal from the entries', and the envelope is validated without looking
+inside an entry, so a bump leaves the envelope readable and the stored entries
+returned verbatim. Only the per-entry validation refuses. This is what recovery
+rests on, and it is pinned by a test driving both reads against a moved version
+rather than asserted here.
+
+**The recovery offered is export then reset**, in that order, from the unreadable
+state, and it never removes the exchange:
+
+| Arm | What it does | What it does not do |
+| --- | --- | --- |
+| Stored-form export | Writes the envelope and its entries out as JSON, verbatim | Does not restore appendability, and asserts nothing about the entries |
+| Accounting-scoped reset | Deletes the accounting value alone, so the next run starts a fresh accounting and the exchange can file again | Does not retain the entries; they are destroyed |
+
+Neither alone covers the failure, which is why the surface orders them: the
+export is the only thing that retains the record, and the reset is the only thing
+that restores appendability. The reset is confirmed explicitly, names what is
+destroyed and what is kept, and is never a read's side effect. When the stored
+value is damaged past its envelope -- corruption rather than a version bump --
+there is nothing to export and the surface says so rather than offering a
+download it cannot honor.
+
+Two shapes are deliberately not offered. **Migration** would rewrite a
+self-attested artifact into a version it was not written under, which the
+reader-rejects-unknown rule and the pre-release no-migration rule both exclude. A
+**read-only legacy view** would render an earlier record's absent fields through
+the current version's meaning of their absence -- the quietly false account the
+whole-read rejection above exists to prevent. The export hands over stored bytes
+and makes no claim about them; an extracted entry is an archival artifact, and a
+build that does not recognize its version will not re-check it.
+
+A bump is held to re-taking this decision by `npm run check:disclosure-recovery`,
+which pins the record version literal and fails the move rather than letting it
+ship past the obligation.
+
 ## See also
 
 - [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md) - the managed exchange lifecycle: who it serves, the automation goal and platform envelope, durability contract, single-owner invariant, desync story, eviction survival, and the moment-anchored backup surfaces

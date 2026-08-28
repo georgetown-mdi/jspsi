@@ -14,15 +14,19 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  DISCLOSURE_ACCOUNTING_VERSION,
+  appendDisclosureRecord,
+} from "@psi/disclosureAccounting";
+import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
 import { ManagedExchangeDetail } from "@bench/ManagedExchangeDetail";
-import { appendDisclosureRecord } from "@psi/disclosureAccounting";
 import { disclosureEntries } from "@bench/disclosureAccountingModel";
 
 import { disclosureRecord } from "../utils/disclosureFixtures";
 
+import { captureDownloads } from "./captureDownloads";
 import { createAppMount } from "./renderApp";
 
 import type {
@@ -80,6 +84,8 @@ describe("managed exchange detail configuration", () => {
         record: record("inviter"),
         accounting: undefined,
         accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -121,6 +127,8 @@ describe("managed exchange detail configuration", () => {
         record: record("acceptor"),
         accounting: undefined,
         accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: false,
@@ -168,6 +176,8 @@ describe("managed exchange detail configuration", () => {
         }),
         accounting: undefined,
         accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -203,6 +213,8 @@ describe("managed exchange detail configuration", () => {
           record: record("inviter"),
           accounting: undefined,
           accountingUnreadable: false,
+          accountingStored: undefined,
+          onResetAccounting: () => Promise.resolve(),
           onSaveLocalFields: () => Promise.resolve(),
           onReinviteToChangeTerms: () => {
             reinviting = true;
@@ -259,6 +271,8 @@ describe("managed exchange detail local fields", () => {
         record: record("inviter"),
         accounting: undefined,
         accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: (edits) => {
           saved.push(edits);
           return Promise.resolve();
@@ -293,6 +307,8 @@ describe("managed exchange detail local fields", () => {
         }),
         accounting: undefined,
         accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -314,6 +330,8 @@ describe("managed exchange detail local fields", () => {
         record: record("inviter"),
         accounting: undefined,
         accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -339,6 +357,8 @@ describe("managed exchange detail accounting of disclosures", () => {
         record: record("inviter"),
         accounting: undefined,
         accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -372,6 +392,8 @@ describe("managed exchange detail accounting of disclosures", () => {
         record: record("inviter"),
         accounting: undefined,
         accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -424,6 +446,8 @@ describe("managed exchange detail accounting of disclosures", () => {
         record: record("inviter"),
         accounting,
         accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -475,6 +499,8 @@ describe("managed exchange detail accounting of disclosures", () => {
         record: record("inviter"),
         accounting,
         accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -513,6 +539,8 @@ describe("managed exchange detail accounting of disclosures", () => {
         record: record("inviter"),
         accounting,
         accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -562,6 +590,8 @@ describe("managed exchange detail accounting of disclosures", () => {
         record: record("inviter"),
         accounting,
         accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -604,6 +634,8 @@ describe("managed exchange detail accounting of disclosures", () => {
         record: record("inviter"),
         accounting: undefined,
         accountingUnreadable: true,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -634,6 +666,8 @@ describe("managed exchange detail accounting of disclosures", () => {
         record: record("inviter"),
         accounting: undefined,
         accountingUnreadable: true,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
@@ -683,5 +717,308 @@ describe("managed exchange detail accounting of disclosures", () => {
     await expect
       .element(page.getByRole("link", { name: "verify page" }))
       .toBeInTheDocument();
+  });
+});
+
+/**
+ * The recovery affordance on an accounting this build can no longer read -- the
+ * state an app upgrade that moved the exchange-record version leaves an operator
+ * in, with the entries still at rest and every later run filing nothing.
+ *
+ * Two arms in one fixed order, and these tests are written around what each one
+ * alone does not do: the export retains the record and leaves the store
+ * un-appendable, the reset restores appendability and destroys the record. So the
+ * assertions are that the export comes first, that it hands over the stored form
+ * rather than a reading of it, and that the reset never fires without an explicit
+ * confirm naming what is destroyed and what is kept.
+ */
+describe("recovering an accounting this version cannot read", () => {
+  /** Entries as an upgrade leaves them at rest: the record's own fields, under a
+   * version this build does not admit. */
+  async function strandedEntries(): Promise<Array<unknown>> {
+    const filed = await disclosureRecord({
+      partnerIdentity: "Riverbend Schools",
+    });
+    return [{ ...filed, version: `${filed.version}-moved` }];
+  }
+
+  test("offers the export before the reset, and names why the reset is needed", async () => {
+    const entries = await strandedEntries();
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting: undefined,
+        accountingUnreadable: true,
+        accountingStored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
+        onResetAccounting: () => Promise.resolve(),
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    const download = page.getByRole("button", {
+      name: /Download the stored records/,
+    });
+    const reset = page.getByRole("button", {
+      name: "Start a fresh accounting",
+    });
+    await expect.element(download).toBeInTheDocument();
+    await expect.element(reset).toBeInTheDocument();
+    // The order IS the affordance: the export does not restore appendability and
+    // the reset destroys what the export would have saved, so the screen must not
+    // reach the destructive arm first.
+    expect(
+      download.element().compareDocumentPosition(reset.element()) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // The consequence an operator cannot see for themselves: a still-scheduled
+    // exchange keeps disclosing and files nothing until this is cleared.
+    await expect
+      .element(page.getByText("cannot add to it either", { exact: false }))
+      .toBeInTheDocument();
+    // The claim the state carried when it had no way out.
+    expect(
+      page.getByText("no export of it from here", { exact: false }).query(),
+    ).toBeNull();
+  });
+
+  test("the export hands over the stored entries verbatim, not a reading of them", async () => {
+    const entries = await strandedEntries();
+    const downloads = captureDownloads();
+    try {
+      app.render(
+        createElement(ManagedExchangeDetail, {
+          record: record("inviter"),
+          accounting: undefined,
+          accountingUnreadable: true,
+          accountingStored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
+          onResetAccounting: () => Promise.resolve(),
+          onSaveLocalFields: () => Promise.resolve(),
+          onReinviteToChangeTerms: () => undefined,
+          canReinvite: true,
+          reinviting: false,
+          reinviteFailed: false,
+        }),
+      );
+
+      await page
+        .getByRole("button", { name: /Download the stored records/ })
+        .click();
+
+      await vi.waitFor(() => {
+        expect(downloads.captured).toHaveLength(1);
+        expect(downloads.captured[0].text).not.toBe("");
+      });
+      expect(downloads.captured[0].fileName).toMatch(
+        /^psilink-disclosures-stored-.*\.json$/,
+      );
+      // Deep equality against what was staged at rest: the file loses no entry
+      // and no field, which is the export's only claim.
+      expect(JSON.parse(downloads.captured[0].text)).toEqual({
+        version: DISCLOSURE_ACCOUNTING_VERSION,
+        entries,
+      });
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("the reset destroys nothing until the confirm is taken, and says what it destroys and keeps", async () => {
+    const onResetAccounting = vi.fn(() => Promise.resolve());
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting: undefined,
+        accountingUnreadable: true,
+        accountingStored: {
+          version: DISCLOSURE_ACCOUNTING_VERSION,
+          entries: await strandedEntries(),
+        },
+        onResetAccounting,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    await page
+      .getByRole("button", { name: "Start a fresh accounting" })
+      .click();
+
+    // Opening the confirm is not the act, so a read of this surface destroys
+    // nothing.
+    expect(onResetAccounting).not.toHaveBeenCalled();
+    await expect
+      .element(page.getByText("destroyed permanently", { exact: false }))
+      .toBeInTheDocument();
+    // What is KEPT, which is what separates this from deleting the exchange.
+    await expect
+      .element(page.getByText("The exchange itself is kept", { exact: false }))
+      .toBeInTheDocument();
+    // The export is offered once more here, where it is last available.
+    await expect
+      .element(
+        page.getByText("You have not downloaded the stored records", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Delete these records" }).click();
+
+    await vi.waitFor(() => expect(onResetAccounting).toHaveBeenCalledTimes(1));
+  });
+
+  test("the confirm stops warning about the download once it has been taken", async () => {
+    const downloads = captureDownloads();
+    try {
+      app.render(
+        createElement(ManagedExchangeDetail, {
+          record: record("inviter"),
+          accounting: undefined,
+          accountingUnreadable: true,
+          accountingStored: {
+            version: DISCLOSURE_ACCOUNTING_VERSION,
+            entries: await strandedEntries(),
+          },
+          onResetAccounting: () => Promise.resolve(),
+          onSaveLocalFields: () => Promise.resolve(),
+          onReinviteToChangeTerms: () => undefined,
+          canReinvite: true,
+          reinviting: false,
+          reinviteFailed: false,
+        }),
+      );
+
+      await page
+        .getByRole("button", { name: /Download the stored records/ })
+        .click();
+      await page
+        .getByRole("button", { name: "Start a fresh accounting" })
+        .click();
+
+      // The prompt tracks the click alone -- the browser reports nothing back
+      // about the saved file -- so what replaces the warning is an instruction to
+      // check for it, never a claim that it is saved.
+      expect(
+        page
+          .getByText("You have not downloaded the stored records", {
+            exact: false,
+          })
+          .query(),
+      ).toBeNull();
+      await expect
+        .element(
+          page.getByText("reached your downloads folder", { exact: false }),
+        )
+        .toBeInTheDocument();
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("a reset that fails keeps the confirm open and says nothing was deleted", async () => {
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting: undefined,
+        accountingUnreadable: true,
+        accountingStored: {
+          version: DISCLOSURE_ACCOUNTING_VERSION,
+          entries: await strandedEntries(),
+        },
+        onResetAccounting: () => Promise.reject(new Error("store failed")),
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    await page
+      .getByRole("button", { name: "Start a fresh accounting" })
+      .click();
+    await page.getByRole("button", { name: "Delete these records" }).click();
+
+    // A destructive step that did not take must not read as one that did: the
+    // confirm stands, so the operator retries rather than believing it is done.
+    await expect
+      .element(page.getByText("That accounting could not be reset"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Delete these records" }))
+      .toBeInTheDocument();
+  });
+
+  test("an accounting whose stored form is gone too offers the reset and no export", async () => {
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting: undefined,
+        accountingUnreadable: true,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    // No download it cannot honor, and the honest reason for its absence.
+    expect(
+      page.getByRole("button", { name: /Download the stored records/ }).query(),
+    ).toBeNull();
+    await expect
+      .element(page.getByText("no export of it from here", { exact: false }))
+      .toBeInTheDocument();
+    // The reset still stands: it is what lets the exchange file disclosures again.
+    await page
+      .getByRole("button", { name: "Start a fresh accounting" })
+      .click();
+
+    await expect
+      .element(page.getByText("nothing to download first", { exact: false }))
+      .toBeInTheDocument();
+  });
+
+  test("an accounting this version can read carries no recovery affordance", async () => {
+    const accounting = appendDisclosureRecord(
+      undefined,
+      await disclosureRecord(),
+    );
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accounting,
+        accountingUnreadable: false,
+        accountingStored: undefined,
+        onResetAccounting: () => Promise.resolve(),
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    // The readable accounting is untouched: its own CSV export stands, and
+    // neither recovery arm is reachable from it.
+    await expect
+      .element(page.getByRole("button", { name: /Export this accounting/ }))
+      .toBeInTheDocument();
+    expect(
+      page.getByRole("button", { name: /Download the stored records/ }).query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: "Start a fresh accounting" }).query(),
+    ).toBeNull();
   });
 });

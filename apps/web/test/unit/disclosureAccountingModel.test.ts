@@ -13,6 +13,8 @@ import {
   disclosureAccountingFileName,
   disclosureEntries,
   disclosureFacts,
+  storedDisclosureAccountingDocument,
+  storedDisclosureAccountingFileName,
 } from "../../src/bench/disclosureAccountingModel.js";
 import {
   DISCLOSURE_ACCOUNTING_VERSION,
@@ -499,6 +501,85 @@ describe("the exported accounting", () => {
     expect(
       disclosureAccountingFileName(new Date("2026-08-20T12:30:00.000Z")),
     ).toBe("psilink-disclosures-2026-08-20T12-30-00-000Z.csv");
+  });
+});
+
+/**
+ * The stored-form export: the file an operator recovers an accounting into when
+ * this build's exchange-record format can no longer read the entries. Its whole
+ * contract is that it asserts nothing about them -- it hands back what is at rest,
+ * so the entries must survive it byte-for-byte in content.
+ */
+describe("the stored accounting as a recovery file", () => {
+  /** Entries as they would sit at rest after a record-version move: the format's
+   * own fields, under a version this build does not admit. */
+  const storedEntries: ReadonlyArray<unknown> = [
+    {
+      version: "psilink-exchange-record/v-moved",
+      createdAt: "2026-07-01T09:00:00.000Z",
+      partnerIdentity: "Riverbend Schools",
+      recordsExposed: 11,
+      fieldTheFormatNoLongerCarries: ["kept anyway"],
+    },
+    {
+      version: "psilink-exchange-record/v-moved",
+      createdAt: "2026-08-01T09:00:00.000Z",
+      partnerIdentity: "Falls County Clinic",
+      recordsExposed: 23,
+    },
+  ];
+
+  test("retains every entry verbatim, including fields this build has no meaning for", () => {
+    const document = storedDisclosureAccountingDocument({
+      version: DISCLOSURE_ACCOUNTING_VERSION,
+      entries: storedEntries,
+    });
+
+    // Deep equality after a round trip, not a spot check on a field: the export's
+    // one job is to lose nothing, and a field the current format does not carry is
+    // exactly the field a bump would have made unreadable.
+    expect(JSON.parse(document)).toEqual({
+      version: DISCLOSURE_ACCOUNTING_VERSION,
+      entries: storedEntries,
+    });
+  });
+
+  test("carries no reading of the entries, only the stored shape", () => {
+    const document = storedDisclosureAccountingDocument({
+      version: DISCLOSURE_ACCOUNTING_VERSION,
+      entries: storedEntries,
+    });
+
+    // The CSV's column labels are this app's reading of a record under the CURRENT
+    // format's meaning. An entry from another version licenses none of it, so the
+    // recovery file must carry the record's own field names and no label of ours.
+    for (const label of DISCLOSURE_FACT_LABELS)
+      expect(document).not.toContain(label);
+    expect(document).toContain("partnerIdentity");
+  });
+
+  test("an accounting with no entries still recovers as a document", () => {
+    expect(
+      JSON.parse(
+        storedDisclosureAccountingDocument({
+          version: DISCLOSURE_ACCOUNTING_VERSION,
+          entries: [],
+        }),
+      ),
+    ).toEqual({ version: DISCLOSURE_ACCOUNTING_VERSION, entries: [] });
+  });
+
+  test("names the download by the export instant, apart from the CSV's name", () => {
+    const exportedAt = new Date("2026-08-20T12:30:00.000Z");
+
+    expect(storedDisclosureAccountingFileName(exportedAt)).toBe(
+      "psilink-disclosures-stored-2026-08-20T12-30-00-000Z.json",
+    );
+    // Two forms of one accounting must not land in a downloads folder under one
+    // name: only one of them is a reading a compliance reader can rely on.
+    expect(storedDisclosureAccountingFileName(exportedAt)).not.toBe(
+      disclosureAccountingFileName(exportedAt),
+    );
   });
 });
 
