@@ -20,12 +20,13 @@ It does not re-specify the record's byte-level shape, the KDF labels, or the CSP
 directive syntax; those live in the spec tier.
 
 > **Status.** The record, its rotating secret at rest, the recurring-exchange
-> surfaces, the attended one-action re-run, and the installable offline app
-> shell are built. Schedule entry, the
-> scheduled window runner, and the between-visit OS notification are not, so
-> every run is operator-initiated today and the automation described below is
-> the design target rather than shipped behavior. Persisting a rotating secret
-> at rest reverses the one-shot exchange's discard (see
+> surfaces, the attended one-action re-run, the installable offline app shell,
+> and the scheduled window runner are built. The runner is not yet reachable:
+> schedule entry and the between-visit OS notification are not built, so no
+> stored record carries a schedule for it to run, every run is
+> operator-initiated, and the automation described below is the design target
+> rather than shipped behavior. Persisting a rotating secret at rest reverses
+> the one-shot exchange's discard (see
 > [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-web-exchanges-single-use-vs-managed)),
 > so the remaining work stays gated on security review.
 

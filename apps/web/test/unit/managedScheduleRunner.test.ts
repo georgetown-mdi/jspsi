@@ -8,6 +8,7 @@ import {
   tickManagedSchedules,
 } from "@psi/managedScheduleRunner";
 import {
+  applyManagedExchangeLocalEdits,
   applyManagedExchangeScheduleAdvance,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
@@ -85,15 +86,18 @@ function recordWith(
 
 /** One recorded attempt: what the tick handed the run seam. */
 interface RecordedAttempt {
+  id: string;
   source: ManagedScheduleAttempt["source"];
   peerWaitTimeoutMs: number;
   startedAtMs: number;
 }
 
 /** How one attempt behaves, in order; the last entry repeats for every further
- * attempt. */
+ * attempt. A `"hang"` never settles until the harness releases it, which is how
+ * a test holds one record inside its window while it drives another wake. */
 type AttemptScript = Array<
   | { kind: "succeed"; spendsMs?: number }
+  | { kind: "hang" }
   | {
       kind: "fail";
       error: unknown;
@@ -111,6 +115,14 @@ interface Harness {
   order: Array<"advance" | "attempt">;
   stored: Map<string, ManagedExchangeRecord>;
   nowMs: () => number;
+  /** Resolves once the first attempt has begun, so a second wake can be driven
+   * at a moment the first is provably inside a window. */
+  firstAttempt: Promise<void>;
+  /** Settles every hanging attempt as a completed exchange. */
+  releaseHangingAttempts: () => void;
+  /** Moves the fake clock on between two wakes, as real time does while a
+   * window is being occupied. */
+  advanceClock: (ms: number) => void;
 }
 
 function harness(options: {
@@ -120,6 +132,10 @@ function harness(options: {
   localState?: Map<string, ManagedLocalState>;
   stopAfterAttempts?: number;
   failAdvanceFor?: string;
+  /** A write applied to the stored record immediately before the conditioned
+   * advance lands, standing in for another tab's edit between this tick's
+   * snapshot and its write. */
+  concurrentEdit?: (record: ManagedExchangeRecord) => ManagedExchangeRecord;
 }): Harness {
   const script = options.script ?? [];
   const stored = new Map(
@@ -131,7 +147,14 @@ function harness(options: {
     advance: ManagedExchangeScheduleAdvance;
   }> = [];
   const order: Array<"advance" | "attempt"> = [];
+  const hangReleases: Array<() => void> = [];
   let clockMs = at(options.startAt);
+  let noteFirstAttempt = (): void => undefined;
+  const firstAttempt = new Promise<void>((resolve) => {
+    noteFirstAttempt = () => {
+      resolve();
+    };
+  });
 
   const seams: ManagedScheduleTickSeams = {
     now: () => clockMs,
@@ -148,22 +171,31 @@ function harness(options: {
       const existing = stored.get(id);
       if (existing === undefined)
         return Promise.reject(new Error(`no record ${id}`));
-      const next = applyManagedExchangeScheduleAdvance(existing, advance);
+      const current = options.concurrentEdit?.(existing) ?? existing;
+      const next = applyManagedExchangeScheduleAdvance(current, advance);
       stored.set(id, next);
       return Promise.resolve(next);
     },
     runAttempt: (attempt) => {
       order.push("attempt");
       attempts.push({
+        id: attempt.record.id,
         source: attempt.source,
         peerWaitTimeoutMs: attempt.peerWaitTimeoutMs,
         startedAtMs: clockMs,
       });
+      noteFirstAttempt();
       // The last scripted step repeats; a tick that attempts anything with no
       // script at all is a test that meant to supply one.
       const step = script.at(Math.min(attempts.length - 1, script.length - 1));
       if (step === undefined)
         return Promise.reject(new Error("no attempt scripted"));
+      if (step.kind === "hang")
+        return new Promise<undefined>((resolve) => {
+          hangReleases.push(() => {
+            resolve(undefined);
+          });
+        });
       clockMs += step.spendsMs ?? 0;
       if (step.kind === "succeed") return Promise.resolve(undefined);
       if (step.startsDataExchange === true) attempt.onDataExchangeStart();
@@ -177,7 +209,21 @@ function harness(options: {
       options.stopAfterAttempts !== undefined &&
       attempts.length >= options.stopAfterAttempts,
   };
-  return { seams, attempts, advances, order, stored, nowMs: () => clockMs };
+  return {
+    seams,
+    attempts,
+    advances,
+    order,
+    stored,
+    nowMs: () => clockMs,
+    firstAttempt,
+    releaseHangingAttempts: () => {
+      for (const release of hangReleases) release();
+    },
+    advanceClock: (ms) => {
+      clockMs += ms;
+    },
+  };
 }
 
 /** A no-show attempt spends its whole peer wait, exactly as the rendezvous
@@ -267,6 +313,24 @@ describe("a due window in the open runtime", () => {
     expect(
       runner.attempts[1].startedAtMs - runner.attempts[0].startedAtMs,
     ).toBe(ATTEMPT_RATE_GAP_MS);
+  });
+
+  test("paces no further than the window's close, which ends the occupancy anyway", async () => {
+    const runner = harness({
+      records: [recordWith()],
+      // Half a rate gap before the close, so the full pacing delay would run
+      // past it.
+      startAt: "2026-01-06T16:59:30.000Z",
+      script: [{ kind: "fail", error: new Error("the broker refused") }],
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry.attempts).toBe(1);
+    expect(entry.disposition).toBe("failed");
+    // The occupancy ends AT the close rather than waiting out a gap the window
+    // has no room for, so the record is free again the moment its window is.
+    expect(runner.nowMs()).toBe(at("2026-01-06T17:00:00.000Z"));
   });
 
   test("never re-attempts once the data exchange began", async () => {
@@ -388,6 +452,59 @@ describe("a window the single-writer lock was held through", () => {
       },
     });
     expect(runner.advances[0].advance.lastRun).toBeUndefined();
+  });
+});
+
+describe("a wake while an earlier one is still occupying a window", () => {
+  /** A second exchange whose window opens two hours after the first one's, so
+   * one wake finds it not due and a later wake finds it open. */
+  const laterWindow: ManagedExchangeSchedule = {
+    anchor: "2026-01-06T16:00:00.000Z",
+    intervalDays: 7,
+    windowSeconds: 10_800,
+    nextWindow: "2026-01-06T16:00:00.000Z",
+    consecutiveMisses: 0,
+  };
+
+  test("runs the exchange whose window just opened, and does not re-enter the occupied one", async () => {
+    const occupying = recordWith();
+    const opening = recordWith({ schedule: laterWindow });
+    const runner = harness({
+      records: [occupying, opening],
+      startAt: "2026-01-06T14:30:00.000Z",
+      script: [{ kind: "hang" }, { kind: "succeed" }],
+    });
+    // The registry the runtime carries across its wakes; the guard is what it
+    // holds, not the wake.
+    const inFlight = new Set<string>();
+
+    const firstWake = tickManagedSchedules(runner.seams, inFlight);
+    await runner.firstAttempt;
+    runner.advanceClock(100 * 60 * 1000);
+    const secondWake = await tickManagedSchedules(runner.seams, inFlight);
+
+    const stillOccupying = secondWake.find(
+      (entry) => entry.id === occupying.id,
+    );
+    const justOpened = secondWake.find((entry) => entry.id === opening.id);
+    expect(stillOccupying).toMatchObject({ attempts: 0, skipped: "in-flight" });
+    // The whole point: the second exchange's window is not lost to the first
+    // one's occupancy, which can legitimately last the width of a window.
+    expect(justOpened).toMatchObject({ attempts: 1, disposition: "succeeded" });
+    expect(
+      runner.attempts.filter((attempt) => attempt.id === occupying.id),
+    ).toHaveLength(1);
+
+    runner.releaseHangingAttempts();
+    const firstEntries = await firstWake;
+    expect(firstEntries[0]).toMatchObject({
+      id: occupying.id,
+      attempts: 1,
+      disposition: "succeeded",
+    });
+    // The record leaves the registry when its tick settles, so the next wake
+    // finds it available again.
+    expect([...inFlight]).toEqual([]);
   });
 });
 
@@ -578,6 +695,57 @@ describe("one record's trouble", () => {
       skipped: "bookkeeping-failed",
     });
     expect(entries[1].disposition).toBe("succeeded");
+  });
+
+  test("reports the attempts and disposition the failed write was for, not zeroes", async () => {
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:30:00.000Z",
+      script: [
+        {
+          kind: "fail",
+          error: new ManagedInputError({
+            reason: "acquire",
+            cause: new Error("gone"),
+          }),
+        },
+      ],
+      failAdvanceFor: record.id,
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    // The window WAS occupied and did settle; what failed is the write that
+    // would have recorded it, and the diagnostic entry says so rather than
+    // reporting an untouched window.
+    expect(entry).toMatchObject({
+      attempts: 1,
+      disposition: "failed",
+      skipped: "bookkeeping-failed",
+    });
+    expect(runner.attempts).toHaveLength(1);
+  });
+});
+
+describe("a schedule an edit in another tab dropped mid-tick", () => {
+  test("is left alone rather than run against the plan the store no longer holds", async () => {
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      // Three windows elapsed, so the catch-up walk writes before any attempt --
+      // and that write is where the concurrent edit is seen.
+      startAt: "2026-01-27T14:30:00.000Z",
+      script: [{ kind: "succeed" }],
+      concurrentEdit: (stored) =>
+        applyManagedExchangeLocalEdits(stored, { schedule: null }),
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry.skipped).toBe("plan-moved");
+    expect(runner.attempts).toHaveLength(0);
+    expect(runner.stored.get(record.id)?.schedule).toBeUndefined();
   });
 });
 

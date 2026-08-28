@@ -2,9 +2,15 @@
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import log from "loglevel";
+
 import { Fragment, createElement } from "react";
 
-import { ScheduledExchangeRunner } from "@components/ScheduledExchangeRunner";
+import {
+  RUNNER_LOAD_FAILURE_NOTICE,
+  ScheduledExchangeRunner,
+  startInstalledRuntimeRunner,
+} from "@components/ScheduledExchangeRunner";
 import { isInstalledRuntime } from "@utils/installedRuntime";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
@@ -76,5 +82,59 @@ describe("the scheduled runner's mount", () => {
     // The runtime is stopped when the mount goes, so a runner never outlives
     // the page that started it.
     expect(runtime.signal.aborted).toBe(true);
+  });
+});
+
+describe("the runner's chunk, which the mount loads on demand", () => {
+  /** A load that resolves, handing back a runtime start the test can watch and
+   * the promise it resolved on -- the runner's own continuation is registered on
+   * that promise first, so awaiting it puts an assertion after the continuation
+   * ran rather than racing it. */
+  function loaderFor(started: () => void) {
+    const loads: Array<Promise<unknown>> = [];
+    return {
+      load: () => {
+        const chunk = Promise.resolve({ startManagedScheduleRuntime: started });
+        loads.push(chunk);
+        return chunk;
+      },
+      lastLoad: () => loads[loads.length - 1],
+    };
+  }
+
+  test("starts the runtime it loaded, and not one whose mount already went", async () => {
+    const started = vi.fn();
+    const loader = loaderFor(started);
+
+    const live = new AbortController();
+    startInstalledRuntimeRunner({ signal: live.signal }, loader.load);
+    await vi.waitFor(() => {
+      expect(started).toHaveBeenCalledTimes(1);
+    });
+
+    const gone = new AbortController();
+    gone.abort();
+    startInstalledRuntimeRunner({ signal: gone.signal }, loader.load);
+    await loader.lastLoad();
+
+    expect(started).toHaveBeenCalledTimes(1);
+  });
+
+  test("makes a load that never arrives visible rather than silently never running", async () => {
+    const error = vi.spyOn(log, "error").mockImplementation(() => undefined);
+    // What an offline first launch or a cached shell asking a newer deployment
+    // for a chunk it no longer serves produces: a rejected import that nothing
+    // else in this mount is watching.
+    const failure = new Error("this deployment serves no such chunk");
+
+    startInstalledRuntimeRunner({ signal: new AbortController().signal }, () =>
+      Promise.reject(failure),
+    );
+
+    await vi.waitFor(() => {
+      expect(error).toHaveBeenCalledTimes(1);
+    });
+    expect(error).toHaveBeenCalledWith(RUNNER_LOAD_FAILURE_NOTICE, failure);
+    error.mockRestore();
   });
 });

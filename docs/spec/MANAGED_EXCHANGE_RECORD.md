@@ -373,7 +373,12 @@ clamped to what is left of the window, and the next attempt begins no sooner tha
 a fixed pacing interval after the last one started, up to a cap on attempts per
 window. One window-long wait would put the whole window on a single broker
 registration surviving that long; the pacing and the cap are what keep an attempt
-that fails immediately from spending the window in a loop.
+that fails immediately from spending the window in a loop. The pacing interval is
+itself bounded by the close, which ends the occupancy in any case.
+
+An occupancy belongs to ONE record. Each wake dispatches every due record that is
+not already occupying its window, so an exchange holding its own window open for
+hours neither blocks nor delays a second exchange whose window opens during it.
 
 Two boundaries the occupancy holds:
 

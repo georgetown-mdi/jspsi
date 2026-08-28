@@ -92,9 +92,11 @@ export interface ManagedScheduleRuntimeOptions {
   signal: AbortSignal;
   /** Overrides {@link SCHEDULE_TICK_INTERVAL_MS}. */
   intervalMs?: number;
-  /** Overrides the tick. Defaults to {@link tickManagedSchedules}. */
+  /** Overrides the tick. Defaults to {@link tickManagedSchedules}, and is
+   * handed the runtime's one in-flight registry on every wake. */
   tick?: (
     seams: ManagedScheduleTickSeams,
+    inFlight: Set<string>,
   ) => Promise<Array<ManagedScheduleTickEntry>>;
   /** Overrides the platform seams. Defaults to the store, the clock, and the
    * browser run driver. */
@@ -106,9 +108,13 @@ export interface ManagedScheduleRuntimeOptions {
  * the catch-up rule is what a launch owes a record whose windows elapsed while
  * this runtime was not running -- and the rest are on the interval.
  *
- * A wake that finds the previous one still running does nothing: occupying a
- * window can take the width of that window, and a second tick over the same
- * records would contend for the very lock the first is holding.
+ * Every wake takes a fresh snapshot and runs, however long the wakes before it
+ * are still taking. What is held back is per RECORD, in the one registry this
+ * runtime carries across its wakes: a record whose tick is still running is
+ * passed over, and every other due record is dispatched. A guard over the whole
+ * tick instead would make a second exchange, whose window opens while the first
+ * is legitimately occupying its own for hours, invisible until the first one
+ * finished -- and then only as a miss the runner inflicted on it.
  */
 export function startManagedScheduleRuntime(
   options: ManagedScheduleRuntimeOptions,
@@ -116,16 +122,13 @@ export function startManagedScheduleRuntime(
   const { signal } = options;
   const tick = options.tick ?? tickManagedSchedules;
   const seams = options.seams ?? browserScheduleTickSeams(signal);
-  let ticking = false;
+  const inFlight = new Set<string>();
   const wake = async (): Promise<void> => {
-    if (ticking || signal.aborted) return;
-    ticking = true;
+    if (signal.aborted) return;
     try {
-      reportTick(await tick(seams));
+      reportTick(await tick(seams, inFlight));
     } catch (error) {
       log.error("scheduled managed exchange tick failed:", error);
-    } finally {
-      ticking = false;
     }
   };
   const timer = setInterval(
@@ -209,12 +212,18 @@ function reportTick(entries: Array<ManagedScheduleTickEntry>): void {
   for (const entry of entries) {
     if (entry.skipped === "bookkeeping-failed") {
       log.warn(
-        `scheduled managed exchange ${entry.id}: schedule bookkeeping failed:`,
+        `scheduled managed exchange ${entry.id}: schedule bookkeeping failed ` +
+          `after ${String(entry.attempts)} attempt(s), ` +
+          `${entry.disposition ?? "nothing"}:`,
         entry.error,
       );
       continue;
     }
-    if (entry.skipped === "no-schedule" || entry.skipped === "not-due")
+    if (
+      entry.skipped === "no-schedule" ||
+      entry.skipped === "not-due" ||
+      entry.skipped === "in-flight"
+    )
       continue;
     log.debug(
       `scheduled managed exchange ${entry.id}: ` +

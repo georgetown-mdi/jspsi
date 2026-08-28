@@ -153,6 +153,7 @@ export interface ManagedScheduleTickSeams {
 export type ManagedScheduleSkipReason =
   | "no-schedule"
   | "spent"
+  | "in-flight"
   | "not-due"
   | "no-input-handle"
   | "plan-moved"
@@ -171,9 +172,12 @@ export interface ManagedScheduleTickEntry {
   caughtUpMisses: number;
   /** Attempts made inside the due window. */
   attempts: number;
-  /** The window's disposition, absent when no window was occupied. */
+  /** The window's disposition, absent when no window was occupied. It stands
+   * alongside a `"bookkeeping-failed"` skip: the window was occupied and settled,
+   * and the write that would have recorded it is what failed. */
   disposition?: ManagedScheduleWindowDisposition;
-  /** Why nothing was attempted, absent when a window was occupied. */
+  /** Why nothing was attempted, absent when a window was occupied and its
+   * bookkeeping landed. */
   skipped?: ManagedScheduleSkipReason;
   /** The failure that stopped this record's bookkeeping, when one did. */
   error?: unknown;
@@ -183,22 +187,43 @@ export interface ManagedScheduleTickEntry {
  * Run one tick over every stored managed exchange: apply catch-up, then occupy
  * the window it lands on if that window is open now.
  *
- * Records are ticked concurrently. Each one holds its own single-writer lock and
- * its own rendezvous, and occupying a window can take the width of that window,
- * so a sequential tick would let one exchange's occupancy starve another's
- * overlapping window entirely.
+ * Records are ticked concurrently, and a record whose previous tick is still
+ * running is passed over rather than started a second time. Each one holds its
+ * own single-writer lock and its own rendezvous, and occupying a window can take
+ * the width of that window, so a guard any coarser than per-record -- one over
+ * the whole tick, say -- would let one exchange's occupancy starve every other
+ * exchange whose window opens during it, for as long as it lasts.
+ *
+ * `inFlight` is the registry of records a tick is still running for. Its owner
+ * is the CALLER, which is what lets the guard span wakes; a call that omits it
+ * guards only within itself. The membership read and the entry into it happen in
+ * one synchronous step, so two overlapping wakes cannot both dispatch the same
+ * record between them.
  */
 export async function tickManagedSchedules(
   seams: ManagedScheduleTickSeams,
+  inFlight: Set<string> = new Set(),
 ): Promise<Array<ManagedScheduleTickEntry>> {
   const [records, localState] = await Promise.all([
     seams.listRecords(),
     seams.listLocalState(),
   ]);
   return Promise.all(
-    records.map((record) =>
-      tickManagedScheduleRecord(record, localState.get(record.id), seams),
-    ),
+    records.map((record) => {
+      if (inFlight.has(record.id))
+        return {
+          id: record.id,
+          caughtUpMisses: 0,
+          attempts: 0,
+          skipped: "in-flight" as const,
+        };
+      inFlight.add(record.id);
+      return tickManagedScheduleRecord(
+        record,
+        localState.get(record.id),
+        seams,
+      ).finally(() => inFlight.delete(record.id));
+    }),
   );
 }
 
@@ -209,6 +234,9 @@ async function tickManagedScheduleRecord(
   localState: ManagedLocalState | undefined,
   seams: ManagedScheduleTickSeams,
 ): Promise<ManagedScheduleTickEntry> {
+  // Filled in as the tick learns each field rather than rebuilt at every return,
+  // so the catch below reports the attempts and disposition that actually
+  // happened beside the failed write instead of the zeroes this started as.
   const entry: ManagedScheduleTickEntry = {
     id: record.id,
     caughtUpMisses: 0,
@@ -237,7 +265,7 @@ async function occupyDueWindow(
   seams: ManagedScheduleTickSeams,
 ): Promise<ManagedScheduleTickEntry> {
   const catchUp = catchUpManagedSchedule(stored, record.lastRun, seams.now());
-  const caughtUpMisses = catchUp.missedWindows;
+  entry.caughtUpMisses = catchUp.missedWindows;
 
   // The catch-up bookkeeping is written BEFORE anything is attempted, so an
   // attempt that never finishes still leaves the elapsed windows counted.
@@ -253,34 +281,33 @@ async function occupyDueWindow(
         : {}),
     });
     // The write is conditioned on the plan it was computed from, so a record
-    // some other wake or an operator edit moved first comes back unchanged.
+    // some other wake or an operator edit moved first comes back unchanged --
+    // including one whose schedule an edit in another tab DROPPED between this
+    // tick's snapshot and this write, which is the shape that arrives here with
+    // no schedule at all. Occupying a window against a plan the store no longer
+    // holds is exactly what the condition exists to prevent.
     if (claimed.schedule === undefined)
-      return { ...entry, caughtUpMisses, skipped: "plan-moved" };
+      return { ...entry, skipped: "plan-moved" };
     planned = claimed.schedule;
   }
 
   const due = catchUp.dueWindow;
-  if (due === undefined)
-    return { ...entry, caughtUpMisses, skipped: "not-due" };
+  if (due === undefined) return { ...entry, skipped: "not-due" };
   if (parseStoredInstant(planned.nextWindow) !== due.opensAtMs)
-    return { ...entry, caughtUpMisses, skipped: "plan-moved" };
+    return { ...entry, skipped: "plan-moved" };
 
   const handle = claimed.inputFileHandle;
   // Without a persisted handle there is no unattended read of the input at all
   // (the re-selection path needs an operator), so the window is left
   // unaccounted: it counts as missed at the wake that finds it elapsed, exactly
   // as a window this runtime slept through does.
-  if (handle === undefined)
-    return { ...entry, caughtUpMisses, skipped: "no-input-handle" };
+  if (handle === undefined) return { ...entry, skipped: "no-input-handle" };
 
   const occupancy = await occupyWindow(claimed, handle, due, seams);
+  entry.attempts = occupancy.attempts;
   if (occupancy.disposition === undefined)
-    return {
-      ...entry,
-      caughtUpMisses,
-      attempts: occupancy.attempts,
-      skipped: seams.stopped() ? "stopped" : "window-closed",
-    };
+    return { ...entry, skipped: seams.stopped() ? "stopped" : "window-closed" };
+  entry.disposition = occupancy.disposition;
 
   await seams.persistAdvance(record.id, {
     schedule: advanceManagedScheduleAfterWindow(
@@ -291,12 +318,7 @@ async function occupyDueWindow(
     fromNextWindow: planned.nextWindow,
     fromConsecutiveMisses: planned.consecutiveMisses,
   });
-  return {
-    ...entry,
-    caughtUpMisses,
-    attempts: occupancy.attempts,
-    disposition: occupancy.disposition,
-  };
+  return { ...entry };
 }
 
 /** What occupying one window produced: how many attempts it took and the
@@ -312,7 +334,8 @@ interface WindowOccupancy {
  *
  * Each attempt waits for the partner up to {@link ATTEMPT_PEER_WAIT_MS},
  * clamped to what is left of the window; a retryable failure starts another
- * attempt no sooner than {@link ATTEMPT_RATE_GAP_MS} after the last one began.
+ * attempt no sooner than {@link ATTEMPT_RATE_GAP_MS} after the last one began,
+ * and no later than the window's close, which ends the occupancy anyway.
  * The window's disposition is the LAST attempt's verdict -- a window that ends
  * on a no-show is `"missed"` however it began, and one that ends on a failure
  * the two runners met through is not counted as a coordination miss.
@@ -358,8 +381,19 @@ async function occupyWindow(
         return { attempts, disposition: verdict.disposition };
       disposition = verdict.disposition;
     }
+    // Paced from the failed attempt's start, and clamped to the window's own
+    // close: the loop head is what ends an occupancy, so a delay outlasting the
+    // window would hold this record's tick open past the close for nothing --
+    // and past the moment the next wake could have found the record free.
+    const pacedFromMs = seams.now();
     await seams.delay(
-      Math.max(0, ATTEMPT_RATE_GAP_MS - (seams.now() - startedAtMs)),
+      Math.max(
+        0,
+        Math.min(
+          ATTEMPT_RATE_GAP_MS - (pacedFromMs - startedAtMs),
+          window.closesAtMs - pacedFromMs,
+        ),
+      ),
     );
   }
   return { attempts, ...(disposition !== undefined ? { disposition } : {}) };

@@ -178,17 +178,35 @@ describe("the two notices an unattended run can raise", () => {
 });
 
 describe("the host that wakes the tick", () => {
+  /** The record the paused tick below is occupying a window for. */
+  const OCCUPIED = "record-occupying-its-window";
+
   /** A tick that resolves when the test releases it, so a second wake can be
-   * driven while the first is still running. */
+   * driven while the first is still running. It keeps the real tick's side of
+   * the contract -- the record it is running is entered in the registry the host
+   * hands it, and removed when it settles -- so what this suite drives is the
+   * host's half. The registry's own per-record guard is the real tick's, in
+   * test/unit/managedScheduleRunner.test.ts. */
   function pausedTick() {
+    const registries: Array<Set<string>> = [];
     const calls: Array<() => void> = [];
     const tick = vi.fn(
-      () =>
-        new Promise<[]>((resolve) => {
-          calls.push(() => resolve([]));
-        }),
+      (_seams: ManagedScheduleTickSeams, inFlight: Set<string>) => {
+        registries.push(inFlight);
+        inFlight.add(OCCUPIED);
+        return new Promise<[]>((resolve) => {
+          calls.push(() => {
+            inFlight.delete(OCCUPIED);
+            resolve([]);
+          });
+        });
+      },
     );
-    return { tick, release: () => calls.forEach((done) => done()) };
+    return {
+      tick,
+      registries,
+      release: () => calls.forEach((done) => done()),
+    };
   }
 
   const seams = {} as ManagedScheduleTickSeams;
@@ -212,9 +230,9 @@ describe("the host that wakes the tick", () => {
     expect(tick).toHaveBeenCalledTimes(3);
   });
 
-  test("does not re-enter a tick that is still occupying a window", async () => {
+  test("keeps waking while a window is occupied, on one registry the guard spans", async () => {
     vi.useFakeTimers();
-    const { tick, release } = pausedTick();
+    const { tick, registries, release } = pausedTick();
 
     startManagedScheduleRuntime({
       signal: new AbortController().signal,
@@ -224,10 +242,24 @@ describe("the host that wakes the tick", () => {
     });
 
     await vi.advanceTimersByTimeAsync(5000);
-    expect(tick).toHaveBeenCalledTimes(1);
+
+    // Occupying a window can take the width of that window. What is held back
+    // is the occupied RECORD, not the wake, so an exchange whose window opens
+    // meanwhile is picked up at the next wake rather than after the occupancy
+    // ends.
+    expect(tick).toHaveBeenCalledTimes(6);
+    // One registry, handed to every wake: that identity is what carries the
+    // per-record guard across them.
+    expect(new Set(registries).size).toBe(1);
+    expect([...registries[registries.length - 1]]).toEqual([OCCUPIED]);
+
     release();
+    await vi.advanceTimersByTimeAsync(0);
+    // And it empties as the occupancy settles, so the record is available to
+    // the wake after that -- which still comes on the interval.
+    expect([...registries[0]]).toEqual([]);
     await vi.advanceTimersByTimeAsync(1000);
-    expect(tick).toHaveBeenCalledTimes(2);
+    expect(tick).toHaveBeenCalledTimes(7);
   });
 
   test("stops waking once the runtime is torn down", async () => {

@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 
+import log from "loglevel";
+
 import { isInstalledRuntime as installedRuntime } from "@utils/installedRuntime";
 
 import type { ManagedScheduleRuntimeOptions } from "@psi/managedScheduleRuntime";
@@ -14,21 +16,47 @@ export interface ScheduledExchangeRunnerProps {
   start?: (options: ManagedScheduleRuntimeOptions) => void;
 }
 
+/** How the runner's chunk is fetched, injectable so the failure a real fetch can
+ * land in is drivable. */
+export type ManagedScheduleRuntimeLoader = () => Promise<{
+  startManagedScheduleRuntime: (options: ManagedScheduleRuntimeOptions) => void;
+}>;
+
+/** What a chunk that never arrived is logged as, so the runner's silence has one
+ * searchable line behind it. */
+export const RUNNER_LOAD_FAILURE_NOTICE =
+  "scheduled managed exchange runner could not load; it will not run in this app runtime:";
+
 /**
  * Load the runner and start it. The import is dynamic because this component is
  * mounted by the app ROOT, on every route: the runtime pulls in the whole
  * exchange stack (the rendezvous, the transport, the PSI engine), and a static
  * import here would put all of it in the chunk every page load fetches, for a
  * capability only an installed runtime ever uses.
+ *
+ * A load that fails -- a first launch with no network and nothing precached, a
+ * cached shell asking a deployment for a chunk it no longer serves -- takes the
+ * runner out for this whole app runtime, so it is logged rather than left as a
+ * rejection nobody handles. The retry unit is the MOUNT, deliberately: the loop
+ * that would retry on a later wake lives inside the very chunk that did not
+ * arrive, so there is nothing here to retry from short of a second timer with
+ * its own policy. The next launch of the installed runtime mounts again and
+ * fetches again, which is the recovery this shape has.
  */
-async function startInstalledRuntimeRunner(
+export function startInstalledRuntimeRunner(
   options: ManagedScheduleRuntimeOptions,
-): Promise<void> {
-  const { startManagedScheduleRuntime } =
-    await import("@psi/managedScheduleRuntime");
-  // The mount can go while the chunk is still loading.
-  if (options.signal.aborted) return;
-  startManagedScheduleRuntime(options);
+  load: ManagedScheduleRuntimeLoader = () =>
+    import("@psi/managedScheduleRuntime"),
+): void {
+  load()
+    .then(({ startManagedScheduleRuntime }) => {
+      // The mount can go while the chunk is still loading.
+      if (options.signal.aborted) return;
+      startManagedScheduleRuntime(options);
+    })
+    .catch((error: unknown) => {
+      log.error(RUNNER_LOAD_FAILURE_NOTICE, error);
+    });
 }
 
 /**
