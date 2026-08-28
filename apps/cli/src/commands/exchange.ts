@@ -544,10 +544,11 @@ export function loadConfig(options: ExchangeOptions): {
     throw new UsageError(
       `the shared secret in ${options.keyFile} expired at ${expiredAt} ` +
         "and cannot be used; no exchange was attempted. Both parties must " +
-        "re-invite to establish a new shared secret: run 'psilink invite URL " +
-        "...' and 'psilink accept URL INVITATION' (the existing psilink.yaml is " +
-        "reused; only the key file is recreated). See " +
-        "docs/CLI.md#out-of-sync-tokens.",
+        "re-invite to establish a new shared secret: remove the expired key " +
+        "file on both sides, then one party runs 'psilink invite' (the offline " +
+        "form, with no URL) and the other runs 'psilink accept INVITATION " +
+        "[INPUT_FILE]'. Each side's configuration is reused; only the key file " +
+        "is recreated. See docs/CLI.md#out-of-sync-tokens.",
     );
   }
   const authPersist: AuthPersist = {

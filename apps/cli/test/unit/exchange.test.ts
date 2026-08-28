@@ -936,9 +936,27 @@ test("loadConfig hard-stops an expired token before any exchange", () => {
     expires: "2020-01-01T00:00:00.000Z",
   });
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
-  expect(() => loadConfig(baseOptions())).toThrow(
-    "expired at 2020-01-01T00:00:00.000Z",
-  );
+  let message = "";
+  try {
+    loadConfig(baseOptions());
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).toContain("expired at 2020-01-01T00:00:00.000Z");
+  expect(message).toContain("no exchange was attempted");
+  // The recovery named is the one that runs from the state this failure leaves:
+  // the key file goes first (both offline commands refuse to overwrite one), and
+  // the offline invite/accept pair keeps each side's configuration. The online
+  // forms are not a recovery route -- they abort on a pre-existing configuration
+  // file, which is exactly what this recovery reuses.
+  expect(message).toContain("remove the expired key file on both sides");
+  expect(message).toContain("'psilink invite'");
+  expect(message).toContain("'psilink accept INVITATION [INPUT_FILE]'");
+  expect(message).not.toContain("psilink invite URL");
+  expect(message).not.toContain("psilink accept URL");
+  expect(message).toContain("Each side's configuration is reused");
+  expect(message).toContain("only the key file is recreated");
+  expect(message).toContain("docs/CLI.md#out-of-sync-tokens");
 });
 
 test("loadConfig accepts a not-yet-expired token", () => {
