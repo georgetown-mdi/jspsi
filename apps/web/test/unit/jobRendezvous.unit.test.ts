@@ -1244,6 +1244,71 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     );
   });
 
+  test("a data root whose real path cannot be read names that side", () => {
+    // The other side of the same narrowing: the comparison ran without the data
+    // root's real path, and which side the console could not read is what tells
+    // the operator where to restore the access. A warning, as every side is.
+    const dataRoot = tempDir("data");
+    const warnings = withUnreadableRealpath(dataRoot, () =>
+      rendezvousStartupWarnings(
+        tempDir("rendezvous"),
+        "shared",
+        undefined,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
+      ),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("the job data root");
+    expect(warnings[0]).toContain("could not be resolved to its real path");
+    expect(warnings[0]).toContain(
+      "Give the console read access to every folder on the way to it",
+    );
+  });
+
+  test("a work-input directory whose real path cannot be read names that side", () => {
+    const jobInput = tempDir("input");
+    const dataRoot = tempDir("data");
+    const warnings = withUnreadableRealpath(jobInput, () =>
+      rendezvousStartupWarnings(
+        tempDir("rendezvous"),
+        "shared",
+        jobInput,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
+      ),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("the work-input directory");
+    expect(warnings[0]).toContain("could not be resolved to its real path");
+  });
+
+  test("an unreadable data root symlinked onto the mount reports the narrowed check", () => {
+    // The overlap the resolution would have caught goes unseen from this side
+    // exactly as it does from the mount's, and the notice is what says so rather
+    // than the comparison reading as a clean one.
+    const mounts = tempDir("mounts");
+    const rendezvous = subDir(mounts, "sync");
+    const dataRoot = path.join(mounts, "data");
+    fs.symlinkSync(rendezvous, dataRoot, "dir");
+    const warnings = withUnreadableRealpath(dataRoot, () =>
+      rendezvousStartupWarnings(
+        rendezvous,
+        "shared",
+        undefined,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
+      ),
+    );
+    expect(overlapWarnings(warnings)).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("the job data root");
+    expect(warnings[0]).toContain("could not be resolved to its real path");
+  });
+
   test("a mount that does not exist yet raises that notice and no other", () => {
     // A component that does not exist is resolved through the nearest existing
     // ancestor, so the absent mount is not also reported as one the console could
@@ -1643,7 +1708,8 @@ interface NoticeShape {
   /** The clause the notice must still end on at the seat, for the leg it is about. */
   tail: (leg: RendezvousLeg) => string;
   /** Whether the notice interpolates the mount path at all. The listing names the
-   * mount's ENTRIES instead, and gives way by name rather than by path. */
+   * mount's ENTRIES instead, and gives way by name rather than by path, while the
+   * notices about the other side of the overlap comparison name that side's path. */
   namesMount: boolean;
   /** Skipped as root, whose access checks ignore the mode bits. */
   unprivilegedOnly?: boolean;
@@ -1870,6 +1936,55 @@ const NOTICE_SHAPES: Array<NoticeShape> = [
       "Give the console read access to every folder on the way to it.",
     namesMount: true,
   },
+  {
+    // The same narrowing from the other side of the comparison. It names the
+    // data root's own path rather than the mount's, so the mount here is only
+    // what the notice attributes itself to -- the fit of the path it does
+    // interpolate is driven by the case below the table.
+    label: "a data root whose real path cannot be read",
+    arrange: (mount, leg) => {
+      fs.mkdirSync(mount, { recursive: true });
+      const dataRoot = tempDir("data");
+      return {
+        args: [
+          mount,
+          leg,
+          tempDir("input"),
+          dataRoot,
+          path.join(dataRoot, "current-job"),
+          SWEEP_OFF,
+        ] as PreflightArgs,
+        restore: blockRealpath(dataRoot),
+      };
+    },
+    match: /^the job data root/,
+    tail: () =>
+      "Give the console read access to every folder on the way to it.",
+    namesMount: false,
+  },
+  {
+    label: "a work-input directory whose real path cannot be read",
+    arrange: (mount, leg) => {
+      fs.mkdirSync(mount, { recursive: true });
+      const dataRoot = tempDir("data");
+      const jobInput = tempDir("input");
+      return {
+        args: [
+          mount,
+          leg,
+          jobInput,
+          dataRoot,
+          path.join(dataRoot, "current-job"),
+          SWEEP_OFF,
+        ] as PreflightArgs,
+        restore: blockRealpath(jobInput),
+      };
+    },
+    match: /^the work-input directory/,
+    tail: () =>
+      "Give the console read access to every folder on the way to it.",
+    namesMount: false,
+  },
 ];
 
 /** The shapes whose notice interpolates the mount, less any this process cannot
@@ -2063,6 +2178,46 @@ describe("every preflight notice fits its budget once rendered", () => {
       expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
     expect(renderedAtSeat([overlap!])[0]).toContain(
       "a partner's sync writes would reach it",
+    );
+  });
+
+  test("the unresolved-side notice gives way to a long data root", () => {
+    // The path this notice interpolates is the other side's, not the mount's, so
+    // the fit is driven from that side. What survives is the sentence: which side
+    // could not be resolved, which folder it was compared with, and the read
+    // access to restore -- none of which the operator can reconstruct.
+    const dataRoot = path.join(
+      tempDir("data"),
+      OVERLONG_SEGMENT,
+      OVERLONG_SEGMENT,
+    );
+    fs.mkdirSync(dataRoot, { recursive: true });
+    const warnings = withUnreadableRealpath(dataRoot, () =>
+      rendezvousStartupWarnings(
+        tempDir("rendezvous"),
+        "inbound",
+        undefined,
+        dataRoot,
+        path.join(dataRoot, "current-job"),
+        SWEEP_OFF,
+      ),
+    );
+    const notice = warnings.find((warning) =>
+      warning.startsWith("the job data root"),
+    );
+    expect(notice).toBeDefined();
+    expect(renderedDisplayCost(dataRoot)).toBeGreaterThan(
+      RENDEZVOUS_NOTICE_BUDGET,
+    );
+    expect(notice).not.toContain(dataRoot);
+    expectWithinNoticeBudget(warnings);
+
+    for (const rendered of renderedAtSeat(warnings))
+      expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+    const rendered = renderedAtSeat([notice!])[0];
+    expect(rendered).toContain(legPhrase("inbound"));
+    expect(rendered).toContain(
+      "Give the console read access to every folder on the way to it.",
     );
   });
 });
