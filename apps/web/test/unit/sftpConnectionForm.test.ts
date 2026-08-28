@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 
 import {
   EMPTY_SFTP_FORM,
+  KEYBOARD_INTERACTIVE_REQUIRES_PASSWORD,
+  PASSPHRASE_REQUIRES_PRIVATE_KEY,
   SPLIT_DIRECTORY_BOTH_HALVES_REQUIREMENT,
   SPLIT_DIRECTORY_DISTINCT_REQUIREMENT,
   SPLIT_DIRECTORY_RETAIN_REQUIREMENT,
@@ -12,7 +14,11 @@ import {
   sftpFormFromLocator,
 } from "@bench/sftpConnectionForm";
 
-import type { SftpConnectionFormValues } from "@bench/sftpConnectionForm";
+import type {
+  SftpConnectionFormValues,
+  SftpCredentialMethod,
+  SftpFormField,
+} from "@bench/sftpConnectionForm";
 
 // A valid literal OpenSSH SHA256 host-key fingerprint (matches core's regex).
 const FINGERPRINT = `SHA256:${"A".repeat(43)}`;
@@ -177,10 +183,100 @@ describe("sftpFormError", () => {
         }),
       ),
     ).toBeUndefined();
-    // The passphrase is ignored under the password method.
+  });
+});
+
+describe("sftpFormError (credential combination, core's rules)", () => {
+  /** One combination the two companion controls and the sign-in method can
+   * reach: the method, whether a passphrase is set, whether keyboard-interactive
+   * is armed, and the field a blocking error lands on (`undefined` where the
+   * combination is coherent). */
+  type Combination = readonly [
+    SftpCredentialMethod,
+    boolean,
+    boolean,
+    SftpFormField | undefined,
+  ];
+
+  /** All eight of them. Core owns which are coherent; what this pins is that
+   * each incoherent one is REFUSED on the control that resolves it rather than
+   * carried and dropped. */
+  const COMBINATIONS: ReadonlyArray<Combination> = [
+    ["password", false, false, undefined],
+    ["password", false, true, undefined],
+    ["password", true, false, "passphrase"],
+    ["password", true, true, "passphrase"],
+    ["private_key", false, false, undefined],
+    ["private_key", false, true, "keyboardInteractive"],
+    ["private_key", true, false, undefined],
+    ["private_key", true, true, "keyboardInteractive"],
+  ];
+
+  const formFor = ([method, passphrase, keyboardInteractive]: Combination) =>
+    validForm({
+      method,
+      passphrasePath: passphrase ? "@/run/secrets/key.pass" : "",
+      keyboardInteractive,
+    });
+
+  test("every combination draws the verdict it is labelled with", () => {
+    for (const combination of COMBINATIONS)
+      expect([
+        ...combination.slice(0, 3),
+        formError(formFor(combination))?.field,
+      ]).toEqual([...combination]);
+  });
+
+  test("every refusal is worded in the console's own controls", () => {
+    // An unmapped core verdict falls through in core's words on the credential
+    // field, naming a configuration key the console never shows; the console's
+    // own wording is what every refused combination must reach.
+    const messages = [
+      PASSPHRASE_REQUIRES_PRIVATE_KEY,
+      KEYBOARD_INTERACTIVE_REQUIRES_PASSWORD,
+    ];
+    for (const combination of COMBINATIONS) {
+      if (combination[3] === undefined) continue;
+      const message = formError(formFor(combination))?.message ?? "";
+      expect([...combination.slice(0, 3), messages.includes(message)]).toEqual([
+        ...combination.slice(0, 3),
+        true,
+      ]);
+      expect(message).not.toContain("privateKeyPassphrase");
+      expect(message).not.toContain("keyboard_interactive");
+    }
+  });
+
+  test("a passphrase set against a password sign-in blocks the save", () => {
+    // The silent-drop shape: the operator typed a passphrase, then moved the
+    // sign-in method. The request must not be built without it.
+    const values = validForm({
+      method: "password",
+      passphrasePath: "@/run/secrets/key.pass",
+    });
+    expect(formError(values)?.message).toBe(PASSPHRASE_REQUIRES_PRIVATE_KEY);
+    expect(authoringRequest(values)).toBeUndefined();
+  });
+
+  test("keyboard-interactive against a private key blocks the save", () => {
+    const values = validForm({
+      method: "private_key",
+      source: { kind: "path", ref: "@/run/secrets/id" },
+      keyboardInteractive: true,
+    });
+    expect(formError(values)?.message).toBe(
+      KEYBOARD_INTERACTIVE_REQUIRES_PASSWORD,
+    );
+    expect(authoringRequest(values)).toBeUndefined();
+  });
+
+  test("the combination is answered before the reference format", () => {
+    // A passphrase that is neither an @path nor allowed under this method draws
+    // the rule that explains why it does not belong, not a format complaint.
     expect(
-      formError(validForm({ method: "password", passphrasePath: "junk" })),
-    ).toBeUndefined();
+      formError(validForm({ method: "password", passphrasePath: "junk" }))
+        ?.message,
+    ).toBe(PASSPHRASE_REQUIRES_PRIVATE_KEY);
   });
 });
 
@@ -302,6 +398,17 @@ describe("buildAuthoringRequest", () => {
     expect(body?.privateKeyPassphrase).toBe("@/run/secrets/id.pass");
   });
 
+  test("carries an armed keyboard-interactive toggle", () => {
+    const body = authoringRequest(validForm({ keyboardInteractive: true }));
+    expect(body?.keyboardInteractive).toBe(true);
+    expect(body?.credential).toEqual({
+      kind: "mountRef",
+      mount: "secrets",
+      subPath: ["partner-password"],
+      credType: "password",
+    });
+  });
+
   test("builds a raw credential from a pasted value, untrimmed", () => {
     const body = authoringRequest(
       validForm({ source: { kind: "raw", value: "  spaced-secret  " } }),
@@ -313,11 +420,12 @@ describe("buildAuthoringRequest", () => {
     });
   });
 
-  test("omits an absent port, remote directory, and passphrase", () => {
+  test("omits an absent port, remote directory, passphrase, and toggle", () => {
     const body = authoringRequest(validForm());
     expect(body?.port).toBeUndefined();
     expect(body?.path).toBeUndefined();
     expect(body?.privateKeyPassphrase).toBeUndefined();
+    expect(body?.keyboardInteractive).toBeUndefined();
   });
 
   test("returns undefined for an invalid form", () => {

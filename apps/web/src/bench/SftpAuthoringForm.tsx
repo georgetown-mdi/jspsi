@@ -254,6 +254,7 @@ export function SftpAuthoringForm({
         values={values}
         error={fieldError("credential")}
         passphraseError={fieldError("passphrase")}
+        keyboardInteractiveError={fieldError("keyboardInteractive")}
         pickerOpen={pickerOpen}
         onPickerOpen={() => setPickerOpen(true)}
         onPickerClose={() => setPickerOpen(false)}
@@ -393,11 +394,13 @@ function SplitDirectoryField({
 
 /** The credential sub-section: the method radio (at-most-one primary at the
  * control level), the picked file (or the secrets picker), and the typed `@path`
- * escape hatch plus the optional passphrase reference. */
+ * escape hatch plus each method's companion -- the optional passphrase reference
+ * for a private key, the keyboard-interactive toggle for a password. */
 function CredentialField({
   values,
   error,
   passphraseError,
+  keyboardInteractiveError,
   pickerOpen,
   onPickerOpen,
   onPickerClose,
@@ -406,6 +409,7 @@ function CredentialField({
   values: SftpConnectionFormValues;
   error: string | undefined;
   passphraseError: string | undefined;
+  keyboardInteractiveError: string | undefined;
   pickerOpen: boolean;
   onPickerOpen: () => void;
   onPickerClose: () => void;
@@ -587,7 +591,10 @@ function CredentialField({
         </Collapse>
       </div>
 
-      {values.method === "private_key" && (
+      {/* Each companion belongs to one sign-in method, but stays on screen while
+          it holds a value the operator set under the other one: hiding it would
+          make the blocking error point at a control that is not there. */}
+      {(values.method === "private_key" || values.passphrasePath !== "") && (
         <TextInput
           label="Key passphrase reference"
           description="Optional. If your private key is encrypted, type an @-file reference to the passphrase file."
@@ -597,6 +604,25 @@ function CredentialField({
           errorProps={{ role: "alert" }}
           onChange={(event) =>
             onChange({ passphrasePath: event.currentTarget.value })
+          }
+        />
+      )}
+
+      {(values.method === "password" || values.keyboardInteractive) && (
+        <Checkbox
+          label="Answer the server's login prompts with this password"
+          description="Only for a server that refuses the direct password method but asks for it as a prompt. The same password, sent a different way -- it cannot answer a one-time code."
+          checked={values.keyboardInteractive}
+          // Checkbox takes the error as a node rather than through the
+          // `errorProps` the text inputs carry, so the live-region role that
+          // announces every other blocking error is set on the node itself.
+          error={
+            keyboardInteractiveError !== undefined ? (
+              <span role="alert">{keyboardInteractiveError}</span>
+            ) : undefined
+          }
+          onChange={(event) =>
+            onChange({ keyboardInteractive: event.currentTarget.checked })
           }
         />
       )}

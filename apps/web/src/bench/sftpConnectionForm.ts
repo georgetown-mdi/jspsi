@@ -61,6 +61,10 @@ export interface SftpConnectionFormValues {
   /** A typed `@path` to the private key's passphrase file (private_key only,
    * optional); it is also a file reference, never a pasted secret. */
   passphrasePath: string;
+  /** Answer the server's keyboard-interactive prompts with the configured
+   * password (password only, optional). Not a second credential: the same
+   * password, offered over a different SSH authentication method. */
+  keyboardInteractive: boolean;
 }
 
 /** The form's initial state, before the operator authors anything. */
@@ -74,6 +78,7 @@ export const EMPTY_SFTP_FORM: SftpConnectionFormValues = {
   method: "password",
   source: undefined,
   passphrasePath: "",
+  keyboardInteractive: false,
 };
 
 /** A partner-supplied SFTP locator: the credential-free host/port/path an accepted
@@ -116,7 +121,8 @@ export type SftpFormField =
   | "port"
   | "hostKeyFingerprint"
   | "credential"
-  | "passphrase";
+  | "passphrase"
+  | "keyboardInteractive";
 
 /** One blocking error on the form: the field and the message. */
 export interface SftpFormError {
@@ -306,11 +312,107 @@ function splitDirectoryError(
 }
 
 /**
+ * What the console says when a key passphrase is set while the connection signs
+ * in with a password. It states core's `privateKeyPassphrase is only valid with
+ * privateKey` rule -- the same one the CLI raises against
+ * `--server-private-key-passphrase` -- over the two controls the operator has:
+ * the sign-in choice and the passphrase field. Surfacing it here is what keeps a
+ * typed passphrase from being silently dropped on the way to the appliance.
+ */
+export const PASSPHRASE_REQUIRES_PRIVATE_KEY =
+  'A key passphrase only decrypts a private key: choose "Private key" under ' +
+  '"How psilink signs in", or clear the passphrase reference.';
+
+/**
+ * What the console says when keyboard-interactive is armed while the connection
+ * signs in with a private key. It states core's `keyboard_interactive requires
+ * password` rule -- the same one the CLI raises against
+ * `--server-keyboard-interactive` -- over the controls the operator has.
+ */
+export const KEYBOARD_INTERACTIVE_REQUIRES_PASSWORD =
+  "Answering the server's prompts sends the password, so it needs one: choose " +
+  '"Password" under "How psilink signs in", or turn this off.';
+
+/**
+ * The console's wording for core's credential-coherence verdicts, keyed by the
+ * message core produces, each with the field the operator changes to resolve it.
+ * Core's refines stay the single statement of WHICH credential combinations are
+ * coherent; these say it in the labels this form shows, because core words its
+ * rules over `privateKeyPassphrase` and `keyboard_interactive` -- configuration
+ * keys the console never puts in front of an operator, and which the CLI in turn
+ * words as flag names.
+ *
+ * An unmapped verdict falls through in core's own words rather than being
+ * swallowed; the form-model tests drive every credential combination this form
+ * can compose and hold each one to a mapped message.
+ */
+const CREDENTIAL_CONSOLE_ERRORS = new Map<string, SftpFormError>([
+  [
+    "privateKeyPassphrase is only valid with privateKey",
+    { field: "passphrase", message: PASSPHRASE_REQUIRES_PRIVATE_KEY },
+  ],
+  [
+    "keyboard_interactive requires password; it answers the server's " +
+      "keyboard-interactive prompts with that password and has no effect " +
+      "without one",
+    {
+      field: "keyboardInteractive",
+      message: KEYBOARD_INTERACTIVE_REQUIRES_PASSWORD,
+    },
+  ],
+]);
+
+/** A syntactically valid host and credential reference, standing in for the
+ * operator's own while the credential COMBINATION is asked about. The host and
+ * the credential source have their own errors above, so feeding core the real
+ * ones here would answer a coherence question with an unrelated verdict. */
+const CREDENTIAL_PROBE_HOST = "sftp.invalid";
+const CREDENTIAL_PROBE_REF = "@/credential-file";
+
+/**
+ * Core's own verdict on the credential combination the form has composed, in the
+ * console's words and on the control that resolves it, or undefined when the
+ * combination is coherent. The rules over it -- a passphrase only with a private
+ * key, keyboard-interactive only with a password, at most one primary method --
+ * are core's single statement, re-run by the appliance on every `PUT` and by the
+ * CLI on every run, so this composes the connection core would parse and asks
+ * core rather than restating any rule of its own.
+ */
+function credentialCoherenceError(
+  values: SftpConnectionFormValues,
+): SftpFormError | undefined {
+  const passphrase = values.passphrasePath.trim();
+  const parsed = ConnectionConfigSchema.safeParse({
+    channel: "sftp",
+    server: {
+      host: CREDENTIAL_PROBE_HOST,
+      ...(values.method === "password"
+        ? { password: CREDENTIAL_PROBE_REF }
+        : { privateKey: CREDENTIAL_PROBE_REF }),
+      ...(passphrase === "" ? {} : { privateKeyPassphrase: passphrase }),
+      ...(values.keyboardInteractive ? { keyboardInteractive: true } : {}),
+    },
+  });
+  if (parsed.success) return undefined;
+  const coreMessage = parsed.error.issues[0].message;
+  return (
+    CREDENTIAL_CONSOLE_ERRORS.get(coreMessage) ?? {
+      field: "credential",
+      message: coreMessage,
+    }
+  );
+}
+
+/**
  * The first blocking error on the form, or undefined when the fields are savable.
  * Host, username, a literal fingerprint, and a credential source are required; the
  * port is optional but bounded; a typed credential/passphrase must be an `@path`.
  * The fingerprint is validated against core's `HOST_KEY_FINGERPRINT_REGEX`, and a
- * value shaped like a signing fingerprint gets the confusion message.
+ * value shaped like a signing fingerprint gets the confusion message. The two
+ * companions of a sign-in method -- the key passphrase and keyboard-interactive
+ * -- are held to core's rules over the combination by
+ * {@link credentialCoherenceError}, so a companion left armed against the other
+ * method blocks the save on its own control instead of being dropped in silence.
  *
  * `retainFiles` is the exchange's retain-mode choice as the operator has it set
  * right now ("How files are handled", the card on the same screen), read
@@ -396,15 +498,22 @@ export function sftpFormError(
       message: "Enter the pasted credential value, or choose a file instead.",
     };
 
-  if (values.method === "private_key" && values.passphrasePath.trim() !== "") {
-    if (!isAtPath(values.passphrasePath.trim()))
-      return {
-        field: "passphrase",
-        message:
-          "Enter the passphrase as an @-file reference, e.g. " +
-          "@/run/secrets/key.pass.",
-      };
-  }
+  // The combination first, then the shape: a passphrase set against a password
+  // sign-in is answered by the rule that explains it, not by a reference-format
+  // complaint about a field that does not belong there at all.
+  const coherenceError = credentialCoherenceError(values);
+  if (coherenceError !== undefined) return coherenceError;
+
+  if (
+    values.passphrasePath.trim() !== "" &&
+    !isAtPath(values.passphrasePath.trim())
+  )
+    return {
+      field: "passphrase",
+      message:
+        "Enter the passphrase as an @-file reference, e.g. " +
+        "@/run/secrets/key.pass.",
+    };
   return undefined;
 }
 
@@ -439,6 +548,11 @@ function fingerprintErrorFor(value: string): string | undefined {
  * `outbound_path`, the remote-directory field supplying the inbound half, which
  * is the same mapping the CLI's `--outbound-path` applies), and a blank one
  * makes it the single shared `path`.
+ *
+ * A set companion -- the key passphrase, keyboard-interactive -- travels on the
+ * value alone, not on the sign-in method beside it: the combination is already
+ * coherent by the time this runs, so there is no method test here that could
+ * quietly drop one the operator set.
  */
 export function buildAuthoringRequest(
   values: SftpConnectionFormValues,
@@ -473,8 +587,7 @@ export function buildAuthoringRequest(
         : source.kind === "path"
           ? { kind: "ref", ref: source.ref.trim(), credType: values.method }
           : { kind: "raw", value: source.value, credType: values.method },
-    ...(values.method === "private_key" && passphrase !== ""
-      ? { privateKeyPassphrase: passphrase }
-      : {}),
+    ...(passphrase !== "" ? { privateKeyPassphrase: passphrase } : {}),
+    ...(values.keyboardInteractive ? { keyboardInteractive: true } : {}),
   };
 }
