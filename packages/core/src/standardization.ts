@@ -1106,7 +1106,7 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     name: "coalesce",
     label: "Coalesce",
     blurb:
-      "Substitute a fallback value for an empty field, which can create matches that would not otherwise occur.",
+      "Substitute a fallback value where an earlier rule left the value empty, which can create matches that would not otherwise occur.",
     tier: "standard",
     params: z.object({
       default: z.string().optional(),
@@ -2994,9 +2994,10 @@ export function pipelineAlwaysDrops(
     if (step.function === "coalesce") {
       // A string default substitutes a constant for a dropped value, rescuing it;
       // an undefined or non-string default leaves a dropped value dropped. The
-      // shared predicate's position half is already established wherever this is
-      // reached with `dropped` set: the `parse_date` that set it is itself a step
-      // that empties a value, so it never withholds a rescue this loop would make.
+      // shared predicate also tests a position half this loop's own reasoning does
+      // not need; that it withholds no rescue here is held by the differential
+      // sweep in standardization.test.ts ("pipelineAlwaysDrops rescue
+      // equivalence") rather than asserted in this comment.
       if (dropped && coalesceSubstitutesConstant(step, steps.slice(0, index)))
         dropped = false;
       continue;

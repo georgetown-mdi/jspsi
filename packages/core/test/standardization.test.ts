@@ -26,6 +26,7 @@ import {
   coalesceSubstitutesConstant,
   stepCanEmptyRealizedValue,
   pipelineAlwaysDrops,
+  parseDateInputDropsEveryRecord,
   STANDARDIZATION_FUNCTION_NAMES,
 } from "../src/standardization";
 import * as standardizationModule from "../src/standardization";
@@ -54,6 +55,7 @@ import type {
   LinkageKey,
   LinkageKeyElement,
   LinkageTerms,
+  TransformStep,
 } from "../src/config/linkageTerms";
 import type { ColumnMetadata, Metadata } from "../src/config/metadata";
 import {
@@ -1054,6 +1056,106 @@ describe("coalesceSubstitutesConstant", () => {
     ).toBe(false);
     expect(pipelineAlwaysDrops([dead, fallbackStep, dead])).toBe(true);
     expect(pipelineAlwaysDrops([fallbackStep])).toBe(false);
+  });
+});
+
+// --- pipelineAlwaysDrops rescue equivalence ----------------------------------
+
+describe("pipelineAlwaysDrops rescue equivalence", () => {
+  // pipelineAlwaysDrops rescues a dropped value through the shared predicate,
+  // whose position half -- some earlier step can empty the value -- is inert on
+  // that path: every rescue the loop reaches already has an emptying step ahead
+  // of it. This sweep is what holds that claim, rather than a comment asserting
+  // it. Each pipeline the alphabet below spells goes through the shipped function
+  // and through a rescue testing the declared default alone, and any pipeline
+  // whose verdicts differ is reported.
+  //
+  // Two changes make it red, both wanting a fresh look at the rescue. A second
+  // source of `dropped` -- a value-independent drop other than an always-dropping
+  // parse_date -- reaches the rescue from a position the weaker rescue below does
+  // not model. And a function moved into VALUE_PRESERVING_FUNCTION_NAMES can
+  // withhold the position half from a coalesce that would otherwise rescue,
+  // turning a live pipeline into a dead one on the consent surface.
+  const FALLBACK_DEFAULT = "ZZZ_FALLBACK";
+
+  // The rescue with no position half: the declared default's shape alone. A local
+  // transcription rather than a call into core, since a differential against the
+  // shipped predicate would compare it to itself.
+  const dropsUnderDefaultShapeRescue = (
+    steps: ReadonlyArray<TransformStep>,
+  ): boolean => {
+    let dropped = false;
+    for (const step of steps) {
+      if (step.function === "coalesce") {
+        if (dropped && typeof step.params?.default === "string")
+          dropped = false;
+        continue;
+      }
+      if (dropped) continue;
+      if (
+        step.function === "parse_date" &&
+        parseDateInputDropsEveryRecord(step.params)
+      )
+        dropped = true;
+    }
+    return dropped;
+  };
+
+  // Every function core knows, bare, plus the parse_date and coalesce shapes the
+  // two formulations turn on: a wire step's params are z.unknown(), so the
+  // non-string and null spellings are reachable from a partner's terms.
+  const ALPHABET: ReadonlyArray<TransformStep> = [
+    ...STANDARDIZATION_FUNCTION_NAMES.map((fn) => ({ function: fn })),
+    { function: "parse_date", params: {} },
+    { function: "parse_date", params: { inputFormat: "MM/DD" } },
+    { function: "parse_date", params: { inputFormat: "MM/DD/YYYY" } },
+    { function: "parse_date", params: { inputFormat: null } },
+    { function: "parse_date", params: { inputFormat: 42 } },
+    { function: "coalesce", params: {} },
+    { function: "coalesce", params: { default: FALLBACK_DEFAULT } },
+    { function: "coalesce", params: { default: 42 } },
+    { function: "coalesce", params: { default: null } },
+    { function: "not_a_real_function" },
+  ];
+  const MAX_PIPELINE_LENGTH = 4;
+
+  const forEachPipeline = (
+    visit: (pipeline: TransformStep[]) => void,
+  ): void => {
+    const extend = (prefix: TransformStep[]): void => {
+      if (prefix.length === MAX_PIPELINE_LENGTH) return;
+      for (const step of ALPHABET) {
+        const pipeline = [...prefix, step];
+        visit(pipeline);
+        extend(pipeline);
+      }
+    };
+    extend([]);
+  };
+
+  test("the position half withholds no rescue the prior formulation makes", () => {
+    const divergent: string[] = [];
+    let examined = 0;
+    let deadVerdicts = 0;
+    forEachPipeline((pipeline) => {
+      examined += 1;
+      const drops = pipelineAlwaysDrops(pipeline);
+      if (drops) deadVerdicts += 1;
+      if (drops !== dropsUnderDefaultShapeRescue(pipeline))
+        divergent.push(JSON.stringify(pipeline));
+    });
+    // Two assertions so a failure carries witnesses as well as its scale: the
+    // whole divergent list is elided in the diff once it runs to thousands.
+    expect(divergent.slice(0, 3)).toEqual([]);
+    expect(divergent).toHaveLength(0);
+    // Not vacuous: the sweep is the full enumeration and reaches both verdicts.
+    const enumeratedPipelines = Array.from(
+      { length: MAX_PIPELINE_LENGTH },
+      (_, index) => ALPHABET.length ** (index + 1),
+    ).reduce((total, count) => total + count, 0);
+    expect(examined).toBe(enumeratedPipelines);
+    expect(deadVerdicts).toBeGreaterThan(0);
+    expect(deadVerdicts).toBeLessThan(examined);
   });
 });
 
