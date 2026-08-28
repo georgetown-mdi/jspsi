@@ -557,10 +557,14 @@ record, in a separate origin-local store keyed by the record `id`, and are
   "backup needed". "Taken since the last rotation" is enforced **structurally**, not
   re-derived from `lastRun`, by two write-side rules:
   - **Export binds the marker to the bytes it serialized.** Every export reads the
-    current record and stamps the marker in one atomic store step (a cross-store
-    read-and-mark), then downloads exactly the bytes it read, so the marker can only
-    ever attest the secret the file carries. A stale tab or a stale in-memory record
-    cannot mark a secret it did not serialize.
+    current record, serializes the bytes it will download, and stamps the marker in
+    one atomic store step (a cross-store read-compose-and-mark), then downloads
+    exactly those bytes, so the marker can only ever attest the secret the file
+    carries. A stale tab or a stale in-memory record cannot mark a secret it did not
+    serialize. Serializing inside the step is what binds the marker to bytes that
+    exist: a composition that refuses the record it read -- the command-line export
+    refuses one this app could not have composed -- throws inside the step and aborts
+    it, so no marker survives an export that produced no file.
   - **Rotation clears the marker.** The persist-before-success rotation write clears
     the marker in the **same** transaction that advances the secret, so a rotation
     stales any prior export the instant it lands -- independent of how the run is

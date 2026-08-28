@@ -17,10 +17,16 @@ import "@mantine/core/styles.css";
 import {
   clearManagedExchanges,
   createManagedExchange,
+  getManagedExchange,
+  readRecordAndMarkBackedUp,
 } from "@psi/managedExchangeStore";
+import {
+  getManagedLocalState,
+  markManagedExchangeSpent,
+} from "@psi/managedLocalState";
 import { ManagedRunSurface } from "@bench/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { getManagedLocalState } from "@psi/managedLocalState";
+import { dispatchManagedCronExport } from "@psi/managedExchangeExport";
 
 import { captureDownloads } from "./captureDownloads";
 import { createAppMount } from "./renderApp";
@@ -218,20 +224,22 @@ describe("the source is spent only on the operator's attestation", () => {
 });
 
 describe("a record this app could not have composed", () => {
-  test("is refused rather than exported, and the panel says why", async () => {
-    // Reachable only by importing a hand-crafted artifact: the browser composes
-    // webrtc exchanges alone. The panel presents the composer's refusal.
-    const created = await createManagedExchange(
-      newExchange({
-        exchangeFile: assembleExchangeSpec({
-          connection: connectionFromLocator({
-            channel: "filedrop",
-            path: "/srv/exchange",
-          }),
-          linkageTerms,
+  /** A stored exchange the command-line composition refuses. Reachable only by
+   * importing a hand-crafted artifact: the browser composes webrtc exchanges alone. */
+  const refusedExchange = () =>
+    newExchange({
+      exchangeFile: assembleExchangeSpec({
+        connection: connectionFromLocator({
+          channel: "filedrop",
+          path: "/srv/exchange",
         }),
+        linkageTerms,
       }),
-    );
+    });
+
+  test("is refused rather than exported, and the panel says why", async () => {
+    // The panel presents the composer's refusal.
+    const created = await createManagedExchange(refusedExchange());
     app.render(createElement(ManagedRunSurface, { id: created.id }));
 
     await expect.element(exportToggle()).toBeInTheDocument();
@@ -258,5 +266,29 @@ describe("a record this app could not have composed", () => {
         }),
       )
       .not.toBeInTheDocument();
+  });
+
+  test("a dispatch past the panel's gate marks nothing in the real store", async () => {
+    // The panel gates on the same refusal, but the gate and the click can diverge
+    // (a concurrent import or rotation in another tab). The composition runs inside
+    // the store's read-and-mark transaction, so its refusal aborts that transaction
+    // against real IndexedDB: no backup marker, no spend, no record change.
+    const created = await createManagedExchange(refusedExchange());
+    const downloaded: Array<string> = [];
+
+    await expect(
+      dispatchManagedCronExport(created.id, {
+        readAndMark: readRecordAndMarkBackedUp,
+        download: (fileName) => downloaded.push(fileName),
+        markSpent: markManagedExchangeSpent,
+        now: () => new Date(),
+      }),
+    ).rejects.toThrow(/stored connection channel is filedrop/);
+
+    expect(downloaded).toEqual([]);
+    expect(await getManagedLocalState(created.id)).toBeUndefined();
+    expect(await getManagedExchange(created.id)).toMatchObject({
+      sharedSecret: created.sharedSecret,
+    });
   });
 });
