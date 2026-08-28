@@ -25,7 +25,6 @@ import {
 } from "@bench/acceptorColumnsModel";
 import { StandardizationPreview } from "@components/StandardizationPreview";
 import { appendSanitizedRunWarning } from "@bench/runWarnings";
-import { isAdmissibleInputName } from "@jobs/workInputName";
 import { linkageRefusalFor } from "@psi/linkageRefusal";
 import { probePeerAnswerCopy } from "@bench/SftpAuthoringForm";
 
@@ -79,7 +78,7 @@ const CONSOLE_SURFACES: Record<PreflightId, ConsoleSurface> = {
     FILEDROP_CONNECTION_TUNING,
   ],
   ignoredOfflineOverrides: null,
-  keyFilePath: ["@jobs/workInputName", isAdmissibleInputName],
+  keyFilePath: null,
   hostKeyTrust: ["@bench/SftpAuthoringForm", probePeerAnswerCopy],
   identityDivergence: ["@bench/runWarnings", appendSanitizedRunWarning],
   outboundPayloadConsent: [
