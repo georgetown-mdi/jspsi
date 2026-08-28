@@ -366,7 +366,7 @@ A pre-existing key file is handled as in [Offline acceptance](#existing-files), 
 psilink exchange [--invitation CODE] [--sweep-exchange-files [--force-retain-sweep]] INPUT_FILE [OUTPUT_FILE]
 ```
 
-The application loads configuration and key files and conducts the exchange without further coordination. The shared secret is rotated after each successful authentication handshake, before the data exchange begins; if the data exchange subsequently fails, both parties already hold the rotated token and can retry without re-inviting. If `OUTPUT_FILE` is given, the results of the exchange are written to that path; otherwise, output is written to `stdout`.
+The application loads configuration and key files and conducts the exchange without further coordination. The shared secret is rotated after each successful authentication handshake, before the data exchange begins; if the data exchange subsequently fails, both parties already hold the rotated token and can retry without re-inviting. If `OUTPUT_FILE` is given, the results of the exchange are written to that path; otherwise, output is written to `stdout`. Running it repeatedly on a schedule -- the recurring production arrangement this command exists for -- is [Scheduling the run](#scheduling-the-run) below.
 
 ### Provisioning the key file from an invitation
 
@@ -491,6 +491,86 @@ Under `--json`, the same verdict also arrives on stdout as one machine-readable 
 The `excerpt` is bytes the peer chose, bounded by the same read budget and carried as a JSON string value escaped to printable ASCII, so untrusted peer bytes never reach the terminal raw -- a property of the emitted LINE only: `JSON.parse` returns the peer's original bytes, so an integrator reading the parsed value escapes it at their own display sink before rendering it. Private-key material is redacted before the excerpt is emitted, the same strip the human-readable failure applies, so a peer answering with a PEM block has it replaced on both routes rather than logged verbatim. The exact byte bound and escape form are in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#sftp-host-key-verification).
 
 This covers every SFTP connection psilink makes: `probe-host-key`, the first-use host-key prompt, and an `exchange` run's own connection, including a mid-run reconnection in connection-per-poll mode -- the case a scheduled, unattended run behind a proxy that starts intercepting the port lands in. The look is spent once per run, not once per connection: it opens a bounded TCP connection of its own, so once a run has told the operator what answered the port it does not look again. That is what keeps connection-per-poll mode -- which re-dials at every cycle -- from re-reading a peer that is answering wrongly on every tick. A peer answering a later reconnection the same way is reported as the plain connection failure, with no second look.
+
+### Scheduling the run
+
+`psilink exchange` conducts one exchange and exits. Repeating it on a cadence is the host scheduler's job -- cron on Linux and macOS, the Task Scheduler on Windows: psilink schedules nothing itself and leaves no process running between runs. Every scheduled run is a fresh process that reads the configuration and key file, exchanges, rotates the shared secret, writes its result, and exits.
+
+A daily run at 02:00, from the directory holding this exchange's files:
+
+```text
+0 2 * * * cd /srv/psilink/agency-b && /usr/local/bin/psilink exchange input.csv results.csv --log-file /srv/psilink/agency-b/exchange.log
+```
+
+The container form mounts that directory at the image's working directory (`/work`) and so needs no `cd` (see [Running the CLI](DEPLOYMENT.md#running-the-cli)):
+
+```text
+0 2 * * * /usr/bin/docker run --rm -v /srv/psilink/agency-b:/work vdorie/psi-link exchange input.csv results.csv --log-file exchange.log
+```
+
+Both lines name the program by absolute path. A scheduled job runs under the scheduler's environment rather than your shell's, so a bare `psilink` or `docker` may not resolve there -- under cron's minimal `PATH`, or a Task Scheduler service account's -- and the job then fails without ever reaching psilink. Give the full path, or put the program on the scheduling account's `PATH`.
+
+For the container form, the mounted directory must be readable and writable by the account inside the container, which is a question of host-side ownership rather than of mode: see [The user the image runs as](DEPLOYMENT.md#the-user-the-image-runs-as), and [Key file permissions in containers](DEPLOYMENT.md#key-file-permissions-in-containers) for mounting the key file (including the read-only-configuration, read-write-secret split).
+
+#### The working directory
+
+The configuration and key files default to `./psilink.yaml` and `./.psilink.key` -- relative paths, resolved against the working directory of the process that reads them. A scheduled job does not inherit the directory you edited the schedule in; the scheduler decides what it starts in. Make it explicit: `cd` into the exchange's directory first, as the lines above do, or pass absolute `--config-file` and `--key-file` paths.
+
+Everything else the run reads or writes by a relative path resolves the same way -- the `INPUT_FILE` and `OUTPUT_FILE` positionals, `--record-file`, `--log-file`, `signing.identity_file`, and any `@path` credential reference stored in the configuration (see [Configuration](#configuration)). One directory per exchange partner is the intended layout, and it is what makes the single `cd` enough.
+
+That directory has to be writable by the scheduling account, not merely readable: each successful run rewrites `.psilink.key` with the rotated secret, and an SFTP run may edit `psilink.yaml` to record a host-key pin. The run verifies up front that the key file can be written, before any key exchange, so a mis-owned directory stops the run rather than desynchronizing the two parties' tokens.
+
+Give the results an `OUTPUT_FILE` path rather than redirecting `stdout`: psilink creates that file owner-only, while a shell `>` redirect leaves it at the scheduling account's umask (see [Key file security](SECURITY_DESIGN.md#key-file-security)). A fixed output path is overwritten by each run. The exchange record and its verification keys default to a per-run timestamped name and so accumulate in the working directory, as does a receipt when the configuration names no `signing.receipt_output`; rotating and archiving what accumulates is an operator responsibility.
+
+#### The key file on the scheduling machine
+
+`.psilink.key` is the credential that authenticates every run of this exchange, and on the scheduling machine it belongs to the account the scheduler runs the job as, readable by nobody else: mode `0600` on Unix, an owner-only ACL on Windows. The CLI writes it that way and warns on load when it finds an existing file over-permissive -- but that warning is a `warn`-level diagnostic, so a job running at `--log-level error` or `silent` forgoes it. [Key file security](SECURITY_DESIGN.md#key-file-security) carries the required permissions, the `chmod`/`icacls` corrections, [what not to do](SECURITY_DESIGN.md#what-not-to-do) with the token, and the [backup](SECURITY_DESIGN.md#backup) and [compromise](SECURITY_DESIGN.md#compromise-response) procedures.
+
+Moving an exchange onto a scheduling machine -- from another host, or from the [web console appliance](DEPLOYMENT.md#server-job-api)'s recurring-run hand-off -- moves that credential, so it travels over an encrypted transfer and under one further rule: from then on exactly one machine may run this exchange. The secret rotates at each successful handshake, so a second copy left running holds a secret the partner has already replaced, its next key exchange fails, and the recovery is for both parties to re-invite (see [Out-of-sync tokens](#out-of-sync-tokens)). Take the copy from the key file as it stands after the last run on the old machine -- the rotation happens before the data exchange, so even a run that later failed has usually rotated it -- and stop running it there.
+
+#### Cadence and the token's expiry
+
+A key file may carry an `expires`, and that instant bounds the schedule. `psilink exchange` checks it at load time, before opening any connection: an expired token aborts the run with a usage error (exit 64), no exchange is attempted, and the recovery is for both parties to re-invite (see [Key lifecycle](#key-lifecycle)). Two mechanisms write it, and enforcement does not distinguish them:
+
+- **An invitation's setup lifetime** -- one hour by default, up to a year with `--expires-in`. The inviting party's key file carries it, whether written by `psilink invite` or provisioned by [`psilink exchange --invitation`](#provisioning-the-key-file-from-an-invitation); the accepting party's copy does not. Where it applies, the first exchange has to happen inside that window, so run the exchange once by hand and confirm it works before handing it to a schedule, rather than letting the schedule take the first run.
+- **The max-age policy.** With [`authentication.token_max_age_days`](EXCHANGE_REFERENCE.md#authenticationtoken_max_age_days) set in `psilink.yaml`, each successful exchange stamps `expires` that many days past the moment of rotation. What must fit inside that window is the interval between *successful* runs, not the nominal schedule: a monthly cadence under `token_max_age_days: 30` lapses the token the first time a run fails or is missed. Leave room for several consecutive failures -- a weekly run under a 30-day policy tolerates three.
+
+The "expiring soon" warning (within `token_max_age_days / 3` days of the expiry) is suppressed by any run that refreshes the token, so on a schedule it appears exactly when successive runs have stopped completing. It is the warning that says a re-invitation is coming unless something is fixed; route it somewhere a person reads.
+
+Keep the scheduling host's clock synchronized. Expiry is evaluated against local time on each side, and a lagging clock can additionally expire a token between the key exchange's round trips, leaving the two parties out of sync (see [Out-of-sync tokens](#out-of-sync-tokens)). The two parties set their policies independently and neither is told the other's, so an exchange that stops because the partner's token lapsed presents from this side as a silent peer (see [Token age and rotation policy](SECURITY_DESIGN.md#token-age-and-rotation-policy)).
+
+#### What an unattended run refuses rather than asking
+
+A scheduled run has no terminal, and psilink never reads that as consent: a question it cannot ask becomes a refusal (exit 64) that fails the job visibly, before any credential, terms, or data are sent. Settle both before the first scheduled run:
+
+- **The outbound columns.** A run whose outbound column set differs from the set recorded when the invitation was accepted refuses instead of asking, naming the columns and what changed (see [Confirming what you send](#confirming-what-you-send)). Run it once from a terminal, or accept the invitation again naming your input file.
+- **An unpinned SFTP host key.** First-use trust is established interactively, and a run with no terminal fails closed instead of trusting the presented key (see [SFTP host-key trust](#sftp-host-key-trust)). Pin `connection.server.host_key_fingerprint` before scheduling -- from a fingerprint verified out-of-band, read with [`psilink probe-host-key`](#reading-a-host-key-with-probe-host-key), or established by one interactive run.
+
+#### Runs that overlap, and runs that wait
+
+Both parties have to be running at once for an exchange to happen, on every channel: each side waits at the rendezvous only for its own budget -- `--peer-timeout`, or the transport's own default where the field is unset -- and then gives up. Agree the cadence and the window with your partner rather than each side picking one, and leave enough of a margin that a late start on either side still meets the other.
+
+A scheduler starts the next run on time whether or not the previous one has finished, and two runs of the same exchange must not overlap: they share one key file, whose secret each of them rotates, and on `sftp` and `filedrop` one shared directory, which has to be dedicated to a single active exchange between exactly two parties (see [Directory exclusivity](EXCHANGE_REFERENCE.md#directory-exclusivity)). Set an interval longer than the run's own waiting budget -- `--peer-timeout` defaults to one hour on `sftp` and `filedrop`, and a partner that never appears waits it out (see [Logging](#logging)) -- or serialize the job with a lock so a late-running exchange makes the scheduler skip the next start rather than run alongside it. An outer timeout in the job line is a worthwhile backstop either way.
+
+On `sftp` and `filedrop`, set a stable [`peer_id`](EXCHANGE_REFERENCE.md#connectionoptions) for a scheduled exchange -- it turns the protocol file a killed run leaves behind into an immediate start-up refusal naming that file rather than a failed run (see [Directory exclusivity](EXCHANGE_REFERENCE.md#directory-exclusivity)). It requires `timestamp_in_filename: true`, the two parties must use distinct ids, and a stable id also makes this party's runs linkable to each other in the partner's logs.
+
+On `webrtc`, a run that configures neither `stun` nor `turn` uses the built-in default STUN server and warns on every run (see [STUN, and what it discloses](#stun-and-what-it-discloses)). On a schedule that warning goes to a log file rather than to a person, so decide the disclosure once, when you set the schedule up: accept it, or set `stun` to a server of your own.
+
+#### Logs, and what the exit code tells the scheduler
+
+Diagnostics go to `stderr` and the result to `stdout`, and a scheduler disposes of both in its own way, so capture what you need deliberately. `--log-file PATH` appends timestamped lines to a file psilink creates owner-only, and its parent directory must already exist (see [Logging](#logging)). `--log-level` still governs that file: `error` or `silent` discards precisely the notices a schedule depends on, including the over-permissive key-file warning and the expiring-soon advisory. A supervising process that would rather not parse log lines can read structured progress and outcome events on file descriptor 3 with [`--event-stream`](#machine-readable-event-stream).
+
+Whatever supervises the schedule should act on the [exit code](#exit-codes) rather than on the log text: 0 completed; 69 is usually a transport failure that may succeed once the transport recovers; and 64, 70, and 73 are each deterministic in the run's own inputs, so a repeat reaches the same refusal -- and re-running a 73 conducts a second exchange rather than recovering the first. Cap automatic retries at a small fixed number and raise the failure to a person instead of looping.
+
+#### Windows Task Scheduler
+
+The same rules apply under the Task Scheduler, with the account the task runs as in place of the cron account: it must own `.psilink.key` under an owner-only ACL, own the working directory, and reach the program by its full path. The equivalent of the daily cron line above:
+
+```cmd
+schtasks /Create /TN "psilink exchange" /SC DAILY /ST 02:00 /TR "cmd /c cd /d C:\psilink\agency-b && psilink exchange input.csv results.csv"
+```
+
+An exchange folder that lives on a Windows network location -- a mapped drive, a UNC path, or a DFS namespace -- is not bind-mountable into the container by its drive letter: the container reaches it through a CIFS volume instead, which the Windows file-drop setup script provisions with the ownership the image needs (see [The user the image runs as](DEPLOYMENT.md#the-user-the-image-runs-as)).
 
 ## Checking a network file drop
 
