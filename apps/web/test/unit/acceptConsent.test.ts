@@ -1697,6 +1697,83 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (any date)");
   });
 
+  test("reads a slice of the date layout's literal region as the collapse it is", () => {
+    // The output format is inviter-authored text with only YYYY/MM/DD substituted,
+    // so its literal characters are the same for every record. A window landing
+    // wholly inside one leaves every date on one constant -- the maximal breadth,
+    // shown as the collapse it is rather than the truncation "(partial)" names.
+    const literalRegion = {
+      function: "parse_date",
+      params: { inputFormat: "MM/DD/YYYY", outputFormat: "ACME-YYYYMMDD" },
+    };
+    expect(
+      headerFor([
+        literalRegion,
+        { function: "substring", params: { start: 1, length: 4 } },
+      ]),
+    ).toBe("last name (any date)");
+    // A bare separator between two components is the same collapse at one
+    // character: "YYYY-MM-DD" puts a literal "-" at position 5.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY-MM-DD" },
+        },
+        { function: "substring", params: { start: 5, length: 1 } },
+      ]),
+    ).toBe("last name (any date)");
+    // A window straddling the literal and the token reads part of the date, so
+    // the truncation is the honest word and the collapse is not claimed.
+    expect(
+      headerFor([
+        literalRegion,
+        { function: "substring", params: { start: 1, length: 6 } },
+      ]),
+    ).toBe("last name (partial)");
+    // A plain layout has no literal region to land in, so every verdict there is
+    // the one it already earned: a slice of a reformatting parse_date truncates
+    // the canonical date, and the parse_date's own component drop still reads
+    // "(partial)" with no slice at all.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+        { function: "substring", params: { start: 1, length: 4 } },
+      ]),
+    ).toBe("last name (partial)");
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY" },
+        },
+      ]),
+    ).toBe("last name (partial)");
+    // Being a collapse of EVERY record, it outranks the coalesce fallback that
+    // collapses only the records an earlier rule emptied.
+    expect(
+      headerFor([
+        literalRegion,
+        { function: "substring", params: { start: 1, length: 4 } },
+        { function: "coalesce", params: { default: "X" } },
+      ]),
+    ).toBe("last name (any date)");
+    // And like the tokenless collapse it presupposes a date is parsed at all: an
+    // input format that drops every record leaves the element matching nothing.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD", outputFormat: "ACME-YYYYMMDD" },
+        },
+        { function: "substring", params: { start: 1, length: 4 } },
+      ]),
+    ).toBe("last name");
+  });
+
   test("shows no breadth marker for a parse_date whose input drops every record", () => {
     // A parse_date whose input format omits a component core requires (here no
     // year) returns null for EVERY record -- the key matches nothing, a narrowing

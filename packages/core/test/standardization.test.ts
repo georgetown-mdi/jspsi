@@ -24,6 +24,7 @@ import {
   accumulationFateAtCharge,
   canProduceMultipleValues,
   coalesceSubstitutesConstant,
+  substringCollapsesParsedDateToConstant,
   stepCanEmptyRealizedValue,
   pipelineAlwaysDrops,
   parseDateInputDropsEveryRecord,
@@ -1056,6 +1057,229 @@ describe("coalesceSubstitutesConstant", () => {
     ).toBe(false);
     expect(pipelineAlwaysDrops([dead, fallbackStep, dead])).toBe(true);
     expect(pipelineAlwaysDrops([fallbackStep])).toBe(false);
+  });
+});
+
+// --- substringCollapsesParsedDateToConstant ----------------------------------
+
+describe("substringCollapsesParsedDateToConstant", () => {
+  // Two dates whose year, month, and day differ in EVERY digit: 1971 vs 2068 in
+  // all four year digits, 01 vs 12 in both month digits, 02 vs 31 in both day
+  // digits. So a window reading even one character the DATE supplied renders
+  // differently for the two, and one reading only the format's own characters
+  // renders identically -- which makes "the two outputs are equal" exactly the
+  // property the predicate claims, and the sweep below an exact differential
+  // rather than a corpus-bounded sample.
+  const DATES = ["01/02/1971", "12/31/2068"];
+  const parseDate = (
+    outputFormat: unknown,
+    inputFormat: unknown = "MM/DD/YYYY",
+  ) => ({
+    function: "parse_date",
+    params: { inputFormat, outputFormat },
+  });
+  const slice = (start: unknown, length: unknown) => ({
+    function: "substring",
+    params: { start, length },
+  });
+
+  test("the verdict matches whether the real slice is one constant (differential)", () => {
+    // Every combination of an output format and a slice window, against the
+    // shipped pipeline: the predicate says "collapses to a constant" exactly
+    // where the two dates leave the same non-null value behind.
+    const OUTPUT_FORMATS = [
+      // A literal region ahead of the date, the motivating shape.
+      "ACME-YYYYMMDD",
+      // Separators between the components, so a window can land on one alone.
+      "YYYY-MM-DD",
+      // The plain default layout, which has no literal to land in.
+      "YYYYMMDD",
+      // Reordered and repeated tokens: the factory substitutes EVERY occurrence,
+      // so the layout carries four component spans around three literals.
+      "MM-MM-YYYY-DD-DD",
+      // Tokens the greedy scan must not mis-split: a fifth Y is literal after
+      // YYYY, a third M is literal after MM, and a bare YY in an OUTPUT format is
+      // literal text rather than a year.
+      "YYYYY",
+      "YYYYYY",
+      "MMM",
+      "MM/DD/YY",
+      // No token at all -- every window is constant, the case the tokenless rule
+      // already names.
+      "registered",
+    ];
+    const WINDOWS: Array<[number, number]> = [
+      [1, 1],
+      [1, 4],
+      [1, 5],
+      [1, 6],
+      [2, 3],
+      [4, 2],
+      [5, 1],
+      [5, 2],
+      [6, 1],
+      [7, 2],
+      [1, 40],
+      [14, 3],
+      [-1, 1],
+      [-2, 2],
+      [-4, 3],
+      [-40, 2],
+      // A negative length is not an empty window: it drives slice's end argument
+      // below zero, where it counts back from the end of the value instead.
+      [1, -3],
+      [1, -9],
+      [1, -13],
+      [2, -8],
+      [-5, -2],
+    ];
+    const collapsed: string[] = [];
+    for (const outputFormat of OUTPUT_FORMATS)
+      for (const [start, length] of WINDOWS) {
+        const steps = [parseDate(outputFormat), slice(start, length)];
+        const outputs = DATES.map((date) => runPipeline(date, steps));
+        const collapses = outputs[0] !== null && outputs[0] === outputs[1];
+        if (collapses) collapsed.push(outputFormat);
+        expect(
+          substringCollapsesParsedDateToConstant(steps[1], [steps[0]]),
+          `${outputFormat} [${start}, ${length}] -> ${JSON.stringify(outputs)}`,
+        ).toBe(collapses);
+      }
+    // Not vacuous, and not carried by the tokenless format alone: a layout that
+    // does render the date still has windows that read none of it.
+    expect(
+      new Set(collapsed.filter((format) => format !== "registered")).size,
+    ).toBeGreaterThan(1);
+    expect(collapsed.length).toBeLessThan(
+      OUTPUT_FORMATS.length * WINDOWS.length,
+    );
+  });
+
+  test("a window that reads nothing is a drop, not a collapse", () => {
+    // substringFactory compiles a non-integer bound, a `start` of 0, a zero
+    // length, and a window that starts past the end into a step that returns null
+    // for every value: the element matches NOTHING, the opposite of collapsing
+    // onto a constant.
+    const literalRegion = parseDate("ACME-YYYYMMDD");
+    for (const [start, length] of [
+      [0, 3],
+      [1, 0],
+      [14, 3],
+      [1, -13],
+      [1.5, 3],
+      [1, 2.5],
+    ] as Array<[unknown, unknown]>) {
+      const steps = [literalRegion, slice(start, length)];
+      for (const date of DATES) expect(runPipeline(date, steps)).toBeNull();
+      expect(
+        substringCollapsesParsedDateToConstant(steps[1], [steps[0]]),
+        `${JSON.stringify([start, length])}`,
+      ).toBe(false);
+    }
+    for (const bound of [null, "1", [], {}, true])
+      expect(
+        substringCollapsesParsedDateToConstant(slice(bound, 3), [
+          literalRegion,
+        ]),
+        JSON.stringify(bound),
+      ).toBe(false);
+  });
+
+  test("the verdict is a property of the pair, not of either step alone", () => {
+    const literalRegion = parseDate("ACME-YYYYMMDD");
+    const firstFour = slice(1, 4);
+    expect(
+      substringCollapsesParsedDateToConstant(firstFour, [literalRegion]),
+    ).toBe(true);
+    // Only a substring reads a window; no other function is the sliced step.
+    for (const fn of STANDARDIZATION_FUNCTION_NAMES.filter(
+      (name) => name !== "substring",
+    ))
+      expect(
+        substringCollapsesParsedDateToConstant({ function: fn }, [
+          literalRegion,
+        ]),
+        fn,
+      ).toBe(false);
+    // The position matters at both ends: with no parse_date ahead of it the
+    // window slices whatever the identifier composed, and a step BETWEEN the two
+    // can move or rewrite the characters the window would read, so the layout no
+    // longer establishes the collapse.
+    expect(substringCollapsesParsedDateToConstant(firstFour, [])).toBe(false);
+    expect(
+      substringCollapsesParsedDateToConstant(firstFour, [
+        literalRegion,
+        { function: "to_upper_case" },
+      ]),
+    ).toBe(false);
+    // A step BEFORE the parse_date is unconstrained: it can change whether a
+    // value parses, never the layout a parsed date renders to.
+    expect(
+      substringCollapsesParsedDateToConstant(firstFour, [
+        { function: "to_upper_case" },
+        literalRegion,
+      ]),
+    ).toBe(true);
+    // The nearest parse_date is the one that laid out the value: a plain layout
+    // in front of the literal-region one does not withdraw the collapse, and the
+    // reverse order does not confer it.
+    expect(
+      substringCollapsesParsedDateToConstant(firstFour, [
+        parseDate("YYYYMMDD"),
+        literalRegion,
+      ]),
+    ).toBe(true);
+    expect(
+      substringCollapsesParsedDateToConstant(firstFour, [
+        literalRegion,
+        parseDate("YYYYMMDD", "YYYYMMDD"),
+      ]),
+    ).toBe(false);
+  });
+
+  test("a parse_date that yields no value at all collapses nothing", () => {
+    // An input format that core cannot assemble a date from drops every record, so
+    // there is no rendered layout to slice -- a narrowing the dead-key advisory
+    // surfaces, not a collapse. Held to the runtime as well as to the predicate.
+    const firstFour = slice(1, 4);
+    for (const inputFormat of ["MM/DD", 7] as unknown[]) {
+      const steps = [parseDate("ACME-YYYYMMDD", inputFormat), firstFour];
+      for (const date of DATES) expect(runPipeline(date, steps)).toBeNull();
+      expect(
+        substringCollapsesParsedDateToConstant(firstFour, [steps[0]]),
+        JSON.stringify(inputFormat),
+      ).toBe(false);
+    }
+    // An ABSENT input format is not a dead one: the factory falls back to the
+    // complete default layout, so the window still lands in the literal region.
+    const absentInput = parseDate("ACME-YYYYMMDD", null);
+    expect(
+      substringCollapsesParsedDateToConstant(firstFour, [absentInput]),
+    ).toBe(true);
+    expect(runPipeline(DATES[0], [absentInput, firstFour])).toBe("ACME");
+  });
+
+  test("an unusable output format falls back to the layout the factory renders", () => {
+    // A non-string outputFormat is not text the window reads: the factory falls
+    // back to the plain default layout, which has no literal region, so no window
+    // collapses. Pinned against the runtime rather than the coercion's source.
+    for (const outputFormat of [undefined, null, 7, [], {}] as unknown[])
+      for (const [start, length] of [
+        [1, 4],
+        [5, 2],
+        [1, 8],
+        [-2, 2],
+      ] as Array<[number, number]>) {
+        const steps = [parseDate(outputFormat), slice(start, length)];
+        const outputs = DATES.map((date) => runPipeline(date, steps));
+        expect(outputs[0] === outputs[1], JSON.stringify(outputFormat)).toBe(
+          false,
+        );
+        expect(
+          substringCollapsesParsedDateToConstant(steps[1], [steps[0]]),
+          JSON.stringify(outputFormat),
+        ).toBe(false);
+      }
   });
 });
 
