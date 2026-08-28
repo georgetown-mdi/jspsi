@@ -59,8 +59,10 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
  *   what this run would send is not the set the exchange recorded agreeing to send
  *   (recovery: re-confirm the disclosure; never a retry, since the same input refuses
  *   identically at the next window).
- * - `"missed"` -- an agreed window passed without a completed handshake (recovery:
- *   automatic retry at the next window; no action). Never a live-launch tier.
+ * - `"missed"` -- the wait for the partner spent its whole budget with nobody
+ *   arriving: an attended run's own wait expiring, or an agreed window passing without
+ *   a completed handshake (recovery: the next window's automatic retry, or running the
+ *   exchange again once the partner is ready).
  * - `"storage"` -- a recorded persist failure on the last run (recovery: re-invite;
  *   a one-sided persist failure may have desynced the two parties).
  * - `"imported"` -- a restore-from-backup or migration import since the last

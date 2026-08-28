@@ -461,6 +461,13 @@ at the moment the close resolves, so it is a completion-surface notice for
 whoever is present rather than a state the next visit reads -- the run
 bookkeeping carries no close outcome.
 
+An attended re-run has a third ending: the wait for the partner runs out and
+nobody arrives, so no handshake is attempted and nothing leaves this device.
+That is the benign no-show a missed window records, and the surface names it as
+one -- the partner was not there, this device is not at fault -- rather than
+sending the operator to check their own connection (see [A missed window is
+neither desync nor attack](#a-missed-window-is-neither-desync-nor-attack)).
+
 ### The input file each run
 
 Where the File System Access API exists (Chromium), the record persists the
@@ -683,16 +690,20 @@ normal operation, not a one-time setup slip.
 
 ### A missed window is neither desync nor attack
 
-A scheduled run the partner's runner never arrives for is a **no-show, not a
-failed handshake**: nothing authenticated and nothing failed closed, because
-there was no one to fail against. It is recorded as its own benign outcome in
-the run bookkeeping (a `"missed"` outcome; see
-[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)) and retried at
-the next agreed window, and it never enters the desync/attack framing below --
-exactly as expiry never does. Only a handshake that actually ran and failed
-reaches that framing. A pattern of missed windows is a coordination problem,
-resolved out-of-band where the schedule itself was agreed -- surfaced, not
-auto-paused (see [Retry and repeated misses](#retry-and-repeated-misses)).
+A run the partner never arrives for is a **no-show, not a failed handshake**:
+nothing authenticated and nothing failed closed, because there was no one to
+fail against. A scheduled run reaches that state when an agreed window passes
+with the partner's runner absent; an attended run reaches the same state when
+its own wait for the partner expires with the operator watching. Either way it
+is recorded as its own benign outcome in the run bookkeeping (a `"missed"`
+outcome; see [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)),
+and it never enters the desync/attack framing below -- exactly as expiry never
+does. Only a handshake that actually ran and failed reaches that framing. The
+recovery is another attempt with both parties present: the next agreed window's
+automatic retry, or the operator running the exchange again once their partner
+is ready. A pattern of missed windows is a coordination problem, resolved
+out-of-band where the schedule itself was agreed -- surfaced, not auto-paused
+(see [Retry and repeated misses](#retry-and-repeated-misses)).
 
 ### The grace window
 

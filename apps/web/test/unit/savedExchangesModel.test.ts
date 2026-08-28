@@ -132,6 +132,21 @@ describe("savedExchangeRow", () => {
     expect(row.status).not.toMatch(/attack|tamper|desync/i);
   });
 
+  test("a partner no-show reads as the arrival line, never a window or a connection problem", () => {
+    const row = savedExchangeRow(
+      record({
+        lastRun: { at: "2026-07-10T09:00:00.000Z", outcome: "missed" },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.status).toMatch(/partner did not arrive/i);
+    // The same line stands for an attended run whose wait expired, so it names no
+    // window and no connection fault on this device.
+    expect(row.status).not.toMatch(/window|connection/i);
+    expect(row.status).not.toMatch(/attack|tamper|desync/i);
+  });
+
   test("an auth failure on a restored record reads as the benign restore line", () => {
     const local: ManagedLocalState = {
       imported: { importedAt: "2026-07-09T00:00:00.000Z" },
