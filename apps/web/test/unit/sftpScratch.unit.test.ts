@@ -259,6 +259,38 @@ describe("setupSftpCredentialScratchDir containment", () => {
   });
 });
 
+describe("setupSftpCredentialScratchDir refusal", () => {
+  test("names the override, the path and the errno when the create fails", () => {
+    // The shape an appliance boots into when it runs as an account other than
+    // the one the image built the default directory for: the default sits under
+    // root-owned /run and cannot be created, every operator mount is excluded,
+    // and the path and errno alone leave the operator with nowhere to point it.
+    const base = sandbox("scratch-create-refused");
+    const scratchDir = path.join(base, "scratch");
+    const dataRoot = path.join(base, "data-root");
+    const mkdirSpy = vi.spyOn(fs, "mkdirSync").mockImplementationOnce(() => {
+      throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+    });
+    let refusal: unknown;
+    try {
+      expect(() => {
+        try {
+          setupSftpCredentialScratchDir(scratchDir, dataRoot, []);
+        } catch (error) {
+          refusal = error;
+          throw error;
+        }
+      }).toThrow(JobApiConfigError);
+    } finally {
+      mkdirSpy.mockRestore();
+    }
+    const message = (refusal as Error).message;
+    expect(message).toContain(JOB_SFTP_CREDENTIAL_DIR_ENV);
+    expect(message).toContain(path.resolve(scratchDir));
+    expect(message).toContain("EACCES");
+  });
+});
+
 describe("isWithin", () => {
   test("a child whose basename starts with .. is within", () => {
     expect(isWithin("/x", "/x/..data")).toBe(true);

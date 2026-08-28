@@ -109,6 +109,36 @@ function installEngine(workspace, name) {
   chmodSync(target, 0o755);
 }
 
+/**
+ * A `uname` ahead of the real one, answering with `system`. The launcher reads
+ * the host's kind to decide whether a bind mount carries ownership into the
+ * container, so stubbing it is what lets both answers be driven from one host.
+ */
+function stubUname(workspace, system) {
+  const target = join(workspace.binDir, "uname");
+  writeFileSync(target, `#!/bin/sh\necho ${system}\n`);
+  chmodSync(target, 0o755);
+}
+
+/** The account the launcher runs the container as on a host that carries
+ * ownership through: the one running this suite. */
+const OPERATOR_IDENTITY = `${process.getuid()}:${process.getgid()}`;
+
+/** The console argument vector the launcher would hand the engine, one argument
+ * per line, for the folders given. */
+function consoleArguments(workspace, folders) {
+  const assignments = Object.entries(folders)
+    .map(([name, value]) => `${name}='${value}'`)
+    .join("\n");
+  const run = sourced(
+    workspace,
+    `${assignments}\nPSILINK_CONTAINER_NAME=psilink-console-1\nPSILINK_PORT=3000\n` +
+      'psilink_build_console_arguments\nprintf "%s\\n" "${PSILINK_CONSOLE_ARGUMENTS[@]}"',
+  );
+  expect(run.status).toBe(0);
+  return run.stdout.trim().split("\n");
+}
+
 function breakEngine(workspace, name) {
   writeFileSync(join(workspace.stubDir, `${name}.broken`), "");
 }
@@ -267,21 +297,6 @@ describe("the sourcing contract", () => {
 });
 
 describe("the shared folder's name passed to the console", () => {
-  /** The console argument vector the launcher would hand the engine, one
-   * argument per line, for the folders given. */
-  function consoleArguments(workspace, folders) {
-    const assignments = Object.entries(folders)
-      .map(([name, value]) => `${name}='${value}'`)
-      .join("\n");
-    const run = sourced(
-      workspace,
-      `${assignments}\nPSILINK_CONTAINER_NAME=psilink-console-1\nPSILINK_PORT=3000\n` +
-        'psilink_build_console_arguments\nprintf "%s\\n" "${PSILINK_CONSOLE_ARGUMENTS[@]}"',
-    );
-    expect(run.status).toBe(0);
-    return run.stdout.trim().split("\n");
-  }
-
   it("names the rendezvous folder the operator picked", () => {
     // The container is shown /rendezvous whatever folder was picked, so the
     // folder's own name has to travel beside the mount.
@@ -330,6 +345,94 @@ describe("the shared folder's name passed to the console", () => {
       expect(args).toContain("JOB_RENDEZVOUS_NAME=");
       expect(args.join(" ")).not.toMatch(/JOB_RENDEZVOUS_NAME=\S/);
     }
+  });
+});
+
+describe("the account the container runs as", () => {
+  // A Linux bind mount carries its host directory's ownership into the
+  // container, so an image running as its own fixed account can only write what
+  // that account's number owns -- and an operator numbered from a directory
+  // service is not it. The launcher runs the container as the operator instead,
+  // which moves the one thing that account cannot then reach: the directory the
+  // image built for itself to hold a pasted SFTP credential.
+
+  it("runs the console as the operator's own account", () => {
+    const workspace = makeWorkspace();
+    stubUname(workspace, "Linux");
+
+    const args = consoleArguments(workspace, {
+      PSILINK_DATA_ROOT: "/home/dana/psilink-work",
+    });
+
+    expect(args).toContain("--user");
+    expect(args[args.indexOf("--user") + 1]).toBe(OPERATOR_IDENTITY);
+  });
+
+  it("points the pasted-credential scratch outside every mount it makes", () => {
+    const workspace = makeWorkspace();
+    stubUname(workspace, "Linux");
+
+    const args = consoleArguments(workspace, {
+      PSILINK_DATA_ROOT: "/home/dana/work",
+      PSILINK_INPUT_DIR: "/home/dana/input",
+      PSILINK_RENDEZVOUS_DIR: "/home/dana/shared",
+    });
+
+    const override = args.find((value) =>
+      value.startsWith("JOB_SFTP_CREDENTIAL_DIR="),
+    );
+    expect(override).toBeDefined();
+    const scratch = override.slice("JOB_SFTP_CREDENTIAL_DIR=".length);
+    const mountPoints = args
+      .map((value, index) => (args[index - 1] === "--volume" ? value : null))
+      .filter((value) => value !== null)
+      .map((value) => value.slice(value.lastIndexOf(":") + 1));
+    expect(mountPoints).toEqual(["/data", "/input", "/rendezvous"]);
+    // The console refuses to start when the scratch directory is, contains, or
+    // sits inside a mounted folder: a pasted secret there would land where the
+    // partner's sync or the operator's own results already are.
+    for (const mount of mountPoints) {
+      expect(scratch).not.toBe(mount);
+      expect(scratch.startsWith(`${mount}/`)).toBe(false);
+      expect(mount.startsWith(`${scratch}/`)).toBe(false);
+    }
+  });
+
+  it("passes no identity where the mount carries no ownership through", () => {
+    // A macOS engine runs the container in a virtual machine and presents the
+    // mount to whichever account it runs as, so there is nothing to match and
+    // the image's own account keeps its own scratch directory.
+    const workspace = makeWorkspace();
+    stubUname(workspace, "Darwin");
+
+    const args = consoleArguments(workspace, {
+      PSILINK_DATA_ROOT: "/Users/dana/psilink-work",
+    });
+
+    expect(args).not.toContain("--user");
+    expect(args.join(" ")).not.toContain("JOB_SFTP_CREDENTIAL_DIR");
+  });
+
+  it("runs the checks as the account the console will run as", () => {
+    // A battery run as some other account reports on that account: the check
+    // and the console it gates have to be the same one.
+    const workspace = makeWorkspace();
+    stubUname(workspace, "Linux");
+    installEngine(workspace, "docker");
+    stageVerdict(workspace, 1, 78, FIX_AND_RETRY);
+    const launcher = stampedLauncher(workspace);
+
+    runLauncher(
+      workspace,
+      launcher,
+      ["--data-root", workspace.dataDir, "--no-browser"],
+      "n\n",
+    );
+
+    const doctorRun = engineCalls(workspace)
+      .split("\n")
+      .find((line) => line.includes("doctor"));
+    expect(doctorRun).toContain(`--user ${OPERATOR_IDENTITY}`);
   });
 });
 
@@ -603,11 +706,51 @@ describe("the doctor loop", () => {
     expect(engineCalls(workspace)).not.toMatch(/serve/);
   });
 
-  it("runs the mount battery against the rendezvous folder", () => {
+  it("runs the mount battery against every folder the console is given", () => {
+    // The console reads and writes all of them, so a fault in any one of them
+    // is a reason not to start. Checking the shared folder alone leaves the
+    // other two to fail as an EACCES after the browser has opened.
     const workspace = makeWorkspace();
     installEngine(workspace, "docker");
+    const inputDir = join(workspace.root, "input");
     const rendezvous = join(workspace.root, "shared");
+    mkdirSync(inputDir);
     mkdirSync(rendezvous);
+    stageVerdict(workspace, 1, 0, ALL_OK);
+    stageVerdict(workspace, 2, 0, ALL_OK);
+    stageVerdict(workspace, 3, 78, FIX_AND_RETRY);
+    const launcher = stampedLauncher(workspace);
+
+    runLauncher(
+      workspace,
+      launcher,
+      [
+        "--data-root",
+        workspace.dataDir,
+        "--input-dir",
+        inputDir,
+        "--rendezvous-dir",
+        rendezvous,
+        "--no-browser",
+      ],
+      "n\n",
+    );
+
+    const doctorRuns = engineCalls(workspace)
+      .split("\n")
+      .filter((line) => line.includes("doctor"));
+    expect(doctorRuns).toHaveLength(3);
+    expect(doctorRuns[0]).toContain(`--volume ${workspace.dataDir}:/rz`);
+    expect(doctorRuns[1]).toContain(`--volume ${inputDir}:/rz`);
+    expect(doctorRuns[2]).toContain(`--volume ${rendezvous}:/rz`);
+    expect(doctorRuns[0]).toContain("doctor mount /rz --json");
+    expect(doctorRuns[0]).toContain(`vdorie/psi-link@${TEST_DIGEST}`);
+    expect(engineCalls(workspace)).not.toMatch(/serve/);
+  });
+
+  it("runs one battery when the same folder was given for everything", () => {
+    const workspace = makeWorkspace();
+    installEngine(workspace, "docker");
     stageVerdict(workspace, 1, 78, FIX_AND_RETRY);
     const launcher = stampedLauncher(workspace);
 
@@ -617,19 +760,19 @@ describe("the doctor loop", () => {
       [
         "--data-root",
         workspace.dataDir,
+        "--input-dir",
+        workspace.dataDir,
         "--rendezvous-dir",
-        rendezvous,
+        workspace.dataDir,
         "--no-browser",
       ],
       "n\n",
     );
 
-    const doctorRun = engineCalls(workspace)
+    const doctorRuns = engineCalls(workspace)
       .split("\n")
-      .find((line) => line.includes("doctor"));
-    expect(doctorRun).toContain(`--volume ${rendezvous}:/rz`);
-    expect(doctorRun).toContain("doctor mount /rz --json");
-    expect(doctorRun).toContain(`vdorie/psi-link@${TEST_DIGEST}`);
+      .filter((line) => line.includes("doctor"));
+    expect(doctorRuns).toHaveLength(1);
   });
 });
 
@@ -699,6 +842,7 @@ describe("starting the console", () => {
 
   it("publishes to host loopback and opens on the port it published", async () => {
     const workspace = makeWorkspace();
+    stubUname(workspace, "Linux");
     installEngine(workspace, "docker");
     stageVerdict(workspace, 1, 0, ALL_OK);
     const launcher = stampedLauncher(workspace);
@@ -755,6 +899,13 @@ describe("starting the console", () => {
     expect(serveRun).toContain("run --rm");
     expect(serveRun).toContain("--env JOB_DATA_ROOT=/data");
     expect(serveRun).toContain(`--volume ${workspace.dataDir}:/data`);
+    // Running as the operator is what makes the mounted folder writable, and
+    // the override is what gives the console somewhere it can still put a
+    // pasted SFTP credential once it is no longer the image's own account.
+    expect(serveRun).toContain(`--user ${OPERATOR_IDENTITY}`);
+    expect(serveRun).toContain(
+      "--env JOB_SFTP_CREDENTIAL_DIR=/tmp/psilink-sftp-credentials",
+    );
     // With one folder for everything, the input and rendezvous directories are
     // left to fall back to JOB_DATA_ROOT rather than mounted a second time.
     expect(serveRun).not.toContain("JOB_INPUT_DIR");

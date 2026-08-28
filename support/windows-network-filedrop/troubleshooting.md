@@ -244,6 +244,15 @@ first cause: they decide which account the mount is presented to, which is a
 question the server does not answer. Neither does `-Dialect` fix any of this: if
 the share was reached, the dialect is not what is refusing you.
 
+**On macOS and Linux there is no volume.** `start-psilink.sh` mounts each folder
+as your machine already sees it and runs the container as your own account, so a
+refused write there is your own account's access to your own folder: check who
+owns it and what it grants, on the machine you are running from. Starting the
+container by hand is the other way to meet this. Without `--user` it runs as the
+account the image ships with, numbered 1000, which cannot write a folder
+belonging to anyone else; pass `--user "$(id -u):$(id -g)"` and it runs as you
+do.
+
 ## The volume will not mount
 
 `permission denied`, `host is down`, or `operation not supported` at part 4,

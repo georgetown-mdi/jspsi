@@ -222,9 +222,10 @@ export function runMountChecks(
       fail(
         "write_rename",
         `could not write and rename in this folder (${errorCode(err)}).`,
-        "the mount reached a folder but psilink cannot write in it. Either the " +
-          "account can open the folder but not create files in it, or the share " +
-          "is out of space.",
+        "the mount reached a folder but psilink cannot write in it. Either " +
+          "the account this container runs as does not own the folder, or it " +
+          "can open the folder but not create files in it, or the share is " +
+          "out of space.",
         "see the troubleshooting page, 'The folder cannot be written to'.",
       ),
     );
