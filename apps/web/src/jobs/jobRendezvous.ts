@@ -815,6 +815,36 @@ function legNoun(leg: RendezvousLeg, noun: "directory" | "path"): string {
 }
 
 /**
+ * The notice a directory of the overlap comparison raises when its OWN real path
+ * could not be READ: the comparison narrowed back to the configured paths, so a
+ * symlink joining it to the other directory goes unseen. It reports a check that
+ * ran narrower than it means to rather than a fault in the operator's layout, so
+ * what it names is the read access to restore -- and it stays a warning whichever
+ * side could not be read, since a filesystem that cannot answer decides which
+ * notice to raise and never whether the exchange runs.
+ *
+ * `comparedWith` names the other directory, which is what attributes the notice on
+ * a split appliance: the data root and the work-input directory are compared once
+ * per leg, so an unqualified sentence would reach the operator twice over with
+ * nothing to tell the two apart. The mount's own notice passes none, being the side
+ * every other one is compared against rather than one of them.
+ */
+function unresolvedRealPathNotice(
+  subject: string,
+  subjectPath: string,
+  comparedWith?: string,
+): string {
+  const unresolved =
+    " could not be resolved to its real path, so an overlap a symlink makes" +
+    `${comparedWith === undefined ? "" : ` with ${comparedWith}`} would go ` +
+    "unseen. Give the console read access to every folder on the way to it.";
+  return fitNotice(
+    `${subject} ${subjectPath}${unresolved}`,
+    `${subject}${unresolved}`,
+  );
+}
+
+/**
  * As much of the sweep control's visible label as the notice budget leaves beside
  * the mount path. Held as its own value because both recoveries below quote it,
  * and tied to the label the run form renders by a check rather than by matching
@@ -935,10 +965,14 @@ function describeRendezvousEntries(
  * The overlap is decided over each path as configured AND as the real path symlinks
  * resolve it to (see {@link resolvePathForms}), so a mount symlinked onto the data
  * root raises the same notice a nested one does: what a partner's sync writes reach
- * is the directory at the far end of the link, not the path that names it. A mount
- * whose own real path cannot be READ falls back to the configured comparison and
- * says so in a further notice, while one that simply does not exist yet is resolved
- * through its nearest existing ancestor and raises no notice about resolution at all.
+ * is the directory at the far end of the link, not the path that names it. A
+ * directory on EITHER side of that comparison whose own real path cannot be READ --
+ * the mount, the data root, or the work-input directory -- falls back to the
+ * configured comparison and says so in a further notice naming the side that could
+ * not be resolved ({@link unresolvedRealPathNotice}), so a narrowed check is never
+ * silent about which side narrowed it; one that simply does not exist yet is
+ * resolved through its nearest existing ancestor and raises no notice about
+ * resolution at all.
  *
  * A directory that is not empty warns for a different reason: the console rendezvouses
  * every filedrop job out of the same mounts, so a completed retain-mode run leaves its
@@ -1056,27 +1090,21 @@ export function rendezvousStartupWarnings(
     overlaps.push([jobInputDir, "the work-input directory"]);
   for (const [other, otherLabel] of overlaps) {
     const otherPaths = resolvePathForms(other);
-    if (!pathFormsOverlap(rendezvousPaths, otherPaths)) continue;
-    warnings.push(
-      fitNotice(
-        `${label} ${rendezvousDir} overlaps ${otherLabel} ` +
-          `(${otherPaths.resolved}); a partner's sync writes would reach it`,
-        `${label} overlaps ${otherLabel}; a partner's sync ` +
-          "writes would reach it",
-      ),
-    );
+    if (pathFormsOverlap(rendezvousPaths, otherPaths))
+      warnings.push(
+        fitNotice(
+          `${label} ${rendezvousDir} overlaps ${otherLabel} ` +
+            `(${otherPaths.resolved}); a partner's sync writes would reach it`,
+          `${label} overlaps ${otherLabel}; a partner's sync ` +
+            "writes would reach it",
+        ),
+      );
+    if (!otherPaths.canonicalized)
+      warnings.push(
+        unresolvedRealPathNotice(otherLabel, otherPaths.resolved, label),
+      );
   }
-  if (!rendezvousPaths.canonicalized) {
-    const unresolved =
-      " could not be resolved to its real path, so an overlap a symlink " +
-      "makes would go unseen. Give the console read access to every folder " +
-      "on the way to it.";
-    warnings.push(
-      fitNotice(
-        `${label} ${rendezvousDir}${unresolved}`,
-        `${label}${unresolved}`,
-      ),
-    );
-  }
+  if (!rendezvousPaths.canonicalized)
+    warnings.push(unresolvedRealPathNotice(label, rendezvousDir));
   return warnings;
 }
