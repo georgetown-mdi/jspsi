@@ -673,6 +673,24 @@ the other tab yields; and reading once means the validating parse and the
 envelope-only parse see the same bytes, so the two readings of an accounting
 cannot disagree.
 
+**A refused value is then split by which side is behind.** A bump strands entries
+only in one direction, and the refused entries' own `version` literals -- carried
+in the same raw value the envelope parse returned -- say which one this is. Where
+an entry names a LATER record format than the reading build admits, the entries
+are not stranded: a build that reads them exists, and this page is running older
+code than it. That is reachable in the deployed app, not hypothetical: the service
+worker does not swap code under a running page (see
+[../MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)), so a tab left open across a
+deployment reads what the newer build filed. It classifies as *stale-page*, whose
+remedy is a reload; offering the reset there would destroy records the current
+build reads. Only entries the reading build is AHEAD of are the *unreadable* state
+the recovery below belongs to. A literal that cannot be ordered against this
+build's -- another family, or no ordinal -- is not later, so a value nothing can
+be concluded about keeps the reading that offers a way out. The append refuses in
+both directions alike, since it re-reads through the same validating parse: a run
+from a stale page discloses and files nothing, which is why that state's copy
+carries the consequence and not only the remedy.
+
 **The recovery offered is export then reset**, in that order, from the unreadable
 state, and it never removes the exchange:
 
@@ -687,7 +705,9 @@ that restores appendability. The reset is confirmed explicitly, names what is
 destroyed and what is kept, and is never a read's side effect. When the stored
 value is damaged past its envelope -- corruption rather than a version bump --
 there is nothing to export and the surface says so rather than offering a
-download it cannot honor.
+download it cannot honor. The export arm alone is offered from the stale-page
+state as well: handing back stored bytes asserts nothing in either direction,
+where the reset belongs to the direction that has records stranded.
 
 Two shapes are deliberately not offered. **Migration** would rewrite a
 self-attested artifact into a version it was not written under, which the

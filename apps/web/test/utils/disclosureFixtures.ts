@@ -1,4 +1,4 @@
-import { buildExchangeRecord } from "@psilink/core";
+import { EXCHANGE_RECORD_VERSION, buildExchangeRecord } from "@psilink/core";
 
 import type {
   CommittedPayload,
@@ -16,6 +16,26 @@ import type {
  * Shared by the Node unit suites and the browser suite, which need the same
  * records.
  */
+
+/**
+ * The exchange-record version `offset` ordinals from this build's -- a later
+ * format at `1`, an earlier one at `-1` -- derived from core's own constant so a
+ * fixture stays relative to wherever the literal stands rather than pinning a
+ * version that stops being the neighbour when core's moves.
+ *
+ * Throws when the constant carries no ordinal to count from. The split that tells
+ * a stranded accounting from a stale page reads that same shape, so a fixture
+ * quietly falling back to some other literal would leave the suites driving
+ * neither direction.
+ */
+export function neighbouringRecordVersion(offset: number): string {
+  const match = /^(.+)\/v(\d+)$/.exec(EXCHANGE_RECORD_VERSION);
+  if (match === null)
+    throw new Error(
+      `EXCHANGE_RECORD_VERSION "${EXCHANGE_RECORD_VERSION}" carries no ordinal, so it has no neighbouring version`,
+    );
+  return `${match[1]}/v${Number(match[2]) + offset}`;
+}
 
 /** The linkage terms both sides of the fixture exchange agree, carrying the
  * governance fields an accounting reads: the agreement and its purpose, the

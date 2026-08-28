@@ -40,7 +40,10 @@ import {
 import { DISCLOSURE_ACCOUNTING_VERSION } from "@psi/disclosureAccounting";
 import { buildManagedDeposit } from "@bench/manageOfferModel";
 
-import { disclosureRecord } from "../utils/disclosureFixtures";
+import {
+  disclosureRecord,
+  neighbouringRecordVersion,
+} from "../utils/disclosureFixtures";
 
 import type { ExchangeRecord, WebRTCExchangeLocator } from "@psilink/core";
 import type {
@@ -851,6 +854,66 @@ describe("an unreadable accounting recovers without deleting the exchange", () =
     await resetDisclosureAccounting(id);
 
     expect(await accountingEntries(other.id)).toEqual([otherRecord]);
+  });
+});
+
+/**
+ * Which way the refusal points, against the real store. A refused value means one
+ * of two opposite things -- this build is ahead of the entries, or behind them --
+ * and only the destructive recovery belongs to the first. The reverse skew is
+ * live in this app: a new deployment activates while a tab goes on running the
+ * code it loaded with, so a stale tab can read entries a newer build filed.
+ */
+describe("a refused accounting is classified by which side is behind", () => {
+  /** Stage an accounting whose entries carry a record version `offset` ordinals
+   * from this build's, under an exchange that otherwise stands. */
+  async function accountingFromNeighbouringBuild(offset: number): Promise<{
+    id: string;
+    entries: Array<unknown>;
+  }> {
+    const created = await createManagedExchange(newExchange());
+    const record = await disclosureRecord();
+    const entries = [
+      { ...record, version: neighbouringRecordVersion(offset) } as unknown,
+    ];
+    await putRawDisclosureStored(created.id, {
+      version: DISCLOSURE_ACCOUNTING_VERSION,
+      entries,
+    });
+    return { id: created.id, entries };
+  }
+
+  test("entries from a later record format read as a stale page, not a stranded accounting", async () => {
+    const { id, entries } = await accountingFromNeighbouringBuild(1);
+
+    // The reset is the wrong recovery here by construction: these entries are
+    // readable by a build that already exists, so clearing them would destroy
+    // records over a tab running older code. The state carries the stored value
+    // all the same -- handing back stored bytes claims nothing either way.
+    expect(await readDisclosureAccounting(id)).toEqual({
+      kind: "stale-page",
+      stored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
+    });
+  });
+
+  test("entries from an earlier record format stay the stranded accounting", async () => {
+    const { id, entries } = await accountingFromNeighbouringBuild(-1);
+
+    expect(await readDisclosureAccounting(id)).toEqual({
+      kind: "unreadable",
+      stored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
+    });
+  });
+
+  test("a stale page's entries are still not appendable, so neither state files quietly", async () => {
+    const { id } = await accountingFromNeighbouringBuild(1);
+
+    // The append re-reads through the validating parse, so this build files
+    // nothing here either. What differs is the remedy the surface offers, not
+    // what the store does.
+    await expect(
+      appendDisclosureRecordToStore(id, await disclosureRecord()),
+    ).rejects.toThrow();
   });
 });
 

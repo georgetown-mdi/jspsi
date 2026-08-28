@@ -202,9 +202,18 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // not open is its own transient state, not the destructive-recovery one.
   useEffect(() => {
     let live = true;
-    void readDisclosureAccounting(id).then((read) => {
-      if (live) setAccountingRead(read);
-    });
+    void readDisclosureAccounting(id)
+      .then((read) => {
+        if (live) setAccountingRead(read);
+      })
+      // The read classifies every failure rather than rejecting, so this is the
+      // backstop for that contract lapsing rather than a second failure path.
+      // Unavailable is the safe landing: it claims nothing about what is stored
+      // and offers no destructive arm, where an unhandled rejection would strand
+      // the section on its spinner.
+      .catch(() => {
+        if (live) setAccountingRead({ kind: "unavailable" });
+      });
     return () => {
       live = false;
     };
@@ -476,12 +485,21 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setRecord(updated);
   }
 
+  // Queue a fresh read of the accounting, dropping the standing verdict as it
+  // goes: the section returns to its in-flight state rather than rendering the
+  // previous verdict and its buttons under a click that has already been taken --
+  // which reads as an inert control, beside an irreversible one.
+  function readAccountingAgain(): void {
+    setAccountingRead(undefined);
+    setAccountingReads((reads) => reads + 1);
+  }
+
   // Destroy the accounting this build cannot read, then re-read it: the surface
   // shows what the store holds afterwards, so a delete that did not take leaves
   // the unreadable state standing rather than a stale empty one.
   async function resetAccounting(): Promise<void> {
     await resetDisclosureAccounting(id);
-    setAccountingReads((reads) => reads + 1);
+    readAccountingAgain();
   }
 
   // Read the accounting again after a read that never reached the store. It is
@@ -489,7 +507,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // progress, while the blocked-open condition this recovers from clears on its
   // own as soon as the other tab's connection yields.
   function retryAccountingRead(): void {
-    setAccountingReads((reads) => reads + 1);
+    readAccountingAgain();
   }
 
   return (

@@ -984,6 +984,22 @@ Nothing is offered to clear, because nothing is known to be damaged. Close any
 other tab this app is open in and use the page's own "try reading it again"; a
 page reload works too, but it would end a run in progress.
 
+### When this page is the older version
+
+The skew runs both ways. A new deployment does not replace the code of a page that
+is already open, so a tab left open across one goes on running what it loaded
+with. If a newer version has filed records for this exchange since, that page
+cannot read them -- and says so as what it is: **this page is running an older
+version of psilink**.
+
+Nothing is wrong with the records, and clearing them is not offered here: a
+version of the app that reads them exists, and this page is not it. Reload the
+page to use it, and reload before running -- a run started from a page in this
+state discloses and files no record, the same way the stranded state above does.
+If a run is under way, reloading ends it. The stored-records download stays
+available in the meantime; it is for your own files, and this page cannot read it
+back.
+
 ## Surviving storage eviction
 
 Browser storage is not durable the way a file on disk is. The design must survive

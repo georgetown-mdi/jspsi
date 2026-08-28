@@ -1,8 +1,15 @@
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   RECORD_VERSION_PIN,
@@ -129,6 +136,40 @@ describe("the recovery path the deferral points at", () => {
 });
 
 describe("the check as CI runs it", () => {
+  let staged = null;
+
+  afterEach(() => {
+    if (staged === null) return;
+    rmSync(staged, { recursive: true, force: true });
+    staged = null;
+  });
+
+  /**
+   * A tree holding the check and the sources it reads, minus `omitted`. The check
+   * resolves its root from its own location, so driving it against anything but
+   * the repository means staging one -- which is also the only way to reach the
+   * case where a source file is not there at all.
+   */
+  function stageTree(omitted = null) {
+    staged = mkdtempSync(join(tmpdir(), "psilink-disclosure-recovery-"));
+    const place = (relative) => {
+      const destination = join(staged, relative);
+      mkdirSync(dirname(destination), { recursive: true });
+      copyFileSync(resolve(repoRoot, relative), destination);
+    };
+    place("scripts/check-disclosure-recovery.mjs");
+    place(RECORD_VERSION_SOURCE);
+    for (const file of Object.keys(RECOVERY_ENTRY_POINTS))
+      if (file !== omitted) place(file);
+    return spawnSync(
+      "node",
+      [join(staged, "scripts", "check-disclosure-recovery.mjs")],
+      {
+        encoding: "utf8",
+      },
+    );
+  }
+
   it("exits zero against the committed tree", () => {
     const output = execFileSync("node", [SCRIPT], {
       cwd: repoRoot,
@@ -136,5 +177,26 @@ describe("the check as CI runs it", () => {
     });
 
     expect(output).toContain(RECORD_VERSION_PIN);
+  });
+
+  it("passes against a staged copy of that tree, so the staging is faithful", () => {
+    const { status, stdout } = stageTree();
+
+    expect(status).toBe(0);
+    expect(stdout).toContain(RECORD_VERSION_PIN);
+  });
+
+  it("reports a deleted recovery source rather than crashing on the read", () => {
+    // Deleting the file outright is the loudest form of the failure this check
+    // reports, so it must reach the message naming the entry point: an ENOENT out
+    // of the read still exits non-zero, with CI red and the diagnostic lost.
+    const [omitted] = Object.keys(RECOVERY_ENTRY_POINTS);
+    const { status, stderr } = stageTree(omitted);
+
+    expect(status).toBe(1);
+    expect(stderr).not.toContain("ENOENT");
+    expect(stderr).toContain("nothing to defer to");
+    for (const name of RECOVERY_ENTRY_POINTS[omitted])
+      expect(stderr).toContain(`${omitted}: "${name}"`);
   });
 });

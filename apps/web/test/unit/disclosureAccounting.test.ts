@@ -7,9 +7,13 @@ import {
   appendDisclosureRecord,
   parseDisclosureAccounting,
   parseStoredDisclosureAccounting,
+  storedEntriesAheadOfThisBuild,
 } from "../../src/psi/disclosureAccounting.js";
 
-import { disclosureRecord } from "../utils/disclosureFixtures.js";
+import {
+  disclosureRecord,
+  neighbouringRecordVersion,
+} from "../utils/disclosureFixtures.js";
 
 import type { DisclosureAccounting } from "../../src/psi/disclosureAccounting.js";
 
@@ -216,6 +220,90 @@ describe("a moved exchange-record version leaves the stored entries recoverable"
       earlier,
       current,
     ]);
+  });
+});
+
+/**
+ * Which DIRECTION a refused entry was written in, which is what separates a
+ * stranded accounting from a stale page. The predicate reads the refused entry's
+ * own version literal, so both directions are driven from core's constant rather
+ * than from a hard-coded literal beside it: a version this build is ahead of is
+ * the app-upgrade case the destructive recovery exists for, and one it is behind
+ * is a page running older code than the build that filed the entry.
+ *
+ * Each neighbouring version comes from {@link neighbouringRecordVersion}, which
+ * throws rather than falling back when core's literal carries no ordinal to count
+ * from: a predicate that silently stopped ordering anything would otherwise leave
+ * every case below passing on the same answer.
+ */
+describe("telling a stranded accounting from a stale page", () => {
+  /** A stored accounting holding exactly these entries. */
+  function storedWith(entries: Array<unknown>) {
+    return parseStoredDisclosureAccounting({
+      version: DISCLOSURE_ACCOUNTING_VERSION,
+      entries,
+    });
+  }
+
+  test("an entry from a later record format says this page is behind", async () => {
+    const record = await disclosureRecord();
+    const later = neighbouringRecordVersion(1);
+    expect(later).not.toBe(EXCHANGE_RECORD_VERSION);
+
+    expect(
+      storedEntriesAheadOfThisBuild(
+        storedWith([{ ...record, version: later }]),
+      ),
+    ).toBe(true);
+  });
+
+  test("an entry from an earlier record format does not", async () => {
+    // The app-upgrade direction: this build is current, the entries are stranded,
+    // and the export-then-reset recovery is what gets them out.
+    const record = await disclosureRecord();
+
+    expect(
+      storedEntriesAheadOfThisBuild(
+        storedWith([{ ...record, version: neighbouringRecordVersion(-1) }]),
+      ),
+    ).toBe(false);
+  });
+
+  test("entries this build admits are not ahead of it", async () => {
+    const record = await disclosureRecord();
+    expect(record.version).toBe(EXCHANGE_RECORD_VERSION);
+
+    expect(storedEntriesAheadOfThisBuild(storedWith([record]))).toBe(false);
+  });
+
+  test("one later entry beside admissible ones is enough", async () => {
+    // Mixed, so the reading is not "everything here is newer" but "something here
+    // is": the build that should decide what to do about the rest is the current
+    // one, which this page is not running.
+    const record = await disclosureRecord();
+    const later = { ...record, version: neighbouringRecordVersion(1) };
+
+    expect(storedEntriesAheadOfThisBuild(storedWith([record, later]))).toBe(
+      true,
+    );
+  });
+
+  test("a version literal it cannot order is not ahead", async () => {
+    // Another family, an unparsable literal, and an entry that is not an object
+    // at all: nothing can be concluded from any of them, so each keeps the
+    // app-upgrade reading -- the one that offers a way out.
+    const record = await disclosureRecord();
+
+    for (const entry of [
+      { ...record, version: `${EXCHANGE_RECORD_VERSION}-moved` },
+      { ...record, version: "psilink-disclosure-accounting/v99" },
+      { ...record, version: "psilink-exchange-record/vNext" },
+      { ...record, version: 6 },
+      "one disclosure",
+      null,
+    ]) {
+      expect(storedEntriesAheadOfThisBuild(storedWith([entry]))).toBe(false);
+    }
   });
 });
 

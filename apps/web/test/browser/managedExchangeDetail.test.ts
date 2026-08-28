@@ -24,7 +24,10 @@ import {
 import { ManagedExchangeDetail } from "@bench/ManagedExchangeDetail";
 import { disclosureEntries } from "@bench/disclosureAccountingModel";
 
-import { disclosureRecord } from "../utils/disclosureFixtures";
+import {
+  disclosureRecord,
+  neighbouringRecordVersion,
+} from "../utils/disclosureFixtures";
 
 import { captureDownloads } from "./captureDownloads";
 import { createAppMount } from "./renderApp";
@@ -834,6 +837,11 @@ describe("recovering an accounting this version cannot read", () => {
     expect(
       page.getByText("no export of it from here", { exact: false }).query(),
     ).toBeNull();
+    // Nor the opposite direction's copy: this build is the current one, so
+    // nothing here tells the operator to reload a page that is behind.
+    expect(
+      page.getByText("older version of psilink", { exact: false }).query(),
+    ).toBeNull();
   });
 
   test("the export hands over the stored entries verbatim, not a reading of them", async () => {
@@ -1127,6 +1135,126 @@ describe("recovering an accounting this version cannot read", () => {
     expect(
       page.getByRole("button", { name: "Start a fresh accounting" }).query(),
     ).toBeNull();
+  });
+});
+
+/**
+ * The reverse skew: entries a NEWER build filed, read by a page still running the
+ * code it loaded with. The app makes this reachable -- a new deployment's worker
+ * waits rather than swapping code under a running tab -- and the records are fine,
+ * so the destructive arm would destroy what the current build reads. What the
+ * operator needs here is the reload, which is all this state offers besides the
+ * harmless export.
+ */
+describe("an accounting a newer version of the app filed", () => {
+  /** Entries as a later build leaves them at rest: this app's own record fields,
+   * under the record version one ordinal ahead of this build's. */
+  async function entriesFromALaterBuild(): Promise<Array<unknown>> {
+    const filed = await disclosureRecord({
+      partnerIdentity: "Riverbend Schools",
+    });
+    return [{ ...filed, version: neighbouringRecordVersion(1) }];
+  }
+
+  const stalePage = (entries: Array<unknown>) =>
+    createElement(ManagedExchangeDetail, {
+      record: record("inviter"),
+      accountingRead: {
+        kind: "stale-page",
+        stored: { version: DISCLOSURE_ACCOUNTING_VERSION, entries },
+      },
+      onResetAccounting: () => Promise.resolve(),
+      onRetryAccountingRead: () => undefined,
+      onSaveLocalFields: () => Promise.resolve(),
+      onReinviteToChangeTerms: () => undefined,
+      canReinvite: true,
+      reinviting: false,
+      reinviteFailed: false,
+    });
+
+  test("names the page as the stale side and asks for a reload", async () => {
+    app.render(stalePage(await entriesFromALaterBuild()));
+
+    await expect
+      .element(
+        page.getByText("running an older version of psilink", { exact: false }),
+      )
+      .toBeInTheDocument();
+    // The remedy, and the one cost of taking it on a surface that sits below the
+    // run controls.
+    await expect
+      .element(page.getByText("Reload this page", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("reloading ends it", { exact: false }))
+      .toBeInTheDocument();
+    // Why it is urgent rather than cosmetic: this build's read failure is an
+    // append failure too, so a run from this page would file nothing.
+    await expect
+      .element(page.getByText("file no record here either", { exact: false }))
+      .toBeInTheDocument();
+  });
+
+  test("offers no reset, and does not blame an upgrade for records this app reads", async () => {
+    app.render(stalePage(await entriesFromALaterBuild()));
+
+    // The finding this state exists for: the destructive arm was offered under
+    // copy blaming an app upgrade, over records the current build reads fine.
+    expect(
+      page.getByRole("button", { name: "Start a fresh accounting" }).query(),
+    ).toBeNull();
+    expect(
+      page
+        .getByText("An app upgrade can leave a stored accounting", {
+          exact: false,
+        })
+        .query(),
+    ).toBeNull();
+    // The stranded state's remedy sentence goes with it: nothing here says the
+    // records have to be cleared before this exchange files again.
+    expect(
+      page.getByText("Until it is cleared", { exact: false }).query(),
+    ).toBeNull();
+    // Nothing was destroyed and nothing is claimed about the records.
+    await expect
+      .element(page.getByText("has been changed or deleted", { exact: false }))
+      .toBeInTheDocument();
+  });
+
+  test("never renders as an empty accounting, and keeps the harmless export", async () => {
+    const entries = await entriesFromALaterBuild();
+    const downloads = captureDownloads();
+    try {
+      app.render(stalePage(entries));
+
+      // "Nothing was disclosed" is a claim this read refutes rather than
+      // supports, and the CSV speaks for entries this build did not read.
+      expect(
+        page
+          .getByText("copy of the accounting is empty", { exact: false })
+          .query(),
+      ).toBeNull();
+      expect(
+        page.getByRole("button", { name: /Export this accounting/ }).query(),
+      ).toBeNull();
+
+      await page
+        .getByRole("button", { name: /Download the stored records/ })
+        .click();
+
+      await vi.waitFor(() => {
+        expect(downloads.captured).toHaveLength(1);
+        expect(downloads.captured[0].text).not.toBe("");
+      });
+      // The same stored-form export the other direction hands over: verbatim, so
+      // it asserts nothing about entries this build cannot read.
+      expect(JSON.parse(downloads.captured[0].text)).toEqual({
+        version: DISCLOSURE_ACCOUNTING_VERSION,
+        entries,
+      });
+    } finally {
+      downloads.restore();
+    }
   });
 });
 

@@ -446,10 +446,13 @@ function factRow(fact: DisclosureFact): ConfigRow {
  * A failed read renders as its own state, never as an empty accounting: "nothing
  * was disclosed" is a claim, and this surface must not make it on a read it could
  * not perform. Which failed state it is comes from the read's own classification,
- * not from this view: a stored value this build refused carries the
- * export-then-reset recovery ({@link UnreadableAccountingRecovery}), while a store
- * that never yielded one carries the transient notice
- * ({@link UnavailableAccountingNotice}) and no destructive offer at all. Both
+ * not from this view: a stored value written under an EARLIER record format
+ * carries the export-then-reset recovery ({@link UnreadableAccountingRecovery}),
+ * one written under a LATER one carries the reload notice
+ * ({@link StalePageAccountingNotice}), and a store that never yielded a value at
+ * all carries the transient notice ({@link UnavailableAccountingNotice}). Only
+ * the first offers anything destructive: the other two describe a condition
+ * outside the stored records, which clearing them would not fix. All three
  * replace the CSV export and the footer's offer of it, which speak for entries
  * this read did not obtain. Each entry starts collapsed behind its date and
  * partner, so a long history stays scannable and the reader opens the run they
@@ -514,6 +517,8 @@ function DisclosureAccountingView({
         </>
       ) : read.kind === "unavailable" ? (
         <UnavailableAccountingNotice onRetryRead={onRetryRead} />
+      ) : read.kind === "stale-page" ? (
+        <StalePageAccountingNotice stored={read.stored} />
       ) : read.kind === "unreadable" ? (
         <UnreadableAccountingRecovery stored={read.stored} onReset={onReset} />
       ) : entries.length === 0 ? (
@@ -642,11 +647,86 @@ function UnavailableAccountingNotice({
   );
 }
 
+/** Hand the stored accounting back as the file it is stored as. Shared by the two
+ * states that hold a stored value, so what an operator downloads does not depend
+ * on which one they reached it from. */
+function downloadStoredAccounting(stored: StoredDisclosureAccounting): void {
+  triggerBlobDownload(
+    storedDisclosureAccountingFileName(new Date()),
+    storedDisclosureAccountingDocument(stored),
+    DISCLOSURE_STORED_EXPORT_MIME,
+  );
+}
+
+/**
+ * The state where the stored entries were written by a LATER version of the app
+ * than this page is running: a new deployment activated while this tab went on
+ * running the code it loaded with (the service worker does not swap code under a
+ * running page; see {@link ../utils/appShellUpdate.ts}), and the entries that
+ * build filed name a record format this one does not admit.
+ *
+ * The records are not stranded and nothing here is damaged -- a build that reads
+ * them exists, and this page simply is not it. So this state offers no reset:
+ * clearing would destroy records the current version reads, over a condition a
+ * reload clears. The stored-form export stays, since handing back stored bytes
+ * asserts nothing about them and costs nothing.
+ *
+ * What it does carry from the stranded state is the append: this build's read
+ * failure is a write failure too, so a run from this page discloses and files
+ * nothing. That is what makes the reload urgent rather than cosmetic, and it is
+ * said here.
+ *
+ * The reload is named rather than pressed. This section sits below the run
+ * controls, and a reload ends a run in progress; the app's own update banner
+ * carries the button, above every route.
+ */
+function StalePageAccountingNotice({
+  stored,
+}: {
+  stored: StoredDisclosureAccounting;
+}) {
+  return (
+    <>
+      <Alert
+        color="blue"
+        title="This page is running an older version of psilink"
+      >
+        <p>
+          The disclosure records stored for this exchange were filed by a newer
+          version of this app than this page is running, so they are not shown
+          here. Nothing is wrong with them, and nothing stored here has been
+          changed or deleted.
+        </p>
+        <p>
+          Runs started from this page file no record here either: this version
+          cannot add to what a newer one wrote. Reload this page to use the
+          current version, which reads these records and files again. If a run
+          is under way, reloading ends it.
+        </p>
+      </Alert>
+      <p className={`${styles.small} ${styles.sub}`}>
+        You can still download the records in the form they are stored in, for
+        your own files. This app version cannot read that file back or check it.
+      </p>
+      <div className={styles.savedRowActions} style={{ marginTop: "1rem" }}>
+        <Button
+          variant="default"
+          onClick={() => downloadStoredAccounting(stored)}
+        >
+          Download the stored records (JSON)
+        </Button>
+      </div>
+    </>
+  );
+}
+
 /**
  * The recovery affordance for an accounting this build can no longer read, which
- * an app upgrade that moved the exchange-record format produces: the stored
- * entries stay at rest, admissible under the format current when they were
- * written, and the validating read refuses them wholesale.
+ * an app upgrade that moved the exchange-record format forward produces: the
+ * stored entries stay at rest, admissible under the format current when they were
+ * written, and the validating read refuses them wholesale. Reached only for
+ * entries this build is AHEAD of; the opposite direction is a stale page rather
+ * than a stranded accounting, and takes {@link StalePageAccountingNotice}.
  *
  * Two arms, offered in one fixed order, because neither alone covers the failure.
  * The EXPORT is the only thing that retains the record -- the accounting is a
@@ -683,11 +763,7 @@ function UnreadableAccountingRecovery({
 
   function downloadStored() {
     if (stored === undefined) return;
-    triggerBlobDownload(
-      storedDisclosureAccountingFileName(new Date()),
-      storedDisclosureAccountingDocument(stored),
-      DISCLOSURE_STORED_EXPORT_MIME,
-    );
+    downloadStoredAccounting(stored);
     setDownloadTaken(true);
   }
 

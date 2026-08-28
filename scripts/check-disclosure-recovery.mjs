@@ -62,6 +62,10 @@
 //   - A version literal that is not a literal. It reads the `export const`
 //     initializer out of the source and fails rather than guessing when that line
 //     does not read as a quoted string.
+//   - A tree with no packages/core/src/exchangeRecord.ts in it. That read is
+//     deliberately not tolerated, unlike the recovery sources' -- a missing
+//     record-version source is a broken checkout rather than a state this check
+//     has a diagnostic for.
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -156,8 +160,22 @@ export function bumpViolations(declared, sources) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const read = (file) => readFileSync(resolve(root, file), "utf8");
+  // A recovery source that is gone entirely is the loudest form of the failure
+  // this check reports, so it reads as no declarations rather than as an ENOENT:
+  // the throw would exit non-zero with the diagnostic lost, which is exactly the
+  // tree where naming the missing entry point matters most.
+  const readIfPresent = (file) => {
+    try {
+      return read(file);
+    } catch {
+      return "";
+    }
+  };
   const sources = Object.fromEntries(
-    Object.keys(RECOVERY_ENTRY_POINTS).map((file) => [file, read(file)]),
+    Object.keys(RECOVERY_ENTRY_POINTS).map((file) => [
+      file,
+      readIfPresent(file),
+    ]),
   );
   const violations = bumpViolations(
     declaredRecordVersion(read(RECORD_VERSION_SOURCE)),

@@ -31,7 +31,7 @@
 
 import { z } from "zod";
 
-import { parseExchangeRecord } from "@psilink/core";
+import { EXCHANGE_RECORD_VERSION, parseExchangeRecord } from "@psilink/core";
 
 import type { ExchangeRecord } from "@psilink/core";
 import type { ZodType } from "zod";
@@ -102,6 +102,63 @@ export function parseStoredDisclosureAccounting(
     version: DISCLOSURE_ACCOUNTING_VERSION,
     entries: envelope.entries,
   };
+}
+
+/** The `<family>/v<n>` shape a format version literal takes, split so two literals
+ * of the same family can be ordered. A literal that does not take it has no
+ * ordinal, and orders against nothing. */
+const VERSION_SHAPE = /^(.+)\/v(\d+)$/;
+
+/** A version literal's family and ordinal, or `undefined` for a value that is not
+ * a literal of that shape. */
+function versionParts(
+  version: unknown,
+): { family: string; ordinal: number } | undefined {
+  if (typeof version !== "string") return undefined;
+  const match = VERSION_SHAPE.exec(version);
+  if (match === null) return undefined;
+  return { family: match[1], ordinal: Number(match[2]) };
+}
+
+/**
+ * Whether any stored entry names a LATER exchange-record format than this build
+ * admits -- the direction that says the READER is behind, not the stored value.
+ *
+ * A refused entry means one of two opposite things, and only the entry's own
+ * version literal tells them apart. An entry from an EARLIER format is the
+ * app-upgrade case: this build is current, and the entries are stranded until
+ * they are exported and cleared. An entry from a LATER one is the reverse -- a
+ * newer deployment activated while this page kept the code it started with (the
+ * service worker does not swap code under a running page; see
+ * {@link ../utils/appShellUpdate.ts}), so a build that reads these entries
+ * already exists and reloading onto it is the whole fix. Clearing them there
+ * would destroy readable records over a stale tab.
+ *
+ * True on ANY such entry, including an accounting that mixes the two: whatever
+ * else is stranded, the build that should be deciding about it is the current
+ * one, not this page.
+ *
+ * A version literal this cannot order -- another family, or a shape carrying no
+ * ordinal -- is not later. So a value nothing can be concluded about keeps the
+ * app-upgrade reading, which is the one that offers a way out.
+ */
+export function storedEntriesAheadOfThisBuild(
+  stored: StoredDisclosureAccounting,
+): boolean {
+  const build = versionParts(EXCHANGE_RECORD_VERSION);
+  if (build === undefined) return false;
+  return stored.entries.some((entry) => {
+    const version =
+      entry !== null && typeof entry === "object"
+        ? (entry as Record<string, unknown>)["version"]
+        : undefined;
+    const entryVersion = versionParts(version);
+    return (
+      entryVersion !== undefined &&
+      entryVersion.family === build.family &&
+      entryVersion.ordinal > build.ordinal
+    );
+  });
 }
 
 /**

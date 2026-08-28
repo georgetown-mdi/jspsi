@@ -22,8 +22,9 @@
  * store appendable again. They are one ordered pair, not alternatives: the export
  * retains the record but leaves the store un-appendable, and the reset restores
  * appendability but destroys the record. The read classifies which state the
- * exchange is in, so the recovery is offered on a value in hand and never on a
- * store that simply did not answer.
+ * exchange is in, so the recovery is offered on a value in hand, never on a
+ * store that simply did not answer, and never on records a later build wrote --
+ * which this page being behind is enough to explain.
  */
 
 import { parseExchangeRecord } from "@psilink/core";
@@ -36,6 +37,7 @@ import {
   appendDisclosureRecord,
   parseDisclosureAccounting,
   parseStoredDisclosureAccounting,
+  storedEntriesAheadOfThisBuild,
 } from "./disclosureAccounting";
 
 import type {
@@ -103,7 +105,14 @@ export type DisclosureAccountingRead =
    * they sit at rest when the ENVELOPE still parses (the record-version-bump
    * case, which is what makes the export arm possible), and is `undefined` when
    * the envelope is gone too and there is nothing to hand back. */
-  | { kind: "unreadable"; stored: StoredDisclosureAccounting | undefined };
+  | { kind: "unreadable"; stored: StoredDisclosureAccounting | undefined }
+  /** A stored value the validating parse refused whose entries name a LATER
+   * exchange-record format than this build admits: the records are fine and this
+   * PAGE is behind them (see {@link storedEntriesAheadOfThisBuild}). Its recovery
+   * is to reload onto the build that wrote them, never the reset -- which would
+   * destroy records the current build reads. `stored` is the same envelope-only
+   * value, since handing back stored bytes claims nothing either way. */
+  | { kind: "stale-page"; stored: StoredDisclosureAccounting };
 
 /** The stored value held only to its envelope, or `undefined` when even that
  * refuses. Never a rendering source: these are the entries the validating parse
@@ -130,7 +139,11 @@ function recoverableStored(
  * split {@link ../bench/savedExchangesLoad.ts} makes for the saved-exchanges
  * list: only a value actually read and then refused reaches `"unreadable"`, so a
  * blocked open -- which self-heals when the other tab yields -- can never present
- * as the irreversible-reset case.
+ * as the irreversible-reset case. A value that WAS refused is then split by
+ * direction, on the refused entries' own version literals: only entries from an
+ * earlier record format are the stranded accounting the reset exists for; entries
+ * from a later one say this page is running older code than the build that wrote
+ * them, and reloading is that state's whole recovery.
  *
  * Total: every failure classifies rather than rejecting, so a caller renders an
  * outcome rather than catching one.
@@ -148,7 +161,10 @@ export async function readDisclosureAccounting(
   try {
     return { kind: "accounting", accounting: parseDisclosureAccounting(raw) };
   } catch {
-    return { kind: "unreadable", stored: recoverableStored(raw) };
+    const stored = recoverableStored(raw);
+    if (stored !== undefined && storedEntriesAheadOfThisBuild(stored))
+      return { kind: "stale-page", stored };
+    return { kind: "unreadable", stored };
   }
 }
 
