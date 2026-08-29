@@ -682,7 +682,7 @@ runs, labeled with the handoff date -- so the cooperation-not-cryptography
 invalidation below is legible at the one moment it is violable. A spent record
 can be deleted, or revived only by importing the artifact back.
 
-**A hand-off never gives away a copy a run has superseded.** Confirming either
+**A hand-off refuses a copy a run has already superseded.** Confirming either
 hand-off -- the device migration here, or the command-line export below --
 re-reads the stored record first, and refuses unless what was downloaded still
 carries the exchange's current secret. A run rotates that secret at its
@@ -698,10 +698,16 @@ other context holds the [single-writer
 lock](#cross-tab-single-writer-locking-web-locks), which is how a second tab's
 run or a scheduled one reaches them. The surface names the run as the reason;
 the hand-offs return when this tab's run ends or, for another context, when its
-lock releases at the rotation persist. That wait is the courtesy and the
-refusal is the guarantee: the lock can be released between the moment the
-surface reads it and the moment the operator clicks, so the confirmation
-re-checks either way.
+lock releases at the rotation persist. That wait is a courtesy, and the refusal
+covers exactly the rotations that have persisted: the confirmation re-checks
+the stored secret where it writes, so a rotation that has landed refuses the
+spend whatever the surface showed. A run still in flight has not yet rotated
+the stored secret, so the confirmation cannot refuse there -- the withholding
+above is the only cover for that window, and it is a best-effort reading: a
+spend it fails to withhold is accepted and then superseded when the run's
+rotation lands. Closing that window structurally -- the spend and the run
+excluding each other rather than observing each other -- is deliberate
+follow-on work, not a property this flow provides.
 
 The artifact is a **plaintext credential file in the operator's custody**.
 Passphrase encryption is deliberately not done: the record must be usable with
