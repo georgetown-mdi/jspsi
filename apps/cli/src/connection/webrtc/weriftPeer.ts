@@ -96,10 +96,26 @@ export const DEFAULT_RENDEZVOUS_TIMEOUT_MS = 10 * 60 * 1000;
  */
 export const DEFAULT_CHANNEL_OPEN_TIMEOUT_MS = 30_000;
 
+/**
+ * The STUN server a peer connection built with no `iceServers` list gathers
+ * against. It is werift's own built-in, not a psilink choice, so the value is
+ * established by driving the library rather than by reading it: the integration
+ * suite resolves this host to loopback and watches the real peer's STUN binding
+ * request arrive on this port (`test/integration/webrtc/transport.test.ts`).
+ *
+ * An operator is told this endpoint before they hand a recurring exchange's
+ * secret to a scheduler, so a stale copy of it is a false confidentiality
+ * statement rather than a typo. Every copy outside this workspace -- the web
+ * app's command-line export panel, which may not import across apps, and the
+ * docs that state the default -- is held to this value by
+ * `npm run check:stun-default-claims`.
+ */
+export const WERIFT_BUILT_IN_STUN_URI = "stun:stun.l.google.com:19302";
+
 /** The warning line emitted when no ICE servers are configured (see below). */
 export const NO_ICE_SERVERS_WARNING =
   "no ICE servers are configured for this webrtc connection, so the built-in " +
-  "default (stun:stun.l.google.com:19302) will be used to discover this " +
+  `default (${WERIFT_BUILT_IN_STUN_URI}) will be used to discover this ` +
   "host's public address. That address, and the fact of a session, are " +
   "disclosed to that server; no exchange content is. Set `stun` (or `turn`) " +
   "on the connection to use your own server instead, or set a single " +
