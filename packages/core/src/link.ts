@@ -14,6 +14,7 @@ import {
   type SinglePassCeilingBreach,
   type SinglePassPartySize,
 } from "./connection/frameSize";
+import { assertBlockDiagonalClosure } from "./entityClosure";
 import { MAX_KEY_CANDIDATES_PER_ROW } from "./fanOutFunctions";
 import {
   fanOutReachedMatchingRefusal,
@@ -247,6 +248,31 @@ function sentGrouping(sent: IterationMap): PartnerIndexGrouping {
   };
 }
 
+// One label per matched record of this party, equal exactly for the records that
+// named one (round, position) -- the block of a single matched value. Read off the
+// grouping copied out before the send rather than off the list itself, for the
+// reason above: the entries are the partner's to overwrite under a transport that
+// does not serialize them.
+function blockLabels(groups: PartnerIndexGrouping): Int32Array {
+  const labels = new Int32Array(groups.rounds.length);
+  const positionsByRound = new Map<number, Map<number, number>>();
+  let next = 0;
+  for (let i = 0; i < labels.length; ++i) {
+    let byPosition = positionsByRound.get(groups.rounds[i]);
+    if (byPosition === undefined) {
+      byPosition = new Map();
+      positionsByRound.set(groups.rounds[i], byPosition);
+    }
+    let label = byPosition.get(groups.positions[i]);
+    if (label === undefined) {
+      label = next++;
+      byPosition.set(groups.positions[i], label);
+    }
+    labels[i] = label;
+  }
+  return labels;
+}
+
 // The rule this party's own returned mapped-element list is held to. There is one
 // rule -- injectivity modulo the grouping this party sent -- read at whichever
 // granularity the partner returns: entry for entry where the partner takes one row
@@ -386,10 +412,12 @@ export function attributableRoundMatches(
  * mirror one procedure (docs/spec/PROTOCOL.md, Deduplicating cardinalities). Under
  * `"many-to-many"` both parties apply the "many" rule, so a matched value stands
  * for a group on each side and the pair set it contributes is the two groups'
- * product; the transitive closure that resolves such a table into entity clusters
- * is not part of the pairing. exchange.ts resolves the cardinality from the two
- * agreed `deduplicate` settings and refuses that pair before the rounds begin, so
- * a production caller reaches here with one of the other three.
+ * product. The entity closure that resolves such a table is a local step over the
+ * returned table rather than part of the pairing ({@link ./entityClosure}), and the
+ * table this returns is held to the block shape that closure rests on before it
+ * leaves here. exchange.ts resolves the cardinality from the two agreed
+ * `deduplicate` settings and refuses that pair before the rounds begin, so a
+ * production caller reaches here with one of the other three.
  *
  * @param protocol - Exchange protocol settings; only `cardinality` is used
  *   here, and it is this party's own resolved label (see
@@ -762,14 +790,26 @@ export async function linkViaPSI(
   // them, each followed by the partner rows of the group it matched. Walking our
   // records in that same order with the per-record tally is what reconstructs the
   // pairing, and it is why the expansion order is normative.
+  //
+  // Under a BOTH-sided multiplicity the pairs are labelled with the block each one
+  // belongs to as they are built, so the entity closure the table resolves into can
+  // be held to those blocks below. Only that cardinality carries the labels: where
+  // one side keeps its distinctness a cluster is one record of that side with the
+  // group facing it, which the table's own shape already gives.
+  const labels = sentGroups && blockLabels(sentGroups);
+  const blockOfPair: Array<number> | undefined = labels && [];
   const table: [Array<number>, Array<number>] = [[], []];
   let cursor = 0;
-  for (const row of originalIndices) {
+  for (let i = 0; i < originalIndices.length; ++i) {
+    const row = originalIndices[i];
     for (let t = returnedEntriesPerRecord![row]; t > 0; --t) {
       table[0].push(row);
       table[1].push(identifiedIndexMap[cursor++].theirIndex);
+      blockOfPair?.push(labels![i]);
     }
   }
+  if (blockOfPair)
+    assertBlockDiagonalClosure(participant.id, table, blockOfPair);
   return table;
 }
 

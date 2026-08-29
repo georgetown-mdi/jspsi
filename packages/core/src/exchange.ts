@@ -741,13 +741,14 @@ export function assertPresentedDeduplicateMatchesInvitation(
  *
  * `(true, true)` is refused. Its round-level pairing follows from the per-side
  * rules -- both sides keep their within-dataset duplicates and every candidate
- * pair is accepted -- but a table carrying multiplicity on both sides links
- * records transitively, and only the transitive closure that resolves it into
- * entity clusters makes such a table actionable for either party. That closure,
- * its interaction with the key cascade, and what it discloses are unspecified and
- * unbuilt, so the pair is refused before the rounds begin rather than paired and
- * handed over unresolved (docs/spec/PROTOCOL.md, `many-to-many` stops at the
- * pairing rules).
+ * pair is accepted -- and the transitive closure that resolves such a table into
+ * entity clusters, which is what makes it actionable for either party, is
+ * specified and runs locally over the cascade's own output
+ * (docs/spec/PROTOCOL.md, The `many-to-many` entity closure). What is not enabled
+ * is the pair itself: no consent surface, no strategy pair, and no run boundary
+ * carries it, and single-pass matches no both-sided cardinality at all. So it is
+ * refused here, before the rounds begin, rather than run through surfaces that
+ * were built for the other three.
  *
  * Every refusal here is a symmetric function of the agreed pair -- each party
  * asserts over BOTH documents and the `(true, true)` test is symmetric in them --
@@ -763,10 +764,10 @@ export function resolveLinkageCardinality(
   if (localTerms.deduplicate && partnerTerms.deduplicate)
     throw new UsageError(
       "both parties' linkage terms set deduplicate to true, which resolves to " +
-        "a many-to-many match. Its pairing rules are specified, but the " +
-        "transitive closure that resolves a both-sided multiplicity into " +
-        "entity clusters -- what makes such a table mean anything to either " +
-        "party -- is not yet implemented, so the exchange is refused before " +
+        "a many-to-many match. Its pairing rules and the transitive closure " +
+        "that resolves a both-sided multiplicity into entity clusters -- what " +
+        "makes such a table mean anything to either party -- are specified, " +
+        "but no exchange runs that cardinality yet, so it is refused before " +
         "matching begins. Set deduplicate to false on one of the two parties " +
         "to run a many-to-one match.",
     );

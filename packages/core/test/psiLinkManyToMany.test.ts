@@ -9,6 +9,11 @@ import {
   ConnectionError,
   type MessageConnection,
 } from "../src/connection/messageConnection";
+import { entityClusters } from "../src/entityClosure";
+import { matchedPairCount } from "../src/exchange";
+import { buildOutputTable, preparePayload } from "../src/payloadExchange";
+import type { Metadata } from "../src/config/metadata";
+import type { CSVRow } from "../src/file";
 import type { AssociationTable } from "../src/types";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
@@ -287,6 +292,171 @@ test("each group expands in ascending record order, groups in the translated lis
     [1, 3, 0, 2, 1, 3],
   ]);
   expectAgreement(starter, joiner);
+});
+
+// --- the entity closure --------------------------------------------------------
+// The step that makes a both-sided table mean something: each party resolves its
+// own copy into entity clusters, locally and with no further frame
+// (docs/spec/PROTOCOL.md, The many-to-many entity closure). The tables here are the
+// ones real runs produce; entityClosure.test.ts drives the block check on
+// hand-built tables, where it can be shown to refuse.
+
+interface CrossPartyCluster {
+  starterRows: ReadonlyArray<number>;
+  joinerRows: ReadonlyArray<number>;
+}
+
+// One party's clusters read in the shared (starter rows, joiner rows) frame, so
+// the two parties' answers compare term for term. Each party orders its own
+// clusters by its own lowest row, so the joiner's order is re-taken here rather
+// than assumed to coincide.
+function crossPartyClusters(
+  table: AssociationTable,
+  swap: boolean,
+): Array<CrossPartyCluster> {
+  return entityClusters(table)
+    .map((cluster) =>
+      swap
+        ? { starterRows: cluster.partnerRows, joinerRows: cluster.localRows }
+        : { starterRows: cluster.localRows, joinerRows: cluster.partnerRows },
+    )
+    .sort((a, b) => a.starterRows[0] - b.starterRows[0]);
+}
+
+test("a chain across two keys never forms, and both parties cluster the same way", async () => {
+  // The chain the closure would otherwise have to reckon with: the starter's row
+  // 0 and the joiner's row 0 share "K1" on the first key, and the joiner's row 0
+  // shares "K2" with the starter's row 1 on the second. It does not form, because
+  // the joiner's row 0 appeared in the first round's candidate pairs and left
+  // candidacy -- so the starter's row 1 takes the joiner's row 1 instead, and the
+  // two clusters stay apart rather than joining through a record that shares a
+  // value with each of them.
+  const run = await runCascade(
+    [
+      ["K1", undefined],
+      [undefined, "K2"],
+    ],
+    [
+      ["K1", undefined],
+      ["K2", "K2"],
+    ],
+  );
+  const [starter, joiner] = expectTables(run);
+
+  expect(crossPartyClusters(starter, false)).toStrictEqual([
+    { starterRows: [0], joinerRows: [0] },
+    { starterRows: [1], joinerRows: [1] },
+  ]);
+  expect(crossPartyClusters(joiner, true)).toStrictEqual(
+    crossPartyClusters(starter, false),
+  );
+});
+
+test("duplicates on both sides resolve to the same clusters on the two parties", async () => {
+  // A mixed dataset: one value two starter records and three joiner records hold,
+  // one held once on each side, one row of each party matching only on the second
+  // key, and one row of each party never matching at all.
+  const run = await runCascade(
+    [
+      ["E1", "E1", "E2", undefined, "S"],
+      [undefined, undefined, undefined, "T", undefined],
+    ],
+    [
+      ["E1", "E1", "E1", "E2", undefined, "J"],
+      [undefined, undefined, undefined, undefined, "T", undefined],
+    ],
+  );
+  const [starter, joiner] = expectTables(run);
+
+  const clusters = crossPartyClusters(starter, false);
+  expect(clusters).toStrictEqual([
+    { starterRows: [0, 1], joinerRows: [0, 1, 2] },
+    { starterRows: [2], joinerRows: [3] },
+    { starterRows: [3], joinerRows: [4] },
+  ]);
+  expect(crossPartyClusters(joiner, true)).toStrictEqual(clusters);
+  // Each cluster is one matched value's whole block, so its members are the rows
+  // that shared that value and nothing reaches it from another round.
+  for (const cluster of clusters)
+    expect(
+      pairsOf(starter, false).filter(
+        ([local, partner]) =>
+          cluster.starterRows.includes(local) ||
+          cluster.joinerRows.includes(partner),
+      ).length,
+    ).toBe(cluster.starterRows.length * cluster.joinerRows.length);
+});
+
+// --- what a cluster costs the result file and the record -----------------------
+
+const outputMeta: Metadata = [
+  { name: "pid", type: "ssn", role: "identifier", isPayload: false },
+  { name: "dose", type: "first_name", role: "payload", isPayload: true },
+];
+const starterInput: CSVRow[] = [
+  { pid: "S0", dose: "10mg" },
+  { pid: "S1", dose: "20mg" },
+];
+const joinerInput: CSVRow[] = [
+  { pid: "J0", dose: "1mg" },
+  { pid: "J1", dose: "2mg" },
+  { pid: "J2", dose: "3mg" },
+];
+
+test("a value m and n records hold writes m x n result rows and attests m x n", async () => {
+  // The accounting the cluster case takes, which is the accounting every other
+  // cardinality takes: one result row per association PAIR, one payload row per
+  // matched RECORD, and a recorded result size that is the pair count. With m = 2
+  // and n = 3 all three figures differ, so none of them can stand in for another.
+  const run = await runCascade([["E1", "E1"]], [["E1", "E1", "E1"]]);
+  const [starter, joiner] = expectTables(run);
+
+  const [cluster] = entityClusters(starter);
+  expect(cluster).toStrictEqual({ localRows: [0, 1], partnerRows: [0, 1, 2] });
+
+  // Both parties derive one figure from the one table, which is why the record
+  // carries the pair count rather than either party's matched-record count.
+  expect(matchedPairCount(starter)).toBe(6);
+  expect(matchedPairCount(joiner)).toBe(6);
+  expect(matchedPairCount(starter)).toBe(
+    cluster.localRows.length * cluster.partnerRows.length,
+  );
+
+  // The payload frame is unmoved by the multiplicity: one row per record each
+  // party matched, addressed by that party's own row index.
+  const joinerPayload = preparePayload(joinerInput, outputMeta, joiner);
+  const starterPayload = preparePayload(starterInput, outputMeta, starter);
+  expect(joinerPayload.hasData && joinerPayload.rowIndices).toStrictEqual([
+    0, 1, 2,
+  ]);
+  expect(starterPayload.hasData && starterPayload.rowIndices).toStrictEqual([
+    0, 1,
+  ]);
+
+  const { headers, rows } = buildOutputTable(
+    starter,
+    starterInput,
+    outputMeta,
+    joinerPayload.hasData
+      ? {
+          columns: joinerPayload.columns,
+          rowIndices: joinerPayload.rowIndices,
+          rows: joinerPayload.rows,
+        }
+      : { columns: [], rowIndices: [], rows: [] },
+  );
+  expect(headers).toStrictEqual(["pid", "row_id", "dose"]);
+  // One row per pair: each of this party's two records against each of the
+  // partner's three, carrying that partner record's own payload row.
+  expect(rows).toStrictEqual([
+    ["S0", "0", "1mg"],
+    ["S0", "1", "2mg"],
+    ["S0", "2", "3mg"],
+    ["S1", "0", "1mg"],
+    ["S1", "1", "2mg"],
+    ["S1", "2", "3mg"],
+  ]);
+  expect(rows.length).toBe(matchedPairCount(starter));
 });
 
 // --- a partner that does not apply the rule ------------------------------------
