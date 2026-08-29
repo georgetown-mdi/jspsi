@@ -86,8 +86,12 @@ class RowForest {
  * linkage-key value, or any quantity the partner declares.
  *
  * Clusters are ordered by their lowest local row, and each cluster's two halves
- * ascend, whatever order the table's pairs arrive in, so two parties comparing a
- * run's clusters compare one arrangement.
+ * ascend, whatever order the table's pairs arrive in, so one table has one
+ * arrangement: a party recomputing, or two readers of that same party's table, get
+ * the same list. Each party orders by its OWN lowest row over a table transposed
+ * from its partner's, so what the two parties hold in common is the cluster SET,
+ * each cluster's halves ascending, rather than the order the clusters are listed
+ * in.
  *
  * @param table - A matched table read as pairs: entry `i` pairs `table[0][i]` with
  *   `table[1][i]`. A repeated pair would be one edge counted twice, which changes
@@ -147,11 +151,16 @@ export function entityClusters(table: AssociationTable): Array<EntityCluster> {
  * refuses each -- a cluster spanning two blocks, a cluster that is not the whole
  * `m x n` product, and one block split across two clusters.
  *
- * The labels are per PAIR rather than per record: a pair's block is what its caller
- * labels it with, so a producer that ever put one record in two of a round's blocks
- * -- a cascade fan-out, refused today where a record's value is read -- labels those
- * pairs apart and meets a refusal here, instead of the two blocks arriving flattened
- * into one label per record that this could not see past.
+ * The labels are read per PAIR rather than per record so that a producer labelling
+ * one record's pairs apart -- one record in two of a round's blocks, as a cascade
+ * fan-out would put it, refused today where a record's value is read -- is held to
+ * the same block shape here, instead of its two blocks arriving flattened into one
+ * label per record that this could not see past. The sole producer today
+ * (`blockLabels`, link.ts) derives one label per matched record and replicates it
+ * across that record's pairs, over a map holding at most one (round, position) per
+ * record, so it excludes that shape structurally; the per-pair signature is what
+ * keeps this a backstop for a changed derivation rather than a restatement of the
+ * current one.
  *
  * The returned-list checks (`assertPartnerIndices`, utils/partnerIndices.ts) imply
  * this on the built path: they hold the runs answering one position identical and

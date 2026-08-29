@@ -250,9 +250,13 @@ function sentGrouping(sent: IterationMap): PartnerIndexGrouping {
 
 // One label per matched record of this party, equal exactly for the records that
 // named one (round, position) -- the block of a single matched value. Read off the
-// grouping copied out before the send rather than off the list itself, for the
-// reason above: the entries are the partner's to overwrite under a transport that
-// does not serialize them.
+// grouping copied out before the send rather than off the list itself, so the
+// derivation rests on this party's own record of what it sent rather than on
+// objects a transport may hand both sides by reference. That is hygiene keeping the
+// derivation self-contained rather than a defence this path needs: the in-place
+// translation that overwrites a received list (`e.theirIndex = i`, below) is the
+// branch a side keeping no duplicates takes, and a label is derived only where both
+// sides keep theirs.
 function blockLabels(groups: PartnerIndexGrouping): Int32Array {
   const labels = new Int32Array(groups.rounds.length);
   const positionsByRound = new Map<number, Map<number, number>>();
