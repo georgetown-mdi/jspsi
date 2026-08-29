@@ -886,8 +886,7 @@ jobs:
           tags: ${{ env.PSILINK_IMAGE }}
           cache-from: type=gha,scope=default
 
-      # One fixture image in two roles: the SSH server whose host key the probe
-      # reads, and the resolver the allowlist permits. sshd listens on the
+      # The SSH server whose host key the probe reads. It listens on the
       # permitted port AND on a second one, so the denied-port row below
       # measures the firewall rather than a closed socket -- the control run
       # reaches that same port and is what establishes the difference.
@@ -904,7 +903,7 @@ jobs:
           echo "endpoint fixture base: $base"
           cat >"$RUNNER_TEMP/endpoint.Dockerfile" <<DOCKERFILE
           FROM $base
-          RUN apk add --no-cache openssh-server dnsmasq
+          RUN apk add --no-cache openssh-server
           RUN ssh-keygen -A
           RUN printf 'Port $ALLOWED_PORT\nPort $DENIED_PORT\n' >> /etc/ssh/sshd_config
           ENTRYPOINT []
@@ -921,25 +920,74 @@ jobs:
       # resolver shares that namespace, so the whole fixture is one link, one
       # route, and the three addresses the rules name.
       #
-      # --filter-AAAA is load-bearing rather than tidiness. Configured with A
-      # records and no upstream, dnsmasq answers an AAAA query REFUSED, and musl
-      # -- which is the resolver in every container here -- reads a refusal on
-      # either half of a lookup as a failure of the whole thing, so the A record
-      # it did answer never gets used. The option answers AAAA locally instead.
+      # The resolver is written here rather than taken off the shelf because
+      # every answer it gives has to be authoritative. musl -- the resolver in
+      # each container the job runs -- asks the A and the AAAA question together
+      # and reads a REFUSED or SERVFAIL on either as a failure of the whole
+      # lookup, so a server that punts on the AAAA half throws away the A record
+      # it answered; dnsmasq configured with addresses and no upstream punts
+      # exactly that way, measured on this runner. Each reply below is NOERROR
+      # with an answer, NOERROR with none, or NXDOMAIN, and its log line is the
+      # record of which names were resolved through the permitted address.
       - name: Start the endpoints and the restricted network
         run: |
           set -euo pipefail
           docker network create --subnet "$EGRESS_SUBNET" "$EGRESS_NET"
 
+          cat >"$RUNNER_TEMP/resolver.mjs" <<'RESOLVER'
+          import { createSocket } from "node:dgram";
+          const RECORDS = new Map(
+            process.env.RESOLVER_RECORDS.split(",").map((e) => e.split("=")),
+          );
+          const socket = createSocket("udp4");
+          socket.on("message", (query, from) => {
+            const labels = [];
+            let at = 12;
+            while (at < query.length && query[at] > 0 && (query[at] & 0xc0) === 0) {
+              labels.push(query.toString("ascii", at + 1, at + 1 + query[at]));
+              at += 1 + query[at];
+            }
+            if (query[at] !== 0 || at + 5 > query.length) return;
+            const name = labels.join(".").toLowerCase();
+            const type = query.readUInt16BE(at + 1);
+            const address = RECORDS.get(name);
+            const answering = address !== undefined && type === 1;
+            console.log(
+              `query[type ${type}] ${name} from ${from.address}: ` +
+                (answering
+                  ? `is ${address}`
+                  : address !== undefined
+                    ? "no record of that type"
+                    : "no such name"),
+            );
+            const header = Buffer.alloc(12);
+            header.writeUInt16BE(query.readUInt16BE(0), 0);
+            const rcode = address === undefined ? 3 : 0;
+            header.writeUInt16BE(0x8480 | (query.readUInt16BE(2) & 0x0100) | rcode, 2);
+            header.writeUInt16BE(1, 4);
+            header.writeUInt16BE(answering ? 1 : 0, 6);
+            const record = answering
+              ? Buffer.from([
+                  0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 30, 0, 4,
+                  ...address.split(".").map(Number),
+                ])
+              : Buffer.alloc(0);
+            socket.send(
+              Buffer.concat([header, query.subarray(12, at + 5), record]),
+              from.port,
+              from.address,
+            );
+          });
+          socket.bind(53);
+          RESOLVER
+
           docker run -d --name psilink-endpoints --network none \
             "$ENDPOINT_IMAGE" /usr/sbin/sshd -D -e
           docker run -d --name psilink-resolver \
             --network "container:psilink-endpoints" \
-            "$ENDPOINT_IMAGE" dnsmasq -k --conf-file=/dev/null --no-resolv \
-            --user=root --group=root --filter-AAAA \
-            --log-queries --log-facility=- \
-            "--address=/$ALLOWED_HOST/$ALLOWED_ADDR" \
-            "--address=/$DENIED_HOST/$DENIED_ADDR"
+            -v "$RUNNER_TEMP/resolver.mjs:/resolver.mjs:ro" \
+            -e "RESOLVER_RECORDS=$ALLOWED_HOST=$ALLOWED_ADDR,$DENIED_HOST=$DENIED_ADDR" \
+            "$ENDPOINT_IMAGE" node /resolver.mjs
 
           pid=$(docker inspect -f '{{.State.Pid}}' psilink-endpoints)
           sudo mkdir -p /var/run/netns
