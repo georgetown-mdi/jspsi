@@ -682,6 +682,27 @@ runs, labeled with the handoff date -- so the cooperation-not-cryptography
 invalidation below is legible at the one moment it is violable. A spent record
 can be deleted, or revived only by importing the artifact back.
 
+**A hand-off never gives away a copy a run has superseded.** Confirming either
+hand-off -- the device migration here, or the command-line export below --
+re-reads the stored record first, and refuses unless what was downloaded still
+carries the exchange's current secret. A run rotates that secret at its
+handshake, so a run that reaches the partner between the download and the
+attestation supersedes what was downloaded: confirming it would hand the new
+owner a copy whose first run meets a partner that has moved on, and only a
+re-invite recovers the pair. The refusal says so, nothing is spent, and the
+remedy is to download the exchange again.
+
+Ahead of that refusal, both hand-offs -- and the downloads that start them --
+are withheld while this tab is running the exchange, and while a run in any
+other context holds the [single-writer
+lock](#cross-tab-single-writer-locking-web-locks), which is how a second tab's
+run or a scheduled one reaches them. The surface names the run as the reason;
+the hand-offs return when this tab's run ends or, for another context, when its
+lock releases at the rotation persist. That wait is the courtesy and the
+refusal is the guarantee: the lock can be released between the moment the
+surface reads it and the moment the operator clicks, so the confirmation
+re-checks either way.
+
 The artifact is a **plaintext credential file in the operator's custody**.
 Passphrase encryption is deliberately not done: the record must be usable with
 nobody present to supply a passphrase at the moment of use. It is the browser

@@ -13,6 +13,7 @@ import {
   persistManagedExchangeRotation,
   readRecordAndMarkBackedUp,
   recordManagedExchangeLastRun,
+  spendManagedExchangeIfCurrent,
 } from "@psi/managedExchangeStore";
 import {
   dispatchManagedMigration,
@@ -28,7 +29,6 @@ import {
   listManagedLocalState,
   markManagedExchangeBackedUp,
   markManagedExchangeImported,
-  markManagedExchangeSpent,
 } from "@psi/managedLocalState";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 import { deriveManagedFailureTier } from "@psi/managedFailureTiers";
@@ -229,7 +229,11 @@ describe("a migration spends the source", () => {
       encodeManagedExchangeArtifact(source),
     );
 
-    await markManagedExchangeSpent(source.id, new Date().toISOString());
+    await spendManagedExchangeIfCurrent(
+      source.id,
+      source.sharedSecret,
+      new Date().toISOString(),
+    );
     const rows = savedExchangeRows(
       [source],
       await listManagedLocalState(),
@@ -243,6 +247,97 @@ describe("a migration spends the source", () => {
     const revived = await importManagedExchange(bytes);
     expect(revived.id).toBe(source.id);
     expect(revived.sharedSecret).toBe(source.sharedSecret);
+  });
+});
+
+describe("the spend is checked against the stored record in one step", () => {
+  // Against the real store: a hand-off is only ever spent while the record still
+  // carries the secret its files carry. These cases pin the check's semantics;
+  // the transaction interleaving itself is not driven here.
+  test("a secret the store has rotated past refuses, writing nothing", async () => {
+    const record = await createManagedExchange(newExchange());
+    const downloadedSecret = record.sharedSecret;
+    await markManagedExchangeBackedUp(record.id, "2026-07-14T12:00:00.000Z");
+    await persistManagedExchangeRotation(record.id, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    // The rotation clears the backup marker in its own step; re-stamp it, so a
+    // refusal that wrote anything at all to the sibling entry would show.
+    await markManagedExchangeBackedUp(record.id, "2026-07-14T12:30:00.000Z");
+    const before = await getManagedExchange(record.id);
+
+    expect(
+      await spendManagedExchangeIfCurrent(
+        record.id,
+        downloadedSecret,
+        "2026-07-14T13:00:00.000Z",
+      ),
+    ).toBe("superseded");
+
+    const local = await getManagedLocalState(record.id);
+    expect(local?.spent).toBeUndefined();
+    expect(local?.backup).toEqual({ backedUpAt: "2026-07-14T12:30:00.000Z" });
+    expect(await getManagedExchange(record.id)).toEqual(before);
+  });
+
+  test("the current secret spends the copy, keeping its backup marker", async () => {
+    const record = await createManagedExchange(newExchange());
+    await markManagedExchangeBackedUp(record.id, "2026-07-14T12:00:00.000Z");
+    const before = await getManagedExchange(record.id);
+
+    expect(
+      await spendManagedExchangeIfCurrent(
+        record.id,
+        record.sharedSecret,
+        "2026-07-14T13:00:00.000Z",
+      ),
+    ).toBe("spent");
+
+    const local = await getManagedLocalState(record.id);
+    // A migration spend records no hand-off: its own artifact revives it.
+    expect(local?.spent).toEqual({ spentAt: "2026-07-14T13:00:00.000Z" });
+    // A spent source has a current export by construction, so the marker stands;
+    // the record itself is the sibling entry's business, not this write's.
+    expect(local?.backup).toEqual({ backedUpAt: "2026-07-14T12:00:00.000Z" });
+    expect(await getManagedExchange(record.id)).toEqual(before);
+  });
+
+  test("a command-line hand-off is recorded beside the instant", async () => {
+    const record = await createManagedExchange(newExchange());
+
+    expect(
+      await spendManagedExchangeIfCurrent(
+        record.id,
+        record.sharedSecret,
+        "2026-07-14T13:00:00.000Z",
+        "command-line",
+      ),
+    ).toBe("spent");
+
+    expect((await getManagedLocalState(record.id))?.spent).toEqual({
+      spentAt: "2026-07-14T13:00:00.000Z",
+      handoff: "command-line",
+    });
+  });
+
+  test("a record already gone is superseded, and leaves no sibling entry behind", async () => {
+    const record = await createManagedExchange(newExchange());
+    const downloadedSecret = record.sharedSecret;
+    await deleteManagedExchange(record.id);
+
+    expect(
+      await spendManagedExchangeIfCurrent(
+        record.id,
+        downloadedSecret,
+        "2026-07-14T13:00:00.000Z",
+      ),
+    ).toBe("superseded");
+
+    // No spent state stranded under an id with no record: there is no live copy
+    // left to spend.
+    expect(await getManagedLocalState(record.id)).toBeUndefined();
+    expect((await listManagedLocalState()).size).toBe(0);
   });
 });
 
@@ -354,7 +449,7 @@ describe("the export binds the marker to the bytes it serialized", () => {
     const dispatch = await dispatchManagedMigration(record.id, {
       readAndMark: readRecordAndMarkBackedUp,
       download: (_fileName, content) => downloaded.push(content),
-      markSpent: markManagedExchangeSpent,
+      spendIfCurrent: spendManagedExchangeIfCurrent,
       now: () => new Date(),
     });
     // Dispatched: backed up, but the source is still live (no spent state yet).
@@ -373,7 +468,11 @@ describe("importing a spent secret-match revives in place", () => {
       encodeManagedExchangeArtifact(source),
     );
     // Spend the source (a migration handed it off from this device).
-    await markManagedExchangeSpent(source.id, new Date().toISOString());
+    await spendManagedExchangeIfCurrent(
+      source.id,
+      source.sharedSecret,
+      new Date().toISOString(),
+    );
 
     // Importing the artifact back revives the SAME record (same id), clears spent,
     // and marks it backed-up -- no duplicate row.
@@ -404,7 +503,11 @@ describe("delete leaves no sibling state behind", () => {
   test("deleting a record removes its backup marker and spent state", async () => {
     const record = await createManagedExchange(newExchange());
     await markManagedExchangeBackedUp(record.id, new Date().toISOString());
-    await markManagedExchangeSpent(record.id, new Date().toISOString());
+    await spendManagedExchangeIfCurrent(
+      record.id,
+      record.sharedSecret,
+      new Date().toISOString(),
+    );
     expect(await getManagedLocalState(record.id)).toBeDefined();
 
     await deleteManagedExchange(record.id);

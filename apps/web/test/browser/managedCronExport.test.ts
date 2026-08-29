@@ -19,15 +19,13 @@ import {
   createManagedExchange,
   getManagedExchange,
   readRecordAndMarkBackedUp,
+  spendManagedExchangeIfCurrent,
 } from "@psi/managedExchangeStore";
-import {
-  getManagedLocalState,
-  markManagedExchangeSpent,
-} from "@psi/managedLocalState";
 import { CLI_BUILT_IN_STUN_URI } from "@bench/managedCronExportModel";
 import { ManagedRunSurface } from "@bench/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 import { dispatchManagedCronExport } from "@psi/managedExchangeExport";
+import { getManagedLocalState } from "@psi/managedLocalState";
 
 import { captureDownloads } from "./captureDownloads";
 import { createAppMount } from "./renderApp";
@@ -377,7 +375,7 @@ describe("a record this app could not have composed", () => {
       dispatchManagedCronExport(created.id, {
         readAndMark: readRecordAndMarkBackedUp,
         download: (fileName) => downloaded.push(fileName),
-        markSpent: markManagedExchangeSpent,
+        spendIfCurrent: spendManagedExchangeIfCurrent,
         now: () => new Date(),
       }),
     ).rejects.toThrow(/stored connection channel is filedrop/);

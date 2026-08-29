@@ -64,6 +64,25 @@ export function managedExchangeLockName(id: string): string {
 }
 
 /**
+ * Whether some same-origin context currently HOLDS the run+rotate lock for `id`.
+ * `navigator.locks.query()` reports the whole origin's lock state rather than this
+ * context's, so this is the only signal a surface has that another tab -- or the
+ * scheduled runtime -- is mid-run on this record. It answers for this context's own
+ * run too: the query does not distinguish holders.
+ *
+ * It is a point-in-time reading with no change event behind it, so a surface
+ * rendering from it polls, and the lock can be taken or released between the reading
+ * and whatever the reader does next. Gate PRESENTATION on it, never the correctness
+ * of a write: a write re-checks its own precondition at the moment it writes (see
+ * {@link ./managedExchangeExport.ts}, the confirm-time currency check).
+ */
+export async function managedExchangeRunLockHeld(id: string): Promise<boolean> {
+  const name = managedExchangeLockName(id);
+  const snapshot = await globalThis.navigator.locks.query();
+  return snapshot.held?.some((lock) => lock.name === name) === true;
+}
+
+/**
  * Raised when the run+rotate lock for a record cannot be acquired without
  * waiting -- another same-origin context already holds it. The runner treats this
  * as "a run is already in progress on this device", not a failure of this run.

@@ -22,6 +22,7 @@ import {
   putManagedExchange,
   recordManagedExchangeLastRun,
   requestPersistentStorage,
+  spendManagedExchangeIfCurrent,
   updateManagedExchangeLocalFields,
 } from "@psi/managedExchangeStore";
 import {
@@ -36,7 +37,6 @@ import {
 import {
   getManagedLocalState,
   markManagedExchangeBackedUp,
-  markManagedExchangeSpent,
 } from "@psi/managedLocalState";
 import { DISCLOSURE_ACCOUNTING_VERSION } from "@psi/disclosureAccounting";
 import { buildManagedDeposit } from "@bench/manageOfferModel";
@@ -735,7 +735,11 @@ describe("one-step delete leaves nothing behind", () => {
     // entry as well as the record -- the two stores the browser holds an exchange
     // in.
     await markManagedExchangeBackedUp(created.id, "2026-02-01T14:05:00.000Z");
-    await markManagedExchangeSpent(created.id, "2026-02-02T09:00:00.000Z");
+    await spendManagedExchangeIfCurrent(
+      created.id,
+      created.sharedSecret,
+      "2026-02-02T09:00:00.000Z",
+    );
     // And file a run's disclosure, so the delete must clear the accounting too --
     // otherwise the delete strands cleartext partner and agreement metadata under
     // an id nothing surfaces.
