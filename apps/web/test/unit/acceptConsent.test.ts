@@ -1774,6 +1774,53 @@ describe("summarizeInvitation", () => {
     ).toBe("last name");
   });
 
+  test("composes a run of slices before reading the date layout", () => {
+    // Each slice reads a contiguous range of the one before it, so a run of them
+    // is one window of the rendered layout. Neither link here reads only the
+    // format's own characters on its own -- the first spans the whole layout --
+    // yet the run leaves every record on "ACME", so the header must name the
+    // collapse rather than the truncation each link alone suggests.
+    const literalRegion = {
+      function: "parse_date",
+      params: { inputFormat: "MM/DD/YYYY", outputFormat: "ACME-YYYYMMDD" },
+    };
+    expect(
+      headerFor([
+        literalRegion,
+        { function: "substring", params: { start: 1, length: 13 } },
+        { function: "substring", params: { start: 1, length: 4 } },
+      ]),
+    ).toBe("last name (any date)");
+    // A run whose composed window still reaches the date truncates, exactly as a
+    // single slice there would.
+    expect(
+      headerFor([
+        literalRegion,
+        { function: "substring", params: { start: 1, length: 13 } },
+        { function: "substring", params: { start: 1, length: 6 } },
+      ]),
+    ).toBe("last name (partial)");
+  });
+
+  test("keeps the milder word when a non-slice step breaks the run (stated limit)", () => {
+    // A case fold leaves a date of digits and separators exactly where the layout
+    // put it, so the runtime still collapses every record onto "ACME" -- but
+    // whether a given function preserves a given layout is a per-function,
+    // per-format property core does not decide, so the walk from the slice back
+    // to the parse_date ends at the intervening step and the header understates.
+    // Pinned so a change to this understatement fails here rather than silently.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "ACME-YYYYMMDD" },
+        },
+        { function: "to_upper_case" },
+        { function: "substring", params: { start: 1, length: 4 } },
+      ]),
+    ).toBe("last name (partial)");
+  });
+
   test("shows no breadth marker for a parse_date whose input drops every record", () => {
     // A parse_date whose input format omits a component core requires (here no
     // year) returns null for EVERY record -- the key matches nothing, a narrowing

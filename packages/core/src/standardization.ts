@@ -3075,6 +3075,29 @@ function substringWindow(
   return to > from ? { start: from, end: to } : undefined;
 }
 
+// The single window a run of consecutive `substring` steps reads out of a value
+// of `valueLength` characters, in that value's own coordinates, or undefined
+// where the run reads nothing. Each link slices a CONTIGUOUS range of the
+// previous link's output, so composing is arithmetic: resolve the link against
+// the length the run holds at that point, then map its bounds forward by the
+// start the run has already advanced to. A link that reads nothing empties the
+// value, which the next link null-propagates, so the whole run reads nothing.
+function composeSubstringWindows(
+  steps: ReadonlyArray<TransformStep>,
+  valueLength: number,
+): { start: number; end: number } | undefined {
+  let composed = { start: 0, end: valueLength };
+  for (const step of steps) {
+    const window = substringWindow(step.params, composed.end - composed.start);
+    if (window === undefined) return undefined;
+    composed = {
+      start: composed.start + window.start,
+      end: composed.start + window.end,
+    };
+  }
+  return composed;
+}
+
 /**
  * Whether the `substring` step at a given position slices a rendered
  * `parse_date` output where the format carries only its OWN characters -- a
@@ -3088,20 +3111,34 @@ function substringWindow(
  * fixed widths, and every other index is a character of the format). Three
  * conditions, all necessary:
  *
- * - The step is a `substring` whose declared bounds read a non-empty window
- *   (substringFactory's coercion, applied against the rendered length so a
- *   negative start resolves too). Bounds that read nothing drop every record,
- *   which is a narrowing rather than a collapse.
- * - The step it sits DIRECTLY after is a `parse_date` whose input format can
- *   parse a date at all ({@link parseDateInputDropsEveryRecord}); one that
- *   cannot supplies no value to slice. Directly after is what makes the window
- *   position meaningful: any step between the two can move or rewrite the
- *   characters the window would read, and its own effect is then what the terms
- *   establish. A step BEFORE the `parse_date` is unconstrained -- it can only
- *   change whether a value parses, never the layout it renders to.
- * - The window overlaps none of the layout's component spans. A window
- *   straddling a literal and a token still reads part of the date, so it
- *   truncates rather than collapses.
+ * - Every step between this one and a `parse_date` is itself a `substring`. The
+ *   whole contiguous run, this step included, composes into ONE window of the
+ *   rendered layout ({@link composeSubstringWindows}), since each link slices a
+ *   contiguous range of the link before it. Any other function ends the walk and
+ *   no verdict is given: a step that rewrites or reorders characters puts the
+ *   window somewhere the layout no longer settles. A step BEFORE the `parse_date`
+ *   is unconstrained -- it can only change whether a value parses, never the
+ *   layout it renders to.
+ * - That `parse_date`'s input format can parse a date at all
+ *   ({@link parseDateInputDropsEveryRecord}); one that cannot supplies no value
+ *   to slice.
+ * - The composed window is non-empty (substringFactory's coercion, applied
+ *   against the rendered length so a negative start resolves too) and overlaps
+ *   none of the layout's component spans. Bounds that read nothing drop every
+ *   record, which is a narrowing rather than a collapse, and a window straddling
+ *   a literal and a token still reads part of the date, so it truncates.
+ *
+ * A known understatement, not a claim of completeness: many intervening steps
+ * leave the characters the window would read exactly where they sit -- a case
+ * fold over a date of digits and separators, a trim of a layout with no outer
+ * whitespace, a `filter_regex` or `null_if` that passes the value through -- and
+ * the runtime then collapses while this predicate stays silent, so the consent
+ * header shows the milder truncation word. Whether a given function preserves a
+ * given layout is a per-function, per-format property, not one this name-blind
+ * walk can settle. The shape is ledgered on `invitationSummary.ts`'s
+ * `elementBreadthMarker`, held by a test that drives it through the pipeline
+ * rather than asserted here, and compensated by the terms' `outputFormat` detail
+ * row, which shows the format whose literal region the window reads.
  *
  * `precedingSteps` are the steps that run before `step` in the same pipeline,
  * required rather than defaulted: like {@link coalesceSubstitutesConstant}, the
@@ -3116,9 +3153,15 @@ export function substringCollapsesParsedDateToConstant(
   precedingSteps: ReadonlyArray<TransformStep>,
 ): boolean {
   if (step.function !== "substring") return false;
-  const parseDateStep = precedingSteps.at(-1);
-  if (parseDateStep === undefined || parseDateStep.function !== "parse_date")
-    return false;
+  let chainStart = precedingSteps.length;
+  while (
+    chainStart > 0 &&
+    precedingSteps[chainStart - 1].function === "substring"
+  )
+    chainStart -= 1;
+  if (chainStart === 0) return false;
+  const parseDateStep = precedingSteps[chainStart - 1];
+  if (parseDateStep.function !== "parse_date") return false;
   if (parseDateInputDropsEveryRecord(parseDateStep.params)) return false;
   const rawOutputFormat = parseDateStep.params?.outputFormat;
   const layout = dateOutputLayout(
@@ -3126,7 +3169,10 @@ export function substringCollapsesParsedDateToConstant(
       ? rawOutputFormat
       : DEFAULT_DATE_OUTPUT_FORMAT,
   );
-  const sliced = substringWindow(step.params, layout.length);
+  const sliced = composeSubstringWindows(
+    [...precedingSteps.slice(chainStart), step],
+    layout.length,
+  );
   if (sliced === undefined) return false;
   return !layout.componentSpans.some(
     (span) => span.start < sliced.end && sliced.start < span.end,

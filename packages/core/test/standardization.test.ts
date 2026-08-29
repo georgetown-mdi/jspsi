@@ -1281,6 +1281,230 @@ describe("substringCollapsesParsedDateToConstant", () => {
         ).toBe(false);
       }
   });
+
+  test("a contiguous run of substrings composes into the window it reads (differential)", () => {
+    // Each link slices a contiguous range of the link before it, so a run of
+    // substrings after a parse_date reads ONE window of the rendered layout. Every
+    // chain below goes through the shipped pipeline: the predicate at the LAST
+    // link says "collapses to a constant" exactly where the two dates leave the
+    // same non-null value behind, whatever the chain's intermediate windows did.
+    const OUTPUT_FORMATS = [
+      // The motivating shape: a literal region the composed window can land in.
+      "ACME-YYYYMMDD",
+      // Separators a composed window can land on alone.
+      "YYYY-MM-DD",
+      // No literal at all, so no chain over it may collapse.
+      "YYYYMMDD",
+      // No token at all, so every non-empty chain over it collapses.
+      "registered",
+    ];
+    const CHAINS: Array<Array<[number, number]>> = [
+      // A wide first window narrowed onto the literal region: neither link reads
+      // only the format's own characters by itself.
+      [
+        [1, 13],
+        [1, 4],
+      ],
+      [
+        [1, 13],
+        [2, 3],
+      ],
+      // The first link already lands in the literal region.
+      [
+        [1, 5],
+        [1, 4],
+      ],
+      [
+        [1, 5],
+        [5, 1],
+      ],
+      // The first link straddles the literal and the date; the second retreats
+      // into the literal.
+      [
+        [1, 6],
+        [1, 4],
+      ],
+      // ... and the second stays on the date.
+      [
+        [1, 6],
+        [6, 1],
+      ],
+      [
+        [6, 8],
+        [1, 4],
+      ],
+      // A window landing on a bare separator between two components.
+      [
+        [1, 10],
+        [5, 1],
+      ],
+      [
+        [5, 3],
+        [1, 1],
+      ],
+      [
+        [5, 3],
+        [2, 2],
+      ],
+      // Negative starts, which resolve against the length the run holds at that
+      // point rather than against the layout.
+      [
+        [-9, 9],
+        [1, 4],
+      ],
+      [
+        [1, 13],
+        [-4, 2],
+      ],
+      // Negative lengths: an end argument below zero counts back from the end of
+      // the value the link is handed, so the link reads a real window.
+      [
+        [1, -9],
+        [1, 4],
+      ],
+      [
+        [1, -8],
+        [1, 4],
+      ],
+      [
+        [1, 13],
+        [1, -9],
+      ],
+      [
+        [1, 5],
+        [1, -4],
+      ],
+      // A second link reaching past the end of the first, which clamps.
+      [
+        [1, 4],
+        [1, 10],
+      ],
+      // A link that reads nothing: the value is emptied and the rest of the run
+      // null-propagates, so the chain drops rather than collapses.
+      [
+        [1, 4],
+        [5, 2],
+      ],
+      [
+        [1, 5],
+        [1, 0],
+      ],
+      [
+        [1, 5],
+        [0, 3],
+      ],
+      // Three links.
+      [
+        [1, 13],
+        [1, 6],
+        [1, 4],
+      ],
+      [
+        [1, 13],
+        [6, 8],
+        [1, 4],
+      ],
+      [
+        [1, 13],
+        [1, 5],
+        [5, 1],
+      ],
+      [
+        [1, 13],
+        [1, 4],
+        [5, 2],
+      ],
+    ];
+    const collapsedBy: Array<{ outputFormat: string; links: number }> = [];
+    for (const outputFormat of OUTPUT_FORMATS)
+      for (const chain of CHAINS) {
+        const steps = [
+          parseDate(outputFormat),
+          ...chain.map(([start, length]) => slice(start, length)),
+        ];
+        const outputs = DATES.map((date) => runPipeline(date, steps));
+        const collapses = outputs[0] !== null && outputs[0] === outputs[1];
+        if (collapses) collapsedBy.push({ outputFormat, links: chain.length });
+        expect(
+          substringCollapsesParsedDateToConstant(
+            steps[steps.length - 1],
+            steps.slice(0, -1),
+          ),
+          `${outputFormat} ${JSON.stringify(chain)} -> ${JSON.stringify(outputs)}`,
+        ).toBe(collapses);
+      }
+    // Not vacuous: chains collapse over more than one layout that does render a
+    // date, and at both chain lengths, while plenty of them do not collapse.
+    expect(
+      new Set(
+        collapsedBy
+          .filter((c) => c.outputFormat !== "registered")
+          .map((c) => c.outputFormat),
+      ).size,
+    ).toBeGreaterThan(1);
+    expect(new Set(collapsedBy.map((c) => c.links))).toEqual(new Set([2, 3]));
+    expect(collapsedBy.length).toBeLessThan(
+      OUTPUT_FORMATS.length * CHAINS.length,
+    );
+  });
+
+  test("the collapse verdict lands on the last link of a chain, not an earlier one", () => {
+    // Neither link reads only literal characters on its own, so a rule reading
+    // one window at a time would see a truncation, while the run reads "ACME"
+    // out of every date. The verdict belongs to the link the run ends at.
+    const steps = [parseDate("ACME-YYYYMMDD"), slice(1, 13), slice(1, 4)];
+    expect(DATES.map((date) => runPipeline(date, steps))).toEqual([
+      "ACME",
+      "ACME",
+    ]);
+    expect(
+      steps.map((step, index) =>
+        substringCollapsesParsedDateToConstant(step, steps.slice(0, index)),
+      ),
+    ).toEqual([false, false, true]);
+  });
+
+  test("a step other than a substring between the two keeps the milder verdict", () => {
+    // The stated limit this predicate carries. Each step below leaves the
+    // characters the window reads exactly where the layout put them, so the
+    // runtime still puts every record on one constant -- but whether a given
+    // function preserves a given layout is a per-function, per-format property,
+    // and the walk ends at the first non-substring instead of deciding it. This
+    // pins the understatement so a change to EITHER half fails a test.
+    const intervening: TransformStep[] = [
+      { function: "to_upper_case" },
+      { function: "to_lower_case" },
+      { function: "trim_whitespace" },
+      { function: "squash_spaces" },
+      { function: "remove_accents" },
+      { function: "remove_non_ascii" },
+      { function: "remove_affixes" },
+      { function: "remove_punctuation" },
+      { function: "remove_dashes" },
+      { function: "replace_separators_with_spaces" },
+      { function: "null_if", params: { values: ["no such value"] } },
+      { function: "filter_regex", params: { pattern: "ACME" } },
+    ];
+    for (const step of intervening) {
+      const steps = [parseDate("ACME-YYYYMMDD"), step, slice(1, 4)];
+      const outputs = DATES.map((date) => runPipeline(date, steps));
+      expect(outputs[0], step.function).not.toBeNull();
+      expect(outputs[0], step.function).toBe(outputs[1]);
+      expect(
+        substringCollapsesParsedDateToConstant(steps[2], steps.slice(0, 2)),
+        step.function,
+      ).toBe(false);
+    }
+    // The walk ends at the first non-substring whichever side of the run it sits,
+    // so a chain broken in the middle is not composed either.
+    expect(
+      substringCollapsesParsedDateToConstant(slice(1, 4), [
+        parseDate("ACME-YYYYMMDD"),
+        slice(1, 13),
+        { function: "to_upper_case" },
+      ]),
+    ).toBe(false);
+  });
 });
 
 // --- pipelineAlwaysDrops rescue equivalence ----------------------------------
