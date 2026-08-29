@@ -7,6 +7,7 @@ import {
   connectionRows,
   linkageTermsRows,
   runHistoryEntries,
+  scheduleView,
 } from "@bench/managedDetailModel";
 import {
   buildManagedExchangeRecord,
@@ -15,6 +16,7 @@ import {
 
 import type {
   ManagedExchangeLastRun,
+  ManagedExchangeSchedule,
   ManagedExchangeSide,
   NewManagedExchange,
 } from "@psi/managedExchangeRecord";
@@ -307,4 +309,88 @@ describe("completedRunRecorded reads the record's own bookkeeping", () => {
       expect(completedRunRecorded(record("acceptor", { lastRun }))).toBe(false);
     },
   );
+});
+
+// The detail view's read-only run-schedule section: the cadence, where the
+// recurrence stands at the instant read, and the states this browser owes the
+// operator honestly around a schedule it does not run while it is closed.
+describe("scheduleView", () => {
+  const NOW = Date.parse("2026-07-14T12:00:00.000Z");
+
+  /** A daily cadence whose window opened an hour before NOW and closes two hours
+   * after it, so NOW sits inside a window. */
+  const daily: ManagedExchangeSchedule = {
+    anchor: "2026-07-14T11:00:00.000Z",
+    intervalDays: 1,
+    windowSeconds: 10_800,
+    nextWindow: "2026-07-14T11:00:00.000Z",
+    consecutiveMisses: 0,
+  };
+
+  test("a record with no agreed schedule has no section at all", () => {
+    // No surface sets a schedule yet, so every record reaches this state; an empty
+    // state here would invite something that does not exist.
+    expect(scheduleView(record("inviter"), true, NOW)).toBeUndefined();
+  });
+
+  test("the section names the cadence and where the recurrence stands", () => {
+    const view = scheduleView(
+      record("inviter", { schedule: daily }),
+      true,
+      NOW,
+    );
+    expect(view?.cadence).toBe(
+      "A run window opens every day and stays open 3 hours.",
+    );
+    expect(view?.dueLine).toMatch(/^Run window open now, until /);
+  });
+
+  test("the standing note promises no run while this browser is closed", () => {
+    const view = scheduleView(
+      record("inviter", { schedule: daily }),
+      true,
+      NOW,
+    );
+    expect(view?.attendanceNote).toMatch(/passes without a run/i);
+    expect(view?.attendanceNote).not.toMatch(/automatically|on its own/i);
+  });
+
+  test("holding a usable input handle raises no re-selection note", () => {
+    expect(
+      scheduleView(record("inviter", { schedule: daily }), true, NOW)
+        ?.inputReselectionNote,
+    ).toBeUndefined();
+  });
+
+  test("holding no input handle states that nothing can run with nobody present", () => {
+    const view = scheduleView(
+      record("inviter", { schedule: daily }),
+      false,
+      NOW,
+    );
+    expect(view?.inputReselectionNote).toMatch(/nobody present/i);
+    // It points at the attended path -- choosing the file at the run itself --
+    // rather than at a re-pointing control this surface does not have.
+    expect(view?.inputReselectionNote).toMatch(/choose it here when you run/i);
+  });
+
+  test("one miss raises no prompt; the second raises the coordination prompt", () => {
+    const once = scheduleView(
+      record("inviter", { schedule: { ...daily, consecutiveMisses: 1 } }),
+      true,
+      NOW,
+    );
+    expect(once?.coordination).toBeUndefined();
+
+    const twice = scheduleView(
+      record("inviter", { schedule: { ...daily, consecutiveMisses: 2 } }),
+      true,
+      NOW,
+    );
+    expect(twice?.coordination?.misses).toBe(2);
+    // Both checks, and no pause taken on the operator's behalf.
+    expect(twice?.coordination?.prompt).toMatch(/partner/i);
+    expect(twice?.coordination?.prompt).toMatch(/this device's own clock/i);
+    expect(twice?.coordination?.prompt).toMatch(/agreed cadence stands/i);
+  });
 });
