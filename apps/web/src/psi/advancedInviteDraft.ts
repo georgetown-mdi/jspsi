@@ -818,9 +818,10 @@ export function draftWithFieldAdded(
         output,
         input: freeColumn,
         steps:
-          sibling?.steps ??
-          recommendedStepsForType(draft.metadata, draft.identity, type) ??
-          [],
+          sibling !== undefined
+            ? (sibling.steps ?? [])
+            : (recommendedStepsForType(draft.metadata, draft.identity, type) ??
+              []),
       },
     ],
   };

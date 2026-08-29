@@ -144,6 +144,29 @@ describe("draftWithFieldAdded", () => {
     expect(added?.steps).toEqual([{ function: "trim_whitespace" }]);
   });
 
+  test("a sibling with steps omitted mirrors as raw, not the recommended pipeline", () => {
+    const { draft } = seedAdvancedInvite("Org", ZIP_COLUMNS, ZIP_ROWS);
+    // Not reachable through the UI: a sibling transformation whose `steps` is
+    // omitted entirely (raw/no cleaning), built directly rather than through
+    // draftWithFieldAdded, which always seeds either the recommended pipeline or
+    // the sibling's own steps.
+    const withRawSibling = {
+      ...draft,
+      standardization: [
+        ...draft.standardization,
+        { output: "zip_code", input: "zip" },
+      ],
+    };
+
+    const second = draftWithFieldAdded(withRawSibling, "zip_code");
+    const added = second.standardization.at(-1);
+    expect(added?.output).toBe("zip_code_2");
+    expect(added?.input).toBe("zipcode");
+    // Mirrors the sibling as raw, not silently upgraded to the recommended
+    // pipeline.
+    expect(added?.steps).toEqual([]);
+  });
+
   test("a type whose columns are all bound leaves the draft untouched", () => {
     const { draft } = seedAdvancedInvite("Org", ZIP_COLUMNS, ZIP_ROWS);
     // One free column left after the first add, none after the second.
