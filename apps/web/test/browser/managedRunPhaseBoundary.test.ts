@@ -93,8 +93,11 @@ async function inputHandle(): Promise<FileSystemFileHandle> {
 
 const app = createAppMount();
 
-/** Mount a saved exchange's run surface and press Run, leaving the stubbed run to
- * fail into the surface's classification. */
+/** Mount a saved exchange's run surface and press Run, returning once the run has
+ * reached the driver and left it the config to fail from. The click resolves as
+ * soon as the handler starts, and the surface reads the record back from the
+ * store before it dials, so the driver has not been called yet at that point --
+ * a check that reads what the surface asked for has nothing to read. */
 async function runUntilItFails(): Promise<void> {
   const created = await createManagedExchange(
     newExchange({ inputFileHandle: await inputHandle() }),
@@ -103,6 +106,7 @@ async function runUntilItFails(): Promise<void> {
   const runButton = page.getByRole("button", { name: "Run exchange" });
   await expect.element(runButton).toBeEnabled();
   await runButton.click();
+  await vi.waitFor(() => expect(driverConfigs.seen).toHaveLength(1));
 }
 
 beforeEach(async () => {

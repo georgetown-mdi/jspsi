@@ -14,7 +14,7 @@ import {
   waitForRoot,
 } from "./prodServer.js";
 
-import type { Browser } from "playwright";
+import type { Browser, FileChooser } from "playwright";
 import type { ChildProcess } from "node:child_process";
 
 // The regression this guards against: PapaParse's `worker: true` self-hosted
@@ -34,12 +34,19 @@ import type { ChildProcess } from "node:child_process";
 // -w apps/web`) before re-running to validate a change; CI always rebuilds first.
 
 const READY_TIMEOUT_MS = 30_000;
+// The phases that wait on real work: the bundle fetch, the off-thread parse, and
+// the invitation mint.
 const GENERATE_TIMEOUT_MS = 30_000;
-// Budget for the app to hydrate before the invite interactions "stick". The page is
-// server-rendered and hydrates asynchronously; an interaction landing before React
-// attaches its handlers is lost, so the invite flow re-applies its inputs until the
-// Continue button reflects them within this window.
+// The spine steps between those, which are re-renders off state the app already
+// holds.
+const SPINE_TIMEOUT_MS = 15_000;
+// Budget for the app to hydrate before the dropzone answers a click.
 const HYDRATION_TIMEOUT_MS = 20_000;
+// One hydration probe: click the dropzone and see whether a file chooser opens.
+const CHOOSER_PROBE_TIMEOUT_MS = 2_000;
+// Bound for an individual page action, so one stuck call cannot eat the budget
+// of the loop it sits in (playwright's 30s default would).
+const ACTION_TIMEOUT_MS = 5_000;
 
 // A CSV comfortably above CSV_WORKER_FILE_BYTE_THRESHOLD (4 MiB), carrying columns
 // that infer to default linkage keys so the invitation is producible. Duplicate rows
@@ -101,61 +108,70 @@ describe.skipIf(!hasBuild)(
             timeout: GENERATE_TIMEOUT_MS,
           });
 
-          // Re-apply the name and file until Continue enables, then walk the spine.
-          // The page is server-rendered and hydrates asynchronously; an interaction
-          // that lands before React attaches its handlers is lost -- a controlled
-          // field re-renders from empty state and the file input's change event is
-          // dropped -- leaving Continue disabled. That is the race that flaked this
-          // deploy under CI load. `load` only guarantees the bundle fetched, not that
-          // hydration ran, so the real fix is to re-apply both inputs until the button
-          // reflects them: an enabled button IS the hydration signal. Each action is
-          // short-bounded so one stuck call cannot eat the whole hydration budget
-          // (playwright's 30s default would); a thrown action just fails that
-          // attempt and vi.waitFor retries, because an action here costs 46-260ms
-          // whether the container is idle or oversubscribed, so the bound expiring
-          // means the box stalled, which is the very thing the retry rides out.
-          const ACTION_TIMEOUT_MS = 5_000;
-          const nameField = page.getByLabel("Your name");
-          const fileInput = page.locator('input[type="file"]').first();
-          const continueToColumns = page.getByRole("button", {
-            name: "Continue to matching & sharing",
-          });
+          // Supply the CSV through the dropzone's own file chooser, retrying only
+          // the click that opens it. The page is server-rendered and hydrates
+          // asynchronously -- `load` guarantees the bundle fetched, not that
+          // hydration ran -- and a file set on the input before React attaches its
+          // change handler is lost. Setting the same path again does not recover
+          // it: driven against this build, the app registered no file on any
+          // re-application. So the file cannot be applied on a retry loop, and a
+          // loop that tried would also restart the 5 MiB parse on every pass,
+          // holding the dropzone in its reading state for as long as it ran.
+          // Retrying the CLICK costs nothing and gates itself: the dropzone opens
+          // a chooser only once its React handler is attached, so a chooser
+          // opening IS hydration, and the file is applied exactly once, after it.
+          const dropzone = page.getByLabel("Your data file");
+          let chooser: FileChooser | undefined;
           try {
             await vi.waitFor(
               async () => {
-                await nameField.fill("Prod Worker Test", {
-                  timeout: ACTION_TIMEOUT_MS,
-                });
-                await fileInput.setInputFiles(csvPath, {
-                  timeout: ACTION_TIMEOUT_MS,
-                });
-                if (
-                  !(await continueToColumns.isEnabled({
-                    timeout: ACTION_TIMEOUT_MS,
-                  }))
-                ) {
-                  throw new Error("Continue to matching & sharing is disabled");
-                }
+                const opened = await Promise.all([
+                  page.waitForEvent("filechooser", {
+                    timeout: CHOOSER_PROBE_TIMEOUT_MS,
+                  }),
+                  dropzone.click({ timeout: ACTION_TIMEOUT_MS }),
+                ]);
+                chooser = opened[0];
               },
               { timeout: HYDRATION_TIMEOUT_MS, interval: 200 },
             );
           } catch (err) {
-            // Distinguish a hydration stall from a real rejection (the accept filter,
-            // the 100 MB cap, or a broken name/file binding) so the failure is
-            // diagnosable rather than a bare "still disabled": report whether the file
-            // registered in the dropzone and the button's disabled attribute.
-            const fileShown =
-              (await page.getByText("large.csv", { exact: false }).count()) > 0;
-            const disabledAttr =
-              await continueToColumns.getAttribute("disabled");
             throw new Error(
-              `Continue to matching & sharing stayed disabled after ${HYDRATION_TIMEOUT_MS}ms ` +
-                `(file shown in dropzone: ${fileShown}, disabled attr: ${disabledAttr}, ` +
-                `last failure: ${err instanceof Error ? err.message : String(err)}); ` +
-                "the invite interactions may not have hydrated, or the file was rejected",
+              `the dropzone opened no file chooser within ${HYDRATION_TIMEOUT_MS}ms ` +
+                `(last failure: ${err instanceof Error ? err.message : String(err)}); ` +
+                "the page's interactions have not hydrated",
             );
           }
-          await continueToColumns.click();
+          if (chooser === undefined)
+            throw new Error("no file chooser was captured");
+          await chooser.setFiles(csvPath);
+
+          // The file card carries the parsed row count, so it renders only once the
+          // off-thread parse has landed -- the one signal that separates a parse
+          // that never finished from a Continue button held back by something else.
+          try {
+            await page
+              .getByText("large.csv", { exact: false })
+              .first()
+              .waitFor({ state: "visible", timeout: GENERATE_TIMEOUT_MS });
+          } catch (err) {
+            throw new Error(
+              `the dropzone showed no parsed file within ${GENERATE_TIMEOUT_MS}ms ` +
+                `(last failure: ${err instanceof Error ? err.message : String(err)}); ` +
+                "the parse did not land, or the file was rejected by the accept " +
+                "filter or the size cap",
+            );
+          }
+
+          // Hydration is proven by now, so one fill sticks: a controlled field only
+          // loses its value to the hydrating re-render that precedes it.
+          await page
+            .getByLabel("Your name")
+            .fill("Prod Worker Test", { timeout: ACTION_TIMEOUT_MS });
+
+          await page
+            .getByRole("button", { name: "Continue to matching & sharing" })
+            .click({ timeout: SPINE_TIMEOUT_MS });
 
           // Step 2 ("Matching & sharing") derives recommended terms from the file's
           // columns; step 3 restates them for review. Neither needs edits here -- the
@@ -163,17 +179,17 @@ describe.skipIf(!hasBuild)(
           // advance straight through both.
           await page
             .getByRole("button", { name: "Continue to review & create" })
-            .click();
+            .click({ timeout: SPINE_TIMEOUT_MS });
           await page
             .getByRole("heading", { name: "Review & create", level: 1 })
-            .waitFor({ state: "visible", timeout: GENERATE_TIMEOUT_MS });
+            .waitFor({ state: "visible", timeout: SPINE_TIMEOUT_MS });
 
           // Create mints the invitation on the default browser transport, which
           // starts listening for the partner immediately -- no partner is needed for
           // the share surface to render.
           await page
             .getByRole("button", { name: "Create the invitation" })
-            .click();
+            .click({ timeout: SPINE_TIMEOUT_MS });
 
           // The share block appears only after generateInvitation resolves, which
           // requires a clean parse (a corrupted header crashes generation). Its
@@ -195,13 +211,18 @@ describe.skipIf(!hasBuild)(
           await page.close();
         }
       },
-      // Cover the four bounded phases serially -- goto (<= GENERATE_TIMEOUT_MS), the
-      // enable loop (<= HYDRATION_TIMEOUT_MS plus the one iteration in flight when
-      // the deadline passes, at most three actions of 5s), the Review & create
-      // heading wait (<= GENERATE_TIMEOUT_MS), and the share-block wait
-      // (<= GENERATE_TIMEOUT_MS) -- plus margin, so a slow phase surfaces its own
-      // error rather than a bare per-test timeout.
-      GENERATE_TIMEOUT_MS * 3 + HYDRATION_TIMEOUT_MS + 20_000,
+      // Cover every bounded phase serially, so a slow one surfaces its own error
+      // rather than a bare per-test timeout: goto, the parsed-file wait, and the
+      // share-block wait at GENERATE_TIMEOUT_MS each; the chooser loop at
+      // HYDRATION_TIMEOUT_MS plus the one iteration in flight when the deadline
+      // passes (a chooser probe and a click); the name fill; and the four spine
+      // steps at SPINE_TIMEOUT_MS each. Plus margin.
+      GENERATE_TIMEOUT_MS * 3 +
+        HYDRATION_TIMEOUT_MS +
+        CHOOSER_PROBE_TIMEOUT_MS +
+        ACTION_TIMEOUT_MS * 2 +
+        SPINE_TIMEOUT_MS * 4 +
+        20_000,
     );
   },
 );
