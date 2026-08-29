@@ -26,6 +26,7 @@ import {
 import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeRun";
 import { PartnerNoShowError } from "@psi/waitForConnection";
 import { RotationPersistError } from "@psi/managedRunRotate";
+import { recordManagedExchangeLastRun } from "@psi/managedExchangeStore";
 
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 
@@ -197,6 +198,55 @@ describe("runManagedRerun: the phase boundary reported to the caller", () => {
     ).rejects.toBeInstanceOf(PartnerNoShowError);
 
     expect(boundaryReported).toBe(false);
+  });
+});
+
+describe("runManagedRerun: whose failure bookkeeping a run writes", () => {
+  /** One run that fails as a no-show, with the record's bookkeeping write
+   * captured. */
+  async function noShowRun(options: Parameters<typeof runManagedRerun>[2]) {
+    stubGrantingWebLocks();
+    vi.mocked(recordManagedExchangeLastRun).mockClear();
+    await expect(
+      runManagedRerun(
+        record(),
+        {
+          acquireInput: () => Promise.resolve("rows"),
+          handshake: () =>
+            Promise.reject(new PartnerNoShowError("nobody arrived")),
+          dataExchange: () => {
+            throw new Error("the data exchange must not run");
+          },
+        },
+        options,
+      ),
+    ).rejects.toBeInstanceOf(PartnerNoShowError);
+    return vi.mocked(recordManagedExchangeLastRun).mock.calls;
+  }
+
+  test("a run on its own account stamps the outcome it classified", async () => {
+    const calls = await noShowRun({
+      now: () => Date.parse("2026-01-06T14:15:00.000Z"),
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({
+      at: "2026-01-06T14:15:00.000Z",
+      outcome: "missed",
+    });
+  });
+
+  test("a run re-making one another context is conducting stamps nothing", async () => {
+    // The scheduled runner withholds the stamp from an attempt made after it
+    // read a rotation it did not perform: that attempt's no-show is expected
+    // rather than evidence, and its entry -- stamped later than the rotating
+    // run's own -- would replace the outcome that run recorded.
+    const calls = await noShowRun({
+      now: () => Date.parse("2026-01-06T14:15:00.000Z"),
+      recordsFailureBookkeeping: false,
+    });
+
+    expect(calls).toHaveLength(0);
   });
 });
 

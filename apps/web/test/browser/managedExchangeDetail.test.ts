@@ -7,7 +7,7 @@ import {
   getDefaultLinkageTerms,
 } from "@psilink/core";
 
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 
@@ -508,6 +508,41 @@ describe("managed exchange detail schedule entry", () => {
 
     await vi.waitFor(() => expect(saved).toHaveLength(1));
     expect(saved[0].label).toBe("Riverbend monthly");
+    expect(saved[0].schedule).toEqual(stored);
+  });
+
+  test("a stored width below the entry floor survives a focus and a blur", async () => {
+    // The widget's own clamp is what this turns off: a NumberInput with bounds
+    // rewrites a value outside them when it loses focus, so an operator who
+    // merely tabbed through the width field on their way to the label would
+    // carry the floor into the save and change the width their partner agreed.
+    // The bounds are the entry model's, which states them at the field rather
+    // than editing the value under the operator.
+    const stored: ManagedExchangeSchedule = {
+      anchor: new Date(2026, 7, 4, 9, 0, 0, 0).toISOString(),
+      intervalDays: 7,
+      windowSeconds: 60,
+      nextWindow: new Date(2026, 8, 1, 9, 0, 0, 0).toISOString(),
+      consecutiveMisses: 2,
+    };
+    const { saved } = renderEntry(stored);
+
+    const width = page.getByLabelText("Each window stays open (hours)");
+    await expect.element(width).toBeInTheDocument();
+    const shown = () => (width.element() as HTMLInputElement).value;
+    expect(Number(shown())).toBeCloseTo(60 / 3600, 10);
+
+    await userEvent.click(width);
+    await userEvent.click(page.getByRole("textbox", { name: "Label" }));
+
+    expect(Number(shown())).toBeCloseTo(60 / 3600, 10);
+
+    await page
+      .getByRole("textbox", { name: "Label" })
+      .fill("Riverbend monthly");
+    await page.getByRole("button", { name: "Save settings" }).click();
+
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
     expect(saved[0].schedule).toEqual(stored);
   });
 

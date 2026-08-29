@@ -132,6 +132,23 @@ export interface ManagedRerunOptions {
    * failure omits it.
    */
   onDataExchangeStart?: () => void;
+  /**
+   * Whether a failure of this run stamps its own `lastRun`
+   * ({@link rerunFailureLastRun}). Defaults to true, which is every run made on
+   * this record's own account.
+   *
+   * The scheduled runner sets it false for a re-attempt it makes after reading
+   * that another context rotated the record inside the same window
+   * ({@link ./managedScheduleRunner.ts}): that context completed a handshake and
+   * is conducting the exchange this attempt is re-making, so this attempt's
+   * failure is not evidence about the partnership, while the entry it would
+   * write -- stamped at the end of a wait that outlasts the other run -- would
+   * REPLACE that run's own outcome, `lastRun` being monotonic on `at`
+   * ({@link ./managedExchangeRecord.ts}, `applyManagedExchangeLastRun`). The
+   * bookkeeping the critical section writes for itself (the input rejection and
+   * the `storage` tier) is not this flag's, and neither is a successful run's.
+   */
+  recordsFailureBookkeeping?: boolean;
 }
 
 /**
@@ -230,13 +247,18 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
     // lapse). Everything else -- the consent refusal the pre-connection prepare
     // raises, and the handshake, transport, and cancelled failures
     // runManagedExchange documents as the runner's to classify and record -- is
-    // stamped here.
-    const lastRun = rerunFailureLastRun(
-      error,
-      now(),
-      options.aborted?.() ?? false,
-      dataExchangeStarted,
-    );
+    // stamped here, except for a run whose caller has told it that another
+    // context is already conducting this exchange (see
+    // `recordsFailureBookkeeping`).
+    const lastRun =
+      (options.recordsFailureBookkeeping ?? true)
+        ? rerunFailureLastRun(
+            error,
+            now(),
+            options.aborted?.() ?? false,
+            dataExchangeStarted,
+          )
+        : undefined;
     if (lastRun !== undefined) {
       // Best-effort, mirroring the critical section's own bookkeeping writes: a
       // failed lastRun write must never replace the run's own failure, which the

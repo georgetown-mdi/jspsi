@@ -487,7 +487,27 @@ would announce itself where the partner no longer looks, and the window would
 record a miss for an exchange the two parties met in. A re-read that finds the
 record gone, its schedule dropped, or its plan moved off this window ends the
 occupancy with no bookkeeping at all, exactly as the wake's own conditioned write
-does when the plan moves under it.
+does when the plan moves under it, and one that finds it carrying no
+`inputFileHandle` ends it the way a record that never carried one is passed over
+below. The attempt's input is taken from the record the re-read returned for the
+same reason its secret is: a handle re-pointed while the window was being
+occupied is the one that can still be read.
+
+**An attempt made after the occupancy reads a rotation it did not perform writes
+no `lastRun` of its own.** A stored secret that has moved since the occupancy's
+last attempt is another context's completed handshake: the occupancy's own
+attempt that reached the rotation persist is past the data-exchange boundary,
+which ends the occupancy rather than re-attempting. So the re-attempt that
+follows one is re-making an exchange another context is already conducting, and
+what it finds is not evidence about the partnership: the partner it waits for
+has met that run. It is also evidence that would DESTROY that run's:
+`lastRun` is monotonic on `at`, and this attempt's wait ends after the other
+run's data exchange does, so a no-show stamped at the end of it would replace the
+`succeeded` entry that discharges the window -- leaving a completed exchange
+recorded as a miss, counted toward the two-miss escalation, with the evidence of
+the success gone. The suppression is scoped to the occupancy's own window and to
+that observation: a window whose partner simply never arrived, with no foreign
+rotation read, records its no-show exactly as any run does.
 
 An occupancy belongs to ONE record. Each wake dispatches every due record that is
 not already occupying its window, so an exchange holding its own window open for
@@ -547,7 +567,10 @@ flight, so its bookkeeping lands in a window already advanced past; a
 `"succeeded"` one is credited at the next wake (see
 [Catch-up on wake](#catch-up-on-wake)), while any other outcome it records leaves
 the window uncounted. Every other disposition's `lastRun` is written by the run
-itself, so the schedule advance carries none and cannot contend with it.
+itself, so the schedule advance carries none and cannot contend with it -- and
+where an attempt withheld its own (the rotation rule above), the entry standing
+is the one written by the run that rotated, which is the account of the window
+worth keeping.
 
 Three records are passed over rather than attempted, each leaving its window
 with no disposition at all -- the wake that finds the window elapsed counts it
@@ -555,7 +578,8 @@ exactly as one this runtime slept through:
 
 - One this device handed off by a migration export (its local `spent` state).
 - One with no persisted `inputFileHandle`, which has no unattended read of the
-  input at all.
+  input at all -- read before every attempt, so a handle dropped while the window
+  was being occupied ends the occupancy on the same footing.
 - One whose runtime stopped while the window was still open.
 
 The rules above are implemented in `apps/web/src/psi/managedScheduleRunner.ts`;

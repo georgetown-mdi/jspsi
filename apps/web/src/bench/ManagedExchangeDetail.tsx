@@ -500,11 +500,14 @@ function ScheduleEntryFieldset({
   onEdit: (edits: Partial<ScheduleEntryFields>) => void;
 }) {
   const resolved = resolvedFirstWindowLabel(fields);
-  // The width field ROUNDS what it displays while decimals are off, so a stored
-  // width finer than whole hours -- an import, a hand-edited record -- would show
-  // the operator a number that is not the width their partner agreed. Decimals
-  // are opened exactly where the stored value needs them; the whole-hour rule
-  // stays the model's, which names it at the field either way.
+  // The width field ROUNDS what it displays while decimals are off, and rewrites
+  // a value outside its bounds to the nearest one on blur, so a stored width
+  // finer than whole hours or below entry's floor -- an import, a hand-edited
+  // record -- would show the operator a number that is not the width their
+  // partner agreed, and a bare focus and blur would carry that number into the
+  // save. Decimals are opened exactly where the stored value needs them and the
+  // clamp is off entirely; the bounds stay the entry model's, which names them
+  // at the field either way (see scheduleEntryErrors).
   const widthNeedsDecimals = !Number.isInteger(fields.windowHours);
   return (
     <>
@@ -549,6 +552,7 @@ function ScheduleEntryFieldset({
         max={MAX_SCHEDULE_WINDOW_HOURS}
         step={1}
         allowDecimal={widthNeedsDecimals}
+        clampBehavior="none"
         error={errors.windowHours}
         onChange={(value) => onEdit({ windowHours: value })}
         mt="xs"

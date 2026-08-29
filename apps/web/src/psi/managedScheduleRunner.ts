@@ -55,6 +55,14 @@
  *   a window the exchange was met in. The record is re-read before every
  *   re-attempt for that reason: a window a recorded success has discharged ends
  *   the occupancy, and one still due is attempted against the fresh secret.
+ * - An attempt made after that rotation writes NO bookkeeping of its own
+ *   ({@link ManagedScheduleAttempt.recordsFailureBookkeeping}). It is re-making
+ *   an exchange another context has already conducted in this window, so its
+ *   failure is not evidence about the partnership -- and `lastRun` is monotonic
+ *   on `at` ({@link ./managedExchangeRecord.ts}), so a no-show stamped at the
+ *   end of a wait that ran past that run's success would REPLACE the success,
+ *   leaving the occupancy nothing to discharge the window with and a completed
+ *   exchange recorded as a miss.
  */
 
 import {
@@ -179,6 +187,14 @@ export interface ManagedScheduleAttempt {
    * left of the window so the last attempt ends AT the close rather than past
    * it -- as a no-show, which is what a window nobody arrived in is. */
   peerWaitTimeoutMs: number;
+  /** Whether this attempt stamps its own failure `lastRun` on the record (see
+   * {@link ./managedRun.ts}, `rerunFailureLastRun`). False once the occupancy
+   * has read the record's secret rotated under it: another context completed a
+   * handshake for this exchange inside this window, so this attempt is a
+   * re-make of a run already conducted and what it finds says nothing about the
+   * partnership -- while the entry it would write, stamped later than that
+   * run's own, would replace it. */
+  recordsFailureBookkeeping: boolean;
   /** Called at the run's own data-exchange phase boundary. The runner reads it
    * to refuse a re-attempt once payload flow could have started. */
   onDataExchangeStart: () => void;
@@ -366,14 +382,7 @@ async function occupyDueWindow(
   if (parseStoredInstant(planned.nextWindow) !== due.opensAtMs)
     return { ...entry, skipped: "plan-moved" };
 
-  const handle = claimed.inputFileHandle;
-  // Without a persisted handle there is no unattended read of the input at all
-  // (the re-selection path needs an operator), so the window is left
-  // unaccounted: it counts as missed at the wake that finds it elapsed, exactly
-  // as a window this runtime slept through does.
-  if (handle === undefined) return { ...entry, skipped: "no-input-handle" };
-
-  const occupancy = await occupyWindow(claimed, handle, due, entry, seams);
+  const occupancy = await occupyWindow(claimed, due, entry, seams);
   // A window another context satisfied or re-planned under the occupancy is not
   // this tick's to account for: the recorded success discharges it through the
   // ordinary catch-up rule at the next wake, and a moved plan is the store's
@@ -382,6 +391,8 @@ async function occupyDueWindow(
     return { ...entry, skipped: "window-satisfied" };
   if (occupancy.kind === "plan-moved")
     return { ...entry, skipped: "plan-moved" };
+  if (occupancy.kind === "no-input-handle")
+    return { ...entry, skipped: "no-input-handle" };
   if (occupancy.kind === "unresolved")
     return { ...entry, skipped: seams.stopped() ? "stopped" : "window-closed" };
   entry.disposition = occupancy.disposition;
@@ -402,16 +413,17 @@ async function occupyDueWindow(
  * How occupying one window ended.
  *
  * `"settled"` is the only ending the schedule advance is written for. The other
- * three each leave the window to a later wake, which recomputes it from the
+ * four each leave the window to a later wake, which recomputes it from the
  * stored plan: `"unresolved"` because the runtime went away or the close was
- * reached before anything settled it, and the two below because the window
- * stopped being this occupancy's to account for while it ran.
+ * reached before anything settled it, and the three below because the window
+ * stopped being this occupancy's to attempt while it ran.
  */
 type WindowOccupancy =
   | { kind: "settled"; disposition: ManagedScheduleWindowDisposition }
   | { kind: "unresolved" }
   | { kind: "satisfied" }
-  | { kind: "plan-moved" };
+  | { kind: "plan-moved" }
+  | { kind: "no-input-handle" };
 
 /**
  * Occupy one open window with bounded re-attempts.
@@ -426,26 +438,28 @@ type WindowOccupancy =
  * The record is re-read before every re-attempt (see
  * {@link refreshOccupiedRecord}), so an attended Run that took the freed lock
  * and finished during the stand-down is met on its own terms rather than
- * attempted over with the state this occupancy started on.
+ * attempted over with the state this occupancy started on. Each attempt's input
+ * source is built from that fresh record too, so a handle re-pointed under the
+ * occupancy is the one the next attempt reads, and a record left with none ends
+ * the occupancy exactly as the tick's own no-handle path leaves the window.
  *
  * `entry.attempts` is counted here rather than returned, so a re-read that
  * rejects reports the attempts already made alongside the failure.
  */
 async function occupyWindow(
   record: ManagedExchangeRecord,
-  handle: FileSystemFileHandle,
   window: ManagedScheduleWindow,
   entry: ManagedScheduleTickEntry,
   seams: ManagedScheduleTickSeams,
 ): Promise<WindowOccupancy> {
-  const source: ManagedInputSource = {
-    kind: "handle",
-    handle,
-    attendance: "unattended",
-  };
   let current = record;
   let partnerWasAbsent = false;
   let contactWasProven = false;
+  // Whether a rotation this occupancy did not perform has been read off the
+  // record. It is sticky for the rest of the window: the rotating run's own
+  // outcome lands whenever its data exchange ends, which is any instant after
+  // the rotation, so every later attempt's stamp is one that could replace it.
+  let secretRotatedElsewhere = false;
   let disposition: ManagedScheduleWindowDisposition | undefined;
   for (;;) {
     // A runtime going away mid-window leaves the window UNRESOLVED, discarding
@@ -457,8 +471,21 @@ async function occupyWindow(
     if (entry.attempts > 0) {
       const refreshed = await refreshOccupiedRecord(current.id, window, seams);
       if (refreshed.kind !== "attempt") return refreshed;
+      // A secret that has moved since the last attempt is one this occupancy did
+      // not move -- an attempt of its own that reached the rotation persist is
+      // past the data-exchange boundary, which ends the occupancy rather than
+      // re-attempting -- so it is another context's completed handshake for this
+      // record, inside this window.
+      if (refreshed.record.sharedSecret !== current.sharedSecret)
+        secretRotatedElsewhere = true;
       current = refreshed.record;
     }
+    const handle = current.inputFileHandle;
+    // Without a persisted handle there is no unattended read of the input at all
+    // (the re-selection path needs an operator), so the window is left
+    // unaccounted: it counts as missed at the wake that finds it elapsed, exactly
+    // as a window this runtime slept through does.
+    if (handle === undefined) return { kind: "no-input-handle" };
     const startedAtMs = seams.now();
     const remainingMs = window.closesAtMs - startedAtMs;
     if (remainingMs <= 0 || entry.attempts >= MAX_WINDOW_ATTEMPTS) break;
@@ -467,8 +494,9 @@ async function occupyWindow(
     try {
       await seams.runAttempt({
         record: current,
-        source,
+        source: { kind: "handle", handle, attendance: "unattended" },
         peerWaitTimeoutMs: Math.min(ATTEMPT_PEER_WAIT_MS, remainingMs),
+        recordsFailureBookkeeping: !secretRotatedElsewhere,
         onDataExchangeStart: () => {
           dataExchangeStarted = true;
         },
