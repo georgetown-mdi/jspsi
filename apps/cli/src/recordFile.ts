@@ -122,11 +122,10 @@ export function recordPathsFor(
  *
  * Called on two paths, and the record's own `outcome` is what tells them apart in
  * the prose it writes: a completed run's record, and the record of a run that
- * disclosed and then terminated in the signed-receipt swap
- * (docs/spec/PROTOCOL.md, Self-attested record). The files, paths, and
- * permissions are identical either way -- what a terminated run wrote is a
- * disclosure-log entry like any other, and it is the record that states it was
- * one, not its filename.
+ * disclosed and then terminated (docs/spec/PROTOCOL.md, Self-attested record).
+ * The files, paths, and permissions are identical either way -- what a terminated
+ * run wrote is a disclosure-log entry like any other, and it is the record that
+ * states it was one, not its filename.
  *
  * The verification keys are written first (they are the material verification
  * needs; if the process dies between the two writes, the salts are preserved and

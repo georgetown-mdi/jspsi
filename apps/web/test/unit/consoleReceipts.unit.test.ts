@@ -1075,8 +1075,19 @@ describe("the receipts card's model", () => {
     // What it does keep is named too, so the copy neither overstates the loss nor
     // leaves the operator to guess whether the disclosure was logged.
     expect(NO_PARTNER_PIN_PROBLEM).toMatch(
-      /only the exchange record of what you had already disclosed/,
+      /the exchange record of what you had already disclosed/,
     );
+    // And it is placed where the operator can act on it. The console gates the
+    // record download on a succeeded run, so copy that said "you keep the record"
+    // and stopped would point at a button this run never shows: the file is in the
+    // run's folder in the mount, and goes when the run is discarded.
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(
+      /record\.json with that run's files in the mounted folder/,
+    );
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(
+      /rather than offered here for download/,
+    );
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/discarding the run removes it/);
   });
 
   test("the unpinned problem states the initiator's extra disclosure", () => {

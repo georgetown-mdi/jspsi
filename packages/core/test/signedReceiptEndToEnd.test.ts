@@ -716,11 +716,35 @@ describe("the run binder pairs a receipt to one exchange run", () => {
 
 // --- The record a terminated swap leaves behind ------------------------------
 
-describe("a terminated receipt swap keeps the record of what was disclosed", () => {
+// A second pair of datasets carrying a payload column, for the routes that need
+// one to have crossed. The suite's main fixtures link on first_name alone, and a
+// party that transmits nothing gives the received-payload check nothing to refuse.
+const payloadServer = [
+  { first_name: "Carol", note: "s-c" },
+  { first_name: "Elizabeth", note: "s-e" },
+  { first_name: "Henry", note: "s-h" },
+];
+const payloadClient = [
+  { first_name: "Carol", note: "c-c" },
+  { first_name: "Elizabeth", note: "c-e" },
+];
+
+/** The suite's `prepared`, with `note` inferred as a transmitted payload column. */
+function preparedWithPayload(identity: string, rows: typeof payloadServer) {
+  return prepareForExchange(
+    { linkageTerms: { ...firstNameTerms, identity, output: both } },
+    identity,
+    rows,
+    ["first_name", "note"],
+  );
+}
+
+describe("a run terminated after its disclosure keeps the record of it", () => {
   // The durability point: the record is owed from the moment the payload exchange
   // completes, because the disclosure it attests has provably happened by then.
-  // Everything after that -- the whole signed-receipt swap -- can fail without
-  // taking the record with it (docs/spec/PROTOCOL.md, Self-attested record).
+  // Everything after that -- the received-payload check and the whole
+  // signed-receipt swap -- can fail without taking the record with it
+  // (docs/spec/PROTOCOL.md, Self-attested record).
 
   test("a fingerprint-pin mismatch leaves both sides holding a terminated record", async () => {
     // The responder pins the WRONG fingerprint, so it refuses the initiator's
@@ -882,6 +906,62 @@ describe("a terminated receipt swap keeps the record of what was disclosed", () 
     await connInitiator.close();
     await connResponder.close();
     await unnamed;
+  });
+
+  test("a received payload outside the consented set terminates with a record too", async () => {
+    // The route past the payload exchange that is not the swap. The initiator has
+    // locked in a column set the responder does not transmit, so
+    // reconcileReceivedPayload refuses AFTER both payloads have crossed: this
+    // party's own data is in the partner's hands whatever came back, so the
+    // disclosure is owed a record exactly as a terminated swap's is. Run unsigned
+    // on both sides, so nothing about the receipt step is what produces the
+    // record.
+    const initiatorPrepared = preparedWithPayload(
+      "Initiator Co",
+      payloadClient,
+    );
+    initiatorPrepared.expectedPayloadColumns = ["a_column_never_sent"];
+    const [connInitiator, connResponder] = createMessagePipe();
+    const [initiatorSettled, responderSettled] = await Promise.allSettled([
+      runExchange(connInitiator, "initiator", initiatorPrepared, {
+        psiLibrary,
+      }),
+      runExchange(
+        connResponder,
+        "responder",
+        preparedWithPayload("Responder Co", payloadServer),
+        { psiLibrary },
+      ),
+    ]);
+
+    expect(initiatorSettled.status).toBe("rejected");
+    const failure = (initiatorSettled as PromiseRejectedResult).reason;
+    expect(failure).toBeInstanceOf(ConnectionError);
+    expect((failure as ConnectionError).kind).toBe("protocol");
+
+    const kept = exchangeRecordFromFailure(failure);
+    expect(kept?.record.outcome).toBe("receipt-swap-terminated");
+    expect(kept?.record.recordsExposed).toBe(payloadClient.length);
+    // The record attests both directions of the disclosure, the refused inbound
+    // payload included: what arrived is part of what happened.
+    expect(kept?.record.governance.payloadSent).toEqual([{ name: "note" }]);
+    expect(kept?.record.governance.payloadReceived).toEqual([{ name: "note" }]);
+    expect(kept?.record.commitments.associationTable).toBeDefined();
+    // This run derived no binder, so it carries none -- the presence rule is "the
+    // run derived one", and the outcome beside it is what says no receipt exists.
+    expect(kept?.record.receiptBinder).toBeUndefined();
+    expect(exchangeRecordOwedButUnbuilt(failure)).toBe(false);
+
+    // The refusal is local to the party that locked in: the responder, which
+    // locked in nothing, completes its own half and records that.
+    expect(responderSettled.status).toBe("fulfilled");
+    const responder = (
+      responderSettled as PromiseFulfilledResult<ExchangeResult>
+    ).value;
+    expect(responder.audit!.record.outcome).toBe("completed");
+
+    await connInitiator.close();
+    await connResponder.close();
   });
 
   test("a record that was owed and could not be built is reported on the failure", async () => {

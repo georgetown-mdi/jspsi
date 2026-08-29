@@ -458,6 +458,8 @@ The run warns before any credential, terms, or data are sent -- naming both cons
 
 The signature swap is the last step of an exchange, so a run that fails there -- a fingerprint that does not match the pin, a partner that re-keyed, a connection that drops mid-swap -- has already sent and received its data. That disclosure happened and cannot be undone by restarting.
 
+The swap is not the only step on that side of the line. A partner that transmits payload columns outside the set you consented to receive is refused as well, and that refusal also lands after both payloads have crossed. Everything below applies to it identically.
+
 Such a run still writes its **exchange record and verification keys**, to the same path a completed run writes them to, so the disclosure has a log entry. It writes no receipt: a swap that did not complete produces no dual-signed record, and none is written half-finished. The record itself says which kind of run it came from, so a reader of the file -- or an auditor you hand it to -- can see that no receipt accompanies it without being told.
 
 The run still fails, with its own exit code and error: keeping the record is not a rescue of the exchange, and there is nothing to salvage from the run beyond the record of what it disclosed. `--no-record` suppresses that record as it suppresses a completed run's.

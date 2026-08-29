@@ -1248,9 +1248,9 @@ export interface ExchangeResult {
    * persisting -- the record is a secondary audit artifact, so its failure is
    * non-fatal and never discards the exchange result.
    *
-   * This is the returning half of the record's delivery. A run that terminates in
-   * the signed-receipt swap never reaches this field, and hands the same pair to
-   * the caller on its thrown error instead; see
+   * This is the returning half of the record's delivery. A run that terminates
+   * after its payload exchange never reaches this field, and hands the same pair
+   * to the caller on its thrown error instead; see
    * {@link exchangeRecordFromFailure}.
    */
   audit?: BuiltExchangeRecord;
@@ -1270,10 +1270,10 @@ export interface ExchangeResult {
 
 // Where a terminated run's self-attested record waits for the caller that catches
 // the throw. A WeakMap rather than a property on the error: the error is raised by
-// the receipt step or by the transport under it, and neither is this module's to
-// mutate -- a frozen or proxied error would refuse the write, and an own property
-// would show up in whatever enumerates or serializes the error later. The entry
-// lives exactly as long as the error object does.
+// a post-disclosure step or by the transport under it, and none of those is this
+// module's to mutate -- a frozen or proxied error would refuse the write, and an
+// own property would show up in whatever enumerates or serializes the error later.
+// The entry lives exactly as long as the error object does.
 const recordsByTerminatedRun = new WeakMap<object, BuiltExchangeRecord>();
 
 // The other half of the same answer: the terminated runs that owed a record and
@@ -1288,9 +1288,9 @@ const unbuiltRecordsByTerminatedRun = new WeakSet<object>();
  * recovered from the error {@link runExchange} threw; `undefined` when the failure
  * carries none.
  *
- * A run that reaches the signed-receipt swap has already sent and received its
- * payloads, so the disclosure the record attests occurred whatever the swap then
- * does. The record is owed from that point (docs/spec/PROTOCOL.md, Self-attested
+ * A run past its payload exchange has already sent and received its payloads, so
+ * the disclosure the record attests occurred whatever the steps after it then do.
+ * The record is owed from that point (docs/spec/PROTOCOL.md, Self-attested
  * record), so the caller persists this pair exactly as it persists
  * {@link ExchangeResult.audit}: the run still failed, and the record's own
  * `outcome` field states that rather than passing for a completed run's.
@@ -1350,10 +1350,9 @@ function carryingExchangeRecord(
     // never built already warned at its build, with the cause this cannot name.
     if (audit !== undefined)
       getLogger("exchange").warn(
-        "the exchange disclosed and then failed in the signed-receipt swap, " +
-          "and the failure is not an object this run's self-attested record " +
-          "could be attached to; no record is available to write for a " +
-          "disclosure that occurred",
+        "the exchange disclosed and then failed, and the failure is not an " +
+          "object this run's self-attested record could be attached to; no " +
+          "record is available to write for a disclosure that occurred",
       );
     return error;
   }
@@ -1926,8 +1925,17 @@ export async function runExchange(
     localPayload,
   );
 
-  // Received-payload enforcement, fail-closed before the result or audit record is
-  // built (so a mismatched payload is never written to disk or surfaced):
+  // The record-owed region opens here. exchangePayloads has returned, so the
+  // disclosure the record attests has provably occurred, and every step that
+  // follows -- the received-payload reconciliation below and the signed-receipt
+  // swap after it -- terminates the run carrying this party's record of that
+  // disclosure rather than discarding it (docs/spec/PROTOCOL.md, Self-attested
+  // record). A holder rather than a bare `unknown`, so a thrown `undefined` still
+  // reads as a failure and cannot pass for a run that got through.
+  let postDisclosureFailure: { error: unknown } | undefined;
+
+  // Received-payload enforcement, fail-closed before the result is returned (so a
+  // mismatched payload is never surfaced or written as a result):
   // - A count-only run locks in the empty column set unconditionally: psi-c
   //   refuses payload in either direction and its record's payload commitments
   //   are fixed present-and-empty (docs/spec/EXCHANGE_RECORD.md, Count-only
@@ -1940,12 +1948,22 @@ export async function runExchange(
   //   acceptor's carried disclosedPayloadColumns, or a persisted lock-in); a lazy
   //   one (expectedPayloadColumns undefined) takes whatever the sender's own
   //   disclosure metadata transmits.
+  //
+  // The refusal is caught rather than thrown straight through: this party's own
+  // payload is already in the partner's hands whatever the partner sent back, so
+  // the record of that outbound disclosure is owed. Catching it also skips the
+  // signed-receipt swap below, so no further frame goes to a partner that broke
+  // the disclosure contract.
   const expectedReceive = countOnly
     ? []
     : linkageTerms.output.expectsOutput
       ? prepared.expectedPayloadColumns
       : [];
-  reconcileReceivedPayload(partnerPayload, expectedReceive);
+  try {
+    reconcileReceivedPayload(partnerPayload, expectedReceive);
+  } catch (error) {
+    postDisclosureFailure = { error };
+  }
 
   // resultSize (the intersection size) is bound only when both parties are
   // entitled to output; heldResult gates both the record's committed table and what
@@ -1986,12 +2004,13 @@ export async function runExchange(
   // not the swap that follows completes (docs/spec/PROTOCOL.md, Self-attested
   // record). The whole step sits inside the catch, the binder derivation included,
   // so no post-disclosure failure route leaves the caller without a record.
+  //
+  // Skipped entirely once the reconciliation above has already terminated the
+  // run: the swap is a step of an exchange that is over, and its frames would go
+  // to the partner whose payload was refused.
   let signedReceipt: DualSignedRecord | undefined;
   let receiptBinder: string | undefined;
-  // A holder rather than a bare `unknown`, so a thrown `undefined` still reads as
-  // a failure and cannot pass for a completed swap.
-  let receiptFailure: { error: unknown } | undefined;
-  if (willSignReceipt) {
+  if (willSignReceipt && postDisclosureFailure === undefined) {
     try {
       // Both parties fold in the INITIATOR's role, so both derive the same binder
       // with no extra messages; see deriveReceiptBinder. Derived before the record
@@ -2033,7 +2052,7 @@ export async function runExchange(
         content,
       });
     } catch (error) {
-      receiptFailure = { error };
+      postDisclosureFailure = { error };
     }
   }
 
@@ -2048,7 +2067,9 @@ export async function runExchange(
       localTerms: linkageTerms,
       partnerTerms,
       outcome:
-        receiptFailure === undefined ? "completed" : "receipt-swap-terminated",
+        postDisclosureFailure === undefined
+          ? "completed"
+          : "receipt-swap-terminated",
       recordsExposed: rowCount,
       resultSize: bothExpectOutput ? attestedResultSize : undefined,
       // Self-facing audit pointer from this party's local config; undefined when
@@ -2063,17 +2084,24 @@ export async function runExchange(
       receiptBinder,
     });
   } catch (err) {
+    // Two warnings rather than one conditional tail: on a terminated run there is
+    // no result to be unaffected -- the throw below discards it -- so the
+    // completed path's reassurance would be a false claim there.
     getLogger("exchange").warn(
-      "the exchange disclosed but the self-attested record could not be " +
-        `built (${sanitizeErrorForDisplay(err)}); the ` +
-        "result above is unaffected",
+      postDisclosureFailure === undefined
+        ? "the exchange disclosed but the self-attested record could not be " +
+            `built (${sanitizeErrorForDisplay(err)}); the result above is ` +
+            "unaffected"
+        : "the exchange disclosed and then failed, and the self-attested " +
+            `record of that disclosure could not be built (${sanitizeErrorForDisplay(err)}); ` +
+            "the run's own failure is reported separately",
     );
   }
 
-  // The swap's failure terminates the run, carrying the record of the disclosure
-  // that already occurred so the caller can still persist it.
-  if (receiptFailure !== undefined)
-    throw carryingExchangeRecord(receiptFailure.error, audit);
+  // The failure terminates the run, carrying the record of the disclosure that
+  // already occurred so the caller can still persist it.
+  if (postDisclosureFailure !== undefined)
+    throw carryingExchangeRecord(postDisclosureFailure.error, audit);
 
   return {
     // Withheld (undefined) from a party whose agreed terms give it no output, so

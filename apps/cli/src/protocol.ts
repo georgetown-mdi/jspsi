@@ -178,8 +178,8 @@ export const SIGNING_WITHOUT_RECORD_WARNING =
   "evidence, or drop the signing block if you do not.";
 
 /**
- * What a run reports when it disclosed, terminated in the receipt swap, and owed
- * a self-attested record its build could not produce.
+ * What a run reports when it disclosed, terminated after that, and owed a
+ * self-attested record its build could not produce.
  *
  * The completed path reports the same loss as a missing artifact; this is the
  * failing path's half, so a disclosure that occurred is never left with no record
@@ -194,8 +194,8 @@ export const SIGNING_WITHOUT_RECORD_WARNING =
  */
 export const TERMINATED_RECORD_UNBUILT_WARNING =
   "no audit record could be built for this exchange, so none was written; " +
-  "the exchange had already disclosed when it failed in the receipt swap, so " +
-  "that disclosure has no local record";
+  "the exchange had already disclosed when it failed, so that disclosure has " +
+  "no local record";
 
 /**
  * What the "terms agreed" line adds when the partner named nobody on a run that
@@ -1985,9 +1985,9 @@ export async function runProtocol(
       );
 
     // The disclosure a terminated run already made outlives the failure that
-    // stopped it: a run reaching the signed-receipt swap has sent and received
-    // its payloads, so core hands the self-attested record of that disclosure
-    // back on the error rather than discarding it (docs/spec/PROTOCOL.md,
+    // stopped it: a run past its payload exchange has sent and received its
+    // payloads, so core hands the self-attested record of that disclosure back
+    // on the error rather than discarding it (docs/spec/PROTOCOL.md,
     // Self-attested record). It is written here on the same terms a completed
     // run's is -- same destination, same owner-only pair -- because it is the
     // same kind of artifact; what marks it as a terminated run's is the record's

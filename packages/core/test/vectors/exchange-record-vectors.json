@@ -1752,6 +1752,182 @@
           "associationTable": "FxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxc"
         }
       }
+    },
+    {
+      "name": "receipt-swap-terminated-with-binder",
+      "description": "The same both-output exchange as the first vector, recorded after the run terminated past its payload exchange rather than completing. Pins the terminated outcome's placement and literal spelling across implementations, and pins the presence rule that goes with it: the binder is carried because the run derived one, not because this party holds a receipt, so a terminated record still pairs against a receipt the partner completed. Everything else is unchanged from that vector -- same commitments, same governance block, same exposed-record count and result size -- which is the format's statement that a terminated record attests the disclosure in full.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Party A",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ],
+          "payload": {
+            "send": [
+              {
+                "name": "dose",
+                "description": "Administered dose in milligrams."
+              }
+            ],
+            "receive": [
+              {
+                "name": "status",
+                "description": "Enrollment status at the most recent visit."
+              }
+            ]
+          },
+          "legalAgreement": {
+            "reference": "MOU-2025-0042",
+            "purpose": "Care coordination for co-enrolled patients",
+            "expirationDate": "2030-06-30"
+          }
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Party B",
+          "date": "2025-01-01",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "SSN",
+              "elements": [
+                {
+                  "field": "ssn"
+                }
+              ]
+            }
+          ],
+          "payload": {
+            "send": [
+              {
+                "name": "status",
+                "description": "Enrollment status at the most recent visit."
+              }
+            ],
+            "receive": [
+              {
+                "name": "dose",
+                "description": "Administered dose in milligrams."
+              }
+            ]
+          },
+          "legalAgreement": {
+            "reference": "MOU-2025-0042",
+            "purpose": "Care coordination for co-enrolled patients",
+            "expirationDate": "2030-06-30"
+          }
+        },
+        "resultSize": 2,
+        "associationTable": [
+          [0, 2],
+          [1, 0]
+        ],
+        "localPayloadSent": {
+          "columns": ["dose"],
+          "rows": [["10mg"], ["20mg"]]
+        },
+        "partnerPayloadReceived": {
+          "columns": ["status"],
+          "rows": [["active"], [null]]
+        },
+        "createdAt": "2026-01-02T03:04:06.000Z",
+        "outcome": "receipt-swap-terminated",
+        "recordsExposed": 5,
+        "receiptBinder": "VFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFQ"
+      },
+      "randomness": {
+        "bindingNonce": "UFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFA",
+        "salts": {
+          "localPayloadSent": "UVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVE",
+          "partnerPayloadReceived": "UlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlI",
+          "associationTable": "U1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1M"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v6",
+        "createdAt": "2026-01-02T03:04:06.000Z",
+        "outcome": "receipt-swap-terminated",
+        "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
+        "localIdentity": "Party A",
+        "partnerIdentity": "Party B",
+        "governance": {
+          "algorithm": "psi",
+          "legalAgreement": {
+            "reference": "MOU-2025-0042",
+            "purpose": "Care coordination for co-enrolled patients",
+            "expirationDate": "2030-06-30"
+          },
+          "matchingBasis": [
+            {
+              "name": "ssn",
+              "type": "ssn"
+            }
+          ],
+          "payloadSent": [
+            {
+              "name": "dose",
+              "description": "Administered dose in milligrams."
+            }
+          ],
+          "payloadReceived": [
+            {
+              "name": "status",
+              "description": "Enrollment status at the most recent visit."
+            }
+          ]
+        },
+        "recordsExposed": 5,
+        "resultSize": 2,
+        "bindingNonce": "UFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFA",
+        "receiptBinder": "VFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFQ",
+        "commitments": {
+          "localPayloadSent": "9tT7GfohNOvgcXrn0SctDOnE7nItcWnS_muvmFUSkZI",
+          "partnerPayloadReceived": "K7Xal_VtimWVvxoXCBa0EQDf_d2bwTz1I9eyIzBBqJM",
+          "associationTable": "Xp_vOzHCqjq0XGKRaM3QRwQA-jegFg71HoWg_axMUWo"
+        }
+      },
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "UVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVE",
+          "partnerPayloadReceived": "UlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlI",
+          "associationTable": "U1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1M"
+        }
+      }
     }
   ]
 }

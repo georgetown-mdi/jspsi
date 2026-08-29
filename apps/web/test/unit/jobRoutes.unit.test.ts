@@ -139,16 +139,18 @@ function recordJson(createdAt: string): string {
  * Enable the API, seed the global manager with one pointed at the stub CLI
  * (carrying its scenario through childEnv, since the route path's sanitized child
  * env drops ambient STUB_* vars), create a job, and resolve its id once it has
- * succeeded. `stubEnv` scripts the stub: what output/record files it writes.
+ * reached `target`. `stubEnv` scripts the stub: what output/record files it
+ * writes, and what it exits with.
  */
-async function createSucceededJob(
+async function createFinishedJob(
+  target: "succeeded" | "failed",
   stubEnv: NodeJS.ProcessEnv,
   intent: JobCreateIntent = validIntent(),
 ): Promise<string> {
   // Create the rendezvous dir first so the data root stays the last-pushed cleanup
   // entry.
   const rendezvousDir = rvzRoot();
-  const root = tempDataRoot("routes-succeed");
+  const root = tempDataRoot(`routes-${target}`);
   roots.push(root);
   vi.stubEnv("JOB_DATA_ROOT", root);
   const manager = new JobManager({
@@ -163,11 +165,18 @@ async function createSucceededJob(
   const deadline = Date.now() + 5000;
   for (;;) {
     const record = manager.getJob(id);
-    if (record !== undefined && record.status === "succeeded") return id;
+    if (record !== undefined && record.status === target) return id;
     if (Date.now() > deadline)
-      throw new Error("timed out waiting for the job to succeed");
+      throw new Error(`timed out waiting for the job to reach ${target}`);
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+async function createSucceededJob(
+  stubEnv: NodeJS.ProcessEnv,
+  intent: JobCreateIntent = validIntent(),
+): Promise<string> {
+  return createFinishedJob("succeeded", stubEnv, intent);
 }
 
 describe("the feature gate keeps the API dark when disabled", () => {
@@ -770,6 +779,45 @@ describe("status route reports record availability", () => {
     };
     expect(body.recordAvailable).toBe(false);
     expect(body.recordCreatedAt).toBeUndefined();
+  });
+
+  test("a failed run's record stays in the run's folder and is not offered", async () => {
+    // A run that terminated after its payloads crossed writes the exchange record
+    // of that disclosure and still exits non-zero, so the record pair is on disk
+    // under a FAILED job. Both console surfaces gate on the job having succeeded,
+    // so neither hands that record over. This is the fact the signing card's
+    // unpinned-partner copy states to the operator -- the file is in the run's
+    // folder in the mount, not on the screen (apps/web/src/bench/receiptsModel.ts,
+    // NO_PARTNER_PIN_PROBLEM, whose wording is pinned in consoleReceipts.unit) --
+    // so a relaxed gate here would leave that copy quietly wrong.
+    const id = await createFinishedJob("failed", {
+      STUB_EXIT_CODE: "1",
+      STUB_RECORD_JSON: recordJson(CREATED_AT),
+    });
+    // The helper pushes the data root last, so the run's folder is under it.
+    const dataRoot = roots[roots.length - 1];
+    expect(fs.existsSync(path.join(dataRoot, id, JOB_FILE_NAMES.record))).toBe(
+      true,
+    );
+
+    const status = (await handlersOf(JobRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}`),
+      params: { jobId: id },
+    })) as Response;
+    const body = (await status.json()) as {
+      status: string;
+      recordAvailable: boolean;
+      recordCreatedAt?: string;
+    };
+    expect(body.status).toBe("failed");
+    expect(body.recordAvailable).toBe(false);
+    expect(body.recordCreatedAt).toBeUndefined();
+
+    const download = (await handlersOf(RecordRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}/record`),
+      params: { jobId: id },
+    })) as Response;
+    expect(download.status).toBe(404);
   });
 
   test("a malformed record file reads as unavailable (defensive parse)", async () => {
