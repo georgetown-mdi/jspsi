@@ -123,9 +123,11 @@ export function warnOnIdentityDivergence(
  * interpolated into an `Error` is escaped once where the chain is rendered
  * (CONTRIBUTING.md, Operator-facing escaping), and escaping here as well would
  * double every backslash the operator sees. Last because the renderer caps a
- * composed link, and `linkage_terms.identity` is bounded only by the terms
- * schema's much larger text cap -- so an over-long name spends the truncation on
- * itself rather than on the remedy the operator has to act on.
+ * composed link, and `linkage_terms.identity` is bounded by the terms
+ * schema's text cap, which is the same size as that link cap -- so the schema
+ * cap alone can consume the entire link budget, and an over-long name spends
+ * the truncation on itself rather than on the remedy the operator has to act
+ * on.
  *
  * Ordering alone would still leave the values with whatever the fixed prose did
  * not spend, so the prose is kept short enough that a realistic pair renders
