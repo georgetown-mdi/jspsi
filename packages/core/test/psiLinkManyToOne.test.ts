@@ -679,7 +679,8 @@ for (const manySide of ["starter", "joiner"] as const) {
 // already ships: the index table names which of a party's records hold one value
 // whatever the cardinality, so the widening is two clauses of the receiver's local
 // replay. The strategies must therefore agree table for table, which is what the
-// equivalence block below drives; `many-to-many` is refused by both.
+// equivalence block below drives; `many-to-many` is refused by single-pass alone
+// (psiLink.test.ts pins the divergence).
 
 const singlePassStarterData = [["E1", "E1", "E2", "E3"]];
 const singlePassJoinerData = [["E1", "E2", "X"]];
@@ -731,8 +732,9 @@ test("single-pass runs one-to-one, dropping the value a group would have kept", 
 
 test("single-pass refuses many-to-many", async () => {
   // Refused before any frame moves, so the unread other end of the pipe is not a
-  // partner this ever reaches -- and refused for the cascade's own reason, the
-  // closure step rather than the pairing.
+  // partner this ever reaches -- and refused for this strategy's own reason: its
+  // seam pins the resolved table's length to the half that keeps its distinctness,
+  // and a both-sided multiplicity leaves neither half distinct.
   const [conn] = createMessagePipe();
   await expect(
     linkViaSinglePassPSI(
@@ -748,49 +750,6 @@ test("single-pass refuses many-to-many", async () => {
       -1,
     ),
   ).rejects.toThrow("psi for cardinality 'many-to-many' not yet implemented");
-});
-
-test("the cascade and single-pass refuse many-to-many with the same message", async () => {
-  // The two resolvers carry this literal independently rather than through a
-  // shared constant, so nothing but a test would catch the copies drifting apart.
-  const [conn] = createMessagePipe();
-  const settle = (run: Promise<unknown>): Promise<unknown> =>
-    run.then(
-      () => undefined,
-      (err: unknown) => err,
-    );
-  const cascadeError = await settle(
-    linkViaPSI(
-      { cardinality: "many-to-many" },
-      makeParticipant("starter"),
-      conn,
-      singlePassStarterData,
-      singlePassJoinerData[0].length,
-      -1,
-    ),
-  );
-  const singlePassError = await settle(
-    linkViaSinglePassPSI(
-      { cardinality: "many-to-many" },
-      makeParticipant("starter"),
-      conn,
-      singlePassStarterData,
-      fanOutFreeBounds(
-        singlePassStarterData.length,
-        singlePassJoinerData[0].length,
-      ),
-      false,
-      -1,
-    ),
-  );
-  expect(cascadeError).toBeInstanceOf(Error);
-  expect(singlePassError).toBeInstanceOf(Error);
-  expect((cascadeError as Error).message).toBe(
-    "psi for cardinality 'many-to-many' not yet implemented",
-  );
-  expect((singlePassError as Error).message).toBe(
-    (cascadeError as Error).message,
-  );
 });
 
 // --- the two strategies agree, table for table --------------------------------

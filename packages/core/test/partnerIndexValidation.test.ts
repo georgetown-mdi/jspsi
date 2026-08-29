@@ -795,6 +795,148 @@ test("a grouping that does not run parallel to the list is a caller fault", () =
   expect((err as Error).message).toMatch(/one group per entry/);
 });
 
+// --- the same rule where the grouping answers in runs -------------------------
+// Where the partner keeps its own duplicates too, one entry this party sent comes
+// back as the whole partner group behind the position it named, so the list is a
+// concatenation of runs rather than one entry per outbound entry. The rule is the
+// same one read at that granularity: runs of one group identical, runs of
+// different groups disjoint, and distinctness surviving inside a run.
+
+const expectCallerFault = (run: () => void, detail: RegExp): void => {
+  const err = refusalFrom(run);
+  expect(err).toBeInstanceOf(Error);
+  expect(err).not.toBeInstanceOf(ConnectionError);
+  expect((err as Error).message).toMatch(detail);
+};
+
+test("runs of one group must be identical and runs of two must be disjoint", () => {
+  // Outbound entries 0 and 1 named one position and came back with two rows each;
+  // entry 2 named another and came back with one.
+  const rules = {
+    repeatsGroupedByRuns: {
+      rounds: [0, 0, 0],
+      positions: [0, 0, 1],
+      runLengths: [2, 2, 1],
+    },
+  };
+  expect(() =>
+    assertPartnerIndices("me", "the list", [2, 1, 2, 1, 0], ROWS, rules),
+  ).not.toThrow();
+  expectProtocolRefusal(
+    refusalFrom(() =>
+      assertPartnerIndices("me", "the list", [2, 1, 2, 1, 2], ROWS, rules),
+    ),
+    /the list names one partner row for two positions this side matched/,
+  );
+  expectProtocolRefusal(
+    refusalFrom(() =>
+      assertPartnerIndices("me", "the list", [2, 1, 2, 0, 1], ROWS, rules),
+    ),
+    /the list names two partner rows for one position this side matched/,
+  );
+});
+
+test("a run naming one partner row twice is refused within the run", () => {
+  // The run is the partner's own group, whose rows are distinct: a row named twice
+  // for one of this party's records is a repeated pair, reported as such rather
+  // than as a merge of two groups.
+  expectProtocolRefusal(
+    refusalFrom(() =>
+      assertPartnerIndices("me", "the list", [2, 2], ROWS, {
+        repeatsGroupedByRuns: {
+          rounds: [0],
+          positions: [0],
+          runLengths: [2],
+        },
+      }),
+    ),
+    /the list names one partner row twice for one record this side matched/,
+  );
+});
+
+test("one position of each round is a group of its own under the run rule", () => {
+  // A position number means nothing across rounds here either, so runs answering
+  // the same position in two rounds must be disjoint.
+  const rules = {
+    repeatsGroupedByRuns: {
+      rounds: [0, 1],
+      positions: [0, 0],
+      runLengths: [1, 1],
+    },
+  };
+  expectProtocolRefusal(
+    refusalFrom(() =>
+      assertPartnerIndices("me", "the list", [1, 1], ROWS, rules),
+    ),
+    /names one partner row for two positions this side matched/,
+  );
+  expect(() =>
+    assertPartnerIndices("me", "the list", [1, 2], ROWS, rules),
+  ).not.toThrow();
+});
+
+test("run lengths that do not cover the list are a caller fault", () => {
+  // The run lengths are the count this party pinned the list's length to before
+  // getting here, so runs that do not add up to it are a local misuse rather than
+  // the partner's violation -- and the comparison of a later run against its
+  // group's first never reads past the run it was given.
+  expectCallerFault(
+    () =>
+      assertPartnerIndices("me", "the list", [0, 1, 2], ROWS, {
+        repeatsGroupedByRuns: {
+          rounds: [0, 0],
+          positions: [0, 1],
+          runLengths: [1, 1],
+        },
+      }),
+    /runs to cover the list, given runs totalling 2 for 3 entries/,
+  );
+  expectCallerFault(
+    () =>
+      assertPartnerIndices("me", "the list", [0, 1], ROWS, {
+        repeatsGroupedByRuns: {
+          rounds: [0, 0],
+          positions: [0],
+          runLengths: [1, 1],
+        },
+      }),
+    /one group per run/,
+  );
+  expectCallerFault(
+    () =>
+      assertPartnerIndices("me", "the list", [0, 1, 2], ROWS, {
+        repeatsGroupedByRuns: {
+          rounds: [0, 0],
+          positions: [0, 0],
+          runLengths: [1, 2],
+        },
+      }),
+    /one run length per position this side matched, given 1 and 2/,
+  );
+});
+
+test("the run rule cannot be combined with either other relaxation", () => {
+  // Each rule holds a repeat to a different thing, so no list can be under two of
+  // them at once -- the check that keeps a caller from relaxing distinctness twice
+  // and getting neither rule's guarantee.
+  for (const other of [
+    { repeats: true },
+    { repeatsGroupedBy: { rounds: [0], positions: [0] } },
+  ])
+    expectCallerFault(
+      () =>
+        assertPartnerIndices("me", "the list", [0], ROWS, {
+          repeatsGroupedByRuns: {
+            rounds: [0],
+            positions: [0],
+            runLengths: [1],
+          },
+          ...other,
+        }),
+      /at most one of them applies to a list/,
+    );
+});
+
 // --- The untouched run --------------------------------------------------------
 
 test("an untouched exchange is unaffected by the checks", async () => {

@@ -149,25 +149,66 @@ test("a deduplicating cardinality leaves an unmatched duplicate group's table un
   expect(mClientResult).toStrictEqual(clientResult);
 });
 
-// many-to-many's round-level pairing rules are specified, but the transitive
-// closure that turns a both-sides-multiple table into entity clusters either party
-// can act on is not, so the cascade refuses it rather than returning a table whose
-// meaning is undecided.
-test("many-to-many is refused as not yet implemented", async () => {
-  const [conn] = createMessagePipe();
-  const participant = new PSIParticipant(
-    "server",
-    psiLibrary,
-    { role: "starter", verbose: -1 },
-    UNBOUNDED_PSI_ELEMENTS,
-  );
-  await expect(
+// many-to-many applies the "many" side's rules to both parties, so a matched value
+// stands for a group on each side and contributes the two groups' product. The
+// cascade pairs that; the single-pass seam holds the resolved table to a length
+// taken from the half that keeps its distinctness, and neither half does here, so
+// it refuses. This is the one label at which the two strategies part company, which
+// is why it sits beside the parity block below rather than inside it.
+// psiLinkManyToMany.test.ts carries the cascade's own behavior at length.
+test("many-to-many pairs in the cascade and is refused by single-pass", async () => {
+  const bothSided = [["E1", "E1"]];
+  const [starterConn, joinerConn] = createMessagePipe();
+  const [starter, joiner] = await Promise.all([
     linkViaPSI(
       { cardinality: "many-to-many" },
-      participant,
-      conn,
-      [["A"]],
-      1,
+      new PSIParticipant(
+        "server",
+        psiLibrary,
+        { role: "starter", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      starterConn,
+      bothSided,
+      2,
+      -1,
+    ),
+    linkViaPSI(
+      { cardinality: "many-to-many" },
+      new PSIParticipant(
+        "client",
+        psiLibrary,
+        { role: "joiner", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      joinerConn,
+      bothSided,
+      2,
+      -1,
+    ),
+  ]);
+  // Both of each party's rows hold the one value, so every one of the four pairs
+  // between the two groups is in the table, on both parties alike.
+  expect(starter).toStrictEqual([
+    [0, 0, 1, 1],
+    [0, 1, 0, 1],
+  ]);
+  expect(joiner).toStrictEqual(starter);
+
+  const [singlePassConn] = createMessagePipe();
+  await expect(
+    linkViaSinglePassPSI(
+      { cardinality: "many-to-many" },
+      new PSIParticipant(
+        "server",
+        psiLibrary,
+        { role: "starter", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      singlePassConn,
+      bothSided,
+      fanOutFreeBounds(bothSided.length, 2),
+      false,
       -1,
     ),
   ).rejects.toThrow(/cardinality 'many-to-many' not yet implemented/);
