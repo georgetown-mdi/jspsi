@@ -354,6 +354,7 @@ describe("the export binds the marker to the bytes it serialized", () => {
     const dispatch = await dispatchManagedMigration(record.id, {
       readAndMark: readRecordAndMarkBackedUp,
       download: (_fileName, content) => downloaded.push(content),
+      readRecord: getManagedExchange,
       markSpent: markManagedExchangeSpent,
       now: () => new Date(),
     });

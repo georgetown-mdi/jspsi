@@ -34,6 +34,17 @@
  * composed -- and a refusal thrown inside the step aborts it, leaving no marker and
  * no other trace, so a refused export really does change nothing.
  *
+ * Both spending intents defer their spend to an operator attestation that can arrive
+ * arbitrarily later, so each re-reads the record by id at CONFIRM time and spends only
+ * if the artifact it downloaded still carries the exchange's current secret
+ * ({@link ManagedHandoffSupersededError} otherwise). A run rotates that secret at its
+ * handshake, and a run in any context -- this surface, a second tab, the scheduled
+ * runtime -- can start and finish between the download and the attestation, which
+ * leaves the operator attesting to an artifact whose secret the partnership has moved
+ * past. Spending on that attestation would hand the new owner a copy whose first run
+ * meets a partner that has moved on. The check is the same read-fresh-by-id the export
+ * step takes, for the same reason: what a caller holds in hand is never what decides.
+ *
  * The seams (the fresh read-compose-and-mark, the download, the spend write) are
  * injected so the intents are testable without a real download or database.
  */
@@ -78,11 +89,58 @@ export interface ManagedExportDeps {
   now: () => Date;
 }
 
-/** The platform seams a migration export drives: the backup seams plus the spend
+/** The platform seams a migration export drives: the backup seams, the fresh read
+ * the confirm-time currency check measures the attestation against, and the spend
  * write that transitions the source to its visible spent state. */
 export interface ManagedMigrationDeps extends ManagedExportDeps {
+  /** Read the stored record for `id` as the store holds it now, resolving
+   * `undefined` when none exists. Read at confirm time, never at dispatch: the
+   * attestation is measured against the current record rather than against the
+   * dispatch's own snapshot of it. */
+  readRecord: (id: string) => Promise<ManagedExchangeRecord | undefined>;
   /** Mark the record spent as of `spentAt` (the handoff date). */
   markSpent: (id: string, spentAt: string) => Promise<void>;
+}
+
+/**
+ * Raised when a hand-off confirmation is refused: the exchange's stored secret is no
+ * longer the one the downloaded artifact carries, so the copy the operator is
+ * attesting to has been superseded -- by a run's rotation in any context, or by a
+ * re-invite. Nothing is spent, and the remedy is to download the exchange again.
+ *
+ * Also raised when the record is gone from the store, where there is no live copy
+ * left to spend.
+ */
+export class ManagedHandoffSupersededError extends Error {
+  constructor(id: string) {
+    super(
+      `the downloaded hand-off artifact for managed exchange ${id} no longer carries its current secret`,
+    );
+    this.name = "ManagedHandoffSupersededError";
+  }
+}
+
+/**
+ * Spend the source on the operator's attestation, but only if `exported` -- the
+ * record the dispatch actually serialized -- still matches what the store holds. The
+ * secret is the identity that decides: it is what the artifact hands over and what a
+ * rotation moves, and an edit that leaves it alone (a label, a max-age policy) leaves
+ * the artifact usable.
+ *
+ * @throws {ManagedHandoffSupersededError} if the stored secret has moved on, or the
+ *   record is gone. `markSpent` is not called.
+ */
+async function spendIfArtifactIsCurrent(
+  id: string,
+  exported: ManagedExchangeRecord,
+  spentAt: Date,
+  readRecord: (id: string) => Promise<ManagedExchangeRecord | undefined>,
+  markSpent: (spentAt: string) => Promise<void>,
+): Promise<void> {
+  const current = await readRecord(id);
+  if (current === undefined || current.sharedSecret !== exported.sharedSecret)
+    throw new ManagedHandoffSupersededError(id);
+  await markSpent(spentAt.toISOString());
 }
 
 /** The atomic export step's result: the fresh read-and-mark instant (threaded so the
@@ -181,7 +239,9 @@ export interface ManagedMigrationDispatch {
   record: ManagedExchangeRecord;
   /** Spend the source as of `spentAt` (the operator's confirmation instant),
    * transitioning this device's copy to its visible spent state. Called only after
-   * the operator confirms the file is saved; not called on a cancelled save. */
+   * the operator confirms the file is saved; not called on a cancelled save. Rejects
+   * with {@link ManagedHandoffSupersededError}, spending nothing, when the record's
+   * secret has moved past the artifact this dispatch downloaded. */
   confirm: (spentAt: Date) => Promise<void>;
 }
 
@@ -207,7 +267,10 @@ export async function dispatchManagedMigration(
   return {
     backedUpAt,
     record,
-    confirm: (spentAt) => deps.markSpent(id, spentAt.toISOString()),
+    confirm: (spentAt) =>
+      spendIfArtifactIsCurrent(id, record, spentAt, deps.readRecord, (at) =>
+        deps.markSpent(id, at),
+      ),
   };
 }
 
@@ -243,7 +306,8 @@ export interface ManagedCronExportDispatch {
   composed: ManagedCronExport;
   /** Spend the source as of `spentAt` (the operator's confirmation instant), under
    * the command-line hand-off. Called only after the operator confirms both files
-   * are saved. */
+   * are saved. Rejects with {@link ManagedHandoffSupersededError}, spending nothing,
+   * when the record's secret has moved past the files this dispatch downloaded. */
   confirm: (spentAt: Date) => Promise<void>;
 }
 
@@ -296,6 +360,8 @@ export async function dispatchManagedCronExport(
     record,
     composed,
     confirm: (spentAt) =>
-      deps.markSpent(id, spentAt.toISOString(), CRON_EXPORT_HANDOFF),
+      spendIfArtifactIsCurrent(id, record, spentAt, deps.readRecord, (at) =>
+        deps.markSpent(id, at, CRON_EXPORT_HANDOFF),
+      ),
   };
 }

@@ -376,6 +376,7 @@ describe("a record this app could not have composed", () => {
       dispatchManagedCronExport(created.id, {
         readAndMark: readRecordAndMarkBackedUp,
         download: (fileName) => downloaded.push(fileName),
+        readRecord: getManagedExchange,
         markSpent: markManagedExchangeSpent,
         now: () => new Date(),
       }),

@@ -690,8 +690,13 @@ record, in a separate origin-local store keyed by the record `id`, and are
   spend the source. Each export downloads its files and marks the source backed-up
   on dispatch (a spent source has a current export by construction), then writes the
   spent state only after the operator confirms the files are saved; a dismissed
-  dialog leaves the source live and recoverable. It carries no secret material and
-  no epoch.
+  dialog leaves the source live and recoverable. The attestation is checked rather
+  than taken on its word: the confirmation re-reads the record by `id` and writes
+  the spent state only while the files it downloaded still carry that record's
+  current `sharedSecret`. A rotation landing between the download and the
+  attestation -- a run in any context, or a re-invite -- therefore refuses the
+  spend instead of recording one, since what would be handed over is a copy the
+  partnership has already moved past. It carries no secret material and no epoch.
 
   **Revive by import is the migration spend's recovery, and only its.** The
   migration export downloads the artifact that clears its own spend (a

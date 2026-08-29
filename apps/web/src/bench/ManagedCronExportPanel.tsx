@@ -5,13 +5,21 @@ import { Alert, Anchor, Button, CopyButton } from "@mantine/core";
 import { DisclosureSection } from "@components/DisclosureSection";
 import { triggerBlobDownload } from "@components/blobDownload";
 
-import { dispatchManagedCronExport } from "@psi/managedExchangeExport";
+import {
+  ManagedHandoffSupersededError,
+  dispatchManagedCronExport,
+} from "@psi/managedExchangeExport";
+import {
+  getManagedExchange,
+  readRecordAndMarkBackedUp,
+} from "@psi/managedExchangeStore";
 import { markManagedExchangeSpent } from "@psi/managedLocalState";
-import { readRecordAndMarkBackedUp } from "@psi/managedExchangeStore";
 
 import {
   RUN_IN_FLIGHT_HANDOFF_REASON,
   RUN_IN_FLIGHT_HANDOFF_TITLE,
+  SUPERSEDED_HANDOFF_REASON,
+  SUPERSEDED_HANDOFF_TITLE,
 } from "./managedHandoffGate";
 import { managedCronExportPanelState } from "./managedCronExportModel";
 import styles from "./bench.module.css";
@@ -25,11 +33,13 @@ const KEY_FILE_SECURITY_DOC_URL =
 
 /** The platform seams the export drives: the same atomic read-and-mark by id every
  * managed export takes (never this component's mounted record, whose secret a
- * concurrent rotation may already have superseded), the blob download, and the
- * spend write. */
+ * concurrent rotation may already have superseded), the blob download, the fresh
+ * read the confirmation measures the operator's attestation against, and the spend
+ * write. */
 const cronExportDeps = {
   readAndMark: readRecordAndMarkBackedUp,
   download: triggerBlobDownload,
+  readRecord: getManagedExchange,
   markSpent: markManagedExchangeSpent,
   now: () => new Date(),
 };
@@ -49,18 +59,30 @@ const cronExportDeps = {
  * browser's copy stays live and runnable until the operator says both files landed.
  * On that attestation the source is spent -- handing the secret to a scheduler and
  * leaving this copy live would fork a linear secret between two owners.
+ *
+ * That attestation can arrive long after the download, so the spend re-reads the
+ * record and refuses files a run has rotated past
+ * ({@link ManagedHandoffSupersededError}). The panel withholds the download and the
+ * confirmation while a run is in flight so the refusal is rarely the operator's
+ * first news of the run, but the refusal is what makes the guarantee: the two are
+ * separated by however long the operator takes to answer.
  */
 export function ManagedCronExportPanel({
   record,
   runInFlight,
+  recheckRunInFlight,
   onBackedUp,
   onHandedOff,
 }: {
   record: ManagedExchangeRecord;
-  /** Whether a run of this exchange is in flight on the host surface. The
-   * hand-off confirmation is withheld while it is, for the reason it states
-   * ({@link RUN_IN_FLIGHT_HANDOFF_REASON}). */
+  /** Whether a run of this exchange is in flight in any context this browser profile
+   * can see -- the host's own run, a second tab's, or the scheduled runtime's. Both
+   * the download and the hand-off confirmation are withheld while it is, for the
+   * reason they state ({@link RUN_IN_FLIGHT_HANDOFF_REASON}). */
   runInFlight: boolean;
+  /** Re-read the run signal now, resolving what it read. The confirmation takes it
+   * at the click, since {@link runInFlight} is a poll's last reading. */
+  recheckRunInFlight: () => Promise<boolean>;
   /** The export marked the record backed-up, at this instant; the host's backup
    * state reflects it without a reload. */
   onBackedUp: (backedUpAt: Date) => void;
@@ -74,12 +96,20 @@ export function ManagedCronExportPanel({
   // A dispatched export whose two downloads fired but whose spend awaits the
   // operator attesting both files are saved; dismissing it leaves the source live.
   const [dispatch, setDispatch] = useState<ManagedCronExportDispatch>();
+  // The confirmation the store refused because a run rotated past the files this
+  // panel downloaded. Its own state, not `failed`: the remedy is a fresh download
+  // rather than a retried attestation, so the confirmation stays refused until one
+  // is taken.
+  const [superseded, setSuperseded] = useState(false);
   const state = useMemo(() => managedCronExportPanelState(record), [record]);
 
+  // Downloading mid-run only manufactures files the confirmation will refuse: the
+  // run rotates past them before the operator can attest to them.
   function downloadFiles() {
-    if (busy) return;
+    if (busy || runInFlight) return;
     setBusy(true);
     setFailed(false);
+    setSuperseded(false);
     void dispatchManagedCronExport(record.id, cronExportDeps)
       .then((dispatched) => {
         onBackedUp(dispatched.backedUpAt);
@@ -89,19 +119,28 @@ export function ManagedCronExportPanel({
       .finally(() => setBusy(false));
   }
 
+  // The spend itself refuses files the record has rotated past, so this classifies
+  // that refusal rather than guarding against it.
   function confirmHandoff() {
     if (dispatch === undefined || busy || runInFlight) return;
     const { composed } = dispatch;
     setBusy(true);
     setFailed(false);
-    void dispatch
-      .confirm(new Date())
-      .then(() => {
+    void (async () => {
+      try {
+        // The gate above renders from a poll, so a run started since the last
+        // reading is still news here; re-reading also puts the reason on screen.
+        if (await recheckRunInFlight()) return;
+        await dispatch.confirm(new Date());
         setDispatch(undefined);
         onHandedOff(composed.command);
-      })
-      .catch(() => setFailed(true))
-      .finally(() => setBusy(false));
+      } catch (error) {
+        if (error instanceof ManagedHandoffSupersededError) setSuperseded(true);
+        else setFailed(true);
+      } finally {
+        setBusy(false);
+      }
+    })();
   }
 
   return (
@@ -183,10 +222,18 @@ export function ManagedCronExportPanel({
                     again; nothing is handed off until you confirm it.
                   </Alert>
                 )}
-                <Button mt="sm" onClick={downloadFiles} loading={busy}>
+                <Button
+                  mt="sm"
+                  onClick={downloadFiles}
+                  loading={busy}
+                  disabled={runInFlight}
+                >
                   Download {state.composed.config.fileName} and{" "}
                   {state.composed.key.fileName}
                 </Button>
+                {runInFlight && dispatch === undefined && (
+                  <p className={styles.small}>{RUN_IN_FLIGHT_HANDOFF_REASON}</p>
+                )}
               </li>
               <li>
                 <p className={styles.handoffStepLabel}>
@@ -288,18 +335,30 @@ export function ManagedCronExportPanel({
                     {RUN_IN_FLIGHT_HANDOFF_REASON}
                   </Alert>
                 )}
+                {superseded && (
+                  <Alert
+                    color="yellow"
+                    title={SUPERSEDED_HANDOFF_TITLE}
+                    mb="sm"
+                  >
+                    {SUPERSEDED_HANDOFF_REASON}
+                  </Alert>
+                )}
                 <p>
                   <Button
                     onClick={confirmHandoff}
                     loading={busy}
-                    disabled={runInFlight}
+                    disabled={runInFlight || superseded}
                   >
                     I saved both files; hand off this exchange
                   </Button>{" "}
                   <Button
                     variant="subtle"
                     disabled={busy}
-                    onClick={() => setDispatch(undefined)}
+                    onClick={() => {
+                      setDispatch(undefined);
+                      setSuperseded(false);
+                    }}
                   >
                     Keep it in this browser
                   </Button>

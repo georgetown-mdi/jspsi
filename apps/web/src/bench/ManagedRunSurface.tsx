@@ -13,6 +13,7 @@ import {
   routeConfirmationReply,
 } from "@psi/managedFailureConfirmation";
 import {
+  ManagedHandoffSupersededError,
   dispatchManagedMigration,
   exportManagedBackup,
 } from "@psi/managedExchangeExport";
@@ -48,6 +49,8 @@ import {
 import {
   RUN_IN_FLIGHT_HANDOFF_REASON,
   RUN_IN_FLIGHT_HANDOFF_TITLE,
+  SUPERSEDED_HANDOFF_REASON,
+  SUPERSEDED_HANDOFF_TITLE,
 } from "./managedHandoffGate";
 import {
   classifyManagedRunFailure,
@@ -64,6 +67,7 @@ import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import { appendSanitizedRunWarning } from "./runWarnings";
 import styles from "./bench.module.css";
 import { useBeforeUnloadPrompt } from "./useUnloadGuard";
+import { useManagedRunInFlight } from "./useManagedRunInFlight";
 
 import type { Ref } from "react";
 
@@ -123,6 +127,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [accountingReads, setAccountingReads] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
+  // A hand-off the store refused because a run rotated past the artifact it
+  // downloaded. Its own state, not exportFailed: the remedy is to download again
+  // rather than to retry the attestation, so the confirmation stays refused until
+  // the operator takes a fresh artifact.
+  const [migrationSuperseded, setMigrationSuperseded] = useState(false);
   // A dispatched migration whose download fired but whose spend awaits the operator
   // attesting "the file is saved"; a dismissed save leaves the source live.
   const [migrationDispatch, setMigrationDispatch] =
@@ -140,6 +149,13 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // connection failure. Only the offline direction is gated -- being online is no
   // promise the partner is there (see @utils/networkStatus).
   const online = useOnlineStatus();
+  // Every hand-off affordance on this surface reads one in-flight signal, which sees
+  // a run started anywhere in this browser profile -- here, in a second tab, or by
+  // the scheduled runtime -- not just the one this surface started.
+  const { inFlight: runInFlight, recheckLock } = useManagedRunInFlight(
+    id,
+    running,
+  );
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [finishedAt, setFinishedAt] = useState<Date>();
   const [failure, setFailure] = useState<ManagedRunFailure>();
@@ -416,12 +432,16 @@ export function ManagedRunSurface({ id }: { id: string }) {
       .finally(() => setExportBusy(false));
   }
 
+  // Dispatching mid-run only manufactures an artifact the confirmation will refuse:
+  // the run rotates past it before the operator can attest to it.
   function migrate() {
-    if (record === undefined || exportBusy) return;
+    if (record === undefined || exportBusy || runInFlight) return;
     setExportBusy(true);
     setExportFailed(false);
+    setMigrationSuperseded(false);
     void dispatchManagedMigration(record.id, {
       ...exportDeps,
+      readRecord: getManagedExchange,
       markSpent: markManagedExchangeSpent,
     })
       .then((dispatch) => {
@@ -433,19 +453,30 @@ export function ManagedRunSurface({ id }: { id: string }) {
   }
 
   // The operator attested the downloaded migration file is saved: spend the source
-  // (this device's copy transitions to the spent load state on the next visit).
+  // (this device's copy transitions to the spent load state on the next visit). The
+  // spend itself refuses an artifact the record has rotated past, so this classifies
+  // that refusal rather than guarding against it.
   function confirmMigration() {
-    if (migrationDispatch === undefined || exportBusy || running) return;
+    const dispatch = migrationDispatch;
+    if (dispatch === undefined || exportBusy || runInFlight) return;
     setExportBusy(true);
     setExportFailed(false);
-    void migrationDispatch
-      .confirm(new Date())
-      .then(() => {
+    void (async () => {
+      try {
+        // The gate above renders from a poll, so a run started since the last
+        // reading is still news here; re-reading also puts the reason on screen.
+        if (await recheckLock()) return;
+        await dispatch.confirm(new Date());
         setMigrationDispatch(undefined);
         setMigrated(true);
-      })
-      .catch(() => setExportFailed(true))
-      .finally(() => setExportBusy(false));
+      } catch (error) {
+        if (error instanceof ManagedHandoffSupersededError)
+          setMigrationSuperseded(true);
+        else setExportFailed(true);
+      } finally {
+        setExportBusy(false);
+      }
+    })();
   }
 
   // The run just rotated the secret, so the previous backup is stale; the completion
@@ -694,23 +725,31 @@ export function ManagedRunSurface({ id }: { id: string }) {
               it, keep the exchange here for now, export the accounting as CSV,
               and then move it.
             </p>
-            {running && (
+            {runInFlight && (
               <Alert color="yellow" title={RUN_IN_FLIGHT_HANDOFF_TITLE} mb="md">
                 {RUN_IN_FLIGHT_HANDOFF_REASON}
+              </Alert>
+            )}
+            {migrationSuperseded && (
+              <Alert color="yellow" title={SUPERSEDED_HANDOFF_TITLE} mb="md">
+                {SUPERSEDED_HANDOFF_REASON}
               </Alert>
             )}
             <p>
               <Button
                 onClick={confirmMigration}
                 loading={exportBusy}
-                disabled={running}
+                disabled={runInFlight || migrationSuperseded}
               >
                 I saved the file; hand off this exchange
               </Button>{" "}
               <Button
                 variant="subtle"
                 disabled={exportBusy}
-                onClick={() => setMigrationDispatch(undefined)}
+                onClick={() => {
+                  setMigrationDispatch(undefined);
+                  setMigrationSuperseded(false);
+                }}
               >
                 Keep it on this device
               </Button>
@@ -804,12 +843,14 @@ export function ManagedRunSurface({ id }: { id: string }) {
               marker={backupMarker}
               busy={exportBusy}
               failed={exportFailed}
+              runInFlight={runInFlight}
               onBackUp={backUp}
               onMigrate={migrate}
             />
             <ManagedCronExportPanel
               record={record}
-              runInFlight={running}
+              runInFlight={runInFlight}
+              recheckRunInFlight={recheckLock}
               onBackedUp={(backedUpAt) =>
                 setBackupMarker({ backedUpAt: backedUpAt.toISOString() })
               }
@@ -1098,12 +1139,17 @@ function BackupPanel({
   marker,
   busy,
   failed,
+  runInFlight,
   onBackUp,
   onMigrate,
 }: {
   marker: ManagedBackupMarker | undefined;
   busy: boolean;
   failed: boolean;
+  /** Whether a run of this exchange is in flight in any context. Only the migration
+   * is withheld while it is: a backup leaves the source live, so taking one across a
+   * rotation costs the operator nothing. */
+  runInFlight: boolean;
   onBackUp: () => void;
   onMigrate: () => void;
 }) {
@@ -1130,9 +1176,17 @@ function BackupPanel({
       <Button mt="sm" variant="default" onClick={onBackUp} loading={busy}>
         Download a backup
       </Button>{" "}
-      <Button mt="sm" variant="subtle" onClick={onMigrate} disabled={busy}>
+      <Button
+        mt="sm"
+        variant="subtle"
+        onClick={onMigrate}
+        disabled={busy || runInFlight}
+      >
         Move to another device
       </Button>
+      {runInFlight && (
+        <p className={styles.small}>{RUN_IN_FLIGHT_HANDOFF_REASON}</p>
+      )}
     </div>
   );
 }

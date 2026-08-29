@@ -7,15 +7,16 @@ import {
 import { describe, expect, test, vi } from "vitest";
 
 import {
-  buildManagedExchangeRecord,
-  composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
-import {
+  ManagedHandoffSupersededError,
   dispatchManagedCronExport,
   dispatchManagedMigration,
   exportManagedBackup,
   managedBackupFileName,
 } from "@psi/managedExchangeExport";
+import {
+  buildManagedExchangeRecord,
+  composeManagedExchangeFile,
+} from "@psi/managedExchangeRecord";
 import {
   importManagedExchangeArtifact,
   parseManagedExchangeArtifact,
@@ -116,12 +117,19 @@ describe("dispatchManagedMigration", () => {
     downloaded: Array<{ fileName: string; content: string }>;
     order: Array<string>;
     markSpent: ReturnType<typeof vi.fn>;
+    /** What a confirm-time read finds in the store; the record itself until a test
+     * moves it, as a rotation or a delete in another context would. */
+    stored: { record: ManagedExchangeRecord | undefined };
   } {
     const order: Array<string> = [];
     const downloaded: Array<{ fileName: string; content: string }> = [];
+    const stored: { record: ManagedExchangeRecord | undefined } = {
+      record: rec,
+    };
     return {
       downloaded,
       order,
+      stored,
       readAndMark: vi.fn(
         (
           _id: string,
@@ -136,6 +144,10 @@ describe("dispatchManagedMigration", () => {
       download: (fileName, content) => {
         order.push("download");
         downloaded.push({ fileName, content });
+      },
+      readRecord: () => {
+        order.push("readRecord");
+        return Promise.resolve(stored.record);
       },
       markSpent: vi.fn((_id: string, _spentAt: string) => {
         order.push("markSpent");
@@ -178,6 +190,49 @@ describe("dispatchManagedMigration", () => {
     await dispatchManagedMigration(rec.id, deps);
     // The caller drops the dispatch without calling confirm.
     expect(deps.markSpent).not.toHaveBeenCalled();
+  });
+
+  test("confirm refuses an artifact a rotation has superseded", async () => {
+    // The ordering the gate on the surface cannot cover: a run in any context
+    // rotates between the download and the operator's attestation, so what they are
+    // attesting to is no longer the exchange's secret.
+    const rec = record();
+    const deps = migrationDeps(rec);
+    const dispatch = await dispatchManagedMigration(rec.id, deps);
+    deps.stored.record = { ...rec, sharedSecret: generateSharedSecret() };
+
+    await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
+      ManagedHandoffSupersededError,
+    );
+    expect(deps.markSpent).not.toHaveBeenCalled();
+  });
+
+  test("confirm refuses when the record is gone", async () => {
+    const rec = record();
+    const deps = migrationDeps(rec);
+    const dispatch = await dispatchManagedMigration(rec.id, deps);
+    deps.stored.record = undefined;
+
+    await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
+      ManagedHandoffSupersededError,
+    );
+    expect(deps.markSpent).not.toHaveBeenCalled();
+  });
+
+  test("confirm reads the store before it spends, never after", async () => {
+    // The read is the precondition, so a spend can never precede it: an
+    // implementation that marked first and checked afterwards would leave a
+    // superseded copy spent.
+    const rec = record();
+    const deps = migrationDeps(rec);
+    const dispatch = await dispatchManagedMigration(rec.id, deps);
+    await dispatch.confirm(new Date("2026-07-14T13:30:00.000Z"));
+    expect(deps.order).toEqual([
+      "readAndMark",
+      "download",
+      "readRecord",
+      "markSpent",
+    ]);
   });
 
   test("marks backed-up before it could ever spend", async () => {
@@ -268,6 +323,9 @@ describe("dispatchManagedCronExport", () => {
     marked: Array<string>;
     order: Array<string>;
     markSpent: ReturnType<typeof vi.fn>;
+    /** What a confirm-time read finds in the store; the record itself until a test
+     * moves it, as a rotation or a delete in another context would. */
+    stored: { record: ManagedExchangeRecord | undefined };
   } {
     const order: Array<string> = [];
     const marked: Array<string> = [];
@@ -276,10 +334,15 @@ describe("dispatchManagedCronExport", () => {
       content: string;
       mimeType: string;
     }> = [];
+    const stored: { record: ManagedExchangeRecord | undefined } = {
+      record: rec,
+    };
     return {
       downloaded,
       marked,
       order,
+      stored,
+      readRecord: () => Promise.resolve(stored.record),
       // The store's atomic step, modelled: the composition runs on the record read
       // and the marker is written only once it returns, so a refusal thrown out of
       // it leaves nothing marked -- the transaction the real store aborts.
@@ -345,6 +408,21 @@ describe("dispatchManagedCronExport", () => {
       "2026-07-14T13:30:00.000Z",
       "command-line",
     );
+  });
+
+  test("confirm refuses files a rotation has superseded", async () => {
+    // The same ordering the migration's confirm refuses: a run rotated between the
+    // two downloads and the operator's attestation, so the key file on their disk
+    // is no longer this exchange's.
+    const rec = record();
+    const deps = cronDeps(rec);
+    const dispatch = await dispatchManagedCronExport(rec.id, deps);
+    deps.stored.record = { ...rec, sharedSecret: generateSharedSecret() };
+
+    await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
+      ManagedHandoffSupersededError,
+    );
+    expect(deps.markSpent).not.toHaveBeenCalled();
   });
 
   test.each(refusedRecords)(
