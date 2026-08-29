@@ -190,8 +190,9 @@ export function ReviewCreateSection({
   const consoleBuild = isConsoleBuild();
   const online = useOnlineStatus();
   // Derived from the draft here rather than passed in, the same read the Matching
-  // keys tab makes: each notice is a function of the terms this step is
-  // restating, and the two steps must not answer them differently.
+  // keys tab makes for the notice the two steps share: a notice is a function of
+  // the terms this step is restating, and two surfaces showing one must not
+  // answer it differently.
   const currentTerms = useMemo(
     () => buildAdvancedTerms(editor.draft),
     [editor.draft],

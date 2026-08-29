@@ -742,7 +742,9 @@ function inertCoalesceFieldLabels(
   const labelByDeclaredName = new Map(
     terms.linkageFields.map((field) => [
       field.name,
-      SEMANTIC_TYPE_LABELS[field.type],
+      Object.hasOwn(SEMANTIC_TYPE_LABELS, field.type)
+        ? SEMANTIC_TYPE_LABELS[field.type]
+        : undefined,
     ]),
   );
   for (const transformation of draft.standardization) {

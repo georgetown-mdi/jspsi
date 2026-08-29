@@ -433,4 +433,20 @@ describe("the inert-coalesce notice (a declared default the run will not substit
       inertCoalesceNotice(substituting, buildAdvancedTerms(substituting)),
     ).toBeUndefined();
   });
+
+  test("a field declared with an Object.prototype key resolves no label, not a stringified function", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const declared = withFirstFieldSteps(draft, [coalesce]);
+    const terms = buildAdvancedTerms(declared);
+    const fieldName = declared.standardization[0].output;
+    const hazardous = {
+      ...terms,
+      linkageFields: terms.linkageFields.map((field) =>
+        field.name === fieldName
+          ? { ...field, type: "constructor" as never }
+          : field,
+      ),
+    };
+    expect(inertCoalesceNotice(declared, hazardous)).toBeUndefined();
+  });
 });

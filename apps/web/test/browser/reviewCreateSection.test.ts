@@ -19,6 +19,11 @@ import { ReviewCreateSection } from "@bench/ReviewCreateSection";
 import { createAppMount } from "./renderApp";
 
 import type { AcquiredCsv, InviterEditor } from "@bench/inviterModel";
+import type { AdvancedInviteDraft } from "@psi/advancedInvite";
+
+const CITATION_DROP_NOTICE_NAME =
+  "The imported rule-set citation will not be carried";
+const INERT_COALESCE_NOTICE_NAME = "A default value will not be substituted";
 
 // The review step's own notice: an imported document's rule-set citation the terms
 // this step is about to seal will not carry. It is the Matching keys tab's notice
@@ -102,6 +107,27 @@ function importedWithDroppedCitation(): InviterEditor {
   return imported;
 }
 
+/** An editor whose first field's cleaning declares a coalesce with nothing ahead
+ * of it in the pipeline that can empty the value, so the run substitutes it
+ * nowhere it sits -- the same construction the unit suite drives
+ * `inertCoalesceNotice` with. */
+function withFirstPositionCoalesce(): InviterEditor {
+  const editor = editorFromCsv("Dana Okafor", csv);
+  const declared: AdvancedInviteDraft = {
+    ...editor.draft,
+    standardization: editor.draft.standardization.map(
+      (transformation, index) =>
+        index === 0
+          ? {
+              ...transformation,
+              steps: [{ function: "coalesce", params: { default: "UNKNOWN" } }],
+            }
+          : transformation,
+    ),
+  };
+  return editorWithAuthoredDraft(editor, declared);
+}
+
 afterEach(app.unmount);
 
 describe("ReviewCreateSection: the dropped-citation notice", () => {
@@ -111,11 +137,14 @@ describe("ReviewCreateSection: the dropped-citation notice", () => {
     await expect
       .element(page.getByRole("heading", { name: "Review & create" }))
       .toBeInTheDocument();
+    const citationNotice = page.getByRole("note", {
+      name: CITATION_DROP_NOTICE_NAME,
+    });
     await expect
-      .element(page.getByRole("note"))
-      .toHaveTextContent("The imported rule-set citation will not be carried");
+      .element(citationNotice)
+      .toHaveTextContent(CITATION_DROP_NOTICE_NAME);
     await expect
-      .element(page.getByRole("note"))
+      .element(citationNotice)
       .toHaveTextContent("the citation cannot be verified");
     // Told, not stopped: dropping the citation is the correct outcome, so the
     // create action stays available.
@@ -130,9 +159,27 @@ describe("ReviewCreateSection: the dropped-citation notice", () => {
     await expect
       .element(page.getByRole("heading", { name: "Review & create" }))
       .toBeInTheDocument();
-    expect(app.container.textContent).not.toContain(
-      "The imported rule-set citation will not be carried",
-    );
-    expect(page.getByRole("note").query()).toBeNull();
+    expect(app.container.textContent).not.toContain(CITATION_DROP_NOTICE_NAME);
+    expect(
+      page.getByRole("note", { name: CITATION_DROP_NOTICE_NAME }).query(),
+    ).toBeNull();
+  });
+});
+
+describe("ReviewCreateSection: the inert-coalesce notice", () => {
+  test("restates it where the terms are sealed, blocking nothing", async () => {
+    render(withFirstPositionCoalesce());
+
+    await expect
+      .element(page.getByRole("heading", { name: "Review & create" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("note", { name: INERT_COALESCE_NOTICE_NAME }))
+      .toHaveTextContent("is never substituted where it sits");
+    // Advisory, not a refusal: terms carrying this shape are valid and run, so
+    // the create action stays available.
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeEnabled();
   });
 });
