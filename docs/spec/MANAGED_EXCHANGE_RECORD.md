@@ -339,6 +339,16 @@ only the windows after it rebuild the count, wherever in the run that window
 sits -- including the window still open at the wake, whose recorded success
 resets the count the elapsed windows before it raised.
 
+One window the walk does not visit is read the same way before it starts: the
+window immediately preceding `nextWindow`, whose recorded `"succeeded"` run
+resets the count. That window is where a run the schedule advanced past as
+`"unattempted"` lands its outcome -- the advance happens while the other
+context's run is still in flight -- so without this reading a completed exchange
+inside an agreed window could fail to discharge the miss run, and the escalation
+threshold could be crossed a window early. The reach is exactly one window: a
+success further back sits behind windows the walk has already counted on their
+own evidence, and leaves them counted.
+
 The rule keeps both fields honest. `consecutiveMisses` reflects the true count
 of elapsed misses whichever side was absent, and the runner lands on a live
 window rather than replaying stale past ones. Crossing the two-miss escalation
@@ -398,21 +408,33 @@ a shortfall against the standing terms, a refused disclosure, a failed rotation
 persist, and a handshake that failed closed each reproduce identically on the
 next attempt, so each ends the window's occupancy where it happened.
 
-The window's disposition is its last attempt's verdict, written once for the
-window rather than once per attempt:
+The window's disposition folds every attempt it took, written once for the window
+rather than once per attempt:
 
-| Disposition | The last attempt | `consecutiveMisses` | Advance carries a `lastRun` |
-| ----------- | ---------------- | ------------------- | --------------------------- |
-| `"succeeded"` | completed the exchange | reset to 0 | no -- the run recorded its own |
-| `"missed"` | ended with the partner absent | incremented | no -- the run recorded its own |
-| `"failed"` | failed any other way | unchanged | no -- the run recorded its own |
-| `"unattempted"` | was refused the single-writer lock, held by another context | unchanged | no -- the window has no bookkeeping |
+| Disposition | The window | `consecutiveMisses` | Advance carries a `lastRun` |
+| ----------- | ---------- | ------------------- | --------------------------- |
+| `"succeeded"` | an attempt completed the exchange | reset to 0 | no -- the run recorded its own |
+| `"missed"` | none did, and at least one found the partner absent | incremented | no -- the run recorded its own |
+| `"failed"` | its attempts failed, none of them on an absent partner | unchanged | no -- the run recorded its own |
+| `"unattempted"` | its last attempt was refused the single-writer lock, held by another context | unchanged | no -- the window has no bookkeeping |
+
+The `"missed"` row folds rather than reading the last attempt because an attempt
+that spent its whole peer wait has already answered the question the miss count
+asks -- whether the two runners met in this window -- and pacing starts the next
+attempt at once after a wait that long. Reading the last verdict alone would
+therefore let one trailing transient failure record a window of no-show waits as
+`"failed"`, which leaves the count untouched and loses the miss entirely.
 
 `"unattempted"` is the one disposition that is not an outcome the record can
-hold: another context was running this very record, so the window records
-neither an attempt nor a miss, and the schedule advances past it. Every other
-disposition's `lastRun` is written by the run itself, so the schedule advance
-carries none and cannot contend with it.
+hold, and the one that stands whatever the attempts before it found: another
+context was running this very record, so the window is that context's to account
+for rather than this runner's, and the schedule advances past it recording
+neither an attempt nor a miss. The advance happens while that run is still in
+flight, so its bookkeeping lands in a window already advanced past; a
+`"succeeded"` one is credited at the next wake (see
+[Catch-up on wake](#catch-up-on-wake)), while any other outcome it records leaves
+the window uncounted. Every other disposition's `lastRun` is written by the run
+itself, so the schedule advance carries none and cannot contend with it.
 
 Three records are passed over rather than attempted, each leaving its window
 with no disposition at all -- the wake that finds the window elapsed counts it

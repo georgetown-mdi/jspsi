@@ -336,9 +336,8 @@ interface WindowOccupancy {
  * clamped to what is left of the window; a retryable failure starts another
  * attempt no sooner than {@link ATTEMPT_RATE_GAP_MS} after the last one began,
  * and no later than the window's close, which ends the occupancy anyway.
- * The window's disposition is the LAST attempt's verdict -- a window that ends
- * on a no-show is `"missed"` however it began, and one that ends on a failure
- * the two runners met through is not counted as a coordination miss.
+ * The window's disposition folds every attempt rather than reading the last one
+ * (see {@link foldWindowDisposition}).
  */
 async function occupyWindow(
   record: ManagedExchangeRecord,
@@ -352,6 +351,7 @@ async function occupyWindow(
     attendance: "unattended",
   };
   let attempts = 0;
+  let partnerWasAbsent = false;
   let disposition: ManagedScheduleWindowDisposition | undefined;
   for (;;) {
     // A runtime going away mid-window leaves the window UNRESOLVED, discarding
@@ -377,8 +377,15 @@ async function occupyWindow(
       return { attempts, disposition: "succeeded" };
     } catch (error) {
       const verdict = managedScheduleWindowVerdict(error, dataExchangeStarted);
+      if (verdict.disposition === "missed") partnerWasAbsent = true;
       if (!verdict.retryable)
-        return { attempts, disposition: verdict.disposition };
+        return {
+          attempts,
+          disposition: foldWindowDisposition(
+            verdict.disposition,
+            partnerWasAbsent,
+          ),
+        };
       disposition = verdict.disposition;
     }
     // Paced from the failed attempt's start, and clamped to the window's own
@@ -396,7 +403,34 @@ async function occupyWindow(
       ),
     );
   }
-  return { attempts, ...(disposition !== undefined ? { disposition } : {}) };
+  return {
+    attempts,
+    ...(disposition !== undefined
+      ? { disposition: foldWindowDisposition(disposition, partnerWasAbsent) }
+      : {}),
+  };
+}
+
+/**
+ * Fold one window's attempts into its disposition.
+ *
+ * A window whose attempts found the partner absent is `"missed"` even when a
+ * later attempt inside it failed some other way: reading the last attempt alone
+ * would let one trailing transient failure -- a dropped channel, a broker fault
+ * -- relabel a window of no-show waits `"failed"`, which leaves
+ * `consecutiveMisses` untouched and loses the miss entirely. The coordination
+ * question the count answers is whether the two runners met at all in the
+ * window, and an attempt that spent its whole peer wait already answered it.
+ *
+ * A window whose failures are all local keeps `"failed"`, and the lock refusal
+ * keeps `"unattempted"`: neither is a claim about the partner. `"succeeded"`
+ * never reaches here -- a completed exchange returns from the loop.
+ */
+function foldWindowDisposition(
+  last: ManagedScheduleWindowDisposition,
+  partnerWasAbsent: boolean,
+): ManagedScheduleWindowDisposition {
+  return last === "failed" && partnerWasAbsent ? "missed" : last;
 }
 
 /** What one failed attempt says about its window: the disposition it would leave

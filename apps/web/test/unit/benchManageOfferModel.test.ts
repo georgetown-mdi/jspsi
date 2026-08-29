@@ -339,6 +339,22 @@ describe("buildManagedDeposit (inviter)", () => {
     expect(deposit.exchangeFile).not.toHaveProperty("expectedPayloadColumns");
   });
 
+  test("carries an input handle and no schedule: the offer has no schedule to make", () => {
+    // The unattended runner fires on a record carrying BOTH a schedule and a
+    // persisted input handle. The deposit writes the handle and no schedule --
+    // the offer has none to make -- so this path cannot assemble that pair; the
+    // import path, which can carry a schedule and reconstructs no handle, is its
+    // converse (test/unit/managedExchangeImport.test.ts). Neither is a claim a
+    // comment could hold.
+    const handle = {} as FileSystemFileHandle;
+    const deposit = buildManagedDeposit(
+      depositInputs({ inputFileHandle: handle }),
+      Date.UTC(2026, 6, 15, 12, 0, 0),
+    );
+    expect(deposit.inputFileHandle).toBe(handle);
+    expect(deposit).not.toHaveProperty("schedule");
+  });
+
   test("tokenMaxAgeDays and expires are absent unless the operator opts in", () => {
     const deposit = buildManagedDeposit(
       depositInputs(),

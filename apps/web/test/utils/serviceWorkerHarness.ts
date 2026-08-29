@@ -188,6 +188,15 @@ function topLevelDeclaration(
   };
 }
 
+/** The names the worker's own global scope answers to. A capability reached
+ * through one of these is reached by the worker as surely as a bare reference
+ * is, and `self.X` is the prevailing idiom in a worker script. */
+const GLOBAL_SCOPE_ALIASES: ReadonlySet<string> = new Set([
+  "self",
+  "globalThis",
+  "window",
+]);
+
 /** Whether `node` is a `caches.open(...)` call -- the one Cache API call that
  * hands back a cache its caller can write. */
 function isCachesOpen(node: ts.Node): boolean {
@@ -213,12 +222,21 @@ function isCachesOpen(node: ts.Node): boolean {
  * A reference here is a name the worker's code resolves in scope -- a
  * declaration's own name included, a property being read off an object (the
  * `open` of `caches.open`) excluded, since that name resolves against the object
- * rather than the worker.
+ * rather than the worker. The one exception is a property read off the global
+ * scope itself ({@link GLOBAL_SCOPE_ALIASES}): `self.indexedDB` reaches the same
+ * capability a bare `indexedDB` would, and a model that saw only the `self` in it
+ * would let a guard over what the worker may touch pass the worker's own idiom.
+ *
+ * `code` defaults to the shipped worker. A caller passes a snippet instead only
+ * to drive a guard against a source that should fail it -- a guard nothing can
+ * fail asserts nothing.
  */
-export function serviceWorkerSourceModel(): ServiceWorkerSourceModel {
+export function serviceWorkerSourceModel(
+  code: string = serviceWorkerSource(),
+): ServiceWorkerSourceModel {
   const source = ts.createSourceFile(
     serviceWorkerPath,
-    serviceWorkerSource(),
+    code,
     ts.ScriptTarget.ES2022,
     true,
     ts.ScriptKind.JS,
@@ -253,6 +271,12 @@ export function serviceWorkerSourceModel(): ServiceWorkerSourceModel {
       return;
     }
     if (ts.isPropertyAccessExpression(node)) {
+      if (
+        ts.isIdentifier(node.expression) &&
+        GLOBAL_SCOPE_ALIASES.has(node.expression.text) &&
+        ts.isIdentifier(node.name)
+      )
+        record(node.name);
       descend(node.expression);
       return;
     }

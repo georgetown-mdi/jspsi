@@ -106,7 +106,8 @@ export interface ManagedScheduleRuntimeOptions {
 /**
  * Start waking the tick until `signal` aborts. The first wake is immediate --
  * the catch-up rule is what a launch owes a record whose windows elapsed while
- * this runtime was not running -- and the rest are on the interval.
+ * this runtime was not running -- and the rest are on the interval. A signal
+ * that has already aborted starts nothing at all.
  *
  * Every wake takes a fresh snapshot and runs, however long the wakes before it
  * are still taking. What is held back is per RECORD, in the one registry this
@@ -120,6 +121,10 @@ export function startManagedScheduleRuntime(
   options: ManagedScheduleRuntimeOptions,
 ): void {
   const { signal } = options;
+  // An abort listener attached to a signal that has ALREADY aborted never fires,
+  // so a runtime started on one would keep its interval for the life of the
+  // page with nothing left to clear it.
+  if (signal.aborted) return;
   const tick = options.tick ?? tickManagedSchedules;
   const seams = options.seams ?? browserScheduleTickSeams(signal);
   const inFlight = new Set<string>();

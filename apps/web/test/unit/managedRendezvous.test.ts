@@ -66,17 +66,25 @@ function fakeConn(): DataConnection {
 function recordingFlows(): {
   flows: ManagedRendezvousFlows;
   inviterCalls: Array<{ secret: string }>;
-  acceptorCalls: Array<{ secret: string; endpoint: WebRTCEndpoint }>;
+  acceptorCalls: Array<{
+    secret: string;
+    endpoint: WebRTCEndpoint;
+    options: Parameters<ManagedRendezvousFlows["dialAsAcceptor"]>[2];
+  }>;
 } {
   const inviterCalls: Array<{ secret: string }> = [];
-  const acceptorCalls: Array<{ secret: string; endpoint: WebRTCEndpoint }> = [];
+  const acceptorCalls: Array<{
+    secret: string;
+    endpoint: WebRTCEndpoint;
+    options: Parameters<ManagedRendezvousFlows["dialAsAcceptor"]>[2];
+  }> = [];
   const flows: ManagedRendezvousFlows = {
     listenAsInviter: (secret) => {
       inviterCalls.push({ secret });
       return Promise.resolve(fakePeer("inviter"));
     },
-    dialAsAcceptor: (secret, endpoint) => {
-      acceptorCalls.push({ secret, endpoint });
+    dialAsAcceptor: (secret, endpoint, options) => {
+      acceptorCalls.push({ secret, endpoint, options });
       return Promise.resolve([fakePeer("acceptor"), fakeConn()]);
     },
   };
@@ -160,6 +168,37 @@ describe("beginManagedRendezvous: side dispatch", () => {
     expect(endpoint.host).not.toBe(webrtcLocator.host);
     expect(endpoint.port).not.toBe(webrtcLocator.port);
     expect(endpoint.path).not.toBe(webrtcLocator.path);
+  });
+
+  test("carries a supplied peer-wait bound into the acceptor's dial budget", async () => {
+    stubAppLocation();
+    const { flows, acceptorCalls } = recordingFlows();
+
+    await beginManagedRendezvous(
+      "acceptor",
+      generateSharedSecret(),
+      exchangeFile(),
+      { flows, peerWaitTimeoutMs: 90_000 },
+    );
+
+    expect(acceptorCalls[0].options?.totalTimeoutMs).toBe(90_000);
+  });
+
+  test("supplies no dial budget of its own when none is given", async () => {
+    stubAppLocation();
+    const { flows, acceptorCalls } = recordingFlows();
+
+    await beginManagedRendezvous(
+      "acceptor",
+      generateSharedSecret(),
+      exchangeFile(),
+      { flows },
+    );
+
+    // Absent rather than an explicit undefined, and absent rather than a bound
+    // this module picked: the dial keeps the flows' own shared default, and the
+    // only policy that overrides it is the scheduled runner's window clamp.
+    expect(acceptorCalls[0].options).not.toHaveProperty("totalTimeoutMs");
   });
 
   test("a non-webrtc stored connection cannot re-run and fails before any flow", async () => {

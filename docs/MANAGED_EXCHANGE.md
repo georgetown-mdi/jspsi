@@ -443,11 +443,15 @@ does that the one-shot flow cannot. On the first-class path the second run is
    agreed window; a no-show partner is a recorded miss, retried next window.
 4. **Rotate-and-persist, then the data exchange** -- the durability contract
    below, unchanged by nobody watching.
-5. **The outcome lands in the run bookkeeping**, and the next visit's surfaces
-   carry it: the results, the refreshed-backup prompt, or the failure state.
+5. **The outcome lands in the run bookkeeping**, the disclosure is filed to this
+   exchange's accounting, and the next visit's surfaces carry the result of all
+   that: the refreshed-backup prompt (the secret rotated), or the failure state.
    An OS-level notification from the installed app is the "this ran / this needs
    you" surface between visits (see [The between-visit
-   notification](#the-between-visit-notification)).
+   notification](#the-between-visit-notification)). The run's own **output files
+   are not delivered**: handing an unattended run's results to the operator is
+   not built, so a run that nobody is present for discards its outputs as it
+   settles, and only the bookkeeping above survives it.
 
 The **attended re-run** -- the degradations' path, available on any platform --
 is the same run with the operator present: open the app (the exchange shows

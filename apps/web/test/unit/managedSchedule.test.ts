@@ -684,6 +684,56 @@ describe("catch-up on wake", () => {
         RangeError,
       );
   });
+
+  describe("a run recorded in the window the plan already advanced past", () => {
+    /** The plan a window ago: window 0 accounted for, window 1 planned, one miss
+     * standing. This is where the schedule sits after a window whose single-writer
+     * lock was held by another context -- advanced past it while that context's
+     * run was still in flight. */
+    const advancedPastWindowZero: ManagedExchangeSchedule = {
+      ...weekly,
+      nextWindow: "2026-01-13T14:00:00.000Z",
+      consecutiveMisses: 1,
+    };
+
+    test("ends the miss run when that run succeeded", () => {
+      const caught = catchUpManagedSchedule(
+        advancedPastWindowZero,
+        { at: "2026-01-06T14:40:00.000Z", outcome: "succeeded" },
+        at("2026-01-06T18:00:00.000Z"),
+      );
+      // The count is a run of consecutive windows the two runners did not meet
+      // in, and window 0 is one they did -- whether or not the plan had already
+      // moved on when the evidence landed.
+      expect(caught.schedule.consecutiveMisses).toBe(0);
+      expect(caught.schedule.nextWindow).toBe("2026-01-13T14:00:00.000Z");
+      expect(caught.missedWindows).toBe(0);
+    });
+
+    test("leaves the count alone when that run did not succeed", () => {
+      for (const outcome of ["missed", "failed"] as const)
+        expect(
+          catchUpManagedSchedule(
+            advancedPastWindowZero,
+            { at: "2026-01-06T14:40:00.000Z", outcome },
+            at("2026-01-06T18:00:00.000Z"),
+          ).schedule.consecutiveMisses,
+        ).toBe(1);
+    });
+
+    test("reaches back exactly one window, never over a run of counted misses", () => {
+      // A success two windows back cannot discharge the window between it and
+      // the plan: that window was walked and counted on its own evidence, and
+      // the count the walk built stands.
+      const caught = catchUpManagedSchedule(
+        { ...advancedPastWindowZero, nextWindow: "2026-01-20T14:00:00.000Z" },
+        { at: "2026-01-06T14:40:00.000Z", outcome: "succeeded" },
+        at("2026-01-20T15:00:00.000Z"),
+      );
+      expect(caught.schedule.consecutiveMisses).toBe(1);
+      expect(caught.dueWindow?.index).toBe(2);
+    });
+  });
 });
 
 describe("catch-up on the import path", () => {

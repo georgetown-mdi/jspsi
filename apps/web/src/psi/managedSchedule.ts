@@ -326,7 +326,10 @@ export function advanceManagedScheduleAfterWindow(
  * open that no success discharged is the one to attempt, leaving the rest of it
  * available. Applying the rule per window rather than to the whole span at once
  * is what keeps a success anywhere in the run resetting the count the windows
- * before it built, wherever that success sits.
+ * before it built, wherever that success sits -- including the one window the
+ * walk itself does not visit, the one immediately before `nextWindow`, whose
+ * recorded success is credited before the walk starts. That window is where a
+ * concurrent run's outcome lands after the plan has already advanced past it.
  *
  * The walk is as long as the run of windows real time crossed since the last
  * wake, one cheap iteration each; a span longer than `MAX_CATCH_UP_WINDOWS` is
@@ -384,7 +387,18 @@ export function catchUpManagedSchedule(
       ? undefined
       : windowIndexContaining(geometry, recordedMs);
 
-  let consecutiveMisses = schedule.consecutiveMisses;
+  // A completed run inside the window the plan last advanced PAST still ends the
+  // miss run. The advance can pass over a window whose run is still in flight:
+  // the single-writer lock refuses a second context while the first holds it,
+  // and that run's own bookkeeping lands after the window was accounted for, so
+  // the walk below -- which starts at `firstUnaccounted` -- would never read it.
+  // `consecutiveMisses` counts a run of consecutive windows the two runners did
+  // not meet in, and one they demonstrably did meet in ends that run wherever
+  // the bookkeeping stood when the evidence landed.
+  let consecutiveMisses =
+    recordedIndex === firstUnaccounted - 1 && lastRun?.outcome === "succeeded"
+      ? 0
+      : schedule.consecutiveMisses;
   let missedWindows = 0;
   // The close of the most recent elapsed window that passed unattempted, cleared
   // by a later elapsed window whose own recorded bookkeeping stands instead.

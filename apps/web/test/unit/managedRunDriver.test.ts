@@ -238,6 +238,7 @@ function runDriver(
   signal: AbortSignal,
   onWarning?: (message: string) => void,
   record: ManagedExchangeRecord = RECORD,
+  peerWaitTimeoutMs?: number,
 ) {
   return runManagedExchangeInBrowser({
     record,
@@ -245,6 +246,7 @@ function runDriver(
     signal,
     urls: URLS,
     ...(onWarning !== undefined ? { onWarning } : {}),
+    ...(peerWaitTimeoutMs !== undefined ? { peerWaitTimeoutMs } : {}),
   });
 }
 
@@ -543,6 +545,65 @@ describe("runManagedExchangeInBrowser", () => {
       expect(onWarning).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("the peer-wait bound", () => {
+  /** The options each half of the inviter's rendezvous was called with: the
+   * acquisition that registers the peer, and the inbound wait that follows it. */
+  function rendezvousOptions() {
+    return {
+      acquisition: mockedRendezvous.mock.calls[0][3],
+      inboundWait: mockedWaitForIncoming.mock.calls[0][1],
+    };
+  }
+
+  test("is left to the flows' own default when the caller supplies none", async () => {
+    // The confinement this pins: the ONE producer of a bound is the scheduled
+    // runner's window policy, and every other caller -- the attended surface
+    // included -- leaves both waits on the shared human-timescale budget. The
+    // options are matched exactly rather than by value, because a driver that
+    // filled the bound in from a default of its own would carry the same
+    // numbers here while taking the choice away from the policy that owns it.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources("inviter");
+    const controller = new AbortController();
+
+    await runDriver(controller.signal, undefined, recordForSide("inviter"));
+
+    expect(rendezvousOptions().acquisition).toEqual({
+      signal: controller.signal,
+    });
+    expect(rendezvousOptions().inboundWait).toEqual({
+      signal: controller.signal,
+    });
+  });
+
+  test("reaches both halves of the rendezvous when the caller supplies one", async () => {
+    // A run that bounded only one half would keep waiting past the window's
+    // close on the other, which is the wait a scheduled run's whole no-show
+    // bookkeeping is read off.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources("inviter");
+    const controller = new AbortController();
+
+    await runDriver(
+      controller.signal,
+      undefined,
+      recordForSide("inviter"),
+      90_000,
+    );
+
+    expect(rendezvousOptions().acquisition).toEqual({
+      signal: controller.signal,
+      peerWaitTimeoutMs: 90_000,
+    });
+    expect(rendezvousOptions().inboundWait).toEqual({
+      signal: controller.signal,
+      timeoutMs: 90_000,
+    });
+  });
 });
 
 describe("filing the run's disclosure", () => {

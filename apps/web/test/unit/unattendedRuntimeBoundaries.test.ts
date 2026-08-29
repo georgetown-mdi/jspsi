@@ -56,6 +56,20 @@ const EXCHANGE_CAPABILITIES = [
   "importScripts",
 ];
 
+/** Which of {@link EXCHANGE_CAPABILITIES} a worker source reaches, from anywhere
+ * in it. The guard, extracted so it can be run against a source that must fail
+ * it as well as against the shipped one. */
+function exchangeCapabilitiesReached(source?: string): Array<string> {
+  const model = serviceWorkerSourceModel(source);
+  const referenced = new Set<string>([
+    ...[...model.functions.values()].flatMap((names) => [...names]),
+    ...model.outsideFunctions.map((reference) => reference.name),
+  ]);
+  return EXCHANGE_CAPABILITIES.filter((capability) =>
+    referenced.has(capability),
+  );
+}
+
 describe("the app-shell service worker", () => {
   test("registers no background wakeup, so nothing can be scheduled into it", () => {
     const harness = createServiceWorkerHarness();
@@ -72,14 +86,30 @@ describe("the app-shell service worker", () => {
   });
 
   test("reaches nothing an exchange would need, from any of its code", () => {
-    const model = serviceWorkerSourceModel();
-    const referenced = new Set<string>([
-      ...[...model.functions.values()].flatMap((names) => [...names]),
-      ...model.outsideFunctions.map((reference) => reference.name),
-    ]);
+    expect(exchangeCapabilitiesReached()).toEqual([]);
+  });
 
-    for (const capability of EXCHANGE_CAPABILITIES)
-      expect([...referenced]).not.toContain(capability);
+  test("would be caught reaching one through the global scope it runs in", () => {
+    // A guard nothing can fail asserts nothing, and this one nearly was: a
+    // capability captured as `self.indexedDB` -- a worker script's prevailing
+    // idiom -- names the global object in scope and the capability as a
+    // property off it, so a model reading only the scope half saw `self` and
+    // passed.
+    expect(
+      exchangeCapabilitiesReached(
+        'self.addEventListener("message", () => {\n' +
+          '  const db = self.indexedDB.open("records");\n' +
+          "  void db;\n" +
+          "});\n",
+      ),
+    ).toEqual(["indexedDB"]);
+    expect(
+      exchangeCapabilitiesReached(
+        "function compile(bytes) {\n" +
+          "  return globalThis.WebAssembly.compile(bytes);\n" +
+          "}\n",
+      ),
+    ).toEqual(["WebAssembly"]);
   });
 });
 

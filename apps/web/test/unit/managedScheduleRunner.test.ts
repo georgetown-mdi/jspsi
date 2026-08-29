@@ -8,6 +8,7 @@ import {
   tickManagedSchedules,
 } from "@psi/managedScheduleRunner";
 import {
+  applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
   applyManagedExchangeScheduleAdvance,
   buildManagedExchangeRecord,
@@ -387,6 +388,75 @@ describe("a due window in the open runtime", () => {
   });
 });
 
+describe("a window whose attempts do not agree", () => {
+  /** A transient failure that runs the rest of the window out, so the occupancy
+   * ends on THIS attempt and the window's disposition is decided with it as the
+   * last verdict. */
+  function transientThroughTheClose(afterMs: number): AttemptScript[number] {
+    return {
+      kind: "fail",
+      error: new Error("the channel dropped"),
+      spendsMs: 3 * 60 * 60 * 1000 - afterMs,
+    };
+  }
+
+  test("counts the miss when a transient failure trails the no-show waits", async () => {
+    // The defect this pins: taking the LAST attempt's verdict alone let one
+    // dropped channel at the end of a window of no-show waits record "failed",
+    // which leaves consecutiveMisses untouched -- so the window nobody arrived
+    // in was never counted as a miss at all. Zero pacing after an attempt that
+    // spent its whole peer wait is what makes that trailing attempt cheap to
+    // reach.
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [
+        ...noShowScript(),
+        ...noShowScript(),
+        transientThroughTheClose(2 * ATTEMPT_PEER_WAIT_MS),
+      ],
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry.attempts).toBe(3);
+    expect(entry.disposition).toBe("missed");
+    expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(1);
+  });
+
+  test("leaves a window whose failures are all local uncounted", async () => {
+    // The same window minus the no-show waits, which is what keeps the fold
+    // from becoming a blanket "any failure is a miss": nothing here waited on
+    // an absent partner, so the window says nothing about whether the two
+    // runners are still meeting.
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [transientThroughTheClose(0)],
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry.attempts).toBe(1);
+    expect(entry.disposition).toBe("failed");
+    expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
+  });
+
+  test("takes the success when any attempt completed the exchange", async () => {
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [...noShowScript(), { kind: "succeed" }],
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry.attempts).toBe(2);
+    expect(entry.disposition).toBe("succeeded");
+    expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
+  });
+});
+
 describe("a window nobody arrived in", () => {
   test("records one miss for the window and plans the next one, nothing sooner", async () => {
     const record = recordWith();
@@ -452,6 +522,80 @@ describe("a window the single-writer lock was held through", () => {
       },
     });
     expect(runner.advances[0].advance.lastRun).toBeUndefined();
+  });
+
+  /** A record already one miss into the count, refused the lock at its window,
+   * driven to the wake after the refusal advanced past that window. */
+  async function refusedThenWokenAgain(): Promise<{
+    record: ManagedExchangeRecord;
+    runner: Harness;
+    wake: (concurrent?: ManagedExchangeRecord["lastRun"]) => Promise<void>;
+  }> {
+    const record = recordWith({
+      schedule: { ...weekly, consecutiveMisses: 1 },
+    });
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [
+        {
+          kind: "fail",
+          error: new ManagedExchangeLockUnavailableError(record.id),
+        },
+      ],
+    });
+    await tickManagedSchedules(runner.seams);
+    return {
+      record,
+      runner,
+      wake: async (concurrent) => {
+        const held = runner.stored.get(record.id);
+        if (held === undefined) throw new Error("the record went missing");
+        // The other context's run settles inside the window, AFTER the refusal
+        // advanced past it -- the ordering the defect lives in.
+        if (concurrent !== undefined)
+          runner.stored.set(
+            record.id,
+            applyManagedExchangeLastRun(held, concurrent),
+          );
+        runner.advanceClock(60 * 60 * 1000);
+        await tickManagedSchedules(runner.seams);
+      },
+    };
+  }
+
+  test("credits the concurrent run that succeeded inside it", async () => {
+    // The refusal advances the plan past a window whose run is still in flight,
+    // so that run's bookkeeping lands in a window the walk no longer visits.
+    // Uncredited, a success could not reset the count, and the two-miss
+    // escalation would fire a window early.
+    const { record, runner, wake } = await refusedThenWokenAgain();
+
+    await wake({ at: "2026-01-06T14:40:00.000Z", outcome: "succeeded" });
+
+    expect(runner.advances[1].advance).toMatchObject({
+      fromNextWindow: "2026-01-13T14:00:00.000Z",
+      fromConsecutiveMisses: 1,
+      schedule: {
+        nextWindow: "2026-01-13T14:00:00.000Z",
+        consecutiveMisses: 0,
+      },
+    });
+    expect(runner.stored.get(record.id)?.schedule?.consecutiveMisses).toBe(0);
+  });
+
+  test("stays exactly unattempted when no concurrent run recorded anything", async () => {
+    const { record, runner, wake } = await refusedThenWokenAgain();
+
+    await wake();
+
+    // Neither an attempt nor a miss: the window is the other context's to
+    // account for, and it accounted for nothing.
+    expect(runner.advances).toHaveLength(1);
+    expect(runner.stored.get(record.id)?.schedule).toMatchObject({
+      nextWindow: "2026-01-13T14:00:00.000Z",
+      consecutiveMisses: 1,
+    });
   });
 });
 

@@ -280,6 +280,27 @@ describe("the host that wakes the tick", () => {
     expect(tick).toHaveBeenCalledTimes(2);
   });
 
+  test("starts nothing at all on a signal that has already aborted", async () => {
+    vi.useFakeTimers();
+    const tick = vi.fn(() => Promise.resolve([]));
+    const controller = new AbortController();
+    controller.abort();
+
+    startManagedScheduleRuntime({
+      signal: controller.signal,
+      intervalMs: 1000,
+      tick,
+      seams,
+    });
+
+    // An abort listener attached to an already-aborted signal never fires, so
+    // an interval created ahead of it would survive with nothing left to clear
+    // it -- for the life of the page, in a runtime that was told to stop.
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(tick).not.toHaveBeenCalled();
+  });
+
   test("reports a tick that threw rather than leaving it unhandled", async () => {
     vi.useFakeTimers();
     const error = vi.spyOn(log, "error").mockImplementation(() => undefined);
