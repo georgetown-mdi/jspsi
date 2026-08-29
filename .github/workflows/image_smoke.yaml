@@ -827,11 +827,14 @@ jobs:
   # the smoke job's containers. Within the job every rule is scoped to the
   # subnet created here, and the teardown deletes them whatever the probes did.
   #
-  # One difference from what an operator applies: the endpoints are containers
-  # on the restricted network rather than servers elsewhere, so no packet leaves
-  # the runner. The rules match on the source subnet and govern this traffic on
-  # the same terms; what goes undriven is the route past the host's own external
-  # interface, not the rules themselves.
+  # The endpoints sit off every Docker network, on a subnet reached through the
+  # host, because that is where an operator's SFTP server and resolver sit: the
+  # traffic is routed, which is the path the DOCKER-USER chain is consulted on.
+  # Endpoints on a Docker network of their own would answer a different question
+  # -- one about Docker's inter-network isolation -- and endpoints on the
+  # restricted network itself a third, since traffic switched within one bridge
+  # reaches the filter table only where br_netfilter is loaded, which a Docker
+  # host does not require and the GitHub runner does not have.
   restricted_egress:
     name: Drive the documented restricted-egress recipe
     runs-on: ubuntu-latest
@@ -844,18 +847,17 @@ jobs:
       # The network name and subnet docs/DEPLOYMENT.md names, used literally.
       EGRESS_NET: psilink-egress
       EGRESS_SUBNET: 172.31.240.0/29
-      EGRESS_RESOLVER: 172.31.240.2
-      EGRESS_ALLOWED: 172.31.240.3
-      EGRESS_DENIED: 172.31.240.4
-      # A second network carrying the same two endpoints, from a subnet no rule
-      # below names. This is the doc's "run it a second time without --network
-      # psilink-egress": a probe that fails for its own reasons proves nothing,
-      # so every refusal here is required to succeed from off the restriction.
-      CONTROL_NET: psilink-egress-control
-      CONTROL_SUBNET: 172.31.241.0/29
-      CONTROL_RESOLVER: 172.31.241.2
-      CONTROL_ALLOWED: 172.31.241.3
-      CONTROL_DENIED: 172.31.241.4
+      # The endpoints' own addresses, from RFC 5737's documentation range so
+      # nothing here can collide with a route the runner really has. One
+      # network namespace carries all three: what the allowlist matches on is
+      # the destination address, and the control run reaches every one of them,
+      # so a refusal below is the rule rather than a dead endpoint.
+      ENDPOINT_NETNS: psilink-endpoints
+      ENDPOINT_PREFIX: "24"
+      ENDPOINT_GATEWAY: 203.0.113.1
+      ALLOWED_ADDR: 203.0.113.24
+      DENIED_ADDR: 203.0.113.99
+      RESOLVER_ADDR: 203.0.113.53
       # The doc's own example names, resolved by the permitted resolver rather
       # than by Docker's embedded container-name DNS: a name the allowlist can
       # actually drop is what makes probing by name a check of the resolver
@@ -912,50 +914,64 @@ jobs:
 
       # Step 1 of the recipe, performed literally: a network of this deployment's
       # own with a subnet chosen rather than drawn from Docker's pool, since the
-      # rules name it. The endpoints take fixed addresses inside it for the same
-      # reason. Each is attached to the control network as well, so the control
-      # run reaches the same two processes over a path no rule governs.
-      - name: Create the networks and start the endpoints
+      # rules name it.
+      #
+      # The endpoints go in a namespace of their own with no Docker network at
+      # all, joined to the host by one veth pair and routed through it. The
+      # resolver shares that namespace, so the whole fixture is one link, one
+      # route, and the three addresses the rules name.
+      #
+      # --filter-AAAA is load-bearing rather than tidiness. Configured with A
+      # records and no upstream, dnsmasq answers an AAAA query REFUSED, and musl
+      # -- which is the resolver in every container here -- reads a refusal on
+      # either half of a lookup as a failure of the whole thing, so the A record
+      # it did answer never gets used. The option answers AAAA locally instead.
+      - name: Start the endpoints and the restricted network
         run: |
           set -euo pipefail
           docker network create --subnet "$EGRESS_SUBNET" "$EGRESS_NET"
-          docker network create --subnet "$CONTROL_SUBNET" "$CONTROL_NET"
 
-          resolver() {
-            docker run -d --name "$1" --network "$2" --ip "$3" \
-              "$ENDPOINT_IMAGE" dnsmasq -k --conf-file=/dev/null --no-resolv \
-              --user=root --group=root --log-queries --log-facility=- \
-              "--address=/$ALLOWED_HOST/$4" "--address=/$DENIED_HOST/$5"
-          }
-          resolver psilink-resolver "$EGRESS_NET" "$EGRESS_RESOLVER" \
-            "$EGRESS_ALLOWED" "$EGRESS_DENIED"
-          resolver psilink-resolver-control "$CONTROL_NET" "$CONTROL_RESOLVER" \
-            "$CONTROL_ALLOWED" "$CONTROL_DENIED"
+          docker run -d --name psilink-endpoints --network none \
+            "$ENDPOINT_IMAGE" /usr/sbin/sshd -D -e
+          docker run -d --name psilink-resolver \
+            --network "container:psilink-endpoints" \
+            "$ENDPOINT_IMAGE" dnsmasq -k --conf-file=/dev/null --no-resolv \
+            --user=root --group=root --filter-AAAA \
+            --log-queries --log-facility=- \
+            "--address=/$ALLOWED_HOST/$ALLOWED_ADDR" \
+            "--address=/$DENIED_HOST/$DENIED_ADDR"
 
-          docker run -d --name psilink-sftp-allowed \
-            --network "$EGRESS_NET" --ip "$EGRESS_ALLOWED" \
-            "$ENDPOINT_IMAGE" /usr/sbin/sshd -D -e
-          docker run -d --name psilink-sftp-denied \
-            --network "$EGRESS_NET" --ip "$EGRESS_DENIED" \
-            "$ENDPOINT_IMAGE" /usr/sbin/sshd -D -e
-          docker network connect --ip "$CONTROL_ALLOWED" \
-            "$CONTROL_NET" psilink-sftp-allowed
-          docker network connect --ip "$CONTROL_DENIED" \
-            "$CONTROL_NET" psilink-sftp-denied
+          pid=$(docker inspect -f '{{.State.Pid}}' psilink-endpoints)
+          sudo mkdir -p /var/run/netns
+          sudo ln -sf "/proc/$pid/ns/net" "/var/run/netns/$ENDPOINT_NETNS"
+          sudo ip link add psi-egress-h type veth peer name psi-egress-p
+          sudo ip link set psi-egress-p netns "$ENDPOINT_NETNS"
+          sudo ip addr add "$ENDPOINT_GATEWAY/$ENDPOINT_PREFIX" dev psi-egress-h
+          sudo ip link set psi-egress-h up
+          for address in "$ALLOWED_ADDR" "$DENIED_ADDR" "$RESOLVER_ADDR"
+          do
+            sudo ip -n "$ENDPOINT_NETNS" addr add \
+              "$address/$ENDPOINT_PREFIX" dev psi-egress-p
+          done
+          sudo ip -n "$ENDPOINT_NETNS" link set lo up
+          sudo ip -n "$ENDPOINT_NETNS" link set psi-egress-p up
+          sudo ip -n "$ENDPOINT_NETNS" route add default via "$ENDPOINT_GATEWAY"
+          sudo ip -n "$ENDPOINT_NETNS" addr show psi-egress-p
 
       # Before any rule exists, so a fixture that never came up is diagnosed as
-      # that rather than read as a refusal. By address, on the control network:
-      # what is being waited for is sshd accepting connections.
+      # that rather than read later as a refusal. Off the restricted network,
+      # and every row the probes below use: the three addresses answering, and
+      # the two names resolving through the resolver.
       - name: Wait for the endpoints to answer
         run: |
           set -uo pipefail
-          for target in "sftp://$CONTROL_ALLOWED" \
-            "sftp://$CONTROL_ALLOWED:$DENIED_PORT" "sftp://$CONTROL_DENIED"
+          for target in "sftp://$ALLOWED_ADDR" "sftp://$ALLOWED_ADDR:$DENIED_PORT" \
+            "sftp://$DENIED_ADDR" "sftp://$ALLOWED_HOST" "sftp://$DENIED_HOST"
           do
             ready=false
             for attempt in $(seq 1 20)
             do
-              if timeout 60 docker run --rm --network "$CONTROL_NET" \
+              if timeout 60 docker run --rm --dns "$RESOLVER_ADDR" \
                 "$PSILINK_IMAGE" probe-host-key "$target" \
                 --connect-timeout 5s >/dev/null 2>&1
               then
@@ -967,8 +983,8 @@ jobs:
             done
             if [ "$ready" != true ]; then
               echo "$target never answered; the endpoint fixture did not start" >&2
-              docker logs psilink-sftp-allowed || true
-              docker logs psilink-sftp-denied || true
+              docker logs psilink-endpoints || true
+              docker logs psilink-resolver || true
               exit 1
             fi
           done
@@ -983,16 +999,11 @@ jobs:
           # What Docker itself left in the chain, read back before anything is
           # inserted so an odd run can be read against the chain it started from.
           sudo iptables -L DOCKER-USER -n --line-numbers
-          # Whether a bridge's own traffic reaches the filter table at all. The
-          # refusal rows below are the load-bearing evidence -- a run with this
-          # off fails them rather than passing them -- but the value is worth
-          # having in the log beside a failure.
-          cat /proc/sys/net/bridge/bridge-nf-call-iptables || true
 
           SUBNET="$EGRESS_SUBNET"
-          SFTP_ADDR="$EGRESS_ALLOWED"
+          SFTP_ADDR="$ALLOWED_ADDR"
           SFTP_PORT="$ALLOWED_PORT"
-          RESOLVER="$EGRESS_RESOLVER"
+          RESOLVER="$RESOLVER_ADDR"
 
           sudo iptables -I DOCKER-USER 1 -s "$SUBNET" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
           sudo iptables -I DOCKER-USER 2 -s "$SUBNET" -p tcp -d "$SFTP_ADDR" --dport "$SFTP_PORT" -j ACCEPT
@@ -1016,44 +1027,44 @@ jobs:
           set -uo pipefail
           failures=0
           probe() {
-            local label="$1" network="$2" resolver="$3" target="$4" expected="$5"
+            local label="$1" network="$2" target="$3" expected="$4"
             local status=0
-            echo "--- $label: $target on $network"
-            timeout 120 docker run --rm --network "$network" --dns "$resolver" \
+            local -a attach=()
+            # The control rows pass no --network at all, which is the doc's own
+            # "run it a second time without --network psilink-egress".
+            if [ -n "$network" ]; then attach=(--network "$network"); fi
+            echo "--- $label: $target"
+            timeout 120 docker run --rm "${attach[@]}" --dns "$RESOLVER_ADDR" \
               "$PSILINK_IMAGE" probe-host-key "$target" --connect-timeout 10s \
               || status=$?
             if [ "$status" = "$expected" ]; then
               echo "$label: exited $status, as the recipe says it must"
             else
-              echo "::error::$label: $target on $network exited $status, expected $expected"
+              echo "::error::$label: $target exited $status, expected $expected"
               failures=$((failures + 1))
             fi
           }
 
           echo "== on the restricted network"
-          probe "permitted endpoint" "$EGRESS_NET" "$EGRESS_RESOLVER" \
-            "sftp://$ALLOWED_HOST" 0
-          probe "denied port" "$EGRESS_NET" "$EGRESS_RESOLVER" \
+          probe "permitted endpoint" "$EGRESS_NET" "sftp://$ALLOWED_HOST" 0
+          probe "denied port" "$EGRESS_NET" \
             "sftp://$ALLOWED_HOST:$DENIED_PORT" 69
-          probe "denied host" "$EGRESS_NET" "$EGRESS_RESOLVER" \
-            "sftp://$DENIED_HOST" 69
+          probe "denied host" "$EGRESS_NET" "sftp://$DENIED_HOST" 69
 
           echo "== off the restricted network"
-          probe "control, permitted endpoint" "$CONTROL_NET" "$CONTROL_RESOLVER" \
-            "sftp://$ALLOWED_HOST" 0
-          probe "control, denied port" "$CONTROL_NET" "$CONTROL_RESOLVER" \
+          probe "control, permitted endpoint" "" "sftp://$ALLOWED_HOST" 0
+          probe "control, denied port" "" \
             "sftp://$ALLOWED_HOST:$DENIED_PORT" 0
-          probe "control, denied host" "$CONTROL_NET" "$CONTROL_RESOLVER" \
-            "sftp://$DENIED_HOST" 0
+          probe "control, denied host" "" "sftp://$DENIED_HOST" 0
 
           echo "== with the two resolver rules deleted"
-          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p udp -d "$EGRESS_RESOLVER" --dport 53 -j ACCEPT
-          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p tcp -d "$EGRESS_RESOLVER" --dport 53 -j ACCEPT
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p udp -d "$RESOLVER_ADDR" --dport 53 -j ACCEPT
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p tcp -d "$RESOLVER_ADDR" --dport 53 -j ACCEPT
           sudo iptables -L DOCKER-USER -n --line-numbers
-          probe "resolver dropped, by name" "$EGRESS_NET" "$EGRESS_RESOLVER" \
+          probe "resolver dropped, by name" "$EGRESS_NET" \
             "sftp://$ALLOWED_HOST" 69
-          probe "resolver dropped, by address" "$EGRESS_NET" "$EGRESS_RESOLVER" \
-            "sftp://$EGRESS_ALLOWED" 0
+          probe "resolver dropped, by address" "$EGRESS_NET" \
+            "sftp://$ALLOWED_ADDR" 0
 
           if [ "$failures" != 0 ]; then
             echo "$failures probe(s) did not answer as the documented recipe says they must" >&2
@@ -1066,27 +1077,27 @@ jobs:
       # would silently govern anything else scheduled onto this machine, and
       # the resolver's query log is the record of which names were resolved
       # through the permitted resolver rather than some other way.
-      - name: Tear the rules and the networks down
+      - name: Tear the rules and the endpoints down
         if: always()
         run: |
           set +e
-          for container in psilink-resolver psilink-resolver-control \
-            psilink-sftp-allowed psilink-sftp-denied
+          for container in psilink-endpoints psilink-resolver
           do
             echo "--- $container"
             docker logs "$container" 2>&1 | tail -n 40
           done
 
           sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -j DROP
-          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p tcp -d "$EGRESS_RESOLVER" --dport 53 -j ACCEPT
-          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p udp -d "$EGRESS_RESOLVER" --dport 53 -j ACCEPT
-          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p tcp -d "$EGRESS_ALLOWED" --dport "$ALLOWED_PORT" -j ACCEPT
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p tcp -d "$RESOLVER_ADDR" --dport 53 -j ACCEPT
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p udp -d "$RESOLVER_ADDR" --dport 53 -j ACCEPT
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p tcp -d "$ALLOWED_ADDR" --dport "$ALLOWED_PORT" -j ACCEPT
           sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
           sudo iptables -L DOCKER-USER -n --line-numbers
 
-          docker rm -f psilink-resolver psilink-resolver-control \
-            psilink-sftp-allowed psilink-sftp-denied
-          docker network rm "$EGRESS_NET" "$CONTROL_NET"
+          docker rm -f psilink-resolver psilink-endpoints
+          docker network rm "$EGRESS_NET"
+          sudo ip link del psi-egress-h
+          sudo rm -f "/var/run/netns/$ENDPOINT_NETNS"
           exit 0
 
   # The other half of the capability gate, and the only one that observes what an
