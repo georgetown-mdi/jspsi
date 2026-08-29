@@ -3,7 +3,10 @@ import { describe, expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import { prepareForExchange, runExchange } from "../src/exchange";
-import { createMessagePipe } from "../src/connection/messageConnection";
+import {
+  ConnectionError,
+  createMessagePipe,
+} from "../src/connection/messageConnection";
 import {
   ReceiptVerificationError,
   SIGNED_RECEIPT_VERSION,
@@ -474,7 +477,12 @@ describe("a party whose certificate is bound away from its agreed terms", () => 
         partnerFingerprint: fingerprintB,
         sessionKey,
       },
-    ).catch((reason: unknown) => reason);
+    ).then(
+      () => {
+        throw new Error("expected the initiator's leg to reject, not return");
+      },
+      (reason: unknown) => reason,
+    );
     const responderOutcome = await runExchange(
       connResponder,
       "responder",
@@ -496,13 +504,20 @@ describe("a party whose certificate is bound away from its agreed terms", () => 
     expect(responderOutcome).toBeInstanceOf(ReceiptVerificationError);
     expect((responderOutcome as Error).message).toMatch(/not trusted/);
     // The diverging initiator sent its frame first and then parks on a terminal
-    // frame that never comes; a real transport releases it with the partner's
-    // abort marker, this pipe with the close. Either way it holds no receipt.
+    // frame that never comes; the swap sends no abort of its own, so what
+    // releases the park is the transport. This pipe's release is the local close
+    // below, which is why the class asserted is the one a deliberate close
+    // raises rather than the peer-close or file-sync abort-marker diagnostic a
+    // production transport would deliver -- the load-bearing half is that the
+    // leg REJECTS, on a released park, having returned nothing.
     await connInitiator.close();
     await connResponder.close();
-    // It raises rather than returning, so it writes no result, no record, and no
-    // receipt -- every local artifact is written after runExchange returns.
-    expect(await initiator).toBeInstanceOf(Error);
+    // Rejecting is what leaves this side with nothing: an ExchangeResult is the
+    // only carrier of the association table, the audit record, and the receipt,
+    // and every local artifact is written after runExchange returns.
+    const initiatorOutcome = await initiator;
+    expect(initiatorOutcome).toBeInstanceOf(ConnectionError);
+    expect((initiatorOutcome as ConnectionError).kind).toBe("closed");
   });
 
   test("as the responder, it exits over a receipt no verifier accepts", async () => {

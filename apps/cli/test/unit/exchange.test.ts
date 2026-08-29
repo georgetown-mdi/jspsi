@@ -371,15 +371,16 @@ test.each([
   },
 );
 
-// warnOnIdentityDivergence (signingIdentityDivergence.ts) returns silently when
-// termsIdentity is absent or empty. Absent is a shape this path reaches: terms
-// may omit the identity, and the silence is right there -- no configured name
-// exists for a certificate to diverge from, and a run that would sign under one
-// is refused outright before it starts (see the certificate-mode gate below).
-// Empty is not, and neither is terms missing altogether: the schema refuses both.
-// Pin all three directly, so a schema change admitting a blank label -- which
-// warnOnIdentityDivergence reads as absence and passes over in silence -- fails
-// here.
+// divergesFromAgreedTerms (signingIdentityDivergence.ts) reports no divergence
+// when termsIdentity is absent or empty, so assertIdentityMatchesAgreedTerms --
+// the exchange path's disposition of it -- lets such a run through. Absent is a
+// shape this path reaches: terms may omit the identity, and the silence is right
+// there -- no configured name exists for a certificate to diverge from, and a
+// run that would sign under one is refused outright before it starts (see the
+// certificate-mode gate below). Empty is not, and neither is terms missing
+// altogether: the schema refuses both. Pin all three directly, so a schema
+// change admitting a blank label -- which divergesFromAgreedTerms reads as
+// absence and passes over -- fails here.
 
 test("a config with no linkage_terms is refused, not silently accepted", () => {
   fs.writeFileSync(
@@ -411,7 +412,7 @@ test("a config with an empty linkage_terms.identity is refused, not silently acc
 test("a config whose linkage_terms omit the identity loads, carrying none", () => {
   // The third shape, and the admissible one: the field is optional, so this
   // config is accepted and its terms carry no identity at all -- which is what
-  // makes warnOnIdentityDivergence's absent branch reachable rather than dead.
+  // makes divergesFromAgreedTerms's absent branch reachable rather than dead.
   // Nothing stands a label in it.
   const { identity: _named, ...unnamedTerms } = minimalLinkageTerms;
   fs.writeFileSync(

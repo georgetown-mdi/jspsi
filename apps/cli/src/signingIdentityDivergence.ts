@@ -124,8 +124,14 @@ export function warnOnIdentityDivergence(
  * (CONTRIBUTING.md, Operator-facing escaping), and escaping here as well would
  * double every backslash the operator sees. Last because the renderer caps a
  * composed link, and `linkage_terms.identity` is bounded only by the terms
- * schema's text cap -- so a long name truncates the values it names rather than
- * the remedy the operator has to act on.
+ * schema's much larger text cap -- so an over-long name spends the truncation on
+ * itself rather than on the remedy the operator has to act on.
+ *
+ * Ordering alone would still leave the values with whatever the fixed prose did
+ * not spend, so the prose is kept short enough that a realistic pair renders
+ * whole inside that cap. Copy is what erodes that, not code, so the budget is
+ * pinned by a check on this message's length rather than by this paragraph
+ * (`exchangeSigning.test.ts`).
  *
  * @throws {OperatorConfigError} when the certificate is bound to a different
  *   identity than the run's agreed terms carry.
@@ -136,16 +142,12 @@ export function assertIdentityMatchesAgreedTerms(
 ): void {
   if (!divergesFromAgreedTerms(certificate, termsIdentity)) return;
   throw new OperatorConfigError(
-    "this exchange signs receipts (signing.mode: certificate) but the signing " +
-      "identity is bound to a party name other than the one the agreed terms " +
-      "carry, so it cannot finish: your partner verifies a receipt against " +
-      "the identity in the agreed terms, and rejects the certificate this " +
-      "party presents at the signature swap -- which runs only after the " +
-      "payloads have crossed. The run would stop there with no result, no " +
-      "exchange record, and no receipt, or, on the leg that signs last, write " +
-      "a receipt no verifier accepts; either way your partner's run fails and " +
-      `your data has already reached them. ${RECONCILE_GUIDANCE} The signing ` +
-      `identity is bound to "${certificate.identity}"; linkage_terms.identity ` +
-      `for this run is "${termsIdentity}".`,
+    "this exchange signs receipts (signing.mode: certificate), but the " +
+      "signing identity is bound to a party name the agreed terms do not " +
+      "carry, so it cannot finish: your partner authorizes the certificate " +
+      "against the agreed terms and rejects it at the signature swap, which " +
+      `runs only after your data has crossed. ${RECONCILE_GUIDANCE} The ` +
+      `certificate is bound to "${certificate.identity}"; ` +
+      `linkage_terms.identity is "${termsIdentity}".`,
   );
 }

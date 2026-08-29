@@ -5,13 +5,15 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import {
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
   OperatorConfigError,
   UsageError,
   generateSigningIdentity,
   computeCertificateFingerprint,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
-import type { SigningConfig } from "@psilink/core";
+import type { SigningConfig, SigningIdentity } from "@psilink/core";
 
 import { resolveSigningPersist } from "../../src/commands/exchange";
 import { saveSigningIdentity } from "../../src/signingIdentityFile";
@@ -26,14 +28,16 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+const fixedPrivateKey = {
+  kty: "EC",
+  crv: "P-256",
+  x: "JHWxrL6MWMbpKlF5G-EULYpHJ5M6PnEdleg66V0RCvo",
+  y: "ZQuEikGWXN5_AKJYN-xh_HjLnqrQG4QpVkzPocFYbJg",
+  d: "AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dw",
+} as const;
+
 const identity = await generateSigningIdentity("Party A", {
-  privateKey: {
-    kty: "EC",
-    crv: "P-256",
-    x: "JHWxrL6MWMbpKlF5G-EULYpHJ5M6PnEdleg66V0RCvo",
-    y: "ZQuEikGWXN5_AKJYN-xh_HjLnqrQG4QpVkzPocFYbJg",
-    d: "AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dw",
-  },
+  privateKey: fixedPrivateKey,
 });
 
 test("returns null when signing is absent (the unsigned path)", async () => {
@@ -104,8 +108,11 @@ test("certificate mode with no pin resolves (the run is refused before this seam
 // it before any credential, terms, or data are sent.
 
 /** A certificate-mode block over the identity saved for this test. */
-function certificateModeOver(identityPath: string): SigningConfig {
-  saveSigningIdentity(identityPath, identity, { exclusive: true });
+function certificateModeOver(
+  identityPath: string,
+  bound: SigningIdentity = identity,
+): SigningConfig {
+  saveSigningIdentity(identityPath, bound, { exclusive: true });
   return { mode: "certificate", identityFile: identityPath };
 }
 
@@ -153,6 +160,69 @@ test("the refusal offers the local config edit before the regeneration remedy, w
   expect(message.indexOf('is bound to "Party A"')).toBeGreaterThan(
     regenerateIndex,
   );
+});
+
+// The two identities land LAST in the refusal, so whatever the fixed prose
+// spends of the renderer's per-link budget comes out of them -- and they are the
+// values an operator has to compare to act on it. What erodes that room is copy
+// rather than code, so both halves are checks: the fixed prose is held to a
+// budget, and a realistic pair is driven through the display boundary whole.
+
+/** Room the refusal must leave for the two identities together, in characters. */
+const IDENTITY_PAIR_DISPLAY_BUDGET = 350;
+
+// One realistic pair: the same person and agency written two ways, which is how
+// the divergence arises -- an operator rewords `linkage_terms.identity` after
+// the certificate was bound. At or past the longest shapes measured against this
+// refusal (100 characters bound, 113 in the terms).
+const REWORDED_BOUND_IDENTITY =
+  "Dana Whitfield, Program Integrity Office, Kentucky State Health Agency, " +
+  "dana.whitfield@health.example.gov";
+const REWORDED_TERMS_IDENTITY =
+  "Dana Whitfield, Office of Program Integrity, Records Unit, State Health " +
+  "Agency, dana.whitfield@health.example.gov";
+
+const rewordedIdentity = await generateSigningIdentity(
+  REWORDED_BOUND_IDENTITY,
+  {
+    privateKey: fixedPrivateKey,
+  },
+);
+
+test("the refusal's fixed prose leaves the identity pair room inside the display cap", async () => {
+  const config = certificateModeOver(path.join(dir, "signing-identity.json"));
+  const terms = "Party A, Agency A, a@agency-a.gov";
+  const message = await resolveSigningPersist(config, terms).then(
+    () => "",
+    (err: unknown) => (err as Error).message,
+  );
+  // The composed message less the two values it names; the certificate this
+  // helper saves is bound to "Party A".
+  const fixedProse = message.length - "Party A".length - terms.length;
+  expect(fixedProse).toBeLessThanOrEqual(
+    COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - IDENTITY_PAIR_DISPLAY_BUDGET,
+  );
+});
+
+test("a realistic identity pair reaches the operator un-truncated", async () => {
+  expect(REWORDED_BOUND_IDENTITY.length).toBeGreaterThanOrEqual(100);
+  expect(REWORDED_TERMS_IDENTITY.length).toBeGreaterThanOrEqual(113);
+  const config = certificateModeOver(
+    path.join(dir, "signing-identity.json"),
+    rewordedIdentity,
+  );
+  const rendered = await resolveSigningPersist(
+    config,
+    REWORDED_TERMS_IDENTITY,
+  ).then(
+    () => "",
+    (err: unknown) => sanitizeErrorForDisplay(err),
+  );
+  // Through the sink that caps the link, not the raw message: the cap is what
+  // would cut them, and it is the only place the operator ever sees them.
+  expect(rendered).toContain(`"${REWORDED_BOUND_IDENTITY}"`);
+  expect(rendered).toContain(`"${REWORDED_TERMS_IDENTITY}"`);
+  expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
 });
 
 test("a control-character label reaches the operator escaped, once", async () => {
