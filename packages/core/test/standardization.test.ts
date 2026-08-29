@@ -24,6 +24,7 @@ import {
   accumulationFateAtCharge,
   canProduceMultipleValues,
   coalesceSubstitutesConstant,
+  substringCollapsesParsedDateToConstant,
   stepCanEmptyRealizedValue,
   pipelineAlwaysDrops,
   parseDateInputDropsEveryRecord,
@@ -462,6 +463,16 @@ describe("runPipeline — parse_date", () => {
         },
       ]),
     ).toBe("20210615");
+  });
+
+  test("adjacent literal separators are matched literally, not as regex metacharacters", () => {
+    const params = { inputFormat: "YYYY-MM..DD", outputFormat: "YYYYMMDD" };
+    expect(
+      runPipeline("1990-12..31", [{ function: "parse_date", params }]),
+    ).toBe("19901231");
+    expect(
+      runPipeline("1990-12.x31", [{ function: "parse_date", params }]),
+    ).toBeNull();
   });
 
   test("a non-string output format does not throw and falls back to the default", () => {
@@ -1056,6 +1067,453 @@ describe("coalesceSubstitutesConstant", () => {
     ).toBe(false);
     expect(pipelineAlwaysDrops([dead, fallbackStep, dead])).toBe(true);
     expect(pipelineAlwaysDrops([fallbackStep])).toBe(false);
+  });
+});
+
+// --- substringCollapsesParsedDateToConstant ----------------------------------
+
+describe("substringCollapsesParsedDateToConstant", () => {
+  // Two dates whose year, month, and day differ in EVERY digit: 1971 vs 2068 in
+  // all four year digits, 01 vs 12 in both month digits, 02 vs 31 in both day
+  // digits. So a window reading even one character the DATE supplied renders
+  // differently for the two, and one reading only the format's own characters
+  // renders identically -- which makes "the two outputs are equal" exactly the
+  // property the predicate claims, and the sweep below an exact differential
+  // rather than a corpus-bounded sample.
+  const DATES = ["01/02/1971", "12/31/2068"];
+  const parseDate = (
+    outputFormat: unknown,
+    inputFormat: unknown = "MM/DD/YYYY",
+  ) => ({
+    function: "parse_date",
+    params: { inputFormat, outputFormat },
+  });
+  const slice = (start: unknown, length: unknown) => ({
+    function: "substring",
+    params: { start, length },
+  });
+
+  test("the verdict matches whether the real slice is one constant (differential)", () => {
+    // Every combination of an output format and a slice window, against the
+    // shipped pipeline: the predicate says "collapses to a constant" exactly
+    // where the two dates leave the same non-null value behind.
+    const OUTPUT_FORMATS = [
+      // A literal region ahead of the date, the motivating shape.
+      "ACME-YYYYMMDD",
+      // Separators between the components, so a window can land on one alone.
+      "YYYY-MM-DD",
+      // The plain default layout, which has no literal to land in.
+      "YYYYMMDD",
+      // Reordered and repeated tokens: the factory substitutes EVERY occurrence,
+      // so the layout carries five component spans around four literals.
+      "MM-MM-YYYY-DD-DD",
+      // Tokens the greedy scan must not mis-split: a fifth Y is literal after
+      // YYYY, a third M is literal after MM, and a bare YY in an OUTPUT format is
+      // literal text rather than a year.
+      "YYYYY",
+      "YYYYYY",
+      "MMM",
+      "MM/DD/YY",
+      // No token at all -- every window is constant, the case the tokenless rule
+      // already names.
+      "registered",
+    ];
+    const WINDOWS: Array<[number, number]> = [
+      [1, 1],
+      [1, 4],
+      [1, 5],
+      [1, 6],
+      [2, 3],
+      [4, 2],
+      [5, 1],
+      [5, 2],
+      [6, 1],
+      [7, 2],
+      [1, 40],
+      [14, 3],
+      [-1, 1],
+      [-2, 2],
+      [-4, 3],
+      [-40, 2],
+      // A negative length is not an empty window: it drives slice's end argument
+      // below zero, where it counts back from the end of the value instead.
+      [1, -3],
+      [1, -9],
+      [1, -13],
+      [2, -8],
+      [-5, -2],
+    ];
+    const collapsed: string[] = [];
+    for (const outputFormat of OUTPUT_FORMATS)
+      for (const [start, length] of WINDOWS) {
+        const steps = [parseDate(outputFormat), slice(start, length)];
+        const outputs = DATES.map((date) => runPipeline(date, steps));
+        const collapses = outputs[0] !== null && outputs[0] === outputs[1];
+        if (collapses) collapsed.push(outputFormat);
+        expect(
+          substringCollapsesParsedDateToConstant(steps[1], [steps[0]]),
+          `${outputFormat} [${start}, ${length}] -> ${JSON.stringify(outputs)}`,
+        ).toBe(collapses);
+      }
+    // Not vacuous, and not carried by the tokenless format alone: a layout that
+    // does render the date still has windows that read none of it.
+    expect(
+      new Set(collapsed.filter((format) => format !== "registered")).size,
+    ).toBeGreaterThan(1);
+    expect(collapsed.length).toBeLessThan(
+      OUTPUT_FORMATS.length * WINDOWS.length,
+    );
+  });
+
+  test("a window that reads nothing is a drop, not a collapse", () => {
+    // substringFactory compiles a non-integer bound, a `start` of 0, a zero
+    // length, and a window that starts past the end into a step that returns null
+    // for every value: the element matches NOTHING, the opposite of collapsing
+    // onto a constant.
+    const literalRegion = parseDate("ACME-YYYYMMDD");
+    for (const [start, length] of [
+      [0, 3],
+      [1, 0],
+      [14, 3],
+      [1, -13],
+      [1.5, 3],
+      [1, 2.5],
+    ] as Array<[unknown, unknown]>) {
+      const steps = [literalRegion, slice(start, length)];
+      for (const date of DATES) expect(runPipeline(date, steps)).toBeNull();
+      expect(
+        substringCollapsesParsedDateToConstant(steps[1], [steps[0]]),
+        `${JSON.stringify([start, length])}`,
+      ).toBe(false);
+    }
+    for (const bound of [null, "1", [], {}, true])
+      expect(
+        substringCollapsesParsedDateToConstant(slice(bound, 3), [
+          literalRegion,
+        ]),
+        JSON.stringify(bound),
+      ).toBe(false);
+  });
+
+  test("the verdict is a property of the pair, not of either step alone", () => {
+    const literalRegion = parseDate("ACME-YYYYMMDD");
+    const firstFour = slice(1, 4);
+    expect(
+      substringCollapsesParsedDateToConstant(firstFour, [literalRegion]),
+    ).toBe(true);
+    // Only a substring reads a window; no other function is the sliced step.
+    for (const fn of STANDARDIZATION_FUNCTION_NAMES.filter(
+      (name) => name !== "substring",
+    ))
+      expect(
+        substringCollapsesParsedDateToConstant({ function: fn }, [
+          literalRegion,
+        ]),
+        fn,
+      ).toBe(false);
+    // The position matters at both ends: with no parse_date ahead of it the
+    // window slices whatever the identifier composed, and a step BETWEEN the two
+    // can move or rewrite the characters the window would read, so the layout no
+    // longer establishes the collapse.
+    expect(substringCollapsesParsedDateToConstant(firstFour, [])).toBe(false);
+    expect(
+      substringCollapsesParsedDateToConstant(firstFour, [
+        literalRegion,
+        { function: "to_upper_case" },
+      ]),
+    ).toBe(false);
+    // A step BEFORE the parse_date is unconstrained: it can change whether a
+    // value parses, never the layout a parsed date renders to.
+    expect(
+      substringCollapsesParsedDateToConstant(firstFour, [
+        { function: "to_upper_case" },
+        literalRegion,
+      ]),
+    ).toBe(true);
+    // The nearest parse_date is the one that laid out the value: a plain layout
+    // in front of the literal-region one does not withdraw the collapse, and the
+    // reverse order does not confer it.
+    expect(
+      substringCollapsesParsedDateToConstant(firstFour, [
+        parseDate("YYYYMMDD"),
+        literalRegion,
+      ]),
+    ).toBe(true);
+    expect(
+      substringCollapsesParsedDateToConstant(firstFour, [
+        literalRegion,
+        parseDate("YYYYMMDD", "YYYYMMDD"),
+      ]),
+    ).toBe(false);
+  });
+
+  test("a parse_date that yields no value at all collapses nothing", () => {
+    // An input format that core cannot assemble a date from drops every record, so
+    // there is no rendered layout to slice -- a narrowing the dead-key advisory
+    // surfaces, not a collapse. Held to the runtime as well as to the predicate.
+    const firstFour = slice(1, 4);
+    for (const inputFormat of ["MM/DD", 7] as unknown[]) {
+      const steps = [parseDate("ACME-YYYYMMDD", inputFormat), firstFour];
+      for (const date of DATES) expect(runPipeline(date, steps)).toBeNull();
+      expect(
+        substringCollapsesParsedDateToConstant(firstFour, [steps[0]]),
+        JSON.stringify(inputFormat),
+      ).toBe(false);
+    }
+    // An ABSENT input format is not a dead one: the factory falls back to the
+    // complete default layout, so the window still lands in the literal region.
+    const absentInput = parseDate("ACME-YYYYMMDD", null);
+    expect(
+      substringCollapsesParsedDateToConstant(firstFour, [absentInput]),
+    ).toBe(true);
+    expect(runPipeline(DATES[0], [absentInput, firstFour])).toBe("ACME");
+  });
+
+  test("an unusable output format falls back to the layout the factory renders", () => {
+    // A non-string outputFormat is not text the window reads: the factory falls
+    // back to the plain default layout, which has no literal region, so no window
+    // collapses. Pinned against the runtime rather than the coercion's source.
+    for (const outputFormat of [undefined, null, 7, [], {}] as unknown[])
+      for (const [start, length] of [
+        [1, 4],
+        [5, 2],
+        [1, 8],
+        [-2, 2],
+      ] as Array<[number, number]>) {
+        const steps = [parseDate(outputFormat), slice(start, length)];
+        const outputs = DATES.map((date) => runPipeline(date, steps));
+        expect(outputs[0] === outputs[1], JSON.stringify(outputFormat)).toBe(
+          false,
+        );
+        expect(
+          substringCollapsesParsedDateToConstant(steps[1], [steps[0]]),
+          JSON.stringify(outputFormat),
+        ).toBe(false);
+      }
+  });
+
+  test("a contiguous run of substrings composes into the window it reads (differential)", () => {
+    // Each link slices a contiguous range of the link before it, so a run of
+    // substrings after a parse_date reads ONE window of the rendered layout. Every
+    // chain below goes through the shipped pipeline: the predicate at the LAST
+    // link says "collapses to a constant" exactly where the two dates leave the
+    // same non-null value behind, whatever the chain's intermediate windows did.
+    const OUTPUT_FORMATS = [
+      // The motivating shape: a literal region the composed window can land in.
+      "ACME-YYYYMMDD",
+      // Separators a composed window can land on alone.
+      "YYYY-MM-DD",
+      // No literal at all, so no chain over it may collapse.
+      "YYYYMMDD",
+      // No token at all, so every non-empty chain over it collapses.
+      "registered",
+    ];
+    const CHAINS: Array<Array<[number, number]>> = [
+      // A wide first window narrowed onto the literal region: neither link reads
+      // only the format's own characters by itself.
+      [
+        [1, 13],
+        [1, 4],
+      ],
+      [
+        [1, 13],
+        [2, 3],
+      ],
+      // The first link already lands in the literal region.
+      [
+        [1, 5],
+        [1, 4],
+      ],
+      [
+        [1, 5],
+        [5, 1],
+      ],
+      // The first link straddles the literal and the date; the second retreats
+      // into the literal.
+      [
+        [1, 6],
+        [1, 4],
+      ],
+      // ... and the second stays on the date.
+      [
+        [1, 6],
+        [6, 1],
+      ],
+      [
+        [6, 8],
+        [1, 4],
+      ],
+      // A window landing on a bare separator between two components.
+      [
+        [1, 10],
+        [5, 1],
+      ],
+      [
+        [5, 3],
+        [1, 1],
+      ],
+      [
+        [5, 3],
+        [2, 2],
+      ],
+      // Negative starts, which resolve against the length the run holds at that
+      // point rather than against the layout.
+      [
+        [-9, 9],
+        [1, 4],
+      ],
+      [
+        [1, 13],
+        [-4, 2],
+      ],
+      // Negative lengths: an end argument below zero counts back from the end of
+      // the value the link is handed, so the link reads a real window.
+      [
+        [1, -9],
+        [1, 4],
+      ],
+      [
+        [1, -8],
+        [1, 4],
+      ],
+      [
+        [1, 13],
+        [1, -9],
+      ],
+      [
+        [1, 5],
+        [1, -4],
+      ],
+      // A second link reaching past the end of the first, which clamps.
+      [
+        [1, 4],
+        [1, 10],
+      ],
+      // A link that reads nothing: the value is emptied and the rest of the run
+      // null-propagates, so the chain drops rather than collapses.
+      [
+        [1, 4],
+        [5, 2],
+      ],
+      [
+        [1, 5],
+        [1, 0],
+      ],
+      [
+        [1, 5],
+        [0, 3],
+      ],
+      // Three links.
+      [
+        [1, 13],
+        [1, 6],
+        [1, 4],
+      ],
+      [
+        [1, 13],
+        [6, 8],
+        [1, 4],
+      ],
+      [
+        [1, 13],
+        [1, 5],
+        [5, 1],
+      ],
+      [
+        [1, 13],
+        [1, 4],
+        [5, 2],
+      ],
+    ];
+    const collapsedBy: Array<{ outputFormat: string; links: number }> = [];
+    for (const outputFormat of OUTPUT_FORMATS)
+      for (const chain of CHAINS) {
+        const steps = [
+          parseDate(outputFormat),
+          ...chain.map(([start, length]) => slice(start, length)),
+        ];
+        const outputs = DATES.map((date) => runPipeline(date, steps));
+        const collapses = outputs[0] !== null && outputs[0] === outputs[1];
+        if (collapses) collapsedBy.push({ outputFormat, links: chain.length });
+        expect(
+          substringCollapsesParsedDateToConstant(
+            steps[steps.length - 1],
+            steps.slice(0, -1),
+          ),
+          `${outputFormat} ${JSON.stringify(chain)} -> ${JSON.stringify(outputs)}`,
+        ).toBe(collapses);
+      }
+    // Not vacuous: chains collapse over more than one layout that does render a
+    // date, and at both chain lengths, while plenty of them do not collapse.
+    expect(
+      new Set(
+        collapsedBy
+          .filter((c) => c.outputFormat !== "registered")
+          .map((c) => c.outputFormat),
+      ).size,
+    ).toBeGreaterThan(1);
+    expect(new Set(collapsedBy.map((c) => c.links))).toEqual(new Set([2, 3]));
+    expect(collapsedBy.length).toBeLessThan(
+      OUTPUT_FORMATS.length * CHAINS.length,
+    );
+  });
+
+  test("the collapse verdict lands on the last link of a chain, not an earlier one", () => {
+    // Neither link reads only literal characters on its own, so a rule reading
+    // one window at a time would see a truncation, while the run reads "ACME"
+    // out of every date. The verdict belongs to the link the run ends at.
+    const steps = [parseDate("ACME-YYYYMMDD"), slice(1, 13), slice(1, 4)];
+    expect(DATES.map((date) => runPipeline(date, steps))).toEqual([
+      "ACME",
+      "ACME",
+    ]);
+    expect(
+      steps.map((step, index) =>
+        substringCollapsesParsedDateToConstant(step, steps.slice(0, index)),
+      ),
+    ).toEqual([false, false, true]);
+  });
+
+  test("a step other than a substring between the two keeps the milder verdict", () => {
+    // The stated limit this predicate carries. Each step below leaves the
+    // characters the window reads exactly where the layout put them, so the
+    // runtime still puts every record on one constant -- but whether a given
+    // function preserves a given layout is a per-function, per-format property,
+    // and the walk ends at the first non-substring instead of deciding it. This
+    // pins the understatement so a change to EITHER half fails a test.
+    const intervening: TransformStep[] = [
+      { function: "to_upper_case" },
+      { function: "to_lower_case" },
+      { function: "trim_whitespace" },
+      { function: "squash_spaces" },
+      { function: "remove_accents" },
+      { function: "remove_non_ascii" },
+      { function: "remove_affixes" },
+      { function: "remove_punctuation" },
+      { function: "remove_dashes" },
+      { function: "replace_separators_with_spaces" },
+      { function: "null_if", params: { values: ["no such value"] } },
+      { function: "filter_regex", params: { pattern: "ACME" } },
+    ];
+    for (const step of intervening) {
+      const steps = [parseDate("ACME-YYYYMMDD"), step, slice(1, 4)];
+      const outputs = DATES.map((date) => runPipeline(date, steps));
+      expect(outputs[0], step.function).not.toBeNull();
+      expect(outputs[0], step.function).toBe(outputs[1]);
+      expect(
+        substringCollapsesParsedDateToConstant(steps[2], steps.slice(0, 2)),
+        step.function,
+      ).toBe(false);
+    }
+    // The walk ends at the first non-substring whichever side of the run it sits,
+    // so a chain broken in the middle is not composed either.
+    expect(
+      substringCollapsesParsedDateToConstant(slice(1, 4), [
+        parseDate("ACME-YYYYMMDD"),
+        slice(1, 13),
+        { function: "to_upper_case" },
+      ]),
+    ).toBe(false);
   });
 });
 

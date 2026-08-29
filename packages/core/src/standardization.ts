@@ -274,6 +274,53 @@ function resolveTwoDigitYear(twoDigit: string): string {
   return String(resolved);
 }
 
+// The tokens a format is scanned for, LONGEST FIRST so `YYYY` wins the prefix it
+// shares with `YY`; the year pair is taken from YEAR_FORMAT_TOKENS rather than
+// re-listed, so the two orderings cannot drift apart.
+const DATE_FORMAT_TOKENS_LONGEST_FIRST: readonly DateFormatToken[] = [
+  ...YEAR_FORMAT_TOKENS,
+  "MM",
+  "DD",
+];
+
+// The capture group each token contributes to the input-matching regex.
+const DATE_TOKEN_CAPTURE_SOURCES: Readonly<Record<DateFormatToken, string>> = {
+  YYYY: "(\\d{4})",
+  YY: "(\\d{2})",
+  MM: "(\\d{1,2})",
+  DD: "(\\d{1,2})",
+};
+
+/** One run of a tokenized date format: a recognized date token, or a single
+ * character the format carries literally. */
+interface DateFormatSegment {
+  /** The token this segment is, or undefined for a literal character. */
+  token?: DateFormatToken;
+  /** The segment exactly as the format writes it. */
+  text: string;
+}
+
+// The one greedy left-to-right scan every reading of a format goes through, so
+// the regex source, the component set, and the output layout below all agree on
+// where a token starts and ends rather than each re-scanning the string.
+function tokenizeDateFormat(format: string): DateFormatSegment[] {
+  const segments: DateFormatSegment[] = [];
+  let i = 0;
+  while (i < format.length) {
+    const token = DATE_FORMAT_TOKENS_LONGEST_FIRST.find((candidate) =>
+      format.startsWith(candidate, i),
+    );
+    if (token === undefined) {
+      segments.push({ text: format[i] });
+      i += 1;
+    } else {
+      segments.push({ token, text: token });
+      i += token.length;
+    }
+  }
+  return segments;
+}
+
 // Build the anchored regex source and capture order for a parse_date input
 // format. The format is partner-controlled and its MM/DD tokens EXPAND into
 // adjacent `(\d{1,2})` groups, which catastrophically backtrack on the JavaScript
@@ -284,30 +331,14 @@ function resolveTwoDigitYear(twoDigit: string): string {
 function parseDateFormat(inputFormat: string): ParsedDateFormat {
   const order: DateFormatToken[] = [];
   let regexStr = "";
-  let i = 0;
 
-  while (i < inputFormat.length) {
-    if (inputFormat.startsWith("YYYY", i)) {
-      order.push("YYYY");
-      regexStr += "(\\d{4})";
-      i += 4;
-    } else if (inputFormat.startsWith("YY", i)) {
-      // Matched after YYYY so the four-digit year wins their shared prefix.
-      order.push("YY");
-      regexStr += "(\\d{2})";
-      i += 2;
-    } else if (inputFormat.startsWith("MM", i)) {
-      order.push("MM");
-      regexStr += "(\\d{1,2})";
-      i += 2;
-    } else if (inputFormat.startsWith("DD", i)) {
-      order.push("DD");
-      regexStr += "(\\d{1,2})";
-      i += 2;
-    } else {
+  for (const segment of tokenizeDateFormat(inputFormat)) {
+    if (segment.token === undefined) {
       // Escape literal separator characters for use in a regex.
-      regexStr += inputFormat[i].replace(/[.*+?^${}()|[\]\\]/, "\\$&");
-      i++;
+      regexStr += segment.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    } else {
+      order.push(segment.token);
+      regexStr += DATE_TOKEN_CAPTURE_SOURCES[segment.token];
     }
   }
 
@@ -354,6 +385,59 @@ export function dateFormatComponents(
   return components;
 }
 
+// The width each OUTPUT-format token emits, and by omission which tokens are
+// substituted at all: parseDateFactory replaces YYYY/MM/DD only, so a YY in an
+// output format is literal text (the reading dateFormatComponents gives it) and
+// falls through to its own two characters below. Every substituted value has a
+// fixed width -- the year is four digits whichever token parsed it (a \d{4}
+// capture, or resolveTwoDigitYear's four-digit resolution), and month and day are
+// padStart(2, "0") -- so a rendered date's layout is a property of the format
+// alone, not of the date. Held to the factory by a differential test rather than
+// by this comment.
+const DATE_OUTPUT_SUBSTITUTION_WIDTHS: Readonly<
+  Partial<Record<DateFormatToken, number>>
+> = { YYYY: 4, MM: 2, DD: 2 };
+
+/** Where a rendered `parse_date` output puts the date's own characters. */
+interface DateOutputLayout {
+  /** Characters the format emits for every date it renders. */
+  length: number;
+  /** The half-open `[start, end)` index ranges the substituted date components
+   * fill. Every index outside them carries a character of the format itself, the
+   * same for every record. */
+  componentSpans: ReadonlyArray<{ start: number; end: number }>;
+}
+
+// Walk an output format into the layout its rendered dates share. Positions come
+// from the same greedy tokenizer the factory's own parse uses, so the spans
+// cannot drift from the substitution the factory performs.
+function dateOutputLayout(outputFormat: string): DateOutputLayout {
+  const componentSpans: Array<{ start: number; end: number }> = [];
+  let position = 0;
+  for (const segment of tokenizeDateFormat(outputFormat)) {
+    const substituted =
+      segment.token === undefined
+        ? undefined
+        : DATE_OUTPUT_SUBSTITUTION_WIDTHS[segment.token];
+    const width = substituted ?? segment.text.length;
+    if (substituted !== undefined)
+      componentSpans.push({ start: position, end: position + width });
+    position += width;
+  }
+  return { length: position, componentSpans };
+}
+
+/**
+ * The output layout a `parse_date` step emits when it declares no usable
+ * `outputFormat`. It carries every date component, so the default drops nothing.
+ *
+ * Exported so a terms-level reading of a step -- the breadth markers here, and
+ * the consent header's `parse_date` copy in `invitationSummary.ts` -- resolves an
+ * absent or non-string `outputFormat` to what the runtime actually emits rather
+ * than to a restated literal.
+ */
+export const DEFAULT_DATE_OUTPUT_FORMAT = "YYYYMMDD";
+
 // Parse `input_format` -> YAML camelizes keys but not values, so format
 // string tokens YYYY / YY / MM / DD stay as written; delimiter characters are
 // literal. Params arrive as camelCase after camelizeKeys (e.g. inputFormat).
@@ -375,7 +459,9 @@ function parseDateFactory(params: Params): StandardizingFn {
         ? rawInputFormat
         : "";
   const outputFormat =
-    typeof params.outputFormat === "string" ? params.outputFormat : "YYYYMMDD";
+    typeof params.outputFormat === "string"
+      ? params.outputFormat
+      : DEFAULT_DATE_OUTPUT_FORMAT;
 
   const { source, order } = parseDateFormat(inputFormat);
   // Compile the anchored source under the linear-time engine, not `new RegExp`:
@@ -421,38 +507,15 @@ function parseDateFactory(params: Params): StandardizingFn {
 }
 
 function substringFactory(params: Params): StandardizingFn {
-  // Guard both bounds by type, not just presence: the wire params are
-  // z.unknown() and typed by no per-function shape, so a partner can declare
-  // either as a non-integer (a string, float, or other JSON value). An unguarded
-  // non-number `length` turns `startIdx + len` into string concatenation,
-  // silently producing the wrong slice rather than the intended one. A start or
-  // length that is not an integer -- like the always-null `start === 0` no-op --
-  // yields a fn that drops every value, the ignore path this factory already
-  // takes for a degenerate bound (never crashing the partner-reachable key
-  // build).
-  const start = params.start;
-  const len = params.length;
-  if (
-    typeof start !== "number" ||
-    !Number.isInteger(start) ||
-    typeof len !== "number" ||
-    !Number.isInteger(len) ||
-    start === 0
-  )
-    return (_s) => null;
-  if (start > 0) {
-    // SQL SUBSTR convention: 1-indexed positive start -- startIdx is fixed.
-    const startIdx = start - 1;
-    return (s) => {
-      const result = s.slice(startIdx, startIdx + len);
-      return result.length > 0 ? result : null;
-    };
-  }
-  // Negative start counts from the end -- depends on string length at call time.
+  // substringWindow carries the whole convention -- bounds coercion, SQL SUBSTR
+  // indexing, and the clamps -- and needs the length of the value being sliced
+  // to settle either bound, so the window is resolved per value rather than
+  // hoisted out of the returned fn. A window that reads nothing is the drop this
+  // step takes for a degenerate bound.
   return (s) => {
-    const startIdx = Math.max(0, s.length + start);
-    const result = s.slice(startIdx, startIdx + len);
-    return result.length > 0 ? result : null;
+    const window = substringWindow(params, s.length);
+    if (window === undefined) return null;
+    return s.slice(window.start, window.end);
   };
 }
 
@@ -2962,6 +3025,157 @@ export function coalesceSubstitutesConstant(
     step.function === "coalesce" &&
     typeof step.params?.default === "string" &&
     precedingSteps.some(stepCanEmptyRealizedValue)
+  );
+}
+
+// The half-open `[start, end)` index range a `substring` step reads out of a
+// value of `valueLength` characters, or undefined where it reads nothing. This
+// is the single reading of the substring convention: substringFactory slices by
+// it at runtime, and the terms-level breadth verdicts here read it against a
+// rendered layout without any data, so the two cannot drift.
+//
+// Guard both bounds by type, not just presence: the wire params are z.unknown()
+// and typed by no per-function shape, so a partner can declare either as a
+// non-integer (a string, float, or other JSON value). An unguarded non-number
+// `length` turns `startIndex + length` into string concatenation, silently
+// producing the wrong window rather than the intended one. A non-integer bound,
+// or the `start === 0` no-op, reads nothing instead -- the ignore path a
+// degenerate bound takes rather than crashing the partner-reachable key build.
+//
+// The two ends of the `String.prototype.slice` call this describes clamp by
+// different rules: a NEGATIVE `length` drives the end argument below zero, where
+// slice counts back from the end of the value rather than yielding the empty
+// string, so such a step reads a real window running from the start bound to
+// `valueLength + length`. Both bounds are determinate only because the caller
+// supplies the length of the value being sliced.
+function substringWindow(
+  params: Params | undefined,
+  valueLength: number,
+): { start: number; end: number } | undefined {
+  const start = params?.start;
+  const length = params?.length;
+  if (
+    typeof start !== "number" ||
+    !Number.isInteger(start) ||
+    typeof length !== "number" ||
+    !Number.isInteger(length) ||
+    start === 0
+  )
+    return undefined;
+  // SQL SUBSTR convention: a positive start is 1-indexed; a negative one counts
+  // back from the end and clamps at the front of the value.
+  const startIndex = start > 0 ? start - 1 : Math.max(0, valueLength + start);
+  const endArgument = startIndex + length;
+  const from = Math.min(startIndex, valueLength);
+  const to =
+    endArgument < 0
+      ? Math.max(valueLength + endArgument, 0)
+      : Math.min(endArgument, valueLength);
+  // An end at or before the start slices "", which the factory returns as null.
+  return to > from ? { start: from, end: to } : undefined;
+}
+
+// The single window a run of consecutive `substring` steps reads out of a value
+// of `valueLength` characters, in that value's own coordinates, or undefined
+// where the run reads nothing. Each link slices a CONTIGUOUS range of the
+// previous link's output, so composing is arithmetic: resolve the link against
+// the length the run holds at that point, then map its bounds forward by the
+// start the run has already advanced to. A link that reads nothing empties the
+// value, which the next link null-propagates, so the whole run reads nothing.
+function composeSubstringWindows(
+  steps: ReadonlyArray<TransformStep>,
+  valueLength: number,
+): { start: number; end: number } | undefined {
+  let composed = { start: 0, end: valueLength };
+  for (const step of steps) {
+    const window = substringWindow(step.params, composed.end - composed.start);
+    if (window === undefined) return undefined;
+    composed = {
+      start: composed.start + window.start,
+      end: composed.start + window.end,
+    };
+  }
+  return composed;
+}
+
+/**
+ * Whether the `substring` step at a given position slices a rendered
+ * `parse_date` output where the format carries only its OWN characters -- a
+ * literal region (`ACME-YYYYMMDD`) or a bare separator -- so every record that
+ * survives the parse leaves the step holding the same constant. It is the
+ * maximal match breadth, not the truncation the step's name suggests: the sliced
+ * value carries no character the date supplied.
+ *
+ * Determinate from the terms because a rendered date's layout is fixed by the
+ * output format alone ({@link dateOutputLayout}: substituted components have
+ * fixed widths, and every other index is a character of the format). Three
+ * conditions, all necessary:
+ *
+ * - Every step between this one and a `parse_date` is itself a `substring`. The
+ *   whole contiguous run, this step included, composes into ONE window of the
+ *   rendered layout ({@link composeSubstringWindows}), since each link slices a
+ *   contiguous range of the link before it. Any other function ends the walk and
+ *   no verdict is given: a step that rewrites or reorders characters puts the
+ *   window somewhere the layout no longer settles. A step BEFORE the `parse_date`
+ *   is unconstrained -- it can only change whether a value parses, never the
+ *   layout it renders to.
+ * - That `parse_date`'s input format can parse a date at all
+ *   ({@link parseDateInputDropsEveryRecord}); one that cannot supplies no value
+ *   to slice.
+ * - The composed window is non-empty (substringFactory's coercion, applied
+ *   against the rendered length so a negative start resolves too) and overlaps
+ *   none of the layout's component spans. Bounds that read nothing drop every
+ *   record, which is a narrowing rather than a collapse, and a window straddling
+ *   a literal and a token still reads part of the date, so it truncates.
+ *
+ * A known understatement, not a claim of completeness: many intervening steps
+ * leave the characters the window would read exactly where they sit -- a case
+ * fold over a date of digits and separators, a trim of a layout with no outer
+ * whitespace, a `filter_regex` or `null_if` that passes the value through -- and
+ * the runtime then collapses while this predicate stays silent, so the consent
+ * header shows the milder truncation word. Whether a given function preserves a
+ * given layout is a per-function, per-format property, not one this name-blind
+ * walk can settle. The shape is ledgered on `invitationSummary.ts`'s
+ * `elementBreadthMarker`, held by a test that drives it through the pipeline
+ * rather than asserted here, and compensated by the terms' `outputFormat` detail
+ * row, which shows the format whose literal region the window reads.
+ *
+ * `precedingSteps` are the steps that run before `step` in the same pipeline,
+ * required rather than defaulted: like {@link coalesceSubstitutesConstant}, the
+ * verdict is a property of the position, not of the step alone.
+ *
+ * Shared so the consent header's collapse marker in `invitationSummary.ts` turns
+ * on core's own tokenization rather than a restated one that could drift from the
+ * factory.
+ */
+export function substringCollapsesParsedDateToConstant(
+  step: TransformStep,
+  precedingSteps: ReadonlyArray<TransformStep>,
+): boolean {
+  if (step.function !== "substring") return false;
+  let chainStart = precedingSteps.length;
+  while (
+    chainStart > 0 &&
+    precedingSteps[chainStart - 1].function === "substring"
+  )
+    chainStart -= 1;
+  if (chainStart === 0) return false;
+  const parseDateStep = precedingSteps[chainStart - 1];
+  if (parseDateStep.function !== "parse_date") return false;
+  if (parseDateInputDropsEveryRecord(parseDateStep.params)) return false;
+  const rawOutputFormat = parseDateStep.params?.outputFormat;
+  const layout = dateOutputLayout(
+    typeof rawOutputFormat === "string"
+      ? rawOutputFormat
+      : DEFAULT_DATE_OUTPUT_FORMAT,
+  );
+  const sliced = composeSubstringWindows(
+    [...precedingSteps.slice(chainStart), step],
+    layout.length,
+  );
+  if (sliced === undefined) return false;
+  return !layout.componentSpans.some(
+    (span) => span.start < sliced.end && sliced.start < span.end,
   );
 }
 

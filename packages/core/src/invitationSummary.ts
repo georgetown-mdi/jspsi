@@ -2,10 +2,12 @@ import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
   coalesceSubstitutesConstant,
   dateFormatComponents,
+  DEFAULT_DATE_OUTPUT_FORMAT,
   describeTransformCoercions,
   FAN_OUT_FUNCTION_NAMES,
   parseDateInputDropsEveryRecord,
   pipelineAlwaysDrops,
+  substringCollapsesParsedDateToConstant,
 } from "./standardization.js";
 import { displayText } from "./utils/sanitizeForDisplay.js";
 import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
@@ -858,11 +860,11 @@ function summarizeTransform(
   return summary;
 }
 
-// Core's parseDateFactory defaults (standardization.ts): an absent format is the
-// full MM/DD/YYYY -> YYYYMMDD layout, which carries every component, so an absent
-// outputFormat drops nothing.
+// Core's parseDateFactory default input format (standardization.ts): an absent
+// format is the full MM/DD/YYYY layout, which carries every component, so an
+// absent inputFormat drops nothing. The matching output default is
+// DEFAULT_DATE_OUTPUT_FORMAT.
 const DEFAULT_PARSE_DATE_INPUT = "MM/DD/YYYY";
-const DEFAULT_PARSE_DATE_OUTPUT = "YYYYMMDD";
 
 /**
  * The breadth marker a `parse_date` step's output layout earns, or undefined when
@@ -879,6 +881,14 @@ const DEFAULT_PARSE_DATE_OUTPUT = "YYYYMMDD";
  *   input carries, so distinct dates collapse onto a coarser bucket and the
  *   element matches on only part of the date (e.g. a year-only output matches
  *   every date within a year).
+ *
+ * A step read alone cannot see the other route to that maximal breadth: a
+ * `substring` following this one, or a run of them, can read a window of the
+ * output layout that carries only the format's own characters, leaving every date
+ * on a constant exactly as a tokenless output does. That verdict is a property of
+ * the steps together, so {@link elementBreadthMarker} takes it from core's
+ * {@link substringCollapsesParsedDateToConstant} rather than from this per-step
+ * classification.
  *
  * A `parse_date` whose input format omits a component core requires drops EVERY
  * record (it returns null for every value), so the element matches NOTHING, not
@@ -915,7 +925,7 @@ function parseDateBreadth(
   const input =
     typeof rawInput === "string" ? rawInput : DEFAULT_PARSE_DATE_INPUT;
   const output =
-    typeof rawOutput === "string" ? rawOutput : DEFAULT_PARSE_DATE_OUTPUT;
+    typeof rawOutput === "string" ? rawOutput : DEFAULT_DATE_OUTPUT_FORMAT;
   // The output is classified in its OWN context: a `YY` in the output format is an
   // unsubstituted literal (the factory fills only YYYY/MM/DD), so it collapses the
   // year and carries no year component -- an output of "YY" is a total constant
@@ -980,8 +990,9 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * match: where the direction is determinable from the terms it names the EFFECT
  * ("partial" for a truncation, or for a `parse_date` whose output layout drops a
  * date component its input carries and so matches on only part of the date; "any
- * date" for a `parse_date` whose output carries no date token at all, collapsing
- * every date to one value -- a stronger breadth than the partial drop; "fuzzy" /
+ * date" for a `parse_date` that leaves every date on one value, whether its output
+ * carries no date token at all or a slice reads only that output's literal
+ * characters -- a stronger breadth than the partial drop; "fuzzy" /
  * "sound-alike" / "fallback" for an expansion), and where an arbitrary
  * partner-authored pattern or value list -- or a fill whose reach into the sliced
  * value is a property of each record rather than of the terms -- makes the
@@ -1042,17 +1053,26 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * - `parse_date` keeps it, with a stated limit. For a token-and-separator output
  *   format the canonical date is laid out from the date's own components, so
  *   slicing it matches on part of the date -- the reading the
- *   output-drops-a-component branch below gives "partial". The limit: the output
- *   format is inviter-authored text with only the YYYY/MM/DD tokens substituted,
- *   so a literal region (`ACME-YYYYMMDD`) or a bare separator can occupy the
- *   slice window and collapse records onto a constant the header still calls
- *   "partial"; the detail row carrying the outputFormat is the surface that
- *   exposes that shape. Deciding membership from the format's token positions is
- *   a params-aware classification this name-only rule cannot express, and moving
- *   `parse_date` into the set wholesale would wrongly suppress "partial" for
- *   every plain format. Keeping it also stops a date-collapsing slice from
- *   showing NO marker, since a merely reformatting `parse_date` earns none of
- *   its own.
+ *   output-drops-a-component branch below gives "partial" -- and a window
+ *   straddling a literal and a token reads part of the date just as much, so the
+ *   same reading is the honest one. The one shape that is no truncation at all is
+ *   a window reading only characters the inviter's own format supplied: a literal
+ *   region (`ACME-YYYYMMDD`) or a bare separator leaves every record holding the
+ *   same constant. That is a collapse, not a coarsening, so it is decided in the
+ *   collapse tier above from the format's token positions
+ *   ({@link substringCollapsesParsedDateToConstant}) and shows "any date".
+ *   Membership here would still be wrong for it: the verdict turns on the
+ *   window's position within the layout, which a name-only set cannot express,
+ *   and joining the set would suppress "partial" for every plain format. Staying
+ *   out also stops a slice after a merely reformatting `parse_date` from showing
+ *   NO marker, since that step earns none of its own. The limit: that collapse is
+ *   read only where the substring reaches its `parse_date` through substrings
+ *   alone -- a contiguous run composes into one window of the layout, but any
+ *   other intervening step ends the walk, and the header then still says
+ *   "partial" for a window that lands in the literal region anyway. The detail
+ *   row carrying the outputFormat is the surface that exposes that shape, since
+ *   it shows the inviter-authored format the window reads from. The
+ *   understatement is ledgered below with the header's other known ones.
  * - `coalesce` keeps it. It substitutes only where an earlier rule has EMPTIED the
  *   value, so a record that still carries an identifier is truncated literally --
  *   unlike `pad_left`, which rewrites the value of every record. The two orders are
@@ -1083,10 +1103,13 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * 1. The fan-out rule, whichever of its two markers it earns.
  * 2. The dead-pipeline suppression, which silences every marker below it.
  * 3. The rules that COLLAPSE records onto one constant, widest first: "any date"
- *    (every record) then "fallback" (every record an earlier rule of the element
- *    emptied). A collapse leaves the records it touches matching each other
- *    whatever else the pipeline does to that constant, so a coarsening word below
- *    would understate it -- the reassuring direction on a consent surface. This
+ *    (every record, whether its output layout carries no date token at all or a
+ *    slice reaching it through substrings alone reads only that layout's literal
+ *    characters) then
+ *    "fallback" (every record an earlier rule of the element emptied). A collapse
+ *    leaves the records it touches matching each other whatever else the pipeline
+ *    does to that constant, so a coarsening word below would understate it -- the
+ *    reassuring direction on a consent surface. This
  *    tier speaks only for a coalesce that substitutes WHERE IT SITS (core's
  *    {@link coalesceSubstitutesConstant}, which reads both the declared `default`
  *    and the steps ahead of it); one whose default cannot substitute, or that no
@@ -1116,6 +1139,22 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * so it is recorded here as a known understatement for an expert-authored
  * compound rather than re-cut: the header names ONE marker, and every re-ordering
  * that closes this case masks some other element's honest one.
+ *
+ * A second known understatement, in the collapse tier rather than in the ranking.
+ * A `substring` reaches its `parse_date` through substrings alone -- a contiguous
+ * run composes into one window of the rendered layout -- and any OTHER step
+ * between the two ends that walk (core's
+ * {@link substringCollapsesParsedDateToConstant}), so
+ * `[parse_date(output "ACME-YYYYMMDD"), to_upper_case, substring(1, 4)]` renders
+ * "partial" although the runtime leaves every record on "ACME". Many such steps
+ * do leave the window's characters where they sit -- a case fold over a date of
+ * digits and separators, a trim of a layout with no outer whitespace, a
+ * `filter_regex` or `null_if` that passes the value through -- but whether a
+ * given function preserves a given layout is a per-function, per-format property,
+ * and deciding it takes a layout-preservation table core does not have. So the
+ * milder word stands, held by a test driving both halves rather than by this
+ * note, and the detail row carrying the outputFormat is the surface that exposes
+ * the format whose literal region the window reads.
  */
 function elementBreadthMarker(
   element: LinkageKeyElement,
@@ -1140,15 +1179,24 @@ function elementBreadthMarker(
   // pipelineAlwaysDrops, which also accounts for a rescuing `coalesce`, so the
   // marker cannot drift from the runtime.
   if (pipelineAlwaysDrops(element.transform)) return undefined;
-  // A tokenless `parse_date` output collapses every date to one constant value --
-  // the maximal match breadth -- so it is checked first and outranks every other
-  // rule the element might also carry: once every value collapses to one, a
-  // further substring/fuzzy/expansion loosening is moot, so "any date" is the
-  // honest dominant effect and is never understated as a milder word. (A
-  // `parse_date` that drops only some components, not all, is the milder "partial"
-  // handled below at the parse_date position.)
+  // A `parse_date` that leaves every record on one constant value collapses to the
+  // maximal match breadth, so it is checked first and outranks every other rule the
+  // element might also carry: once every value collapses to one, a further
+  // substring/fuzzy/expansion loosening is moot, so "any date" is the honest
+  // dominant effect and is never understated as a milder word. Two shapes reach it
+  // -- an output layout carrying no date token at all, and a window sliced out of
+  // the layout's literal region, which reads the same characters of the inviter's
+  // own format for every date. (A `parse_date` that drops only some components, and
+  // a window that still reads part of the date, are the milder "partial" handled
+  // below at the parse_date position.)
   const parseDateBreadths = steps.map(parseDateBreadth);
-  if (parseDateBreadths.includes("any date")) return displayText`any date`;
+  if (
+    parseDateBreadths.includes("any date") ||
+    steps.some((step, index) =>
+      substringCollapsesParsedDateToConstant(step, steps.slice(0, index)),
+    )
+  )
+    return displayText`any date`;
   // A `coalesce` that substitutes puts one constant on every record an earlier
   // rule of this element emptied, so all of those records collide on that value
   // and match each other -- the same collapse "any date" names, bounded to the
