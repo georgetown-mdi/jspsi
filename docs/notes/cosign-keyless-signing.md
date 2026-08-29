@@ -73,6 +73,15 @@ pins and why omitting one is not an option, because the failure mode is a
 command that still exits zero while checking less than the reader thinks. That
 was judged acceptably simple.
 
+What the longer command costs instead is a coupling: the identity it pins is
+made of the release workflow's own file path and its tag trigger, so renaming
+that file or widening that filter leaves the published command refusing the
+signature a real release produced, with nothing in the document that would
+notice. The release workflow therefore runs the published command against each
+digest it signs, and `npm run check:release-signing` holds the document's
+pattern, the workflow's copy of it, and those two properties of the workflow to
+each other on every pull request.
+
 ## The evidence
 
 A throwaway workflow on a throwaway branch drove the real thing in this
@@ -119,7 +128,10 @@ which are not indexed here.
 scheme is the conventional tag, which Docker Hub already holds for any image, so
 nothing here is expected to differ -- but the first real release is what
 establishes that, alongside the attestation-reference question RELEASES.md
-already flags in the same position.
+already flags in the same position. What that release does with the answer is
+settled: it verifies each signature it produces before building the next image,
+so a storage scheme Docker Hub does not hold fails the release rather than
+reaching a partner as an image the published command calls untrusted.
 
 **A verifier with no route to the internet.** `cosign verify` reported the
 transparency-log claim verified offline, the inclusion proof travelling with the

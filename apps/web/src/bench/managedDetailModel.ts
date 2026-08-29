@@ -23,9 +23,9 @@ import {
 } from "@psilink/core";
 
 import {
-  SCHEDULE_ATTENDANCE_NOTE,
   SCHEDULE_INPUT_RESELECTION_NOTE,
   repeatedMissCoordination,
+  scheduleAttendanceNote,
   scheduleCadenceLine,
   scheduleDueLine,
   scheduleDueness,
@@ -151,10 +151,9 @@ export function connectionRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
  * instant it is read at (see {@link ./scheduleSurfacingModel.ts}); nothing is
  * persisted, advanced, or promised.
  *
- * The section is read-only by design: no surface sets a schedule yet, so a record
- * carries one only from an import or an earlier stored write, and a half-built
- * editor would be worse than none (see {@link ./ManagedExchangeDetail.tsx}'s
- * local-fields editor).
+ * The section READS the schedule; the operator sets and clears it in the
+ * local-fields editor beside it (see {@link ./ManagedExchangeDetail.tsx}), which
+ * owns the entry form and the one store write that carries it.
  */
 export interface ScheduleView {
   /** The agreed cadence in words. */
@@ -162,7 +161,8 @@ export interface ScheduleView {
   /** Where the recurrence stands at the instant read: a window open now, or the
    * next one. */
   dueLine: string;
-  /** What this browser does with a schedule, and what the operator does about it.
+  /** What THIS runtime does with a schedule, and what the operator does about it:
+   * an installed app meets the windows itself, an ordinary tab never does.
    * Standing copy: it holds whether or not a window is open. */
   attendanceNote: string;
   /** The escalated coordination state, once the record's consecutive-miss count
@@ -175,12 +175,14 @@ export interface ScheduleView {
 
 /**
  * The run-schedule section for a record, or `undefined` for one with no agreed
- * schedule -- which is every record until a surface can set one, and is why the
- * section renders nothing at all rather than an empty state inviting one.
+ * schedule -- an attended-only exchange, which is what an operator who has not
+ * entered a cadence has -- so the section renders nothing rather than an empty
+ * state duplicating the entry form beside it.
  *
- * `hasInputHandle` is the caller's platform reading (a stored handle AND the File
- * System Access API to use it with), kept out of this model so the derivation
- * stays pure.
+ * Both platform readings are the caller's, kept out of this model so the
+ * derivation stays pure: `hasInputHandle` is a stored handle AND the File System
+ * Access API to use it with, and `installedRuntime` is whether this page is the
+ * installed app the unattended runner starts in.
  *
  * @throws {RangeError} if the schedule's lattice is unusable (see
  *   {@link scheduleDueness}).
@@ -188,6 +190,7 @@ export interface ScheduleView {
 export function scheduleView(
   record: Pick<ManagedExchangeRecord, "schedule">,
   hasInputHandle: boolean,
+  installedRuntime: boolean,
   now: number,
 ): ScheduleView | undefined {
   const { schedule } = record;
@@ -196,7 +199,7 @@ export function scheduleView(
   return {
     cadence: scheduleCadenceLine(schedule),
     dueLine: scheduleDueLine(scheduleDueness(schedule, now)),
-    attendanceNote: SCHEDULE_ATTENDANCE_NOTE,
+    attendanceNote: scheduleAttendanceNote(installedRuntime),
     ...(coordination !== undefined ? { coordination } : {}),
     ...(hasInputHandle
       ? {}

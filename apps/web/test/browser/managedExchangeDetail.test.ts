@@ -1,13 +1,13 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   RECORDED_LINKAGE_RULE_SET_CAVEAT,
   getDefaultLinkageTerms,
 } from "@psilink/core";
 
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 
@@ -21,6 +21,13 @@ import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
+import {
+  clearManagedExchanges,
+  createManagedExchange,
+  getManagedExchange,
+  persistManagedExchangeScheduleAdvance,
+  updateManagedExchangeLocalFields,
+} from "@psi/managedExchangeStore";
 import { ManagedExchangeDetail } from "@bench/ManagedExchangeDetail";
 import { disclosureEntries } from "@bench/disclosureAccountingModel";
 
@@ -347,6 +354,416 @@ describe("managed exchange detail local fields", () => {
   });
 });
 
+describe("managed exchange detail schedule entry", () => {
+  /** Render the detail sections over `stored`, collecting the edits each save
+   * carries. */
+  function renderEntry(stored?: ManagedExchangeSchedule): {
+    saved: Array<ManagedExchangeLocalEdits>;
+  } {
+    const saved: Array<ManagedExchangeLocalEdits> = [];
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record(
+          "inviter",
+          stored !== undefined ? { schedule: stored } : {},
+        ),
+        accountingRead: { kind: "none" },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onSaveLocalFields: (edits) => {
+          saved.push(edits);
+          return Promise.resolve();
+        },
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+    return { saved };
+  }
+
+  const scheduleCheckbox = () =>
+    page.getByRole("checkbox", {
+      name: "Run this exchange on an agreed schedule",
+    });
+
+  test("scheduling is off by default, and the fields appear only once it is on", async () => {
+    renderEntry();
+
+    await expect.element(scheduleCheckbox()).not.toBeChecked();
+    expect(
+      page.getByLabelText("A window opens every (days)").query(),
+    ).toBeNull();
+
+    await scheduleCheckbox().click();
+
+    await expect
+      .element(page.getByLabelText("A window opens every (days)"))
+      .toBeInTheDocument();
+  });
+
+  test("an entered cadence saves as a schedule, resolved to a stored instant", async () => {
+    const { saved } = renderEntry();
+
+    await scheduleCheckbox().click();
+    await page
+      .getByLabelText("First agreed run window (date)")
+      .fill("2026-08-04");
+    await page.getByLabelText("Time the window opens").fill("09:00");
+    await page.getByLabelText("A window opens every (days)").fill("7");
+    await page.getByLabelText("Each window stays open (hours)").fill("3");
+    await page.getByRole("button", { name: "Save settings" }).click();
+
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    const entered = saved[0].schedule;
+    expect(entered).not.toBeNull();
+    expect(entered?.intervalDays).toBe(7);
+    expect(entered?.windowSeconds).toBe(3 * 3600);
+    // Resolved to the instant the operator's own clock names, which is what both
+    // runners meet at; the wall clock itself is never stored.
+    expect(entered?.anchor).toBe(
+      new Date(2026, 7, 4, 9, 0, 0, 0).toISOString(),
+    );
+    expect(entered?.consecutiveMisses).toBe(0);
+  });
+
+  test("turning scheduling off drops the stored schedule", async () => {
+    const anchor = new Date(Date.now() + 3600_000).toISOString();
+    const { saved } = renderEntry({
+      anchor,
+      intervalDays: 7,
+      windowSeconds: 10_800,
+      nextWindow: anchor,
+      consecutiveMisses: 0,
+    });
+
+    await expect.element(scheduleCheckbox()).toBeChecked();
+    await scheduleCheckbox().click();
+    await page.getByRole("button", { name: "Save settings" }).click();
+
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0].schedule).toBeNull();
+  });
+
+  test("a save that touched only the label carries no schedule edit at all", async () => {
+    // The planned window and the miss count are the runner's bookkeeping; a label
+    // edit must not reset either, must not re-resolve the agreed instant, and must
+    // not write the mount-time object back over what the runner has since advanced.
+    const stored: ManagedExchangeSchedule = {
+      anchor: new Date(2026, 7, 4, 9, 0, 0, 0).toISOString(),
+      intervalDays: 7,
+      windowSeconds: 10_800,
+      nextWindow: new Date(2026, 8, 1, 9, 0, 0, 0).toISOString(),
+      consecutiveMisses: 2,
+    };
+    const { saved } = renderEntry(stored);
+
+    await page
+      .getByRole("textbox", { name: "Label" })
+      .fill("Riverbend monthly");
+    await page.getByRole("button", { name: "Save settings" }).click();
+
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0].label).toBe("Riverbend monthly");
+    expect("schedule" in saved[0]).toBe(false);
+  });
+
+  test("a stored width finer than the field's unit is shown and saved as it is", async () => {
+    // An imported or hand-edited record can carry a width and an anchor at a
+    // finer resolution than the fields hold. Both must survive an edit to some
+    // other field, and the width the operator reads has to be the one their
+    // partner agreed rather than a round number standing in for it.
+    const stored: ManagedExchangeSchedule = {
+      anchor: new Date(2026, 7, 4, 9, 0, 30, 500).toISOString(),
+      intervalDays: 7,
+      windowSeconds: 5400,
+      nextWindow: new Date(2026, 8, 1, 9, 0, 30, 500).toISOString(),
+      consecutiveMisses: 2,
+    };
+    const { saved } = renderEntry(stored);
+
+    await expect
+      .element(page.getByLabelText("Each window stays open (hours)"))
+      .toHaveValue("1.5");
+
+    await page.getByLabelText("A window opens every (days)").fill("14");
+    await page.getByRole("button", { name: "Save settings" }).click();
+
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0].schedule?.intervalDays).toBe(14);
+    expect(saved[0].schedule?.windowSeconds).toBe(5400);
+    expect(saved[0].schedule?.anchor).toBe(stored.anchor);
+  });
+
+  test("a stored width below the entry floor still lets an edit to another field save", async () => {
+    // A width entry's own floor refuses can only arrive from an import or a hand
+    // edit. Holding the operator to it would withhold the label edit in front of
+    // them over a value they never typed, and the form will not rewrite the width
+    // their partner agreed on their behalf either.
+    const stored: ManagedExchangeSchedule = {
+      anchor: new Date(2026, 7, 4, 9, 0, 0, 0).toISOString(),
+      intervalDays: 7,
+      windowSeconds: 60,
+      nextWindow: new Date(2026, 8, 1, 9, 0, 0, 0).toISOString(),
+      consecutiveMisses: 2,
+    };
+    const { saved } = renderEntry(stored);
+
+    await page
+      .getByRole("textbox", { name: "Label" })
+      .fill("Riverbend monthly");
+    await page.getByRole("button", { name: "Save settings" }).click();
+
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0].label).toBe("Riverbend monthly");
+    expect("schedule" in saved[0]).toBe(false);
+  });
+
+  test("a stored width below the entry floor survives a focus and a blur", async () => {
+    // The widget's own clamp is what this turns off: a NumberInput with bounds
+    // rewrites a value outside them when it loses focus, so an operator who
+    // merely tabbed through the width field on their way to the label would
+    // carry the floor into the save and change the width their partner agreed.
+    // The bounds are the entry model's, which states them at the field rather
+    // than editing the value under the operator.
+    const stored: ManagedExchangeSchedule = {
+      anchor: new Date(2026, 7, 4, 9, 0, 0, 0).toISOString(),
+      intervalDays: 7,
+      windowSeconds: 60,
+      nextWindow: new Date(2026, 8, 1, 9, 0, 0, 0).toISOString(),
+      consecutiveMisses: 2,
+    };
+    const { saved } = renderEntry(stored);
+
+    const width = page.getByLabelText("Each window stays open (hours)");
+    await expect.element(width).toBeInTheDocument();
+    const shown = () => (width.element() as HTMLInputElement).value;
+    expect(Number(shown())).toBeCloseTo(60 / 3600, 10);
+
+    await userEvent.click(width);
+    await userEvent.click(page.getByRole("textbox", { name: "Label" }));
+
+    expect(Number(shown())).toBeCloseTo(60 / 3600, 10);
+
+    await page
+      .getByRole("textbox", { name: "Label" })
+      .fill("Riverbend monthly");
+    await page.getByRole("button", { name: "Save settings" }).click();
+
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    // No schedule edit at all is the proof the clamp left the width alone: a
+    // rewritten width would read as an operator edit and rebuild the cadence.
+    expect("schedule" in saved[0]).toBe(false);
+  });
+
+  test("an out-of-range window width blocks the save at its own field", async () => {
+    renderEntry();
+
+    await scheduleCheckbox().click();
+    await page.getByLabelText("Each window stays open (hours)").fill("0");
+
+    // The error names what the width buys rather than only the range, and the
+    // save is withheld until it is fixed -- an unusable cadence must not reach
+    // the store write as a generic failure after the click.
+    await expect
+      .element(page.getByText("clock difference", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Save settings" }))
+      .toBeDisabled();
+  });
+
+  test("a cadence that outruns the max-age bound is surfaced, not silently accepted", async () => {
+    const { saved } = renderEntry();
+
+    await scheduleCheckbox().click();
+    await page.getByLabelText("A window opens every (days)").fill("30");
+    await page
+      .getByRole("checkbox", {
+        name: "Set a maximum age for the stored secret",
+      })
+      .click();
+    await page.getByLabelText("Maximum age in days").fill("7");
+
+    await expect
+      .element(page.getByText("This cadence outruns the maximum age"))
+      .toBeInTheDocument();
+    // The bound's own terms, and the cadence it is weighed against.
+    await expect
+      .element(
+        page.getByText(
+          "must run or be renewed within 7 days, but a run window opens only every 30 days",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+
+    // Surfaced rather than refused: an operator who renews by hand is entitled to
+    // this cadence, and the problem stands beside the save rather than blocking
+    // it.
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0].schedule?.intervalDays).toBe(30);
+    expect(saved[0].tokenMaxAgeDays).toBe(7);
+  });
+
+  test("a cadence inside the bound raises no problem", async () => {
+    renderEntry();
+
+    await scheduleCheckbox().click();
+    await page.getByLabelText("A window opens every (days)").fill("7");
+    await page
+      .getByRole("checkbox", {
+        name: "Set a maximum age for the stored secret",
+      })
+      .click();
+    await page.getByLabelText("Maximum age in days").fill("30");
+
+    await expect
+      .element(page.getByLabelText("Maximum age in days"))
+      .toHaveValue("30");
+    expect(
+      page.getByText("This cadence outruns the maximum age").query(),
+    ).toBeNull();
+  });
+});
+
+describe("managed exchange detail local fields against the real store", () => {
+  // The editor holds the record the page mounted on, while the unattended runner
+  // advances the same record's schedule underneath it. What the save carries has to
+  // be the operator's edit and nothing else, which only a store behind the page can
+  // show: the mount-time snapshot is a valid schedule, so a write-back of it is
+  // accepted by the store and silently rewinds the runner's own bookkeeping.
+  beforeEach(clearManagedExchanges);
+  afterEach(clearManagedExchanges);
+
+  const savingTo = (id: string) => (edits: ManagedExchangeLocalEdits) =>
+    updateManagedExchangeLocalFields(id, edits).then(() => undefined);
+
+  const dailySchedule = (): ManagedExchangeSchedule => {
+    const anchor = new Date(2026, 7, 4, 9, 0, 0, 0).toISOString();
+    return {
+      anchor,
+      intervalDays: 1,
+      windowSeconds: 10_800,
+      nextWindow: anchor,
+      consecutiveMisses: 0,
+    };
+  };
+
+  /** The schedule one missed window later: the plan advanced to the next window
+   * and the miss counted, which is what the runner's own advance writes. */
+  function afterOneMissedWindow(
+    schedule: ManagedExchangeSchedule,
+  ): ManagedExchangeSchedule {
+    return {
+      ...schedule,
+      nextWindow: new Date(
+        Date.parse(schedule.nextWindow) + schedule.intervalDays * 86_400_000,
+      ).toISOString(),
+      consecutiveMisses: schedule.consecutiveMisses + 1,
+    };
+  }
+
+  test("a label-only save leaves the schedule the runner advanced behind the page", async () => {
+    const schedule = dailySchedule();
+    const stored = await createManagedExchange({
+      label: "Riverbend quarterly",
+      exchangeFile: exchangeFile(),
+      side: "inviter",
+      sharedSecret: "A".repeat(43),
+      schedule,
+    });
+
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: stored,
+        accountingRead: { kind: "none" },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onSaveLocalFields: savingTo(stored.id),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+    // The form has read the record before the store moves under it.
+    await expect
+      .element(page.getByLabelText("A window opens every (days)"))
+      .toHaveValue("1");
+
+    // The window opens, nobody arrives, and the runner writes its advance while the
+    // operator's page sits open on the schedule as it stood at mount.
+    const advanced = afterOneMissedWindow(schedule);
+    await persistManagedExchangeScheduleAdvance(stored.id, {
+      schedule: advanced,
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
+    });
+
+    await page
+      .getByRole("textbox", { name: "Label" })
+      .fill("Riverbend monthly");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect.element(page.getByText("Settings saved.")).toBeInTheDocument();
+
+    const saved = await getManagedExchange(stored.id);
+    expect(saved?.label).toBe("Riverbend monthly");
+    // The advance stands: the plan is not rewound to the window already accounted
+    // for, and the miss the escalation counts is not erased.
+    expect(saved?.schedule?.nextWindow).toBe(advanced.nextWindow);
+    expect(saved?.schedule?.consecutiveMisses).toBe(1);
+  });
+
+  test("an edited cadence replaces the schedule, bookkeeping and all", async () => {
+    const schedule = dailySchedule();
+    const stored = await createManagedExchange({
+      label: "Riverbend quarterly",
+      exchangeFile: exchangeFile(),
+      side: "inviter",
+      sharedSecret: "A".repeat(43),
+      schedule,
+    });
+
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: stored,
+        accountingRead: { kind: "none" },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onSaveLocalFields: savingTo(stored.id),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+    await expect
+      .element(page.getByLabelText("A window opens every (days)"))
+      .toHaveValue("1");
+
+    await persistManagedExchangeScheduleAdvance(stored.id, {
+      schedule: afterOneMissedWindow(schedule),
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
+    });
+
+    await page.getByLabelText("A window opens every (days)").fill("7");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect.element(page.getByText("Settings saved.")).toBeInTheDocument();
+
+    // A cadence the operator did edit is a new lattice, so the count the old one
+    // accumulated goes with it -- the omission above is scoped to a cadence nobody
+    // touched, not a general refusal to write the schedule.
+    const saved = await getManagedExchange(stored.id);
+    expect(saved?.schedule?.intervalDays).toBe(7);
+    expect(saved?.schedule?.consecutiveMisses).toBe(0);
+    expect(saved?.schedule?.anchor).toBe(schedule.anchor);
+  });
+});
+
 describe("managed exchange detail run schedule", () => {
   /** A daily cadence with a three-hour window, anchored `opensInMs` from the real
    * clock the section reads: negative puts the window's open in the past, so a
@@ -423,29 +840,33 @@ describe("managed exchange detail run schedule", () => {
       .toBeInTheDocument();
   });
 
-  test("the section promises no run this browser will not make", async () => {
+  test("the section promises no run this tab will not make, and points at the editor", async () => {
+    // The suite runs in an ordinary browser tab rather than an installed app, so
+    // the honest reading here is the one that promises nothing.
     renderWithSchedule(schedule(-60 * 60 * 1000));
 
     await expect
       .element(
-        page.getByText(
-          "A window that opens while this browser is closed passes without a run",
-          { exact: false },
-        ),
+        page.getByText("never runs this exchange on its own", { exact: false }),
       )
       .toBeInTheDocument();
-    // No schedule-entry surface exists, so the section says so rather than
-    // implying an editor is somewhere else on the page.
+    // The cadence is editable, in the local-fields form above, and the section
+    // names where rather than implying it is nowhere.
     await expect
       .element(
-        page.getByText("Changing it is not offered here yet", { exact: false }),
+        page.getByText("Change it under Local settings above", {
+          exact: false,
+        }),
       )
       .toBeInTheDocument();
   });
 
   test("a record holding no input handle says nothing can run with nobody present", async () => {
-    // A record built here carries no File System Access handle, which is the state
-    // of every record on a browser without the API and of every imported one.
+    // A scheduled record and a persisted input handle are independent: this one
+    // carries a cadence and no File System Access handle, which is the state of
+    // every record on a browser without the API and of every imported one. The
+    // note is what the runner's own silent skip of such a record owes the
+    // operator.
     renderWithSchedule(schedule(-60 * 60 * 1000));
 
     await expect

@@ -26,6 +26,10 @@
  */
 
 import {
+  MAX_SCHEDULE_INTERVAL_DAYS,
+  MAX_SCHEDULE_WINDOW_SECONDS,
+} from "@psi/managedExchangeRecord";
+import {
   MAX_TIME_VALUE,
   managedScheduleWindow,
   managedScheduleWindowStateAt,
@@ -44,9 +48,9 @@ import type { ManagedExchangeSchedule } from "@psi/managedExchangeRecord";
  */
 export const REPEATED_MISS_ESCALATION = 2;
 
-/** Where the recurrence stands at an instant: a window open right now, the next
- * one ahead, or a lattice whose windows fall on no renderable calendar. The first
- * two carry their instants phrased in the operator's local display format. */
+/** Where the recurrence stands at an instant: a window open right now, or the
+ * next one ahead. Both carry their instants phrased in the operator's local
+ * display format. */
 export type ScheduleDueness =
   | {
       state: "open";
@@ -59,20 +63,17 @@ export type ScheduleDueness =
       state: "upcoming";
       /** The instant the next window opens. */
       opensAt: string;
-    }
-  | { state: "unreadable" };
+    };
 
-/** An instant phrased for display, or `undefined` for one no calendar carries.
- * The record's schema puts no ceiling on `intervalDays` or `windowSeconds`, so a
- * hand-edited or imported schedule can place its next window past every calendar
- * there is ({@link MAX_TIME_VALUE}); `Intl` refuses such a value rather than
- * rendering it, which would take the whole list down over one row.
- * {@link scheduleDueness} reads that as its own state instead. */
-function phraseInstant(ms: number): string | undefined {
-  return Number.isFinite(ms) && Math.abs(ms) <= MAX_TIME_VALUE
-    ? dateTimeLabel(new Date(ms))
-    : undefined;
-}
+/**
+ * The widest span a window instant can sit past `now`: one full period plus one
+ * full width, both at the record schema's ceiling. Every instant
+ * {@link scheduleDueness} phrases lies inside it, since the window it names is
+ * either the one containing `now` or the first one after it, so a `now` this far
+ * inside the representable range guarantees a renderable window.
+ */
+const MAX_WINDOW_REACH_MS =
+  MAX_SCHEDULE_INTERVAL_DAYS * 86_400_000 + MAX_SCHEDULE_WINDOW_SECONDS * 1000;
 
 /**
  * Where `schedule` stands at `now`, read off the recurrence lattice rather than
@@ -80,14 +81,28 @@ function phraseInstant(ms: number): string | undefined {
  * advances, so a browser that has not been running the schedule carries a stale
  * one, while the lattice states where the agreed windows really fall.
  *
+ * Every instant returned is renderable, so neither surface carries a fallback for
+ * a schedule whose windows no calendar has: the record schema caps `intervalDays`
+ * and `windowSeconds`, which bounds how far past `now` a window can fall, and the
+ * guard below bounds `now` itself. That pairing is what makes an unrenderable
+ * window unreachable rather than merely unlikely.
+ *
  * @throws {RangeError} if the schedule's lattice is unusable -- an anchor that is
  *   not a UTC instant, or a period or width outside the record schema's bounds
- *   (see {@link managedScheduleWindow}).
+ *   (see {@link managedScheduleWindow}) -- or if `now` sits so near the end of the
+ *   representable instant range that the window it names falls past it.
  */
 export function scheduleDueness(
   schedule: ManagedExchangeSchedule,
   now: number,
 ): ScheduleDueness {
+  if (
+    !Number.isFinite(now) ||
+    Math.abs(now) > MAX_TIME_VALUE - MAX_WINDOW_REACH_MS
+  )
+    throw new RangeError(
+      "managed schedule cannot be read at an instant this near the end of the representable range",
+    );
   const upcoming = nextManagedScheduleWindowAfter(schedule, now);
   // The next window opens strictly after `now`, so the one before it is the only
   // window `now` can sit inside -- and before window 0 there is none to sit in.
@@ -95,28 +110,24 @@ export function scheduleDueness(
     upcoming.index > 0
       ? managedScheduleWindow(schedule, upcoming.index - 1)
       : undefined;
-  if (
-    current !== undefined &&
+  return current !== undefined &&
     managedScheduleWindowStateAt(current, now) === "open"
-  ) {
-    const opensAt = phraseInstant(current.opensAtMs);
-    const closesAt = phraseInstant(current.closesAtMs);
-    return opensAt !== undefined && closesAt !== undefined
-      ? { state: "open", opensAt, closesAt }
-      : { state: "unreadable" };
-  }
-  const opensAt = phraseInstant(upcoming.opensAtMs);
-  return opensAt !== undefined
-    ? { state: "upcoming", opensAt }
-    : { state: "unreadable" };
+    ? {
+        state: "open",
+        opensAt: dateTimeLabel(new Date(current.opensAtMs)),
+        closesAt: dateTimeLabel(new Date(current.closesAtMs)),
+      }
+    : {
+        state: "upcoming",
+        opensAt: dateTimeLabel(new Date(upcoming.opensAtMs)),
+      };
 }
 
 /** The one-line phrasing of {@link scheduleDueness} both surfaces carry. It
  * states where the window is and promises no run: whether anything runs is the
- * operator's own visit, and the notes beside this line say so. */
+ * operator's own visit or this runtime's own attendance, and the notes beside
+ * this line say which. */
 export function scheduleDueLine(dueness: ScheduleDueness): string {
-  if (dueness.state === "unreadable")
-    return "This exchange's agreed schedule names no window on any calendar this can show; check it against the cadence you agreed with your partner.";
   return dueness.state === "open"
     ? `Run window open now, until ${dueness.closesAt}`
     : `Next run window: ${dueness.opensAt}`;
@@ -174,14 +185,39 @@ export function repeatedMissCoordination(
 }
 
 /**
- * What this browser does with an agreed schedule, said wherever one is surfaced.
+ * What an INSTALLED app runtime does with an agreed schedule. The unattended
+ * runner starts only there, so this is the one reading on which "runs on its own"
+ * is a true statement -- and it stays bounded by what the runtime can promise: an
+ * app that is not running when a window opens meets nothing, and a partner who
+ * does not arrive leaves the window a benign miss.
+ */
+export const SCHEDULE_ATTENDANCE_NOTE_INSTALLED =
+  "This app is installed, so it runs this exchange itself at each agreed window while it is open, with nobody present. A window that opens while the app is closed passes without a run, so leave it running (or launch it at sign-in) if you want the schedule met unattended.";
+
+/**
+ * What an ORDINARY browser tab does with an agreed schedule: nothing on its own.
  *
  * It states the limit and the operator's move, and promises no run: a window that
  * arrives while nothing is open here is simply a window that passes, and the copy
- * must not read as an assurance that something attended to it.
+ * must not read as an assurance that something attended to it. It names the
+ * installed app as the way out, which is the honest degradation rather than a
+ * capability this tab is withholding.
  */
-export const SCHEDULE_ATTENDANCE_NOTE =
-  "A window that opens while this browser is closed passes without a run. Come back during a window and run this exchange to keep the partnership meeting.";
+export const SCHEDULE_ATTENDANCE_NOTE_TAB =
+  "This is an ordinary browser tab, which never runs this exchange on its own: a window that opens passes without a run unless you run it here. Come back during a window and run this exchange, or install this app and leave it running to have it meet the windows for you.";
+
+/**
+ * The attendance note for the runtime the operator is actually looking at. The
+ * two readings are different facts rather than different wordings of one -- the
+ * unattended runner starts in the installed app and in nothing else -- so the
+ * surfaces branch on the runtime rather than carrying one hedged line for both
+ * (docs/MANAGED_EXCHANGE.md, "The automation goal and its platform envelope").
+ */
+export function scheduleAttendanceNote(installedRuntime: boolean): string {
+  return installedRuntime
+    ? SCHEDULE_ATTENDANCE_NOTE_INSTALLED
+    : SCHEDULE_ATTENDANCE_NOTE_TAB;
+}
 
 /**
  * The standing consequence of holding no pointer to the operator's input file: a

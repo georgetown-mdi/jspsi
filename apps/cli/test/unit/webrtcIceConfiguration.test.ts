@@ -5,6 +5,7 @@ import { UsageError } from "@psilink/core";
 import {
   NO_ICE_SERVERS_WARNING,
   PLAINTEXT_SIGNALING_WARNING,
+  WERIFT_BUILT_IN_STUN_URI,
   brokerLocationFromConnection,
   buildPeerConfiguration,
   iceServersFromConnection,
@@ -98,8 +99,10 @@ test.each([
 
 test("the warning names the default, what it discloses, and how to override", () => {
   // An operator reading one line has to be able to act on it, so this pins the
-  // content rather than merely that something was logged.
-  expect(NO_ICE_SERVERS_WARNING).toContain("stun.l.google.com:19302");
+  // content rather than merely that something was logged. The endpoint it names
+  // is the measured one -- what werift actually falls back to is held by the
+  // integration suite, and this holds the warning to that value.
+  expect(NO_ICE_SERVERS_WARNING).toContain(WERIFT_BUILT_IN_STUN_URI);
   expect(NO_ICE_SERVERS_WARNING).toContain("public address");
   expect(NO_ICE_SERVERS_WARNING).toContain("`stun`");
   expect(NO_ICE_SERVERS_WARNING).toContain("`turn`");

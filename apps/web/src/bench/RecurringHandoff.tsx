@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { Anchor, Button, CopyButton } from "@mantine/core";
+import { Anchor } from "@mantine/core";
 
 import {
   fetchRecurringHandoff,
@@ -9,6 +9,9 @@ import {
 } from "@psi/recurringHandoff";
 
 import { DisclosureSection } from "../components/DisclosureSection";
+
+import { cronScheduleLine, taskSchedulerLine } from "./scheduleTemplates";
+import { CopyableCode } from "./CopyableCode";
 import styles from "./bench.module.css";
 
 import type { JobHandoff } from "@jobs/handoff";
@@ -89,11 +92,9 @@ function HandoffBody({ handoff }: { handoff: JobHandoff }) {
     handoff.template.kind === "command"
       ? shellJoinCommand(handoff.template.argv)
       : "psilink exchange input.csv results.csv";
-  // Inside /TR "...", schtasks needs the command's own double quotes escaped as
-  // \" so its argv parse preserves them for the scheduled cmd to re-read.
   const windowsScheduledCommand =
     handoff.template.kind === "command"
-      ? windowsJoinCommand(handoff.template.argv).replace(/"/g, '\\"')
+      ? windowsJoinCommand(handoff.template.argv)
       : runCommand;
 
   return (
@@ -119,13 +120,13 @@ function HandoffBody({ handoff }: { handoff: JobHandoff }) {
         Schedule it (adjust the times and paths)
       </h3>
       <p className={styles.small}>cron (Linux/macOS), daily at 2am:</p>
-      <HandoffCode
-        code={`0 2 * * * cd /path/to/your/exchange-folder && ${runCommand}`}
+      <CopyableCode
+        code={cronScheduleLine(runCommand)}
         ariaLabel="cron schedule line"
       />
       <p className={styles.small}>Windows Task Scheduler, daily at 2am:</p>
-      <HandoffCode
-        code={`schtasks /Create /TN "psilink exchange" /SC DAILY /ST 02:00 /TR "cmd /c cd /d C:\\path\\to\\your\\exchange-folder && ${windowsScheduledCommand}"`}
+      <CopyableCode
+        code={taskSchedulerLine(windowsScheduledCommand)}
         ariaLabel="Windows Task Scheduler command"
       />
       <p className={styles.small}>
@@ -170,7 +171,7 @@ function ConfigSteps({
         <p className={styles.handoffStepLabel}>
           Save this as psilink.yaml in a folder on the scheduling machine
         </p>
-        <HandoffCode code={yaml} ariaLabel="psilink.yaml configuration" />
+        <CopyableCode code={yaml} ariaLabel="psilink.yaml configuration" />
       </li>
       {usedKeyFile && (
         <li>
@@ -206,7 +207,7 @@ function ConfigSteps({
       )}
       <li>
         <p className={styles.handoffStepLabel}>Run the exchange</p>
-        <HandoffCode
+        <CopyableCode
           code="psilink exchange input.csv results.csv"
           ariaLabel="recurring exchange command"
         />
@@ -229,7 +230,7 @@ function CommandSteps({ command }: { command: string }) {
       <h3 className={styles.handoffHeading}>
         Run this command on the scheduling machine
       </h3>
-      <HandoffCode
+      <CopyableCode
         code={command}
         ariaLabel="recurring Direct exchange command"
       />
@@ -277,36 +278,5 @@ function Caveats({ handoff }: { handoff: JobHandoff }) {
         )}
       </ul>
     </>
-  );
-}
-
-/** A preformatted, copyable code block: the config/command shown whole (with
- * horizontal scroll for long lines) beside a copy button. The clipboard check is
- * defence-in-depth for a non-secure origin, where the block is still selectable by
- * hand. */
-function HandoffCode({ code, ariaLabel }: { code: string; ariaLabel: string }) {
-  return (
-    <div className={styles.handoffCodeRow}>
-      <pre className={`${styles.handoffCode} ${styles.mono}`}>{code}</pre>
-      {
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        typeof navigator !== "undefined" && navigator.clipboard ? (
-          <CopyButton value={code} timeout={1500}>
-            {({ copied, copy }) => (
-              <Button
-                variant="default"
-                size="compact-sm"
-                onClick={copy}
-                aria-label={
-                  copied ? `${ariaLabel} copied` : `Copy ${ariaLabel}`
-                }
-              >
-                {copied ? "Copied" : "Copy"}
-              </Button>
-            )}
-          </CopyButton>
-        ) : null
-      }
-    </div>
   );
 }

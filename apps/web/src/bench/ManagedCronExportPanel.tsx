@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { Alert, Anchor, Button, CopyButton } from "@mantine/core";
+import { Alert, Anchor, Button } from "@mantine/core";
 
 import { DisclosureSection } from "@components/DisclosureSection";
 import { triggerBlobDownload } from "@components/blobDownload";
@@ -15,12 +15,16 @@ import {
 } from "@psi/managedExchangeStore";
 
 import {
+  CLI_BUILT_IN_STUN_URI,
+  managedCronExportPanelState,
+} from "./managedCronExportModel";
+import {
   RUN_IN_FLIGHT_HANDOFF_REASON,
   RUN_IN_FLIGHT_HANDOFF_TITLE,
   SUPERSEDED_HANDOFF_REASON,
   SUPERSEDED_HANDOFF_TITLE,
 } from "./managedHandoffGate";
-import { managedCronExportPanelState } from "./managedCronExportModel";
+import { CopyableCode } from "./CopyableCode";
 import styles from "./bench.module.css";
 
 import type { ManagedCronExportDispatch } from "@psi/managedExchangeExport";
@@ -244,7 +248,7 @@ export function ManagedCronExportPanel({
               </li>
               <li>
                 <p className={styles.handoffStepLabel}>Run it there</p>
-                <ExportCode
+                <CopyableCode
                   code={state.composed.command}
                   ariaLabel="exchange command"
                 />
@@ -256,14 +260,14 @@ export function ManagedCronExportPanel({
                 <p className={styles.small}>
                   cron (Linux/macOS), daily at 2am:
                 </p>
-                <ExportCode
+                <CopyableCode
                   code={state.cronLine}
                   ariaLabel="cron schedule line"
                 />
                 <p className={styles.small}>
                   Windows Task Scheduler, daily at 2am:
                 </p>
-                <ExportCode
+                <CopyableCode
                   code={state.taskSchedulerLine}
                   ariaLabel="Windows Task Scheduler command"
                 />
@@ -279,12 +283,12 @@ export function ManagedCronExportPanel({
             <ul className={styles.small}>
               <li>
                 This exchange names no STUN server, so every scheduled run uses
-                the built-in default (stun:stun.l.google.com:19302) to discover
-                that machine&apos;s public address. The address, and the fact
-                that a session is happening, are disclosed to that server; no
-                exchange content is. Each run warns about it. Add a stun entry
-                to the connection in {state.composed.config.fileName} to use
-                your own server instead.
+                the built-in default ({CLI_BUILT_IN_STUN_URI}) to discover that
+                machine&apos;s public address. The address, and the fact that a
+                session is happening, are disclosed to that server; no exchange
+                content is. Each run warns about it. Add a stun entry to the
+                connection in {state.composed.config.fileName} to use your own
+                server instead.
               </li>
               <li>
                 The schedule you agreed with your partner does not travel in
@@ -365,36 +369,6 @@ export function ManagedCronExportPanel({
           </>
         )}
       </DisclosureSection>
-    </div>
-  );
-}
-
-/** A preformatted, copyable line: the command shown whole (with horizontal scroll
- * for long lines) beside a copy button. The clipboard check is defence-in-depth for
- * a non-secure origin, where the block is still selectable by hand. */
-function ExportCode({ code, ariaLabel }: { code: string; ariaLabel: string }) {
-  return (
-    <div className={styles.handoffCodeRow}>
-      <pre className={`${styles.handoffCode} ${styles.mono}`}>{code}</pre>
-      {
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        typeof navigator !== "undefined" && navigator.clipboard ? (
-          <CopyButton value={code} timeout={1500}>
-            {({ copied, copy }) => (
-              <Button
-                variant="default"
-                size="compact-sm"
-                onClick={copy}
-                aria-label={
-                  copied ? `${ariaLabel} copied` : `Copy ${ariaLabel}`
-                }
-              >
-                {copied ? "Copied" : "Copy"}
-              </Button>
-            )}
-          </CopyButton>
-        ) : null
-      }
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createSocket } from "node:dgram";
 import dns from "node:dns";
 
 import { RTCPeerConnection } from "werift";
@@ -7,7 +8,10 @@ import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
 import { ConnectionError, generateSharedSecret } from "@psilink/core";
 
 import { openWebRtcMessageConnection } from "../../../src/connection/webrtc/webrtcMessageConnection";
-import { openWebRtcPeerSession } from "../../../src/connection/webrtc/weriftPeer";
+import {
+  WERIFT_BUILT_IN_STUN_URI,
+  openWebRtcPeerSession,
+} from "../../../src/connection/webrtc/weriftPeer";
 import { PEERJS_CHUNK_MTU } from "../../../src/connection/webrtc/peerjsWire";
 import { startBrokerProcess } from "../../signaling/brokerProcess";
 
@@ -29,7 +33,10 @@ import type { MessageConnection } from "@psilink/core";
  * unreachable STUN entry, which is both the no-STUN idiom the transport
  * documents and the only workable choice in a firewalled container. Leaving
  * `iceServers` empty would select werift's built-in Google default, which
- * cannot be reached from here.
+ * cannot be reached from here. The two tests that must drive that default --
+ * whether a configured list suppresses it, and which endpoint it addresses --
+ * intercept the resolver instead, so the default is exercised without a packet
+ * leaving the machine.
  */
 
 /**
@@ -38,6 +45,18 @@ import type { MessageConnection } from "@psilink/core";
  * makes it the list actually used rather than the built-in default.
  */
 const HOST_ONLY_ICE = [{ urls: "stun:127.0.0.1:3478" }];
+
+/**
+ * The two halves of the endpoint the transport names as werift's built-in
+ * default, split out of the one constant that holds it so the measurements below
+ * cannot drift from what an operator is told.
+ */
+const BUILT_IN_STUN = ((uri: string) => {
+  const parsed = /^stun:(?<host>[^:]+):(?<port>\d+)$/.exec(uri)?.groups;
+  if (parsed === undefined)
+    throw new Error(`built-in STUN URI is not a stun:host:port URI: ${uri}`);
+  return { host: parsed.host, port: Number(parsed.port) };
+})(WERIFT_BUILT_IN_STUN_URI);
 
 let broker: BrokerProcess;
 const openConnections: Array<MessageConnection> = [];
@@ -253,14 +272,84 @@ test("a configured iceServers list suppresses werift's built-in Google STUN defa
   // is not also silently disclosing their public IP to Google's default. Held by
   // werift's own DNS resolution -- the default resolves stun.l.google.com, a
   // configured list does not.
-  const GOOGLE_STUN_HOST = "stun.l.google.com";
   const withDefault = await stunHostsLookedUp({});
-  expect([...withDefault]).toContain(GOOGLE_STUN_HOST);
+  expect([...withDefault]).toContain(BUILT_IN_STUN.host);
 
   const withConfigured = await stunHostsLookedUp({
     iceServers: [{ urls: "stun:127.0.0.1:3478" }],
   });
-  expect([...withConfigured]).not.toContain(GOOGLE_STUN_HOST);
+  expect([...withConfigured]).not.toContain(BUILT_IN_STUN.host);
+}, 60_000);
+
+/**
+ * Every STUN binding request a peer built with no `iceServers` sends to the
+ * endpoint {@link WERIFT_BUILT_IN_STUN_URI} names, observed on a loopback socket
+ * bound to that port. The default's hostname resolves to loopback for the
+ * duration, so both halves of the endpoint are measured -- the host through the
+ * resolver werift asks, the port through the datagram it addresses -- and no
+ * packet leaves the machine.
+ */
+async function builtInStunRequests(): Promise<Array<Buffer>> {
+  const received: Array<Buffer> = [];
+  const realPromiseLookup = dns.promises.lookup;
+  const realCallbackLookup = dns.lookup;
+  (dns.promises as { lookup: unknown }).lookup = async (
+    hostname: string,
+  ): Promise<{ address: string; family: number }> => {
+    if (hostname !== BUILT_IN_STUN.host)
+      throw new Error(`unexpected lookup of ${hostname}`);
+    return { address: "127.0.0.1", family: 4 };
+  };
+  (dns as { lookup: unknown }).lookup = (
+    hostname: string,
+    options: unknown,
+    callback: unknown,
+  ): void => {
+    const cb = (typeof options === "function" ? options : callback) as (
+      err: Error | null,
+      address?: string,
+      family?: number,
+    ) => void;
+    if (hostname !== BUILT_IN_STUN.host)
+      cb(new Error(`unexpected lookup of ${hostname}`));
+    else cb(null, "127.0.0.1", 4);
+  };
+  const socket = createSocket("udp4");
+  socket.on("message", (message) => received.push(message));
+  await new Promise<void>((resolve) =>
+    socket.bind(BUILT_IN_STUN.port, "127.0.0.1", resolve),
+  );
+  const peer = new RTCPeerConnection({});
+  try {
+    peer.createDataChannel("dc_default_endpoint", { ordered: true });
+    await peer.setLocalDescription(await peer.createOffer());
+    // The first request goes out within milliseconds of gathering starting, and
+    // werift retransmits; this window is orders of magnitude above that, so an
+    // empty result means the endpoint moved, not that the test was impatient.
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+  } finally {
+    (dns.promises as { lookup: unknown }).lookup = realPromiseLookup;
+    (dns as { lookup: unknown }).lookup = realCallbackLookup;
+    await peer.close();
+    socket.close();
+  }
+  return received;
+}
+
+test("the built-in default is the endpoint the warning and the export panel name", async () => {
+  // WERIFT_BUILT_IN_STUN_URI is a first-party copy of a library fact, and the
+  // operator reads it as a confidentiality statement before handing a secret to a
+  // scheduler. Driving the library is the only honest way to hold it: a peer with
+  // no configured list must address its binding requests to exactly this host and
+  // this port.
+  const requests = await builtInStunRequests();
+  expect(requests.length).toBeGreaterThan(0);
+  // Message type 0x0001 (binding request) and the RFC 5389 magic cookie, so an
+  // unrelated datagram arriving on the port cannot stand in for the measurement.
+  for (const request of requests) {
+    expect(request.readUInt16BE(0)).toBe(0x0001);
+    expect(request.readUInt32BE(4)).toBe(0x2112a442);
+  }
 }, 60_000);
 
 test("an over-cap inbound frame fails the connection closed", async () => {

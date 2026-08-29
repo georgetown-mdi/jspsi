@@ -20,41 +20,27 @@ import { sanitizeErrorForDisplay } from "@psilink/core";
 
 import { composeManagedCronExport } from "@psi/managedCronExport";
 
+import { cronScheduleLine, taskSchedulerLine } from "./scheduleTemplates";
+
 import type { ManagedCronExport } from "@psi/managedCronExport";
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 
-/** The folder placeholder the POSIX schedule line changes into. The exported files
- * carry no path of their own -- the command reads its config and key from the
- * working directory -- so the one machine-specific value is where the operator put
- * them. */
-const POSIX_FOLDER_PLACEHOLDER = "/path/to/your/exchange-folder";
-
-/** The Windows counterpart of {@link POSIX_FOLDER_PLACEHOLDER}. */
-const WINDOWS_FOLDER_PLACEHOLDER = "C:\\path\\to\\your\\exchange-folder";
-
 /**
- * The cron line that runs `command` daily at 2am from the folder holding the two
- * exported files.
- */
-export function cronScheduleLine(command: string): string {
-  return `0 2 * * * cd ${POSIX_FOLDER_PLACEHOLDER} && ${command}`;
-}
-
-/**
- * The Windows Task Scheduler command that registers `command` daily at 2am from the
- * folder holding the two exported files.
+ * The STUN server the exported invocation falls back to, disclosed on the panel
+ * because a managed connection configures no ICE server of its own: every
+ * scheduled run tells this server the scheduling host's public address.
  *
- * `command` is interpolated into the `/TR "..."` argument, so a double quote inside
- * it would end that argument early. The composed invocation carries none (it is the
- * CLI's own verb plus two fixed file names), which the model's unit suite asserts
- * rather than this line escaping a case that cannot arise.
+ * It is werift's built-in default, and the CLI is where that fact is owned and
+ * measured against the real library
+ * (`WERIFT_BUILT_IN_STUN_URI` in apps/cli/src/connection/webrtc/weriftPeer.ts,
+ * driven in the CLI's WebRTC integration suite). An app may not import from
+ * another app, so this copy is held to that one by
+ * `npm run check:stun-default-claims` rather than derived from it.
+ *
+ * Not the web app's own ICE list (`@psi/rendezvous`), which is a different list
+ * for exchanges this browser runs itself.
  */
-export function taskSchedulerLine(command: string): string {
-  return (
-    `schtasks /Create /TN "psilink exchange" /SC DAILY /ST 02:00 ` +
-    `/TR "cmd /c cd /d ${WINDOWS_FOLDER_PLACEHOLDER} && ${command}"`
-  );
-}
+export const CLI_BUILT_IN_STUN_URI = "stun:stun.l.google.com:19302";
 
 /**
  * What the panel renders for a record: the composed export and its schedule lines,

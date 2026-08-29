@@ -239,11 +239,6 @@ re-invite if it lands an already-lapsed bound (the standing recovery for a lapse
 
 ### The schedule object
 
-> **Not yet reachable:** the runner that reads and advances this object is
-> built, and executes a due window in an installed app runtime. No surface
-> enters a schedule yet, so no stored record carries one and nothing is due; a
-> record acquires a `schedule` when schedule entry ships.
-
 The optional `schedule` object carries the partnership-agreed run cadence, the
 run window the two runners meet in, and the miss bookkeeping the retry policy
 reads. It is present only when the operator saved the exchange as recurring;
@@ -254,8 +249,8 @@ analysis](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape) covers.
 | Field | Type | Notes |
 | ----- | ---- | ----- |
 | `anchor` | string (ISO 8601, UTC `Z`) | The instant of the first agreed window's open, the phase the recurrence counts from. Both parties persist the **same** `anchor`, agreed out-of-band with the rest of the schedule, so both runners compute the same window opens. Stored UTC; a local-time cadence ("09:00 Tuesdays") is resolved to UTC at save and re-resolved only when the operator edits the schedule, so a daylight-saving shift does not silently move an unattended window. |
-| `intervalDays` | integer, at least 1 | The recurrence period in whole days: the run window opens every `intervalDays` after `anchor`. A whole-day integer covers the daily, weekly, and monthly-approximated (for example 28- or 30-day) cadences the persona runs; sub-day cadences are out of scope for a partnership coordinated out-of-band, and calendar-month recurrence (the drifting "1st of the month") is deliberately not modeled -- an integer period keeps both runners' window computation identical without a shared calendar library. |
-| `windowSeconds` | integer, at least 1 | The run window's width: window *n* is open from `anchor + n * intervalDays` for `windowSeconds`. The width is chosen to dwarf realistic clock skew between the two machines (see [Clock skew](#clock-skew-and-the-window-width)); a several-hour width is the intended range, not a several-minute one. The structural floor is one second, but schedule entry enforces a UX-level minimum on the order of an hour: width is the only skew mitigation the design has, so a seconds-wide window would guarantee perpetual self-inflicted misses. |
+| `intervalDays` | integer, **1 through 366** | The recurrence period in whole days: the run window opens every `intervalDays` after `anchor`. A whole-day integer covers the daily, weekly, and monthly-approximated (for example 28- or 30-day) cadences the persona runs; sub-day cadences are out of scope for a partnership coordinated out-of-band, and calendar-month recurrence (the drifting "1st of the month") is deliberately not modeled -- an integer period keeps both runners' window computation identical without a shared calendar library. The ceiling is an annual cadence, the longest a partnership recurrence means anything at; it is also what keeps every window a surface renders on a calendar that exists (see [Every admitted schedule renders](#every-admitted-schedule-renders)). |
+| `windowSeconds` | integer, **1 through 43200** | The run window's width: window *n* is open from `anchor + n * intervalDays` for `windowSeconds`. The width is chosen to dwarf realistic clock skew between the two machines (see [Clock skew](#clock-skew-and-the-window-width)); a several-hour width is the intended range, not a several-minute one. The structural floor is one second, but schedule entry enforces a UX-level minimum of **one hour**: width is the only skew mitigation the design has, so a seconds-wide window would guarantee perpetual self-inflicted misses. The ceiling is twelve hours, which sits below the shortest period the `intervalDays` floor admits, so no schedule this schema accepts can place two windows over one instant. |
 | `nextWindow` | string (ISO 8601, UTC `Z`) | The open instant of the next window the runner plans to attempt. Derived from `anchor`, `intervalDays`, and the run bookkeeping (advanced past a completed or missed window), it is persisted rather than recomputed so a reader -- the runtime waking, or a next-visit surface -- sees the planned attempt without replaying history. After a miss it is the **next** window, never a sooner off-schedule retry: retry-at-next-window is the whole retry policy (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)). A runtime that wakes to find it in the past applies the catch-up rule below before anything else (see [Catch-up on wake](#catch-up-on-wake)). |
 | `consecutiveMisses` | integer, at least 0 | The count of consecutive agreed windows that passed without a completed handshake, **regardless of which side was absent**: a window this runner sat out waiting for a peer that never arrived counts exactly as one this runner itself slept through (the latter recorded retroactively; see [Catch-up on wake](#catch-up-on-wake)). A `"succeeded"` outcome resets it to 0; a `"missed"` outcome increments it; **any other outcome leaves it unchanged**, because only a no-show signals the two runners are not meeting. A handshake that ran and failed (`"failed"`/`"desynced"`) means the partnership *did* meet, so it is a desync/attack question, not a coordination-drift one; a benign pre-peer failure (an `"input"` or `"terms-shortfall"` refusal) is likewise not a partner no-show. It drives only the surfacing of a repeated-miss coordination problem, whose escalated state fires at **two** consecutive misses (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)); it never pauses the schedule and never changes `nextWindow`'s cadence. |
 
@@ -267,13 +262,11 @@ policy needs.
 
 Window *n* is the half-open interval from `anchor + n * intervalDays` to
 `windowSeconds` later: an instant exactly at the close belongs to no window, so
-a window is elapsed the moment it closes and, while `windowSeconds` does not
-exceed the period `intervalDays` spans, two consecutive windows never both
-contain the same instant. The schema does not yet tie the two fields together,
-so a hand-edited or imported schedule can carry overlapping windows; there a
-run's instant is credited to the latest window containing it, and an earlier
-overlapping window it also fell in still counts as missed. Every open is
-computed by fixed-millisecond arithmetic
+a window is elapsed the moment it closes. Two consecutive windows never both
+contain the same instant, which the two fields' own ceilings and floors settle
+rather than a cross-field rule: the widest admitted `windowSeconds` is twelve
+hours and the shortest admitted period is one day, so a width can never reach
+the next open. Every open is computed by fixed-millisecond arithmetic
 from the stored UTC `anchor`, never by a local-calendar date add -- a calendar
 add moves the instant by the offset change on the week a party's zone shifts,
 which is exactly when two runners can least afford to stop overlapping. The host
@@ -298,11 +291,89 @@ a benign coordination failure, never a desync or an attack. The operational
 framing is in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#where-the-schedule-is-agreed-and-where-it-lives).
 
-#### Catch-up on wake
+Entry is implemented in `apps/web/src/bench/scheduleEntryModel.ts` (the
+validation, the resolution, and the cross-field condition) over the arithmetic in
+`apps/web/src/psi/managedSchedule.ts`; the form itself is the local-fields editor
+in `apps/web/src/bench/ManagedExchangeDetail.tsx`, which writes the schedule
+through the store's one local-fields edit alongside the label and the max-age
+policy.
 
-> **Not yet reachable:** the runner applying this rule is built and runs in an
-> installed app runtime; until schedule entry ships, no stored record carries a
-> `schedule` for it to advance.
+#### What entry writes
+
+Entry composes the whole object from four values the operator types -- the first
+agreed window's local date and time of day, the period in days, and the width in
+hours -- plus three rules that are entry's alone:
+
+- **The anchor is resolved once.** The host zone is read here and nowhere else,
+  turning the wall-clock cadence into the stored UTC `anchor` (see the `anchor`
+  row). Re-opening the form reads the anchor back on the operator's own clock,
+  and a save that left every cadence field as it was **writes no schedule at
+  all** rather than resolving again: a wall clock a zone skips or repeats does
+  not round-trip, so re-resolving on an unrelated save (a label edit, a max-age
+  change) could walk the agreed instant away from the partner's. Omitting the
+  field, rather than writing back the object the form opened on, is what keeps
+  such a save off the runner's bookkeeping too: `nextWindow` and
+  `consecutiveMisses` live in this same object and advance under a page left
+  open, so a mount-time snapshot written back would rewind them to a window
+  already accounted for. The carry-through is **per field**, not all-or-nothing:
+  a save that edited one cadence field takes the anchor and the width from the
+  stored object verbatim while the fields displaying them are untouched, and
+  writes the rebuilt schedule because the operator moved something. The fields
+  hold the cadence to the minute and the width to the hour, coarser than the
+  record stores either, so re-deriving them from what they display would rewrite
+  a stored value at a resolution the operator never saw -- an edit to the period
+  alone silently moving an agreed anchor or width.
+- **`nextWindow` is the first window not yet closed at the save**, not the
+  anchor's own window. A cadence anchored to a date already past would otherwise
+  hand [catch-up](#catch-up-on-wake) every window that elapsed before the
+  partnership agreed the cadence, and count each one a miss it never had.
+  Entering a cadence while one of its windows is already open plans **that**
+  window, so the run in progress can meet it.
+- **`consecutiveMisses` starts at 0** on an edited cadence. The stored count
+  speaks for windows on the lattice the edit replaced.
+
+Entry also enforces the field bounds in the table above as its own validation, so
+an out-of-range value is refused at the field rather than at the store write, and
+the width floor of one hour that the schema's structural floor does not carry.
+Those bounds hold what the operator **enters**. A width the record already
+carries -- one merely finer than the field's unit, 5400 seconds for an hour and a
+half, or one below the floor from an import or a hand-edited record -- is shown
+back as the exact value it is rather than rounded, and stands: the save carries
+its seconds through untouched, and neither the unit nor the floor is applied to
+it. Rewriting it would change what the partnership agreed without saying so, and
+refusing it would block the form's other edits -- a label, a max-age policy -- on
+a value the operator never typed. Only a width the operator changes takes entry's
+bounds and the whole-hour rule the field asks for.
+
+One cross-field condition is **surfaced rather than refused**. When
+[`tokenMaxAgeDays`](#persisted-across-runs) is set and `intervalDays` is at or
+past it, the stored secret lapses before the window that would have refreshed
+it -- the partnership stops on a lapsed credential and recovery is a re-invite.
+Entry states that in the bound's own terms ("must run or be renewed within N
+days") and leaves the save available, since an operator who renews by hand is
+entitled to the cadence. The policy remains opt-in and off by default, so the
+condition is unreachable for an exchange that set no bound.
+
+#### Every admitted schedule renders
+
+Every surface that shows a window formats the instant directly and carries no
+fallback for one no calendar has. What makes that total is the pair of ceilings
+on `intervalDays` and `windowSeconds`: the window containing an instant, and the
+first window after it, both then land within one period plus one width of that
+instant, which is inside the representable range for any clock reading a machine
+can hold. A period or width past the ceilings is refused by the schema, so it
+never reaches a surface as a record at all: the list read parses strictly and
+rejects wholesale on it, so the whole read fails and the saved-exchanges list
+routes to its read-failed recovery surface, whose separate per-entry diagnostic
+read is where the offending record is identified and discarded. The unattended
+tick reads the same strict list, so while such a record sits in the store no
+exchange runs unattended -- every wake's read fails with only a diagnostic log
+line naming it -- a blast radius reachable only from an artifact imported or
+hand-edited before these ceilings existed. The display
+derivation also refuses a reading instant within one period plus one width of the
+end of the representable range, which is the other half of the pair.
+
+#### Catch-up on wake
 
 A runner does not tick while its machine sleeps, so a runtime can wake -- a
 laptop reopened after a week on a daily cadence, the app relaunched after a
@@ -385,6 +456,22 @@ window. One window-long wait would put the whole window on a single broker
 registration surviving that long; the pacing and the cap are what keep an attempt
 that fails immediately from spending the window in a loop. The pacing interval is
 itself bounded by the close, which ends the occupancy in any case.
+
+**A limit of the occupancy.** The lock is held per attempt, not per window: an
+attempt that spends its full peer wait outlasts the pacing interval, so the
+next attempt takes the [single-writer lock](#the-secret-is-a-linear-resource)
+back at once, but an attempt that fails fast leaves the lock free for the rest
+of its pacing gap, and a window whose attempt cap runs out before the close
+leaves it free for the tail (see
+[MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#cross-tab-single-writer-locking-web-locks)).
+An operator's own Run can take the lock in any such free interval and rotate
+the shared secret, and the occupancy's later attempts then run against a
+rotated record and can stamp their own `lastRun` over that run's success. A
+designed inter-attempt yield is deferred rather than designed away, and it
+cannot be added on its own: widening the free intervals widens that hazard, so
+any future yield must arrive with a write-path rule on the shared attended
+path -- a run that fails cannot overwrite a success stamped after that run
+began, `lastRun` being monotonic on `at`.
 
 An occupancy belongs to ONE record. Each wake dispatches every due record that is
 not already occupying its window, so an exchange holding its own window open for

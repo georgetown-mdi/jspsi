@@ -21,6 +21,7 @@ import {
   readRecordAndMarkBackedUp,
   spendManagedExchangeIfCurrent,
 } from "@psi/managedExchangeStore";
+import { CLI_BUILT_IN_STUN_URI } from "@bench/managedCronExportModel";
 import { ManagedRunSurface } from "@bench/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 import { dispatchManagedCronExport } from "@psi/managedExchangeExport";
@@ -144,7 +145,7 @@ describe("the command-line export hands over two files", () => {
     // A managed connection configures no ICE server, so every scheduled run falls
     // back to the CLI's built-in default and discloses the host's public address.
     await expect
-      .element(page.getByText("stun:stun.l.google.com:19302", { exact: false }))
+      .element(page.getByText(CLI_BUILT_IN_STUN_URI, { exact: false }))
       .toBeInTheDocument();
     await expect
       .element(page.getByText("backup of record", { exact: false }))

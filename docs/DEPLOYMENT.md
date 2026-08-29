@@ -516,6 +516,8 @@ docker run --rm --network psilink-egress --dns 192.0.2.53 \
 
 Probing by name is also the name-resolution check, since it succeeds only if the container both resolved the name and reached the address. A probe that fails by name and succeeds against the address says resolution is what the rules are dropping -- permit the resolver, or pin the server by address.
 
+These steps are executed, not only written: PSI-Link's image smoke workflow (`.github/workflows/image_smoke.yaml`) creates the network, writes these rules into `DOCKER-USER`, and asserts each row above against the image it has just built -- the permitted endpoint read by name, the denied port and the denied host refused, each of the three reached again off the restricted network, and the by-name probe refused once the resolver rules are removed. What that establishes is that the mechanism works as written on a current Docker Engine. Your own subnet, resolver, server address, and port are still yours to check here.
+
 Finally, start the console once on the restricted network and confirm it still loads at `http://127.0.0.1:3000`. The publish binding governs what arrives at the container and these rules govern what leaves it, but a mistake in either is worth catching before an exchange rather than during one.
 
 #### What the restriction does not cover
