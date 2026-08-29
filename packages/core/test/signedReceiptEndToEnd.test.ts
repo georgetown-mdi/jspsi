@@ -3,7 +3,10 @@ import { describe, expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import { prepareForExchange, runExchange } from "../src/exchange";
-import { createMessagePipe } from "../src/connection/messageConnection";
+import {
+  ConnectionError,
+  createMessagePipe,
+} from "../src/connection/messageConnection";
 import {
   ReceiptVerificationError,
   SIGNED_RECEIPT_VERSION,
@@ -11,6 +14,7 @@ import {
 } from "../src/signedReceipt";
 import { verifyDualSignedRecord } from "../src/signedReceiptVerification";
 import {
+  certificateAuthorizesIdentity,
   computeCertificateFingerprint,
   generateSigningIdentity,
 } from "../src/signingIdentity";
@@ -441,6 +445,134 @@ test("a fingerprint-pin mismatch terminates the exchange fail-closed", async () 
   await connInitiator.close();
   await connResponder.close();
   await initiator;
+});
+
+// --- A certificate bound away from its own agreed-terms identity -------------
+
+describe("a party whose certificate is bound away from its agreed terms", () => {
+  // The measured premise behind the CLI's refusal of such a configuration
+  // (apps/cli/src/signingIdentityDivergence.ts). The partner authorizes a
+  // presented certificate against the AGREED-TERMS identity, so a party signing
+  // under a certificate bound to anything else cannot leave the pair holding a
+  // verifiable receipt -- and what it IS left holding depends on which handshake
+  // role it drew, which no configuration of its own decides. Both roles are
+  // driven here so that premise is a check rather than a claim.
+  //
+  // The certificate is identityA/identityB throughout, bound to "Initiator Co" /
+  // "Responder Co"; only the terms identity the diverging party runs under moves.
+  const RENAMED = "Renamed In The Config";
+
+  test("as the initiator, both parties end with nothing", async () => {
+    const [connInitiator, connResponder] = createMessagePipe();
+    // The initiator's terms say RENAMED while its certificate says "Initiator
+    // Co". Its partner pins the right fingerprint and authorizes it against the
+    // terms, which is what fails.
+    const initiator = runExchange(
+      connInitiator,
+      "initiator",
+      prepared(RENAMED, both, clientRows),
+      {
+        psiLibrary,
+        signingIdentity: identityA,
+        partnerFingerprint: fingerprintB,
+        sessionKey,
+      },
+    ).then(
+      () => {
+        throw new Error("expected the initiator's leg to reject, not return");
+      },
+      (reason: unknown) => reason,
+    );
+    const responderOutcome = await runExchange(
+      connResponder,
+      "responder",
+      prepared("Responder Co", both, serverRows),
+      {
+        psiLibrary,
+        signingIdentity: identityB,
+        partnerFingerprint: fingerprintA,
+        sessionKey,
+      },
+    ).then(
+      () => {
+        throw new Error("expected the responder to reject the divergent cert");
+      },
+      (reason: unknown) => reason,
+    );
+    // The responder verifies before it sends, so it discloses no signature of
+    // its own and writes nothing: the run raises rather than returning a result.
+    expect(responderOutcome).toBeInstanceOf(ReceiptVerificationError);
+    expect((responderOutcome as Error).message).toMatch(/not trusted/);
+    // The diverging initiator sent its frame first and then parks on a terminal
+    // frame that never comes; the swap sends no abort of its own, so what
+    // releases the park is the transport. This pipe's release is the local close
+    // below, which is why the class asserted is the one a deliberate close
+    // raises rather than the peer-close or file-sync abort-marker diagnostic a
+    // production transport would deliver -- the load-bearing half is that the
+    // leg REJECTS, on a released park, having returned nothing.
+    await connInitiator.close();
+    await connResponder.close();
+    // Rejecting is what leaves this side with nothing: an ExchangeResult is the
+    // only carrier of the association table, the audit record, and the receipt,
+    // and every local artifact is written after runExchange returns.
+    const initiatorOutcome = await initiator;
+    expect(initiatorOutcome).toBeInstanceOf(ConnectionError);
+    expect((initiatorOutcome as ConnectionError).kind).toBe("closed");
+  });
+
+  test("as the responder, it exits over a receipt no verifier accepts", async () => {
+    const [connInitiator, connResponder] = createMessagePipe();
+    // Roles swapped: the diverging party signs LAST, so it verifies its
+    // partner's frame (which passes) and sends its own before the partner can
+    // reject it. Nothing in the swap checks a party's own certificate against
+    // its own agreed terms, so this side runs to completion.
+    const initiatorOutcome = runExchange(
+      connInitiator,
+      "initiator",
+      prepared("Initiator Co", both, clientRows),
+      {
+        psiLibrary,
+        signingIdentity: identityA,
+        partnerFingerprint: fingerprintB,
+        sessionKey,
+      },
+    ).then(
+      () => {
+        throw new Error("expected the initiator to reject the divergent cert");
+      },
+      (reason: unknown) => reason,
+    );
+    const responderResult = await runExchange(
+      connResponder,
+      "responder",
+      prepared(RENAMED, both, serverRows),
+      {
+        psiLibrary,
+        signingIdentity: identityB,
+        partnerFingerprint: fingerprintA,
+        sessionKey,
+      },
+    );
+    // It holds a result, an audit record, and a receipt: everything a success
+    // leaves behind, and it returns as a success does.
+    expect(responderResult.associationTable).toBeDefined();
+    expect(responderResult.audit).toBeDefined();
+    const receipt = responderResult.signedReceipt;
+    expect(receipt).toBeDefined();
+    // The receipt is worthless: its own slot's certificate does not authorize
+    // the identity this party agreed terms under, which is the check every
+    // verifier applies -- so it fails wherever it is presented, including
+    // verify-receipt on the machine that wrote it.
+    expect(
+      certificateAuthorizesIdentity(receipt!.responder.certificate, RENAMED),
+    ).toBe(false);
+    // And the partner, whose data has already crossed, is left with the error.
+    const raised = await initiatorOutcome;
+    expect(raised).toBeInstanceOf(ReceiptVerificationError);
+    expect((raised as Error).message).toMatch(/not trusted/);
+    await connInitiator.close();
+    await connResponder.close();
+  });
 });
 
 // --- Pairing a receipt to one run --------------------------------------------

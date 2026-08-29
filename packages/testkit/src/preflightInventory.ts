@@ -216,14 +216,16 @@ export const PREFLIGHT_INVENTORY: Record<PreflightId, PreflightRow> = {
     concern:
       "the signing identity is bound to a party name that differs from the " +
       "one the agreed linkage terms carry",
-    weight: "warns",
+    weight: "refuses",
     console: {
-      kind: "runWarning",
-      how:
+      kind: "pending",
+      because:
         "the appliance keeps ONE long-lived signing identity, whose party name " +
         "is bound when it is created and left alone afterwards, so a later " +
-        "exchange under a different name diverges; the CLI child's own warning " +
-        "is what reaches the operator, folded into the run's warnings",
+        "exchange under a different name diverges -- and the CLI child refuses " +
+        "such a run rather than warning through it, which reaches a console " +
+        "operator only as a launch that failed. An authoring-time surface for " +
+        "it is a known gap",
     },
   },
   outboundPayloadConsent: {

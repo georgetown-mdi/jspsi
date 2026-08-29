@@ -37,7 +37,7 @@ import {
 import { optionalIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveReceiptOutput } from "../receiptFile";
-import { warnOnIdentityDivergence } from "../signingIdentityDivergence";
+import { assertIdentityMatchesAgreedTerms } from "../signingIdentityDivergence";
 import {
   defaultSigningIdentityPath,
   loadSigningIdentity,
@@ -808,18 +808,19 @@ export async function prepareDataset(
  *
  * `termsIdentity` is this run's `linkage_terms.identity` -- the identity the
  * partner verifies the loaded certificate against -- and a certificate bound to
- * anything else warns on `log` before the exchange proceeds (see
- * {@link warnOnIdentityDivergence}). Pass it and the run's logger on every call:
- * a load that skipped the check would leave the divergence to fail at the
- * partner's end of a completed exchange.
+ * anything else makes the run unfinishable, so it is refused here (see
+ * {@link assertIdentityMatchesAgreedTerms}). Pass it on every call: a load that
+ * skipped the check would leave the divergence to fail at the partner's end of
+ * an exchange that has already sent this party's data.
  *
  * @throws {UsageError} when `mode: certificate` is set but no signing identity
  *   exists at the resolved path, or the file is malformed/unreadable.
+ * @throws {OperatorConfigError} when the loaded certificate is bound to an
+ *   identity other than `termsIdentity`.
  */
 export async function resolveSigningPersist(
   signing: SigningConfig | undefined,
   termsIdentity: string | undefined,
-  log: { warn: (message: string) => void },
 ): Promise<SigningPersist | null> {
   if (signing === undefined || signing.mode !== "certificate") return null;
   const identityPath = expandTilde(
@@ -832,7 +833,7 @@ export async function resolveSigningPersist(
         `found at ${identityPath}; run 'psilink fingerprint' to create one, or ` +
         `set signing.identity_file to the correct path`,
     );
-  warnOnIdentityDivergence(identity.certificate, termsIdentity, log);
+  assertIdentityMatchesAgreedTerms(identity.certificate, termsIdentity);
   return {
     identity,
     partnerFingerprint: signing.partnerFingerprint,
@@ -1005,15 +1006,14 @@ export async function handler(argv: Arguments): Promise<void> {
     // any credential, terms, or data are sent, so a certificate-mode block with no
     // signing identity fails fast (exit 64) rather than after the handshake, and
     // an identity bound to something other than this run's terms identity is
-    // warned about while the run can still be stopped rather than after it has
-    // produced receipts the partner rejects. `null` when signing is not configured
-    // for certificate mode, which leaves the exchange unsigned.
+    // refused while the run can still be stopped rather than after it has sent
+    // this party's data toward receipts the partner rejects. `null` when signing
+    // is not configured for certificate mode, which leaves the exchange unsigned.
     let signing: SigningPersist | null;
     try {
       signing = await resolveSigningPersist(
         exchangeDataSpec.signing,
         termsIdentity,
-        log,
       );
     } catch (err) {
       exitWithError(log, err, err instanceof UsageError ? 64 : 69);

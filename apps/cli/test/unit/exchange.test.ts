@@ -371,15 +371,16 @@ test.each([
   },
 );
 
-// warnOnIdentityDivergence (signingIdentityDivergence.ts) returns silently when
-// termsIdentity is absent or empty. Absent is a shape this path reaches: terms
-// may omit the identity, and the silence is right there -- no configured name
-// exists for a certificate to diverge from, and a run that would sign under one
-// is refused outright before it starts (see the certificate-mode gate below).
-// Empty is not, and neither is terms missing altogether: the schema refuses both.
-// Pin all three directly, so a schema change admitting a blank label -- which
-// warnOnIdentityDivergence reads as absence and passes over in silence -- fails
-// here.
+// divergesFromAgreedTerms (signingIdentityDivergence.ts) reports no divergence
+// when termsIdentity is absent or empty, so assertIdentityMatchesAgreedTerms --
+// the exchange path's disposition of it -- lets such a run through. Absent is a
+// shape this path reaches: terms may omit the identity, and the silence is right
+// there -- no configured name exists for a certificate to diverge from, and a
+// run that would sign under one is refused outright before it starts (see the
+// certificate-mode gate below). Empty is not, and neither is terms missing
+// altogether: the schema refuses both. Pin all three directly, so a schema
+// change admitting a blank label -- which divergesFromAgreedTerms reads as
+// absence and passes over -- fails here.
 
 test("a config with no linkage_terms is refused, not silently accepted", () => {
   fs.writeFileSync(
@@ -411,7 +412,7 @@ test("a config with an empty linkage_terms.identity is refused, not silently acc
 test("a config whose linkage_terms omit the identity loads, carrying none", () => {
   // The third shape, and the admissible one: the field is optional, so this
   // config is accepted and its terms carry no identity at all -- which is what
-  // makes warnOnIdentityDivergence's absent branch reachable rather than dead.
+  // makes divergesFromAgreedTerms's absent branch reachable rather than dead.
   // Nothing stands a label in it.
   const { identity: _named, ...unnamedTerms } = minimalLinkageTerms;
   fs.writeFileSync(
@@ -1272,7 +1273,8 @@ test("handler suppresses the advisory when a successful exchange refreshes the t
 // --- handler: signing-identity divergence (wiring) ---------------------------
 // The comparison itself is unit-tested in exchangeSigning.test.ts; these cover
 // the wiring -- that the handler hands the run's terms identity to the signing
-// resolver, and that a divergence is reported and the exchange still runs.
+// resolver, and that a divergence stops the run ahead of the exchange that would
+// carry credentials, terms, and data.
 
 // Seed a certificate-mode config whose identity file is bound to `bound`, and
 // return the argv a run of it takes. The config's terms identity is "Test Party".
@@ -1302,46 +1304,64 @@ async function signedExchangeRun(bound: string): Promise<Arguments> {
   } as unknown as Arguments;
 }
 
-test("handler warns on a divergent signing identity and runs the exchange anyway", async () => {
+test("handler exits 64 on a divergent signing identity, before runProtocol", async () => {
+  // The seam is the CLI's own (assertIdentityMatchesAgreedTerms, inside
+  // resolveSigningPersist), and what is pinned here is that it is reached on the
+  // exchange path ahead of the run that carries credentials, terms, and data,
+  // and that its remedy reaches the operator through the command's own error
+  // sink as a usage error (exit 64) rather than a transport failure.
   const argv = await signedExchangeRun("Someone Else");
   vi.mocked(runProtocol).mockReset();
-  vi.mocked(runProtocol).mockResolvedValueOnce({});
-  await handler(argv);
-  const warning = mockState.warnings.find((m) =>
-    m.includes("linkage_terms.identity"),
-  );
-  expect(warning).toBeDefined();
-  expect(warning).toContain('"Someone Else"');
-  expect(warning).toContain('"Test Party"');
-  expect(warning).toContain("reject");
-  // Warned, not refused: the run reaches the exchange.
-  expect(runProtocol).toHaveBeenCalledOnce();
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(handler(argv)).rejects.toThrow("exit:64");
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    const reported = mockState.errors.join("\n");
+    expect(reported).toContain('"Someone Else"');
+    expect(reported).toContain('"Test Party"');
+    expect(reported).toContain("cannot finish");
+  } finally {
+    exitSpy.mockRestore();
+  }
 });
 
-test("handler stays silent when the signing identity matches the terms identity", async () => {
+test("handler runs the exchange when the signing identity matches the terms identity", async () => {
   const argv = await signedExchangeRun("Test Party");
   vi.mocked(runProtocol).mockReset();
   vi.mocked(runProtocol).mockResolvedValueOnce({});
   await handler(argv);
   expect(
-    mockState.warnings.some((m) => m.includes("linkage_terms.identity")),
+    mockState.errors.some((m) => m.includes("linkage_terms.identity")),
   ).toBe(false);
   expect(runProtocol).toHaveBeenCalledOnce();
 });
 
 test("handler compares the signing identity against --identity when it is given", async () => {
   // --identity replaces the config's terms identity for the run, so it is the
-  // value the partner will verify the certificate against.
+  // value the partner will verify the certificate against -- and therefore the
+  // one a certificate matching the CONFIG's label now diverges from.
   const argv = await signedExchangeRun("Test Party");
   vi.mocked(runProtocol).mockReset();
-  vi.mocked(runProtocol).mockResolvedValueOnce({});
-  await handler({ ...argv, identity: "Overridden Party" } as Arguments);
-  const warning = mockState.warnings.find((m) =>
-    m.includes("linkage_terms.identity"),
-  );
-  expect(warning).toBeDefined();
-  expect(warning).toContain('"Test Party"');
-  expect(warning).toContain('"Overridden Party"');
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({ ...argv, identity: "Overridden Party" } as Arguments),
+    ).rejects.toThrow("exit:64");
+    const reported = mockState.errors.join("\n");
+    expect(reported).toContain('"Test Party"');
+    expect(reported).toContain('"Overridden Party"');
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    exitSpy.mockRestore();
+  }
 });
 
 test("handler takes the run's identity from the configuration", async () => {

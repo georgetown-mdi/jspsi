@@ -119,7 +119,7 @@ const CLI_ANCHORS: Record<PreflightId, CliAnchor> = {
   identityDivergence: {
     kind: "export",
     module: "signingIdentityDivergence",
-    names: ["warnOnIdentityDivergence"],
+    names: ["assertIdentityMatchesAgreedTerms", "warnOnIdentityDivergence"],
   },
   outboundPayloadConsent: {
     kind: "export",
