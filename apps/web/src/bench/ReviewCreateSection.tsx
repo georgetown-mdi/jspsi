@@ -1,10 +1,18 @@
 import { useMemo } from "react";
 
-import { Button, NativeSelect, Radio, VisuallyHidden } from "@mantine/core";
+import {
+  Alert,
+  Button,
+  NativeSelect,
+  Radio,
+  VisuallyHidden,
+} from "@mantine/core";
+import { IconAlertTriangle } from "@tabler/icons-react";
 
 import {
   buildAdvancedTerms,
   importedCitationDropNotice,
+  inertCoalesceNotice,
 } from "@psi/advancedInvite";
 
 import { isConsoleBuild } from "@utils/clientConfig";
@@ -182,15 +190,19 @@ export function ReviewCreateSection({
   const consoleBuild = isConsoleBuild();
   const online = useOnlineStatus();
   // Derived from the draft here rather than passed in, the same read the Matching
-  // keys tab makes: the notice is a function of the terms this step is
-  // restating, and the two steps must not answer it differently.
-  const citationDrop = useMemo(
-    () =>
-      importedCitationDropNotice(
-        editor.draft,
-        buildAdvancedTerms(editor.draft),
-      ),
+  // keys tab makes: each notice is a function of the terms this step is
+  // restating, and the two steps must not answer them differently.
+  const currentTerms = useMemo(
+    () => buildAdvancedTerms(editor.draft),
     [editor.draft],
+  );
+  const citationDrop = useMemo(
+    () => importedCitationDropNotice(editor.draft, currentTerms),
+    [editor.draft, currentTerms],
+  );
+  const inertCoalesce = useMemo(
+    () => inertCoalesceNotice(editor.draft, currentTerms),
+    [editor.draft, currentTerms],
   );
   const sftpConfigured = sftpConnection != null;
   const rendezvousConfigured = rendezvous?.configured === true;
@@ -436,6 +448,22 @@ export function ReviewCreateSection({
         operator can import there and come straight here. */}
       {citationDrop !== undefined && (
         <CitationDropNotice notice={citationDrop} />
+      )}
+      {/* The other fact the restatement below cannot show: a declared default the
+        run will not substitute is a term that reads as widening the match and
+        does nothing. Stated where the terms are sealed, since the step editor's
+        own advisory sits inside a card an operator need never reopen. It holds
+        nothing shut -- such terms are valid and run. */}
+      {inertCoalesce !== undefined && (
+        <Alert
+          role="note"
+          color="yellow"
+          icon={<IconAlertTriangle aria-hidden />}
+          title="A default value will not be substituted"
+          mt="md"
+        >
+          {inertCoalesce}
+        </Alert>
       )}
       <div className={styles.tableScroll}>
         <table className={`${styles.benchTable} ${styles.answers}`}>

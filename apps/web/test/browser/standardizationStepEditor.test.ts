@@ -236,6 +236,35 @@ describe("StandardizationStepEditor", () => {
     expect(page.getByTestId("outcome-dropped").elements()).toHaveLength(0);
   });
 
+  test("a coalesce that substitutes nothing where it sits is advised against, and the advice clears on a reorder", async () => {
+    // The same order-dependent flip the preview shows, read on the advisory: the
+    // leading coalesce substitutes nothing (nothing ahead of it can empty a
+    // value), and moving null_if ahead of it makes the substitution real. The
+    // advisory refuses nothing -- the step list is editable throughout.
+    app.render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [
+          { function: "coalesce", params: { default: "Z" } },
+          { function: "null_if", params: { values: ["X"] } },
+        ],
+        rawRows: [{ n: "X" }],
+      }),
+    );
+    await expect
+      .element(page.getByTestId("inert-coalesce-advice"))
+      .toHaveTextContent("no step before it can leave a value empty");
+
+    await userEvent.click(
+      page.getByRole("button", { name: "Move Null if earlier" }),
+    );
+
+    await expect
+      .poll(() => page.getByTestId("inert-coalesce-advice").elements().length)
+      .toBe(0);
+  });
+
   test("a typed param input rejects an out-of-type value and accepts a valid one", async () => {
     // substring.start refuses 0 (positions are 1-indexed); seeding 0 shows the
     // descriptor's own message, and a valid value clears it.

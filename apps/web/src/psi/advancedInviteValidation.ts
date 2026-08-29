@@ -6,6 +6,7 @@ import {
   MAX_INVITATION_LIFETIME_SECONDS,
   UsageError,
   assertDeduplicateImplemented,
+  authoredLinkageFields,
   canonicalString,
   countOnlyShapeViolation,
   countOnlyTransmitsColumn,
@@ -24,7 +25,11 @@ import {
   draftFromTerms,
   keyIsSupplyable,
 } from "./advancedInviteDraft";
-import { isStepValid } from "./standardizationAuthoring";
+import {
+  isStepValid,
+  pipelineHasInertCoalesce,
+} from "./standardizationAuthoring";
+import { SEMANTIC_TYPE_LABELS } from "./metadataEditing";
 import { outputForDirection } from "./advancedInviteTypes";
 
 import type {
@@ -44,15 +49,17 @@ import type {
 } from "./advancedInviteTypes";
 
 /**
- * The Generate gate, the import-refusal messages, and the one import notice that
- * refuses nothing. {@link validateAdvancedInvite} runs a draft's built terms
+ * The Generate gate, the import-refusal messages, and the two notices that refuse
+ * nothing. {@link validateAdvancedInvite} runs a draft's built terms
  * through the core schema (the single validation source
  * for everything it covers) and adds only the gates the schema does not express;
  * {@link gatedActiveSettingMessage} and {@link importedConstraintDivergenceMessage}
  * refuse an import that carries a gated setting or a constraint the editor cannot
  * represent; {@link importedCitationDropNotice} tells the operator when the rebuilt
- * document loses the rule-set citation the imported one carried, which is a
- * consequence to state rather than an obstacle to clear. No React, no I/O.
+ * document loses the rule-set citation the imported one carried, and
+ * {@link inertCoalesceNotice} when a declared default value will not be
+ * substituted where it sits -- each a consequence to state rather than an
+ * obstacle to clear. No React, no I/O.
  */
 
 /** Today's date as YYYY-MM-DD, for the legal-agreement expiry check. Matches the
@@ -710,6 +717,101 @@ export function importedCitationDropNotice(
   if (cause === "no-keys" && !draftHasSupplyableKey(draft))
     return CITATION_DROP_NO_SUPPLYABLE_KEY;
   return CITATION_DROP_NOTICES[cause];
+}
+
+/**
+ * The fields whose declared cleaning or linkage-key transform carries a
+ * `coalesce` that substitutes nothing where it sits, named by their safe
+ * semantic-type label and de-duplicated in first-seen order.
+ *
+ * Both surfaces a coalesce can reach are read, because the two arrive by
+ * different doors: the per-party cleaning the operator authors here, and a
+ * linkage-key element transform, which only an imported document carries (the
+ * editor's own key authoring offers no coalesce for an element).
+ *
+ * Labels, never names: an imported document's field names are
+ * partner-influenceable, the same reason {@link UNSUPPLYABLE_KEY_MESSAGE} names
+ * no field. A transformation or element whose field the draft does not declare
+ * contributes nothing -- it names no label to show, and it is matched on
+ * nothing.
+ */
+function inertCoalesceFieldLabels(
+  draft: AdvancedInviteDraft,
+  terms: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
+): Array<string> {
+  const labels = new Set<string>();
+  const labelByFieldName = new Map(
+    authoredLinkageFields(draft.metadata, draft.standardization).map(
+      (field) => [field.name, SEMANTIC_TYPE_LABELS[field.type]],
+    ),
+  );
+  for (const transformation of draft.standardization) {
+    const label = labelByFieldName.get(transformation.output);
+    if (
+      label !== undefined &&
+      pipelineHasInertCoalesce(transformation.steps ?? [])
+    )
+      labels.add(label);
+  }
+  const labelByDeclaredName = new Map(
+    terms.linkageFields.map((field) => [
+      field.name,
+      SEMANTIC_TYPE_LABELS[field.type],
+    ]),
+  );
+  for (const key of terms.linkageKeys)
+    for (const element of key.elements) {
+      const label = labelByDeclaredName.get(element.field);
+      if (
+        label !== undefined &&
+        pipelineHasInertCoalesce(element.transform ?? [])
+      )
+        labels.add(label);
+    }
+  return [...labels];
+}
+
+/**
+ * The notice for a declared default value the run will not substitute, or
+ * `undefined` when every declared one substitutes where it sits.
+ *
+ * The failure it names is silent under-matching: the author declares a default
+ * expecting blank-ish records to participate, and at runtime the step is a
+ * pass-through, so those records quietly do not match. The verdict is core's own
+ * position-aware one (see `pipelineHasInertCoalesce`, over
+ * `coalesceSubstitutesConstant`), so the notice appears and clears exactly as the
+ * runtime behavior turns -- adding a rule that can drop a value ahead of the
+ * step, moving the step after one, or declaring a text default all clear it.
+ *
+ * It speaks for several fields at once, so it names BOTH conditions rather than
+ * whichever one a given step fails -- the same choice core's consent-side
+ * description of a non-substituting coalesce makes, and for the same reason: one
+ * sentence then covers every shape. The step editor, which has a row to attach
+ * advice to, names the failing one instead (`INERT_COALESCE_ADVICE`).
+ *
+ * It blocks nothing: a terms document carrying this shape is valid, mints, and
+ * runs, with the step as a pass-through, so the operator is told what their terms
+ * will do rather than stopped from creating them. That is why this is not one of
+ * {@link validateAdvancedInvite}'s errors, whose every member holds the Generate
+ * gate shut -- the same reason {@link importedCitationDropNotice} is not.
+ */
+export function inertCoalesceNotice(
+  draft: AdvancedInviteDraft,
+  builtTerms?: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
+): string | undefined {
+  const labels = inertCoalesceFieldLabels(
+    draft,
+    builtTerms ?? buildAdvancedTerms(draft),
+  );
+  if (labels.length === 0) return undefined;
+  return (
+    `A default value declared for ${labels.join(", ")} is never substituted ` +
+    "where it sits: a value is replaced only where an earlier rule in the same " +
+    "pipeline left it empty, and only by a text default. A record with no value " +
+    "for the column never reaches those steps at all. Records pass through them " +
+    "unchanged, so they add no matches. Move each step after a rule that can " +
+    "drop a value, give it a text default, or remove it."
+  );
 }
 
 /** Whether any of the draft's keys -- enabled or not -- references only fields the

@@ -2,6 +2,7 @@ import { useRef } from "react";
 
 import {
   ActionIcon,
+  Alert,
   Badge,
   Button,
   Group,
@@ -16,6 +17,7 @@ import {
   TextInput,
 } from "@mantine/core";
 import {
+  IconAlertTriangle,
   IconArrowDown,
   IconArrowUp,
   IconPlus,
@@ -26,11 +28,13 @@ import { useIsomorphicEffect } from "@mantine/hooks";
 import { sanitizeForDisplay } from "@psilink/core";
 
 import {
+  INERT_COALESCE_ADVICE,
   OFFERED_EXPERT_FUNCTION_GROUPS,
   STANDARDIZATION_FUNCTION_GROUPS,
   describeParamFields,
   descriptorFor,
   functionDisplay,
+  inertCoalesceCause,
   validateParamValue,
 } from "@psi/standardizationAuthoring";
 
@@ -163,9 +167,11 @@ function ParamInput({
 }
 
 /** One step row: its plain-language function label, typed param inputs (or a
- * read-only note for the deferred raw-pattern tier), and reorder/remove controls. */
+ * read-only note for the deferred raw-pattern tier), the advisory a step that
+ * does nothing where it sits earns, and reorder/remove controls. */
 function StepRow({
   step,
+  precedingSteps,
   index,
   count,
   allowRawPatterns,
@@ -174,6 +180,10 @@ function StepRow({
   onRemove,
 }: {
   step: EditableStep;
+  /** The steps that run before this one in the same pipeline. Carried because a
+   * `coalesce`'s effect is a property of its POSITION, not of the step alone (see
+   * {@link inertCoalesceCause}), so the row cannot judge itself in isolation. */
+  precedingSteps: ReadonlyArray<EditableStep>;
   index: number;
   count: number;
   /** When set, the raw-pattern (`tier: "regex"`) family is editable here; otherwise
@@ -185,6 +195,11 @@ function StepRow({
 }) {
   const descriptor = descriptorFor(step.function);
   const { label } = functionDisplay(step.function);
+  // Advice, never a gate: a pipeline carrying one of these is valid, mints, and
+  // runs -- core runs the step as a pass-through. Re-derived on every render, so
+  // adding an emptying rule ahead of the step or moving the step after one clears
+  // it as the edit commits.
+  const inertCoalesce = inertCoalesceCause(step, precedingSteps);
   const isRegexTier = descriptor?.tier === "regex";
   // The raw-pattern family (`tier: "regex"`) is editable only when the host enables it
   // via `allowRawPatterns`; without it -- and for any unrecognized function -- the step
@@ -232,6 +247,18 @@ function StepRow({
                   {sanitizeForDisplay(`${key}: ${describeReadonlyParam(raw)}`)}
                 </Text>
               ))}
+          {inertCoalesce !== undefined && (
+            <Alert
+              role="note"
+              color="yellow"
+              variant="light"
+              p="xs"
+              icon={<IconAlertTriangle size={16} aria-hidden />}
+              data-testid="inert-coalesce-advice"
+            >
+              <Text size="xs">{INERT_COALESCE_ADVICE[inertCoalesce]}</Text>
+            </Alert>
+          )}
         </Stack>
         <Group gap={2} wrap="nowrap">
           <ActionIcon
@@ -490,6 +517,7 @@ export function StepListEditor({
             <StepRow
               key={keyFor(step)}
               step={step}
+              precedingSteps={steps.slice(0, index)}
               index={index}
               count={steps.length}
               allowRawPatterns={allowRawPatterns}
