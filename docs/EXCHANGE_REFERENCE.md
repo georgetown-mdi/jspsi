@@ -39,6 +39,8 @@ Only the fields marked "`@`-file recommended" in their descriptions, together wi
 
 Linkage terms are verified by both parties at the start of every exchange. After authentication, both parties swap their terms; if any fields are inconsistent, the exchange is cancelled. Fields marked as "soft" produce a warning and an updated set of terms are written out rather than an error.
 
+The document's four free-text fields -- [`identity`](#linkage_termsidentity), the legal agreement's [`purpose`](#linkage_termslegal_agreement), a payload column's [`description`](#linkage_termspayload), and each [constraint `exclude`](#constraints) value -- share one shape rule beyond their 1024-character cap: none may carry a control character. Each is a single-line value that travels to the partner and is written verbatim into both parties' exchange records, so a NUL, an ESC, a tab, or a line break in one is refused when the terms are read, whichever side authored them. Letters outside ASCII are untouched, so a name, a purpose, or a denylist value written in any script is fine.
+
 ### The built-in rules
 
 Not every exchange authors its own linkage fields and keys. A zero-setup exchange, an invitation minted on the web app's quick path, and the template `psilink init` writes all fill them in for you, from the product's built-in rules. They are also where the web app's Advanced invite path starts, before you edit the keys.

@@ -128,8 +128,58 @@ export const MAX_NAME_LENGTH = 256;
  * characters). Larger than {@link MAX_NAME_LENGTH} because these legitimately
  * hold a sentence, a name-plus-contact line, or a long data value rather than a
  * single label; 1 KiB is still comfortably above any real value.
+ *
+ * Those four fields are exactly the document's free-text set, and they carry the
+ * shape rule beside this one as a set too: see
+ * {@link TEXT_CONTROL_CHAR_PATTERN}, which is applied to each of them without
+ * exception.
  */
 export const MAX_TEXT_LENGTH = 1024;
+
+/**
+ * The control characters no free-text field of a terms document may carry: the
+ * C0 range (NUL among them), DEL, and C1. The rule reaches every
+ * {@link MAX_TEXT_LENGTH}-bounded field the document holds -- the party
+ * `identity`, the legal-agreement `purpose`, a payload column `description`, and
+ * each constraint `exclude` entry -- with no field spared and no exception for
+ * tab, line feed, or carriage return. Each of the four is a single-line value: a
+ * party label, a one-sentence statement of the disclosure's purpose, a data-
+ * dictionary line, and a data value a cell is compared against. None of them is
+ * the multi-line note a whitespace-control exception exists for, so no control
+ * byte in any of them is text a party meant to write.
+ *
+ * The reason the refusal sits at the schema rather than at each display sink is
+ * that the sinks are not the whole reach of these values. A terms document is
+ * swapped with the partner at exchange time, folded into the canonical encoding
+ * both parties hash, and written verbatim into each party's exchange record,
+ * which is kept and read back long after the run; the seams that neutralize a
+ * control character (sanitizeErrorForDisplay.ts, compatibilityMessage.ts) do so
+ * where psilink itself renders one, not where a later reader of the record opens
+ * it. Refusing at parse means every seat that parses the document -- the
+ * operator's own config load and the post-handshake wire re-parse
+ * (parseLinkageTerms), the invitation-token decode, and the exchange-file and
+ * job-intent schemas that embed {@link LinkageTermsSchema} -- refuses the same
+ * value, rather than each downstream consumer carrying a guard of its own.
+ *
+ * Letters outside ASCII are untouched: the ranges stop below U+00A0, so a party
+ * that writes its name, its purpose, or its denylist in its own script is
+ * admissible.
+ */
+export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
+
+/**
+ * The one reason all four free-text fields report, so the document says the same
+ * thing about the same class of value wherever it is refused.
+ *
+ * A fixed literal naming no submitted value: the offending field is located by
+ * the issue `path`, which `describeDecodeError` escapes segment by segment. That
+ * is the discipline the referential-integrity, dialect, and length refusals in
+ * this file already follow, and the unsanitized parse-error path (protocolSetup)
+ * depends on it -- a message echoing the value would put the partner's bytes
+ * back in front of the operator, which is the very thing this rule removes.
+ */
+export const TEXT_CONTROL_CHAR_MESSAGE =
+  "a linkage terms free-text value must not contain control characters";
 
 /**
  * Generous upper bound on the COUNT of entries in the `linkageFields` and
@@ -325,14 +375,33 @@ export const MAX_KEY_ELEMENTS = 256;
 export const MAX_PAYLOAD_ENTRIES = 4096;
 
 /**
+ * One free-text value of a terms document, holding the caller's own length floor
+ * to the shared shape rule: no {@link TEXT_CONTROL_CHAR_PATTERN} character. The
+ * caller supplies the string schema so a field that requires a value keeps its
+ * `.min(1)`, and the control-character check is written once so the four
+ * free-text fields cannot drift apart.
+ *
+ * Unlike the `allowedCharacters` refine below, this one needs no pre-length
+ * short-circuit. Zod does not short-circuit chained checks, so the scan runs on a
+ * value the `.max()` already rejected -- but it is a linear regex test rather
+ * than a super-linear regex COMPILE, so an oversized value costs one pass over
+ * bytes the parser has already walked and reports both issues.
+ */
+const freeTextValue = (schema: z.ZodString) =>
+  schema.refine((value) => !TEXT_CONTROL_CHAR_PATTERN.test(value), {
+    message: TEXT_CONTROL_CHAR_MESSAGE,
+  });
+
+/**
  * A constraint `exclude` denylist: partner-controlled free-text values, each
- * length-bounded like every other free-text string, with the entry COUNT bounded
- * at {@link MAX_EXCLUDE_ENTRIES} before per-element validation (see
+ * length-bounded and control-character-refused like every other free-text string
+ * ({@link freeTextValue}), with the entry COUNT bounded at
+ * {@link MAX_EXCLUDE_ENTRIES} before per-element validation (see
  * {@link boundedArray}). Shared by all four constraint schemas so the bound is
  * defined once.
  */
 const ExcludeSchema = boundedArray(
-  z.string().max(MAX_TEXT_LENGTH),
+  freeTextValue(z.string().max(MAX_TEXT_LENGTH)),
   MAX_EXCLUDE_ENTRIES,
   `exclude must not exceed ${MAX_EXCLUDE_ENTRIES} entries`,
 );
@@ -895,7 +964,7 @@ interface PayloadColumn {
 
 const PayloadColumnSchema: z.ZodType<PayloadColumn> = z.object({
   name: z.string().min(1).max(MAX_NAME_LENGTH),
-  description: z.string().max(MAX_TEXT_LENGTH).optional(),
+  description: freeTextValue(z.string().max(MAX_TEXT_LENGTH)).optional(),
 });
 
 /**
@@ -961,7 +1030,7 @@ export interface LegalAgreement {
 
 const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
   reference: z.string().min(1).max(MAX_NAME_LENGTH),
-  purpose: z.string().min(1).max(MAX_TEXT_LENGTH),
+  purpose: freeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH)),
   expirationDate: z.iso.date(),
 });
 
@@ -1194,9 +1263,10 @@ const LinkageTermsBaseSchema = z.object({
     .max(MAX_NAME_LENGTH)
     .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
   // Optional, and bounded where it is present: a party that names itself is held
-  // to a non-empty, length-capped label, and a party that supplies none omits the
-  // field rather than sending an empty string or a placeholder.
-  identity: z.string().min(1).max(MAX_TEXT_LENGTH).optional(),
+  // to a non-empty, length-capped, control-character-free label, and a party that
+  // supplies none omits the field rather than sending an empty string or a
+  // placeholder.
+  identity: freeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH)).optional(),
   date: z.iso.date(),
   algorithm: AlgorithmSchema,
   linkageStrategy: LinkageStrategySchema.default("cascade"),

@@ -5162,11 +5162,18 @@ test("handler: hostile terms stay printable ASCII on the prompt's own sink", asy
   const fixture = offlineAcceptFixture();
   promptConfirmMock.mockResolvedValue(false);
   try {
+    // Unlike the render-boundary walk, this route goes through the token's own
+    // validation, so the hostile code points ride the fields a decoded token can
+    // still hold: the key name takes the two control characters, since the terms'
+    // free text is refused one at parse, and the identity takes the bidi
+    // override, which is not a control character.
     const encoded = await encodeInvitation({
       ...sampleToken(FUTURE()),
       linkageTerms: {
-        ...sampleTerms(`Inviter${ESC}[31mOrg${RLO}`),
-        linkageKeys: [{ name: `ssn${BEL}`, elements: [{ field: "ssn" }] }],
+        ...sampleTerms(`InviterOrg${RLO}`),
+        linkageKeys: [
+          { name: `ssn${BEL}${ESC}[31m`, elements: [{ field: "ssn" }] },
+        ],
       },
     });
     const { stderrWrites, stdoutWrites } = await runOfflineAcceptCapturingStdio(
