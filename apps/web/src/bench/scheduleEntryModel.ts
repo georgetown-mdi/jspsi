@@ -115,18 +115,89 @@ function readTimeFields(
   return { hour, minute };
 }
 
+/** Whether a number field holds a number inside `[low, high]`. */
+function withinRange(
+  value: number | string,
+  low: number,
+  high: number,
+): boolean {
+  return typeof value === "number" && value >= low && value <= high;
+}
+
 /** Whether a number field holds a whole number inside `[low, high]`. */
 function withinWholeRange(
   value: number | string,
   low: number,
   high: number,
 ): boolean {
-  return (
-    typeof value === "number" &&
-    Number.isInteger(value) &&
-    value >= low &&
-    value <= high
-  );
+  return withinRange(value, low, high) && Number.isInteger(value);
+}
+
+/** The width a stored schedule shows in the width field: the hours it is,
+ * exactly. A width that is not a whole number of hours -- which the schema admits
+ * and entry does not -- therefore displays as the fraction it is rather than as a
+ * round number the operator would read as their partner's agreed width. */
+function storedWindowHours(schedule: ManagedExchangeSchedule): number {
+  return schedule.windowSeconds / SECONDS_PER_HOUR;
+}
+
+/** The date and time fields a stored UTC anchor reads back as on the operator's
+ * own clock.
+ *
+ * @throws {RangeError} if the anchor is not a usable UTC instant. */
+function anchorEntryFields(anchor: string): {
+  firstWindowDate: string;
+  firstWindowTime: string;
+} {
+  const cadence = localCadenceFromAnchor(anchor);
+  const pad = (value: number, width: number) =>
+    String(value).padStart(width, "0");
+  return {
+    firstWindowDate: `${pad(cadence.year, 4)}-${pad(cadence.month, 2)}-${pad(cadence.day, 2)}`,
+    firstWindowTime: `${pad(cadence.hour, 2)}:${pad(cadence.minute, 2)}`,
+  };
+}
+
+/**
+ * The stored width where the width field still shows exactly it, so a save that
+ * edited some OTHER field carries the stored seconds through rather than
+ * re-deriving them from a display value in hours.
+ *
+ * Without this, a stored width finer than the field's unit -- 5400 seconds from
+ * an import or a hand-edited record -- would be rewritten to the hours it
+ * displays as by an edit to the period alone, silently changing the width the
+ * partnership agreed.
+ */
+function carriedWindowSeconds(
+  fields: ScheduleEntryFields,
+  stored: ManagedExchangeSchedule | undefined,
+): number | undefined {
+  if (stored === undefined) return undefined;
+  return fields.windowHours === storedWindowHours(stored)
+    ? stored.windowSeconds
+    : undefined;
+}
+
+/**
+ * The stored anchor where the date and time fields still show exactly the wall
+ * clock it reads back as, carried through for the same reason as the width: the
+ * fields resolve only to the minute, so an anchor carrying seconds would be
+ * rewritten by an edit to the period alone. It also keeps such an edit from
+ * re-resolving a wall clock the operator's zone skips or repeats, which does not
+ * round-trip (see {@link scheduleEntryUnchanged}).
+ *
+ * @throws {RangeError} if the stored anchor is not a usable UTC instant.
+ */
+function carriedAnchor(
+  fields: ScheduleEntryFields,
+  stored: ManagedExchangeSchedule | undefined,
+): string | undefined {
+  if (stored === undefined) return undefined;
+  const shown = anchorEntryFields(stored.anchor);
+  return shown.firstWindowDate === fields.firstWindowDate &&
+    shown.firstWindowTime === fields.firstWindowTime
+    ? stored.anchor
+    : undefined;
 }
 
 /**
@@ -136,9 +207,19 @@ function withinWholeRange(
  * The date and time are checked together against the calendar, through the same
  * resolver the save uses, so a 29 February that the year does not have fails here
  * rather than at the write.
+ *
+ * `stored` is the schedule the form opened on, where there is one. A width it
+ * carries that the field's whole-hour unit cannot express stands as it is while
+ * the operator leaves it alone -- the save carries those seconds through
+ * untouched, so there is nothing to correct -- while a width the operator CHANGES
+ * takes the whole-hour rule like any other entry. A stored width outside entry's
+ * own bounds is refused either way: the floor is what the design rests on, so a
+ * below-floor width from an import is flagged for the operator to fix rather than
+ * carried through unremarked.
  */
 export function scheduleEntryErrors(
   fields: ScheduleEntryFields,
+  stored?: ManagedExchangeSchedule,
 ): ScheduleEntryErrors {
   const errors: ScheduleEntryErrors = {};
   const date = readDateFields(fields.firstWindowDate);
@@ -157,20 +238,26 @@ export function scheduleEntryErrors(
     }
   if (!withinWholeRange(fields.intervalDays, 1, MAX_SCHEDULE_INTERVAL_DAYS))
     errors.intervalDays = `Enter a whole number of days, 1 through ${String(MAX_SCHEDULE_INTERVAL_DAYS)}.`;
-  if (
-    !withinWholeRange(
+  const widthUsable =
+    withinRange(
       fields.windowHours,
       MIN_SCHEDULE_WINDOW_HOURS,
       MAX_SCHEDULE_WINDOW_HOURS,
-    )
-  )
+    ) &&
+    (Number.isInteger(fields.windowHours) ||
+      carriedWindowSeconds(fields, stored) !== undefined);
+  if (!widthUsable)
     errors.windowHours = `Enter a whole number of hours, ${String(MIN_SCHEDULE_WINDOW_HOURS)} through ${String(MAX_SCHEDULE_WINDOW_HOURS)}. A window this wide is what absorbs the clock difference between your machine and your partner's.`;
   return errors;
 }
 
-/** Whether an entry is usable as it stands. */
-export function scheduleEntryUsable(fields: ScheduleEntryFields): boolean {
-  return Object.keys(scheduleEntryErrors(fields)).length === 0;
+/** Whether an entry is usable as it stands, against the schedule the form opened
+ * on where there is one (see {@link scheduleEntryErrors}). */
+export function scheduleEntryUsable(
+  fields: ScheduleEntryFields,
+  stored?: ManagedExchangeSchedule,
+): boolean {
+  return Object.keys(scheduleEntryErrors(fields, stored)).length === 0;
 }
 
 /**
@@ -185,13 +272,21 @@ export function scheduleEntryUsable(fields: ScheduleEntryFields): boolean {
  * count starts at zero for the same reason: an edited cadence is a new lattice,
  * and a count of windows on the old one says nothing about this one.
  *
+ * `stored` is the schedule the form opened on, where there is one. The anchor and
+ * the width are carried from it VERBATIM while the fields that display them are
+ * untouched (see {@link carriedAnchor} and {@link carriedWindowSeconds}), so
+ * editing one field of a cadence never rewrites another that the display fields
+ * hold at a coarser resolution than the record does.
+ *
  * @throws {RangeError} if any field is unusable (see
- *   {@link scheduleEntryErrors}), or if the resolved anchor falls outside the
- *   range a stored UTC instant carries.
+ *   {@link scheduleEntryErrors}), if the width does not resolve to the whole
+ *   number of seconds the record stores, or if the resolved anchor falls outside
+ *   the range a stored UTC instant carries.
  */
 export function buildScheduleFromEntry(
   fields: ScheduleEntryFields,
   now: number,
+  stored?: ManagedExchangeSchedule,
 ): ManagedExchangeSchedule {
   const date = readDateFields(fields.firstWindowDate);
   const time = readTimeFields(fields.firstWindowTime);
@@ -202,11 +297,23 @@ export function buildScheduleFromEntry(
     typeof fields.windowHours !== "number"
   )
     throw new RangeError("managed schedule entry is not a usable cadence");
-  const anchor = resolveLocalCadenceAnchor({ ...date, ...time });
+  const anchor =
+    carriedAnchor(fields, stored) ??
+    resolveLocalCadenceAnchor({ ...date, ...time });
+  const windowSeconds =
+    carriedWindowSeconds(fields, stored) ??
+    fields.windowHours * SECONDS_PER_HOUR;
+  // A width in hours that is not a whole number of seconds has no record to be
+  // written to: the schema stores integer seconds, so it would surface as a
+  // validation failure at the store write rather than here.
+  if (!Number.isInteger(windowSeconds))
+    throw new RangeError(
+      "managed schedule entry width is not a whole number of seconds",
+    );
   const lattice: ManagedExchangeSchedule = {
     anchor,
     intervalDays: fields.intervalDays,
-    windowSeconds: fields.windowHours * SECONDS_PER_HOUR,
+    windowSeconds,
     nextWindow: anchor,
     consecutiveMisses: 0,
   };
@@ -223,23 +330,27 @@ export function buildScheduleFromEntry(
  * operator's own clock, and the period and width in the units the fields use.
  *
  * A width the schema admits but entry does not (a stored schedule from an import,
- * or one entered before the floor existed) reads back as the seconds it is,
- * rounded to the nearest whole hour, so the form shows a value the operator can
- * see and correct rather than silently rewriting their partner's agreed width.
+ * or one entered before the floor existed) reads back as the EXACT hours it is,
+ * fractional where its seconds are not a whole hour, so the form shows what the
+ * partnership agreed rather than a rounded value the operator would take for it.
+ * A width below entry's floor is flagged for the operator to correct
+ * ({@link scheduleEntryErrors}); one merely finer than the field's unit stands,
+ * and the save carries its seconds through untouched
+ * ({@link buildScheduleFromEntry}).
+ *
+ * The anchor is read back only to the minute, which is the resolution the fields
+ * carry; a stored anchor finer than that is likewise carried through rather than
+ * re-resolved from the reading.
  *
  * @throws {RangeError} if the stored anchor is not a usable UTC instant.
  */
 export function scheduleEntryFieldsFrom(
   schedule: ManagedExchangeSchedule,
 ): ScheduleEntryFields {
-  const cadence = localCadenceFromAnchor(schedule.anchor);
-  const pad = (value: number, width: number) =>
-    String(value).padStart(width, "0");
   return {
-    firstWindowDate: `${pad(cadence.year, 4)}-${pad(cadence.month, 2)}-${pad(cadence.day, 2)}`,
-    firstWindowTime: `${pad(cadence.hour, 2)}:${pad(cadence.minute, 2)}`,
+    ...anchorEntryFields(schedule.anchor),
     intervalDays: schedule.intervalDays,
-    windowHours: Math.round(schedule.windowSeconds / SECONDS_PER_HOUR),
+    windowHours: storedWindowHours(schedule),
   };
 }
 
@@ -248,12 +359,14 @@ export function scheduleEntryFieldsFrom(
  * touched only the label or the max-age policy carries the stored schedule
  * VERBATIM instead of rebuilding it.
  *
- * Two things rest on this. The cadence is re-resolved to UTC only on an operator
- * edit (docs/spec/MANAGED_EXCHANGE_RECORD.md, the `anchor` row), and a wall clock
- * the operator's zone repeats or skips does not round-trip through the local
- * reading, so an unrelated save could otherwise walk the agreed instant. And the
- * schedule's bookkeeping -- the planned window and the consecutive-miss count --
- * belongs to the runner; rebuilding a cadence nobody edited would reset both.
+ * What rests on this is the schedule's bookkeeping: the planned window and the
+ * consecutive-miss count belong to the runner, and rebuilding a cadence nobody
+ * edited would reset both. The agreed instant itself is held either way -- a
+ * cadence field the operator did not touch is carried through verbatim even on a
+ * save that edited another (see {@link buildScheduleFromEntry}), so a wall clock
+ * the operator's zone repeats or skips, which does not round-trip through the
+ * local reading, is never re-resolved off that reading
+ * (docs/spec/MANAGED_EXCHANGE_RECORD.md, the `anchor` row).
  */
 export function scheduleEntryUnchanged(
   fields: ScheduleEntryFields,

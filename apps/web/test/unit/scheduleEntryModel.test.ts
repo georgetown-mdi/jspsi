@@ -343,21 +343,117 @@ describe("a cadence weighed against the max-token-age bound", () => {
 });
 
 describe("a stored schedule the entry form did not write", () => {
+  /** An imported or hand-edited record carrying a 90-minute window and an anchor
+   * with seconds on it: two values the entry fields hold at a coarser resolution
+   * than the record does. */
+  function finerThanTheFields() {
+    return scheduleSchema.parse({
+      anchor: "2026-07-14T09:00:30.500Z",
+      intervalDays: 7,
+      windowSeconds: 5400,
+      nextWindow: "2026-08-04T09:00:30.500Z",
+      consecutiveMisses: 2,
+    });
+  }
+
   test("a width below the entry floor reads back as itself, not silently rewritten", () => {
     // An imported record can carry a width the schema admits and entry does not.
     // Showing it is what lets the operator see and correct it; rewriting it would
     // change what their partner agreed without telling them.
-    const fields = scheduleEntryFieldsFrom(
-      scheduleSchema.parse({
-        anchor: "2026-07-14T09:00:00.000Z",
-        intervalDays: 7,
-        windowSeconds: 60,
-        nextWindow: "2026-07-14T09:00:00.000Z",
-        consecutiveMisses: 0,
-      }),
+    const stored = scheduleSchema.parse({
+      anchor: "2026-07-14T09:00:00.000Z",
+      intervalDays: 7,
+      windowSeconds: 60,
+      nextWindow: "2026-07-14T09:00:00.000Z",
+      consecutiveMisses: 0,
+    });
+    const fields = scheduleEntryFieldsFrom(stored);
+    expect(fields.windowHours).toBe(60 / 3600);
+    // Refused even though it is the stored value: the floor is what the design's
+    // only clock-skew mitigation rests on, so a below-floor width is the one case
+    // entry makes the operator settle rather than carrying through.
+    expect(scheduleEntryErrors(fields, stored).windowHours).toBeDefined();
+    expect(scheduleEntryUsable(fields, stored)).toBe(false);
+  });
+
+  test("a width the hour field cannot express reads back exactly, never rounded", () => {
+    // The rounded reading is the silent rewrite this guards: shown as 2, a save
+    // of any other field writes 7200 seconds over the 5400 the partnership
+    // agreed.
+    const stored = finerThanTheFields();
+    const fields = scheduleEntryFieldsFrom(stored);
+    expect(fields.windowHours).toBe(1.5);
+    expect(Number(fields.windowHours) * 3600).toBe(stored.windowSeconds);
+    // It stands as it is rather than being flagged: it is inside entry's bounds,
+    // and the operator has nothing to correct while the save carries it through.
+    expect(scheduleEntryErrors(fields, stored)).toEqual({});
+    expect(scheduleEntryUsable(fields, stored)).toBe(true);
+  });
+
+  test("editing one field carries every untouched value through verbatim", () => {
+    withTimeZone("America/New_York", () => {
+      const stored = finerThanTheFields();
+      const edited = {
+        ...scheduleEntryFieldsFrom(stored),
+        intervalDays: 14,
+      };
+      const rebuilt = buildScheduleFromEntry(edited, NOW, stored);
+      // Neither the seconds on the width nor the sub-minute part of the anchor
+      // survives a round trip through the display fields, so both are carried
+      // rather than re-derived.
+      expect(rebuilt.windowSeconds).toBe(5400);
+      expect(rebuilt.anchor).toBe(stored.anchor);
+      // The edit itself lands, and the bookkeeping starts over on the new
+      // lattice as it does for any edited cadence.
+      expect(rebuilt.intervalDays).toBe(14);
+      expect(rebuilt.consecutiveMisses).toBe(0);
+      expect(scheduleSchema.safeParse(rebuilt).success).toBe(true);
+    });
+  });
+
+  test("a width the operator does change takes the whole-hour rule", () => {
+    const stored = finerThanTheFields();
+    const fields = scheduleEntryFieldsFrom(stored);
+    // Another value the field's unit cannot express is a value the operator
+    // typed, not one they inherited, so it is refused at the field.
+    expect(
+      scheduleEntryErrors({ ...fields, windowHours: 2.5 }, stored).windowHours,
+    ).toBeDefined();
+    const widened = buildScheduleFromEntry(
+      { ...fields, windowHours: 2 },
+      NOW,
+      stored,
     );
-    expect(fields.windowHours).toBe(0);
-    expect(scheduleEntryErrors(fields).windowHours).toBeDefined();
+    expect(widened.windowSeconds).toBe(7200);
+  });
+
+  test("editing the date re-resolves the anchor rather than carrying the stored one", () => {
+    // The carry-through is per field: it must not hold an instant the operator
+    // moved. Date and time resolve together, so touching either re-resolves.
+    withTimeZone("America/New_York", () => {
+      const stored = finerThanTheFields();
+      const fields = scheduleEntryFieldsFrom(stored);
+      const moved = buildScheduleFromEntry(
+        { ...fields, firstWindowDate: "2026-07-21" },
+        NOW,
+        stored,
+      );
+      expect(moved.anchor).not.toBe(stored.anchor);
+      expect(moved.anchor).toBe(
+        new Date(2026, 6, 21, 5, 0, 0, 0).toISOString(),
+      );
+      // The width it did not touch is still carried.
+      expect(moved.windowSeconds).toBe(5400);
+    });
+  });
+
+  test("a width with no stored schedule to carry it is refused, not written fractional", () => {
+    // The record stores whole seconds, so a width that resolves to a fraction of
+    // one has nowhere to be written; refusing here is what keeps it from
+    // surfacing as a validation failure at the store write.
+    expect(() =>
+      buildScheduleFromEntry(entry({ windowHours: 1.5000001 }), NOW),
+    ).toThrow(RangeError);
   });
 
   test("the widest stored window reads back as the ceiling entry offers", () => {

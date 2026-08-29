@@ -311,6 +311,13 @@ hours -- plus three rules that are entry's alone:
   through **verbatim** rather than resolving again: a wall clock a zone skips or
   repeats does not round-trip, so re-resolving on an unrelated save (a label
   edit, a max-age change) could walk the agreed instant away from the partner's.
+  The carry-through is **per field**, not all-or-nothing: a save that edited one
+  cadence field takes the anchor and the width from the stored object verbatim
+  while the fields displaying them are untouched. The fields hold the cadence to
+  the minute and the width to the hour, coarser than the record stores either, so
+  re-deriving them from what they display would rewrite a stored value at a
+  resolution the operator never saw -- an edit to the period alone silently
+  moving an agreed anchor or width.
 - **`nextWindow` is the first window not yet closed at the save**, not the
   anchor's own window. A cadence anchored to a date already past would otherwise
   hand [catch-up](#catch-up-on-wake) every window that elapsed before the
@@ -326,7 +333,12 @@ the width floor of one hour that the schema's structural floor does not carry. A
 stored width below that floor -- from an import, or a hand-edited record -- is
 shown back as the value it is and flagged, never silently rewritten: the width is
 what the partnership agreed, and changing it unannounced would drift this party
-away from the other.
+away from the other. A stored width that is merely finer than the field's unit --
+5400 seconds, an hour and a half -- is shown as the exact fraction of an hour it
+is rather than rounded to one, and stands: it is inside entry's own bounds, so
+there is nothing for the operator to correct and the save carries its seconds
+through. Only a width the operator **changes** takes the whole-hour rule the
+field asks for.
 
 One cross-field condition is **surfaced rather than refused**. When
 [`tokenMaxAgeDays`](#persisted-across-runs) is set and `intervalDays` is at or

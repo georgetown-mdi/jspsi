@@ -316,8 +316,11 @@ function LocalFieldsEditor({
       ? maxAgeDays
       : undefined;
   const cadenceNote = maxAgeCadenceNote(tokenMaxAgeDays);
-  const scheduleErrors = scheduleEnabled ? scheduleEntryErrors(schedule) : {};
-  const scheduleValid = !scheduleEnabled || scheduleEntryUsable(schedule);
+  const scheduleErrors = scheduleEnabled
+    ? scheduleEntryErrors(schedule, record.schedule)
+    : {};
+  const scheduleValid =
+    !scheduleEnabled || scheduleEntryUsable(schedule, record.schedule);
   const cadenceProblem = scheduleEnabled
     ? cadenceAgainstTokenBound(schedule.intervalDays, tokenMaxAgeDays)
     : undefined;
@@ -335,13 +338,15 @@ function LocalFieldsEditor({
 
   /** The stored schedule where the form still says exactly what it does, and the
    * entered cadence resolved afresh otherwise (see
-   * {@link scheduleEntryUnchanged}). The host zone is read only on the second
-   * branch, which is the operator's own edit. */
+   * {@link scheduleEntryUnchanged}). The second branch is the operator's own
+   * edit, and it is handed the stored schedule too: the fields it did not touch
+   * are carried from there verbatim rather than re-derived from what they
+   * display, so editing one of them rewrites no other. */
   function storedOrEnteredSchedule() {
     return record.schedule !== undefined &&
       scheduleEntryUnchanged(schedule, record.schedule)
       ? record.schedule
-      : buildScheduleFromEntry(schedule, Date.now());
+      : buildScheduleFromEntry(schedule, Date.now(), record.schedule);
   }
 
   function save() {
@@ -495,6 +500,12 @@ function ScheduleEntryFieldset({
   onEdit: (edits: Partial<ScheduleEntryFields>) => void;
 }) {
   const resolved = resolvedFirstWindowLabel(fields);
+  // The width field ROUNDS what it displays while decimals are off, so a stored
+  // width finer than whole hours -- an import, a hand-edited record -- would show
+  // the operator a number that is not the width their partner agreed. Decimals
+  // are opened exactly where the stored value needs them; the whole-hour rule
+  // stays the model's, which names it at the field either way.
+  const widthNeedsDecimals = !Number.isInteger(fields.windowHours);
   return (
     <>
       <TextInput
@@ -537,7 +548,7 @@ function ScheduleEntryFieldset({
         min={MIN_SCHEDULE_WINDOW_HOURS}
         max={MAX_SCHEDULE_WINDOW_HOURS}
         step={1}
-        allowDecimal={false}
+        allowDecimal={widthNeedsDecimals}
         error={errors.windowHours}
         onChange={(value) => onEdit({ windowHours: value })}
         mt="xs"

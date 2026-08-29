@@ -460,6 +460,33 @@ describe("managed exchange detail schedule entry", () => {
     expect(saved[0].schedule).toEqual(stored);
   });
 
+  test("a stored width finer than the field's unit is shown and saved as it is", async () => {
+    // An imported or hand-edited record can carry a width and an anchor at a
+    // finer resolution than the fields hold. Both must survive an edit to some
+    // other field, and the width the operator reads has to be the one their
+    // partner agreed rather than a round number standing in for it.
+    const stored: ManagedExchangeSchedule = {
+      anchor: new Date(2026, 7, 4, 9, 0, 30, 500).toISOString(),
+      intervalDays: 7,
+      windowSeconds: 5400,
+      nextWindow: new Date(2026, 8, 1, 9, 0, 30, 500).toISOString(),
+      consecutiveMisses: 2,
+    };
+    const { saved } = renderEntry(stored);
+
+    await expect
+      .element(page.getByLabelText("Each window stays open (hours)"))
+      .toHaveValue("1.5");
+
+    await page.getByLabelText("A window opens every (days)").fill("14");
+    await page.getByRole("button", { name: "Save settings" }).click();
+
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0].schedule?.intervalDays).toBe(14);
+    expect(saved[0].schedule?.windowSeconds).toBe(5400);
+    expect(saved[0].schedule?.anchor).toBe(stored.anchor);
+  });
+
   test("an out-of-range window width blocks the save at its own field", async () => {
     renderEntry();
 

@@ -277,9 +277,8 @@ exchange a clock reading, so a wide window is what guarantees overlap despite
 small clock differences; the honest bound is in
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#clock-skew-and-the-window-width)),
 and it absorbs the ordinary slack of two independently-kept machines -- a laptop
-that woke late, an app launched a few minutes after login. Entry holds the width
-to that range: at least an hour, at most half a day. A missed window carries no
-security meaning (see [A missed window is neither desync nor
+that woke late, an app launched a few minutes after login. A missed window
+carries no security meaning (see [A missed window is neither desync nor
 attack](#a-missed-window-is-neither-desync-nor-attack)).
 
 While a window is being occupied, the runner stands down between its attempts
