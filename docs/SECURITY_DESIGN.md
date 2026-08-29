@@ -1,7 +1,7 @@
 ---
 title: "PSI-Link Security Design"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-26"
+last_reviewed: "2026-08-29"
 ---
 
 # PSI-Link security
@@ -368,6 +368,14 @@ Its reach is narrower than the claim it guards, and deliberately so. It does not
 - a URL an author took the trouble to split across fragments, to encode past the scheme, or to write into a regular-expression literal; an escape the language itself removes is not one of these, since a literal is read as the value it evaluates to.
 
 The check's own header carries the full list, including the authority shapes it knowingly skips and the invalid ones it reports anyway. Like the `connect-src` allowlist above, it narrows a surface rather than closing it.
+
+#### The containerized roles
+
+In the containerized roles -- the headless CLI and the console appliance -- what bounds dependency-originated egress is the host's firewall rather than any browser directive. An exchange gives the container one reason to reach the network, and the allowlist that holds it to that one endpoint is in [DEPLOYMENT.md](DEPLOYMENT.md#restricting-the-containers-outbound-network-access): a dedicated Docker network on a pinned subnet, `DOCKER-USER` rules permitting the agreed SFTP server and the resolver, and a `DROP` for everything else. Were the process ever compromised through a dependency vulnerability, that is what bounds where it could reach.
+
+The control is driven rather than asserted. The image smoke workflow applies those rules on a runner that has Docker and root and asserts the documented verification: the permitted endpoint read by name, a denied port and a denied host refused, each of the three reached again off the restricted network, and the by-name probe refused once the resolver rules are taken away. So a Docker release that changed where operator rules are consulted, or a rule the document records where it is never reached, surfaces as a failed check rather than as a deployment that believes itself restricted.
+
+Its limits are the recipe's own. It is hardening the operator applies deliberately -- no exchange needs it and nothing in PSI-Link depends on it -- so a deployment that has not applied it has none of it. It works only on Linux with Docker Engine's iptables integration; Docker Desktop and rootless Docker route container traffic where these rules do not reach. It bounds one container's reach and not the machine's, leaves name resolution a permitted channel wherever a resolver is allowed, and does not govern traffic the host delivers to itself. And it is not a substitute for the controls that carry the exchange: the partner's material is untrusted whatever the container may reach, and what bounds it is the protocol (see [Channel security](#channel-security)).
 
 ## Receipt signing identities
 
