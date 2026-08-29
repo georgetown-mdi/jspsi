@@ -272,7 +272,10 @@ honestly: the attested-to-head diff is dominated by already-merged staging
 content, so the verifier can never HOLD across one, and a conflict resolution is
 branch-authored change no round has read. Its route is a round, not a mechanical
 path: re-run the branch's standing refutation contract in full at the merge head
-(`/light-review --role <role> --claims <file>`, the same claims, the new head).
+(`/light-review --role <role> --claims <file> --target <branch>`). The standing
+contract is the union of the claims the branch's role rounds have run -- each
+ledger row records its claims verbatim, so the union survives a lost claims
+file -- and never the last row's delta subset.
 No verdict is carried across the merge -- a claim's truth is not a function of
 its recorded subject file, the ledger does not record the file set a claim
 ranges over, and the merge composes the branch with content no round has read --
