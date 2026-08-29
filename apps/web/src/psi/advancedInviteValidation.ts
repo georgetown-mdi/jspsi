@@ -6,7 +6,6 @@ import {
   MAX_INVITATION_LIFETIME_SECONDS,
   UsageError,
   assertDeduplicateImplemented,
-  authoredLinkageFields,
   canonicalString,
   countOnlyShapeViolation,
   countOnlyTransmitsColumn,
@@ -726,39 +725,34 @@ export function importedCitationDropNotice(
  *
  * Both surfaces a coalesce can reach are read, because the two arrive by
  * different doors: the per-party cleaning the operator authors here, and a
- * linkage-key element transform, which only an imported document carries (the
- * editor's own key authoring offers no coalesce for an element).
+ * linkage-key element transform, authored in the key editor or carried by an
+ * imported document.
  *
  * Labels, never names: an imported document's field names are
  * partner-influenceable, the same reason {@link UNSUPPLYABLE_KEY_MESSAGE} names
- * no field. A transformation or element whose field the draft does not declare
- * contributes nothing -- it names no label to show, and it is matched on
- * nothing.
+ * no field. A transformation or element whose field the built terms do not
+ * declare contributes nothing: an unreferenced field is not part of the
+ * exchange, so its steps cannot cost a match.
  */
 function inertCoalesceFieldLabels(
   draft: AdvancedInviteDraft,
   terms: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
 ): Array<string> {
   const labels = new Set<string>();
-  const labelByFieldName = new Map(
-    authoredLinkageFields(draft.metadata, draft.standardization).map(
-      (field) => [field.name, SEMANTIC_TYPE_LABELS[field.type]],
-    ),
-  );
-  for (const transformation of draft.standardization) {
-    const label = labelByFieldName.get(transformation.output);
-    if (
-      label !== undefined &&
-      pipelineHasInertCoalesce(transformation.steps ?? [])
-    )
-      labels.add(label);
-  }
   const labelByDeclaredName = new Map(
     terms.linkageFields.map((field) => [
       field.name,
       SEMANTIC_TYPE_LABELS[field.type],
     ]),
   );
+  for (const transformation of draft.standardization) {
+    const label = labelByDeclaredName.get(transformation.output);
+    if (
+      label !== undefined &&
+      pipelineHasInertCoalesce(transformation.steps ?? [])
+    )
+      labels.add(label);
+  }
   for (const key of terms.linkageKeys)
     for (const element of key.elements) {
       const label = labelByDeclaredName.get(element.field);

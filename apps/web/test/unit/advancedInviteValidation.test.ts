@@ -9,13 +9,16 @@ import {
 } from "@psilink/core";
 
 import {
+  draftWithFieldAdded,
+  seedAdvancedInvite,
+} from "../../src/psi/advancedInviteDraft.js";
+import {
   gatedActiveSettingMessage,
   inertCoalesceNotice,
   validateAdvancedInvite,
 } from "../../src/psi/advancedInviteValidation.js";
 import { SEMANTIC_TYPE_LABELS } from "../../src/psi/metadataEditing.js";
 import { buildAdvancedTerms } from "../../src/psi/advancedInviteTerms.js";
-import { seedAdvancedInvite } from "../../src/psi/advancedInviteDraft.js";
 
 import type {
   LinkageStrategy,
@@ -371,6 +374,30 @@ describe("the inert-coalesce notice (a declared default the run will not substit
     expect(
       inertCoalesceNotice(rescued, buildAdvancedTerms(rescued)),
     ).toBeUndefined();
+  });
+
+  test("a declared default on a field the built terms do not carry says nothing", () => {
+    // A second column of the same type (`fname` aliases to `first_name`) so
+    // draftWithFieldAdded has a free column to bind: the added field
+    // (`first_name_2`) is declared in the draft's standardization but no
+    // enabled key references it, so the built terms do not carry it -- the
+    // exact split between authoredLinkageFields and terms.linkageFields this
+    // notice must read from the latter to get right.
+    const { draft } = seedAdvancedInvite("Org", [...ALL_COLUMNS, "fname"]);
+    const added = draftWithFieldAdded(draft, "first_name");
+    const unreferenced = {
+      ...added,
+      standardization: added.standardization.map((transformation) =>
+        transformation.output === "first_name_2"
+          ? { ...transformation, steps: [coalesce] }
+          : transformation,
+      ),
+    };
+    const terms = buildAdvancedTerms(unreferenced);
+    expect(
+      terms.linkageFields.some((field) => field.name === "first_name_2"),
+    ).toBe(false);
+    expect(inertCoalesceNotice(unreferenced, terms)).toBeUndefined();
   });
 
   test("an imported key transform whose coalesce declares no text default is named", () => {
