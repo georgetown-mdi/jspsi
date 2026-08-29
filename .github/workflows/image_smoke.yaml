@@ -816,12 +816,12 @@ jobs:
   # docs/DEPLOYMENT.md hands the operator a restricted-egress recipe for the
   # containerized roles -- a dedicated network with a subnet they pin, an
   # allowlist written into the DOCKER-USER chain, and a `probe-host-key`
-  # verification procedure -- and it was written where no Docker existed to run
-  # it. This job runs it: the documented rules are applied against the image
-  # this repository builds and every row of the doc's own verification table is
-  # asserted, so a recipe that has stopped working -- a rule recorded at a
-  # position where it is never reached, a Docker release that reorders the
-  # forward chain around DOCKER-USER -- fails here instead of in a deployment.
+  # verification procedure. This job is where that recipe is executed: the
+  # documented rules are applied against the image this repository builds and
+  # every row of the doc's own verification table is asserted, so a recipe that
+  # has stopped working -- a rule recorded at a position where it is never
+  # reached, a Docker release that reorders the forward chain around
+  # DOCKER-USER -- fails here instead of in a deployment.
   #
   # Its own job on its own runner, so the firewall rules it writes cannot reach
   # the smoke job's containers. Within the job every rule is scoped to the
