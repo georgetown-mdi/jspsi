@@ -795,7 +795,7 @@ record, in a separate origin-local store keyed by the record `id`, and are
   and that run's rotation then supersedes the handed-over copy; the surfaces'
   run-in-flight withholding covers that window as a best-effort reading only, and the
   structural exclusion of spend and run is follow-on work, not a property this store
-  step provides. It carries no secret material and no epoch.
+  step provides. The spent state carries no secret material and no epoch.
 
   **Revive by import is the migration spend's recovery, and only its.** The
   migration export downloads the artifact that clears its own spend (a
