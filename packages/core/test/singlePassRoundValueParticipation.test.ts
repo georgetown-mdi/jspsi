@@ -31,12 +31,12 @@ import {
 // The sides driven are `{localKeepsDuplicates: false, partnerKeepsDuplicates: true}`,
 // the receiver's own label for a sender that keeps its duplicates, which is the one
 // combination the elided branch belongs to. `{true, true}` is not among the
-// combinations left unswept here: multiplicitySides returns undefined for
-// many-to-many and both strategies refuse that pair before a round begins, which
-// psiLinkManyToOne.test.ts ("single-pass refuses many-to-many", "the cascade and
-// single-pass refuse many-to-many with the same message") and
+// combinations left unswept here: it is the many-to-many label, which this strategy
+// refuses before a round begins, so no replay of it runs under those sides.
+// psiLinkManyToOne.test.ts ("single-pass refuses many-to-many"), psiLink.test.ts
+// ("many-to-many pairs in the cascade and is refused by single-pass") and
 // linkageCardinality.test.ts ("single-pass resolves the same labels the cascade
-// does") carry.
+// does") carry that.
 //
 // A row holding one value twice is in the corpus defensively rather than as a
 // reachable shape: a local cell realizes a ReadonlySet, and a partner's ragged cell
