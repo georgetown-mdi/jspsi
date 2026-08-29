@@ -10,6 +10,10 @@ name: Image Smoke
 # runner's Docker so it can run it -- deliberately faster and simpler than the
 # release job's multi-arch build+push, since nothing is published here.
 #
+# A second job drives the restricted-egress recipe docs/DEPLOYMENT.md hands the
+# operator. It needs Docker and root on the same machine, which is what puts it
+# here rather than anywhere else, and its own comment carries the rest.
+#
 # The pull-request trigger is scoped by path to changes that can affect an
 # image. If this is made a required status check, configure branch protection so
 # a path-skipped run does not block an unrelated PR -- a skipped required check
@@ -808,6 +812,282 @@ jobs:
           && steps.vulnerability_scan.outcome != 'skipped'
           && steps.image_scan_upload.outcome != 'success' }}
         run: cat trivy-image.sarif
+
+  # docs/DEPLOYMENT.md hands the operator a restricted-egress recipe for the
+  # containerized roles -- a dedicated network with a subnet they pin, an
+  # allowlist written into the DOCKER-USER chain, and a `probe-host-key`
+  # verification procedure -- and it was written where no Docker existed to run
+  # it. This job runs it: the documented rules are applied against the image
+  # this repository builds and every row of the doc's own verification table is
+  # asserted, so a recipe that has stopped working -- a rule recorded at a
+  # position where it is never reached, a Docker release that reorders the
+  # forward chain around DOCKER-USER -- fails here instead of in a deployment.
+  #
+  # Its own job on its own runner, so the firewall rules it writes cannot reach
+  # the smoke job's containers. Within the job every rule is scoped to the
+  # subnet created here, and the teardown deletes them whatever the probes did.
+  #
+  # One difference from what an operator applies: the endpoints are containers
+  # on the restricted network rather than servers elsewhere, so no packet leaves
+  # the runner. The rules match on the source subnet and govern this traffic on
+  # the same terms; what goes undriven is the route past the host's own external
+  # interface, not the rules themselves.
+  restricted_egress:
+    name: Drive the documented restricted-egress recipe
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      PSILINK_IMAGE: psi-link:egress-smoke
+      ENDPOINT_IMAGE: psi-link:egress-endpoint
+      # The network name and subnet docs/DEPLOYMENT.md names, used literally.
+      EGRESS_NET: psilink-egress
+      EGRESS_SUBNET: 172.31.240.0/29
+      EGRESS_RESOLVER: 172.31.240.2
+      EGRESS_ALLOWED: 172.31.240.3
+      EGRESS_DENIED: 172.31.240.4
+      # A second network carrying the same two endpoints, from a subnet no rule
+      # below names. This is the doc's "run it a second time without --network
+      # psilink-egress": a probe that fails for its own reasons proves nothing,
+      # so every refusal here is required to succeed from off the restriction.
+      CONTROL_NET: psilink-egress-control
+      CONTROL_SUBNET: 172.31.241.0/29
+      CONTROL_RESOLVER: 172.31.241.2
+      CONTROL_ALLOWED: 172.31.241.3
+      CONTROL_DENIED: 172.31.241.4
+      # The doc's own example names, resolved by the permitted resolver rather
+      # than by Docker's embedded container-name DNS: a name the allowlist can
+      # actually drop is what makes probing by name a check of the resolver
+      # rules and not decoration.
+      ALLOWED_HOST: sftp.partner.example
+      DENIED_HOST: some.other.host
+      ALLOWED_PORT: "22"
+      DENIED_PORT: "2222"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # The subject is the image an operator runs, so it is built here rather
+      # than approximated by the CLI on the runner. Reads the smoke job's cache
+      # scope and writes none of its own: the two jobs run concurrently, and a
+      # second writer on one scope would have them evicting each other.
+      - name: Build image (amd64, load into local Docker)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          push: false
+          tags: ${{ env.PSILINK_IMAGE }}
+          cache-from: type=gha,scope=default
+
+      # One fixture image in two roles: the SSH server whose host key the probe
+      # reads, and the resolver the allowlist permits. sshd listens on the
+      # permitted port AND on a second one, so the denied-port row below
+      # measures the firewall rather than a closed socket -- the control run
+      # reaches that same port and is what establishes the difference.
+      - name: Build the endpoint fixture
+        run: |
+          set -euo pipefail
+          # Taken from the base this repository already pins by digest, so
+          # driving the recipe introduces no second, floating image.
+          base=$(sed -n 's/^FROM \(node:[^ ]*@sha256:[0-9a-f]*\).*/\1/p' Dockerfile | head -n 1)
+          if [ -z "$base" ]; then
+            echo "could not read a digest-pinned base image out of Dockerfile" >&2
+            exit 1
+          fi
+          echo "endpoint fixture base: $base"
+          cat >"$RUNNER_TEMP/endpoint.Dockerfile" <<DOCKERFILE
+          FROM $base
+          RUN apk add --no-cache openssh-server dnsmasq
+          RUN ssh-keygen -A
+          RUN printf 'Port $ALLOWED_PORT\nPort $DENIED_PORT\n' >> /etc/ssh/sshd_config
+          ENTRYPOINT []
+          DOCKERFILE
+          docker buildx build --load --tag "$ENDPOINT_IMAGE" \
+            --file "$RUNNER_TEMP/endpoint.Dockerfile" "$RUNNER_TEMP"
+
+      # Step 1 of the recipe, performed literally: a network of this deployment's
+      # own with a subnet chosen rather than drawn from Docker's pool, since the
+      # rules name it. The endpoints take fixed addresses inside it for the same
+      # reason. Each is attached to the control network as well, so the control
+      # run reaches the same two processes over a path no rule governs.
+      - name: Create the networks and start the endpoints
+        run: |
+          set -euo pipefail
+          docker network create --subnet "$EGRESS_SUBNET" "$EGRESS_NET"
+          docker network create --subnet "$CONTROL_SUBNET" "$CONTROL_NET"
+
+          resolver() {
+            docker run -d --name "$1" --network "$2" --ip "$3" \
+              "$ENDPOINT_IMAGE" dnsmasq -k --conf-file=/dev/null --no-resolv \
+              --user=root --group=root --log-queries --log-facility=- \
+              "--address=/$ALLOWED_HOST/$4" "--address=/$DENIED_HOST/$5"
+          }
+          resolver psilink-resolver "$EGRESS_NET" "$EGRESS_RESOLVER" \
+            "$EGRESS_ALLOWED" "$EGRESS_DENIED"
+          resolver psilink-resolver-control "$CONTROL_NET" "$CONTROL_RESOLVER" \
+            "$CONTROL_ALLOWED" "$CONTROL_DENIED"
+
+          docker run -d --name psilink-sftp-allowed \
+            --network "$EGRESS_NET" --ip "$EGRESS_ALLOWED" \
+            "$ENDPOINT_IMAGE" /usr/sbin/sshd -D -e
+          docker run -d --name psilink-sftp-denied \
+            --network "$EGRESS_NET" --ip "$EGRESS_DENIED" \
+            "$ENDPOINT_IMAGE" /usr/sbin/sshd -D -e
+          docker network connect --ip "$CONTROL_ALLOWED" \
+            "$CONTROL_NET" psilink-sftp-allowed
+          docker network connect --ip "$CONTROL_DENIED" \
+            "$CONTROL_NET" psilink-sftp-denied
+
+      # Before any rule exists, so a fixture that never came up is diagnosed as
+      # that rather than read as a refusal. By address, on the control network:
+      # what is being waited for is sshd accepting connections.
+      - name: Wait for the endpoints to answer
+        run: |
+          set -uo pipefail
+          for target in "sftp://$CONTROL_ALLOWED" \
+            "sftp://$CONTROL_ALLOWED:$DENIED_PORT" "sftp://$CONTROL_DENIED"
+          do
+            ready=false
+            for attempt in $(seq 1 20)
+            do
+              if timeout 60 docker run --rm --network "$CONTROL_NET" \
+                "$PSILINK_IMAGE" probe-host-key "$target" \
+                --connect-timeout 5s >/dev/null 2>&1
+              then
+                echo "$target answered on attempt $attempt"
+                ready=true
+                break
+              fi
+              sleep 3
+            done
+            if [ "$ready" != true ]; then
+              echo "$target never answered; the endpoint fixture did not start" >&2
+              docker logs psilink-sftp-allowed || true
+              docker logs psilink-sftp-denied || true
+              exit 1
+            fi
+          done
+
+      # Step 2 of the recipe, in the doc's own order and at the doc's own rule
+      # numbers: -I inserts at the position given, so the numbering is what
+      # keeps the DROP last rather than first.
+      - name: Apply the documented DOCKER-USER allowlist
+        run: |
+          set -euo pipefail
+          docker version --format 'Docker Engine {{.Server.Version}}'
+          # What Docker itself left in the chain, read back before anything is
+          # inserted so an odd run can be read against the chain it started from.
+          sudo iptables -L DOCKER-USER -n --line-numbers
+          # Whether a bridge's own traffic reaches the filter table at all. The
+          # refusal rows below are the load-bearing evidence -- a run with this
+          # off fails them rather than passing them -- but the value is worth
+          # having in the log beside a failure.
+          cat /proc/sys/net/bridge/bridge-nf-call-iptables || true
+
+          SUBNET="$EGRESS_SUBNET"
+          SFTP_ADDR="$EGRESS_ALLOWED"
+          SFTP_PORT="$ALLOWED_PORT"
+          RESOLVER="$EGRESS_RESOLVER"
+
+          sudo iptables -I DOCKER-USER 1 -s "$SUBNET" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+          sudo iptables -I DOCKER-USER 2 -s "$SUBNET" -p tcp -d "$SFTP_ADDR" --dport "$SFTP_PORT" -j ACCEPT
+          sudo iptables -I DOCKER-USER 3 -s "$SUBNET" -p udp -d "$RESOLVER" --dport 53 -j ACCEPT
+          sudo iptables -I DOCKER-USER 4 -s "$SUBNET" -p tcp -d "$RESOLVER" --dport 53 -j ACCEPT
+          sudo iptables -I DOCKER-USER 5 -s "$SUBNET" -j DROP
+
+          sudo iptables -L DOCKER-USER -n --line-numbers
+
+      # The doc's verification section, run. Every row is measured before the
+      # step decides, so one wrong answer does not hide the rest.
+      #
+      # The last pair is the doc's resolution diagnostic, and it is what makes
+      # the by-name rows above mean something: with the two resolver rules
+      # deleted, the permitted endpoint must stop being reachable BY NAME while
+      # staying reachable BY ADDRESS. A run where name resolution took some path
+      # the allowlist does not govern would pass the by-name row here, and this
+      # pair is what refuses to let that read as a working allowlist.
+      - name: Drive the documented probe against the allowlist
+        run: |
+          set -uo pipefail
+          failures=0
+          probe() {
+            local label="$1" network="$2" resolver="$3" target="$4" expected="$5"
+            local status=0
+            echo "--- $label: $target on $network"
+            timeout 120 docker run --rm --network "$network" --dns "$resolver" \
+              "$PSILINK_IMAGE" probe-host-key "$target" --connect-timeout 10s \
+              || status=$?
+            if [ "$status" = "$expected" ]; then
+              echo "$label: exited $status, as the recipe says it must"
+            else
+              echo "::error::$label: $target on $network exited $status, expected $expected"
+              failures=$((failures + 1))
+            fi
+          }
+
+          echo "== on the restricted network"
+          probe "permitted endpoint" "$EGRESS_NET" "$EGRESS_RESOLVER" \
+            "sftp://$ALLOWED_HOST" 0
+          probe "denied port" "$EGRESS_NET" "$EGRESS_RESOLVER" \
+            "sftp://$ALLOWED_HOST:$DENIED_PORT" 69
+          probe "denied host" "$EGRESS_NET" "$EGRESS_RESOLVER" \
+            "sftp://$DENIED_HOST" 69
+
+          echo "== off the restricted network"
+          probe "control, permitted endpoint" "$CONTROL_NET" "$CONTROL_RESOLVER" \
+            "sftp://$ALLOWED_HOST" 0
+          probe "control, denied port" "$CONTROL_NET" "$CONTROL_RESOLVER" \
+            "sftp://$ALLOWED_HOST:$DENIED_PORT" 0
+          probe "control, denied host" "$CONTROL_NET" "$CONTROL_RESOLVER" \
+            "sftp://$DENIED_HOST" 0
+
+          echo "== with the two resolver rules deleted"
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p udp -d "$EGRESS_RESOLVER" --dport 53 -j ACCEPT
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p tcp -d "$EGRESS_RESOLVER" --dport 53 -j ACCEPT
+          sudo iptables -L DOCKER-USER -n --line-numbers
+          probe "resolver dropped, by name" "$EGRESS_NET" "$EGRESS_RESOLVER" \
+            "sftp://$ALLOWED_HOST" 69
+          probe "resolver dropped, by address" "$EGRESS_NET" "$EGRESS_RESOLVER" \
+            "sftp://$EGRESS_ALLOWED" 0
+
+          if [ "$failures" != 0 ]; then
+            echo "$failures probe(s) did not answer as the documented recipe says they must" >&2
+            exit 1
+          fi
+          echo "every row of the documented verification answered as written"
+
+      # Runs whatever the probes did. The runner is ephemeral, so this is
+      # hygiene rather than a requirement -- but a rule left in DOCKER-USER
+      # would silently govern anything else scheduled onto this machine, and
+      # the resolver's query log is the record of which names were resolved
+      # through the permitted resolver rather than some other way.
+      - name: Tear the rules and the networks down
+        if: always()
+        run: |
+          set +e
+          for container in psilink-resolver psilink-resolver-control \
+            psilink-sftp-allowed psilink-sftp-denied
+          do
+            echo "--- $container"
+            docker logs "$container" 2>&1 | tail -n 40
+          done
+
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -j DROP
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p tcp -d "$EGRESS_RESOLVER" --dport 53 -j ACCEPT
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p udp -d "$EGRESS_RESOLVER" --dport 53 -j ACCEPT
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p tcp -d "$EGRESS_ALLOWED" --dport "$ALLOWED_PORT" -j ACCEPT
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+          sudo iptables -L DOCKER-USER -n --line-numbers
+
+          docker rm -f psilink-resolver psilink-resolver-control \
+            psilink-sftp-allowed psilink-sftp-denied
+          docker network rm "$EGRESS_NET" "$CONTROL_NET"
+          exit 0
 
   # The other half of the capability gate, and the only one that observes what an
   # operator's setup run really reaches. Setup-PsilinkFileDrop.ps1 is fetched off
