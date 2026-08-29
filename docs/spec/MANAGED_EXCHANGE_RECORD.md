@@ -365,7 +365,11 @@ can hold. A period or width past the ceilings is refused by the schema, so it
 never reaches a surface as a record at all: the list read parses strictly and
 rejects wholesale on it, so the whole read fails and the saved-exchanges list
 routes to its read-failed recovery surface, whose separate per-entry diagnostic
-read is where the offending record is identified and discarded. The display
+read is where the offending record is identified and discarded. The unattended
+tick reads the same strict list, so while such a record sits in the store no
+exchange runs unattended -- every wake's read fails with only a diagnostic log
+line naming it -- a blast radius reachable only from an artifact imported or
+hand-edited before these ceilings existed. The display
 derivation also refuses a reading instant within one period plus one width of the
 end of the representable range, which is the other half of the pair.
 
@@ -453,19 +457,21 @@ registration surviving that long; the pacing and the cap are what keep an attemp
 that fails immediately from spending the window in a loop. The pacing interval is
 itself bounded by the close, which ends the occupancy in any case.
 
-**A limit of the occupancy.** The pacing is measured from an attempt's start and
-an attempt that spends its peer wait has already outlasted it, so the next
-attempt takes the [single-writer lock](#the-secret-is-a-linear-resource) back at
-once: an occupied window holds that lock across its bounded re-attempts, and an
-operator's own Run during such a window is refused for the window's duration
-rather than taking it over (see
+**A limit of the occupancy.** The lock is held per attempt, not per window: an
+attempt that spends its full peer wait outlasts the pacing interval, so the
+next attempt takes the [single-writer lock](#the-secret-is-a-linear-resource)
+back at once, but an attempt that fails fast leaves the lock free for the rest
+of its pacing gap, and a window whose attempt cap runs out before the close
+leaves it free for the tail (see
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#cross-tab-single-writer-locking-web-locks)).
-Yielding the lock between attempts is deferred rather than designed away, and it
-cannot be added on its own: an interval in which the lock is free is one an
-attended run can complete in, rotating the shared secret and stamping its own
-`lastRun`, so any future yield must arrive with a write-path rule on the shared
-attended path -- a run that fails cannot overwrite a success stamped after that
-run began, `lastRun` being monotonic on `at`.
+An operator's own Run can take the lock in any such free interval and rotate
+the shared secret, and the occupancy's later attempts then run against a
+rotated record and can stamp their own `lastRun` over that run's success. A
+designed inter-attempt yield is deferred rather than designed away, and it
+cannot be added on its own: widening the free intervals widens that hazard, so
+any future yield must arrive with a write-path rule on the shared attended
+path -- a run that fails cannot overwrite a success stamped after that run
+began, `lastRun` being monotonic on `at`.
 
 An occupancy belongs to ONE record. Each wake dispatches every due record that is
 not already occupying its window, so an exchange holding its own window open for
