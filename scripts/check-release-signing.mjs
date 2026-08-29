@@ -18,12 +18,10 @@
 // release time, with the tag already pushed and the image already published.
 // This check is the pull-request half.
 //
-// Four rules:
+// Five rules:
 //
 //   1. The signing workflow and docs/RELEASES.md publish ONE identity pattern
-//      and ONE issuer between them, and the issuer is GitHub Actions'. This is
-//      what holds the workflow's self-verify to the command a partner runs:
-//      they are the same two literals or the check fails.
+//      and ONE issuer between them, and the issuer is GitHub Actions'.
 //   2. That identity decomposes to the anchored shape
 //      `^https://github\.com/<owner>/<repo>/<workflow path>@refs/tags/<tag>$`,
 //      and its workflow-path segment is the signing workflow's own path. The
@@ -36,6 +34,13 @@
 //      image's push sitting between the first one's push and its signing leaves
 //      the first published under `latest` and unsigned for as long as that
 //      build runs, and permanently if the build fails.
+//   5. Every one of those verify steps carries both `--certificate-` arguments
+//      in its own run text, with the values the document publishes. Rule 1
+//      reads the whole file at once and rule 4 credits a step by the digest it
+//      names, so one step's copy of the pair satisfies rule 1 for every other
+//      step: a verify step stripped of the pair -- or pointed at another
+//      identity -- would otherwise pass both while running a command no partner
+//      runs. This rule is what holds each self-verify step to that command.
 //
 // What this check cannot see:
 //   - Whether the identity is the one a run actually produces. It holds the
@@ -228,7 +233,10 @@ const digestReferences = (text) => [
   ...new Set([...text.matchAll(DIGEST_REFERENCE)].map((match) => match[1])),
 ];
 
-/** A step's part in the publish sequence, and the step digests it names. */
+/**
+ * A step's part in the publish sequence, the step digests it names, and -- for
+ * a verify step -- the certificate arguments its own command carries.
+ */
 export function classifyStep(step) {
   const uses = typeof step?.uses === "string" ? step.uses : "";
   const run = typeof step?.run === "string" ? step.run : "";
@@ -248,7 +256,11 @@ export function classifyStep(step) {
   if (COSIGN_SIGN.test(run))
     return { role: "sign", ids: digestReferences(run) };
   if (COSIGN_VERIFY.test(run)) {
-    return { role: "verify", ids: digestReferences(run) };
+    return {
+      role: "verify",
+      ids: digestReferences(run),
+      flags: certificateFlags(run),
+    };
   }
   return { role: null, ids: [] };
 }
@@ -262,11 +274,65 @@ function pushState(value) {
 }
 
 /**
- * Every way a workflow's publish sequence lets a pushed image exist unsigned,
- * unverified or unattested while another build runs. Empty means each pushed
- * image is signed, verified and attested before any later build starts.
+ * The `--certificate-` pair docs/RELEASES.md publishes, each value present only
+ * when the document publishes exactly one of it. A document carrying several
+ * names no single value a verify step could be held to, and the agreement rule
+ * is what reports that.
  */
-export function publishSequenceViolations(source, file) {
+export function publishedCertificatePair(docSource) {
+  const single = (values) => {
+    const [value, ...rest] = [...new Set(values)];
+    return rest.length === 0 ? value : undefined;
+  };
+  const { identities, issuers } = certificateFlags(docSource);
+  return { identity: single(identities), issuer: single(issuers) };
+}
+
+const CERTIFICATE_ARGUMENTS = [
+  { flag: "--certificate-identity-regexp", key: "identities", of: "identity" },
+  { flag: "--certificate-oidc-issuer", key: "issuers", of: "issuer" },
+];
+
+/**
+ * Every way a verify step credited with covering a pushed image fails to run
+ * the published command itself: a missing `--certificate-` argument, or one
+ * carrying a value the document does not publish. A step whose command builds
+ * either argument somewhere this scan cannot read it fails as a missing one,
+ * which is the direction that reports rather than passes.
+ */
+function verifyArgumentViolations({ step, where, file, published }) {
+  const covers = list(step.ids.map((id) => `steps.${id}.outputs.digest`));
+  const violations = [];
+  for (const { flag, key, of: pin } of CERTIFICATE_ARGUMENTS) {
+    const values = step.flags[key];
+    if (values.length === 0) {
+      violations.push(
+        `${file}: ${where} verifies ${covers} without \`${flag}\`, so it does not run the command ${RELEASES_DOC} publishes and cannot stand for a partner running it. Each verify step carries both \`--certificate-\` arguments in its own command: one step's copy of the pair is what satisfies the rule holding this file and ${RELEASES_DOC} to one, so a step that has lost them still reads here as verifying the image.`,
+      );
+      continue;
+    }
+    const expected = published[pin];
+    if (expected === undefined) continue;
+    for (const value of new Set(values)) {
+      if (value === expected) continue;
+      violations.push(
+        `${file}: ${where} verifies ${covers} with \`${flag} ${value}\`, but ${RELEASES_DOC} publishes \`${expected}\`. The release would check its own signature against a pin no partner runs.`,
+      );
+    }
+  }
+  return violations;
+}
+
+/**
+ * Every way a workflow's publish sequence lets a pushed image exist unsigned,
+ * unverified or unattested while another build runs, or verified by a command
+ * other than the published one. Empty means each pushed image is signed,
+ * verified against the published `--certificate-` pair, and attested before any
+ * later build starts. `published` is that pair, from
+ * `publishedCertificatePair`; a value it leaves absent is one the document does
+ * not publish, so a step is held only to carrying the argument at all.
+ */
+export function publishSequenceViolations(source, file, published = {}) {
   const jobs = parse(source)?.jobs;
   const violations = [];
   let pushed = 0;
@@ -336,9 +402,20 @@ export function publishSequenceViolations(source, file) {
 
     for (const step of classified) {
       if (!SIGNING_ROLES.includes(step.role)) continue;
-      if (step.ids.some((id) => pushedIds.has(id))) continue;
+      if (!step.ids.some((id) => pushedIds.has(id))) {
+        violations.push(
+          `${file}: ${where(step)} names ${step.ids.length === 0 ? "no step digest at all" : `${list(step.ids.map((id) => `steps.${id}.outputs.digest`))}, which no pushing build in this job produces`}, so what it covers cannot be read from this file.`,
+        );
+        continue;
+      }
+      if (step.role !== "verify") continue;
       violations.push(
-        `${file}: ${where(step)} names ${step.ids.length === 0 ? "no step digest at all" : `${list(step.ids.map((id) => `steps.${id}.outputs.digest`))}, which no pushing build in this job produces`}, so what it covers cannot be read from this file.`,
+        ...verifyArgumentViolations({
+          step,
+          where: where(step),
+          file,
+          published,
+        }),
       );
     }
   }
@@ -483,14 +560,19 @@ function readWorkflows(root) {
 export function releaseSigningReport(root) {
   const signing = findSigningWorkflow(readWorkflows(root));
   if (signing.problem !== undefined) return { violations: [signing.problem] };
+  const docSource = readFileSync(resolve(root, RELEASES_DOC), "utf8");
   return {
     violations: [
       ...couplingViolations({
         workflowPath: signing.path,
         workflowSource: signing.source,
-        docSource: readFileSync(resolve(root, RELEASES_DOC), "utf8"),
+        docSource,
       }),
-      ...publishSequenceViolations(signing.source, signing.path),
+      ...publishSequenceViolations(
+        signing.source,
+        signing.path,
+        publishedCertificatePair(docSource),
+      ),
     ],
     workflowPath: signing.path,
     identity: certificateFlags(signing.source).identities[0],

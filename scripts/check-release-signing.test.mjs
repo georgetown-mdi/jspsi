@@ -19,6 +19,7 @@ import {
   findSigningWorkflow,
   parseSignerIdentity,
   publishSequenceViolations,
+  publishedCertificatePair,
   refPatternForTagFilter,
   releaseSigningReport,
   tagFilters,
@@ -71,6 +72,18 @@ const verifyStep = (
     `            vdorie/psi-link@\${{ steps.${id}.outputs.digest }}`,
   ].join("\n");
 
+const verifyStepWithoutArguments = (id) =>
+  verifyStep(id)
+    .split("\n")
+    .filter((line) => !line.includes("--certificate-"))
+    .join("\n");
+
+// The pair of `--certificate-` lines as release.yaml holds them, matched once
+// so a mutation strips exactly the first verify step's copy and leaves the
+// variant's in place.
+const CERTIFICATE_ARGUMENT_LINES =
+  /^ *--certificate-identity-regexp '[^']*' \\\n *--certificate-oidc-issuer \S+ \\\n/m;
+
 const attestStep = (id) =>
   [
     `      - name: Attest ${id}`,
@@ -117,6 +130,10 @@ const doc = ({ identity = IDENTITY, issuer = ACTIONS_OIDC_ISSUER } = {}) =>
     "```",
     "",
   ].join("\n");
+
+// The pair a verify step is held to, derived from the same fixture document the
+// coupling rules read rather than transcribed beside it.
+const PUBLISHED = publishedCertificatePair(doc());
 
 const coupling = (overrides = {}) =>
   couplingViolations({
@@ -380,11 +397,19 @@ describe("the coupling between the published command and the signer", () => {
 
 describe("the publish sequence", () => {
   const sequence = (steps, tags = [TAG_FILTER]) =>
-    publishSequenceViolations(workflow({ tags, steps }), "fixture.yaml");
+    publishSequenceViolations(
+      workflow({ tags, steps }),
+      "fixture.yaml",
+      PUBLISHED,
+    );
 
   it("passes the committed release workflow", () => {
     expect(
-      publishSequenceViolations(releaseWorkflowSource, RELEASE_WORKFLOW),
+      publishSequenceViolations(
+        releaseWorkflowSource,
+        RELEASE_WORKFLOW,
+        publishedCertificatePair(releasesDocSource),
+      ),
     ).toEqual([]);
   });
 
@@ -515,6 +540,99 @@ describe("the publish sequence", () => {
   });
 });
 
+describe("the arguments each verify step runs", () => {
+  const sequence = (steps, published = PUBLISHED) =>
+    publishSequenceViolations(workflow({ steps }), "fixture.yaml", published);
+
+  it("reads the published pair, and no value from a document publishing two", () => {
+    expect(publishedCertificatePair(releasesDocSource)).toEqual({
+      identity: IDENTITY,
+      issuer: ACTIONS_OIDC_ISSUER,
+    });
+    expect(
+      publishedCertificatePair(
+        doc() + doc({ identity: IDENTITY.replace("jspsi", "psilink") }),
+      ),
+    ).toEqual({ identity: undefined, issuer: ACTIONS_OIDC_ISSUER });
+  });
+
+  it("fails a verify step stripped of both arguments while another keeps them", () => {
+    // The drift the file-wide agreement rule cannot see: the variant's step
+    // still carries the pair, so the file agrees with itself and with the
+    // document, and the stripped step still names the digest that credits it
+    // with covering the image.
+    const steps = [...orderedSteps];
+    steps[2] = verifyStepWithoutArguments("build");
+    const source = workflow({ steps });
+    expect(coupling({ workflowSource: source })).toEqual([]);
+
+    const violations = publishSequenceViolations(
+      source,
+      "fixture.yaml",
+      PUBLISHED,
+    );
+    expect(violations).toHaveLength(2);
+    for (const violation of violations) {
+      expect(violation).toContain('"Verify build" in job');
+      expect(violation).toContain("steps.build.outputs.digest");
+    }
+    expect(violations.join("\n")).toContain("--certificate-identity-regexp");
+    expect(violations.join("\n")).toContain("--certificate-oidc-issuer");
+  });
+
+  it("fails a verify step pinned to an identity the document does not publish", () => {
+    const violations = sequence([
+      buildStep("build", true),
+      signStep("build"),
+      verifyStep("build", { identity: IDENTITY.replace("jspsi", "psilink") }),
+      attestStep("build"),
+    ]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain('"Verify build" in job');
+    expect(violations[0]).toContain("psilink");
+    expect(violations[0]).toContain(RELEASES_DOC);
+  });
+
+  it("fails a verify step pinned to an issuer the document does not publish", () => {
+    const violations = sequence([
+      buildStep("build", true),
+      signStep("build"),
+      verifyStep("build", { issuer: "https://accounts.google.com" }),
+      attestStep("build"),
+    ]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("accounts.google.com");
+  });
+
+  it("holds a step to carrying both arguments with no published pair to match", () => {
+    // A document publishing no single pair is the agreement rule's finding
+    // rather than this one's, so a value is compared only against a value.
+    const divergent = [
+      buildStep("build", true),
+      signStep("build"),
+      verifyStep("build", { identity: IDENTITY.replace("jspsi", "psilink") }),
+      attestStep("build"),
+    ];
+    expect(sequence(divergent, {})).toEqual([]);
+
+    const stripped = [...divergent];
+    stripped[2] = verifyStepWithoutArguments("build");
+    expect(sequence(stripped, {})).toHaveLength(2);
+  });
+
+  it("says nothing of the arguments of a verify step covering no pushed image", () => {
+    const violations = sequence([
+      ...orderedSteps,
+      verifyStepWithoutArguments("build").replace(
+        "steps.build.outputs.digest",
+        "steps.nothing.outputs.digest",
+      ),
+    ]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("cannot be read from this file");
+  });
+});
+
 describe("the workflow the check reads the signer identity off", () => {
   it("finds the one workflow that signs", () => {
     const found = findSigningWorkflow([
@@ -568,6 +686,26 @@ describe("the check over a repository tree", () => {
     expect(report.violations).toEqual([]);
     expect(report.workflowPath).toBe(RELEASE_WORKFLOW);
     expect(report.identity).toBe(IDENTITY);
+  });
+
+  it("fails the committed workflow with one verify step's arguments stripped", () => {
+    // The same mutation against the real files: every other rule stays quiet,
+    // because the surviving copy of the pair is what they read.
+    const stripped = releaseWorkflowSource.replace(
+      CERTIFICATE_ARGUMENT_LINES,
+      "",
+    );
+    expect(certificateFlags(stripped).identities).toHaveLength(
+      certificateFlags(releaseWorkflowSource).identities.length - 1,
+    );
+    const report = releaseSigningReport(
+      tree({ workflowSource: stripped, docSource: releasesDocSource }),
+    );
+    expect(report.violations).toHaveLength(2);
+    expect(report.violations.join("\n")).toContain(
+      "--certificate-identity-regexp",
+    );
+    expect(report.violations.join("\n")).toContain("--certificate-oidc-issuer");
   });
 
   it("reports both rule sets at once", () => {
