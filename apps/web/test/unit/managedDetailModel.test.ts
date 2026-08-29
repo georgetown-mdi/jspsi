@@ -313,8 +313,9 @@ describe("completedRunRecorded reads the record's own bookkeeping", () => {
 });
 
 // The detail view's read-only run-schedule section: the cadence, where the
-// recurrence stands at the instant read, and the states this browser owes the
-// operator honestly around a schedule it does not run while it is closed.
+// recurrence stands at the instant read, and the states this runtime owes the
+// operator honestly around it -- including whether an unattended run happens here
+// at all, which is a different fact in an installed app and in an ordinary tab.
 describe("scheduleView", () => {
   const NOW = Date.parse("2026-07-14T12:00:00.000Z");
 
@@ -329,15 +330,17 @@ describe("scheduleView", () => {
   };
 
   test("a record with no agreed schedule has no section at all", () => {
-    // No surface sets a schedule yet, so every record reaches this state; an empty
-    // state here would invite something that does not exist.
-    expect(scheduleView(record("inviter"), true, NOW)).toBeUndefined();
+    // An attended-only exchange, which is what an operator who entered no cadence
+    // has; the entry form beside this section is where one is set, so an empty
+    // state here would duplicate it.
+    expect(scheduleView(record("inviter"), true, false, NOW)).toBeUndefined();
   });
 
   test("the section names the cadence and where the recurrence stands", () => {
     const view = scheduleView(
       record("inviter", { schedule: daily }),
       true,
+      false,
       NOW,
     );
     expect(view?.cadence).toBe(
@@ -346,19 +349,35 @@ describe("scheduleView", () => {
     expect(view?.dueLine).toMatch(/^Run window open now, until /);
   });
 
-  test("the standing note promises no run while this browser is closed", () => {
+  test("an ordinary tab's note promises no run while this browser is closed", () => {
     const view = scheduleView(
       record("inviter", { schedule: daily }),
       true,
+      false,
       NOW,
     );
     expect(view?.attendanceNote).toMatch(/passes without a run/i);
-    expect(view?.attendanceNote).not.toMatch(/automatically|on its own/i);
+    expect(view?.attendanceNote).toMatch(
+      /never runs this exchange on its own/i,
+    );
+  });
+
+  test("an installed runtime's note says this app meets the windows itself", () => {
+    // The runner starts only in an installed runtime, so the honest copy differs
+    // by which one the operator is looking at rather than hedging across both.
+    const view = scheduleView(
+      record("inviter", { schedule: daily }),
+      true,
+      true,
+      NOW,
+    );
+    expect(view?.attendanceNote).toMatch(/installed/i);
+    expect(view?.attendanceNote).toMatch(/nobody present/i);
   });
 
   test("holding a usable input handle raises no re-selection note", () => {
     expect(
-      scheduleView(record("inviter", { schedule: daily }), true, NOW)
+      scheduleView(record("inviter", { schedule: daily }), true, false, NOW)
         ?.inputReselectionNote,
     ).toBeUndefined();
   });
@@ -367,12 +386,27 @@ describe("scheduleView", () => {
     const view = scheduleView(
       record("inviter", { schedule: daily }),
       false,
+      false,
       NOW,
     );
     expect(view?.inputReselectionNote).toMatch(/nobody present/i);
     // It points at the attended path -- choosing the file at the run itself --
     // rather than at a re-pointing control this surface does not have.
     expect(view?.inputReselectionNote).toMatch(/choose it here when you run/i);
+  });
+
+  test("an installed runtime holding no input handle still states the standing bar", () => {
+    // The two readings compose rather than replacing each other: an installed app
+    // meets the windows, and a record it cannot read the input for is one it
+    // cannot meet them for.
+    const view = scheduleView(
+      record("inviter", { schedule: daily }),
+      false,
+      true,
+      NOW,
+    );
+    expect(view?.attendanceNote).toMatch(/installed/i);
+    expect(view?.inputReselectionNote).toMatch(/nobody present/i);
   });
 
   test("a lapsed stored secret keeps the schedule section standing", () => {
@@ -384,7 +418,7 @@ describe("scheduleView", () => {
       expires: "2026-07-01T00:00:00.000Z",
     });
     expect(managedExchangeLapsed(lapsed, NOW)).toBe(true);
-    const view = scheduleView(lapsed, true, NOW);
+    const view = scheduleView(lapsed, true, false, NOW);
     expect(view?.dueLine).toMatch(/^Run window open now, until /);
     expect(view?.cadence).toMatch(/^A run window opens every day/);
   });
@@ -393,6 +427,7 @@ describe("scheduleView", () => {
     const once = scheduleView(
       record("inviter", { schedule: { ...daily, consecutiveMisses: 1 } }),
       true,
+      false,
       NOW,
     );
     expect(once?.coordination).toBeUndefined();
@@ -400,6 +435,7 @@ describe("scheduleView", () => {
     const twice = scheduleView(
       record("inviter", { schedule: { ...daily, consecutiveMisses: 2 } }),
       true,
+      false,
       NOW,
     );
     expect(twice?.coordination?.misses).toBe(2);

@@ -1,15 +1,19 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  MAX_SCHEDULE_INTERVAL_DAYS,
+  MAX_SCHEDULE_WINDOW_SECONDS,
+  scheduleSchema,
+} from "@psi/managedExchangeRecord";
+import { MAX_TIME_VALUE, nextConsecutiveMisses } from "@psi/managedSchedule";
+import {
   REPEATED_MISS_ESCALATION,
-  SCHEDULE_ATTENDANCE_NOTE,
   repeatedMissCoordination,
+  scheduleAttendanceNote,
   scheduleCadenceLine,
   scheduleDueLine,
   scheduleDueness,
 } from "@bench/scheduleSurfacingModel";
-import { nextConsecutiveMisses } from "@psi/managedSchedule";
-import { scheduleSchema } from "@psi/managedExchangeRecord";
 import { withTimeZone } from "../utils/hostTimeZone";
 
 import type { ManagedExchangeSchedule } from "@psi/managedExchangeRecord";
@@ -47,14 +51,12 @@ function readAtUtc(
   return withTimeZone("UTC", () => scheduleDueness(schedule, at(instant)));
 }
 
-/** The window instants a readable state carries, failing loudly on the unreadable
- * one rather than letting an assertion below read a field it does not have. */
+/** The window instants a reading carries: both for an open window, the open alone
+ * for one still ahead. */
 function windowInstants(dueness: ScheduleDueness): {
   opensAt: string;
   closesAt?: string;
 } {
-  if (dueness.state === "unreadable")
-    throw new Error("the schedule did not read as a window");
   return dueness.state === "open"
     ? { opensAt: dueness.opensAt, closesAt: dueness.closesAt }
     : { opensAt: dueness.opensAt };
@@ -235,36 +237,59 @@ describe("cadence in words", () => {
   });
 });
 
-describe("the standing attendance note", () => {
-  test("it promises no run and names the operator's own move", () => {
-    expect(SCHEDULE_ATTENDANCE_NOTE).toMatch(/passes without a run/i);
-    expect(SCHEDULE_ATTENDANCE_NOTE).toMatch(/run this exchange/i);
-    // No assurance that something ran, or will run, while nobody is here.
-    expect(SCHEDULE_ATTENDANCE_NOTE).not.toMatch(
-      /automatically|by itself|on its own|unattended/i,
+describe("the attendance note branches on the runtime", () => {
+  test("an installed runtime says the app runs this itself, and bounds the promise", () => {
+    // The unattended runner starts only in an installed runtime, so this is the
+    // one reading on which "runs on its own" is true rather than aspirational.
+    const note = scheduleAttendanceNote(true);
+    expect(note).toMatch(/installed/i);
+    expect(note).toMatch(/nobody present/i);
+    // Bounded by what the runtime can actually promise: an app that is closed
+    // when a window opens meets nothing.
+    expect(note).toMatch(/while the app is closed passes without a run/i);
+  });
+
+  test("an ordinary tab promises no run and names the operator's own move", () => {
+    const note = scheduleAttendanceNote(false);
+    expect(note).toMatch(/passes without a run/i);
+    expect(note).toMatch(/run this exchange/i);
+    // No assurance that something ran, or will run, while nobody is here -- the
+    // installed app is named as the way to get that, not implied to be in force.
+    expect(note).toMatch(/never runs this exchange on its own/i);
+    expect(note).not.toMatch(/automatically|by itself|unattended/i);
+  });
+
+  test("the two readings are different facts, not two wordings of one", () => {
+    expect(scheduleAttendanceNote(true)).not.toBe(
+      scheduleAttendanceNote(false),
     );
   });
 });
 
-describe("every schedule the record schema admits is readable", () => {
-  // A schedule reaches these surfaces only through the record schema, which bounds
-  // neither `intervalDays` nor `windowSeconds` above -- so an imported or
-  // hand-edited record really can place its next window past every calendar. That
-  // it lands on a state rather than a thrown render is checked rather than asserted
-  // in prose: one row that threw would take the whole list down with it. The sweep
-  // is over the schema's own extremes, at the instants a real clock reads.
+describe("every schedule the record schema admits renders", () => {
+  // The surfaces render a window instant directly, with no fallback for one no
+  // calendar carries. What makes that safe is the record schema's ceilings on
+  // `intervalDays` and `windowSeconds`: within them the window containing an
+  // instant, and the first one after it, both land on a renderable calendar. That
+  // is checked rather than asserted in prose -- one row that threw would take the
+  // whole list down with it -- by sweeping the schema's own extremes, at the
+  // extremes of the instant range as well as at a real clock's reading.
   const anchors = [
     "0000-01-01T00:00:00.000Z",
     "1970-01-01T00:00:00.000Z",
     "2026-07-14T12:00:00.000Z",
     "9999-12-31T23:59:59.999Z",
   ];
-  const intervals = [1, 7, 1_000_000_000];
-  const widths = [1, 10_800, 10_000_000_000_000];
+  const intervals = [1, 7, MAX_SCHEDULE_INTERVAL_DAYS];
+  const widths = [1, 10_800, MAX_SCHEDULE_WINDOW_SECONDS];
+  const readableSpan =
+    MAX_TIME_VALUE -
+    (MAX_SCHEDULE_INTERVAL_DAYS * 86_400_000 +
+      MAX_SCHEDULE_WINDOW_SECONDS * 1000);
   const instants = [
-    "1970-01-01T00:00:00.000Z",
-    "2026-07-14T12:00:00.000Z",
-    "2100-01-01T00:00:00.000Z",
+    -readableSpan,
+    at("2026-07-14T12:00:00.000Z"),
+    readableSpan,
   ];
 
   function admittedSchedule(
@@ -281,44 +306,58 @@ describe("every schedule the record schema admits is readable", () => {
     });
   }
 
-  test("no admitted schedule refuses to be read at a real clock's instant", () => {
+  test("no admitted schedule refuses to be read anywhere in the range it can be read at", () => {
     for (const anchor of anchors)
       for (const intervalDays of intervals)
         for (const windowSeconds of widths)
           for (const instant of instants) {
             const dueness = scheduleDueness(
               admittedSchedule(anchor, intervalDays, windowSeconds),
-              at(instant),
+              instant,
             );
-            expect(dueness.state).toMatch(/^(open|upcoming|unreadable)$/);
+            expect(dueness.state).toMatch(/^(open|upcoming)$/);
+            // A rendered calendar moment, not a placeholder for one no calendar
+            // carries: `Intl` throws on an instant outside the range rather than
+            // formatting it, and an unrepresentable instant reaches it as an
+            // invalid `Date`.
+            const { opensAt, closesAt } = windowInstants(dueness);
+            for (const rendered of [opensAt, closesAt ?? opensAt]) {
+              expect(rendered).not.toBe("");
+              expect(rendered).not.toMatch(/invalid/i);
+            }
             expect(scheduleDueLine(dueness)).not.toBe("");
           }
   });
 
-  test("a next window past every calendar reads as unreadable, not as a rendered date", () => {
-    // Nothing above passes vacuously: this is a combination that reaches the
-    // state, and it is a schedule the schema admits.
-    const millennial = admittedSchedule(
-      "1970-01-01T00:00:00.000Z",
-      1_000_000_000,
-      10_800,
-    );
-    const dueness = scheduleDueness(millennial, at("2026-07-14T12:00:00.000Z"));
-    expect(dueness.state).toBe("unreadable");
-    expect(scheduleDueLine(dueness)).toMatch(/no window on any calendar/i);
-    expect(scheduleDueLine(dueness)).toMatch(/agreed with your partner/i);
+  test("a period or width past the ceiling is refused before it reaches a surface", () => {
+    // The other half of what makes the sweep above total: an imported or
+    // hand-edited record carrying either shape fails validation, so it is never a
+    // record these surfaces read.
+    expect(() =>
+      admittedSchedule(
+        "1970-01-01T00:00:00.000Z",
+        MAX_SCHEDULE_INTERVAL_DAYS + 1,
+        10_800,
+      ),
+    ).toThrow();
+    expect(() =>
+      admittedSchedule(
+        "1970-01-01T00:00:00.000Z",
+        1,
+        MAX_SCHEDULE_WINDOW_SECONDS + 1,
+      ),
+    ).toThrow();
   });
 
-  test("an open window whose close is past every calendar reads the same way", () => {
-    // The other half of the render: `now` sits inside window 0, and it is the
-    // window's CLOSE that no calendar carries.
-    const endless = admittedSchedule(
-      "1970-01-01T00:00:00.000Z",
-      1,
-      10_000_000_000_000,
-    );
-    expect(scheduleDueness(endless, at("2026-07-14T12:00:00.000Z")).state).toBe(
-      "unreadable",
-    );
+  test("an instant too near the end of the range is refused rather than rendered", () => {
+    // The other half of the pairing: the schema bounds how far past `now` a window
+    // falls, and this bounds `now`. A host clock this far out is not a reading the
+    // surfaces have to render, and refusing beats formatting an invalid date.
+    expect(() =>
+      scheduleDueness(
+        admittedSchedule("2026-07-14T12:00:00.000Z", 7, 10_800),
+        MAX_TIME_VALUE,
+      ),
+    ).toThrow(RangeError);
   });
 });

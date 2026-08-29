@@ -12,6 +12,7 @@ import {
 import { Link } from "@tanstack/react-router";
 
 import { DisclosureSection } from "@components/DisclosureSection";
+import { isInstalledRuntime } from "@utils/installedRuntime";
 import { storedInputHandleUsable } from "@psi/managedInputHandle";
 import { triggerBlobDownload } from "@components/blobDownload";
 
@@ -33,6 +34,19 @@ import {
   maxAgeDaysError,
 } from "./manageOfferModel";
 import {
+  MAX_SCHEDULE_INTERVAL_DAYS,
+  MAX_SCHEDULE_WINDOW_HOURS,
+  MIN_SCHEDULE_WINDOW_HOURS,
+  buildScheduleFromEntry,
+  cadenceAgainstTokenBound,
+  defaultScheduleEntryFields,
+  resolvedFirstWindowLabel,
+  scheduleEntryErrors,
+  scheduleEntryFieldsFrom,
+  scheduleEntryUnchanged,
+  scheduleEntryUsable,
+} from "./scheduleEntryModel";
+import {
   SIDE_LABELS,
   completedRunRecorded,
   connectionRows,
@@ -51,6 +65,7 @@ import type {
 import type { ConfigRow } from "./managedDetailModel";
 import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { DisclosureFact } from "./disclosureAccountingModel";
+import type { ScheduleEntryFields } from "./scheduleEntryModel";
 import type { StoredDisclosureAccounting } from "@psi/disclosureAccounting";
 
 /**
@@ -248,17 +263,20 @@ function ConfigurationView({
 }
 
 /**
- * The local-fields editor: the label and the max-token-age policy edit in place,
- * without touching the partnership (see docs/spec/MANAGED_EXCHANGE_RECORD.md -- a
- * reschedule or a label change is neither a terms change nor a credential). Editing
- * the max-age policy re-derives `expires` conservatively at the store boundary (an
- * edit never extends the stored credential's life without a rotation), so this form
- * only collects the policy; the derivation is not the form's to make.
+ * The local-fields editor: the label, the agreed run schedule, and the
+ * max-token-age policy edit in place, without touching the partnership (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md -- a reschedule or a label change is
+ * neither a terms change nor a credential). Editing the max-age policy re-derives
+ * `expires` conservatively at the store boundary (an edit never extends the stored
+ * credential's life without a rotation), so this form only collects the policy;
+ * the derivation is not the form's to make.
  *
- * The schedule is not editable here: no schedule-entry surface exists yet
- * (scheduling is a separate item), so the detail view shows the schedule read-only
- * below rather than a half-built editor. A saved schedule can still be dropped, but
- * there is nothing to drop until scheduling can set one.
+ * The schedule and the max-age policy share this one form rather than sitting in
+ * sections of their own, because they constrain each other: a cadence that opens
+ * its next window past the bound lapses the stored secret between runs, and the
+ * operator can only weigh that where both values are in front of them (see
+ * {@link cadenceAgainstTokenBound}). One Save writes both through the store's
+ * single local-fields edit.
  */
 function LocalFieldsEditor({
   record,
@@ -277,6 +295,17 @@ function LocalFieldsEditor({
   const [maxAgeDays, setMaxAgeDays] = useState<number | string>(
     record.tokenMaxAgeDays ?? 90,
   );
+  const [scheduleEnabled, setScheduleEnabled] = useState(
+    record.schedule !== undefined,
+  );
+  // Seeded from the stored schedule where there is one, so re-opening the form
+  // shows the cadence the operator agreed on their own clock rather than the UTC
+  // instant it was resolved to.
+  const [schedule, setSchedule] = useState<ScheduleEntryFields>(() =>
+    record.schedule !== undefined
+      ? scheduleEntryFieldsFrom(record.schedule)
+      : defaultScheduleEntryFields(Date.now()),
+  );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -287,21 +316,48 @@ function LocalFieldsEditor({
       ? maxAgeDays
       : undefined;
   const cadenceNote = maxAgeCadenceNote(tokenMaxAgeDays);
+  const scheduleErrors = scheduleEnabled ? scheduleEntryErrors(schedule) : {};
+  const scheduleValid = !scheduleEnabled || scheduleEntryUsable(schedule);
+  const cadenceProblem = scheduleEnabled
+    ? cadenceAgainstTokenBound(schedule.intervalDays, tokenMaxAgeDays)
+    : undefined;
   const labelValid = labelWithinCap(label);
   const canSave =
-    labelValid && !saving && (!maxAgeEnabled || maxAgeError === undefined);
+    labelValid &&
+    scheduleValid &&
+    !saving &&
+    (!maxAgeEnabled || maxAgeError === undefined);
+
+  function editSchedule(fields: Partial<ScheduleEntryFields>) {
+    setSchedule((current) => ({ ...current, ...fields }));
+    setSaved(false);
+  }
+
+  /** The stored schedule where the form still says exactly what it does, and the
+   * entered cadence resolved afresh otherwise (see
+   * {@link scheduleEntryUnchanged}). The host zone is read only on the second
+   * branch, which is the operator's own edit. */
+  function storedOrEnteredSchedule() {
+    return record.schedule !== undefined &&
+      scheduleEntryUnchanged(schedule, record.schedule)
+      ? record.schedule
+      : buildScheduleFromEntry(schedule, Date.now());
+  }
 
   function save() {
     if (!canSave) return;
     setSaving(true);
     setSaved(false);
     setFailed(false);
-    // The policy is a three-way edit: enabled with a valid count sets it, disabled
-    // clears it (null), so an off checkbox drops any standing bound rather than
-    // leaving it untouched.
+    // Both opt-ins are three-way edits: enabled with valid values sets them,
+    // disabled clears them (null), so an off checkbox drops what is stored rather
+    // than leaving it untouched. A cadence the operator did not touch is carried
+    // through verbatim, so a save of the label alone neither re-resolves the
+    // agreed instant nor resets the bookkeeping the runner owns.
     const edits: ManagedExchangeLocalEdits = {
       label,
       tokenMaxAgeDays: maxAgeEnabled ? (tokenMaxAgeDays ?? null) : null,
+      schedule: scheduleEnabled ? storedOrEnteredSchedule() : null,
     };
     void onSave(edits)
       .then(() => setSaved(true))
@@ -333,6 +389,23 @@ function LocalFieldsEditor({
         mt="sm"
       />
       <Checkbox
+        label="Run this exchange on an agreed schedule"
+        description="Off by default. Enter the cadence and window you agreed with your partner; each of you enters it on your own machine, and nothing about it is sent anywhere."
+        checked={scheduleEnabled}
+        onChange={(event) => {
+          setScheduleEnabled(event.currentTarget.checked);
+          setSaved(false);
+        }}
+        mt="sm"
+      />
+      {scheduleEnabled && (
+        <ScheduleEntryFieldset
+          fields={schedule}
+          errors={scheduleErrors}
+          onEdit={editSchedule}
+        />
+      )}
+      <Checkbox
         label="Set a maximum age for the stored secret"
         description="Off by default. When set, the stored secret lapses if the exchange is not run or renewed within the age you choose."
         checked={maxAgeEnabled}
@@ -360,6 +433,16 @@ function LocalFieldsEditor({
       )}
       {cadenceNote !== undefined && (
         <p className={`${styles.small} ${styles.sub}`}>{cadenceNote}</p>
+      )}
+      {cadenceProblem !== undefined && (
+        <Alert
+          color="yellow"
+          title="This cadence outruns the maximum age"
+          mt="sm"
+          mb="sm"
+        >
+          {cadenceProblem}
+        </Alert>
       )}
       <p className={`${styles.small} ${styles.sub}`}>
         Shortening the maximum age applies now. Turning the bound off applies
@@ -391,24 +474,107 @@ function LocalFieldsEditor({
 }
 
 /**
- * The agreed run schedule, read-only: the cadence, where the recurrence stands at
- * this render, and the states this browser owes the operator honestly around it --
- * that a window passing while nothing is open here simply passes, that a browser
- * holding no pointer to the input file cannot meet a window with nobody present,
- * and, once misses have accumulated, the coordination prompt.
+ * The cadence fields of {@link LocalFieldsEditor}, shown once the operator opts
+ * the exchange into a schedule. The entered wall-clock time is echoed back as the
+ * instant it resolves to, because the resolution is not always the identity: a
+ * time the operator's zone skips or repeats across a daylight-saving transition
+ * names a different instant than the wall clock reads, and the instant is what
+ * both runners meet at (see {@link ./scheduleEntryModel.ts}).
  *
- * A record with no agreed schedule renders nothing here: no surface sets one yet,
- * so an empty state would invite something that does not exist.
+ * The date and time are native inputs rather than a date picker: the value is a
+ * cadence agreed with a partner and read off a message, and typing it back is the
+ * shortest path from that message to the field.
+ */
+function ScheduleEntryFieldset({
+  fields,
+  errors,
+  onEdit,
+}: {
+  fields: ScheduleEntryFields;
+  errors: ReturnType<typeof scheduleEntryErrors>;
+  onEdit: (edits: Partial<ScheduleEntryFields>) => void;
+}) {
+  const resolved = resolvedFirstWindowLabel(fields);
+  return (
+    <>
+      <TextInput
+        label="First agreed run window (date)"
+        description="The date of the first window you and your partner agreed, on your own calendar."
+        type="date"
+        value={fields.firstWindowDate}
+        error={errors.firstWindowDate}
+        onChange={(event) =>
+          onEdit({ firstWindowDate: event.currentTarget.value })
+        }
+        mt="xs"
+      />
+      <TextInput
+        label="Time the window opens"
+        description="On your own clock. It is stored as the exact moment it names, so the window does not move when the clocks change."
+        type="time"
+        value={fields.firstWindowTime}
+        error={errors.firstWindowTime}
+        onChange={(event) =>
+          onEdit({ firstWindowTime: event.currentTarget.value })
+        }
+        mt="xs"
+      />
+      <NumberInput
+        label="A window opens every (days)"
+        value={fields.intervalDays}
+        min={1}
+        max={MAX_SCHEDULE_INTERVAL_DAYS}
+        step={1}
+        allowDecimal={false}
+        error={errors.intervalDays}
+        onChange={(value) => onEdit({ intervalDays: value })}
+        mt="xs"
+      />
+      <NumberInput
+        label="Each window stays open (hours)"
+        description="Both of you must be running during the same window, so a wide window is what absorbs the difference between your two clocks and the slack of two independently-kept machines."
+        value={fields.windowHours}
+        min={MIN_SCHEDULE_WINDOW_HOURS}
+        max={MAX_SCHEDULE_WINDOW_HOURS}
+        step={1}
+        allowDecimal={false}
+        error={errors.windowHours}
+        onChange={(value) => onEdit({ windowHours: value })}
+        mt="xs"
+      />
+      {resolved !== undefined && (
+        <p className={`${styles.small} ${styles.sub}`}>
+          The first window opens {resolved}. Check that against what you agreed:
+          your partner enters the same moment on their own clock, and every
+          later window is counted from it.
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * The agreed run schedule, read-only: the cadence, where the recurrence stands at
+ * this render, and the states this runtime owes the operator honestly around it --
+ * whether an unattended run happens here at all, that a browser holding no pointer
+ * to the input file cannot meet a window with nobody present, and, once misses
+ * have accumulated, the coordination prompt.
+ *
+ * A record with no agreed schedule renders nothing here: it is attended-only, and
+ * the local-fields editor above is where a schedule is entered, so an empty state
+ * would duplicate that form.
  *
  * The instant is read at render (`Date.now()`) rather than held in state: the
  * section is a reading of where the recurrence stands when the operator opened it,
  * and a window that opens or closes while they sit on the page is the next visit's
- * reading, not a ticking one.
+ * reading, not a ticking one. The runtime reading beside it is read the same way
+ * and cannot change while the page is open (see {@link isInstalledRuntime}).
  */
 function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
   const view = scheduleView(
     record,
     storedInputHandleUsable(record.inputFileHandle),
+    isInstalledRuntime(),
     Date.now(),
   );
   if (view === undefined) return null;
@@ -430,8 +596,8 @@ function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
       )}
       <p className={`${styles.small} ${styles.sub}`}>
         This schedule is what you and your partner agreed out of band; it is
-        kept only in this browser and is never sent anywhere. Changing it is not
-        offered here yet.
+        kept only in this browser and is never sent anywhere. Change it under
+        Local settings above.
       </p>
     </div>
   );

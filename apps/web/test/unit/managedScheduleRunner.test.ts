@@ -7,11 +7,14 @@ import { beforeEach, describe, expect, test } from "vitest";
 
 import {
   ATTEMPT_PEER_WAIT_MS,
-  ATTEMPT_RATE_GAP_MS,
+  MAX_ATTEMPT_LOCK_YIELD_MS,
   MAX_WINDOW_ATTEMPTS,
+  MIN_ATTEMPT_LOCK_YIELD_MS,
+  attemptLockYieldMs,
   tickManagedSchedules,
 } from "@psi/managedScheduleRunner";
 import {
+  MAX_SCHEDULE_WINDOW_SECONDS,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
   applyManagedExchangeScheduleAdvance,
@@ -65,6 +68,11 @@ const weekly: ManagedExchangeSchedule = {
 function at(instant: string): number {
   return Date.parse(instant);
 }
+
+/** The width of the fixture's window, and the stand-down the runner takes between
+ * two attempts at one that wide -- the interval its single-writer lock is free. */
+const WEEKLY_WINDOW_MS = weekly.windowSeconds * 1000;
+const WEEKLY_YIELD_MS = attemptLockYieldMs(WEEKLY_WINDOW_MS);
 
 /** A handle stands in for the persisted `FileSystemFileHandle`: the record's
  * schema validates its presence, not its structure, and nothing under test reads
@@ -295,8 +303,10 @@ describe("a due window in the open runtime", () => {
     // Occupancy runs the window out and stops exactly at its close: no attempt
     // starts after it, and the last one's wait ends on it rather than past it.
     expect(runner.nowMs()).toBe(at("2026-01-06T17:00:00.000Z"));
+    // One attempt plus one stand-down per cycle, for as many cycles as the window
+    // holds.
     expect(runner.attempts).toHaveLength(
-      (3 * 60 * 60 * 1000) / ATTEMPT_PEER_WAIT_MS,
+      WEEKLY_WINDOW_MS / (ATTEMPT_PEER_WAIT_MS + WEEKLY_YIELD_MS),
     );
   });
 
@@ -314,18 +324,19 @@ describe("a due window in the open runtime", () => {
 
     expect(entry.attempts).toBe(2);
     expect(entry.disposition).toBe("succeeded");
-    // The retry is paced from the failed attempt's start, so a failure that
-    // reproduces instantly cannot spin the window away.
+    // The next attempt starts a full stand-down after the failed one ended, so a
+    // failure that reproduces instantly cannot spin the window away -- and the
+    // single-writer lock is free for that whole interval.
     expect(
       runner.attempts[1].startedAtMs - runner.attempts[0].startedAtMs,
-    ).toBe(ATTEMPT_RATE_GAP_MS);
+    ).toBe(WEEKLY_YIELD_MS);
   });
 
-  test("paces no further than the window's close, which ends the occupancy anyway", async () => {
+  test("stands down no further than the window's close, which ends the occupancy anyway", async () => {
     const runner = harness({
       records: [recordWith()],
-      // Half a rate gap before the close, so the full pacing delay would run
-      // past it.
+      // Half a minute before the close, so the full stand-down would run past
+      // it.
       startAt: "2026-01-06T16:59:30.000Z",
       script: [{ kind: "fail", error: new Error("the broker refused") }],
     });
@@ -379,7 +390,7 @@ describe("a due window in the open runtime", () => {
     }
   });
 
-  test("bounds a window whose attempts fail immediately", async () => {
+  test("bounds a window whose attempts fail immediately by the stand-down", async () => {
     const runner = harness({
       records: [recordWith()],
       startAt: "2026-01-06T14:00:00.000Z",
@@ -388,20 +399,84 @@ describe("a due window in the open runtime", () => {
 
     const [entry] = await tickManagedSchedules(runner.seams);
 
+    // Nothing spins: a failure that reproduces instantly costs one attempt per
+    // stand-down, and the window's own close is what ends the occupancy.
+    expect(entry.attempts).toBe(WEEKLY_WINDOW_MS / WEEKLY_YIELD_MS);
+    expect(entry.disposition).toBe("failed");
+    expect(runner.nowMs()).toBe(at("2026-01-06T17:00:00.000Z"));
+  });
+
+  test("bounds a window whose clock never advances by the attempt cap", async () => {
+    // The one case the close cannot bound: a clock that stops under the loop
+    // leaves every attempt reading the same instant, so the window never
+    // elapses. The cap is what ends it.
+    const frozen = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [{ kind: "fail", error: new Error("the broker refused") }],
+    });
+    const stoppedClockSeams = {
+      ...frozen.seams,
+      now: () => at("2026-01-06T14:00:00.000Z"),
+      delay: () => Promise.resolve(),
+    };
+
+    const [entry] = await tickManagedSchedules(stoppedClockSeams);
+
     expect(entry.attempts).toBe(MAX_WINDOW_ATTEMPTS);
     expect(entry.disposition).toBe("failed");
+  });
+
+  test("the stand-down never reaches the peer wait, so two runners always overlap", () => {
+    // Two runners each listening for the peer wait out of every (wait +
+    // stand-down) overlap for (wait - stand-down) of every cycle, at any phase.
+    // A stand-down at or past the wait admits an anti-phase pair that occupies
+    // the same window and never meets in it, so this bound is the rendezvous's,
+    // not a tuning preference.
+    expect(MAX_ATTEMPT_LOCK_YIELD_MS).toBeLessThan(ATTEMPT_PEER_WAIT_MS);
+    for (const windowSeconds of [
+      1,
+      3600,
+      10_800,
+      MAX_SCHEDULE_WINDOW_SECONDS,
+    ]) {
+      const standDown = attemptLockYieldMs(windowSeconds * 1000);
+      expect(standDown).toBeLessThan(ATTEMPT_PEER_WAIT_MS);
+      expect(standDown).toBeGreaterThanOrEqual(MIN_ATTEMPT_LOCK_YIELD_MS);
+      expect(standDown).toBeLessThanOrEqual(MAX_ATTEMPT_LOCK_YIELD_MS);
+    }
+    // The width really does drive it across the narrow end of the widths entry
+    // admits, rather than the clamps answering everywhere.
+    expect(attemptLockYieldMs(2 * 60 * 60 * 1000)).toBeGreaterThan(
+      MIN_ATTEMPT_LOCK_YIELD_MS,
+    );
+    expect(attemptLockYieldMs(2 * 60 * 60 * 1000)).toBeLessThan(
+      MAX_ATTEMPT_LOCK_YIELD_MS,
+    );
+  });
+
+  test("the attempt cap never cuts a window nobody arrived in short", () => {
+    // The cap is a backstop for a wide window of instant failures and for a clock
+    // that stops advancing, not a limit on the occupancy itself: the widest window
+    // entry admits, spending a full peer wait and a stand-down per attempt, stays
+    // under it. Stated in the runner's own doc, so it is a claim rather than a
+    // hope unless it is driven.
+    const widestMs = MAX_SCHEDULE_WINDOW_SECONDS * 1000;
+    const cycleMs = ATTEMPT_PEER_WAIT_MS + attemptLockYieldMs(widestMs);
+    expect(Math.ceil(widestMs / cycleMs)).toBeLessThan(MAX_WINDOW_ATTEMPTS);
   });
 });
 
 describe("a window whose attempts do not agree", () => {
   /** A transient failure that runs the rest of the window out, so the occupancy
    * ends on THIS attempt and the window's disposition is decided with it as the
-   * last verdict. */
-  function transientThroughTheClose(afterMs: number): AttemptScript[number] {
+   * last verdict. Spending a whole window's width reaches the close from
+   * anywhere inside it, wherever the attempts before it left the clock. */
+  function transientThroughTheClose(): AttemptScript[number] {
     return {
       kind: "fail",
       error: new Error("the channel dropped"),
-      spendsMs: 3 * 60 * 60 * 1000 - afterMs,
+      spendsMs: WEEKLY_WINDOW_MS,
     };
   }
 
@@ -418,7 +493,7 @@ describe("a window whose attempts do not agree", () => {
       script: [
         ...noShowScript(),
         ...noShowScript(),
-        transientThroughTheClose(2 * ATTEMPT_PEER_WAIT_MS),
+        transientThroughTheClose(),
       ],
     });
 
@@ -437,7 +512,7 @@ describe("a window whose attempts do not agree", () => {
     const runner = harness({
       records: [recordWith()],
       startAt: "2026-01-06T14:00:00.000Z",
-      script: [transientThroughTheClose(0)],
+      script: [transientThroughTheClose()],
     });
 
     const [entry] = await tickManagedSchedules(runner.seams);

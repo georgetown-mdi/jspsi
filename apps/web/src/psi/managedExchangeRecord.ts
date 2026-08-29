@@ -73,6 +73,24 @@ export const MAX_LABEL_LENGTH = 120;
  * schema-only `connection.role`. */
 export type ManagedExchangeSide = "inviter" | "acceptor";
 
+/**
+ * Upper bound on {@link ManagedExchangeSchedule.intervalDays}: an annual cadence,
+ * the longest partnership recurrence the design serves. It also bounds how far
+ * past any instant a window can fall, which is what lets every surface render an
+ * admitted schedule without a fallback (see docs/spec/MANAGED_EXCHANGE_RECORD.md,
+ * the `intervalDays` row and "Every admitted schedule renders").
+ */
+export const MAX_SCHEDULE_INTERVAL_DAYS = 366;
+
+/**
+ * Upper bound on {@link ManagedExchangeSchedule.windowSeconds}, in seconds: half
+ * a day. It is below the shortest period {@link MAX_SCHEDULE_INTERVAL_DAYS}'s
+ * companion floor of one day admits, so no schedule this schema accepts can
+ * place two windows over the same instant (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `windowSeconds` row).
+ */
+export const MAX_SCHEDULE_WINDOW_SECONDS = 43_200;
+
 /** The recurrence period, run window, and miss bookkeeping the unattended path
  * executes. Every field is a timestamp, an integer duration, or a count -- no
  * free text, so the object cannot accumulate schedule narrative. */
@@ -80,10 +98,12 @@ export interface ManagedExchangeSchedule {
   /** ISO 8601 UTC instant of the first agreed window's open, the phase the
    * recurrence counts from. Both parties persist the same value. */
   anchor: string;
-  /** Recurrence period in whole days (at least 1): the run window opens every
+  /** Recurrence period in whole days (1 through
+   * {@link MAX_SCHEDULE_INTERVAL_DAYS}): the run window opens every
    * `intervalDays` after `anchor`. */
   intervalDays: number;
-  /** Run window width in seconds (at least 1): window n is open from
+  /** Run window width in seconds (1 through
+   * {@link MAX_SCHEDULE_WINDOW_SECONDS}): window n is open from
    * `anchor + n * intervalDays` for this many seconds. */
   windowSeconds: number;
   /** ISO 8601 UTC open instant of the next window the runner plans to attempt,
@@ -181,15 +201,23 @@ export interface ManagedExchangeRecord {
   lastRun?: ManagedExchangeLastRun;
 }
 
-/** The canonical `schedule` validator, with the schema's own bounds (`intervalDays`
- * and `windowSeconds` at least 1, `consecutiveMisses` at least 0). Exported so the
- * export/import artifact reuses it rather than re-declaring a laxer copy -- a
- * tampered artifact with `intervalDays: 0` must be rejected exactly as a stored
- * record would be. */
+/**
+ * The canonical `schedule` validator, with the schema's own bounds
+ * (`intervalDays` from 1 to {@link MAX_SCHEDULE_INTERVAL_DAYS}, `windowSeconds`
+ * from 1 to {@link MAX_SCHEDULE_WINDOW_SECONDS}, `consecutiveMisses` at least 0).
+ * Exported so the export/import artifact reuses it rather than re-declaring a
+ * laxer copy -- a tampered artifact with `intervalDays: 0` must be rejected
+ * exactly as a stored record would be.
+ *
+ * The upper bounds are what let every surface that renders a window render it:
+ * within them the next window off any anchor this schema admits lands on a
+ * calendar `Intl` can format, so no display carries a fallback for a recurrence
+ * whose instants no calendar has (see {@link ../bench/scheduleSurfacingModel.ts}).
+ */
 export const scheduleSchema: ZodType<ManagedExchangeSchedule> = z.object({
   anchor: z.iso.datetime(),
-  intervalDays: z.int().min(1),
-  windowSeconds: z.int().min(1),
+  intervalDays: z.int().min(1).max(MAX_SCHEDULE_INTERVAL_DAYS),
+  windowSeconds: z.int().min(1).max(MAX_SCHEDULE_WINDOW_SECONDS),
   nextWindow: z.iso.datetime(),
   consecutiveMisses: z.int().min(0),
 });

@@ -21,14 +21,13 @@ directive syntax; those live in the spec tier.
 
 > **Status.** The record, its rotating secret at rest, the recurring-exchange
 > surfaces, the attended one-action re-run, the installable offline app shell,
-> and the scheduled window runner are built. The runner is not yet reachable:
-> schedule entry and the between-visit OS notification are not built, so no
-> stored record carries a schedule for it to run, every run is
-> operator-initiated, and the automation described below is the design target
-> rather than shipped behavior. Persisting a rotating secret at rest reverses
-> the one-shot exchange's discard (see
+> schedule entry, and the scheduled window runner are built: an installed app
+> runtime runs a due exchange unattended at its agreed window. The
+> between-visit OS notification is not built, so every state reaches the
+> operator at their next in-app visit rather than sooner. Persisting a rotating
+> secret at rest reverses the one-shot exchange's discard (see
 > [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-web-exchanges-single-use-vs-managed)),
-> so the remaining work stays gated on security review.
+> so work here stays gated on security review.
 
 ## Who this is for
 
@@ -115,6 +114,13 @@ Degradations are named, not design floors:
   operator-initiated -- one action, through the persisted handle.
 - **No File System Access API** (Safari, Firefox): the run is attended and the
   operator re-selects the input file.
+
+The surfaces say which of these the operator is looking at rather than
+describing the capability in general. A schedule shown in the installed app
+says the app meets its windows itself; the same schedule shown in an ordinary
+tab says the tab never runs it on its own and names installing as the way to
+get that. A record this browser holds no input-file pointer for says so in
+either runtime, since nothing can read the input with nobody present.
 
 **An unattended run takes two parties.** A WebRTC exchange is live: both
 parties' runners must be awake in an overlapping window, so the run schedule is
@@ -223,9 +229,11 @@ The schedule is **partnership-level agreement, coordinated out-of-band**,
 exactly as the linkage terms and the setup secret are (see
 [SECURITY_DESIGN.md](SECURITY_DESIGN.md#invitation-contents-and-confidentiality)).
 The two operators decide a cadence and a window together over their trusted
-channel, and each enters it locally. Saving an exchange as recurring does not
-yet offer schedule entry -- the record carries the field, but no surface sets
-it. It is
+channel, and each enters it locally, under **Local settings** on the exchange's
+own page: the date and time of the first agreed window on their own clock, how
+often a window opens, and how long it stays open. Scheduling is off until
+someone enters one, and turning it off again returns the exchange to
+attended-only without touching anything else. The schedule is
 **not** minted into the exchange-file document and **not** carried on the
 invitation wire: the document is the shared terms-and-locator config, fixed for
 the partnership -- changing the terms means setting up a new exchange, not
@@ -269,9 +277,16 @@ exchange a clock reading, so a wide window is what guarantees overlap despite
 small clock differences; the honest bound is in
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#clock-skew-and-the-window-width)),
 and it absorbs the ordinary slack of two independently-kept machines -- a laptop
-that woke late, an app launched a few minutes after login. A missed window
-carries no security meaning (see [A missed window is neither desync nor
+that woke late, an app launched a few minutes after login. Entry holds the width
+to that range: at least an hour, at most half a day. A missed window carries no
+security meaning (see [A missed window is neither desync nor
 attack](#a-missed-window-is-neither-desync-nor-attack)).
+
+While a window is being occupied, the runner stands down between its attempts
+rather than holding the exchange continuously. That interval is what leaves the
+exchange free for an operator who opens the app and runs it themselves during
+one of its own windows: an attended run started then takes over, and the window
+records neither an attempt nor a miss on the runner's behalf.
 
 ### Retry and repeated misses
 
@@ -923,7 +938,13 @@ where it can also be cleared; an edit re-derives the bound conservatively and
 never moves the stored secret's lapse later than it already stood. When the
 operator sets one, the exchange surfaces its cadence implication -- "this
 exchange must run or be renewed within N days" -- for the operator to weigh
-against the partnership's known cadence. The reason to opt in is a dormant
+against the partnership's known cadence. Where the exchange also carries an
+agreed schedule, that weighing is done for them: a cadence whose next window
+opens at or past the bound is surfaced as a problem at entry, since the stored
+secret would lapse before the window that would have refreshed it. It is stated
+rather than refused -- an operator who renews by hand is entitled to that
+cadence -- and it is unreachable for an exchange that set no bound. The reason
+to opt in is a dormant
 partnership: rotation caps exposure only for an exchange that actually runs, so
 an idle stored secret has no automatic exposure bound unless a max-age is set
 (see [The primary controls](SECURITY_DESIGN.md#the-primary-controls)).

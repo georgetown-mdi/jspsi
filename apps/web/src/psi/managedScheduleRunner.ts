@@ -38,6 +38,13 @@
  *   payload flow could have started would disclose a second time, so the run's
  *   own phase boundary ({@link ./managedExchangeRun.ts}'s `onDataExchangeStart`)
  *   is what gates the retry rather than the failure's kind.
+ * - The single-writer lock is held per ATTEMPT, not for the window. Between two
+ *   attempts the runner stands down for {@link attemptLockYieldMs}, which is the
+ *   only interval in which an operator's own Run can take the lock at all -- the
+ *   attended path takes it fail-fast, so a window occupied back-to-back would
+ *   refuse them for its whole width. A window the attended run wins that way
+ *   records neither an attempt nor a miss, which is the `"unattempted"`
+ *   disposition already in place.
  */
 
 import {
@@ -83,21 +90,59 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
 export const ATTEMPT_PEER_WAIT_MS = DEFAULT_PEER_WAIT_TIMEOUT_MS;
 
 /**
- * The minimum spacing between two attempts at the same window, measured from
- * one attempt's start to the next. An attempt that spends its whole peer wait
- * has already outlasted this and the next one starts immediately; an attempt
- * that fails at once waits out the remainder, so a failure that reproduces
- * instantly cannot spin the window away.
+ * The share of a window's width the runner stands down for between two attempts,
+ * before the floor and ceiling below are applied.
+ *
+ * The single-writer lock is held for the length of an attempt, so back-to-back
+ * attempts hold it for essentially the whole window and refuse an attended Run
+ * for all of it. The gap between attempts is when the lock is demonstrably free,
+ * which makes it the yield policy, and it is scaled by the window because a wider
+ * window can afford to stand down longer and still meet its partner.
  */
-export const ATTEMPT_RATE_GAP_MS = 60_000;
+export const ATTEMPT_LOCK_YIELD_WINDOW_SHARE = 1 / 32;
+
+/** The shortest stand-down between two attempts: the floor keeps a failure that
+ * reproduces instantly from spinning the window away, and keeps the lock free
+ * long enough for an operator's own Run to take it. */
+export const MIN_ATTEMPT_LOCK_YIELD_MS = 120_000;
+
+/**
+ * The longest stand-down between two attempts, which is what keeps the yield from
+ * costing the rendezvous it exists beside.
+ *
+ * Two runners each listening for {@link ATTEMPT_PEER_WAIT_MS} out of every
+ * (wait + yield) overlap for at least (wait - yield) of every cycle whatever
+ * their phase, so a yield at or past the wait admits an anti-phase pair that
+ * never meets inside a window they both occupied. Half the wait leaves half of it
+ * as guaranteed overlap, which is many times what a rendezvous and handshake
+ * take.
+ */
+export const MAX_ATTEMPT_LOCK_YIELD_MS = ATTEMPT_PEER_WAIT_MS / 2;
+
+/**
+ * How long the runner leaves the single-writer lock free after an attempt at a
+ * window `windowMs` wide, before starting the next one. It is clamped into
+ * [{@link MIN_ATTEMPT_LOCK_YIELD_MS}, {@link MAX_ATTEMPT_LOCK_YIELD_MS}], so the
+ * window's width drives it across the narrow end of the widths schedule entry
+ * admits and the rendezvous ceiling binds above that.
+ */
+export function attemptLockYieldMs(windowMs: number): number {
+  return Math.min(
+    MAX_ATTEMPT_LOCK_YIELD_MS,
+    Math.max(
+      MIN_ATTEMPT_LOCK_YIELD_MS,
+      Math.floor(windowMs * ATTEMPT_LOCK_YIELD_WINDOW_SHARE),
+    ),
+  );
+}
 
 /**
  * The most attempts one window takes. The window's own close is what ends an
- * ordinary occupancy -- at the peer wait above, a window would have to stay open
- * for the better part of a day to reach this -- so the cap does not cut a
- * realistic window short. It bounds the other case: an attempt failing
- * immediately, paced by {@link ATTEMPT_RATE_GAP_MS}, would otherwise keep the
- * runner in a wide window for its whole width.
+ * ordinary occupancy: a window nobody arrives in spends a full peer wait plus a
+ * stand-down per attempt, so the widest window schedule entry admits stays under
+ * this and the cap never cuts such a window short. It bounds the two cases the
+ * close does not -- attempts failing immediately in a wide window, and a clock
+ * that stops advancing under the loop, where the close is never reached at all.
  */
 export const MAX_WINDOW_ATTEMPTS = 64;
 
@@ -333,11 +378,11 @@ interface WindowOccupancy {
  * Occupy one open window with bounded re-attempts.
  *
  * Each attempt waits for the partner up to {@link ATTEMPT_PEER_WAIT_MS},
- * clamped to what is left of the window; a retryable failure starts another
- * attempt no sooner than {@link ATTEMPT_RATE_GAP_MS} after the last one began,
- * and no later than the window's close, which ends the occupancy anyway.
- * The window's disposition folds every attempt rather than reading the last one
- * (see {@link foldWindowDisposition}).
+ * clamped to what is left of the window; a retryable failure stands the runner
+ * down for {@link attemptLockYieldMs} -- leaving the single-writer lock free for
+ * an attended Run -- and no later than the window's close, which ends the
+ * occupancy anyway. The window's disposition folds every attempt rather than
+ * reading the last one (see {@link foldWindowDisposition}).
  */
 async function occupyWindow(
   record: ManagedExchangeRecord,
@@ -391,17 +436,19 @@ async function occupyWindow(
         };
       disposition = verdict.disposition;
     }
-    // Paced from the failed attempt's start, and clamped to the window's own
-    // close: the loop head is what ends an occupancy, so a delay outlasting the
-    // window would hold this record's tick open past the close for nothing --
-    // and past the moment the next wake could have found the record free.
-    const pacedFromMs = seams.now();
+    // The lock is free from here until the next attempt takes it, so this delay
+    // is the yield: measured from the failed attempt's END, which is when the
+    // lock actually came free, and clamped to the window's own close. The loop
+    // head is what ends an occupancy, so a yield outlasting the window would hold
+    // this record's tick open past the close for nothing -- and past the moment
+    // the next wake could have found the record free.
+    const yieldFromMs = seams.now();
     await seams.delay(
       Math.max(
         0,
         Math.min(
-          ATTEMPT_RATE_GAP_MS - (pacedFromMs - startedAtMs),
-          window.closesAtMs - pacedFromMs,
+          attemptLockYieldMs(window.closesAtMs - window.opensAtMs),
+          window.closesAtMs - yieldFromMs,
         ),
       ),
     );
