@@ -4,6 +4,7 @@ import PSI from "@openmined/psi.js";
 
 import {
   exchangeRecordFromFailure,
+  exchangeRecordOwedButUnbuilt,
   prepareForExchange,
   runExchange,
 } from "../src/exchange";
@@ -774,6 +775,8 @@ describe("a terminated receipt swap keeps the record of what was disclosed", () 
     // receipt bearing it, and a record that dropped it would leave that receipt
     // unpairable.
     expect(responderKept?.record.receiptBinder).toBeDefined();
+    // The record is in hand, so nothing was lost to a failed build.
+    expect(exchangeRecordOwedButUnbuilt(responderFailure)).toBe(false);
 
     await connInitiator.close();
     await connResponder.close();
@@ -873,8 +876,72 @@ describe("a terminated receipt swap keeps the record of what was disclosed", () 
       (reason: unknown) => reason,
     );
     expect(exchangeRecordFromFailure(refused)).toBeUndefined();
+    // Nothing was owed, so nothing is reported lost: this is the answer the
+    // owed-but-unbuilt case below has to be distinguishable from.
+    expect(exchangeRecordOwedButUnbuilt(refused)).toBe(false);
     await connInitiator.close();
     await connResponder.close();
     await unnamed;
+  });
+
+  test("a record that was owed and could not be built is reported on the failure", async () => {
+    // The build is non-fatal and warns on the operator log alone, so a caller
+    // handed a bare `undefined` cannot tell "no disclosure to attest" from "the
+    // disclosure happened and its record did not build" -- and only the second
+    // is a lost accounting entry. The responder's prepared exchange carries an
+    // empty retention disposition, a value reaching past the config schema that
+    // buildExchangeRecord validates and rejects, so its build throws on a run
+    // that had already disclosed.
+    const [connInitiator, connResponder] = createMessagePipe();
+    const initiator = runExchange(
+      connInitiator,
+      "initiator",
+      prepared("Initiator Co", both, clientRows),
+      {
+        psiLibrary,
+        signingIdentity: identityA,
+        partnerFingerprint: fingerprintB,
+        sessionKey,
+      },
+    ).then(
+      () => {
+        throw new Error("expected the initiator's run to terminate");
+      },
+      (reason: unknown) => reason,
+    );
+    const responderFailure = await runExchange(
+      connResponder,
+      "responder",
+      {
+        ...prepared("Responder Co", both, serverRows),
+        retentionDisposition: "",
+      },
+      {
+        psiLibrary,
+        signingIdentity: identityB,
+        // WRONG pin, as the mismatch case above: the swap terminates the run
+        // after the payloads have crossed.
+        partnerFingerprint: fingerprintB,
+        sessionKey,
+      },
+    ).then(
+      () => {
+        throw new Error("expected the responder to reject on the pin mismatch");
+      },
+      (reason: unknown) => reason,
+    );
+
+    expect(responderFailure).toBeInstanceOf(ReceiptVerificationError);
+    expect(exchangeRecordFromFailure(responderFailure)).toBeUndefined();
+    expect(exchangeRecordOwedButUnbuilt(responderFailure)).toBe(true);
+
+    await connInitiator.close();
+    await connResponder.close();
+    // The initiator's own build was unaffected: the loss is one party's.
+    const initiatorFailure = await initiator;
+    expect(exchangeRecordFromFailure(initiatorFailure)?.record.outcome).toBe(
+      "receipt-swap-terminated",
+    );
+    expect(exchangeRecordOwedButUnbuilt(initiatorFailure)).toBe(false);
   });
 });

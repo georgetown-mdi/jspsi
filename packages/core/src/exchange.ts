@@ -500,11 +500,13 @@ export function assertSigningModeImplemented(
  * signature swap is the last step of a successful exchange, so the payloads have
  * already crossed when it starts, and the partner's certificate arrives with
  * nothing on file to check it against: {@link assertPartnerCertificateTrusted}
- * rejects unconditionally on an absent pin, which terminates the run. Every local
- * artifact is written after {@link runExchange} returns, so the operator is left
- * with no result, no exchange record, and no receipt -- while this party's data
- * is in the partner's hands, and on the leg that sends its `{certificate,
- * signature}` frame first the partner also holds this party's signed receipt.
+ * rejects unconditionally on an absent pin, which terminates the run. The result
+ * and the receipt are written after {@link runExchange} returns, so the operator
+ * is left with neither -- keeping only the self-attested record of the disclosure
+ * the run had already made, which the throw carries back
+ * ({@link exchangeRecordFromFailure}) -- while this party's data is in the
+ * partner's hands, and on the leg that sends its `{certificate, signature}` frame
+ * first the partner also holds this party's signed receipt.
  * Nothing about the partner or the network changes that: the `signing` block is
  * only ever this party's own config, and no invitation or accept path supplies a
  * pin later (see `config/signing.ts`), so the outcome is settled while the
@@ -515,7 +517,7 @@ export function assertSigningModeImplemented(
  * fault with an actionable remedy, surfaced as that category on both front ends
  * (and exit 64 on the CLI, through the base class). Strictly the worse of the
  * two, in fact -- a `session-derived` config at least COMPLETES the exchange and
- * leaves the ordinary unsigned record behind.
+ * leaves the operator its result beside the ordinary unsigned record.
  *
  * Scoped to `certificate` mode alone: `none`, an absent block, and an
  * unimplemented mode (already refused above) verify no partner certificate, so
@@ -536,8 +538,9 @@ export function assertCertificateModePinsPartner(
       "after the payloads have crossed, and the certificate the partner " +
       "presents there is refused when nothing is on file to check it against. " +
       "The run would stop having sent this party's data and having written no " +
-      "result, no exchange record, and no receipt. Obtain the partner's " +
-      "fingerprint out-of-band -- they produce it with 'psilink fingerprint' " +
+      "result and no receipt, keeping only the exchange record of that " +
+      "disclosure. Obtain the partner's fingerprint out-of-band -- they " +
+      "produce it with 'psilink fingerprint' " +
       '-- and set signing.partner_fingerprint, or set signing.mode to "none" ' +
       "to run unsigned until you hold it.",
   );
@@ -874,7 +877,8 @@ export function prepareForExchange(
   // Fail closed on the same footing when certificate mode pins no partner: the
   // signature swap runs after the payloads have crossed and rejects any
   // certificate presented against an absent pin, so the run discloses this
-  // party's data and then terminates with nothing written locally. See
+  // party's data and then terminates with no result and no receipt, leaving the
+  // operator only the record of that disclosure. See
   // assertCertificateModePinsPartner.
   assertCertificateModePinsPartner(exchangeDataSpec.signing);
 
@@ -1272,6 +1276,13 @@ export interface ExchangeResult {
 // lives exactly as long as the error object does.
 const recordsByTerminatedRun = new WeakMap<object, BuiltExchangeRecord>();
 
+// The other half of the same answer: the terminated runs that owed a record and
+// whose build of it threw. Kept beside the map rather than as a sentinel inside
+// it so the record-bearing accessor's return type stays exactly what a caller
+// already handles, and so "nothing was owed" and "what was owed could not be
+// built" stop sharing one undefined.
+const unbuiltRecordsByTerminatedRun = new WeakSet<object>();
+
 /**
  * The self-attested record of the disclosure a terminated run had ALREADY made,
  * recovered from the error {@link runExchange} threw; `undefined` when the failure
@@ -1302,24 +1313,52 @@ export function exchangeRecordFromFailure(
 }
 
 /**
- * `error`, with `audit` attached for {@link exchangeRecordFromFailure} to
- * recover. A record that was never built is nothing to carry, and its own build
- * already warned. A thrown non-object cannot carry one at all, which is warned
- * here: what goes missing is the operator's disclosure-log entry for a disclosure
- * that happened.
+ * Whether the terminated run behind `error` owed a self-attested record that
+ * could not be built, so {@link exchangeRecordFromFailure} returns nothing for a
+ * disclosure that nonetheless occurred.
+ *
+ * True only past the payload exchange: the record was owed (docs/spec/PROTOCOL.md,
+ * Self-attested record) and {@link buildExchangeRecord} threw, which the build
+ * warns about on the operator log with its cause. This is the same loss the
+ * completed path reports as a missing artifact, made queryable on the failing path
+ * so a caller can report it on a machine interface rather than only in a log line
+ * an unattended run discards. False when the failure owed no record at all, and
+ * false once the record is in hand -- the two answers a bare `undefined` from
+ * {@link exchangeRecordFromFailure} cannot tell apart.
+ *
+ * The lookup walks the `cause` chain, as its record-bearing sibling does.
+ */
+export function exchangeRecordOwedButUnbuilt(error: unknown): boolean {
+  return causeChainSome(error, (link) =>
+    unbuiltRecordsByTerminatedRun.has(link),
+  );
+}
+
+/**
+ * `error`, marked for the two accessors above: carrying `audit` where the record
+ * built, and recording the loss where it did not, so a caller can tell that
+ * absence from a failure that owed no record. A thrown non-object can hold
+ * neither mark, which is warned here: what goes missing is the operator's
+ * disclosure-log entry for a disclosure that happened.
  */
 function carryingExchangeRecord(
   error: unknown,
   audit: BuiltExchangeRecord | undefined,
 ): unknown {
-  if (audit === undefined) return error;
   if (typeof error !== "object" || error === null) {
-    getLogger("exchange").warn(
-      "the exchange disclosed and then failed in the signed-receipt swap, " +
-        "and the failure is not an object this run's self-attested record " +
-        "could be attached to; no record is available to write for a " +
-        "disclosure that occurred",
-    );
+    // Warned only where a record exists and is now unreachable; a record that
+    // never built already warned at its build, with the cause this cannot name.
+    if (audit !== undefined)
+      getLogger("exchange").warn(
+        "the exchange disclosed and then failed in the signed-receipt swap, " +
+          "and the failure is not an object this run's self-attested record " +
+          "could be attached to; no record is available to write for a " +
+          "disclosure that occurred",
+      );
+    return error;
+  }
+  if (audit === undefined) {
+    unbuiltRecordsByTerminatedRun.add(error);
     return error;
   }
   recordsByTerminatedRun.set(error, audit);
