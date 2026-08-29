@@ -2,6 +2,10 @@ import { describe, expect, test, vi } from "vitest";
 import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
+  ManagedImportHandedOffError,
+  importManagedExchange,
+} from "@psi/managedExchangeImport";
+import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
@@ -9,15 +13,16 @@ import {
   encodeManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
 } from "@psi/managedExchangeArtifact";
-import { importManagedExchange } from "@psi/managedExchangeImport";
 
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 import type { ManagedImportDeps } from "@psi/managedExchangeImport";
+import type { ManagedReviveOutcome } from "@psi/managedExchangeStore";
 
 // The import take-over, tested in Node with injected seams: a valid artifact installs
-// one owner and marks it imported-and-backed-up; a malformed or tampered file is
-// rejected before any install, so the store is left untouched. The store-backed
-// install (real IndexedDB) is the browser suite's.
+// one owner and marks it imported-and-backed-up; a migration-spent secret-match is
+// revived in place; a match handed off by a route of its own refuses the import
+// outright; a malformed or tampered file is rejected before any install, so the store
+// is left untouched. The store-backed install (real IndexedDB) is the browser suite's.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
@@ -62,7 +67,9 @@ function scheduledBytes(): string {
   );
 }
 
-function recordingDeps(revive?: ManagedExchangeRecord): ManagedImportDeps & {
+function recordingDeps(
+  reconciled: ManagedReviveOutcome = { kind: "no-match" },
+): ManagedImportDeps & {
   installed: Array<ManagedExchangeRecord>;
   reviveSpent: ReturnType<typeof vi.fn>;
   markImported: ReturnType<typeof vi.fn>;
@@ -70,7 +77,7 @@ function recordingDeps(revive?: ManagedExchangeRecord): ManagedImportDeps & {
   const installed: Array<ManagedExchangeRecord> = [];
   return {
     installed,
-    reviveSpent: vi.fn(() => Promise.resolve(revive)),
+    reviveSpent: vi.fn(() => Promise.resolve(reconciled)),
     install: (record) => {
       installed.push(record);
       return Promise.resolve(record);
@@ -92,7 +99,7 @@ describe("importManagedExchange", () => {
     );
   });
 
-  test("revives a spent secret-match in place instead of installing a duplicate", async () => {
+  test("revives a migration-spent secret-match in place instead of installing a duplicate", async () => {
     const existing = buildManagedExchangeRecord({
       label: "Riverbend quarterly",
       exchangeFile: composeManagedExchangeFile({
@@ -102,11 +109,34 @@ describe("importManagedExchange", () => {
       side: "inviter",
       sharedSecret: generateSharedSecret(),
     });
-    const deps = recordingDeps(existing);
+    const deps = recordingDeps({ kind: "revived", record: existing });
     const result = await importManagedExchange(goodBytes(), deps);
     // The revived record is returned; nothing fresh is installed and no separate
     // marker write runs (the revive stamped it in its own transaction).
     expect(result).toBe(existing);
+    expect(deps.installed).toHaveLength(0);
+    expect(deps.markImported).not.toHaveBeenCalled();
+  });
+
+  test("a match handed off by another route refuses, installing nothing", async () => {
+    // The husk the artifact would fork: the exchange runs from what the hand-off
+    // saved, so neither reviving it here nor installing a second live copy beside it
+    // is an import -- the refusal carries the stored record's label so the surface
+    // can name the exchange the operator still has.
+    const deps = recordingDeps({
+      kind: "handed-off",
+      handoff: "command-line",
+      label: "Riverbend quarterly",
+    });
+    await expect(importManagedExchange(goodBytes(), deps)).rejects.toThrow(
+      ManagedImportHandedOffError,
+    );
+    await expect(
+      importManagedExchange(goodBytes(), deps),
+    ).rejects.toMatchObject({
+      handoff: "command-line",
+      label: "Riverbend quarterly",
+    });
     expect(deps.installed).toHaveLength(0);
     expect(deps.markImported).not.toHaveBeenCalled();
   });

@@ -14,14 +14,22 @@
  * untouched.
  *
  * Import reconciles against a spent husk before installing fresh. When the artifact
- * matches an existing SPENT record -- same `sharedSecret`, the honest match, since a
- * spent-and-unrun-since record's artifact holds exactly its secret (compared in
- * memory, never persisted) -- the import REVIVES that record in place: it updates the
- * record's fields from the artifact, keeps its `id` and any persisted input handle,
- * clears the spent state, and marks it imported-and-backed-up, so re-importing onto
- * the device that handed the exchange off does not leave a permanent duplicate row.
- * Otherwise the import installs a fresh record with a new `id` and NO input-file
- * handle: the first run re-acquires one by selection.
+ * matches a record spent by the DEVICE MIGRATION -- same `sharedSecret`, the honest
+ * match, since a spent-and-unrun-since record's artifact holds exactly its secret
+ * (compared in memory, never persisted) -- the import REVIVES that record in place: it
+ * updates the record's fields from the artifact, keeps its `id` and any persisted
+ * input handle, clears the spent state, and marks it imported-and-backed-up, so
+ * re-importing onto the device that handed the exchange off does not leave a permanent
+ * duplicate row. Otherwise the import installs a fresh record with a new `id` and NO
+ * input-file handle: the first run re-acquires one by selection.
+ *
+ * A match spent under a HAND-OFF of its own is refused instead
+ * ({@link ManagedImportHandedOffError}). The exchange runs from what that hand-off
+ * saved -- the command-line export's two files, which this import does not accept --
+ * so the artifact, taken before the hand-off, has no copy to bring back: reviving
+ * would run a copy the hand-off gave away, and installing fresh would split one secret
+ * across a spent husk and a live row beside it. The refusal names the record the store
+ * still holds so the surface can say which exchange it is and what recovery it has.
  *
  * Either way the installed or revived record is marked imported and backed-up as of
  * the import instant: the file just imported from is itself a current backup of the
@@ -40,17 +48,42 @@ import { importManagedExchangeArtifact } from "./managedExchangeArtifact";
 import { markManagedExchangeImported } from "./managedLocalState";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
+import type { ManagedReviveOutcome } from "./managedExchangeStore";
+import type { ManagedSpentHandoff } from "./managedLocalStateShape";
+
+/**
+ * Raised when an import is refused because the artifact's secret matches a record
+ * this device handed off under {@link handoff}: the exchange runs from what that
+ * hand-off saved, so nothing is revived and nothing is installed. Carries the stored
+ * record's operator label (which may be empty) so the surface can name the exchange
+ * the operator still has here.
+ */
+export class ManagedImportHandedOffError extends Error {
+  /** Which hand-off spent the record the artifact's secret matches. */
+  readonly handoff: ManagedSpentHandoff;
+  /** The stored record's operator label; empty when the operator named nothing. */
+  readonly label: string;
+
+  constructor(handoff: ManagedSpentHandoff, label: string) {
+    super(
+      `this artifact's managed exchange was handed off (${handoff}), so importing it back is refused`,
+    );
+    this.name = "ManagedImportHandedOffError";
+    this.handoff = handoff;
+    this.label = label;
+  }
+}
 
 /** The platform seams the import drives, injected so the flow is testable. */
 export interface ManagedImportDeps {
-  /** Revive a spent record whose stored secret matches the reconstructed artifact's,
-   * in place (keeping its id and input handle, clearing spent, marking imported and
-   * backed-up as of the same instant), or `undefined` when no spent secret-match
-   * exists. */
+  /** Reconcile the reconstructed artifact against the spent records: revive a
+   * migration-spent secret-match in place (keeping its id and input handle, clearing
+   * spent, marking imported and backed-up as of the same instant), report the
+   * hand-off that refuses the import, or report no match at all. */
   reviveSpent: (
     reconstructed: ManagedExchangeRecord,
     at: string,
-  ) => Promise<ManagedExchangeRecord | undefined>;
+  ) => Promise<ManagedReviveOutcome>;
   /** Install a reconstructed record as a new managed exchange (the one owner). */
   install: (record: ManagedExchangeRecord) => Promise<ManagedExchangeRecord>;
   /** Stamp the installed record's import and backup markers as of `at` -- the
@@ -84,10 +117,11 @@ const defaultDeps: ManagedImportDeps = {
 /**
  * Import an artifact's bytes as a managed exchange. Parses and reconstructs through
  * the artifact module's trust boundary (throwing on a malformed or tampered file
- * before any write). If the artifact matches an existing spent record, revives that
+ * before any write). If the artifact matches a migration-spent record, revives that
  * record in place (already marked imported and backed-up in the same transaction);
- * otherwise installs a fresh record and marks it imported and backed-up as of the
- * import instant. Returns the revived or installed record.
+ * if it matches a record handed off by a route of its own, refuses; otherwise
+ * installs a fresh record and marks it imported and backed-up as of the import
+ * instant. Returns the revived or installed record.
  *
  * The import mark on a fresh install is best-effort after the install succeeds: a
  * valid record is already durable, so a failed marker write must not report the
@@ -97,6 +131,8 @@ const defaultDeps: ManagedImportDeps = {
  *
  * @throws {UsageError} if the bytes are not parseable JSON or the embedded document
  *   is not parseable YAML.
+ * @throws {ManagedImportHandedOffError} if the artifact's secret matches a record
+ *   handed off from this device; nothing is written.
  * @throws {ZodError} if the artifact or the reconstructed record is invalid, or the
  *   install itself fails.
  */
@@ -106,8 +142,10 @@ export async function importManagedExchange(
 ): Promise<ManagedExchangeRecord> {
   const reconstructed = importManagedExchangeArtifact(source);
   const at = deps.now().toISOString();
-  const revived = await deps.reviveSpent(reconstructed, at);
-  if (revived !== undefined) return revived;
+  const reconciled = await deps.reviveSpent(reconstructed, at);
+  if (reconciled.kind === "revived") return reconciled.record;
+  if (reconciled.kind === "handed-off")
+    throw new ManagedImportHandedOffError(reconciled.handoff, reconciled.label);
   const installed = await deps.install(reconstructed);
   try {
     await deps.markImported(installed.id, at);

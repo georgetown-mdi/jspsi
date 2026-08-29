@@ -18,14 +18,16 @@ import {
   clearManagedExchanges,
   createManagedExchange,
   getManagedExchange,
-  readRecordAndMarkBackedUp,
   spendManagedExchangeIfCurrent,
 } from "@psi/managedExchangeStore";
+import {
+  getManagedLocalState,
+  markManagedExchangeBackedUp,
+} from "@psi/managedLocalState";
 import { CLI_BUILT_IN_STUN_URI } from "@bench/managedCronExportModel";
 import { ManagedRunSurface } from "@bench/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 import { dispatchManagedCronExport } from "@psi/managedExchangeExport";
-import { getManagedLocalState } from "@psi/managedLocalState";
 
 import { captureDownloads } from "./captureDownloads";
 import { createAppMount } from "./renderApp";
@@ -38,7 +40,8 @@ import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 // real one: no download or spend is stubbed). What is pinned here is the hand-off
 // invariant -- the two files the CLI opens land, and this browser's copy is spent
 // ONLY on the operator's attestation that they did, so a dismissed save leaves one
-// live owner rather than two.
+// live owner rather than two -- and the custody line beside it: these files are not a
+// backup this browser restores from, so this export never touches the backup marker.
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -227,6 +230,105 @@ describe("the source is spent only on the operator's attestation", () => {
   });
 });
 
+describe("the export leaves the backup indicator exactly where it was", () => {
+  // The indicator answers one question -- is there a file this browser can restore
+  // from -- and these two files are not one: this app's import does not accept them.
+  // So no step of this export may mark the record, whichever way the operator goes.
+
+  test("a dismissed export marks nothing, and the exchange still reads backup-needed", async () => {
+    const created = await createManagedExchange(newExchange());
+    const downloads = captureDownloads();
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      await openExportPanel();
+      await downloadBothFiles(downloads.captured);
+      await page
+        .getByRole("button", { name: "Keep it in this browser" })
+        .click();
+
+      expect(await getManagedLocalState(created.id)).toBeUndefined();
+      // Not just the stored marker: the panel above still asks for the backup this
+      // operator does not have.
+      await expect
+        .element(page.getByText("Back up this exchange."))
+        .toBeInTheDocument();
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("a confirmed hand-off marks nothing either", async () => {
+    const created = await createManagedExchange(newExchange());
+    const downloads = captureDownloads();
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      await openExportPanel();
+      await downloadBothFiles(downloads.captured);
+      await page
+        .getByRole("button", {
+          name: "I saved both files; hand off this exchange",
+        })
+        .click();
+      await expect
+        .element(page.getByText("Handed off to the command line"))
+        .toBeInTheDocument();
+
+      // The spend is the only thing this export writes.
+      expect((await getManagedLocalState(created.id))?.backup).toBeUndefined();
+      expect((await getManagedLocalState(created.id))?.spent).toBeDefined();
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("an earlier backup's date is carried through untouched", async () => {
+    // The other direction: a record that IS backed up must not lose or re-date its
+    // marker for an export that has nothing to do with it.
+    const created = await createManagedExchange(newExchange());
+    await markManagedExchangeBackedUp(created.id, "2026-07-14T12:00:00.000Z");
+    const downloads = captureDownloads();
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      await openExportPanel();
+      await downloadBothFiles(downloads.captured);
+
+      expect((await getManagedLocalState(created.id))?.backup).toEqual({
+        backedUpAt: "2026-07-14T12:00:00.000Z",
+      });
+      await expect
+        .element(page.getByText("Backed up as of", { exact: false }))
+        .toBeInTheDocument();
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("the panel names these files as the command line's, not a browser backup", async () => {
+    const created = await createManagedExchange(newExchange());
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+    await openExportPanel();
+
+    await expect
+      .element(
+        page.getByText("not a backup file this browser can restore from", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    // And the backup panel above says which file that is.
+    await expect
+      .element(
+        page.getByText(
+          "The backup file is the one this browser restores from",
+          {
+            exact: false,
+          },
+        ),
+      )
+      .toBeInTheDocument();
+  });
+});
+
 describe("the durable spent surface names the hand-off that spent it", () => {
   // The "Handed off to the command line" surface a confirmation leaves on screen is
   // session state. What a LATER VISIT shows is read back from the sibling store, so
@@ -362,28 +464,25 @@ describe("a record this app could not have composed", () => {
       .not.toBeInTheDocument();
   });
 
-  test("a dispatch past the panel's gate marks nothing in the real store", async () => {
+  test("a dispatch past the panel's gate writes nothing in the real store", async () => {
     // The panel gates on the same refusal, but the gate and the click can diverge
-    // (a concurrent import or rotation in another tab). The composition runs inside
-    // the store's read-and-mark transaction, so its refusal aborts that transaction
-    // against real IndexedDB: no backup marker, no spend, no record change.
+    // (a concurrent import or rotation in another tab). The composition refuses the
+    // record the store handed back, before anything is downloaded: against real
+    // IndexedDB that leaves no sibling entry, no spend, and no record change.
     const created = await createManagedExchange(refusedExchange());
     const downloaded: Array<string> = [];
     const before = await getManagedExchange(created.id);
 
     await expect(
       dispatchManagedCronExport(created.id, {
-        readAndMark: readRecordAndMarkBackedUp,
+        readRecord: getManagedExchange,
         download: (fileName) => downloaded.push(fileName),
         spendIfCurrent: spendManagedExchangeIfCurrent,
-        now: () => new Date(),
       }),
     ).rejects.toThrow(/stored connection channel is filedrop/);
 
     expect(downloaded).toEqual([]);
     expect(await getManagedLocalState(created.id)).toBeUndefined();
-    // Not just the secret: the whole stored record is what it was before the
-    // dispatch, since the refusal aborted the transaction it was composed inside.
     expect(await getManagedExchange(created.id)).toEqual(before);
   });
 });

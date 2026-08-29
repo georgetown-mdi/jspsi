@@ -34,14 +34,15 @@ import type {
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 
 // The three export intents, tested in Node with injected seams. Every export reads
-// the record fresh, composes what it will download, and marks it in one atomic step
-// (readAndMark), so what it serializes is what the marker attests and a composition
-// that refuses the record leaves no marker behind; a backup leaves the source live;
-// a migration and a command-line export download and return a confirm handle,
-// spending the source only when the operator attests the files are saved (a
-// dismissed save leaves it live) and only through the one atomic step
-// (spendIfCurrent) that writes the spend while the stored secret is still the one
-// the download carried.
+// the record fresh rather than trusting a caller's copy. The backup and migration
+// exports serialize and mark in one atomic step (readAndMark), so what they serialize
+// is what the marker attests; the command-line export takes a plain read and has no
+// marking seam at all, since the two files it writes are not a backup this app
+// restores from. A backup leaves the source live; a migration and a command-line
+// export download and return a confirm handle, spending the source only when the
+// operator attests the files are saved (a dismissed save leaves it live) and only
+// through the one atomic step (spendIfCurrent) that writes the spend while the stored
+// secret is still the one the download carried.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
@@ -114,6 +115,22 @@ describe("exportManagedBackup", () => {
     // secret the marker was stamped against, not a stale React snapshot.
     const restored = importManagedExchangeArtifact(deps.downloaded[0].content);
     expect(restored.sharedSecret).toBe(rec.sharedSecret);
+  });
+
+  test("a step that marks without serializing is refused, not downloaded", async () => {
+    // The binding is only as good as the step honoring it, so a seam that resolves
+    // having skipped the serialization fails the export rather than downloading bytes
+    // no marker attests.
+    const rec = record();
+    const deps = {
+      ...backupDeps(rec),
+      readAndMark: () => Promise.resolve(rec),
+    };
+
+    await expect(exportManagedBackup(rec.id, deps)).rejects.toThrow(
+      /without serializing the export/,
+    );
+    expect(deps.downloaded).toEqual([]);
   });
 });
 
@@ -335,8 +352,8 @@ describe("dispatchManagedCronExport", () => {
 
   function cronDeps(rec: ManagedExchangeRecord): ManagedCronExportDeps & {
     downloaded: Array<{ fileName: string; content: string; mimeType: string }>;
-    marked: Array<string>;
     order: Array<string>;
+    readRecord: ReturnType<typeof vi.fn>;
     spendIfCurrent: ReturnType<typeof vi.fn>;
     /** The spends the atomic step actually wrote; a refused one writes nothing. */
     spent: Array<{ spentAt: string; handoff: ManagedSpentHandoff }>;
@@ -345,7 +362,6 @@ describe("dispatchManagedCronExport", () => {
     stored: { record: ManagedExchangeRecord | undefined };
   } {
     const order: Array<string> = [];
-    const marked: Array<string> = [];
     const spent: Array<{ spentAt: string; handoff: ManagedSpentHandoff }> = [];
     const downloaded: Array<{
       fileName: string;
@@ -357,24 +373,15 @@ describe("dispatchManagedCronExport", () => {
     };
     return {
       downloaded,
-      marked,
       order,
       spent,
       stored,
-      // The store's atomic step, modelled: the composition runs on the record read
-      // and the marker is written only once it returns, so a refusal thrown out of
-      // it leaves nothing marked -- the transaction the real store aborts.
-      readAndMark: (
-        _id: string,
-        backedUpAt: string,
-        composeExport: (read: ManagedExchangeRecord) => void,
-      ) => {
-        order.push("compose");
-        composeExport(rec);
-        order.push("mark");
-        marked.push(backedUpAt);
-        return Promise.resolve(rec);
-      },
+      // The plain read this export takes: no marker is written here or anywhere else
+      // in it, so the deps carry no marking seam to write one through.
+      readRecord: vi.fn((_id: string) => {
+        order.push("read");
+        return Promise.resolve<ManagedExchangeRecord | undefined>(rec);
+      }),
       download: (fileName, content, mimeType) => {
         order.push("download");
         downloaded.push({ fileName, content, mimeType });
@@ -398,11 +405,10 @@ describe("dispatchManagedCronExport", () => {
           return Promise.resolve<ManagedSpendOutcome>("spent");
         },
       ),
-      now: () => new Date("2026-07-14T12:00:00.000Z"),
     };
   }
 
-  test("downloads both CLI files and marks backed-up, without spending", async () => {
+  test("downloads both CLI files from a fresh read, without spending", async () => {
     const rec = record();
     const deps = cronDeps(rec);
     const dispatch = await dispatchManagedCronExport(rec.id, deps);
@@ -411,7 +417,7 @@ describe("dispatchManagedCronExport", () => {
       "psilink.yaml",
       ".psilink.key",
     ]);
-    expect(deps.marked).toEqual(["2026-07-14T12:00:00.000Z"]);
+    expect(deps.readRecord).toHaveBeenCalledWith(rec.id);
     // The spend is operator-attested: not written until confirm() is called.
     expect(deps.spendIfCurrent).not.toHaveBeenCalled();
     expect(dispatch.record).toBe(rec);
@@ -420,11 +426,26 @@ describe("dispatchManagedCronExport", () => {
     );
   });
 
-  test("composes before any durable write, then downloads", async () => {
+  test("reads first, then downloads", async () => {
     const rec = record();
     const deps = cronDeps(rec);
     await dispatchManagedCronExport(rec.id, deps);
-    expect(deps.order).toEqual(["compose", "mark", "download", "download"]);
+    expect(deps.order).toEqual(["read", "download", "download"]);
+  });
+
+  test("a record gone from the store downloads nothing", async () => {
+    const rec = record();
+    const deps = {
+      ...cronDeps(rec),
+      readRecord: () =>
+        Promise.resolve<ManagedExchangeRecord | undefined>(undefined),
+    };
+
+    await expect(dispatchManagedCronExport(rec.id, deps)).rejects.toThrow(
+      /no managed exchange with id/,
+    );
+    expect(deps.downloaded).toEqual([]);
+    expect(deps.spendIfCurrent).not.toHaveBeenCalled();
   });
 
   test("confirm spends the source as a command-line hand-off", async () => {
@@ -463,7 +484,7 @@ describe("dispatchManagedCronExport", () => {
   });
 
   test.each(refusedRecords)(
-    "a refused record marks nothing and leaves the record untouched (%s)",
+    "a refused record downloads nothing and leaves the record untouched (%s)",
     async (_shape, build, refusal) => {
       const rec = build();
       const before = structuredClone(rec);
@@ -472,29 +493,11 @@ describe("dispatchManagedCronExport", () => {
       await expect(dispatchManagedCronExport(rec.id, deps)).rejects.toThrow(
         refusal,
       );
-      // The refusal aborts the step it was composed inside: no marker, no bytes,
-      // no spend, and the record the step read still equals its snapshot.
-      expect(deps.marked).toEqual([]);
+      // The composition refuses before anything leaves the app: no bytes, no spend,
+      // and the record the read returned still equals its snapshot.
       expect(deps.downloaded).toEqual([]);
       expect(deps.spendIfCurrent).not.toHaveBeenCalled();
       expect(rec).toEqual(before);
     },
   );
-
-  test("a step that marks without composing is refused, not downloaded", async () => {
-    // The binding is only as good as the step honoring it, so a seam that resolves
-    // having skipped the composition fails the export rather than downloading bytes
-    // no marker attests.
-    const rec = record();
-    const deps = {
-      ...cronDeps(rec),
-      readAndMark: () => Promise.resolve(rec),
-    };
-
-    await expect(dispatchManagedCronExport(rec.id, deps)).rejects.toThrow(
-      /without composing the export/,
-    );
-    expect(deps.downloaded).toEqual([]);
-    expect(deps.spendIfCurrent).not.toHaveBeenCalled();
-  });
 });

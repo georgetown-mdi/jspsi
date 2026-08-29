@@ -11,6 +11,10 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 
 import {
+  ManagedImportHandedOffError,
+  importManagedExchange,
+} from "@psi/managedExchangeImport";
+import {
   deleteManagedExchange,
   listManagedExchanges,
   listManagedExchangesDiagnostic,
@@ -18,9 +22,12 @@ import {
   requestPersistentStorage,
 } from "@psi/managedExchangeStore";
 import { MAX_ARTIFACT_IMPORT_BYTES } from "@psi/managedExchangeArtifact";
-import { importManagedExchange } from "@psi/managedExchangeImport";
 import { listManagedLocalState } from "@psi/managedLocalState";
 
+import {
+  HANDED_OFF_IMPORT_TITLE,
+  handedOffImportReason,
+} from "./managedHandoffGate";
 import { BenchLobby } from "./BenchLobby";
 import { BenchPage } from "./BenchPage";
 import { loadSavedExchanges } from "./savedExchangesLoad";
@@ -531,19 +538,26 @@ function RecoveryListing({ reload }: { reload: () => void }) {
 /** The standing restore-from-backup import affordance, shared by the empty state and the
  * read-failed surface so both render one markup. A successful import takes the operator
  * to the imported exchange's run surface, so it is a way forward even when the list read
- * itself cannot be mended. */
+ * itself cannot be mended.
+ *
+ * An import the store refuses because its exchange was handed off from this browser is
+ * not the unreadable-file failure and does not read as one: the file is fine and the
+ * exchange is still here, running somewhere else, so that refusal names the exchange
+ * and the recovery it actually has ({@link handedOffImportReason}). */
 function RestoreFromBackup() {
   const navigate = useNavigate();
-  const [importFailed, setImportFailed] = useState(false);
+  const [importFailure, setImportFailure] = useState<
+    { kind: "unreadable" } | { kind: "handed-off"; reason: string }
+  >();
 
   function onFile(file: File | null) {
     if (file === null) return;
-    setImportFailed(false);
+    setImportFailure(undefined);
     // Cap the file size before reading it: the artifact is a small JSON document, so
     // an over-cap file is rejected with the same import-failure copy rather than read
     // into memory ahead of the bounded parse.
     if (file.size > MAX_ARTIFACT_IMPORT_BYTES) {
-      setImportFailed(true);
+      setImportFailure({ kind: "unreadable" });
       return;
     }
     void (async () => {
@@ -554,8 +568,15 @@ function RestoreFromBackup() {
         void requestPersistentStorage();
         const installed = await importManagedExchange(source);
         await navigate({ to: "/saved/$id", params: { id: installed.id } });
-      } catch {
-        setImportFailed(true);
+      } catch (error) {
+        setImportFailure(
+          error instanceof ManagedImportHandedOffError
+            ? {
+                kind: "handed-off",
+                reason: handedOffImportReason(error.handoff, error.label),
+              }
+            : { kind: "unreadable" },
+        );
       }
     })();
   }
@@ -567,11 +588,17 @@ function RestoreFromBackup() {
         If this browser was cleared or you are moving to a new device, import
         the backup file you exported to bring the exchange back here.
       </p>
-      {importFailed && (
-        <Alert color="red" title="That file could not be imported" mb="sm">
-          The backup file could not be read. Check that you chose the backup
-          file you exported and that it was not modified.
+      {importFailure?.kind === "handed-off" ? (
+        <Alert color="yellow" title={HANDED_OFF_IMPORT_TITLE} mb="sm">
+          {importFailure.reason}
         </Alert>
+      ) : (
+        importFailure !== undefined && (
+          <Alert color="red" title="That file could not be imported" mb="sm">
+            The backup file could not be read. Check that you chose the backup
+            file you exported and that it was not modified.
+          </Alert>
+        )
       )}
       <FileButton accept="application/json,.json" onChange={onFile}>
         {(props) => (

@@ -462,6 +462,59 @@ describe("the export binds the marker to the bytes it serialized", () => {
 });
 
 describe("importing a spent secret-match revives in place", () => {
+  test("a backup export marks the record and its file restores the exchange", async () => {
+    // The export the indicator is about, end to end against the real store: it marks
+    // the record green, and the bytes it wrote bring the exchange back after the
+    // eviction the marker promises they cover.
+    const source = await createManagedExchange(newExchange());
+    const deps = {
+      downloaded: [] as Array<string>,
+      readAndMark: readRecordAndMarkBackedUp,
+      download: (_fileName: string, content: string) =>
+        deps.downloaded.push(content),
+      now: () => new Date(),
+    };
+    await exportManagedBackup(source.id, deps);
+    expect((await getManagedLocalState(source.id))?.backup).toBeDefined();
+
+    await deleteManagedExchange(source.id);
+    const restored = await importManagedExchange(deps.downloaded[0]);
+    expect(restored.sharedSecret).toBe(source.sharedSecret);
+    expect(restored.exchangeFile).toEqual(source.exchangeFile);
+  });
+
+  test("an artifact predating a command-line hand-off is refused, not revived", async () => {
+    // The husk this artifact would fork: the exchange runs from the CLI files the
+    // operator saved, so the older browser backup brings nothing back. Reviving would
+    // run a copy that was handed away; installing fresh would leave the secret in a
+    // live row beside the spent husk. The import refuses instead, naming the record.
+    const source = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(source),
+    );
+    await spendManagedExchangeIfCurrent(
+      source.id,
+      source.sharedSecret,
+      "2026-07-14T13:00:00.000Z",
+      "command-line",
+    );
+
+    await expect(importManagedExchange(bytes)).rejects.toMatchObject({
+      name: "ManagedImportHandedOffError",
+      handoff: "command-line",
+      label: source.label,
+    });
+
+    // Nothing was written by the refusal: one record, still spent under its hand-off,
+    // and no import or backup marker stamped over it.
+    expect((await listManagedExchanges()).map((r) => r.id)).toEqual([
+      source.id,
+    ]);
+    expect(await getManagedLocalState(source.id)).toEqual({
+      spent: { spentAt: "2026-07-14T13:00:00.000Z", handoff: "command-line" },
+    });
+  });
+
   test("a re-import onto the spending device revives the husk, not a duplicate", async () => {
     const source = await createManagedExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(

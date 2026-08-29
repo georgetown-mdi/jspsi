@@ -10,7 +10,7 @@ import {
   dispatchManagedCronExport,
 } from "@psi/managedExchangeExport";
 import {
-  readRecordAndMarkBackedUp,
+  getManagedExchange,
   spendManagedExchangeIfCurrent,
 } from "@psi/managedExchangeStore";
 
@@ -34,15 +34,14 @@ import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 const KEY_FILE_SECURITY_DOC_URL =
   "https://github.com/georgetown-mdi/jspsi/blob/main/docs/SECURITY_DESIGN.md#key-file-security";
 
-/** The platform seams the export drives: the same atomic read-and-mark by id every
- * managed export takes (never this component's mounted record, whose secret a
- * concurrent rotation may already have superseded), the blob download, and the
- * atomic spend the confirmation measures the operator's attestation against. */
+/** The platform seams the export drives: a read of the record by id (never this
+ * component's mounted record, whose secret a concurrent rotation may already have
+ * superseded) that stamps no backup marker, the blob download, and the atomic spend
+ * the confirmation measures the operator's attestation against. */
 const cronExportDeps = {
-  readAndMark: readRecordAndMarkBackedUp,
+  readRecord: getManagedExchange,
   download: triggerBlobDownload,
   spendIfCurrent: spendManagedExchangeIfCurrent,
-  now: () => new Date(),
 };
 
 /**
@@ -54,6 +53,11 @@ const cronExportDeps = {
  * It downloads TWO files rather than one archive, because the two are handled
  * differently once they land: `psilink.yaml` carries no secret, and `.psilink.key`
  * is a plaintext credential. A zip would hide that split behind one save.
+ *
+ * Neither file is a backup this browser restores from, so this export marks no backup
+ * marker and the panel says which kind of file it hands over. Taking it, confirming
+ * the hand-off, and dismissing the confirmation all leave the backup panel above
+ * reading exactly what it read before.
  *
  * The spend is operator-attested, exactly as the device migration's is: two
  * `anchor.click()` calls give two chances to fail with no landing signal, so this
@@ -72,7 +76,6 @@ export function ManagedCronExportPanel({
   record,
   runInFlight,
   recheckRunInFlight,
-  onBackedUp,
   onHandedOff,
 }: {
   record: ManagedExchangeRecord;
@@ -84,9 +87,6 @@ export function ManagedCronExportPanel({
   /** Re-read the run signal now, resolving what it read. The confirmation takes it
    * at the click, since {@link runInFlight} is a poll's last reading. */
   recheckRunInFlight: () => Promise<boolean>;
-  /** The export marked the record backed-up, at this instant; the host's backup
-   * state reflects it without a reload. */
-  onBackedUp: (backedUpAt: Date) => void;
   /** The operator attested the files landed and the source is spent, so the host
    * takes down the run affordances. Carries the invocation to run instead. */
   onHandedOff: (command: string) => void;
@@ -112,10 +112,7 @@ export function ManagedCronExportPanel({
     setFailed(false);
     setSuperseded(false);
     void dispatchManagedCronExport(record.id, cronExportDeps)
-      .then((dispatched) => {
-        onBackedUp(dispatched.backedUpAt);
-        setDispatch(dispatched);
-      })
+      .then(setDispatch)
       .catch(() => setFailed(true))
       .finally(() => setBusy(false));
   }
@@ -177,6 +174,13 @@ export function ManagedCronExportPanel({
               schedule the command there. Handing it over ends its life in this
               browser: one owner holds a recurring exchange&apos;s secret, never
               two.
+            </p>
+            <p className={styles.small}>
+              These two files are the command line&apos;s, not a backup file
+              this browser can restore from -- importing them here does nothing,
+              so downloading them leaves the backup state above exactly as it
+              is. If you want a file that brings this exchange back to this
+              browser, download a backup up there first.
             </p>
             <ol className={styles.handoffSteps}>
               <li>
