@@ -465,6 +465,16 @@ describe("runPipeline — parse_date", () => {
     ).toBe("20210615");
   });
 
+  test("adjacent literal separators are matched literally, not as regex metacharacters", () => {
+    const params = { inputFormat: "YYYY-MM..DD", outputFormat: "YYYYMMDD" };
+    expect(
+      runPipeline("1990-12..31", [{ function: "parse_date", params }]),
+    ).toBe("19901231");
+    expect(
+      runPipeline("1990-12.x31", [{ function: "parse_date", params }]),
+    ).toBeNull();
+  });
+
   test("a non-string output format does not throw and falls back to the default", () => {
     for (const bad of [42, [], {}, true, null]) {
       const badOutput = () =>

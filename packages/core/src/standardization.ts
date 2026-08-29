@@ -335,7 +335,7 @@ function parseDateFormat(inputFormat: string): ParsedDateFormat {
   for (const segment of tokenizeDateFormat(inputFormat)) {
     if (segment.token === undefined) {
       // Escape literal separator characters for use in a regex.
-      regexStr += segment.text.replace(/[.*+?^${}()|[\]\\]/, "\\$&");
+      regexStr += segment.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     } else {
       order.push(segment.token);
       regexStr += DATE_TOKEN_CAPTURE_SOURCES[segment.token];
