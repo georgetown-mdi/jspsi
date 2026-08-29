@@ -329,16 +329,16 @@ hours -- plus three rules that are entry's alone:
 
 Entry also enforces the field bounds in the table above as its own validation, so
 an out-of-range value is refused at the field rather than at the store write, and
-the width floor of one hour that the schema's structural floor does not carry. A
-stored width below that floor -- from an import, or a hand-edited record -- is
-shown back as the value it is and flagged, never silently rewritten: the width is
-what the partnership agreed, and changing it unannounced would drift this party
-away from the other. A stored width that is merely finer than the field's unit --
-5400 seconds, an hour and a half -- is shown as the exact fraction of an hour it
-is rather than rounded to one, and stands: it is inside entry's own bounds, so
-there is nothing for the operator to correct and the save carries its seconds
-through. Only a width the operator **changes** takes the whole-hour rule the
-field asks for.
+the width floor of one hour that the schema's structural floor does not carry.
+Those bounds hold what the operator **enters**. A width the record already
+carries -- one merely finer than the field's unit, 5400 seconds for an hour and a
+half, or one below the floor from an import or a hand-edited record -- is shown
+back as the exact value it is rather than rounded, and stands: the save carries
+its seconds through untouched, and neither the unit nor the floor is applied to
+it. Rewriting it would change what the partnership agreed without saying so, and
+refusing it would block the form's other edits -- a label, a max-age policy -- on
+a value the operator never typed. Only a width the operator changes takes entry's
+bounds and the whole-hour rule the field asks for.
 
 One cross-field condition is **surfaced rather than refused**. When
 [`tokenMaxAgeDays`](#persisted-across-runs) is set and `intervalDays` is at or
@@ -357,10 +357,12 @@ on `intervalDays` and `windowSeconds`: the window containing an instant, and the
 first window after it, both then land within one period plus one width of that
 instant, which is inside the representable range for any clock reading a machine
 can hold. A period or width past the ceilings is refused by the schema, so it
-never reaches a surface as a record at all -- it fails validation and the store's
-own unreadable-record row reports it. The display derivation also refuses a
-reading instant within one period plus one width of the end of the representable
-range, which is the other half of the pair.
+never reaches a surface as a record at all: the list read parses strictly and
+rejects wholesale on it, so the whole read fails and the saved-exchanges list
+routes to its read-failed recovery surface, whose separate per-entry diagnostic
+read is where the offending record is identified and discarded. The display
+derivation also refuses a reading instant within one period plus one width of the
+end of the representable range, which is the other half of the pair.
 
 #### Catch-up on wake
 
@@ -450,8 +452,10 @@ The stand-down is also the **lock-yield policy**, which is what fixes its size.
 The [single-writer lock](#the-secret-is-a-linear-resource) is held for the length
 of an attempt, and both the scheduled and the attended path take it fail-fast, so
 back-to-back attempts would refuse an operator's own Run for the whole width of
-the window. The interval between attempts is the only one in which that Run can
-take the lock at all. It is bounded on both sides:
+the window. That interval is one of the two in which that Run can take the lock:
+the other is the tail of an attempt that got past the rotation persist, which
+runs the data exchange and the success stamp with the lock already released. The
+stand-down is bounded on both sides:
 
 - **Below**, by a floor that keeps a failure reproducing instantly from spinning
   the window away and keeps the free interval long enough to be caught.
@@ -459,13 +463,31 @@ take the lock at all. It is bounded on both sides:
   budget out of every (wait + stand-down) overlap for at least (wait - stand-down)
   of every cycle whatever their relative phase, so a stand-down at or past the
   wait admits an anti-phase pair that occupies the same window and never meets in
-  it. This ceiling is the rendezvous's requirement, not a tuning preference.
+  it. This ceiling is the rendezvous's requirement, not a tuning preference. The
+  (wait - stand-down) floor models an attempt as pure listening; a real attempt
+  spends input acquisition and rendezvous setup before it listens, so the
+  realized overlap is lower than the model's by that per-attempt overhead, and
+  the margin half the wait leaves is what absorbs it.
 
 Between those, the interval scales with the window's width: a wider window can
 stand down longer and still meet its partner many times over. A window an
 attended run takes the lock in this way records neither an attempt nor a miss --
 it is the `"unattempted"` disposition in the table below, reached by the same
 refusal.
+
+An attended run that **completes** in that free interval satisfies the window
+instead, and the runner **re-reads the record before every re-attempt** to see
+it. A `lastRun` success stamped inside the window ends the occupancy there: no
+attempt, no miss, and no advance of the occupancy's own, since the recorded
+success is exactly what [catch-up](#catch-up-on-wake) credits at the next wake
+and an advance here would account for the window twice. The re-read matters as
+much for a window that is still due: the completed run rotated the shared secret
+the rendezvous address derives from, so a re-attempt carrying the wake's snapshot
+would announce itself where the partner no longer looks, and the window would
+record a miss for an exchange the two parties met in. A re-read that finds the
+record gone, its schedule dropped, or its plan moved off this window ends the
+occupancy with no bookkeeping at all, exactly as the wake's own conditioned write
+does when the plan moves under it.
 
 An occupancy belongs to ONE record. Each wake dispatches every due record that is
 not already occupying its window, so an exchange holding its own window open for

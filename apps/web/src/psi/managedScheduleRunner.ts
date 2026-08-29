@@ -39,12 +39,22 @@
  *   own phase boundary ({@link ./managedExchangeRun.ts}'s `onDataExchangeStart`)
  *   is what gates the retry rather than the failure's kind.
  * - The single-writer lock is held per ATTEMPT, not for the window. Between two
- *   attempts the runner stands down for {@link attemptLockYieldMs}, which is the
- *   only interval in which an operator's own Run can take the lock at all -- the
- *   attended path takes it fail-fast, so a window occupied back-to-back would
- *   refuse them for its whole width. A window the attended run wins that way
- *   records neither an attempt nor a miss, which is the `"unattempted"`
- *   disposition already in place.
+ *   attempts the runner stands down for {@link attemptLockYieldMs}, which is one
+ *   of the two intervals in which an operator's own Run can take the lock -- the
+ *   other is the tail of an attempt that got past the rotation persist, which
+ *   runs the data exchange and the success stamp with the lock already released
+ *   ({@link ./managedExchangeRun.ts}). The attended path takes the lock
+ *   fail-fast, so a window occupied back-to-back would refuse them for its whole
+ *   width. A window the attended run wins by REFUSING an attempt records neither
+ *   an attempt nor a miss, which is the `"unattempted"` disposition already in
+ *   place.
+ * - A window the attended run wins by COMPLETING is satisfied, not missed. That
+ *   run rotates the shared secret the rendezvous peer id derives from
+ *   ({@link ./managedRunDriver.ts}), so an occupancy re-attempting against the
+ *   tick's snapshot would no-show against its own exchange and record a miss for
+ *   a window the exchange was met in. The record is re-read before every
+ *   re-attempt for that reason: a window a recorded success has discharged ends
+ *   the occupancy, and one still due is attempted against the fresh secret.
  */
 
 import {
@@ -60,6 +70,7 @@ import {
 import {
   advanceManagedScheduleAfterWindow,
   catchUpManagedSchedule,
+  managedScheduleWindowStateAt,
 } from "./managedSchedule";
 import { ManagedExchangeExpiredError } from "./managedExpiry";
 import { ManagedExchangeLockUnavailableError } from "./managedExchangeRun";
@@ -68,6 +79,7 @@ import { RotationPersistError } from "./managedRunRotate";
 import { parseStoredInstant } from "./managedExchangeRecord";
 
 import type {
+  ManagedExchangeLastRun,
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   ManagedExchangeScheduleAdvance,
@@ -116,6 +128,12 @@ export const MIN_ATTEMPT_LOCK_YIELD_MS = 120_000;
  * never meets inside a window they both occupied. Half the wait leaves half of it
  * as guaranteed overlap, which is many times what a rendezvous and handshake
  * take.
+ *
+ * The (wait - yield) floor models an attempt as pure listening. A real attempt
+ * spends input acquisition and rendezvous setup before it listens, so the
+ * realized overlap is lower than the model's by that per-attempt overhead; the
+ * margin half the wait leaves is what absorbs it, and the floor is the bound's
+ * shape rather than a measured guarantee.
  */
 export const MAX_ATTEMPT_LOCK_YIELD_MS = ATTEMPT_PEER_WAIT_MS / 2;
 
@@ -175,6 +193,12 @@ export interface ManagedScheduleTickSeams {
   now: () => number;
   /** Every stored managed exchange. */
   listRecords: () => Promise<Array<ManagedExchangeRecord>>;
+  /** One record as the store holds it now, or `undefined` when it is gone. The
+   * occupancy re-reads through this before every re-attempt, so an attended run
+   * that landed between two attempts is seen rather than attempted over. It
+   * rejects on a record the current build cannot validate, exactly as the list
+   * read does. */
+  readRecord: (id: string) => Promise<ManagedExchangeRecord | undefined>;
   /** Each record's local sibling state, read once per tick. Its `spent` marker
    * is what keeps a handed-off copy from running: a migration export transitions
    * the source to spent precisely so neither the operator nor the schedule runs
@@ -202,6 +226,7 @@ export type ManagedScheduleSkipReason =
   | "not-due"
   | "no-input-handle"
   | "plan-moved"
+  | "window-satisfied"
   | "window-closed"
   | "stopped"
   | "bookkeeping-failed";
@@ -348,9 +373,16 @@ async function occupyDueWindow(
   // as a window this runtime slept through does.
   if (handle === undefined) return { ...entry, skipped: "no-input-handle" };
 
-  const occupancy = await occupyWindow(claimed, handle, due, seams);
-  entry.attempts = occupancy.attempts;
-  if (occupancy.disposition === undefined)
+  const occupancy = await occupyWindow(claimed, handle, due, entry, seams);
+  // A window another context satisfied or re-planned under the occupancy is not
+  // this tick's to account for: the recorded success discharges it through the
+  // ordinary catch-up rule at the next wake, and a moved plan is the store's
+  // newer bookkeeping. Writing an advance for either would count a window twice.
+  if (occupancy.kind === "satisfied")
+    return { ...entry, skipped: "window-satisfied" };
+  if (occupancy.kind === "plan-moved")
+    return { ...entry, skipped: "plan-moved" };
+  if (occupancy.kind === "unresolved")
     return { ...entry, skipped: seams.stopped() ? "stopped" : "window-closed" };
   entry.disposition = occupancy.disposition;
 
@@ -366,13 +398,20 @@ async function occupyDueWindow(
   return { ...entry };
 }
 
-/** What occupying one window produced: how many attempts it took and the
- * window's disposition, absent when the window ended before anything settled
- * it. */
-interface WindowOccupancy {
-  attempts: number;
-  disposition?: ManagedScheduleWindowDisposition;
-}
+/**
+ * How occupying one window ended.
+ *
+ * `"settled"` is the only ending the schedule advance is written for. The other
+ * three each leave the window to a later wake, which recomputes it from the
+ * stored plan: `"unresolved"` because the runtime went away or the close was
+ * reached before anything settled it, and the two below because the window
+ * stopped being this occupancy's to account for while it ran.
+ */
+type WindowOccupancy =
+  | { kind: "settled"; disposition: ManagedScheduleWindowDisposition }
+  | { kind: "unresolved" }
+  | { kind: "satisfied" }
+  | { kind: "plan-moved" };
 
 /**
  * Occupy one open window with bounded re-attempts.
@@ -383,11 +422,20 @@ interface WindowOccupancy {
  * an attended Run -- and no later than the window's close, which ends the
  * occupancy anyway. The window's disposition folds every attempt rather than
  * reading the last one (see {@link foldWindowDisposition}).
+ *
+ * The record is re-read before every re-attempt (see
+ * {@link refreshOccupiedRecord}), so an attended Run that took the freed lock
+ * and finished during the stand-down is met on its own terms rather than
+ * attempted over with the state this occupancy started on.
+ *
+ * `entry.attempts` is counted here rather than returned, so a re-read that
+ * rejects reports the attempts already made alongside the failure.
  */
 async function occupyWindow(
   record: ManagedExchangeRecord,
   handle: FileSystemFileHandle,
   window: ManagedScheduleWindow,
+  entry: ManagedScheduleTickEntry,
   seams: ManagedScheduleTickSeams,
 ): Promise<WindowOccupancy> {
   const source: ManagedInputSource = {
@@ -395,7 +443,7 @@ async function occupyWindow(
     handle,
     attendance: "unattended",
   };
-  let attempts = 0;
+  let current = record;
   let partnerWasAbsent = false;
   let contactWasProven = false;
   let disposition: ManagedScheduleWindowDisposition | undefined;
@@ -405,29 +453,34 @@ async function occupyWindow(
     // open, and recording a miss for one this runner simply stopped occupying
     // would count a miss the partner may yet have been met in. A later wake
     // decides it from the stored plan.
-    if (seams.stopped()) return { attempts };
+    if (seams.stopped()) return { kind: "unresolved" };
+    if (entry.attempts > 0) {
+      const refreshed = await refreshOccupiedRecord(current.id, window, seams);
+      if (refreshed.kind !== "attempt") return refreshed;
+      current = refreshed.record;
+    }
     const startedAtMs = seams.now();
     const remainingMs = window.closesAtMs - startedAtMs;
-    if (remainingMs <= 0 || attempts >= MAX_WINDOW_ATTEMPTS) break;
-    attempts += 1;
+    if (remainingMs <= 0 || entry.attempts >= MAX_WINDOW_ATTEMPTS) break;
+    entry.attempts += 1;
     let dataExchangeStarted = false;
     try {
       await seams.runAttempt({
-        record,
+        record: current,
         source,
         peerWaitTimeoutMs: Math.min(ATTEMPT_PEER_WAIT_MS, remainingMs),
         onDataExchangeStart: () => {
           dataExchangeStarted = true;
         },
       });
-      return { attempts, disposition: "succeeded" };
+      return { kind: "settled", disposition: "succeeded" };
     } catch (error) {
       const verdict = managedScheduleWindowVerdict(error, dataExchangeStarted);
       if (verdict.disposition === "missed") partnerWasAbsent = true;
       if (verdict.provesContact) contactWasProven = true;
       if (!verdict.retryable)
         return {
-          attempts,
+          kind: "settled",
           disposition: foldWindowDisposition(
             verdict.disposition,
             partnerWasAbsent,
@@ -453,18 +506,75 @@ async function occupyWindow(
       ),
     );
   }
-  return {
-    attempts,
-    ...(disposition !== undefined
-      ? {
-          disposition: foldWindowDisposition(
-            disposition,
-            partnerWasAbsent,
-            contactWasProven,
-          ),
-        }
-      : {}),
-  };
+  return disposition !== undefined
+    ? {
+        kind: "settled",
+        disposition: foldWindowDisposition(
+          disposition,
+          partnerWasAbsent,
+          contactWasProven,
+        ),
+      }
+    : { kind: "unresolved" };
+}
+
+/** What a re-read before a re-attempt makes of the occupancy: the record to
+ * attempt against, or the ending the fresh state calls for. */
+type WindowRefresh =
+  | { kind: "attempt"; record: ManagedExchangeRecord }
+  | { kind: "satisfied" }
+  | { kind: "plan-moved" };
+
+/**
+ * Re-read the record the occupancy is running against, and decide from the
+ * fresh state whether the window is still this occupancy's to attempt.
+ *
+ * The single-writer lock is free between two attempts, so an attended Run can
+ * take it and complete there. It rotates the shared secret, and the rendezvous
+ * peer id is derived from that secret ({@link ./managedRunDriver.ts}), so a
+ * re-attempt carrying the tick's snapshot would announce itself at an address
+ * the partner has already moved off -- a no-show, folded into a `"missed"`
+ * window the exchange was in fact met in.
+ *
+ * A recorded success stamped inside the window discharges it, which is the same
+ * evidence the catch-up walk reads for a window still open
+ * ({@link ./managedSchedule.ts}, `catchUpManagedSchedule`) -- and the walk is
+ * what accounts for the window at the next wake, so the occupancy writes no
+ * advance of its own. `lastRun` is read as evidence and never validated: a stamp
+ * that does not parse falls outside the window and discharges nothing.
+ *
+ * A record that is gone, one whose schedule an edit dropped, and one whose plan
+ * has moved off this window are the shape the tick's own conditioned write
+ * already treats as `"plan-moved"`: the store holds newer bookkeeping than this
+ * occupancy computed against.
+ *
+ * @throws whatever the store's read raises for a record this build cannot
+ *   validate, which the tick reports as failed bookkeeping.
+ */
+async function refreshOccupiedRecord(
+  id: string,
+  window: ManagedScheduleWindow,
+  seams: ManagedScheduleTickSeams,
+): Promise<WindowRefresh> {
+  const fresh = await seams.readRecord(id);
+  if (fresh?.schedule === undefined) return { kind: "plan-moved" };
+  if (parseStoredInstant(fresh.schedule.nextWindow) !== window.opensAtMs)
+    return { kind: "plan-moved" };
+  if (windowSatisfiedByRun(window, fresh.lastRun)) return { kind: "satisfied" };
+  return { kind: "attempt", record: fresh };
+}
+
+/** Whether a recorded run discharges this window: a success stamped inside the
+ * window's own half-open interval. */
+function windowSatisfiedByRun(
+  window: ManagedScheduleWindow,
+  lastRun: ManagedExchangeLastRun | undefined,
+): boolean {
+  return (
+    lastRun?.outcome === "succeeded" &&
+    managedScheduleWindowStateAt(window, parseStoredInstant(lastRun.at)) ===
+      "open"
+  );
 }
 
 /**

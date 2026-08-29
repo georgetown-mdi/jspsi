@@ -167,6 +167,10 @@ function anchorEntryFields(anchor: string): {
  * an import or a hand-edited record -- would be rewritten to the hours it
  * displays as by an edit to the period alone, silently changing the width the
  * partnership agreed.
+ *
+ * It is also the exception {@link scheduleEntryErrors} reads: the value it
+ * returns is one the operator inherited rather than entered, so entry's bounds
+ * have nothing to hold it to.
  */
 function carriedWindowSeconds(
   fields: ScheduleEntryFields,
@@ -209,13 +213,14 @@ function carriedAnchor(
  * rather than at the write.
  *
  * `stored` is the schedule the form opened on, where there is one. A width it
- * carries that the field's whole-hour unit cannot express stands as it is while
- * the operator leaves it alone -- the save carries those seconds through
- * untouched, so there is nothing to correct -- while a width the operator CHANGES
- * takes the whole-hour rule like any other entry. A stored width outside entry's
- * own bounds is refused either way: the floor is what the design rests on, so a
- * below-floor width from an import is flagged for the operator to fix rather than
- * carried through unremarked.
+ * carries stands as it is while the operator leaves it alone -- the save carries
+ * those seconds through untouched, so there is nothing at that field to correct
+ * -- while a width the operator CHANGES takes entry's bounds and the whole-hour
+ * rule like any other entry. The exception covers the floor as well as the unit:
+ * a width below the floor arrives only from an import or a hand-edited record,
+ * and refusing it would block every OTHER edit the form makes -- a label, a
+ * max-age policy -- on a value the operator never entered and this form will not
+ * rewrite for them.
  */
 export function scheduleEntryErrors(
   fields: ScheduleEntryFields,
@@ -239,13 +244,13 @@ export function scheduleEntryErrors(
   if (!withinWholeRange(fields.intervalDays, 1, MAX_SCHEDULE_INTERVAL_DAYS))
     errors.intervalDays = `Enter a whole number of days, 1 through ${String(MAX_SCHEDULE_INTERVAL_DAYS)}.`;
   const widthUsable =
-    withinRange(
+    carriedWindowSeconds(fields, stored) !== undefined ||
+    (withinRange(
       fields.windowHours,
       MIN_SCHEDULE_WINDOW_HOURS,
       MAX_SCHEDULE_WINDOW_HOURS,
     ) &&
-    (Number.isInteger(fields.windowHours) ||
-      carriedWindowSeconds(fields, stored) !== undefined);
+      Number.isInteger(fields.windowHours));
   if (!widthUsable)
     errors.windowHours = `Enter a whole number of hours, ${String(MIN_SCHEDULE_WINDOW_HOURS)} through ${String(MAX_SCHEDULE_WINDOW_HOURS)}. A window this wide is what absorbs the clock difference between your machine and your partner's.`;
   return errors;
@@ -333,10 +338,9 @@ export function buildScheduleFromEntry(
  * or one entered before the floor existed) reads back as the EXACT hours it is,
  * fractional where its seconds are not a whole hour, so the form shows what the
  * partnership agreed rather than a rounded value the operator would take for it.
- * A width below entry's floor is flagged for the operator to correct
- * ({@link scheduleEntryErrors}); one merely finer than the field's unit stands,
- * and the save carries its seconds through untouched
- * ({@link buildScheduleFromEntry}).
+ * It stands while the operator leaves it alone -- below entry's floor as much as
+ * merely finer than the field's unit ({@link scheduleEntryErrors}) -- and the
+ * save carries its seconds through untouched ({@link buildScheduleFromEntry}).
  *
  * The anchor is read back only to the minute, which is the resolution the fields
  * carry; a stored anchor finer than that is likewise carried through rather than

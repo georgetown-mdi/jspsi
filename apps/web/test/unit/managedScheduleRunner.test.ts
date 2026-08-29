@@ -17,6 +17,7 @@ import {
   MAX_SCHEDULE_WINDOW_SECONDS,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
+  applyManagedExchangeRotation,
   applyManagedExchangeScheduleAdvance,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
@@ -104,6 +105,9 @@ interface RecordedAttempt {
   source: ManagedScheduleAttempt["source"];
   peerWaitTimeoutMs: number;
   startedAtMs: number;
+  /** The secret the attempt's record carried, which is what the rendezvous
+   * address is derived from. */
+  sharedSecret: string;
 }
 
 /** How one attempt behaves, in order; the last entry repeats for every further
@@ -150,6 +154,13 @@ function harness(options: {
    * advance lands, standing in for another tab's edit between this tick's
    * snapshot and its write. */
   concurrentEdit?: (record: ManagedExchangeRecord) => ManagedExchangeRecord;
+  /** A write applied to every stored record during a stand-down, standing in for
+   * an attended Run that took the lock the runner just freed. The stand-down is
+   * numbered from 1, so a test can act in one of them and leave the rest. */
+  duringStandDown?: (
+    record: ManagedExchangeRecord,
+    standDown: number,
+  ) => ManagedExchangeRecord;
 }): Harness {
   const script = options.script ?? [];
   const stored = new Map(
@@ -163,6 +174,7 @@ function harness(options: {
   const order: Array<"advance" | "attempt"> = [];
   const hangReleases: Array<() => void> = [];
   let clockMs = at(options.startAt);
+  let standDowns = 0;
   let noteFirstAttempt = (): void => undefined;
   const firstAttempt = new Promise<void>((resolve) => {
     noteFirstAttempt = () => {
@@ -173,6 +185,7 @@ function harness(options: {
   const seams: ManagedScheduleTickSeams = {
     now: () => clockMs,
     listRecords: () => Promise.resolve([...stored.values()]),
+    readRecord: (id) => Promise.resolve(stored.get(id)),
     listLocalState: () =>
       Promise.resolve(
         options.localState ?? new Map<string, ManagedLocalState>(),
@@ -197,6 +210,7 @@ function harness(options: {
         source: attempt.source,
         peerWaitTimeoutMs: attempt.peerWaitTimeoutMs,
         startedAtMs: clockMs,
+        sharedSecret: attempt.record.sharedSecret,
       });
       noteFirstAttempt();
       // The last scripted step repeats; a tick that attempts anything with no
@@ -217,6 +231,12 @@ function harness(options: {
     },
     delay: (ms) => {
       clockMs += ms;
+      const write = options.duringStandDown;
+      if (write !== undefined) {
+        standDowns += 1;
+        for (const [id, held] of stored)
+          stored.set(id, write(held, standDowns));
+      }
       return Promise.resolve();
     },
     stopped: () =>
@@ -239,6 +259,13 @@ function harness(options: {
     },
   };
 }
+
+/** A retryable failure that leaves the window open and the runner standing down,
+ * which is the interval an attended Run can take the freed lock in. */
+const transientFailure = {
+  kind: "fail",
+  error: new Error("the channel dropped"),
+} as const;
 
 /** A no-show attempt spends its whole peer wait, exactly as the rendezvous
  * budget does before it raises. */
@@ -780,6 +807,166 @@ describe("a window the single-writer lock was held through", () => {
       nextWindow: "2026-01-13T14:00:00.000Z",
       consecutiveMisses: 1,
     });
+  });
+});
+
+describe("an attended run that finished while the window was being occupied", () => {
+  test("ends the occupancy satisfied rather than recording a miss for the window it completed in", async () => {
+    // The defect this pins: the occupancy re-attempted against the tick's
+    // snapshot, whose secret the completed run has rotated past, so the next
+    // attempt no-showed and the window recorded a miss for an exchange the two
+    // parties had just completed inside it.
+    const record = recordWith({
+      schedule: { ...weekly, consecutiveMisses: 1 },
+    });
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [transientFailure],
+      duringStandDown: (held) =>
+        applyManagedExchangeLastRun(held, {
+          at: "2026-01-06T14:02:00.000Z",
+          outcome: "succeeded",
+        }),
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, skipped: "window-satisfied" });
+    expect(entry.disposition).toBeUndefined();
+    // No advance of the occupancy's own: the recorded success is what catch-up
+    // credits, and a second writer here would account for the window twice.
+    expect(runner.advances).toHaveLength(0);
+    expect(runner.stored.get(record.id)?.schedule).toMatchObject({
+      nextWindow: "2026-01-06T14:00:00.000Z",
+      consecutiveMisses: 1,
+    });
+
+    // The window is still accounted for, by the rule that owns it: the wake
+    // after its close credits the success, resets the miss run, and counts
+    // nothing against the window.
+    runner.advanceClock(4 * 60 * 60 * 1000);
+    await tickManagedSchedules(runner.seams);
+
+    expect(runner.advances).toHaveLength(1);
+    expect(runner.advances[0].advance.schedule).toMatchObject({
+      nextWindow: "2026-01-13T14:00:00.000Z",
+      consecutiveMisses: 0,
+    });
+    expect(runner.advances[0].advance.lastRun).toBeUndefined();
+  });
+
+  test("re-attempts a still-due window against the secret that run rotated to", async () => {
+    // The same interval, with the attended run rotating and then failing its
+    // data phase: the window is still due, and the rendezvous address derives
+    // from the secret, so the next attempt has to carry the rotated one.
+    const record = recordWith();
+    const rotated = generateSharedSecret();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [transientFailure, { kind: "succeed" }],
+      duringStandDown: (held, standDown) =>
+        standDown === 1
+          ? applyManagedExchangeLastRun(
+              applyManagedExchangeRotation(held, {
+                sharedSecret: rotated,
+                expires: null,
+              }),
+              {
+                at: "2026-01-06T14:02:00.000Z",
+                outcome: "failed",
+                failureKind: "transport",
+              },
+            )
+          : held,
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 2, disposition: "succeeded" });
+    expect(runner.attempts[0].sharedSecret).toBe(record.sharedSecret);
+    expect(runner.attempts[1].sharedSecret).toBe(rotated);
+  });
+
+  test("keeps the lock refusal exactly as it was, re-reading nothing", async () => {
+    // The refusal is not retryable, so the occupancy ends on it before any
+    // re-read: the window is the other context's to account for, and stays the
+    // "unattempted" disposition whatever the attempts before it found.
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [
+        ...noShowScript(),
+        {
+          kind: "fail",
+          error: new ManagedExchangeLockUnavailableError(record.id),
+        },
+      ],
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 2, disposition: "unattempted" });
+    expect(runner.advances[0].advance.schedule).toMatchObject({
+      nextWindow: "2026-01-13T14:00:00.000Z",
+      consecutiveMisses: 0,
+    });
+  });
+});
+
+describe("a record the occupancy re-reads and cannot act on", () => {
+  test("leaves a schedule dropped under it to the store's newer bookkeeping", async () => {
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [transientFailure],
+      duringStandDown: (held) =>
+        applyManagedExchangeLocalEdits(held, { schedule: null }),
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, skipped: "plan-moved" });
+    expect(runner.advances).toHaveLength(0);
+  });
+
+  test("leaves a record deleted under it alone, the same way", async () => {
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [transientFailure],
+    });
+
+    const [entry] = await tickManagedSchedules({
+      ...runner.seams,
+      readRecord: () => Promise.resolve(undefined),
+    });
+
+    expect(entry).toMatchObject({ attempts: 1, skipped: "plan-moved" });
+    expect(runner.advances).toHaveLength(0);
+  });
+
+  test("reports a re-read the store refuses as failed bookkeeping, with the attempts it made", async () => {
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [transientFailure],
+    });
+
+    const [entry] = await tickManagedSchedules({
+      ...runner.seams,
+      readRecord: () =>
+        Promise.reject(new Error("this build cannot read the record")),
+    });
+
+    expect(entry).toMatchObject({
+      attempts: 1,
+      skipped: "bookkeeping-failed",
+    });
+    expect(runner.advances).toHaveLength(0);
   });
 });
 

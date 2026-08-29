@@ -356,24 +356,56 @@ describe("a stored schedule the entry form did not write", () => {
     });
   }
 
-  test("a width below the entry floor reads back as itself, not silently rewritten", () => {
-    // An imported record can carry a width the schema admits and entry does not.
-    // Showing it is what lets the operator see and correct it; rewriting it would
-    // change what their partner agreed without telling them.
-    const stored = scheduleSchema.parse({
+  /** An imported or hand-edited record carrying a one-minute window: a width the
+   * schema admits and entry's own floor does not. */
+  function belowTheEntryFloor() {
+    return scheduleSchema.parse({
       anchor: "2026-07-14T09:00:00.000Z",
       intervalDays: 7,
       windowSeconds: 60,
       nextWindow: "2026-07-14T09:00:00.000Z",
       consecutiveMisses: 0,
     });
+  }
+
+  test("a width below the entry floor reads back as itself, not silently rewritten", () => {
+    // An imported record can carry a width the schema admits and entry does not.
+    // Showing it is what lets the operator see it; rewriting it would change what
+    // their partner agreed without telling them.
+    const stored = belowTheEntryFloor();
     const fields = scheduleEntryFieldsFrom(stored);
     expect(fields.windowHours).toBe(60 / 3600);
-    // Refused even though it is the stored value: the floor is what the design's
-    // only clock-skew mitigation rests on, so a below-floor width is the one case
-    // entry makes the operator settle rather than carrying through.
-    expect(scheduleEntryErrors(fields, stored).windowHours).toBeDefined();
-    expect(scheduleEntryUsable(fields, stored)).toBe(false);
+    expect(buildScheduleFromEntry(fields, NOW, stored).windowSeconds).toBe(60);
+  });
+
+  test("a stored width below the floor does not block an edit to another field", () => {
+    // The bounds hold what the operator ENTERS. Refusing an inherited width would
+    // withhold every other save the form makes -- a label, a max-age policy, a
+    // re-planned cadence -- over a value they never typed and this form will not
+    // rewrite for them.
+    const stored = belowTheEntryFloor();
+    const fields = scheduleEntryFieldsFrom(stored);
+    expect(scheduleEntryErrors(fields, stored)).toEqual({});
+    expect(scheduleEntryUsable(fields, stored)).toBe(true);
+    expect(
+      buildScheduleFromEntry({ ...fields, intervalDays: 14 }, NOW, stored)
+        .windowSeconds,
+    ).toBe(60);
+  });
+
+  test("a below-floor width the operator types is still refused at its field", () => {
+    // The carve-out is the stored value exactly, not the range around it: a width
+    // under the floor that the operator entered is theirs to fix, and the error
+    // still names what the width buys.
+    const stored = belowTheEntryFloor();
+    const fields = scheduleEntryFieldsFrom(stored);
+    for (const windowHours of [0.5, MIN_SCHEDULE_WINDOW_HOURS - 1]) {
+      const errors = scheduleEntryErrors({ ...fields, windowHours }, stored);
+      expect(errors.windowHours).toMatch(/clock difference/i);
+      expect(scheduleEntryUsable({ ...fields, windowHours }, stored)).toBe(
+        false,
+      );
+    }
   });
 
   test("a width the hour field cannot express reads back exactly, never rounded", () => {

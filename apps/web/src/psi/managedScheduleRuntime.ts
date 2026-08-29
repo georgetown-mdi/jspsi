@@ -31,6 +31,7 @@ import log from "loglevel";
 import { appendSanitizedRunWarning } from "@bench/runWarnings";
 
 import {
+  getManagedExchange,
   listManagedExchanges,
   persistManagedExchangeScheduleAdvance,
 } from "./managedExchangeStore";
@@ -158,6 +159,7 @@ export function browserScheduleTickSeams(
   return {
     now: () => Date.now(),
     listRecords: listManagedExchanges,
+    readRecord: getManagedExchange,
     listLocalState: listManagedLocalState,
     persistAdvance: persistManagedExchangeScheduleAdvance,
     delay: (ms) => delayUntilAborted(ms, signal),
