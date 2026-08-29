@@ -53,8 +53,9 @@ export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
  * (`TEXT_CONTROL_CHAR_PATTERN`, config/linkageTerms.ts), which refuses the
  * ESC and BEL they carry here; the bidi override in `purpose` and in the payload
  * `description` is not a control character, so those two stay within what a
- * decoded token can hold. Either way a decoded token cannot carry the hostile
- * byte in the listed fields today. They carry one here because
+ * decoded token can hold -- a real parse of this fixture's own values accepts
+ * both -- and it is exactly what the display-escaping assertions over those two
+ * fields exercise. They carry one here because
  * the display boundary's contract is uniform and does not depend on that
  * validation staying in place -- the same reason `summarizeInvitation` routes
  * the dates through the sanitizer.

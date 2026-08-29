@@ -155,9 +155,13 @@ export const MAX_TEXT_LENGTH = 1024;
  * into each party's exchange record, which is kept and read back long after the
  * run: the two parties' identities, the agreement `purpose`, and a payload
  * column's `description` (exchangeRecord.ts). A constraint `exclude` value
- * reaches no record -- the record's account of the matching basis carries a
- * field's name and semantic type, never a constraint -- so for that one the
- * partner's copy of the live document is the whole of the reach. The seams that
+ * reaches no exchange record -- the record's account of the matching basis
+ * carries a field's name and semantic type, never a constraint -- but it does
+ * persist past the live document: `psilink accept` provisions a configuration
+ * from the adopted terms, and `saveConfig` serializes the whole of them,
+ * constraints included, into the acceptor's YAML config, which is itself
+ * parsed back through this schema, so a control character still cannot ride
+ * it that way either. The seams that
  * neutralize a control character (sanitizeErrorForDisplay.ts,
  * compatibilityMessage.ts) act where psilink itself renders one, not where a
  * later reader of the record opens it. Every seat that parses a LIVE terms
@@ -1847,7 +1851,12 @@ export function safeParseLinkageTerms(raw: unknown) {
  * are derived rather than authored by either party, and `identity` -- the one
  * free text substituted here, and the accepting operator's own -- carries the
  * document's control-character rule at entry above, so it is refused there under
- * a message attributing it locally rather than reaching this one.
+ * a message attributing it locally rather than reaching this one. That holds only
+ * for a control character: an empty or over-{@link MAX_TEXT_LENGTH} acceptor
+ * identity carries neither check at entry and does reach this re-check under the
+ * invitation-blaming account instead. Neither shipped front end can produce one
+ * (the CLI refuses an empty identity, the web field caps its length), but the
+ * account this re-check gives is not itself scoped to control characters.
  *
  * It also refuses a `psi-c` document outside the count-only shape, before the
  * mirror is built rather than after ({@link assertCountOnlyTermsShape}): the
