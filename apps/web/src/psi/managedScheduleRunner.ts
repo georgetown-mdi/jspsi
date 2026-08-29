@@ -422,8 +422,8 @@ async function occupyWindow(
 
 /**
  * Fold one window's attempts into its disposition: `"missed"` only when at
- * least one attempt found the partner absent AND no attempt's failure proved
- * the partner was met.
+ * least one attempt found the partner absent and the attempt that ends the
+ * window's occupancy does not prove the partner was met.
  *
  * Both halves come from docs/spec/MANAGED_EXCHANGE_RECORD.md ("Occupying a due
  * window", the disposition table, and "The schedule object"'s
@@ -432,12 +432,16 @@ async function occupyWindow(
  * channel, a broker fault -- would otherwise relabel a window of no-show waits
  * `"failed"`, which leaves `consecutiveMisses` untouched and loses the miss
  * entirely, though an attempt that spent its whole peer wait already answered
- * the coordination question the count asks. The contact half is why a met
- * partnership outranks an earlier absence in the same window: a handshake that
- * ran and failed means the two runners DID meet, which the spec routes as a
- * desync/attack question rather than coordination drift, so the window records
- * `"failed"` and counts nothing ({@link attemptProvesContact} is the
- * enumeration).
+ * the coordination question the count asks. The contact half instead turns on
+ * only the attempt that ends the window: every contact-proving verdict is also
+ * non-retryable ({@link attemptProvesContact}), so a handshake that ran and
+ * failed ends the window's occupancy at once rather than starting another
+ * attempt -- the spec routes that as a desync/attack question rather than
+ * coordination drift, so the window records `"failed"` and counts nothing.
+ * `contactWasProven` stays an accumulator across the caller's attempts for a
+ * future retryable contact-proving class; no verdict is both today, so it
+ * never carries more into this fold than the evidence of the attempt that just
+ * ended the window.
  *
  * A window whose failures are all local keeps `"failed"`, and the lock refusal
  * keeps `"unattempted"`: neither is a claim about the partner. `"succeeded"`
