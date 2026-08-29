@@ -34,13 +34,13 @@ export type DoctorCheckStatus = "ok" | "warn" | "fail" | "skipped";
  */
 export type DoctorOverall = "ok" | "fix_and_retry" | "fatal";
 
-// The two shapes the emitted document is made of are declared as type aliases
-// rather than interfaces: TypeScript grants an object type alias the implicit
-// index signature that makes a verdict assignable to the encoder's
-// JsonLineObject parameter, and grants an interface none. Neither declares an
-// index signature of its own, so a literal still cannot carry a member the
-// shape does not name -- which is what keeps the human-only fields of a check
-// record out of the document.
+// The two shapes the emitted document is made of are type aliases rather than
+// interfaces for one reason: an object type alias carries the implicit index
+// signature asciiSafeJsonLine's JsonLineObject parameter needs, an interface
+// does not. What withholds a check record's human-only fields is verdictOf's
+// explicit field picking: the `satisfies` annotations pin that at compile time,
+// and the emitted-document equality test covers what they miss -- a
+// `checks: report.checks` passthrough typechecks clean.
 
 /** One check as it appears in the `--json` verdict. */
 export type DoctorCheck = {
@@ -163,25 +163,29 @@ export function verdictOf(report: DoctorReport): DoctorVerdict {
     version: DOCTOR_VERDICT_VERSION,
     mode: report.mode,
     overall: overallOf(report),
-    checks: report.checks.map((check) => ({
-      id: check.id,
-      status: check.status,
-      ...(check.meaning !== undefined ? { meaning: check.meaning } : {}),
-      ...(check.action !== undefined ? { action: check.action } : {}),
-    })),
-  };
+    checks: report.checks.map(
+      (check) =>
+        ({
+          id: check.id,
+          status: check.status,
+          ...(check.meaning !== undefined ? { meaning: check.meaning } : {}),
+          ...(check.action !== undefined ? { action: check.action } : {}),
+        }) satisfies DoctorCheck,
+    ),
+  } satisfies DoctorVerdict;
 }
 
 /**
  * The single stdout line the `--json` form emits. A check's `meaning` and
- * `action` interpolate environment- and tool-derived text -- the operator's
- * subdirectory, an `smbclient` status word -- so the line rides
- * {@link asciiSafeJsonLine}, which leaves every byte of it printable ASCII
- * while the keys, the value types, and the parsed values stay exactly what
- * `JSON.stringify` alone produces. The escapes are JSON's own, so this is no
- * second escaping altitude: a launcher that renders a parsed field to a human
- * still escapes it once, at its own sink (see CONTRIBUTING.md, Operator-facing
- * escaping).
+ * `action` interpolate the operator's own `SMB_*` values -- `SMB_PATH` reaches
+ * one verbatim, and its validation rejects only the C0 controls and DEL, so the
+ * C1 range, U+2028/U+2029 and an astral character all pass through -- and the
+ * line therefore rides {@link asciiSafeJsonLine}, which leaves every byte of it
+ * printable ASCII while the keys, the value types, and the parsed values stay
+ * exactly what `JSON.stringify` alone produces. The escapes are JSON's own, so
+ * this is no second escaping altitude: a launcher that renders a parsed field
+ * to a human still escapes it once, at its own sink (see CONTRIBUTING.md,
+ * Operator-facing escaping).
  */
 export function verdictJson(report: DoctorReport): string {
   return asciiSafeJsonLine(verdictOf(report));

@@ -81,22 +81,32 @@ describe("the JSON verdict is the launcher-facing contract", () => {
     expect(line.split("\n")).toHaveLength(1);
   });
 
-  test("a human-only field cannot be declared on the emitted shapes", () => {
-    // What the document withholds is a type-level property of the two shapes
-    // verdictJson serializes, and the type aliases they are declared as gain no
-    // index signature that would admit a member they do not declare. An
-    // unnecessary directive is itself a typecheck failure, so this stops passing
-    // the moment that changes.
+  test("an annotated DoctorCheck literal rejects a human-only field", () => {
+    // Each of the three fields that exist only for the human rendering, pinned
+    // in the position where excess-property checking is in reach: an annotated
+    // literal, which is the shape verdictOf's own `satisfies DoctorCheck` puts
+    // its map callback in. An unnecessary directive is itself a typecheck
+    // failure, so a shape that started admitting one of these stops this
+    // passing.
     // @ts-expect-error a check object carries no summary
-    const check: DoctorCheck = { id: "a", status: "ok", summary: "s" };
-    expect(check.id).toBe("a");
+    const withSummary: DoctorCheck = { id: "a", status: "ok", summary: "s" };
+    // @ts-expect-error a check object carries no detail
+    const withDetail: DoctorCheck = { id: "b", status: "ok", detail: "d" };
+    // @ts-expect-error a check object carries no blocksRun
+    const withBlocks: DoctorCheck = { id: "c", status: "ok", blocksRun: true };
+    expect([withSummary.id, withDetail.id, withBlocks.id]).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
   });
 });
 
 describe("the JSON verdict line is printable ASCII", () => {
   // A launcher that cannot classify a line prints it -- to a terminal, or into a
-  // log a person later reads -- and a check's meaning and action interpolate
-  // strings the environment and smbclient chose. The line therefore has to be
+  // log a person later reads -- and a check's meaning and action interpolate the
+  // operator's own SMB_* values, which readSmbProbeInput validates against the
+  // C0 controls and DEL and nothing above them. The line therefore has to be
   // safe as BYTES, which bare JSON.stringify does not make it: it escapes
   // U+0000-U+001F, the quote and the backslash, and passes DEL, the C1 range and
   // U+2028/U+2029 through.
@@ -138,6 +148,27 @@ describe("the JSON verdict line is printable ASCII", () => {
       `"action":"check \\u007f\\u009b and run this again."`,
     );
     expect(PRINTABLE_ASCII_ONLY.test(line)).toBe(true);
+  });
+
+  test("a bidi override, an astral pair and U+2028 cross as printable ASCII", () => {
+    // None of the three is a latin1 byte, so the sweep below does not reach
+    // them, and each survives bare JSON.stringify: the bidi override reorders
+    // whatever a terminal prints after it, U+2028 terminates a line for a
+    // consumer reading the stream as JavaScript, and an astral character is a
+    // surrogate pair the encoder has to escape as code units to stay parseable.
+    const RLO = "\u202e";
+    const ASTRAL = "\u{1f600}";
+    const LINE_SEPARATOR = "\u2028";
+    const meaning = `'q3${RLO}fdp${ASTRAL}${LINE_SEPARATOR}x' names a file, not a folder.`;
+    const bare = JSON.stringify({ meaning });
+    for (const raw of [RLO, ASTRAL, LINE_SEPARATOR])
+      expect(bare).toContain(raw);
+
+    const line = lineWith(meaning, `rename it ${RLO}${ASTRAL} and try again.`);
+    expect(PRINTABLE_ASCII_ONLY.test(line)).toBe(true);
+    expect(line).toContain("\\u202e");
+    expect(line).toContain("\\ud83d\\ude00");
+    expect(line).toContain("\\u2028");
   });
 
   test("every byte of latin1 crosses as printable ASCII on one line", () => {

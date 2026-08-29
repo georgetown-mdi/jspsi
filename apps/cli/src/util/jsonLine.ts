@@ -4,7 +4,7 @@
 // (apps/cli/src/doctor/verdict.ts: verdictJson). Each carries text chosen
 // somewhere other than this codebase -- the probe's excerpt is a latin1 decode
 // of bytes an untrusted peer sent, and a doctor check's meaning and action
-// interpolate environment- and tool-derived strings -- so these lines have to be
+// interpolate the operator's own SMB_* values -- so these lines have to be
 // safe as BYTES, not only valid as JSON: `JSON.stringify` escapes
 // U+0000-U+001F, the quote, and the backslash, which is enough to keep a line
 // one line, but it passes DEL and the C1 range straight through, and a value
