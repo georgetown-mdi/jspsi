@@ -46,6 +46,10 @@ import {
   RunWarningsAlert,
 } from "./BenchRunSurface";
 import {
+  RUN_IN_FLIGHT_HANDOFF_REASON,
+  RUN_IN_FLIGHT_HANDOFF_TITLE,
+} from "./managedHandoffGate";
+import {
   classifyManagedRunFailure,
   managedReinviteRecoveryCopy,
   managedRunReinvites,
@@ -431,7 +435,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // The operator attested the downloaded migration file is saved: spend the source
   // (this device's copy transitions to the spent load state on the next visit).
   function confirmMigration() {
-    if (migrationDispatch === undefined || exportBusy) return;
+    if (migrationDispatch === undefined || exportBusy || running) return;
     setExportBusy(true);
     setExportFailed(false);
     void migrationDispatch
@@ -690,8 +694,17 @@ export function ManagedRunSurface({ id }: { id: string }) {
               it, keep the exchange here for now, export the accounting as CSV,
               and then move it.
             </p>
+            {running && (
+              <Alert color="yellow" title={RUN_IN_FLIGHT_HANDOFF_TITLE} mb="md">
+                {RUN_IN_FLIGHT_HANDOFF_REASON}
+              </Alert>
+            )}
             <p>
-              <Button onClick={confirmMigration} loading={exportBusy}>
+              <Button
+                onClick={confirmMigration}
+                loading={exportBusy}
+                disabled={running}
+              >
                 I saved the file; hand off this exchange
               </Button>{" "}
               <Button
@@ -796,6 +809,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
             />
             <ManagedCronExportPanel
               record={record}
+              runInFlight={running}
               onBackedUp={(backedUpAt) =>
                 setBackupMarker({ backedUpAt: backedUpAt.toISOString() })
               }

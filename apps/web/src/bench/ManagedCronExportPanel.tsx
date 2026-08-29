@@ -9,6 +9,10 @@ import { dispatchManagedCronExport } from "@psi/managedExchangeExport";
 import { markManagedExchangeSpent } from "@psi/managedLocalState";
 import { readRecordAndMarkBackedUp } from "@psi/managedExchangeStore";
 
+import {
+  RUN_IN_FLIGHT_HANDOFF_REASON,
+  RUN_IN_FLIGHT_HANDOFF_TITLE,
+} from "./managedHandoffGate";
 import { managedCronExportPanelState } from "./managedCronExportModel";
 import styles from "./bench.module.css";
 
@@ -48,10 +52,15 @@ const cronExportDeps = {
  */
 export function ManagedCronExportPanel({
   record,
+  runInFlight,
   onBackedUp,
   onHandedOff,
 }: {
   record: ManagedExchangeRecord;
+  /** Whether a run of this exchange is in flight on the host surface. The
+   * hand-off confirmation is withheld while it is, for the reason it states
+   * ({@link RUN_IN_FLIGHT_HANDOFF_REASON}). */
+  runInFlight: boolean;
   /** The export marked the record backed-up, at this instant; the host's backup
    * state reflects it without a reload. */
   onBackedUp: (backedUpAt: Date) => void;
@@ -81,7 +90,7 @@ export function ManagedCronExportPanel({
   }
 
   function confirmHandoff() {
-    if (dispatch === undefined || busy) return;
+    if (dispatch === undefined || busy || runInFlight) return;
     const { composed } = dispatch;
     setBusy(true);
     setFailed(false);
@@ -270,8 +279,21 @@ export function ManagedCronExportPanel({
                     still live here; try again.
                   </Alert>
                 )}
+                {runInFlight && (
+                  <Alert
+                    color="yellow"
+                    title={RUN_IN_FLIGHT_HANDOFF_TITLE}
+                    mb="sm"
+                  >
+                    {RUN_IN_FLIGHT_HANDOFF_REASON}
+                  </Alert>
+                )}
                 <p>
-                  <Button onClick={confirmHandoff} loading={busy}>
+                  <Button
+                    onClick={confirmHandoff}
+                    loading={busy}
+                    disabled={runInFlight}
+                  >
                     I saved both files; hand off this exchange
                   </Button>{" "}
                   <Button

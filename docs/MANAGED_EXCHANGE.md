@@ -674,6 +674,14 @@ runs, labeled with the handoff date -- so the cooperation-not-cryptography
 invalidation below is legible at the one moment it is violable. A spent record
 can be deleted, or revived only by importing the artifact back.
 
+**Neither hand-off can be confirmed while a run of that exchange is in flight**
+-- not the device migration here, nor the command-line export below. A run
+rotates the shared secret at its handshake, so a spend confirmed mid-run hands
+the new owner a copy the rotation has already superseded: its first run meets a
+partner that has moved on, and only a re-invite recovers the pair. The surface
+names the run as the reason for the wait, and offers the confirmation again once
+the run settles, whatever its outcome.
+
 The artifact is a **plaintext credential file in the operator's custody**.
 Passphrase encryption is deliberately not done: the record must be usable with
 nobody present to supply a passphrase at the moment of use. It is the browser
