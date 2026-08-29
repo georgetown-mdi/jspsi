@@ -237,6 +237,18 @@ jobs:
       # to is no longer there.
       - name: Disclosure accounting recovery
         run: npm run check:disclosure-recovery
+      # A run that configures no STUN server discloses the running host's public
+      # address to the WebRTC library's built-in default, and three surfaces name
+      # that endpoint to an operator -- the CLI's warning, the web app's
+      # command-line export panel, and the docs -- one of them right before they
+      # hand a recurring exchange's secret to a scheduler. An app may not import
+      # from another app and a document imports nothing, so those are hand-written
+      # copies of a value the library decides. This holds every copy to the one
+      # constant the CLI measures against the real library, so a bump that moved
+      # the default fails here instead of leaving a confidentiality statement
+      # quietly false.
+      - name: Built-in STUN default claims
+        run: npm run check:stun-default-claims
       # A zero-setup exchange authors no linkage terms: each party derives them
       # from its own file, and the built-in keys work with no authoring only
       # because every one of them is built from the guaranteed-minimum PII both

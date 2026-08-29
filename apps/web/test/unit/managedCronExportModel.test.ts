@@ -17,11 +17,7 @@ import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
-import {
-  cronScheduleLine,
-  managedCronExportPanelState,
-  taskSchedulerLine,
-} from "@bench/managedCronExportModel";
+import { managedCronExportPanelState } from "@bench/managedCronExportModel";
 
 import type { ExchangeLocator, WebRTCExchangeLocator } from "@psilink/core";
 import type {
@@ -32,10 +28,11 @@ import type {
 // The pure model behind the command-line export panel, tested in Node without a
 // store or a download: what the panel gets to render for an exportable record, the
 // two schedule lines that run its invocation unattended, and the composer's own
-// refusal presented rather than re-derived. The facts the panel's copy asserts --
-// that the invocation needs no quoting inside a Task Scheduler argument, and that
-// the exported connection names no ICE server -- are checks here, so the copy
-// cannot quietly go stale.
+// refusal presented rather than re-derived. The fact the panel's copy asserts --
+// that the exported connection names no ICE server, so every scheduled run falls
+// back to the built-in STUN default -- is a check here, so the copy cannot quietly
+// go stale. The schedule snippets themselves are shared with the console hand-off
+// and are covered in scheduleTemplates.test.ts.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
@@ -96,15 +93,6 @@ describe("what the panel gets to render", () => {
     expect(windowsLine).toContain("schtasks /Create");
     expect(windowsLine).toContain(
       `cmd /c cd /d C:\\path\\to\\your\\exchange-folder && ${composed.command}`,
-    );
-  });
-
-  test("the invocation needs no quoting inside the Task Scheduler argument", () => {
-    // taskSchedulerLine interpolates the command into /TR "...", so a double quote
-    // in the command would end that argument early. This is the check standing in
-    // for an escape the composed command cannot currently need.
-    expect(exportableState(managedRecord()).composed.command).not.toContain(
-      '"',
     );
   });
 
@@ -212,16 +200,5 @@ describe("a record the composer refuses", () => {
       signing.receiptOutput,
     ])
       expect(state.reason).not.toContain(value);
-  });
-});
-
-describe("the schedule lines on their own", () => {
-  test("both run the command they are given", () => {
-    expect(cronScheduleLine("psilink exchange in.csv out.csv")).toContain(
-      "psilink exchange in.csv out.csv",
-    );
-    expect(taskSchedulerLine("psilink exchange in.csv out.csv")).toContain(
-      "psilink exchange in.csv out.csv",
-    );
   });
 });
