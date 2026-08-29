@@ -13,10 +13,12 @@
  * calendar add shifts the instant by the offset change across a daylight-saving
  * transition, which would move an unattended window by an hour on one machine
  * and not the other -- two runners that no longer overlap, recorded as mutual
- * misses. Nothing below reads the host zone: the operator's local wall-clock
+ * misses. No rule below reads the host zone: the operator's local wall-clock
  * cadence is resolved to the UTC anchor exactly once, by
  * {@link resolveLocalCadenceAnchor} at save and again only when the operator
- * edits the schedule. Every other instant must carry the UTC designator to be
+ * edits the schedule, and read back by {@link localCadenceFromAnchor} for the
+ * entry surface alone. Those two are the whole zone-reading surface of this
+ * module. Every other instant must carry the UTC designator to be
  * read at all -- {@link ./managedExchangeRecord.ts}'s `parseStoredInstant`
  * requires it rather than assuming it -- so the claim holds for a hand-edited or
  * tampered record too, not only for one the record schema validated.
@@ -25,7 +27,11 @@
  * of the managed modules, so every rule here is a pure function of its inputs.
  */
 
-import { parseStoredInstant } from "./managedExchangeRecord";
+import {
+  MAX_SCHEDULE_INTERVAL_DAYS,
+  MAX_SCHEDULE_WINDOW_SECONDS,
+  parseStoredInstant,
+} from "./managedExchangeRecord";
 
 import type {
   ManagedExchangeLastRun,
@@ -173,22 +179,32 @@ function toScheduleInstant(ms: number): string {
 
 /**
  * Reduce a schedule to its lattice, rejecting a period or width the record's
- * schema would not admit. The schema is the first line of defense
- * (`intervalDays` and `windowSeconds` at least 1, both integers), so this
- * repeats it where the division happens: a zero period would divide to
- * `Infinity` and an unparseable anchor to `NaN`, either of which would silently
- * carry a nonsense instant into the bookkeeping write instead of aborting it.
+ * schema would not admit. The schema is the first line of defense (both integers,
+ * `intervalDays` from 1 to {@link MAX_SCHEDULE_INTERVAL_DAYS}, `windowSeconds`
+ * from 1 to {@link MAX_SCHEDULE_WINDOW_SECONDS}), so this repeats it where the
+ * division happens: a zero period would divide to `Infinity` and an unparseable
+ * anchor to `NaN`, either of which would silently carry a nonsense instant into
+ * the bookkeeping write instead of aborting it, and a period or width past the
+ * ceiling would place a window past every calendar a surface can render it on.
  */
 function readScheduleGeometry(
   schedule: ManagedExchangeSchedule,
 ): ScheduleGeometry {
-  if (!Number.isInteger(schedule.intervalDays) || schedule.intervalDays < 1)
+  if (
+    !Number.isInteger(schedule.intervalDays) ||
+    schedule.intervalDays < 1 ||
+    schedule.intervalDays > MAX_SCHEDULE_INTERVAL_DAYS
+  )
     throw new RangeError(
-      "managed schedule intervalDays must be a whole number of days, at least 1",
+      `managed schedule intervalDays must be a whole number of days, 1 through ${String(MAX_SCHEDULE_INTERVAL_DAYS)}`,
     );
-  if (!Number.isInteger(schedule.windowSeconds) || schedule.windowSeconds < 1)
+  if (
+    !Number.isInteger(schedule.windowSeconds) ||
+    schedule.windowSeconds < 1 ||
+    schedule.windowSeconds > MAX_SCHEDULE_WINDOW_SECONDS
+  )
     throw new RangeError(
-      "managed schedule windowSeconds must be a whole number of seconds, at least 1",
+      `managed schedule windowSeconds must be a whole number of seconds, 1 through ${String(MAX_SCHEDULE_WINDOW_SECONDS)}`,
     );
   return {
     anchorMs: parseScheduleInstant(schedule.anchor, "anchor"),
@@ -257,6 +273,30 @@ export function nextManagedScheduleWindowAfter(
   const index = Math.max(
     0,
     Math.floor((atMs - geometry.anchorMs) / geometry.periodMs) + 1,
+  );
+  return windowAt(geometry, index);
+}
+
+/**
+ * The first window that has not yet closed at `atMs`: the window `atMs` sits
+ * inside, or the next one when it sits in the gap after one closed. This is the
+ * window a schedule ENTERED at `atMs` plans first -- writing the anchor's own
+ * window instead would hand the catch-up walk a run of windows that elapsed
+ * before the operator agreed the cadence, and count each of them a miss.
+ *
+ * @throws {RangeError} if the schedule's lattice is unusable (see
+ *   {@link managedScheduleWindow}).
+ */
+export function firstUnclosedManagedScheduleWindow(
+  schedule: ManagedExchangeSchedule,
+  atMs: number,
+): ManagedScheduleWindow {
+  const geometry = readScheduleGeometry(schedule);
+  const index = Math.max(
+    0,
+    Math.floor(
+      (atMs - geometry.widthMs - geometry.anchorMs) / geometry.periodMs,
+    ) + 1,
   );
   return windowAt(geometry, index);
 }
@@ -502,6 +542,34 @@ export function resolveLocalCadenceAnchor(
   resolved.setFullYear(cadence.year, cadence.month - 1, cadence.day);
   resolved.setHours(cadence.hour, cadence.minute, 0, 0);
   return toScheduleInstant(resolved.getTime());
+}
+
+/**
+ * Read a stored UTC anchor back as the local wall-clock cadence an entry surface
+ * shows the operator -- the inverse of {@link resolveLocalCadenceAnchor}, and the
+ * OTHER place the host zone is read. An entry form re-opened on a stored schedule
+ * must show the cadence the operator agreed on their own clock rather than the
+ * UTC instant it was resolved to, and a save that changes nothing must resolve
+ * back to the same anchor.
+ *
+ * The round trip holds in both directions except across a daylight-saving
+ * transition the zone itself makes ambiguous: a wall-clock time the zone skips or
+ * repeats resolves to an instant whose read-back names a different wall clock,
+ * which is the zone's own doing rather than this pair's (see
+ * {@link resolveLocalCadenceAnchor}).
+ *
+ * @throws {RangeError} if `anchor` is not a usable stored UTC instant.
+ */
+export function localCadenceFromAnchor(anchor: string): LocalWallClockCadence {
+  const anchorMs = parseScheduleInstant(anchor, "anchor");
+  const local = new Date(anchorMs);
+  return {
+    year: local.getFullYear(),
+    month: local.getMonth() + 1,
+    day: local.getDate(),
+    hour: local.getHours(),
+    minute: local.getMinutes(),
+  };
 }
 
 function requireComponentInRange(

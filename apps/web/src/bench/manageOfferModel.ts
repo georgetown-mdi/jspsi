@@ -194,8 +194,10 @@ export function composeManagedDocument(
 }
 
 /** The operator's choices on the manage offer: the display label and whether to
- * opt into a max-age policy. The schedule is a later surface (a managed re-run
- * item), so it is deliberately not offered here. */
+ * opt into a max-age policy. The schedule is deliberately not among them: it is a
+ * cadence agreed with the partner out of band, which the operator settles once
+ * they have the exchange in front of them, on its own page's local-fields editor
+ * (see {@link ./scheduleEntryModel.ts}). */
 export interface ManageOfferChoices {
   /** The operator-supplied display label for the partnership. */
   label: string;

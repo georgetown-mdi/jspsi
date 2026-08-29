@@ -4,6 +4,8 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 import {
   advanceManagedScheduleAfterWindow,
   catchUpManagedSchedule,
+  firstUnclosedManagedScheduleWindow,
+  localCadenceFromAnchor,
   managedScheduleWindow,
   managedScheduleWindowStateAt,
   nextConsecutiveMisses,
@@ -107,6 +109,50 @@ describe("window geometry", () => {
     ).toBe(0);
   });
 
+  test("the first unclosed window is the one an instant sits in, or the next", () => {
+    // What a schedule ENTERED at that instant plans first. Window 0 opens
+    // 2026-01-06T14:00Z and closes at 17:00Z.
+    expect(
+      firstUnclosedManagedScheduleWindow(weekly, at("2026-01-06T14:00:00.000Z"))
+        .index,
+    ).toBe(0);
+    expect(
+      firstUnclosedManagedScheduleWindow(weekly, at("2026-01-06T16:59:59.999Z"))
+        .index,
+    ).toBe(0);
+    // The close instant is already elapsed, so the window it belongs to is the
+    // next one -- the same half-open reading the state rule takes.
+    expect(
+      firstUnclosedManagedScheduleWindow(
+        weekly,
+        at("2026-01-06T17:00:00.000Z"),
+      ),
+    ).toEqual({
+      index: 1,
+      opensAtMs: at("2026-01-13T14:00:00.000Z"),
+      closesAtMs: at("2026-01-13T17:00:00.000Z"),
+    });
+    // In the gap between two windows: the next one, not the one just closed.
+    expect(
+      firstUnclosedManagedScheduleWindow(weekly, at("2026-01-08T09:00:00.000Z"))
+        .index,
+    ).toBe(1);
+    // Never earlier than the first agreed window, however far before the anchor.
+    expect(
+      firstUnclosedManagedScheduleWindow(weekly, at("2020-01-01T00:00:00.000Z"))
+        .index,
+    ).toBe(0);
+  });
+
+  test("an instant exactly at a window's open plans THAT window, not the next", () => {
+    // Where this parts company with `nextManagedScheduleWindowAfter`, which is
+    // for advancing past a window just occupied: a cadence entered while one of
+    // its windows is open plans the open one, so the run in progress can meet it.
+    const open = at("2026-01-13T14:00:00.000Z");
+    expect(firstUnclosedManagedScheduleWindow(weekly, open).index).toBe(1);
+    expect(nextManagedScheduleWindowAfter(weekly, open).index).toBe(2);
+  });
+
   test("a lattice the schema would not admit is refused rather than divided by", () => {
     expect(() =>
       managedScheduleWindow({ ...weekly, intervalDays: 0 }, 1),
@@ -119,6 +165,12 @@ describe("window geometry", () => {
     ).toThrow(RangeError);
     expect(() =>
       managedScheduleWindow({ ...weekly, anchor: "the sixth of January" }, 1),
+    ).toThrow(RangeError);
+    expect(() =>
+      firstUnclosedManagedScheduleWindow(
+        { ...weekly, intervalDays: 0 },
+        at("2026-01-06T14:00:00.000Z"),
+      ),
     ).toThrow(RangeError);
     expect(() =>
       catchUpManagedSchedule(
@@ -224,12 +276,14 @@ describe("daylight saving", () => {
       outcome: "failed" as const,
     };
     const now = at("2026-03-17T15:00:00.000Z");
-    // Every export the module has bar `resolveLocalCadenceAnchor`, which is the
-    // one that reads the zone deliberately and is driven on its own below.
+    // Every rule the module exports bar `resolveLocalCadenceAnchor` and
+    // `localCadenceFromAnchor`, the two that read the zone deliberately and are
+    // driven on their own below.
     const compute = () => ({
       window: managedScheduleWindow(march, 2),
       state: managedScheduleWindowStateAt(managedScheduleWindow(march, 2), now),
       next: nextManagedScheduleWindowAfter(march, now),
+      firstUnclosed: firstUnclosedManagedScheduleWindow(march, now),
       misses: nextConsecutiveMisses(1, "missed"),
       caught: catchUpManagedSchedule(march, lastRun, now),
       advanced: advanceManagedScheduleAfterWindow(
@@ -942,5 +996,103 @@ describe("resolveLocalCadenceAnchor", () => {
         minute: 0,
       }),
     ).toThrow(RangeError);
+  });
+});
+
+describe("localCadenceFromAnchor", () => {
+  test("reads a stored anchor back on the host zone's own clock", () => {
+    withTimeZone("America/New_York", () => {
+      expect(localCadenceFromAnchor("2026-03-03T14:00:00.000Z")).toEqual({
+        year: 2026,
+        month: 3,
+        day: 3,
+        hour: 9,
+        minute: 0,
+      });
+    });
+    withTimeZone("UTC", () => {
+      expect(localCadenceFromAnchor("2026-03-03T14:00:00.000Z")).toEqual({
+        year: 2026,
+        month: 3,
+        day: 3,
+        hour: 14,
+        minute: 0,
+      });
+    });
+    // A zone whose offset is not a whole hour, so a reading that dropped the
+    // minutes of the offset would show here.
+    withTimeZone("Asia/Kolkata", () => {
+      expect(localCadenceFromAnchor("2026-03-03T14:00:00.000Z")).toEqual({
+        year: 2026,
+        month: 3,
+        day: 3,
+        hour: 19,
+        minute: 30,
+      });
+    });
+  });
+
+  test("the reading and the resolution invert each other", () => {
+    // What re-opening the entry form on a stored schedule rests on: the cadence
+    // shown is the one that was entered, and a save that changes nothing lands on
+    // the same anchor.
+    withTimeZone("America/New_York", () => {
+      for (const anchor of [
+        "2026-03-03T14:00:00.000Z",
+        "2026-03-17T13:00:00.000Z",
+        "2026-12-25T00:30:00.000Z",
+      ])
+        expect(resolveLocalCadenceAnchor(localCadenceFromAnchor(anchor))).toBe(
+          anchor,
+        );
+    });
+  });
+
+  test("reads to the minute, so an anchor finer than that does not round-trip", () => {
+    // The cadence carries no seconds, which is why an entry surface holding a
+    // stored anchor at this resolution carries it through rather than resolving
+    // the reading back (see ../../src/bench/scheduleEntryModel.ts).
+    withTimeZone("UTC", () => {
+      const cadence = localCadenceFromAnchor("2026-03-03T14:00:30.500Z");
+      expect(cadence).toEqual({
+        year: 2026,
+        month: 3,
+        day: 3,
+        hour: 14,
+        minute: 0,
+      });
+      expect(resolveLocalCadenceAnchor(cadence)).toBe(
+        "2026-03-03T14:00:00.000Z",
+      );
+    });
+  });
+
+  test("an hour the zone repeats does not round-trip either, which is the zone's doing", () => {
+    // 2026 US daylight saving ends on 1 November: 01:30 local names two instants,
+    // 05:30Z before the shift and 06:30Z after it. Both read back as the same
+    // wall clock, so resolving that reading picks one of them -- the documented
+    // exception to the inversion above, and the second reason an unrelated save
+    // must not re-resolve an anchor nobody edited.
+    withTimeZone("America/New_York", () => {
+      const beforeShift = "2026-11-01T05:30:00.000Z";
+      const afterShift = "2026-11-01T06:30:00.000Z";
+      expect(localCadenceFromAnchor(afterShift)).toEqual(
+        localCadenceFromAnchor(beforeShift),
+      );
+      expect(
+        resolveLocalCadenceAnchor(localCadenceFromAnchor(afterShift)),
+      ).toBe(beforeShift);
+    });
+  });
+
+  test("an anchor that is not a usable stored instant is refused, not read", () => {
+    for (const anchor of [
+      "the third of March",
+      "",
+      // No UTC designator: read against the host zone it would name a different
+      // moment on every machine, so it is refused rather than assumed.
+      "2026-03-03T14:00:00",
+    ])
+      expect(() => localCadenceFromAnchor(anchor)).toThrow(RangeError);
   });
 });
