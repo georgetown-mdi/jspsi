@@ -70,11 +70,11 @@ The check is implied by rules that already run: the returned-list rules hold the
 
 ## Why the pair table takes no ceiling
 
-Both sides keeping their duplicates makes the pair count quadratic in the duplication: a value `m` of one party's rows and `n` of the other's hold contributes `m * n` pairs. The question that raises is whether the protocol should cap it.
+Both sides keeping their duplicates makes the pair count quadratic in the duplication, and the question that raises is whether the protocol should cap it. It does not, and where the quadratic term falls due is the accounting in [PROTOCOL.md](../spec/PROTOCOL.md#deriving-one-table-from-the-exchanged-association-maps).
 
-It should not. A cap is a limit on the operator's own dataset choices, and refusing an exchange because its inputs are what they are converts a large result into no result. Failing fast has some value where the failure is otherwise obscure or expensive to reach; here the alternative is the same failure a moment later, in the operator's own workspace, with the table in hand to look at. The quadratic term is also narrower than it first appears: it is the derived pair table and the result file, not the exchange. The encryption cost is values-only, since a records-per-value widening adds no PSI set entry and no value slot, and the closure reads the per-(round, value) blocks rather than a materialized pair list -- so the expansion falls due at the result file rather than in the rounds.
+A cap would be a limit on the operator's own dataset choices, refusing an exchange because its inputs are what they are and converting a large result into no result. Failing fast earns that where the failure is otherwise obscure or expensive to reach, and here it is neither: the alternative is the same failure a moment later, in the operator's own workspace, with the table in hand to look at. The cost accounting is what makes the trade cheap to take, since the growth lands on artifacts the operator holds rather than on the rounds.
 
-What is admissible is an advisory warning naming the pair count a run projects, at a front end's discretion. That is a different artifact from a protocol ceiling: it informs the operator without deciding for them.
+The alternative kept is an advisory warning naming the pair count a run projects, left to a front end's discretion. It is a different artifact from a protocol ceiling on the same reasoning that declines the ceiling: the dataset is the operator's, so the projection informs them without deciding for them, and which surface is worth showing it on is a question about that front end rather than about the exchange.
 
 ## Why a cluster is not a column
 

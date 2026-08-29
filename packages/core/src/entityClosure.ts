@@ -86,7 +86,8 @@ class RowForest {
  * linkage-key value, or any quantity the partner declares.
  *
  * Clusters are ordered by their lowest local row, and each cluster's two halves
- * ascend, so two parties comparing a run's clusters compare one arrangement.
+ * ascend, whatever order the table's pairs arrive in, so two parties comparing a
+ * run's clusters compare one arrangement.
  *
  * @param table - A matched table read as pairs: entry `i` pairs `table[0][i]` with
  *   `table[1][i]`. A repeated pair would be one edge counted twice, which changes
@@ -109,9 +110,6 @@ export function entityClusters(table: AssociationTable): Array<EntityCluster> {
       forest.nodeForPartner(partnerRows[i]),
     );
 
-  // Keyed by component root; the local half is walked first and in its own
-  // insertion order, so a cluster is created at its lowest local row (the table's
-  // local half being ascending) and the returned order follows.
   const byRoot = new Map<number, MutableCluster>();
   const clusterFor = (node: number): MutableCluster => {
     const root = forest.find(node);
@@ -128,10 +126,11 @@ export function entityClusters(table: AssociationTable): Array<EntityCluster> {
     clusterFor(node).partnerRows.push(row);
 
   const ascending = (a: number, b: number): number => a - b;
-  return Array.from(byRoot.values(), (cluster) => ({
+  const clusters = Array.from(byRoot.values(), (cluster) => ({
     localRows: cluster.localRows.sort(ascending),
     partnerRows: cluster.partnerRows.sort(ascending),
   }));
+  return clusters.sort((a, b) => a.localRows[0] - b.localRows[0]);
 }
 
 /**

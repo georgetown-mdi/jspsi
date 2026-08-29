@@ -413,11 +413,13 @@ export function attributableRoundMatches(
  * `"many-to-many"` both parties apply the "many" rule, so a matched value stands
  * for a group on each side and the pair set it contributes is the two groups'
  * product. The entity closure that resolves such a table is a local step over the
- * returned table rather than part of the pairing ({@link ./entityClosure}), and the
- * table this returns is held to the block shape that closure rests on before it
- * leaves here. exchange.ts resolves the cardinality from the two agreed
- * `deduplicate` settings and refuses that pair before the rounds begin, so a
- * production caller reaches here with one of the other three.
+ * returned table rather than part of the pairing
+ * ({@link ./entityClosure.entityClusters}), and the table this returns is held to
+ * the block shape that closure rests on before it leaves here
+ * ({@link ./entityClosure.assertBlockDiagonalClosure}). exchange.ts resolves the
+ * cardinality from the two agreed `deduplicate` settings and refuses that pair
+ * before the rounds begin, so a production caller reaches here with one of the
+ * other three.
  *
  * @param protocol - Exchange protocol settings; only `cardinality` is used
  *   here, and it is this party's own resolved label (see

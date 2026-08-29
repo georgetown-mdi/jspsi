@@ -72,6 +72,20 @@ describe("entityClusters", () => {
     ]);
   });
 
+  test("the ordering holds over a table whose local half does not ascend", () => {
+    // The same pairs as the case above, shuffled: the cascade hands over an
+    // ascending local half, but a reader recomputing clusters from a stored result
+    // file supplies whatever order it finds there, and gets the one arrangement.
+    const table: AssociationTable = [
+      [3, 0, 2, 2],
+      [1, 5, 1, 4],
+    ];
+    expect(entityClusters(table)).toStrictEqual([
+      { localRows: [0], partnerRows: [5] },
+      { localRows: [2, 3], partnerRows: [1, 4] },
+    ]);
+  });
+
   test("halves of different lengths are refused", () => {
     expect(() => entityClusters([[0, 1], [0]])).toThrow(
       /halves have different lengths/,
