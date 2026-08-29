@@ -149,11 +149,12 @@ async function runDoctor(
  * pass on. They carry server-controlled bytes -- an NT_STATUS token and
  * smbclient's own output -- so they are escaped and redacted here, at the
  * composition: the plain-line sink bypasses core's prefixer, so the per-argument
- * private-key strip does not run behind this call. The JSON form carries the
- * same bytes and takes its own encoder, `verdictJson`'s `asciiSafeJsonLine`:
- * bare JSON string encoding leaves DEL, the C1 range and U+2028/U+2029 intact,
- * so the line is made printable ASCII there rather than here. Its consumer
- * re-validates at its own boundary either way.
+ * private-key strip does not run behind this call. The JSON form withholds the
+ * tool output (verdictOf drops summary and detail) but carries each check's
+ * meaning and action, and takes its own encoder, `verdictJson`'s
+ * `asciiSafeJsonLine`: bare JSON string encoding leaves DEL, the C1 range and
+ * U+2028/U+2029 intact, so the line is made printable ASCII there rather than
+ * here. Its consumer re-validates at its own boundary either way.
  *
  * Dropping the prefix does not exempt them from `--log-level`: they are written
  * only when the level admits the `info` they were logged at, so `--log-level

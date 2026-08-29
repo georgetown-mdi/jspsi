@@ -38,9 +38,11 @@ export type DoctorOverall = "ok" | "fix_and_retry" | "fatal";
 // interfaces for one reason: an object type alias carries the implicit index
 // signature asciiSafeJsonLine's JsonLineObject parameter needs, an interface
 // does not. What withholds a check record's human-only fields is verdictOf's
-// explicit field picking: the `satisfies` annotations pin that at compile time,
-// and the emitted-document equality test covers what they miss -- a
-// `checks: report.checks` passthrough typechecks clean.
+// explicit field picking: the inner `satisfies DoctorCheck` on the map
+// callback's literal pins that at compile time (the outer annotation is
+// redundant with the return-type annotation), and the emitted-document
+// equality test covers what it misses -- a `checks: report.checks`
+// passthrough typechecks clean.
 
 /** One check as it appears in the `--json` verdict. */
 export type DoctorCheck = {
@@ -177,10 +179,12 @@ export function verdictOf(report: DoctorReport): DoctorVerdict {
 
 /**
  * The single stdout line the `--json` form emits. A check's `meaning` and
- * `action` interpolate the operator's own `SMB_*` values -- `SMB_PATH` reaches
+ * `action` interpolate the operator's own `SMB_*` values (`SMB_PATH` reaches
  * one verbatim, and its validation rejects only the C0 controls and DEL, so the
- * C1 range, U+2028/U+2029 and an astral character all pass through -- and the
- * line therefore rides {@link asciiSafeJsonLine}, which leaves every byte of it
+ * C1 range, U+2028/U+2029 and an astral character all pass through) and, on the
+ * authentication and share_open arms, the smbclient NT_STATUS token, which is
+ * bounded to NT_STATUS_[A-Z_]+ where it is extracted and so is ASCII by
+ * construction. The line rides {@link asciiSafeJsonLine}, which leaves every byte of it
  * printable ASCII while the keys, the value types, and the parsed values stay
  * exactly what `JSON.stringify` alone produces. The escapes are JSON's own, so
  * this is no second escaping altitude: a launcher that renders a parsed field
