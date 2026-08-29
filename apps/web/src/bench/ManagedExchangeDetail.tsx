@@ -61,6 +61,7 @@ import styles from "./bench.module.css";
 import type {
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
+  ManagedExchangeSchedule,
 } from "@psi/managedExchangeRecord";
 import type { ConfigRow } from "./managedDetailModel";
 import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
@@ -336,16 +337,30 @@ function LocalFieldsEditor({
     setSaved(false);
   }
 
-  /** The stored schedule where the form still says exactly what it does, and the
-   * entered cadence resolved afresh otherwise (see
-   * {@link scheduleEntryUnchanged}). The second branch is the operator's own
-   * edit, and it is handed the stored schedule too: the fields it did not touch
-   * are carried from there verbatim rather than re-derived from what they
-   * display, so editing one of them rewrites no other. */
-  function storedOrEnteredSchedule() {
-    return record.schedule !== undefined &&
-      scheduleEntryUnchanged(schedule, record.schedule)
-      ? record.schedule
+  /**
+   * What this save does to the stored schedule: the resolved cadence to write,
+   * `null` to drop it, or `undefined` to leave the stored object alone.
+   *
+   * A cadence the operator did not touch is OMITTED rather than written back.
+   * The form holds the record as the page mounted on it, while the schedule
+   * object also carries bookkeeping the unattended runner advances under an open
+   * page -- `nextWindow` and `consecutiveMisses` (see
+   * docs/spec/MANAGED_EXCHANGE_RECORD.md, "The schedule object") -- so writing
+   * the mount-time object back on a label or max-age edit would rewind the
+   * runner's own advance to a window it has already accounted for.
+   *
+   * A cadence the operator DID edit is resolved afresh, and it is handed the
+   * stored schedule: the fields the edit did not touch are carried from there
+   * verbatim rather than re-derived from what they display, so editing one of
+   * them rewrites no other (see {@link scheduleEntryUnchanged}).
+   */
+  function scheduleEdit(): ManagedExchangeSchedule | null | undefined {
+    if (!scheduleEnabled)
+      return record.schedule !== undefined ? null : undefined;
+    if (record.schedule === undefined)
+      return buildScheduleFromEntry(schedule, Date.now());
+    return scheduleEntryUnchanged(schedule, record.schedule)
+      ? undefined
       : buildScheduleFromEntry(schedule, Date.now(), record.schedule);
   }
 
@@ -354,15 +369,15 @@ function LocalFieldsEditor({
     setSaving(true);
     setSaved(false);
     setFailed(false);
-    // Both opt-ins are three-way edits: enabled with valid values sets them,
-    // disabled clears them (null), so an off checkbox drops what is stored rather
-    // than leaving it untouched. A cadence the operator did not touch is carried
-    // through verbatim, so a save of the label alone neither re-resolves the
-    // agreed instant nor resets the bookkeeping the runner owns.
+    // The max-age opt-in is a three-way edit: enabled with a valid value sets it,
+    // disabled clears it (null), so an off checkbox drops what is stored rather
+    // than leaving it untouched. The schedule takes the same shape for a toggle
+    // the operator moved, and no edit at all otherwise.
+    const scheduleChange = scheduleEdit();
     const edits: ManagedExchangeLocalEdits = {
       label,
       tokenMaxAgeDays: maxAgeEnabled ? (tokenMaxAgeDays ?? null) : null,
-      schedule: scheduleEnabled ? storedOrEnteredSchedule() : null,
+      ...(scheduleChange !== undefined ? { schedule: scheduleChange } : {}),
     };
     void onSave(edits)
       .then(() => setSaved(true))

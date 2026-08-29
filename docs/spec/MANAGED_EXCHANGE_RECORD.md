@@ -307,17 +307,22 @@ hours -- plus three rules that are entry's alone:
 - **The anchor is resolved once.** The host zone is read here and nowhere else,
   turning the wall-clock cadence into the stored UTC `anchor` (see the `anchor`
   row). Re-opening the form reads the anchor back on the operator's own clock,
-  and a save that left every cadence field as it was carries the stored object
-  through **verbatim** rather than resolving again: a wall clock a zone skips or
-  repeats does not round-trip, so re-resolving on an unrelated save (a label
-  edit, a max-age change) could walk the agreed instant away from the partner's.
-  The carry-through is **per field**, not all-or-nothing: a save that edited one
-  cadence field takes the anchor and the width from the stored object verbatim
-  while the fields displaying them are untouched. The fields hold the cadence to
-  the minute and the width to the hour, coarser than the record stores either, so
-  re-deriving them from what they display would rewrite a stored value at a
-  resolution the operator never saw -- an edit to the period alone silently
-  moving an agreed anchor or width.
+  and a save that left every cadence field as it was **writes no schedule at
+  all** rather than resolving again: a wall clock a zone skips or repeats does
+  not round-trip, so re-resolving on an unrelated save (a label edit, a max-age
+  change) could walk the agreed instant away from the partner's. Omitting the
+  field, rather than writing back the object the form opened on, is what keeps
+  such a save off the runner's bookkeeping too: `nextWindow` and
+  `consecutiveMisses` live in this same object and advance under a page left
+  open, so a mount-time snapshot written back would rewind them to a window
+  already accounted for. The carry-through is **per field**, not all-or-nothing:
+  a save that edited one cadence field takes the anchor and the width from the
+  stored object verbatim while the fields displaying them are untouched, and
+  writes the rebuilt schedule because the operator moved something. The fields
+  hold the cadence to the minute and the width to the hour, coarser than the
+  record stores either, so re-deriving them from what they display would rewrite
+  a stored value at a resolution the operator never saw -- an edit to the period
+  alone silently moving an agreed anchor or width.
 - **`nextWindow` is the first window not yet closed at the save**, not the
   anchor's own window. A cadence anchored to a date already past would otherwise
   hand [catch-up](#catch-up-on-wake) every window that elapsed before the

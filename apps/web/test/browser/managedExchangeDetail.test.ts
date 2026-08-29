@@ -1,6 +1,6 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   RECORDED_LINKAGE_RULE_SET_CAVEAT,
@@ -21,6 +21,13 @@ import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
+import {
+  clearManagedExchanges,
+  createManagedExchange,
+  getManagedExchange,
+  persistManagedExchangeScheduleAdvance,
+  updateManagedExchangeLocalFields,
+} from "@psi/managedExchangeStore";
 import { ManagedExchangeDetail } from "@bench/ManagedExchangeDetail";
 import { disclosureEntries } from "@bench/disclosureAccountingModel";
 
@@ -439,9 +446,10 @@ describe("managed exchange detail schedule entry", () => {
     expect(saved[0].schedule).toBeNull();
   });
 
-  test("a save that touched only the label carries the stored schedule verbatim", async () => {
+  test("a save that touched only the label carries no schedule edit at all", async () => {
     // The planned window and the miss count are the runner's bookkeeping; a label
-    // edit must not reset either, and must not re-resolve the agreed instant.
+    // edit must not reset either, must not re-resolve the agreed instant, and must
+    // not write the mount-time object back over what the runner has since advanced.
     const stored: ManagedExchangeSchedule = {
       anchor: new Date(2026, 7, 4, 9, 0, 0, 0).toISOString(),
       intervalDays: 7,
@@ -457,7 +465,8 @@ describe("managed exchange detail schedule entry", () => {
     await page.getByRole("button", { name: "Save settings" }).click();
 
     await vi.waitFor(() => expect(saved).toHaveLength(1));
-    expect(saved[0].schedule).toEqual(stored);
+    expect(saved[0].label).toBe("Riverbend monthly");
+    expect("schedule" in saved[0]).toBe(false);
   });
 
   test("a stored width finer than the field's unit is shown and saved as it is", async () => {
@@ -508,7 +517,7 @@ describe("managed exchange detail schedule entry", () => {
 
     await vi.waitFor(() => expect(saved).toHaveLength(1));
     expect(saved[0].label).toBe("Riverbend monthly");
-    expect(saved[0].schedule).toEqual(stored);
+    expect("schedule" in saved[0]).toBe(false);
   });
 
   test("a stored width below the entry floor survives a focus and a blur", async () => {
@@ -543,7 +552,9 @@ describe("managed exchange detail schedule entry", () => {
     await page.getByRole("button", { name: "Save settings" }).click();
 
     await vi.waitFor(() => expect(saved).toHaveLength(1));
-    expect(saved[0].schedule).toEqual(stored);
+    // No schedule edit at all is the proof the clamp left the width alone: a
+    // rewritten width would read as an operator edit and rebuild the cadence.
+    expect("schedule" in saved[0]).toBe(false);
   });
 
   test("an out-of-range window width blocks the save at its own field", async () => {
@@ -615,6 +626,141 @@ describe("managed exchange detail schedule entry", () => {
     expect(
       page.getByText("This cadence outruns the maximum age").query(),
     ).toBeNull();
+  });
+});
+
+describe("managed exchange detail local fields against the real store", () => {
+  // The editor holds the record the page mounted on, while the unattended runner
+  // advances the same record's schedule underneath it. What the save carries has to
+  // be the operator's edit and nothing else, which only a store behind the page can
+  // show: the mount-time snapshot is a valid schedule, so a write-back of it is
+  // accepted by the store and silently rewinds the runner's own bookkeeping.
+  beforeEach(clearManagedExchanges);
+  afterEach(clearManagedExchanges);
+
+  const savingTo = (id: string) => (edits: ManagedExchangeLocalEdits) =>
+    updateManagedExchangeLocalFields(id, edits).then(() => undefined);
+
+  const dailySchedule = (): ManagedExchangeSchedule => {
+    const anchor = new Date(2026, 7, 4, 9, 0, 0, 0).toISOString();
+    return {
+      anchor,
+      intervalDays: 1,
+      windowSeconds: 10_800,
+      nextWindow: anchor,
+      consecutiveMisses: 0,
+    };
+  };
+
+  /** The schedule one missed window later: the plan advanced to the next window
+   * and the miss counted, which is what the runner's own advance writes. */
+  function afterOneMissedWindow(
+    schedule: ManagedExchangeSchedule,
+  ): ManagedExchangeSchedule {
+    return {
+      ...schedule,
+      nextWindow: new Date(
+        Date.parse(schedule.nextWindow) + schedule.intervalDays * 86_400_000,
+      ).toISOString(),
+      consecutiveMisses: schedule.consecutiveMisses + 1,
+    };
+  }
+
+  test("a label-only save leaves the schedule the runner advanced behind the page", async () => {
+    const schedule = dailySchedule();
+    const stored = await createManagedExchange({
+      label: "Riverbend quarterly",
+      exchangeFile: exchangeFile(),
+      side: "inviter",
+      sharedSecret: "A".repeat(43),
+      schedule,
+    });
+
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: stored,
+        accountingRead: { kind: "none" },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onSaveLocalFields: savingTo(stored.id),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+    // The form has read the record before the store moves under it.
+    await expect
+      .element(page.getByLabelText("A window opens every (days)"))
+      .toHaveValue("1");
+
+    // The window opens, nobody arrives, and the runner writes its advance while the
+    // operator's page sits open on the schedule as it stood at mount.
+    const advanced = afterOneMissedWindow(schedule);
+    await persistManagedExchangeScheduleAdvance(stored.id, {
+      schedule: advanced,
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
+    });
+
+    await page
+      .getByRole("textbox", { name: "Label" })
+      .fill("Riverbend monthly");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect.element(page.getByText("Settings saved.")).toBeInTheDocument();
+
+    const saved = await getManagedExchange(stored.id);
+    expect(saved?.label).toBe("Riverbend monthly");
+    // The advance stands: the plan is not rewound to the window already accounted
+    // for, and the miss the escalation counts is not erased.
+    expect(saved?.schedule?.nextWindow).toBe(advanced.nextWindow);
+    expect(saved?.schedule?.consecutiveMisses).toBe(1);
+  });
+
+  test("an edited cadence replaces the schedule, bookkeeping and all", async () => {
+    const schedule = dailySchedule();
+    const stored = await createManagedExchange({
+      label: "Riverbend quarterly",
+      exchangeFile: exchangeFile(),
+      side: "inviter",
+      sharedSecret: "A".repeat(43),
+      schedule,
+    });
+
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: stored,
+        accountingRead: { kind: "none" },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onSaveLocalFields: savingTo(stored.id),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+    await expect
+      .element(page.getByLabelText("A window opens every (days)"))
+      .toHaveValue("1");
+
+    await persistManagedExchangeScheduleAdvance(stored.id, {
+      schedule: afterOneMissedWindow(schedule),
+      fromNextWindow: schedule.nextWindow,
+      fromConsecutiveMisses: schedule.consecutiveMisses,
+    });
+
+    await page.getByLabelText("A window opens every (days)").fill("7");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect.element(page.getByText("Settings saved.")).toBeInTheDocument();
+
+    // A cadence the operator did edit is a new lattice, so the count the old one
+    // accumulated goes with it -- the omission above is scoped to a cadence nobody
+    // touched, not a general refusal to write the schedule.
+    const saved = await getManagedExchange(stored.id);
+    expect(saved?.schedule?.intervalDays).toBe(7);
+    expect(saved?.schedule?.consecutiveMisses).toBe(0);
+    expect(saved?.schedule?.anchor).toBe(schedule.anchor);
   });
 });
 

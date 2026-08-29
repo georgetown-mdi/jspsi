@@ -360,12 +360,14 @@ export function scheduleEntryFieldsFrom(
 
 /**
  * Whether an entry still says exactly what a stored schedule does, so a save that
- * touched only the label or the max-age policy carries the stored schedule
- * VERBATIM instead of rebuilding it.
+ * touched only the label or the max-age policy writes NO schedule at all instead
+ * of rebuilding it.
  *
  * What rests on this is the schedule's bookkeeping: the planned window and the
- * consecutive-miss count belong to the runner, and rebuilding a cadence nobody
- * edited would reset both. The agreed instant itself is held either way -- a
+ * consecutive-miss count belong to the runner, which advances them under a page
+ * left open, so such a save must neither rebuild the cadence -- which resets both
+ * -- nor write the object the form opened on back, which rewinds them to what the
+ * page last read. The agreed instant itself is held either way -- a
  * cadence field the operator did not touch is carried through verbatim even on a
  * save that edited another (see {@link buildScheduleFromEntry}), so a wall clock
  * the operator's zone repeats or skips, which does not round-trip through the
