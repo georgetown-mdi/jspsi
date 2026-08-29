@@ -494,6 +494,73 @@ describe("saved list route: delete is a first-class, always-available action", (
     ).toBeNull();
   });
 
+  test("a command-line hand-off's confirm says the saved files keep running it", async () => {
+    // The hand-off marks no backup, so the backed-up note cannot carry the custody
+    // reminder for it: deleting this row leaves the CLI's two files and the schedule
+    // the operator set around them running the exchange.
+    const created = await createManagedExchange(
+      newExchange({ label: "Handed off to cron" }),
+    );
+    await spendManagedExchangeIfCurrent(
+      created.id,
+      created.sharedSecret,
+      "2026-07-12T09:00:00.000Z",
+      "command-line",
+    );
+
+    app.render(createElement(SavedExchanges));
+
+    await page.getByRole("button", { name: "Delete" }).click();
+
+    await expect
+      .element(
+        page.getByText(
+          "psilink.yaml and .psilink.key you saved still run this exchange",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("nor stops the runs you scheduled", { exact: false }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByText("A backup file you exported stays in your custody", {
+          exact: false,
+        })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("a migration spend's confirm keeps the backup note, not the hand-off one", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Migrated partnership" }),
+    );
+    await markManagedExchangeBackedUp(created.id, "2026-07-12T08:00:00.000Z");
+    await spendManagedExchangeIfCurrent(
+      created.id,
+      created.sharedSecret,
+      "2026-07-12T09:00:00.000Z",
+    );
+
+    app.render(createElement(SavedExchanges));
+
+    await page.getByRole("button", { name: "Delete" }).click();
+
+    await expect
+      .element(
+        page.getByText("A backup file you exported stays in your custody", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page.getByText("still run this exchange", { exact: false }).query(),
+    ).toBeNull();
+  });
+
   test("a spent (handed-off) row offers Open and Delete", async () => {
     const created = await createManagedExchange(
       newExchange({ label: "Handed off partnership" }),

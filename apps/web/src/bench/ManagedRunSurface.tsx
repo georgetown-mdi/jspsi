@@ -404,8 +404,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const downloadArtifact = (fileName: string, content: string) =>
     triggerBlobDownload(fileName, content, MANAGED_EXCHANGE_ARTIFACT_MIME);
 
-  // Every export reads the record fresh from the store and marks it in one atomic
-  // step (readRecordAndMarkBackedUp), so a mount-time React snapshot -- with a
+  // The two artifact exports read the record fresh from the store and mark it in one
+  // atomic step (readRecordAndMarkBackedUp), so a mount-time React snapshot -- with a
   // pre-rotation secret -- is never what an export serializes or the marker attests.
   const exportDeps = {
     readAndMark: readRecordAndMarkBackedUp,
@@ -848,9 +848,6 @@ export function ManagedRunSurface({ id }: { id: string }) {
               record={record}
               runInFlight={runInFlight}
               recheckRunInFlight={recheckLock}
-              onBackedUp={(backedUpAt) =>
-                setBackupMarker({ backedUpAt: backedUpAt.toISOString() })
-              }
               onHandedOff={setCommandLineHandoff}
             />
             <ManagedExchangeDetail
@@ -1128,10 +1125,13 @@ function ReinvitePanel({
 }
 
 /** The pre-run backup panel: the derived backup state ("backed up as of <date>" or
- * the actionable "Back up this exchange") plus the two export intents. A backup
- * export leaves this exchange live; a migration export hands it off to another
- * device, spending this copy. The custody guidance matches the CLI key file's:
- * the file is a plaintext credential to keep under owner-only custody. */
+ * the actionable "Back up this exchange") plus the two export intents that download
+ * the artifact this browser restores from. A backup export leaves this exchange live;
+ * a migration export hands it off to another device, spending this copy. Both are
+ * named against the command-line export below, whose two files this browser's import
+ * does not accept, so the state this panel shows is about the restorable file alone.
+ * The custody guidance matches the CLI key file's: the file is a plaintext credential
+ * to keep under owner-only custody. */
 function BackupPanel({
   marker,
   busy,
@@ -1161,9 +1161,10 @@ function BackupPanel({
         <p className={styles.calloutLead}>Back up this exchange.</p>
       )}
       <p className={styles.small}>
-        The backup file holds this exchange&apos;s secret in plain text. Keep it
-        somewhere only you can read, and never send it over an unencrypted
-        channel.
+        The backup file is the one this browser restores from: import it here to
+        bring this exchange back. It holds this exchange&apos;s secret in plain
+        text -- keep it somewhere only you can read, and never send it over an
+        unencrypted channel.
       </p>
       {failed && (
         <Alert color="red" title="That export could not be completed" mb="sm">

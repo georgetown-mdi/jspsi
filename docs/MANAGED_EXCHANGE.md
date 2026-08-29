@@ -679,8 +679,8 @@ source live and recoverable by exporting again; declining the attestation keeps
 the exchange on this device. On confirmation the source record visibly
 transitions to a spent, handed-off state -- no Run affordance, no scheduled
 runs, labeled with the handoff date -- so the cooperation-not-cryptography
-invalidation below is legible at the one moment it is violable. A spent record
-can be deleted, or revived only by importing the artifact back.
+invalidation below is legible at the one moment it is violable. A record spent this
+way can be deleted, or revived only by importing the artifact back.
 
 **A hand-off refuses a copy a run has already superseded.** Confirming either
 hand-off -- the device migration here, or the command-line export below --
@@ -764,8 +764,33 @@ a second live owner behind.
 
 On every later visit the browser names that hand-off rather than a migration's:
 the recovery a migration has -- import the artifact back -- has nothing to act on
-here, because the two files are the CLI's own, not the artifact. The exchange
-runs on the machine holding them from then on.
+here, because the two files are the CLI's own, not the artifact. An older browser
+backup does not stand in for them either. Importing an artifact exported before the
+hand-off is **refused** while the handed-off exchange is still listed here and the
+artifact carries the secret it was spent holding: importing it would either run a
+copy this browser gave away or leave that copy live beside the spent one, and one
+owner holds a recurring exchange's secret. Where an import is offered at all --
+the list's empty and could-not-read states are the only surfaces carrying one --
+the refusal names the exchange and what it has instead: it runs on the machine
+holding those two files from then on, and bringing it back to this browser means
+a fresh invitation. Alongside a healthy listing there is no import to refuse, so
+in practice the fresh invitation is the recovery an operator reaches for.
+
+Those two conditions bound it, and an import outside them installs an ordinary
+fresh exchange:
+
+- **An artifact older than the last rotation** carries a secret no spent record
+  here holds, so nothing matches it.
+- **Deleting the handed-off exchange** takes away the record the match is made
+  against -- the operator's own choice, and the same cooperation every
+  single-owner rule here rests on.
+
+Neither leaves two copies running side by side for long. An older artifact already
+carries a secret the partnership has moved past, and a copy of the current one
+diverges from the handed-off files the moment either side runs and rotates, so the
+losing copy's next run fails its handshake and surfaces through [Desync detection
+and recovery](#desync-detection-and-recovery), whose recovery is a fresh
+invitation.
 
 Two things do not travel with the files:
 
@@ -784,13 +809,17 @@ changes is **whose** address is disclosed -- the scheduling machine's rather tha
 this browser's -- and that the CLI names it in a warning on every run. Naming a
 `stun` server in the exported `psilink.yaml` is what replaces the default.
 
-The two files carry the current secret, so taking the export marks the exchange
-backed up like the other two exports do. It is a backup for the command line, not
-for this browser: reconstituting a browser copy after an eviction is the artifact
+The two files carry the current secret, but they are a backup for the command line,
+not for this browser: reconstituting a browser copy after an eviction is the artifact
 import ([Eviction recovery is the import
-flow](#eviction-recovery-is-the-import-flow)), which these two files are not. An
-operator who declines the hand-off and keeps running here should take an ordinary
-backup as well; one who confirms it has handed the exchange over, and the two
+flow](#eviction-recovery-is-the-import-flow)), which these two files are not. So --
+unlike the backup and migration exports -- taking this one **marks nothing**: the
+exchange's backup state is exactly what it was before, whether the operator confirms
+the hand-off or declines it. A backup indicator reading green is a promise that a file
+this browser restores from exists, and these files are not that file. The panel says
+so where it offers them, so the two kinds of export are told apart before either is
+downloaded. An operator who declines the hand-off and keeps running here still needs
+an ordinary backup; one who confirms it has handed the exchange over, and the two
 files are its backup of record from then on.
 
 ## Desync detection and recovery
@@ -1248,7 +1277,10 @@ moments it changes rather than as standing chrome:
   displayed line -- the operator cannot act on it except by exporting, which
   the backup state already covers -- and on WebKit a granted `persisted()` must
   never suppress the actionable state below (the grant does not reliably exempt
-  the ITP cap).
+  the ITP cap). The export that counts is the artifact one, which this browser
+  imports back: the command-line hand-off's two files are not it, and taking them
+  leaves this state exactly where it stands (see [Exporting to the command
+  line](#exporting-to-the-command-line)).
 - **Backup needed.** No current export exists: none was ever taken, or the
   secret has rotated since the last one (an export from before the last
   rotation restores a stale secret and lands in the desync recovery above).

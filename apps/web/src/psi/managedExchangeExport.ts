@@ -25,14 +25,17 @@
  * browser: it downloads the CLI's own two files ({@link composeManagedCronExport})
  * rather than the artifact, and spends the source on the same operator attestation
  * the migration uses. It is a migration by another route -- the secret is handed to
- * a scheduler on some machine -- so it takes the identical
- * read-compose-and-mark-then-attest shape, and differs only in what lands on disk.
+ * a scheduler on some machine -- so it takes the same read-then-attest shape, and
+ * differs in what lands on disk and in marking NOTHING: what it downloads is not an
+ * artifact this app's import accepts, so a backup marker stamped for it would present
+ * the record as restorable from files nothing here restores from. It reads the record
+ * by id like every other intent, and leaves the backup marker where it stands whether
+ * the hand-off is confirmed or dismissed.
  *
- * Every intent composes what it will download INSIDE the read-and-mark step rather
- * than after it. That is what keeps the marker bound to bytes that exist: the
- * command-line composition is partial -- it refuses a record this app could not have
- * composed -- and a refusal thrown inside the step aborts it, leaving no marker and
- * no other trace, so a refused export really does change nothing.
+ * The two marking intents compose what they will download INSIDE the read-and-mark
+ * step rather than after it. That is what keeps the marker bound to bytes that exist:
+ * a step that resolved without composing would leave a marker attesting bytes nothing
+ * produced, so it fails the export instead.
  *
  * Both spending intents defer their spend to an operator attestation that can arrive
  * arbitrarily later, so each spends through one atomic store step that re-reads the
@@ -48,9 +51,9 @@
  * and it is bound to the write for the reason the export's mark is bound to its read
  * -- a check the write can outrun decides nothing.
  *
- * The seams (the fresh read-compose-and-mark, the download, the currency-checked
- * spend) are injected so the intents are testable without a real download or
- * database.
+ * The seams (the marking intents' fresh read-serialize-and-mark, the command-line
+ * export's non-marking read by id, the download, the currency-checked spend) are
+ * injected so the intents are testable without a real download or database.
  */
 
 import {
@@ -164,63 +167,40 @@ export interface ManagedBackupResult {
   record: ManagedExchangeRecord;
 }
 
-/** The atomic step's result, with what the step composed from the record it read. */
-interface ManagedComposedExportResult<TComposed> extends ManagedBackupResult {
-  /** What `compose` produced from the record, inside the step that marked it. */
-  composed: TComposed;
-}
-
 /**
- * The atomic step under every export intent: one clock read, then the store's
- * read-compose-and-mark by id. Reading by id rather than from a caller-held record
- * is what keeps a stale tab -- or a stale React snapshot holding a pre-rotation
- * secret -- from being what an export serializes, and binding the marker to that
- * same read is what keeps the marker unable to attest bytes it did not read.
+ * The atomic step under the two marking intents: one clock read, then the store's
+ * read-serialize-and-mark by id, then the download of exactly those bytes. Reading by
+ * id rather than from a caller-held record is what keeps a stale tab -- or a stale
+ * React snapshot holding a pre-rotation secret -- from being what an export
+ * serializes, and serializing inside the step is what keeps the marker unable to
+ * attest bytes it did not read. A step that resolves without serializing would leave
+ * exactly that marker, so it fails the export rather than downloading.
  *
- * `compose` runs on the record inside the step, so an intent whose composition can
- * refuse the record leaves no marker when it does: the refusal aborts the step
- * rather than following a durable write.
- */
-async function readComposeAndMark<TComposed>(
-  id: string,
-  compose: (record: ManagedExchangeRecord) => TComposed,
-  deps: Pick<ManagedExportDeps, "readAndMark" | "now">,
-): Promise<ManagedComposedExportResult<TComposed>> {
-  const backedUpAt = deps.now();
-  let composition: [TComposed] | undefined;
-  const record = await deps.readAndMark(
-    id,
-    backedUpAt.toISOString(),
-    (read) => {
-      composition = [compose(read)];
-    },
-  );
-  if (composition === undefined)
-    throw new Error(
-      "the read-and-mark step resolved without composing the export, so its " +
-        "backup marker would attest bytes nothing produced",
-    );
-  return { backedUpAt, record, composed: composition[0] };
-}
-
-/**
- * Read the current record, serialize the artifact, and stamp the backup marker --
- * one atomic read-compose-and-mark -- then download exactly those bytes. Returns
- * the mark instant and the record read, so the marker and the locally-rendered
- * state carry the same clock read (no second `new Date()`) and the caller sees what
- * it exported.
+ * Returns the mark instant and the record read, so the marker and the
+ * locally-rendered state carry the same clock read (no second `new Date()`) and the
+ * caller sees what it exported.
  */
 async function readMarkAndDownload(
   id: string,
   deps: ManagedExportDeps,
 ): Promise<ManagedBackupResult> {
-  const { backedUpAt, record, composed } = await readComposeAndMark(
+  const backedUpAt = deps.now();
+  let serialized: string | undefined;
+  const record = await deps.readAndMark(
     id,
-    (read) =>
-      serializeManagedExchangeArtifact(encodeManagedExchangeArtifact(read)),
-    deps,
+    backedUpAt.toISOString(),
+    (read) => {
+      serialized = serializeManagedExchangeArtifact(
+        encodeManagedExchangeArtifact(read),
+      );
+    },
   );
-  deps.download(managedBackupFileName(backedUpAt), composed);
+  if (serialized === undefined)
+    throw new Error(
+      "the read-and-mark step resolved without serializing the export, so its " +
+        "backup marker would attest bytes nothing produced",
+    );
+  deps.download(managedBackupFileName(backedUpAt), serialized);
   return { backedUpAt, record };
 }
 
@@ -259,7 +239,7 @@ export interface ManagedMigrationDispatch {
 /**
  * Dispatch a MIGRATION export ("take over on another device"): read the current
  * record, stamp the backup marker, and download exactly those bytes -- the same
- * atomic read-compose-and-mark as a backup -- then return a dispatch whose {@link
+ * atomic read-serialize-and-mark as a backup -- then return a dispatch whose {@link
  * ManagedMigrationDispatch.confirm} spends the source. The spend is deliberately
  * NOT written here: `anchor.click()` gives no landing signal, so the source stays
  * live until the operator attests the file is saved (a cancelled or failed save
@@ -285,15 +265,17 @@ export async function dispatchManagedMigration(
   };
 }
 
-/** The platform seams the command-line export drives. The migration's seams, with a
+/** The platform seams the command-line export drives: a NON-STAMPING read of the
+ * record by id (this export marks no backup marker -- see the module header), a
  * download that carries each composed file's own media type -- the two files land as
  * the YAML and JSON documents the CLI opens, not as one artifact blob -- and a spend
  * that records which hand-off spent the copy, so the durable spent state does not
  * read as a migration's. */
-export interface ManagedCronExportDeps extends Omit<
-  ManagedMigrationDeps,
-  "download" | "spendIfCurrent"
-> {
+export interface ManagedCronExportDeps {
+  /** Read the current stored record for `id`, or `undefined` when none is stored.
+   * Read at dispatch and never from a caller-held record, so a stale tab composes the
+   * files the store's record carries or none at all. */
+  readRecord: (id: string) => Promise<ManagedExchangeRecord | undefined>;
   /** Trigger a client-side download of one composed file. */
   download: (fileName: string, content: string, mimeType: string) => void;
   /** The migration's currency-checked spend, recording the hand-off that spent the
@@ -307,12 +289,10 @@ export interface ManagedCronExportDeps extends Omit<
 }
 
 /** A dispatched command-line export awaiting the operator's "the files are saved"
- * confirmation. Both files are already downloaded and the source marked backed-up;
- * the source is spent only when {@link confirm} is called, so a dismissed or failed
- * save leaves it live. */
+ * confirmation. Both files are already downloaded; the source is spent only when
+ * {@link confirm} is called, so a dismissed or failed save leaves it live -- and its
+ * backup marker untouched either way. */
 export interface ManagedCronExportDispatch {
-  /** The instant the backup marker was stamped, from the caller's `now`. */
-  backedUpAt: Date;
   /** The record the export composed from (the fresh store read). */
   record: ManagedExchangeRecord;
   /** What the two downloads carried, and the invocation that runs them. */
@@ -330,15 +310,20 @@ export interface ManagedCronExportDispatch {
 const CRON_EXPORT_HANDOFF: ManagedSpentHandoff = "command-line";
 
 /**
- * Dispatch a COMMAND-LINE export: read the current record, compose the CLI's two
- * files from exactly that read, and stamp the backup marker -- the same atomic step
- * every export takes -- then download each file under its own name and return a
+ * Dispatch a COMMAND-LINE export: read the current record by id, compose the CLI's
+ * two files from exactly that read, download each under its own name, and return a
  * dispatch whose {@link ManagedCronExportDispatch.confirm} spends the source.
  *
- * Composing inside the step is what makes a refusal cost nothing: this composition
- * is the partial one ({@link composeManagedCronExport} refuses a record this app
- * could not have composed), and a refusal aborts the step, so no backup marker is
- * left claiming an export that never produced a byte.
+ * Nothing durable is written here, and no backup marker is stamped at any point of
+ * this export: the two files are the CLI's, not an artifact this app's import
+ * accepts, so marking the record backed up would tell the operator they hold a
+ * restorable backup they do not hold. The exchange's backup state is therefore
+ * whatever the last artifact export left it -- unchanged by taking these files, by
+ * confirming the hand-off, and by dismissing it.
+ *
+ * The composition is the partial one ({@link composeManagedCronExport} refuses a
+ * record this app could not have composed); a refusal throws before any download and
+ * leaves the store exactly as it was.
  *
  * The spend is deliberately NOT written here, for the reason
  * {@link dispatchManagedMigration} defers it: `anchor.click()` gives no landing
@@ -351,25 +336,24 @@ const CRON_EXPORT_HANDOFF: ManagedSpentHandoff = "command-line";
  * The spend records the command-line hand-off ({@link ManagedSpentHandoff}) rather
  * than a bare instant: this export produces the CLI's two files, which the import
  * flow does not accept, so the durable spent state must not read as a migration's
- * -- whose surfaces send the operator to an import that has no artifact here.
+ * -- whose surfaces send the operator to an import that has no artifact here, and
+ * whose spent copy an artifact revives.
  *
  * @throws {Error} if no record with `id` exists, or if the record is one the
  *   command-line export refuses ({@link composeManagedCronExport}).
- * @throws {ZodError} if the stored record or its sibling entry is invalid.
+ * @throws {ZodError} if the stored record is invalid.
  */
 export async function dispatchManagedCronExport(
   id: string,
   deps: ManagedCronExportDeps,
 ): Promise<ManagedCronExportDispatch> {
-  const { backedUpAt, record, composed } = await readComposeAndMark(
-    id,
-    composeManagedCronExport,
-    deps,
-  );
+  const record = await deps.readRecord(id);
+  if (record === undefined)
+    throw new Error(`no managed exchange with id ${id}`);
+  const composed = composeManagedCronExport(record);
   for (const file of [composed.config, composed.key])
     deps.download(file.fileName, file.text, file.mimeType);
   return {
-    backedUpAt,
     record,
     composed,
     confirm: (spentAt) =>

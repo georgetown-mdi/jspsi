@@ -1,6 +1,7 @@
 /**
- * The reasons both managed hand-off confirmations give when they will not spend this
- * browser's copy of the shared secret.
+ * The reasons the managed hand-offs give when they will not move this browser's copy
+ * of the shared secret: the two that hold a confirmation back before it spends the
+ * copy, and the one an import meets afterwards, when the copy is already gone.
  *
  * The device migration's "I saved the file" and the command-line export's "I saved
  * both files" each hand that copy to a new owner. A run rotates the secret at its
@@ -17,6 +18,8 @@
  * command-line export two, and what goes out of date is the copy whichever shape it
  * took.
  */
+
+import type { ManagedSpentHandoff } from "@psi/managedLocalState";
 
 /** The heading the run-in-flight reason is shown under, at both hand-offs. */
 export const RUN_IN_FLIGHT_HANDOFF_TITLE = "Wait for this run to finish";
@@ -49,3 +52,40 @@ export const SUPERSEDED_HANDOFF_REASON =
   "it, and so does creating a fresh invitation -- so what you downloaded would " +
   "not work for whoever received it. Nothing was handed over. Download this " +
   "exchange again, then confirm.";
+
+/** The heading the refused-import reason is shown under, at the import affordance. */
+export const HANDED_OFF_IMPORT_TITLE = "That exchange was handed off";
+
+/**
+ * The refusal an import meets when the backup file it was given belongs to an
+ * exchange this browser has already handed off: the copy the file would bring back is
+ * one the hand-off gave away, so the import is refused rather than reviving it or
+ * installing a second live copy beside the handed-off one. Keyed by the hand-off,
+ * because what the operator has instead is whatever that hand-off saved -- a route
+ * added later must say its own recovery here rather than inherit this one.
+ */
+const HANDED_OFF_IMPORT_REASON: Record<
+  ManagedSpentHandoff,
+  (named: string) => string
+> = {
+  "command-line": (named) =>
+    `${named} is still here, handed off to the command line: it runs from the ` +
+    "psilink.yaml and .psilink.key you saved, on the machine you saved them to, " +
+    "and that machine is its one owner. A backup file taken before the hand-off " +
+    "would run a copy you gave away, so nothing was imported. To run this " +
+    "exchange in this browser again, create a fresh invitation for your partner.",
+};
+
+/**
+ * The refused-import reason for the hand-off that spent the stored copy, naming the
+ * exchange as the operator knows it. An unlabeled exchange is named neutrally rather
+ * than by an empty pair of quotes.
+ */
+export function handedOffImportReason(
+  handoff: ManagedSpentHandoff,
+  label: string,
+): string {
+  return HANDED_OFF_IMPORT_REASON[handoff](
+    label === "" ? "That exchange" : `"${label}"`,
+  );
+}

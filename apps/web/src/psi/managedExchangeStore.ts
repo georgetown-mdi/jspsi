@@ -46,6 +46,7 @@ import type {
 import type {
   ManagedSpendOutcome,
   ManagedSpentHandoff,
+  ManagedSpentState,
 } from "./managedLocalStateShape";
 
 /** The IndexedDB database name, under the app's origin. */
@@ -627,7 +628,7 @@ export async function readRecordAndMarkBackedUp(
  * spend. The secret is the identity that decides: it is what the hand-off files
  * carry and what a rotation moves, so an edit that leaves it alone (a label, a
  * max-age policy) leaves the downloaded copy spendable. Any backup marker is left
- * untouched: a spent source has a current export by construction.
+ * untouched -- present or absent, it is the export's business, not this write's.
  *
  * @throws {ZodError} if the stored record or sibling entry is invalid; the
  *   transaction aborts and nothing is written.
@@ -688,7 +689,8 @@ export async function spendManagedExchangeIfCurrent(
  * with different recoveries and the surfaces reading this state say so: a migration
  * spend (`handoff` omitted) downloaded the artifact that clears it, reviving the
  * record in place ({@link reviveSpentManagedExchange}), while a `"command-line"`
- * hand-off downloaded the CLI's own two files, which the import flow does not accept.
+ * hand-off downloaded the CLI's own two files, which the import flow does not accept
+ * -- and an artifact predating that hand-off is refused rather than reviving the copy.
  * The result is re-validated ({@link parseManagedLocalState}) before the write, so a
  * malformed spent state aborts the transaction rather than landing.
  */
@@ -910,25 +912,54 @@ export async function persistManagedExchangeInputHandle(
 }
 
 /**
- * Revive a SPENT record whose stored secret matches the reconstructed artifact's,
- * in place -- an import of the migration artifact back onto the device that spent
- * it. The whole reconciliation runs in one transaction spanning both stores: it
- * reads every record and every sibling entry, finds a record that is spent AND
- * holds the same `sharedSecret` as `reconstructed` (the honest match -- the artifact
- * of a spent, unrun-since record carries exactly its secret; compared in memory, so
- * nothing secret-derived is ever persisted), and, if one exists, updates that
- * record's fields from the artifact (keeping its own `id` and any persisted input
- * handle), clears its spent state, and stamps the backup and import markers as of
- * `at` (a revive is itself an import event -- the desync tiering's restore evidence).
- * It returns the revived record, or `undefined` when no spent secret-match exists --
- * in which case the caller installs a fresh record instead of duplicating the husk.
+ * How {@link reviveSpentManagedExchange} reconciled an artifact against the spent
+ * records in the store:
  *
- * Only a SPENT match revives: a live record holding the same secret is a genuine
- * second owner (a re-import onto a device that never spent), so importing over it
- * would be the fork the single-owner invariant forbids; that case installs fresh and
- * the operator resolves the duplicate. The field update is re-validated through the
- * record schema, so a malformed revive aborts the transaction and leaves the store
- * untouched.
+ * - `"revived"` -- a MIGRATION-spent record held the artifact's secret and was
+ *   revived in place, carrying the revived record.
+ * - `"handed-off"` -- a spent record holding the artifact's secret was handed off
+ *   by a route of its own ({@link ManagedSpentHandoff}), which the artifact cannot
+ *   take back. Nothing was written; the caller refuses the import, naming the record
+ *   the store still holds.
+ * - `"no-match"` -- no spent record holds the artifact's secret, so the caller
+ *   installs a fresh record.
+ */
+export type ManagedReviveOutcome =
+  | { kind: "revived"; record: ManagedExchangeRecord }
+  | { kind: "handed-off"; handoff: ManagedSpentHandoff; label: string }
+  | { kind: "no-match" };
+
+/**
+ * Reconcile a reconstructed artifact against the spent records in the store, in one
+ * transaction spanning both stores: it reads every record and every sibling entry
+ * and looks for a record that is spent AND holds the same `sharedSecret` as
+ * `reconstructed` (the honest match -- the artifact of a spent, unrun-since record
+ * carries exactly its secret; compared in memory, so nothing secret-derived is ever
+ * persisted).
+ *
+ * A match spent by the DEVICE MIGRATION is revived in place -- an import of the
+ * migration artifact back onto the device that spent it: the record's fields are
+ * updated from the artifact (keeping its own `id` and any persisted input handle),
+ * its spent state cleared, and the backup and import markers stamped as of `at` (a
+ * revive is itself an import event -- the desync tiering's restore evidence).
+ *
+ * A match spent under a `handoff` is NOT revived and nothing is written: the
+ * discriminating test is that the migration leaves `handoff` ABSENT, so a hand-off
+ * route added later gates here by default rather than inheriting the migration's
+ * recovery. The exchange runs from what that hand-off saved, and the artifact -- an
+ * export taken before it -- cannot take a copy back without splitting one secret
+ * across a spent husk here and a live copy elsewhere, so the outcome names the record
+ * for the caller to refuse the import on. The refusal wins over a revive: when the
+ * artifact's secret matches BOTH a handed-off record and a migration-spent one, the
+ * outcome is the refusal naming the handed-off record, because reviving the migration
+ * copy would put a second live owner beside the one the hand-off already runs.
+ *
+ * Only a SPENT match is reconciled at all: a live record holding the same secret is a
+ * genuine second owner (a re-import onto a device that never spent), so importing over
+ * it would be the fork the single-owner invariant forbids; that case reports
+ * `"no-match"`, the caller installs fresh, and the operator resolves the duplicate.
+ * The field update is re-validated through the record schema, so a malformed revive
+ * aborts the transaction and leaves the store untouched.
  *
  * @throws {ZodError} if any stored record or sibling entry is invalid, or the
  *   revived record is invalid.
@@ -936,72 +967,89 @@ export async function persistManagedExchangeInputHandle(
 export async function reviveSpentManagedExchange(
   reconstructed: ManagedExchangeRecord,
   at: string,
-): Promise<ManagedExchangeRecord | undefined> {
+): Promise<ManagedReviveOutcome> {
   const db = await openManagedExchangeDatabase();
   try {
-    return await new Promise<ManagedExchangeRecord | undefined>(
-      (resolve, reject) => {
-        const transaction = db.transaction(
-          [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
-          "readwrite",
-          { durability: "strict" },
-        );
-        const records = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
-        const local = transaction.objectStore(
-          MANAGED_EXCHANGE_LOCAL_STORE_NAME,
-        );
-        const readRecords = records.getAll();
-        const readKeys = local.getAllKeys();
-        const readValues = local.getAll();
-        let revived: ManagedExchangeRecord | undefined;
-        let failure: unknown;
-        const applyWhenReady = () => {
-          if (
-            readRecords.readyState !== "done" ||
-            readKeys.readyState !== "done" ||
-            readValues.readyState !== "done"
-          )
-            return;
-          try {
-            const spent = new Set<string>();
-            const keys = readKeys.result;
-            const values = readValues.result;
-            for (let index = 0; index < keys.length; index += 1)
-              if (parseManagedLocalState(values[index]).spent !== undefined)
-                spent.add(String(keys[index]));
-            const match = readRecords.result
-              .map((raw) => parseManagedExchangeRecord(raw))
-              .find(
-                (existing) =>
-                  spent.has(existing.id) &&
-                  existing.sharedSecret === reconstructed.sharedSecret,
-              );
-            if (match === undefined) return;
-            revived = parseManagedExchangeRecord({
-              ...reconstructed,
-              id: match.id,
-              ...(match.inputFileHandle !== undefined
-                ? { inputFileHandle: match.inputFileHandle }
-                : {}),
-            });
-            records.put(revived);
-            local.put(
-              { backup: { backedUpAt: at }, imported: { importedAt: at } },
-              match.id,
-            );
-          } catch (error) {
-            failure = error;
-            transaction.abort();
+    return await new Promise<ManagedReviveOutcome>((resolve, reject) => {
+      const transaction = db.transaction(
+        [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
+        "readwrite",
+        { durability: "strict" },
+      );
+      const records = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
+      const local = transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
+      const readRecords = records.getAll();
+      const readKeys = local.getAllKeys();
+      const readValues = local.getAll();
+      let outcome: ManagedReviveOutcome = { kind: "no-match" };
+      let failure: unknown;
+      const applyWhenReady = () => {
+        if (
+          readRecords.readyState !== "done" ||
+          readKeys.readyState !== "done" ||
+          readValues.readyState !== "done"
+        )
+          return;
+        try {
+          const spentStates = new Map<string, ManagedSpentState>();
+          const keys = readKeys.result;
+          const values = readValues.result;
+          for (let index = 0; index < keys.length; index += 1) {
+            const { spent } = parseManagedLocalState(values[index]);
+            if (spent !== undefined)
+              spentStates.set(String(keys[index]), spent);
           }
-        };
-        readRecords.onsuccess = applyWhenReady;
-        readKeys.onsuccess = applyWhenReady;
-        readValues.onsuccess = applyWhenReady;
-        transaction.oncomplete = () => resolve(revived);
-        transaction.onerror = () => reject(failure ?? transaction.error);
-        transaction.onabort = () => reject(failure ?? transaction.error);
-      },
-    );
+          let match: ManagedExchangeRecord | undefined;
+          let handedOff:
+            | { record: ManagedExchangeRecord; handoff: ManagedSpentHandoff }
+            | undefined;
+          // Every stored record is parsed, matched or not: an invalid one aborts
+          // this transaction rather than being skipped past.
+          for (const raw of readRecords.result) {
+            const existing = parseManagedExchangeRecord(raw);
+            const spent = spentStates.get(existing.id);
+            if (
+              spent === undefined ||
+              existing.sharedSecret !== reconstructed.sharedSecret
+            )
+              continue;
+            if (spent.handoff === undefined) match ??= existing;
+            else handedOff ??= { record: existing, handoff: spent.handoff };
+          }
+          if (handedOff !== undefined) {
+            outcome = {
+              kind: "handed-off",
+              handoff: handedOff.handoff,
+              label: handedOff.record.label,
+            };
+            return;
+          }
+          if (match === undefined) return;
+          const revived = parseManagedExchangeRecord({
+            ...reconstructed,
+            id: match.id,
+            ...(match.inputFileHandle !== undefined
+              ? { inputFileHandle: match.inputFileHandle }
+              : {}),
+          });
+          records.put(revived);
+          local.put(
+            { backup: { backedUpAt: at }, imported: { importedAt: at } },
+            match.id,
+          );
+          outcome = { kind: "revived", record: revived };
+        } catch (error) {
+          failure = error;
+          transaction.abort();
+        }
+      };
+      readRecords.onsuccess = applyWhenReady;
+      readKeys.onsuccess = applyWhenReady;
+      readValues.onsuccess = applyWhenReady;
+      transaction.oncomplete = () => resolve(outcome);
+      transaction.onerror = () => reject(failure ?? transaction.error);
+      transaction.onabort = () => reject(failure ?? transaction.error);
+    });
   } finally {
     db.close();
   }

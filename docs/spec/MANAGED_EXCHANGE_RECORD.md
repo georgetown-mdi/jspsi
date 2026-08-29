@@ -739,16 +739,24 @@ record, in a separate origin-local store keyed by the record `id`, and are
   surfaces](../MANAGED_EXCHANGE.md#moment-anchored-backup-surfaces)), which is
   simply **marker present / absent**: a present marker is "backed up", no marker is
   "backup needed". "Taken since the last rotation" is enforced **structurally**, not
-  re-derived from `lastRun`, by two write-side rules:
-  - **Export binds the marker to the bytes it serialized.** Every export reads the
-    current record, serializes the bytes it will download, and stamps the marker in
-    one atomic store step (a cross-store read-compose-and-mark), then downloads
-    exactly those bytes, so the marker can only ever attest the secret the file
-    carries. A stale tab or a stale in-memory record cannot mark a secret it did not
-    serialize. Serializing inside the step is what binds the marker to bytes that
-    exist: a composition that refuses the record it read -- the command-line export
-    refuses one this app could not have composed -- throws inside the step and aborts
-    it, so no marker survives an export that produced no file.
+  re-derived from `lastRun`, by the write-side rules below -- which also settle which
+  export the state is about:
+  - **A marking export binds the marker to the bytes it serialized.** The backup and
+    migration exports read the current record, serialize the bytes they will download,
+    and stamp the marker in one atomic store step (a cross-store
+    read-serialize-and-mark), then download exactly those bytes, so the marker can only
+    ever attest the secret the file carries. A stale tab or a stale in-memory record
+    cannot mark a secret it did not serialize. Serializing inside the step is what binds
+    the marker to bytes that exist: a step that resolved without serializing would leave
+    a marker attesting bytes nothing produced, so it fails the export instead.
+  - **The command-line export marks nothing.** What it writes is the CLI's own
+    `psilink.yaml` and `.psilink.key`, which this app's import does not accept, so a
+    marker stamped for it would present the record as restorable from files nothing
+    here restores from. It takes a plain read of the record by `id` and leaves the
+    marker -- present or absent -- exactly where it stood, whether the hand-off is
+    confirmed or dismissed. The two exports are named apart where they are offered, so
+    the operator chooses between "a file this browser restores from" and "the files
+    the command line runs from" rather than between two downloads.
   - **Rotation clears the marker.** The persist-before-success rotation write clears
     the marker in the **same** transaction that advances the secret, so a rotation
     stales any prior export the instant it lands -- independent of how the run is
@@ -774,12 +782,14 @@ record, in a separate origin-local store keyed by the record `id`, and are
   operator-cooperation invalidation is legible at the one moment it is violable.
   The spend is **operator-attested, not dispatch-anchored**: a download dispatch
   (`anchor.click()`) gives no landing signal, so a cancelled or failed save must not
-  spend the source. Each export downloads its files and marks the source backed-up
-  on dispatch (a spent source has a current export by construction), then writes the
-  spent state only after the operator confirms the files are saved; a dismissed
-  dialog leaves the source live and recoverable. The attestation is checked rather
-  than taken on its word, and the check and the write are **one atomic store step**
-  (a cross-store check-and-spend), as the backup marker's are: inside a single
+  spend the source. Each export downloads its files, then writes the spent state only
+  after the operator confirms they are saved; a dismissed dialog leaves the source
+  live and recoverable. The migration also marks the source backed-up on dispatch, so
+  a migration-spent copy has a current artifact by construction; the command-line
+  export marks nothing, so a copy spent that way carries whatever backup state it
+  already had. The attestation is checked rather than taken on its word, and the
+  check and the write are **one atomic store step** (a cross-store
+  check-and-spend), as the backup marker's are: inside a single
   transaction spanning the record and sibling stores, the confirmation reads the
   record by `id`, compares the `sharedSecret` the files it downloaded carry, and
   writes the spent state only while the two match. A rotation -- whose own write
@@ -809,12 +819,42 @@ record, in a separate origin-local store keyed by the record `id`, and are
   discriminator rather than naming one recovery for both -- a spent copy is told
   the recovery its hand-off actually has.
 
-  The revive-in-place match itself is `spent` plus a secret match, not the
-  discriminator: an artifact the operator exported from this browser BEFORE a
-  command-line hand-off still carries the secret that record was spent holding, so
-  importing that older artifact revives the copy. Nothing in the protocol prevents
-  it, exactly as nothing prevents a copied artifact or a profile snapshot
-  resurrecting a migrated one -- the same operator-cooperation caveat, with the same
+  **The match is `spent` plus a secret match plus an ABSENT `handoff`.** Revive keys
+  on the absence rather than on an inequality against a known route, so a hand-off
+  added later is gated by default instead of inheriting the migration's recovery. An
+  artifact the operator exported from this browser BEFORE a command-line hand-off
+  still carries the secret that record was spent holding, and the import **refuses
+  it**: it neither revives the spent record -- that would run a copy the hand-off gave
+  away -- nor installs a fresh one, which would split one secret across a spent husk
+  here and a live row beside it. Nothing is written. A handed-off match settles the
+  import by itself: an artifact whose secret matches a handed-off record is refused
+  even when a migration-spent record holds that secret too, and the refusal names the
+  handed-off record. Where it fires, the refusal names the stored record and the
+  recovery that record actually has -- the exchange runs from the files the
+  hand-off saved, and bringing it back to this browser is a re-invite. A stated
+  limit bounds the surface: the import affordance renders only beside an empty or
+  unreadable listing, a handed-off record keeps the listing non-empty, and an
+  unreadable store fails the revive's own parse before the refusal can be
+  reported -- so the guard binds at the store's import path, and a first-class
+  surface for meeting it (an explicit re-take on the spent record) remains future
+  work.
+
+  **The refusal is scoped to this store's state at import**, and both of its
+  conditions are the operator's to remove: the handed-off record must still be in
+  this store, and its `sharedSecret` must still equal the artifact's. An artifact
+  exported before a rotation the record then took carries an older secret and
+  matches nothing, so it installs fresh; deleting the handed-off record removes the
+  match on the same terms. Neither is prevented -- the refusal is an
+  operator-cooperation property, not a cryptographic one, exactly as the revive
+  below is. Neither leaves a durable second owner either: an older artifact's
+  secret is already behind the partnership's, and a copy of the current secret
+  diverges from the handed-off one at the first rotation either side makes, so the
+  losing copy's next handshake fails and surfaces through the import/desync tiering
+  (recovery: re-invite).
+
+  Reviving a migration spend remains an operator-cooperation property, not a
+  cryptographic one: nothing in the protocol prevents a copied artifact or a profile
+  snapshot from resurrecting a migrated copy -- the same caveat, with the same
   response (see
   [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect)).
 - **The import marker** (`importedAt`, an ISO 8601 UTC instant) records that this

@@ -37,7 +37,10 @@ import { importManagedExchange } from "@psi/managedExchangeImport";
 import { managedRunFailureFromRecord } from "@bench/managedRunLaunchModel";
 import { savedExchangeRows } from "@bench/savedExchangesModel";
 
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type {
+  ManagedExchangeSchedule,
+  NewManagedExchange,
+} from "@psi/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The store-backed export/import and local sibling state, exercised against real
@@ -54,6 +57,14 @@ const webrtcLocator: WebRTCExchangeLocator = {
   host: "signaling.example.org",
   port: 3000,
   path: "/api/",
+};
+
+const schedule: ManagedExchangeSchedule = {
+  anchor: "2026-01-06T14:00:00.000Z",
+  intervalDays: 7,
+  windowSeconds: 10_800,
+  nextWindow: "2026-01-13T14:00:00.000Z",
+  consecutiveMisses: 2,
 };
 
 function newExchange(
@@ -462,8 +473,114 @@ describe("the export binds the marker to the bytes it serialized", () => {
 });
 
 describe("importing a spent secret-match revives in place", () => {
-  test("a re-import onto the spending device revives the husk, not a duplicate", async () => {
+  test("a backup export marks the record and its file restores the exchange", async () => {
+    // The export the indicator is about, end to end against the real store: it marks
+    // the record green, and the bytes it wrote bring the exchange back after the
+    // eviction the marker promises they cover.
     const source = await createManagedExchange(newExchange());
+    const deps = {
+      downloaded: [] as Array<string>,
+      readAndMark: readRecordAndMarkBackedUp,
+      download: (_fileName: string, content: string) =>
+        deps.downloaded.push(content),
+      now: () => new Date(),
+    };
+    await exportManagedBackup(source.id, deps);
+    expect((await getManagedLocalState(source.id))?.backup).toBeDefined();
+
+    await deleteManagedExchange(source.id);
+    const restored = await importManagedExchange(deps.downloaded[0]);
+    expect(restored.sharedSecret).toBe(source.sharedSecret);
+    expect(restored.exchangeFile).toEqual(source.exchangeFile);
+  });
+
+  test("an artifact predating a command-line hand-off is refused, not revived", async () => {
+    // The husk this artifact would fork: the exchange runs from the CLI files the
+    // operator saved, so the older browser backup brings nothing back. Reviving would
+    // run a copy that was handed away; installing fresh would leave the secret in a
+    // live row beside the spent husk. The import refuses instead, naming the record.
+    const source = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(source),
+    );
+    await spendManagedExchangeIfCurrent(
+      source.id,
+      source.sharedSecret,
+      "2026-07-14T13:00:00.000Z",
+      "command-line",
+    );
+
+    await expect(importManagedExchange(bytes)).rejects.toMatchObject({
+      name: "ManagedImportHandedOffError",
+      handoff: "command-line",
+      label: source.label,
+    });
+
+    // Nothing was written by the refusal: one record, still spent under its hand-off,
+    // and no import or backup marker stamped over it.
+    expect((await listManagedExchanges()).map((r) => r.id)).toEqual([
+      source.id,
+    ]);
+    expect(await getManagedLocalState(source.id)).toEqual({
+      spent: { spentAt: "2026-07-14T13:00:00.000Z", handoff: "command-line" },
+    });
+  });
+
+  test("a hand-off match refuses even beside a migration-spent match", async () => {
+    // Both spent shapes hold the artifact's secret at once: the migration copy the
+    // artifact would revive, and the copy a command-line hand-off runs from. Reviving
+    // the migration husk would put a second live owner beside that hand-off, so the
+    // refusal wins and names the handed-off record.
+    const migrated = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(migrated),
+    );
+    const handedOff = await createManagedExchange(
+      newExchange({
+        label: "Riverbend quarterly (command line)",
+        sharedSecret: migrated.sharedSecret,
+      }),
+    );
+    await spendManagedExchangeIfCurrent(
+      migrated.id,
+      migrated.sharedSecret,
+      "2026-07-14T13:00:00.000Z",
+    );
+    await spendManagedExchangeIfCurrent(
+      handedOff.id,
+      handedOff.sharedSecret,
+      "2026-07-14T14:00:00.000Z",
+      "command-line",
+    );
+    const before = [
+      await getManagedExchange(migrated.id),
+      await getManagedExchange(handedOff.id),
+    ];
+
+    await expect(importManagedExchange(bytes)).rejects.toMatchObject({
+      name: "ManagedImportHandedOffError",
+      handoff: "command-line",
+      label: handedOff.label,
+    });
+
+    // Nothing was written: no revive of the migration husk, no fresh install, and both
+    // records still carry exactly the spent state they were left with.
+    const all = await listManagedExchanges();
+    expect(all.map((r) => r.id).sort()).toEqual(
+      [migrated.id, handedOff.id].sort(),
+    );
+    expect(await getManagedExchange(migrated.id)).toEqual(before[0]);
+    expect(await getManagedExchange(handedOff.id)).toEqual(before[1]);
+    expect(await getManagedLocalState(migrated.id)).toEqual({
+      spent: { spentAt: "2026-07-14T13:00:00.000Z" },
+    });
+    expect(await getManagedLocalState(handedOff.id)).toEqual({
+      spent: { spentAt: "2026-07-14T14:00:00.000Z", handoff: "command-line" },
+    });
+  });
+
+  test("a re-import onto the spending device revives the husk, not a duplicate", async () => {
+    const source = await createManagedExchange(newExchange({ schedule }));
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
@@ -479,11 +596,22 @@ describe("importing a spent secret-match revives in place", () => {
     const revived = await importManagedExchange(bytes);
     expect(revived.id).toBe(source.id);
     expect(revived.sharedSecret).toBe(source.sharedSecret);
+    // The revive restores the whole artifact, not just the secret: the unattended
+    // path picks the recurrence back up at the window and miss count the artifact
+    // carries, rather than reviving an attended-only husk.
+    expect(revived.schedule).toEqual(
+      importManagedExchangeArtifact(bytes).schedule,
+    );
+    expect(revived.schedule).toEqual(schedule);
     const all = await listManagedExchanges();
     expect(all.map((r) => r.id)).toEqual([source.id]);
     const local = await getManagedLocalState(source.id);
     expect(local?.spent).toBeUndefined();
     expect(local?.backup).toBeDefined();
+    // A revive is an import event: it stamps the restore evidence the desync
+    // tiering reads, at the same instant as the backup marker it writes with it.
+    expect(local?.imported?.importedAt).toEqual(expect.any(String));
+    expect(local?.imported?.importedAt).toBe(local?.backup?.backedUpAt);
   });
 
   test("importing over a LIVE secret-match installs fresh (never forks a live owner)", async () => {
