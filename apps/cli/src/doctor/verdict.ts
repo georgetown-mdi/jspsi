@@ -5,6 +5,8 @@
 
 import { redactPrivateKeyMaterial } from "@psilink/core";
 
+import { asciiSafeJsonLine } from "../util/jsonLine";
+
 /**
  * Schema version of the `--json` verdict. A consumer reads this field first and
  * refuses a version it does not know; every additive field is compatible within
@@ -32,8 +34,16 @@ export type DoctorCheckStatus = "ok" | "warn" | "fail" | "skipped";
  */
 export type DoctorOverall = "ok" | "fix_and_retry" | "fatal";
 
+// The two shapes the emitted document is made of are declared as type aliases
+// rather than interfaces: TypeScript grants an object type alias the implicit
+// index signature that makes a verdict assignable to the encoder's
+// JsonLineObject parameter, and grants an interface none. Neither declares an
+// index signature of its own, so a literal still cannot carry a member the
+// shape does not name -- which is what keeps the human-only fields of a check
+// record out of the document.
+
 /** One check as it appears in the `--json` verdict. */
-export interface DoctorCheck {
+export type DoctorCheck = {
   /** Stable identifier; the id set per mode is fixed and ordered. */
   id: string;
   status: DoctorCheckStatus;
@@ -41,7 +51,7 @@ export interface DoctorCheck {
   meaning?: string;
   /** What to do about it. */
   action?: string;
-}
+};
 
 /**
  * A check plus the fields that exist only for the human rendering. `summary` is
@@ -66,12 +76,12 @@ export interface DoctorReport {
 }
 
 /** The `--json` document. */
-export interface DoctorVerdict {
+export type DoctorVerdict = {
   version: number;
   mode: DoctorMode;
   overall: DoctorOverall;
   checks: DoctorCheck[];
-}
+};
 
 // Record builders shared by both batteries.
 
@@ -162,9 +172,19 @@ export function verdictOf(report: DoctorReport): DoctorVerdict {
   };
 }
 
-/** The single stdout line the `--json` form emits. */
+/**
+ * The single stdout line the `--json` form emits. A check's `meaning` and
+ * `action` interpolate environment- and tool-derived text -- the operator's
+ * subdirectory, an `smbclient` status word -- so the line rides
+ * {@link asciiSafeJsonLine}, which leaves every byte of it printable ASCII
+ * while the keys, the value types, and the parsed values stay exactly what
+ * `JSON.stringify` alone produces. The escapes are JSON's own, so this is no
+ * second escaping altitude: a launcher that renders a parsed field to a human
+ * still escapes it once, at its own sink (see CONTRIBUTING.md, Operator-facing
+ * escaping).
+ */
 export function verdictJson(report: DoctorReport): string {
-  return JSON.stringify(verdictOf(report));
+  return asciiSafeJsonLine(verdictOf(report));
 }
 
 /**

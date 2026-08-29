@@ -9,7 +9,11 @@ import {
   verdictLines,
   verdictOf,
 } from "../../src/doctor/verdict";
-import type { DoctorCheckRecord, DoctorReport } from "../../src/doctor/verdict";
+import type {
+  DoctorCheck,
+  DoctorCheckRecord,
+  DoctorReport,
+} from "../../src/doctor/verdict";
 
 function report(checks: DoctorCheckRecord[]): DoctorReport {
   return { mode: "probe", checks };
@@ -75,6 +79,94 @@ describe("the JSON verdict is the launcher-facing contract", () => {
     );
     expect(line).not.toContain(String.fromCharCode(0x1b));
     expect(line.split("\n")).toHaveLength(1);
+  });
+
+  test("a human-only field cannot be declared on the emitted shapes", () => {
+    // What the document withholds is a type-level property of the two shapes
+    // verdictJson serializes, and the type aliases they are declared as gain no
+    // index signature that would admit a member they do not declare. An
+    // unnecessary directive is itself a typecheck failure, so this stops passing
+    // the moment that changes.
+    // @ts-expect-error a check object carries no summary
+    const check: DoctorCheck = { id: "a", status: "ok", summary: "s" };
+    expect(check.id).toBe("a");
+  });
+});
+
+describe("the JSON verdict line is printable ASCII", () => {
+  // A launcher that cannot classify a line prints it -- to a terminal, or into a
+  // log a person later reads -- and a check's meaning and action interpolate
+  // strings the environment and smbclient chose. The line therefore has to be
+  // safe as BYTES, which bare JSON.stringify does not make it: it escapes
+  // U+0000-U+001F, the quote and the backslash, and passes DEL, the C1 range and
+  // U+2028/U+2029 through.
+  const DEL = String.fromCharCode(0x7f);
+  const C1_CSI = String.fromCharCode(0x9b);
+  const PRINTABLE_ASCII_ONLY = /^[\x20-\x7e]*$/;
+
+  function lineWith(meaning: string, action: string): string {
+    return verdictJson(
+      report([
+        {
+          id: "subdirectory",
+          status: "fail",
+          summary: "the subfolder would not open.",
+          meaning,
+          action,
+        },
+      ]),
+    );
+  }
+
+  test("a DEL and a C1 byte in a meaning are escaped, not passed through", () => {
+    const meaning = `'a${DEL}b${C1_CSI}c' names a file, not a folder.`;
+    // The premise, driven rather than asserted in prose.
+    const bare = JSON.stringify({ meaning });
+    expect(bare).toContain(DEL);
+    expect(bare).toContain(C1_CSI);
+
+    const line = lineWith(meaning, "give the folder, not a file in it.");
+    expect(line).toContain(
+      `"meaning":"'a\\u007fb\\u009bc' names a file, not a folder."`,
+    );
+    expect(PRINTABLE_ASCII_ONLY.test(line)).toBe(true);
+  });
+
+  test("an action carrying the same bytes is escaped the same way", () => {
+    const line = lineWith("m", `check ${DEL}${C1_CSI} and run this again.`);
+    expect(line).toContain(
+      `"action":"check \\u007f\\u009b and run this again."`,
+    );
+    expect(PRINTABLE_ASCII_ONLY.test(line)).toBe(true);
+  });
+
+  test("every byte of latin1 crosses as printable ASCII on one line", () => {
+    const everyByte = Array.from({ length: 256 }, (_, code) =>
+      String.fromCharCode(code),
+    ).join("");
+    const line = lineWith(everyByte, everyByte);
+    expect(PRINTABLE_ASCII_ONLY.test(line)).toBe(true);
+    expect(line.split("\n")).toHaveLength(1);
+  });
+
+  test("the document a consumer parses back is unchanged by the encoding", () => {
+    // The escapes are JSON's own, so the keys, the value types and the parsed
+    // values are what JSON.stringify alone would have produced: nothing here for
+    // a launcher's own display escape to double.
+    const built = report([
+      { id: "tcp_445", status: "ok", summary: "open." },
+      {
+        id: "subdirectory",
+        status: "fail",
+        summary: "refused.",
+        meaning: `'x${DEL} y${C1_CSI}' names a file, not a folder.`,
+        action: `back\\slash "quote" \u{1f600}`,
+        detail: "NT_STATUS_ACCESS_DENIED",
+      },
+    ]);
+    expect(JSON.parse(verdictJson(built))).toEqual(
+      JSON.parse(JSON.stringify(verdictOf(built))),
+    );
   });
 });
 
