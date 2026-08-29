@@ -2,9 +2,9 @@
  * The pure model behind the saved-exchanges affordance: turning a stored managed
  * record and its local sibling state into the small, honest summary the lobby's run
  * list shows -- the label, this party's side, a one-line last-run status, the
- * derived backup state, and the spent (handed-off) state. No React, no IndexedDB:
- * the store reads and the actions live in the components, so the display derivation
- * is unit-testable in Node.
+ * schedule's due-ness where one is agreed, the derived backup state, and the spent
+ * (handed-off) state. No React, no IndexedDB: the store reads and the actions live
+ * in the components, so the display derivation is unit-testable in Node.
  *
  * This is deliberately NOT the management list: it lists stored records with a run
  * action, the backup state, and (for a spent record) no run action. Add/remove and
@@ -17,9 +17,15 @@ import { deriveManagedFailureTier } from "@psi/managedFailureTiers";
 import { managedExchangeLapsed } from "@psi/managedExpiry";
 
 import { dateLabel, dateTimeLabel } from "./inviterModel";
+import {
+  repeatedMissCoordination,
+  scheduleDueLine,
+  scheduleDueness,
+} from "./scheduleSurfacingModel";
 
 import type {
   ManagedExchangeRecord,
+  ManagedExchangeSchedule,
   ManagedExchangeSide,
 } from "@psi/managedExchangeRecord";
 import type {
@@ -41,6 +47,17 @@ export const SIDE_LABEL: Record<ManagedExchangeSide, string> = {
  * actionable state. */
 export type SavedExchangeBackup =
   { kind: "backed-up"; asOf: string } | { kind: "backup-needed" };
+
+/** The schedule lines a row carries for a record with an agreed schedule: where
+ * the recurrence stands at the row's `now`, and the coordination line a run of
+ * missed windows earns (see {@link ./scheduleSurfacingModel.ts}). */
+export interface SavedExchangeScheduleLines {
+  /** Where the recurrence stands: a window open now, or the next one. */
+  dueLine: string;
+  /** The escalated coordination line, once the record's consecutive-miss count
+   * reaches the threshold; absent below it. */
+  missLine?: string;
+}
 
 /** One row in the saved-exchanges run list: everything the list renders for a
  * stored record, plus the record `id` the run action dispatches on. */
@@ -68,6 +85,10 @@ export interface SavedExchangeRow {
    * command-line files do not), so the row names the one that applies. Absent on a
    * row that is not spent, and on a migration spend. */
   spentHandoff?: ManagedSpentHandoff;
+  /** The schedule lines, for a record that carries an agreed schedule and is not
+   * spent (see {@link scheduleLines}). Absent otherwise, so a row for an exchange
+   * nobody scheduled says nothing about scheduling. */
+  schedule?: SavedExchangeScheduleLines;
 }
 
 /** The one-line status a failure tier reads as in the list -- a specific but quiet
@@ -138,6 +159,20 @@ function backupFor(local: ManagedLocalState | undefined): SavedExchangeBackup {
   return { kind: "backup-needed" };
 }
 
+/** The schedule lines for a row: where the recurrence stands at `now`, and the
+ * coordination line once the record's own consecutive-miss count has reached the
+ * escalation threshold. */
+function scheduleLines(
+  schedule: ManagedExchangeSchedule,
+  now: number,
+): SavedExchangeScheduleLines {
+  const coordination = repeatedMissCoordination(schedule);
+  return {
+    dueLine: scheduleDueLine(scheduleDueness(schedule, now)),
+    ...(coordination !== undefined ? { missLine: coordination.line } : {}),
+  };
+}
+
 /**
  * Derive the display row for a stored record as of `now`, given its local sibling
  * state (the backup marker and any spent state). The last-run status carries a
@@ -145,6 +180,10 @@ function backupFor(local: ManagedLocalState | undefined): SavedExchangeBackup {
  * the marker's presence; a spent record names its handoff date and which hand-off it
  * was, and the list suppresses its run action. `now` is injected so the expiry note
  * is pure and testable.
+ *
+ * A record carrying an agreed schedule also carries its schedule lines -- unless it
+ * is spent, whose copy this browser no longer runs: naming a next window on a row
+ * with no run action would read as a run this browser is going to make.
  */
 export function savedExchangeRow(
   record: ManagedExchangeRecord,
@@ -165,7 +204,9 @@ export function savedExchangeRow(
             ? { spentHandoff: local.spent.handoff }
             : {}),
         }
-      : {}),
+      : record.schedule !== undefined
+        ? { schedule: scheduleLines(record.schedule, now) }
+        : {}),
   };
 }
 

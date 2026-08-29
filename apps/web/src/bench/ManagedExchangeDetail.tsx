@@ -12,6 +12,7 @@ import {
 import { Link } from "@tanstack/react-router";
 
 import { DisclosureSection } from "@components/DisclosureSection";
+import { storedInputHandleUsable } from "@psi/managedInputHandle";
 import { triggerBlobDownload } from "@components/blobDownload";
 
 import {
@@ -37,7 +38,9 @@ import {
   connectionRows,
   linkageTermsRows,
   runHistoryEntries,
+  scheduleView,
 } from "./managedDetailModel";
+import { REPEATED_MISS_TITLE } from "./scheduleSurfacingModel";
 import { dateLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
@@ -54,10 +57,10 @@ import type { StoredDisclosureAccounting } from "@psi/disclosureAccounting";
  * The managed exchange detail sections composed onto the per-partnership home at
  * `/saved/$id` (below the run affordance in {@link ./ManagedRunSurface.tsx}): the
  * read-only configuration a compliance user inspects, the local-fields editor, the
- * run history, and the accounting of disclosures. Each is its own component so the
- * run surface stays the run affordance and these compose beside it; the derivations
- * and copy are the pure {@link ./managedDetailModel.ts}'s and
- * {@link ./disclosureAccountingModel.ts}'s.
+ * agreed run schedule where one exists, the run history, and the accounting of
+ * disclosures. Each is its own component so the run surface stays the run
+ * affordance and these compose beside it; the derivations and copy are the pure
+ * {@link ./managedDetailModel.ts}'s and {@link ./disclosureAccountingModel.ts}'s.
  *
  * The agreed terms are read-only here -- fixed for this partnership; a change to
  * them is a new exchange, not an in-place edit ({@link ConfigurationView} says so
@@ -121,6 +124,7 @@ export function ManagedExchangeDetail({
         reinviteFailed={reinviteFailed}
       />
       <LocalFieldsEditor record={record} onSave={onSaveLocalFields} />
+      <RunSchedule record={record} />
       <RunHistory record={record} />
       <DisclosureAccountingView
         read={accountingRead}
@@ -382,6 +386,53 @@ function LocalFieldsEditor({
       <Button mt="sm" onClick={save} loading={saving} disabled={!canSave}>
         Save settings
       </Button>
+    </div>
+  );
+}
+
+/**
+ * The agreed run schedule, read-only: the cadence, where the recurrence stands at
+ * this render, and the states this browser owes the operator honestly around it --
+ * that a window passing while nothing is open here simply passes, that a browser
+ * holding no pointer to the input file cannot meet a window with nobody present,
+ * and, once misses have accumulated, the coordination prompt.
+ *
+ * A record with no agreed schedule renders nothing here: no surface sets one yet,
+ * so an empty state would invite something that does not exist.
+ *
+ * The instant is read at render (`Date.now()`) rather than held in state: the
+ * section is a reading of where the recurrence stands when the operator opened it,
+ * and a window that opens or closes while they sit on the page is the next visit's
+ * reading, not a ticking one.
+ */
+function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
+  const view = scheduleView(
+    record,
+    storedInputHandleUsable(record.inputFileHandle),
+    Date.now(),
+  );
+  if (view === undefined) return null;
+  return (
+    <div className={styles.callout}>
+      <h2 className={styles.eyebrow}>Run schedule</h2>
+      <p className={styles.calloutLead}>{view.dueLine}</p>
+      <p className={styles.small}>{view.cadence}</p>
+      {view.coordination !== undefined && (
+        <Alert color="yellow" title={REPEATED_MISS_TITLE} mt="sm" mb="sm">
+          {view.coordination.prompt}
+        </Alert>
+      )}
+      <p className={`${styles.small} ${styles.sub}`}>{view.attendanceNote}</p>
+      {view.inputReselectionNote !== undefined && (
+        <p className={`${styles.small} ${styles.sub}`}>
+          {view.inputReselectionNote}
+        </p>
+      )}
+      <p className={`${styles.small} ${styles.sub}`}>
+        This schedule is what you and your partner agreed out of band; it is
+        kept only in this browser and is never sent anywhere. Changing it is not
+        offered here yet.
+      </p>
     </div>
   );
 }

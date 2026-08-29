@@ -34,6 +34,7 @@ import { createAppMount } from "./renderApp";
 
 import type {
   ManagedExchangeLocalEdits,
+  ManagedExchangeSchedule,
   ManagedExchangeSide,
   NewManagedExchange,
 } from "@psi/managedExchangeRecord";
@@ -342,6 +343,154 @@ describe("managed exchange detail local fields", () => {
           exact: false,
         }),
       )
+      .toBeInTheDocument();
+  });
+});
+
+describe("managed exchange detail run schedule", () => {
+  /** A daily cadence with a three-hour window, anchored `opensInMs` from the real
+   * clock the section reads: negative puts the window's open in the past, so a
+   * window is open right now; positive leaves it ahead. */
+  function schedule(
+    opensInMs: number,
+    overrides: Partial<ManagedExchangeSchedule> = {},
+  ): ManagedExchangeSchedule {
+    const anchor = new Date(Date.now() + opensInMs).toISOString();
+    return {
+      anchor,
+      intervalDays: 1,
+      windowSeconds: 10_800,
+      nextWindow: anchor,
+      consecutiveMisses: 0,
+      ...overrides,
+    };
+  }
+
+  function renderWithSchedule(scheduled?: ManagedExchangeSchedule) {
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record(
+          "inviter",
+          scheduled !== undefined ? { schedule: scheduled } : {},
+        ),
+        accountingRead: { kind: "none" },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+  }
+
+  test("a record with no agreed schedule renders no schedule section", async () => {
+    renderWithSchedule();
+
+    // The other sections still render, so this is not a blank surface passing.
+    await expect
+      .element(page.getByRole("heading", { name: "Run history" }))
+      .toBeInTheDocument();
+    expect(
+      page.getByRole("heading", { name: "Run schedule" }).query(),
+    ).toBeNull();
+  });
+
+  test("an open window is named as open, beside the agreed cadence", async () => {
+    renderWithSchedule(schedule(-60 * 60 * 1000));
+
+    await expect
+      .element(page.getByRole("heading", { name: "Run schedule" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Run window open now", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("A run window opens every day and stays open 3 hours", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a window still ahead is named as the next one", async () => {
+    renderWithSchedule(schedule(2 * 60 * 60 * 1000));
+
+    await expect
+      .element(page.getByText("Next run window:", { exact: false }))
+      .toBeInTheDocument();
+  });
+
+  test("the section promises no run this browser will not make", async () => {
+    renderWithSchedule(schedule(-60 * 60 * 1000));
+
+    await expect
+      .element(
+        page.getByText(
+          "A window that opens while this browser is closed passes without a run",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+    // No schedule-entry surface exists, so the section says so rather than
+    // implying an editor is somewhere else on the page.
+    await expect
+      .element(
+        page.getByText("Changing it is not offered here yet", { exact: false }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a record holding no input handle says nothing can run with nobody present", async () => {
+    // A record built here carries no File System Access handle, which is the state
+    // of every record on a browser without the API and of every imported one.
+    renderWithSchedule(schedule(-60 * 60 * 1000));
+
+    await expect
+      .element(
+        page.getByText(
+          "no run of this exchange can happen with nobody present",
+          {
+            exact: false,
+          },
+        ),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a single miss raises no coordination prompt", async () => {
+    renderWithSchedule(schedule(-60 * 60 * 1000, { consecutiveMisses: 1 }));
+
+    await expect
+      .element(page.getByRole("heading", { name: "Run schedule" }))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByText("Runs are not happening on schedule", { exact: false })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("the second consecutive miss raises the coordination prompt, naming both checks", async () => {
+    renderWithSchedule(schedule(-60 * 60 * 1000, { consecutiveMisses: 2 }));
+
+    await expect
+      .element(
+        page.getByText("Runs are not happening on schedule", { exact: false }),
+      )
+      .toBeInTheDocument();
+    // Both checks -- the partner, and this device's own clock -- and no pause
+    // taken on the operator's behalf.
+    await expect
+      .element(page.getByText("still running this exchange", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("this device's own clock", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("the agreed cadence stands", { exact: false }))
       .toBeInTheDocument();
   });
 });

@@ -10,7 +10,10 @@ import {
   savedExchangeRows,
 } from "@bench/savedExchangesModel";
 
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
+import type {
+  ManagedExchangeRecord,
+  ManagedExchangeSchedule,
+} from "@psi/managedExchangeRecord";
 import type { ManagedLocalState } from "@psi/managedLocalState";
 
 // The saved-exchanges run list's display derivation, tested in Node: the side
@@ -241,6 +244,95 @@ describe("savedExchangeRow spent state", () => {
     expect(
       savedExchangeRow(record(), undefined, NOW).spentAsOf,
     ).toBeUndefined();
+  });
+});
+
+describe("savedExchangeRow schedule lines", () => {
+  // NOW is 2026-07-14T12:00Z: window 0 of this daily cadence opened an hour before
+  // it and closes two hours after, so NOW sits inside a window.
+  const daily: ManagedExchangeSchedule = {
+    anchor: "2026-07-14T11:00:00.000Z",
+    intervalDays: 1,
+    windowSeconds: 10_800,
+    nextWindow: "2026-07-14T11:00:00.000Z",
+    consecutiveMisses: 0,
+  };
+
+  test("a record with no schedule carries no schedule lines at all", () => {
+    // Nothing about scheduling exists for an exchange nobody scheduled, so the row
+    // is exactly what it was before schedules were surfaced.
+    expect(savedExchangeRow(record(), undefined, NOW).schedule).toBeUndefined();
+  });
+
+  test("an open window is named as open, with when it closes", () => {
+    const row = savedExchangeRow(record({ schedule: daily }), undefined, NOW);
+    expect(row.schedule?.dueLine).toMatch(/^Run window open now, until /);
+    expect(row.schedule?.missLine).toBeUndefined();
+  });
+
+  test("between windows the next one is named, not the one that passed", () => {
+    // This cadence's window opened at 06:00 and closed at 09:00, three hours
+    // before NOW: the row names tomorrow's window rather than today's.
+    const row = savedExchangeRow(
+      record({
+        schedule: {
+          ...daily,
+          anchor: "2026-07-13T06:00:00.000Z",
+          nextWindow: "2026-07-13T06:00:00.000Z",
+        },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.schedule?.dueLine).toMatch(/^Next run window: /);
+  });
+
+  test("one miss stays quiet; the second puts the coordination line on the row", () => {
+    const once = savedExchangeRow(
+      record({ schedule: { ...daily, consecutiveMisses: 1 } }),
+      undefined,
+      NOW,
+    );
+    expect(once.schedule?.missLine).toBeUndefined();
+
+    const twice = savedExchangeRow(
+      record({ schedule: { ...daily, consecutiveMisses: 2 } }),
+      undefined,
+      NOW,
+    );
+    // The list's quiet form of the coordination state: both checks named, the
+    // full prompt left to the exchange's own surface.
+    expect(twice.schedule?.missLine).toMatch(/partner/i);
+    expect(twice.schedule?.missLine).toMatch(/clock/i);
+    expect(twice.schedule?.missLine).not.toMatch(/attack|tamper|desync/i);
+  });
+
+  test("a lapsed secret keeps its window line beside the lapse", () => {
+    // The two states compose rather than one suppressing the other: a lapse is
+    // recovered by a re-invite, which keeps the cadence the partnership agreed, so
+    // the row names the lapse AND where the recurrence stands. Contrast the spent
+    // row below, whose copy this browser no longer runs at all.
+    const row = savedExchangeRow(
+      record({ expires: "2026-07-01T00:00:00.000Z", schedule: daily }),
+      undefined,
+      NOW,
+    );
+    expect(row.expired).toBe(true);
+    expect(row.status).toMatch(/lapsed/);
+    expect(row.schedule?.dueLine).toMatch(/^Run window open now, until /);
+  });
+
+  test("a spent row names no window: this browser's copy no longer runs", () => {
+    const local: ManagedLocalState = {
+      spent: { spentAt: "2026-07-12T09:00:00.000Z", handoff: "command-line" },
+    };
+    const row = savedExchangeRow(
+      record({ schedule: { ...daily, consecutiveMisses: 3 } }),
+      local,
+      NOW,
+    );
+    expect(row.spentAsOf).toBeDefined();
+    expect(row.schedule).toBeUndefined();
   });
 });
 

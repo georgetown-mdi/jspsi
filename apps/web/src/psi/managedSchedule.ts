@@ -41,7 +41,7 @@ const MS_PER_SECOND = 1000;
 
 /** The largest instant an ECMAScript `Date` represents; a value outside it is
  * not a clock reading at all. */
-const MAX_TIME_VALUE = 8.64e15;
+export const MAX_TIME_VALUE = 8.64e15;
 
 /** The instants a stored UTC instant carries: the record's validator admits a
  * four-digit year alone, so anything before year 0 or after year 9999 has only

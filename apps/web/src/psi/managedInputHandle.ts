@@ -48,6 +48,21 @@ export function fileSystemAccessSupported(): boolean {
   return typeof globalThis.FileSystemFileHandle !== "undefined";
 }
 
+/**
+ * Whether a record's stored input-file pointer can actually be followed in this
+ * runtime: a handle is held AND {@link fileSystemAccessSupported} says there is an
+ * API to open it with. Both halves are required -- a held handle on a runtime
+ * without the API is a pointer nothing here can read -- so the run path (which
+ * reads the input through it) and the schedule surface (which owes the operator the
+ * standing consequence of holding no usable pointer) decide it identically rather
+ * than each spelling the conjunction out.
+ */
+export function storedInputHandleUsable(
+  handle: FileSystemFileHandle | undefined,
+): boolean {
+  return handle !== undefined && fileSystemAccessSupported();
+}
+
 /** A selected file that MAY carry a File System Access handle. The bench's file
  * intake (Mantine's Dropzone over `file-selector`) attaches a `handle` to a
  * dropped file in a secure context on Chromium, so a managed deposit can capture

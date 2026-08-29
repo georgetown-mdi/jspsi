@@ -32,10 +32,10 @@ import {
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managedExchangeArtifact";
 import { canReinviteFromRecord } from "@psi/managedReinvite";
 import { deriveManagedBackupState } from "@psi/managedBackupState";
-import { fileSystemAccessSupported } from "@psi/managedInputHandle";
 import { managedRerunCompletion } from "@psi/managedCompletionSurface";
 import { reinviteManagedExchange } from "@psi/managedReinviteDriver";
 import { runManagedExchangeInBrowser } from "@psi/managedRunDriver";
+import { storedInputHandleUsable } from "@psi/managedInputHandle";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import {
@@ -260,11 +260,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
       });
   }, [reinvite, reinviteSource]);
 
-  // Where the File System Access API exists and the record holds a handle, the run
-  // reads through it (attended, so a gone permission may be re-prompted once);
-  // otherwise the operator re-selects the file each run.
-  const hasHandle =
-    record?.inputFileHandle !== undefined && fileSystemAccessSupported();
+  // With a usable pointer the run reads through it (attended, so a gone permission
+  // may be re-prompted once); otherwise the operator re-selects the file each run.
+  const hasHandle = storedInputHandleUsable(record?.inputFileHandle);
 
   function inputSource(): ManagedInputSource | undefined {
     if (record === undefined) return undefined;

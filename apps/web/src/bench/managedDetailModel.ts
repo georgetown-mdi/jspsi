@@ -2,9 +2,10 @@
  * The pure derivation behind the managed exchange detail view (the per-partnership
  * home at `/saved/$id`): the read-only configuration a compliance user inspects
  * (the agreed terms, the channel and partner endpoint), this party's side label,
- * the most-recent-run history entry, and the honest framing of the self-attested
- * record view. No React, no IndexedDB -- the derivations and copy are unit-testable
- * in Node, and the components stay thin over this model.
+ * the agreed schedule's due-ness where one exists, the most-recent-run history
+ * entry, and the honest framing of the self-attested record view. No React, no
+ * IndexedDB -- the derivations and copy are unit-testable in Node, and the
+ * components stay thin over this model.
  *
  * The agreed terms (the persisted exchange-file document) are READ-ONLY here: a
  * change to them is a re-invite, not an in-place edit (see
@@ -21,6 +22,14 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
+import {
+  SCHEDULE_ATTENDANCE_NOTE,
+  SCHEDULE_INPUT_RESELECTION_NOTE,
+  repeatedMissCoordination,
+  scheduleCadenceLine,
+  scheduleDueLine,
+  scheduleDueness,
+} from "./scheduleSurfacingModel";
 import { dateTimeLabel } from "./inviterModel";
 
 import type { Displayable, ExchangeSpec } from "@psilink/core";
@@ -29,6 +38,7 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSide,
 } from "@psi/managedExchangeRecord";
+import type { RepeatedMissCoordination } from "./scheduleSurfacingModel";
 
 /** The operator-facing name for each side of the partnership. */
 export const SIDE_LABELS: Record<ManagedExchangeSide, string> = {
@@ -132,6 +142,66 @@ export function connectionRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
     });
   }
   return rows;
+}
+
+/**
+ * The read-only run-schedule section: the agreed cadence, where the recurrence
+ * stands right now, and the states this browser must be honest about around it.
+ * Everything here is derived at render time from the record's own schedule and the
+ * instant it is read at (see {@link ./scheduleSurfacingModel.ts}); nothing is
+ * persisted, advanced, or promised.
+ *
+ * The section is read-only by design: no surface sets a schedule yet, so a record
+ * carries one only from an import or an earlier stored write, and a half-built
+ * editor would be worse than none (see {@link ./ManagedExchangeDetail.tsx}'s
+ * local-fields editor).
+ */
+export interface ScheduleView {
+  /** The agreed cadence in words. */
+  cadence: string;
+  /** Where the recurrence stands at the instant read: a window open now, or the
+   * next one. */
+  dueLine: string;
+  /** What this browser does with a schedule, and what the operator does about it.
+   * Standing copy: it holds whether or not a window is open. */
+  attendanceNote: string;
+  /** The escalated coordination state, once the record's consecutive-miss count
+   * has reached the threshold; absent below it. */
+  coordination?: RepeatedMissCoordination;
+  /** Present when this browser holds no usable pointer to the input file, which
+   * is a standing bar to any run happening with nobody present. */
+  inputReselectionNote?: string;
+}
+
+/**
+ * The run-schedule section for a record, or `undefined` for one with no agreed
+ * schedule -- which is every record until a surface can set one, and is why the
+ * section renders nothing at all rather than an empty state inviting one.
+ *
+ * `hasInputHandle` is the caller's platform reading (a stored handle AND the File
+ * System Access API to use it with), kept out of this model so the derivation
+ * stays pure.
+ *
+ * @throws {RangeError} if the schedule's lattice is unusable (see
+ *   {@link scheduleDueness}).
+ */
+export function scheduleView(
+  record: Pick<ManagedExchangeRecord, "schedule">,
+  hasInputHandle: boolean,
+  now: number,
+): ScheduleView | undefined {
+  const { schedule } = record;
+  if (schedule === undefined) return undefined;
+  const coordination = repeatedMissCoordination(schedule);
+  return {
+    cadence: scheduleCadenceLine(schedule),
+    dueLine: scheduleDueLine(scheduleDueness(schedule, now)),
+    attendanceNote: SCHEDULE_ATTENDANCE_NOTE,
+    ...(coordination !== undefined ? { coordination } : {}),
+    ...(hasInputHandle
+      ? {}
+      : { inputReselectionNote: SCHEDULE_INPUT_RESELECTION_NOTE }),
+  };
 }
 
 /**

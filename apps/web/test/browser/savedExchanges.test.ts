@@ -20,10 +20,14 @@ import {
 } from "@psi/managedLocalState";
 import { BenchLobby } from "@bench/BenchLobby";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+import styles from "@bench/bench.module.css";
 
 import { createAppMount } from "./renderApp";
 
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type {
+  ManagedExchangeSchedule,
+  NewManagedExchange,
+} from "@psi/managedExchangeRecord";
 
 // The component's delete goes through this module. It is mocked so the delete-failure
 // test can make a single delete reject while every other case uses the real
@@ -71,6 +75,26 @@ function newExchange(
     }),
     side: "inviter",
     sharedSecret: generateSharedSecret(),
+    ...overrides,
+  };
+}
+
+/** A daily cadence with a three-hour window, anchored `opensInMs` from the real
+ * clock the list reads: negative puts the window's open in the past, so a window is
+ * open right now; positive leaves it ahead. The list derives due-ness at render
+ * against `Date.now()`, so the fixture is anchored to it rather than to a fixed
+ * date that would drift into a different state. */
+function schedule(
+  opensInMs: number,
+  overrides: Partial<ManagedExchangeSchedule> = {},
+): ManagedExchangeSchedule {
+  const anchor = new Date(Date.now() + opensInMs).toISOString();
+  return {
+    anchor,
+    intervalDays: 1,
+    windowSeconds: 10_800,
+    nextWindow: anchor,
+    consecutiveMisses: 0,
     ...overrides,
   };
 }
@@ -266,6 +290,125 @@ describe("saved list route: the always-list surface", () => {
     await expect
       .element(page.getByText("You accept", { exact: false }))
       .toBeInTheDocument();
+  });
+});
+
+describe("saved list route: an agreed schedule surfaces its due-ness", () => {
+  test("a window open right now is named as open on the row", async () => {
+    await createManagedExchange(
+      newExchange({
+        label: "Scheduled partnership",
+        schedule: schedule(-60 * 60 * 1000),
+      }),
+    );
+
+    app.render(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("Run window open now", { exact: false }))
+      .toBeInTheDocument();
+  });
+
+  test("a window still ahead is named as the next one", async () => {
+    await createManagedExchange(
+      newExchange({
+        label: "Scheduled partnership",
+        schedule: schedule(2 * 60 * 60 * 1000),
+      }),
+    );
+
+    app.render(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("Next run window:", { exact: false }))
+      .toBeInTheDocument();
+  });
+
+  test("a record with no schedule shows no window line at all", async () => {
+    await createManagedExchange(newExchange({ label: "Attended partnership" }));
+
+    app.render(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("Attended partnership"))
+      .toBeInTheDocument();
+    // The exact two phrasings the scheduled rows above are found by, so this
+    // absence is those same queries returning nothing rather than a third one.
+    expect(
+      page.getByText("Run window open now", { exact: false }).query(),
+    ).toBeNull();
+    expect(
+      page.getByText("Next run window:", { exact: false }).query(),
+    ).toBeNull();
+  });
+
+  test("a single miss stays quiet: the row names the window and nothing else", async () => {
+    await createManagedExchange(
+      newExchange({
+        label: "Drifting partnership",
+        schedule: schedule(-60 * 60 * 1000, { consecutiveMisses: 1 }),
+      }),
+    );
+
+    app.render(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("Run window open now", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page.getByText("check with your partner", { exact: false }).query(),
+    ).toBeNull();
+  });
+
+  test("the second consecutive miss raises the coordination line, naming both checks", async () => {
+    await createManagedExchange(
+      newExchange({
+        label: "Drifting partnership",
+        schedule: schedule(-60 * 60 * 1000, { consecutiveMisses: 2 }),
+      }),
+    );
+
+    app.render(createElement(SavedExchanges));
+
+    await expect
+      .element(
+        page.getByText("2 agreed run windows in a row", { exact: false }),
+      )
+      .toBeInTheDocument();
+    // Both checks: the partner, and this device's own clock.
+    await expect
+      .element(page.getByText("check with your partner", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("this device's clock", { exact: false }))
+      .toBeInTheDocument();
+  });
+
+  test("the coordination line is styled as caution, never as a failure", async () => {
+    await createManagedExchange(
+      newExchange({
+        label: "Drifting partnership",
+        schedule: schedule(-60 * 60 * 1000, { consecutiveMisses: 2 }),
+      }),
+    );
+
+    app.render(createElement(SavedExchanges));
+
+    await expect
+      .element(
+        page.getByText("2 agreed run windows in a row", { exact: false }),
+      )
+      .toBeInTheDocument();
+    // The escalation is a state to look into, not a failure: it takes the same
+    // caution treatment the exchange's own surface renders it in, and the failure
+    // red would make the miss surface the standing warning the design keeps it
+    // from being (docs/MANAGED_EXCHANGE.md, "Repeated misses surface, they do not
+    // auto-pause").
+    expect(
+      app.container.querySelector(`.${styles.statusLineWarn}`)?.textContent,
+    ).toMatch(/2 agreed run windows in a row/);
+    // The danger class reaches no part of the row, not just not this line.
+    expect(app.container.innerHTML).not.toContain(styles.statusLineDanger);
   });
 });
 

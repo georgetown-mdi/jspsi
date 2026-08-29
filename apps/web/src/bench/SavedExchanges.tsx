@@ -101,8 +101,9 @@ export function SavedExchangesHome() {
 /**
  * The managed-exchange list, the canonical always-list route at `/saved`. It lists the
  * recurring exchanges stored in this browser -- label, side, a one-line last-run
- * status, and the derived backup state -- each with a run action that opens the
- * attended re-run surface, above a standing entry into the quick (invite/accept) path.
+ * status, the schedule's due-ness where one is agreed, and the derived backup state
+ * -- each with a run action that opens the attended re-run surface, above a standing
+ * entry into the quick (invite/accept) path.
  *
  * Unlike the home route, it renders the full surface unconditionally: the loading
  * state, then the exchanges, the designed empty state, the read-failed state, or --
@@ -191,6 +192,7 @@ function SavedExchangesList({
               <span className={`${styles.small} ${styles.sub}`}>
                 {row.sideLabel} - {row.status}
               </span>
+              <ScheduleLines row={row} />
               <BackupLine row={row} />
             </div>
             <div className={styles.savedRowActions}>
@@ -253,6 +255,35 @@ function StorageUnavailable() {
         </p>
       </main>
     </BenchPage>
+  );
+}
+
+/** The per-row schedule lines, for a row whose record carries an agreed schedule:
+ * where the recurrence stands right now, quietly, and -- once the record's
+ * consecutive-miss count has reached the escalation threshold -- the coordination
+ * line, which is the one state here an operator acts on. A row with no schedule
+ * renders nothing, so a list of exchanges nobody scheduled is unchanged.
+ *
+ * The coordination line takes the caution treatment, matching the yellow Alert the
+ * exchange's own surface renders the same state in: repeated misses are a state to
+ * look into, not a failure, and the failure red would make the miss surface the
+ * standing warning the design keeps it from being (see docs/MANAGED_EXCHANGE.md,
+ * "Repeated misses surface, they do not auto-pause"). */
+function ScheduleLines({ row }: { row: SavedExchangeRow }) {
+  if (row.schedule === undefined) return null;
+  return (
+    <>
+      <span className={`${styles.small} ${styles.sub}`}>
+        {row.schedule.dueLine}
+      </span>
+      {row.schedule.missLine !== undefined && (
+        <span
+          className={`${styles.small} ${styles.statusLine} ${styles.statusLineWarn}`}
+        >
+          {row.schedule.missLine}
+        </span>
+      )}
+    </>
   );
 }
 

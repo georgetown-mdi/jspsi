@@ -17,6 +17,7 @@ import {
   capturedInputHandle,
   ensureHandleReadPermission,
   fileSystemAccessSupported,
+  storedInputHandleUsable,
 } from "@psi/managedInputHandle";
 import {
   clearManagedExchanges,
@@ -150,6 +151,20 @@ afterEach(async () => {
 describe("fileSystemAccessSupported", () => {
   test("is true in Chromium, which has FileSystemFileHandle", () => {
     expect(fileSystemAccessSupported()).toBe(true);
+  });
+});
+
+describe("storedInputHandleUsable", () => {
+  test("a held handle is a usable pointer where the API exists", async () => {
+    const handle = await trackedOpfsFile(
+      "usable-pointer.csv",
+      CONFORMING_HEADER + CONFORMING_ROW,
+    );
+    expect(storedInputHandleUsable(handle)).toBe(true);
+  });
+
+  test("no handle held is no usable pointer", () => {
+    expect(storedInputHandleUsable(undefined)).toBe(false);
   });
 });
 
