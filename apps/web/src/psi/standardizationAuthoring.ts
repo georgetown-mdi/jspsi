@@ -1,22 +1,27 @@
 /**
  * The pure, React-free model behind the web standardization-authoring workbench:
  * the intent-grouped function menu, the descriptor-driven typed param-field model,
- * and per-param validation. The single tested boundary -- the function grouping and
- * the Zod-shape introspection are exercised here rather than through the UI. The
- * value-level constraint check the workbench renders as badges lives in core's
- * `checkValueConstraints` (shared with the CLI), not here.
+ * per-param validation, and the reading of a step that does nothing where it sits
+ * ({@link inertCoalesceCause}). The single tested boundary -- the function
+ * grouping and the Zod-shape introspection are exercised here rather than through
+ * the UI. The value-level constraint check the workbench renders as badges lives
+ * in core's `checkValueConstraints` (shared with the CLI), not here, and so does
+ * the coalesce classification this file reads rather than restates.
  */
 
 import {
   FAN_OUT_FUNCTION_NAMES,
   STANDARDIZATION_FUNCTION_DESCRIPTORS,
+  coalesceSubstitutesConstant,
   sanitizeForDisplay,
+  stepCanEmptyRealizedValue,
 } from "@psilink/core";
 
 import type {
   Standardization,
   StandardizationFunctionDescriptor,
   StandardizationStep,
+  TransformStep,
 } from "@psilink/core";
 
 import type { ZodType } from "zod";
@@ -228,10 +233,24 @@ export const OFFERED_EXPERT_FUNCTION_GROUPS: Array<StandardizationFunctionGroup>
   })).filter((group) => group.functionNames.length > 0);
 
 /**
- * The editor-facing label and one-line blurb for a function, taken from its
- * descriptor -- except `coalesce`, whose generic "Coalesce" name is replaced with
- * the plain-language framing the acceptance criteria call for ("If empty,
- * substitute a default"), since an operator should not need to know the SQL term.
+ * The plain-language label the add-step menu and the step rows show for
+ * `coalesce`, in place of the descriptor's SQL term: an operator should not need
+ * to know it. It states the condition core's descriptor states -- a value an
+ * earlier rule of the SAME pipeline emptied -- rather than offering to fill in
+ * for an absent or empty input, which is the framing that invites an author to
+ * declare a coalesce and expect blank-ish records to participate. A record whose
+ * field is absent never enters the pipeline at all; the semantics are in
+ * `docs/EXCHANGE_REFERENCE.md`, "Null propagation", and in
+ * `coalesceSubstitutesConstant`'s own doc comment.
+ */
+const COALESCE_LABEL = "Substitute a default where a rule emptied the value";
+
+/**
+ * The editor-facing label and one-line blurb for a function. The blurb is always
+ * the descriptor's own, so a later correction in core reaches this surface with
+ * no second edit here; the label is the descriptor's except for `coalesce`, which
+ * takes {@link COALESCE_LABEL}.
+ *
  * Falls back to the function name as the label when no descriptor matches. That
  * branch is unreachable from the add-step menu (which only offers descriptor-backed
  * functions, asserted by the parity test) BUT IS reachable via an imported linkage-
@@ -246,16 +265,88 @@ export function functionDisplay(functionName: string): {
   label: string;
   blurb: string;
 } {
-  if (functionName === "coalesce")
-    return {
-      label: "If empty, substitute a default",
-      blurb:
-        "Replace an empty (dropped) value with a fixed default, which can create matches that would not otherwise occur.",
-    };
   const descriptor = descriptorFor(functionName);
-  return descriptor === undefined
-    ? { label: sanitizeForDisplay(functionName), blurb: "" }
-    : { label: descriptor.label, blurb: descriptor.blurb };
+  if (descriptor === undefined)
+    return { label: sanitizeForDisplay(functionName), blurb: "" };
+  return {
+    label: functionName === "coalesce" ? COALESCE_LABEL : descriptor.label,
+    blurb: descriptor.blurb,
+  };
+}
+
+// --- A coalesce that substitutes nothing where it sits -----------------------
+
+/**
+ * Why a declared `coalesce` substitutes nothing at the position it occupies:
+ *
+ * - `"no-emptying-rule"` -- no step before it can leave a realized value empty,
+ *   so its substituting branch is never reached.
+ * - `"no-text-default"` -- an emptying rule does precede it, but the `default` it
+ *   declares is absent or is not text, which core runs as a pass-through.
+ */
+export type InertCoalesceCause = "no-emptying-rule" | "no-text-default";
+
+/**
+ * Why the `coalesce` at a position substitutes nothing there, or `undefined`
+ * where it does substitute (and for any other function).
+ *
+ * The verdict is core's: {@link coalesceSubstitutesConstant} decides whether the
+ * substitution fires at all, and {@link stepCanEmptyRealizedValue} decides its
+ * position half. This surface classifies nothing of its own, so it cannot drift
+ * from the runtime. The cause follows by elimination from those two -- a
+ * substitution that does not fire although some earlier step CAN empty a value is
+ * held back by the declared `default` -- so a change to either rule in core moves
+ * this answer with it.
+ *
+ * Position is reported ahead of the default, because a coalesce no emptying rule
+ * precedes substitutes nothing whatever its default says: declaring one would not
+ * reach the fault.
+ *
+ * `precedingSteps` are the steps that run before `step` in the same pipeline,
+ * required rather than defaulted for the reason core requires them: the verdict
+ * is a property of the position, not of the step alone. So adding an emptying
+ * step ahead of the coalesce, or moving the coalesce after one, re-answers this.
+ */
+export function inertCoalesceCause(
+  step: TransformStep,
+  precedingSteps: ReadonlyArray<TransformStep>,
+): InertCoalesceCause | undefined {
+  if (step.function !== "coalesce") return undefined;
+  if (coalesceSubstitutesConstant(step, precedingSteps)) return undefined;
+  return precedingSteps.some(stepCanEmptyRealizedValue)
+    ? "no-text-default"
+    : "no-emptying-rule";
+}
+
+/**
+ * What the step editor tells an author about a coalesce that substitutes nothing
+ * where it sits, one line per {@link InertCoalesceCause}, each naming the remedy
+ * that reaches its own cause. Advice, not a refusal: a pipeline carrying such a
+ * step is valid, mints, and runs -- core runs the step as a pass-through.
+ */
+export const INERT_COALESCE_ADVICE: Record<InertCoalesceCause, string> = {
+  "no-emptying-rule":
+    "This default is never substituted here: no step before it can leave a " +
+    "value empty, and a record with no value for the column never reaches " +
+    "these steps at all. Move this step after a rule that can drop a value, " +
+    "or add one before it.",
+  "no-text-default":
+    "This step substitutes nothing until it declares a text default value.",
+};
+
+/**
+ * Whether a pipeline declares a `coalesce` that substitutes nothing where it
+ * sits -- {@link inertCoalesceCause} over each step against the steps ahead of
+ * it. The per-field question behind the authoring notice; the step editor asks
+ * for the cause instead, since it has a row to attach the advice to.
+ */
+export function pipelineHasInertCoalesce(
+  steps: ReadonlyArray<TransformStep>,
+): boolean {
+  return steps.some(
+    (step, index) =>
+      inertCoalesceCause(step, steps.slice(0, index)) !== undefined,
+  );
 }
 
 // --- Typed param fields ------------------------------------------------------

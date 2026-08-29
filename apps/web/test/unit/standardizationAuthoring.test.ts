@@ -7,9 +7,11 @@ import {
   getDefaultStandardization,
   prepareForExchange,
   runPipeline,
+  stepCanEmptyRealizedValue,
 } from "@psilink/core";
 
 import {
+  INERT_COALESCE_ADVICE,
   OFFERED_EXPERT_FUNCTION_GROUPS,
   STANDARDIZATION_EXPERT_FUNCTION_GROUPS,
   STANDARDIZATION_FUNCTION_GROUPS,
@@ -20,7 +22,9 @@ import {
   descriptorFor,
   expertFunctionNames,
   functionDisplay,
+  inertCoalesceCause,
   isStepValid,
+  pipelineHasInertCoalesce,
   validateParamValue,
 } from "../../src/psi/standardizationAuthoring.js";
 
@@ -63,10 +67,31 @@ describe("function grouping parity with the descriptor table", () => {
     expect(flat.length).toBe(new Set(flat).size);
   });
 
-  test("coalesce is presented in plain language, not the SQL term", () => {
+  test("coalesce's editor copy states core's condition, in plain language", () => {
     const display = functionDisplay("coalesce");
-    expect(display.label.toLowerCase()).toContain("substitute a default");
-    expect(display.label).not.toBe("Coalesce");
+    const descriptor = STANDARDIZATION_FUNCTION_DESCRIPTORS["coalesce"];
+    // The description IS core's, not a paraphrase of it, so a later correction
+    // there cannot leave this surface asserting a behavior coalesce does not have.
+    expect(display.blurb).toBe(descriptor.blurb);
+    // The label stays plain language rather than the SQL term the descriptor
+    // carries, and states the condition core's does: a value an earlier rule of
+    // the same pipeline emptied -- not an absent or empty input, which never
+    // reaches the step.
+    expect(display.label).not.toBe(descriptor.label);
+    expect(display.label.toLowerCase()).toContain("rule emptied the value");
+  });
+
+  test("every other function's label and blurb are the descriptor's own", () => {
+    // coalesce is the single label override; nothing else restates core's copy,
+    // so a correction in the descriptor table reaches the menu unaided.
+    for (const name of authorableFunctionNames) {
+      if (name === "coalesce") continue;
+      const descriptor = STANDARDIZATION_FUNCTION_DESCRIPTORS[name];
+      expect(functionDisplay(name)).toEqual({
+        label: descriptor.label,
+        blurb: descriptor.blurb,
+      });
+    }
   });
 
   test("an unrecognized (imported) function name is sanitized for display", () => {
@@ -450,6 +475,104 @@ describe("isStepValid (the launch gate's basis)", () => {
 
   test("a function core does not recognize is treated as valid", () => {
     expect(isStepValid({ function: "totally_unknown" })).toBe(true);
+  });
+});
+
+describe("a coalesce that substitutes nothing where it sits", () => {
+  const withDefault = { function: "coalesce", params: { default: "Z" } };
+
+  test("a coalesce in first position substitutes nothing", () => {
+    // A pipeline starts from a non-null string, so a coalesce reached with a
+    // value still in hand returns it untouched; a record whose field is absent
+    // never enters the pipeline at all. Nothing ahead of the step can have
+    // emptied anything, so the fault is its position, not its default.
+    expect(inertCoalesceCause(withDefault, [])).toBe("no-emptying-rule");
+    expect(pipelineHasInertCoalesce([withDefault])).toBe(true);
+  });
+
+  test("a coalesce preceded only by value-preserving steps substitutes nothing", () => {
+    // Every step ahead of it returns a value for every value it is handed, so
+    // the substituting branch is never reached. Adding the default does not fix
+    // it, which is why the position is the cause reported.
+    const preceding = [
+      { function: "trim_whitespace" },
+      { function: "to_upper_case" },
+      { function: "pad_left", params: { length: 9, char: "0" } },
+    ];
+    expect(inertCoalesceCause(withDefault, preceding)).toBe("no-emptying-rule");
+    expect(pipelineHasInertCoalesce([...preceding, withDefault])).toBe(true);
+  });
+
+  test("a coalesce after a step that can empty a value substitutes, and raises nothing", () => {
+    const preceding = [
+      { function: "trim_whitespace" },
+      { function: "null_if", params: { values: ["X"] } },
+    ];
+    expect(inertCoalesceCause(withDefault, preceding)).toBeUndefined();
+    expect(pipelineHasInertCoalesce([...preceding, withDefault])).toBe(false);
+  });
+
+  test("moving an emptying step ahead of the coalesce clears the advisory", () => {
+    // The editor re-derives the verdict per position on every render, so a
+    // reorder is what clears it -- the same flip the runtime makes.
+    const nullIf = { function: "null_if", params: { values: ["X"] } };
+    expect(pipelineHasInertCoalesce([withDefault, nullIf])).toBe(true);
+    expect(pipelineHasInertCoalesce([nullIf, withDefault])).toBe(false);
+  });
+
+  test("a default that is absent or not text substitutes nothing either", () => {
+    // The editor's own `default` control is a text input, so these arrive on an
+    // imported document, whose transform params are `z.unknown()`. Core runs
+    // every non-string default as a pass-through, so the surface must not claim
+    // a substitution. Reported against the default rather than the position,
+    // because an emptying rule already precedes it.
+    const preceding = [{ function: "null_if", params: { values: ["X"] } }];
+    expect(inertCoalesceCause({ function: "coalesce" }, preceding)).toBe(
+      "no-text-default",
+    );
+    expect(
+      inertCoalesceCause(
+        { function: "coalesce", params: { default: 0 } },
+        preceding,
+      ),
+    ).toBe("no-text-default");
+    expect(
+      inertCoalesceCause(
+        { function: "coalesce", params: { default: null } },
+        preceding,
+      ),
+    ).toBe("no-text-default");
+  });
+
+  test("the position half is core's own classification, not a second list here", () => {
+    // Every function core classes as value-preserving leaves a coalesce after it
+    // inert, and every other one rescues it. Driven over the whole descriptor
+    // table so a function added to core is covered here with no edit -- the web
+    // surface reads the verdict and restates no rule of its own.
+    for (const name of Object.keys(STANDARDIZATION_FUNCTION_DESCRIPTORS)) {
+      const canEmpty = stepCanEmptyRealizedValue({ function: name });
+      expect(
+        pipelineHasInertCoalesce([{ function: name }, withDefault]),
+        name,
+      ).toBe(!canEmpty);
+    }
+  });
+
+  test("no other function raises the advisory", () => {
+    for (const name of Object.keys(STANDARDIZATION_FUNCTION_DESCRIPTORS)) {
+      if (name === "coalesce") continue;
+      expect(inertCoalesceCause({ function: name }, []), name).toBeUndefined();
+    }
+    expect(
+      inertCoalesceCause({ function: "totally_unknown" }, []),
+    ).toBeUndefined();
+  });
+
+  test("each cause carries advice naming the remedy that reaches it", () => {
+    expect(INERT_COALESCE_ADVICE["no-emptying-rule"]).toContain(
+      "Move this step",
+    );
+    expect(INERT_COALESCE_ADVICE["no-text-default"]).toContain("text default");
   });
 });
 

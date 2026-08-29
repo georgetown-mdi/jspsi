@@ -5,16 +5,28 @@ import {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
   FAN_OUT_FUNCTION_NAMES,
   MAX_INVITATION_LIFETIME_SECONDS,
+  authoredLinkageFields,
 } from "@psilink/core";
 
 import {
+  draftWithFieldAdded,
+  seedAdvancedInvite,
+} from "../../src/psi/advancedInviteDraft.js";
+import {
   gatedActiveSettingMessage,
+  inertCoalesceNotice,
   validateAdvancedInvite,
 } from "../../src/psi/advancedInviteValidation.js";
+import { SEMANTIC_TYPE_LABELS } from "../../src/psi/metadataEditing.js";
 import { buildAdvancedTerms } from "../../src/psi/advancedInviteTerms.js";
-import { seedAdvancedInvite } from "../../src/psi/advancedInviteDraft.js";
 
-import type { LinkageStrategy } from "@psilink/core";
+import type {
+  LinkageStrategy,
+  StandardizationStep,
+  TransformStep,
+} from "@psilink/core";
+
+import type { AdvancedInviteDraft } from "../../src/psi/advancedInviteTypes.js";
 
 const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
 
@@ -264,5 +276,177 @@ describe("the invitation-lifetime gate (validation-only, not a schema rule)", ()
     expect(result.errors.lifetime).toBeUndefined();
     expect(result.canGenerate).toBe(true);
     expect(result.terms).toBeDefined();
+  });
+});
+
+describe("the inert-coalesce notice (a declared default the run will not substitute)", () => {
+  // The failure it names is silent under-matching: the author declares a default
+  // expecting blank-ish records to participate, and the step runs as a
+  // pass-through instead. It refuses nothing -- terms carrying this shape are
+  // valid, mint, and run -- so the cases below also check Generate stays open.
+  const now = new Date("2026-01-01T00:00:00Z");
+  const coalesce = { function: "coalesce", params: { default: "UNKNOWN" } };
+  const nullIf = { function: "null_if", params: { values: ["N/A"] } };
+
+  function withFirstFieldSteps(
+    draft: AdvancedInviteDraft,
+    steps: Array<StandardizationStep>,
+  ): AdvancedInviteDraft {
+    return {
+      ...draft,
+      standardization: draft.standardization.map((transformation, index) =>
+        index === 0 ? { ...transformation, steps } : transformation,
+      ),
+    };
+  }
+
+  function labelForOutput(draft: AdvancedInviteDraft, output: string): string {
+    const field = authoredLinkageFields(
+      draft.metadata,
+      draft.standardization,
+    ).find((candidate) => candidate.name === output);
+    if (field === undefined) throw new Error("no field for the transformation");
+    return SEMANTIC_TYPE_LABELS[field.type];
+  }
+
+  function withFirstElementTransform(
+    draft: AdvancedInviteDraft,
+    transform: Array<TransformStep>,
+  ): AdvancedInviteDraft {
+    return {
+      ...draft,
+      keys: draft.keys.map((entry, index) =>
+        index === 0
+          ? {
+              ...entry,
+              enabled: true,
+              key: {
+                ...entry.key,
+                elements: entry.key.elements.map((element, position) =>
+                  position === 0 ? { ...element, transform } : element,
+                ),
+              },
+            }
+          : entry,
+      ),
+    };
+  }
+
+  test("says nothing about a draft that declares no default value", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    expect(
+      inertCoalesceNotice(draft, buildAdvancedTerms(draft)),
+    ).toBeUndefined();
+  });
+
+  test("names the field of a coalesce nothing ahead of it can empty, and blocks nothing", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const declared = withFirstFieldSteps(draft, [coalesce]);
+    const notice = inertCoalesceNotice(declared, buildAdvancedTerms(declared));
+    // The field is named by its safe semantic-type label, never the field name,
+    // and the sentence states the real condition rather than the absent-input
+    // framing that invites the misauthoring.
+    expect(notice).toContain(
+      labelForOutput(declared, declared.standardization[0].output),
+    );
+    expect(notice).toMatch(/earlier rule in the same pipeline left it empty/);
+    expect(validateAdvancedInvite(declared, seed, now).canGenerate).toBe(true);
+  });
+
+  test("a coalesce preceded only by value-preserving steps is named too", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const declared = withFirstFieldSteps(draft, [
+      { function: "trim_whitespace" },
+      { function: "to_upper_case" },
+      coalesce,
+    ]);
+    expect(
+      inertCoalesceNotice(declared, buildAdvancedTerms(declared)),
+    ).toBeDefined();
+    expect(validateAdvancedInvite(declared, seed, now).canGenerate).toBe(true);
+  });
+
+  test("moving the coalesce after a rule that can drop a value clears it", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const inert = withFirstFieldSteps(draft, [coalesce, nullIf]);
+    expect(inertCoalesceNotice(inert, buildAdvancedTerms(inert))).toBeDefined();
+    const rescued = withFirstFieldSteps(draft, [nullIf, coalesce]);
+    expect(
+      inertCoalesceNotice(rescued, buildAdvancedTerms(rescued)),
+    ).toBeUndefined();
+  });
+
+  test("a declared default on a field the built terms do not carry says nothing", () => {
+    // A second column of the same type (`fname` aliases to `first_name`) so
+    // draftWithFieldAdded has a free column to bind: the added field
+    // (`first_name_2`) is declared in the draft's standardization but no
+    // enabled key references it, so the built terms do not carry it -- the
+    // exact split between authoredLinkageFields and terms.linkageFields this
+    // notice must read from the latter to get right.
+    const { draft } = seedAdvancedInvite("Org", [...ALL_COLUMNS, "fname"]);
+    const added = draftWithFieldAdded(draft, "first_name");
+    const unreferenced = {
+      ...added,
+      standardization: added.standardization.map((transformation) =>
+        transformation.output === "first_name_2"
+          ? { ...transformation, steps: [coalesce] }
+          : transformation,
+      ),
+    };
+    const terms = buildAdvancedTerms(unreferenced);
+    expect(
+      terms.linkageFields.some((field) => field.name === "first_name_2"),
+    ).toBe(false);
+    expect(inertCoalesceNotice(unreferenced, terms)).toBeUndefined();
+  });
+
+  test("an imported key transform whose coalesce declares no text default is named", () => {
+    // The editor's own `default` control is a text input, so an absent or
+    // non-string default arrives only on an imported document, whose transform
+    // params are `z.unknown()`. Core runs both as a pass-through.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    for (const step of [
+      { function: "coalesce" },
+      { function: "coalesce", params: { default: 7 } },
+    ]) {
+      const imported = withFirstElementTransform(draft, [nullIf, step]);
+      const terms = buildAdvancedTerms(imported);
+      const element = terms.linkageKeys[0].elements[0];
+      const field = terms.linkageFields.find(
+        (candidate) => candidate.name === element.field,
+      );
+      if (field === undefined)
+        throw new Error("the element's field is not declared");
+      expect(inertCoalesceNotice(imported, terms)).toContain(
+        SEMANTIC_TYPE_LABELS[field.type],
+      );
+      expect(validateAdvancedInvite(imported, seed, now).canGenerate).toBe(
+        true,
+      );
+    }
+  });
+
+  test("a key transform whose coalesce does substitute says nothing", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const substituting = withFirstElementTransform(draft, [nullIf, coalesce]);
+    expect(
+      inertCoalesceNotice(substituting, buildAdvancedTerms(substituting)),
+    ).toBeUndefined();
+  });
+
+  test("a field declared with an Object.prototype key resolves no label, not a stringified function", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const declared = withFirstFieldSteps(draft, [coalesce]);
+    const terms = buildAdvancedTerms(declared);
+    const fieldName = declared.standardization[0].output;
+    const hazardous = {
+      ...terms,
+      linkageFields: terms.linkageFields.map((field) =>
+        field.name === fieldName
+          ? { ...field, type: "constructor" as never }
+          : field,
+      ),
+    };
+    expect(inertCoalesceNotice(declared, hazardous)).toBeUndefined();
   });
 });

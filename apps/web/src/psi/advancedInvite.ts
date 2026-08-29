@@ -11,7 +11,9 @@
  *   {@link LinkageTerms} it represents, and the inviter's own exchange spec. The
  *   gated-setting clamp (dedup / fuzzy) lives here.
  * - {@link ./advancedInviteValidation} -- the Generate gate, the import-refusal
- *   messages, and the notice for an imported rule-set citation the rebuild drops.
+ *   messages, and the two notices that refuse nothing: an imported rule-set
+ *   citation the rebuild drops, and a declared default value the run will not
+ *   substitute.
  */
 
 export type {
@@ -62,5 +64,6 @@ export {
   gatedActiveSettingMessage,
   importedCitationDropNotice,
   importedConstraintDivergenceMessage,
+  inertCoalesceNotice,
   validateAdvancedInvite,
 } from "./advancedInviteValidation";
