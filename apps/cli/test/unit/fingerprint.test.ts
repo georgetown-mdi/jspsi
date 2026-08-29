@@ -343,6 +343,33 @@ test("warns when the bound identity diverges from the config identity", async ()
   expect(message).toContain('"Party A, Agency A, a@agency-a.gov"');
   expect(message).toContain("linkage_terms.identity");
   expect(message).toContain("reject");
+  // `psilink fingerprint` sends nothing, so it reports and prints the
+  // fingerprint. What it must not leave unsaid is that the exchange command
+  // disposes of the same divergence differently: it refuses the run.
+  expect(message).toContain("refused before it runs");
+});
+
+test("a control-character label is escaped where the warning is logged", async () => {
+  // The warning's values never become an Error on this path, so this log sink is
+  // their single escape (CONTRIBUTING.md, Operator-facing escaping) and the
+  // shared party-identity helper is what performs it. Both identities are
+  // locally authored, so this is display hygiene rather than an injection
+  // boundary -- but a label carrying a terminal escape must still not reach the
+  // operator's terminal as one.
+  const idPath = path.join(dir, "id.json");
+  const warn = vi.fn();
+  const esc = String.fromCharCode(0x1b);
+  await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: `Party ${esc}[31mA`,
+    configIdentity: `Agency\nA`,
+    force: false,
+    log: { warn },
+  });
+  const message = warn.mock.calls[0]?.[0] as string;
+  expect(message).toContain("Party \\x1b[31mA");
+  expect(message).toContain("Agency\\x0aA");
+  expect(/[^\t\x20-\x7e]/.test(message)).toBe(false);
 });
 
 test("is silent when the bound identity matches the config identity", async () => {

@@ -24,7 +24,6 @@ import {
   acceptorPayloadDeclarationConflict,
 } from "@bench/acceptorColumnsModel";
 import { StandardizationPreview } from "@components/StandardizationPreview";
-import { appendSanitizedRunWarning } from "@bench/runWarnings";
 import { linkageRefusalFor } from "@psi/linkageRefusal";
 import { probePeerAnswerCopy } from "@bench/SftpAuthoringForm";
 
@@ -80,7 +79,7 @@ const CONSOLE_SURFACES: Record<PreflightId, ConsoleSurface> = {
   ignoredOfflineOverrides: null,
   keyFilePath: null,
   hostKeyTrust: ["@bench/SftpAuthoringForm", probePeerAnswerCopy],
-  identityDivergence: ["@bench/runWarnings", appendSanitizedRunWarning],
+  identityDivergence: null,
   outboundPayloadConsent: [
     "@bench/acceptorColumnsModel",
     acceptorDisclosedColumns,
@@ -149,12 +148,18 @@ describe("every row is dispositioned in the console", () => {
     }
   });
 
-  test("the deferred seam is recorded as pending, not as covered", () => {
-    // The one row that is deliberately a gap. It is written down rather than
+  test("the deferred seams are recorded as pending, not as covered", () => {
+    // The rows that are deliberately gaps. Each is written down rather than
     // dropped so that building the seam is a change to this list, not a
-    // rediscovery.
-    expect(PREFLIGHT_INVENTORY.jobAdmission.console.kind).toBe("pending");
-    expect(CONSOLE_SURFACES.jobAdmission).toBeNull();
+    // rediscovery, and each names no console surface -- a pending row that still
+    // pointed at a symbol would read as covered.
+    for (const id of ["jobAdmission", "identityDivergence"] as const) {
+      expect([id, PREFLIGHT_INVENTORY[id].console.kind]).toEqual([
+        id,
+        "pending",
+      ]);
+      expect([id, CONSOLE_SURFACES[id]]).toEqual([id, null]);
+    }
   });
 });
 

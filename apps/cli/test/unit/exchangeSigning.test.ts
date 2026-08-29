@@ -2,12 +2,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 
 import {
+  OperatorConfigError,
   UsageError,
   generateSigningIdentity,
   computeCertificateFingerprint,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 import type { SigningConfig } from "@psilink/core";
 
@@ -15,7 +17,6 @@ import { resolveSigningPersist } from "../../src/commands/exchange";
 import { saveSigningIdentity } from "../../src/signingIdentityFile";
 
 let dir: string;
-const noopLog = { warn: () => {} };
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-signing-test-"));
@@ -36,20 +37,14 @@ const identity = await generateSigningIdentity("Party A", {
 });
 
 test("returns null when signing is absent (the unsigned path)", async () => {
-  await expect(
-    resolveSigningPersist(undefined, "Party A", noopLog),
-  ).resolves.toBeNull();
+  await expect(resolveSigningPersist(undefined, "Party A")).resolves.toBeNull();
 });
 
 test("returns null for the non-certificate modes", async () => {
   const none: SigningConfig = { mode: "none" };
   const session: SigningConfig = { mode: "session-derived" };
-  await expect(
-    resolveSigningPersist(none, "Party A", noopLog),
-  ).resolves.toBeNull();
-  await expect(
-    resolveSigningPersist(session, "Party A", noopLog),
-  ).resolves.toBeNull();
+  await expect(resolveSigningPersist(none, "Party A")).resolves.toBeNull();
+  await expect(resolveSigningPersist(session, "Party A")).resolves.toBeNull();
 });
 
 test("loads the identity and pin for certificate mode", async () => {
@@ -62,7 +57,7 @@ test("loads the identity and pin for certificate mode", async () => {
     partnerFingerprint: fingerprint,
     receiptOutput: path.join(dir, "receipt.json"),
   };
-  const resolved = await resolveSigningPersist(config, "Party A", noopLog);
+  const resolved = await resolveSigningPersist(config, "Party A");
   expect(resolved).not.toBeNull();
   expect(resolved!.identity).toEqual(identity);
   expect(resolved!.partnerFingerprint).toBe(fingerprint);
@@ -76,12 +71,12 @@ test("certificate mode with no identity file is a usage error", async () => {
     mode: "certificate",
     identityFile: path.join(dir, "does-not-exist.json"),
   };
-  await expect(
-    resolveSigningPersist(config, "Party A", noopLog),
-  ).rejects.toThrow(UsageError);
-  await expect(
-    resolveSigningPersist(config, "Party A", noopLog),
-  ).rejects.toThrow(/no signing identity was found/);
+  await expect(resolveSigningPersist(config, "Party A")).rejects.toThrow(
+    UsageError,
+  );
+  await expect(resolveSigningPersist(config, "Party A")).rejects.toThrow(
+    /no signing identity was found/,
+  );
 });
 
 test("certificate mode with no pin resolves (the run is refused before this seam)", async () => {
@@ -91,7 +86,7 @@ test("certificate mode with no pin resolves (the run is refused before this seam
     mode: "certificate",
     identityFile: identityPath,
   };
-  const resolved = await resolveSigningPersist(config, "Party A", noopLog);
+  const resolved = await resolveSigningPersist(config, "Party A");
   // This resolver states no pin rule of its own: an unpinned certificate-mode
   // config is refused by core's single gate (assertCertificateModePinsPartner,
   // inside prepareForExchange), which the exchange handler reaches before it
@@ -103,44 +98,45 @@ test("certificate mode with no pin resolves (the run is refused before this seam
 
 // --- divergence from the run's linkage_terms.identity ------------------------
 // The loaded certificate is bound to "Party A" throughout; only the terms
-// identity handed to the resolver varies.
+// identity handed to the resolver varies. A diverging run cannot leave both
+// parties holding a verifiable receipt on either handshake role -- driven end to
+// end in packages/core/test/signedReceiptEndToEnd.test.ts -- so this seam refuses
+// it before any credential, terms, or data are sent.
 
-test("warns when the loaded identity diverges from the run's terms identity", async () => {
-  const identityPath = path.join(dir, "signing-identity.json");
+/** A certificate-mode block over the identity saved for this test. */
+function certificateModeOver(identityPath: string): SigningConfig {
   saveSigningIdentity(identityPath, identity, { exclusive: true });
-  const config: SigningConfig = {
-    mode: "certificate",
-    identityFile: identityPath,
-  };
-  const warn = vi.fn();
-  const resolved = await resolveSigningPersist(
+  return { mode: "certificate", identityFile: identityPath };
+}
+
+test("refuses when the loaded identity diverges from the run's terms identity", async () => {
+  const config = certificateModeOver(path.join(dir, "signing-identity.json"));
+  const rejection = resolveSigningPersist(
     config,
     "Party A, Agency A, a@agency-a.gov",
-    { warn },
   );
-  // Warned, and still resolved: the exchange proceeds rather than being refused.
-  expect(resolved).not.toBeNull();
-  expect(resolved!.identity).toEqual(identity);
-  expect(warn).toHaveBeenCalledOnce();
-  const message = warn.mock.calls[0]?.[0] as string;
+  // An OperatorConfigError, as its certificate-mode siblings in core are: the
+  // CLI classifies it as a configuration error (exit 64) and the message is
+  // composed only of this operator's own content.
+  await expect(rejection).rejects.toThrow(OperatorConfigError);
+  const message = await rejection.catch(
+    (err: unknown) => (err as Error).message,
+  );
   expect(message).toContain('"Party A"');
   expect(message).toContain('"Party A, Agency A, a@agency-a.gov"');
   expect(message).toContain("linkage_terms.identity");
-  expect(message).toContain("reject");
+  expect(message).toContain("cannot finish");
 });
 
-test("the warning offers the local config edit before the regeneration remedy, with the re-pin caution", async () => {
-  const identityPath = path.join(dir, "signing-identity.json");
-  saveSigningIdentity(identityPath, identity, { exclusive: true });
-  const config: SigningConfig = {
-    mode: "certificate",
-    identityFile: identityPath,
-  };
-  const warn = vi.fn();
-  await resolveSigningPersist(config, "Party A, Agency A, a@agency-a.gov", {
-    warn,
-  });
-  const message = warn.mock.calls[0]?.[0] as string;
+test("the refusal offers the local config edit before the regeneration remedy, with the re-pin caution", async () => {
+  const config = certificateModeOver(path.join(dir, "signing-identity.json"));
+  const message = await resolveSigningPersist(
+    config,
+    "Party A, Agency A, a@agency-a.gov",
+  ).then(
+    () => "",
+    (err: unknown) => (err as Error).message,
+  );
   // The local config edit is offered before the certificate-regeneration
   // remedy: an operator reading top to bottom sees the cheaper fix first.
   const editIndex = message.indexOf("a local config edit");
@@ -150,29 +146,51 @@ test("the warning offers the local config edit before the regeneration remedy, w
   // Regeneration changes the fingerprint the partner has pinned; the caution
   // is what keeps an operator from silently breaking that pin.
   expect(message).toContain("coordinated re-pin");
+  // Both remedies precede the two values they are about. The renderer caps a
+  // composed link and `linkage_terms.identity` is bounded only by the terms
+  // schema's text cap, so a long name has to truncate the values rather than the
+  // remedy the operator acts on.
+  expect(message.indexOf('is bound to "Party A"')).toBeGreaterThan(
+    regenerateIndex,
+  );
 });
 
-test("is silent when the loaded identity matches the run's terms identity", async () => {
-  const identityPath = path.join(dir, "signing-identity.json");
-  saveSigningIdentity(identityPath, identity, { exclusive: true });
-  const config: SigningConfig = {
-    mode: "certificate",
-    identityFile: identityPath,
-  };
-  const warn = vi.fn();
-  await resolveSigningPersist(config, "Party A", { warn });
-  expect(warn).not.toHaveBeenCalled();
+test("a control-character label reaches the operator escaped, once", async () => {
+  // The refusal composes both identities RAW; the single escape is the error
+  // sink the CLI reports through (exitWithError -> sanitizeErrorForDisplay).
+  // Escaping here as well would double every backslash the operator sees, so
+  // both halves are asserted: the control bytes are gone, and the escape that
+  // removed them ran exactly once.
+  const config = certificateModeOver(path.join(dir, "signing-identity.json"));
+  const esc = String.fromCharCode(0x1b);
+  const label = `Party ${esc}[31mA\nAgency A`;
+  const rendered = await resolveSigningPersist(config, label).then(
+    () => "",
+    (err: unknown) => sanitizeErrorForDisplay(err),
+  );
+  expect(rendered).toContain("Party \\x1b[31mA\\x0aAgency A");
+  expect(rendered).not.toContain("\\\\x1b");
+  // Nothing outside printable ASCII survives to the operator's terminal. The
+  // renderer frames a cause chain with its own newline, which is removed first
+  // so the assertion is about the escaped fragment rather than that framing.
+  expect(/[^\t\x20-\x7e]/.test(rendered.split("\n").join(" "))).toBe(false);
 });
 
-test("is silent when the run carries no terms identity", async () => {
-  const identityPath = path.join(dir, "signing-identity.json");
-  saveSigningIdentity(identityPath, identity, { exclusive: true });
-  const config: SigningConfig = {
-    mode: "certificate",
-    identityFile: identityPath,
-  };
-  const warn = vi.fn();
-  await resolveSigningPersist(config, undefined, { warn });
-  await resolveSigningPersist(config, "", { warn });
-  expect(warn).not.toHaveBeenCalled();
+test("resolves when the loaded identity matches the run's terms identity", async () => {
+  const config = certificateModeOver(path.join(dir, "signing-identity.json"));
+  await expect(
+    resolveSigningPersist(config, "Party A"),
+  ).resolves.not.toBeNull();
+});
+
+test("resolves when the run carries no terms identity", async () => {
+  // Nothing to diverge from. A certificate-mode run that names no party is
+  // unrunnable for its own reason and is refused ahead of this seam, by core's
+  // assertCertificateModeNamesLocalParty inside prepareForExchange -- so this
+  // branch must not restate that refusal in a second spelling.
+  const config = certificateModeOver(path.join(dir, "signing-identity.json"));
+  await expect(
+    resolveSigningPersist(config, undefined),
+  ).resolves.not.toBeNull();
+  await expect(resolveSigningPersist(config, "")).resolves.not.toBeNull();
 });
