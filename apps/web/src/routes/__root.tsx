@@ -19,6 +19,7 @@ import { cssVariablesResolver, mantineTheme } from "@theme";
 import { AppShellStatus } from "@components/AppShellStatus";
 import { DefaultCatchBoundary } from "@components/DefaultCatchBoundary";
 import { NotFound } from "@components/NotFound";
+import { ScheduledExchangeRunner } from "@components/ScheduledExchangeRunner";
 import { seo } from "@utils/seo";
 
 import type { ReactNode } from "react";
@@ -97,6 +98,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
           cssVariablesResolver={cssVariablesResolver}
         >
           <AppShellStatus />
+          <ScheduledExchangeRunner />
           {children}
           <TanStackRouterDevtools position="bottom-right" />
           <Scripts />

@@ -239,9 +239,10 @@ re-invite if it lands an already-lapsed bound (the standing recovery for a lapse
 
 ### The schedule object
 
-> **Not yet implemented:** the scheduled runner that reads and advances this
-> object is not yet built. Its shape and schema are in place; the semantics
-> below are the intended design.
+> **Not yet reachable:** the runner that reads and advances this object is
+> built, and executes a due window in an installed app runtime. No surface
+> enters a schedule yet, so no stored record carries one and nothing is due; a
+> record acquires a `schedule` when schedule entry ships.
 
 The optional `schedule` object carries the partnership-agreed run cadence, the
 run window the two runners meet in, and the miss bookkeeping the retry policy
@@ -299,9 +300,9 @@ framing is in
 
 #### Catch-up on wake
 
-> **Not yet implemented:** `nextWindow` and `consecutiveMisses` are persisted
-> by the schema above, but the runner that advances them is not yet built. The
-> catch-up rule below is the intended design.
+> **Not yet reachable:** the runner applying this rule is built and runs in an
+> installed app runtime; until schedule entry ships, no stored record carries a
+> `schedule` for it to advance.
 
 A runner does not tick while its machine sleeps, so a runtime can wake -- a
 laptop reopened after a week on a daily cadence, the app relaunched after a
@@ -338,6 +339,16 @@ only the windows after it rebuild the count, wherever in the run that window
 sits -- including the window still open at the wake, whose recorded success
 resets the count the elapsed windows before it raised.
 
+One window the walk does not visit is read the same way before it starts: the
+window immediately preceding `nextWindow`, whose recorded `"succeeded"` run
+resets the count. That window is where a run the schedule advanced past as
+`"unattempted"` lands its outcome -- the advance happens while the other
+context's run is still in flight -- so without this reading a completed exchange
+inside an agreed window could fail to discharge the miss run, and the escalation
+threshold could be crossed a window early. The reach is exactly one window: a
+success further back sits behind windows the walk has already counted on their
+own evidence, and leaves them counted.
+
 The rule keeps both fields honest. `consecutiveMisses` reflects the true count
 of elapsed misses whichever side was absent, and the runner lands on a live
 window rather than replaying stale past ones. Crossing the two-miss escalation
@@ -362,6 +373,92 @@ snapshot's `nextWindow`, typically in the past by the time the artifact is
 restored, and the first wake after an import applies the same catch-up --
 elapsed windows counted, `nextWindow` advanced to a live window -- before any
 attempt.
+
+#### Occupying a due window
+
+A window catch-up lands on and finds open is **occupied**, not waited out in one
+call. The runner makes bounded re-attempts across it: each attempt waits for the
+partner's runner up to the human-timescale budget both one-shot roles share,
+clamped to what is left of the window, and the next attempt begins no sooner than
+a fixed pacing interval after the last one started, up to a cap on attempts per
+window. One window-long wait would put the whole window on a single broker
+registration surviving that long; the pacing and the cap are what keep an attempt
+that fails immediately from spending the window in a loop. The pacing interval is
+itself bounded by the close, which ends the occupancy in any case.
+
+An occupancy belongs to ONE record. Each wake dispatches every due record that is
+not already occupying its window, so an exchange holding its own window open for
+hours neither blocks nor delays a second exchange whose window opens during it.
+
+Two boundaries the occupancy holds:
+
+- **The window's close is reached as a no-show, never as an abort.** The last
+  attempt's wait is clamped to the close, so a window nobody arrived in ends as
+  the partner absence it is. Signalling the close through the run's abort instead
+  would record the operator's own cancellation (see the `lastRun` `failureKind`
+  row), which is a different fact.
+- **Nothing is re-attempted once the data exchange began.** Past that phase
+  boundary this run's payload could already have reached the partner, so a
+  re-attempt would disclose a second time. The boundary gates the retry rather
+  than the failure's kind.
+
+Within those, an attempt is re-made only for a partner who never arrived and for
+a failure with no determinate local cause. A lapsed `expires`, an unusable input,
+a shortfall against the standing terms, a refused disclosure, a failed rotation
+persist, and a handshake that failed closed each reproduce identically on the
+next attempt, so each ends the window's occupancy where it happened.
+
+The window's disposition folds every attempt it took, written once for the window
+rather than once per attempt:
+
+| Disposition | The window | `consecutiveMisses` | Advance carries a `lastRun` |
+| ----------- | ---------- | ------------------- | --------------------------- |
+| `"succeeded"` | an attempt completed the exchange | reset to 0 | no -- the run recorded its own |
+| `"missed"` | none did, at least one found the partner absent, and none failed in a way that proves the partner was met | incremented | no -- the run recorded its own |
+| `"failed"` | its attempts failed, none of them on an absent partner -- or one of them proved the partner was met | unchanged | no -- the run recorded its own |
+| `"unattempted"` | its last attempt was refused the single-writer lock, held by another context | unchanged | no -- the window has no bookkeeping |
+
+The `"missed"` row folds rather than reading the last attempt because an attempt
+that spent its whole peer wait has already answered the question the miss count
+asks -- whether the two runners met in this window -- and pacing starts the next
+attempt at once after a wait that long. Reading the last verdict alone would
+therefore let one trailing transient failure record a window of no-show waits as
+`"failed"`, which leaves the count untouched and loses the miss entirely.
+
+A failure that **proves the partner was met** settles the same question the
+other way, and outranks any absence the window found earlier: a handshake that
+failed closed ran against a partner on the far end of an open channel, a
+rotation persist fails only after that handshake yielded the rotated secret, and
+any failure past the data-exchange boundary postdates both. Per the
+[`consecutiveMisses`](#the-schedule-object) row, a partnership that met is a
+desync/attack question rather than a coordination-drift one, so such a window
+records `"failed"` and counts nothing. A failure with no determinate cause
+proves nothing either way and leaves the fold to the absence above.
+
+`"unattempted"` is the one disposition that is not an outcome the record can
+hold, and the one that stands whatever the attempts before it found: another
+context was running this very record, so the window is that context's to account
+for rather than this runner's, and the schedule advances past it recording
+neither an attempt nor a miss. The advance happens while that run is still in
+flight, so its bookkeeping lands in a window already advanced past; a
+`"succeeded"` one is credited at the next wake (see
+[Catch-up on wake](#catch-up-on-wake)), while any other outcome it records leaves
+the window uncounted. Every other disposition's `lastRun` is written by the run
+itself, so the schedule advance carries none and cannot contend with it.
+
+Three records are passed over rather than attempted, each leaving its window
+with no disposition at all -- the wake that finds the window elapsed counts it
+exactly as one this runtime slept through:
+
+- One this device handed off by a migration export (its local `spent` state).
+- One with no persisted `inputFileHandle`, which has no unattended read of the
+  input at all.
+- One whose runtime stopped while the window was still open.
+
+The rules above are implemented in `apps/web/src/psi/managedScheduleRunner.ts`;
+the browser host that wakes them, and the installed-runtime gate that decides
+whether it runs at all, are `apps/web/src/psi/managedScheduleRuntime.ts` and
+`apps/web/src/components/ScheduledExchangeRunner.tsx`.
 
 ### Clock skew and the window width
 

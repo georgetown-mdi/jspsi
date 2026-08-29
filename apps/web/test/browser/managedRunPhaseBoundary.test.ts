@@ -33,6 +33,12 @@ import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 
 const phase = vi.hoisted(() => ({ dataExchangeStarted: false }));
 
+/** The configs the surface handed the driver, so a check can read what an
+ * attended run asks for as well as how it classifies what comes back. */
+const driverConfigs = vi.hoisted(() => ({
+  seen: [] as Array<Record<string, unknown>>,
+}));
+
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
@@ -52,6 +58,7 @@ vi.mock("@psi/managedRunDriver", async () => {
     runManagedExchangeInBrowser: (config: {
       options?: { onDataExchangeStart?: () => void };
     }) => {
+      driverConfigs.seen.push(config);
       if (phase.dataExchangeStarted) config.options?.onDataExchangeStart?.();
       return Promise.reject(
         new PartnerNoShowError("timed out waiting for the other party"),
@@ -100,6 +107,7 @@ async function runUntilItFails(): Promise<void> {
 
 beforeEach(async () => {
   phase.dataExchangeStarted = false;
+  driverConfigs.seen.length = 0;
   await clearManagedExchanges();
 });
 
@@ -133,5 +141,18 @@ describe("the run surface reports its own data-exchange boundary", () => {
       "Your partner did not arrive",
     );
     expect(app.container.textContent).not.toContain("nothing left this device");
+  });
+
+  test("asks for no peer-wait bound of its own", async () => {
+    // The bound the driver takes is one policy's: the scheduled runner clamps
+    // its wait to the agreed window's close, so the window ends as the partner
+    // no-show it is rather than as this operator's cancellation. An attended run
+    // has an operator who can stop it and no window to end at, so it leaves the
+    // wait on the flows' shared human-timescale budget -- and this is the one
+    // check that reads the config the real component builds.
+    await runUntilItFails();
+
+    expect(driverConfigs.seen).toHaveLength(1);
+    expect(driverConfigs.seen[0]).not.toHaveProperty("peerWaitTimeoutMs");
   });
 });

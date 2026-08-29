@@ -36,6 +36,32 @@ function goodBytes(): string {
   );
 }
 
+/** A backup of a record that WAS scheduled and did hold an input pointer: the
+ * artifact carries the schedule, and the handle is a device-local platform
+ * object no artifact can carry. */
+function scheduledBytes(): string {
+  const record = buildManagedExchangeRecord({
+    label: "Riverbend quarterly",
+    exchangeFile: composeManagedExchangeFile({
+      connection: { channel: "webrtc", host: "signaling.example.org" },
+      linkageTerms,
+    }),
+    side: "inviter",
+    sharedSecret: generateSharedSecret(),
+    inputFileHandle: {} as FileSystemFileHandle,
+    schedule: {
+      anchor: "2026-01-06T14:00:00.000Z",
+      intervalDays: 7,
+      windowSeconds: 10_800,
+      nextWindow: "2026-01-06T14:00:00.000Z",
+      consecutiveMisses: 0,
+    },
+  });
+  return serializeManagedExchangeArtifact(
+    encodeManagedExchangeArtifact(record),
+  );
+}
+
 function recordingDeps(revive?: ManagedExchangeRecord): ManagedImportDeps & {
   installed: Array<ManagedExchangeRecord>;
   reviveSpent: ReturnType<typeof vi.fn>;
@@ -98,6 +124,22 @@ describe("importManagedExchange", () => {
   test("the installed record carries no input-file handle", async () => {
     const deps = recordingDeps();
     const installed = await importManagedExchange(goodBytes(), deps);
+    expect(installed).not.toHaveProperty("inputFileHandle");
+  });
+
+  test("carries a backed-up schedule but still no handle, so no import can run unattended", async () => {
+    // The converse of the deposit path (test/unit/benchManageOfferModel.test.ts,
+    // which writes a handle and no schedule): an import can carry a schedule and
+    // reconstructs no handle, so neither path on its own assembles the pair the
+    // unattended runner fires on. The source record here HELD a handle, so what
+    // is asserted is that the round trip drops it rather than that there was
+    // nothing to drop.
+    const deps = recordingDeps();
+    const installed = await importManagedExchange(scheduledBytes(), deps);
+    expect(installed.schedule).toMatchObject({
+      nextWindow: "2026-01-06T14:00:00.000Z",
+      intervalDays: 7,
+    });
     expect(installed).not.toHaveProperty("inputFileHandle");
   });
 
