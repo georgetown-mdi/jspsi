@@ -188,6 +188,15 @@ expert key editor is for. Terms carrying an added key are not drawn from the set
 so they cite none -- the departure reaches the accepting party's terms review,
 not only the operator's screen.
 
+A key over one of these types carries the type's recommended cleaning whichever
+door authors it -- the guided offer's checkbox, an imported document, or the
+expert key editor. The cleaning is per-party and never travels, so the accepting
+party derives its own from the terms it accepted: a party matching one of these
+columns raw would hash `20001-1234` against a partner hashing `20001` and match
+nothing, with neither side told. The editor seeds the recommended pipeline
+instead, and an operator who wants other steps edits them in the data-prep
+workbench, where the change is theirs and visible.
+
 The honest summary is that the key set is looser than some standards where it
 matches, and narrower than the product's own capability in what it can match
 on.

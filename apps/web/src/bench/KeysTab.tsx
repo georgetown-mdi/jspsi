@@ -84,9 +84,12 @@ const OPT_IN_BADGE_LABEL = "outside the default set";
  *
  * The shape of the offer needs stating as much as the departure does: each type
  * is offered only inside a compound key, and an operator who reads the list as a
- * menu of single identifiers would not see why. The closing sentence is about the
- * badge instead, which a metadata edit can leave on an offer the file no longer
- * supplies a column for.
+ * menu of single identifiers would not see why. The last two sentences are about
+ * the badge, which a metadata edit can leave on an offer the file no longer
+ * supplies a column for, and about the cleaning that follows the key -- an
+ * operator who edited an offered type's steps and then lost the key to a column
+ * edit gets the recommended steps back, not their own, and is told so here rather
+ * than discovering it in the workbench.
  */
 const OPT_IN_KEYS_GUIDANCE =
   "The default keys use none of phone number, email address, or ZIP code, so " +
@@ -98,7 +101,10 @@ const OPT_IN_KEYS_GUIDANCE =
   "email address is often a shared one, covering a household or the " +
   "organization that helped with an application. Offers " +
   "appear for the keys your file can supply; one marked not satisfiable lost " +
-  "its column to a later edit.";
+  "its column to a later edit. Cleaning follows the key: turning an offer off, " +
+  "or losing a column its key needs, withdraws the cleaning that came with it, " +
+  "and turning it back on restores the recommended steps rather than any you " +
+  "had changed.";
 
 /**
  * The Matching keys tab: the guided ordered key list (enable + reorder, with

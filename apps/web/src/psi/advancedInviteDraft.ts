@@ -26,6 +26,7 @@ import type {
   LinkageTerms,
   Metadata,
   Standardization,
+  StandardizationStep,
 } from "@psilink/core";
 
 import type {
@@ -459,12 +460,9 @@ function isOfferedTypeCleaning(
 }
 
 /** The standardization an opt-in offer's enabled flag implies: `standardization`
- * with the offered cleaning no enabled key references dropped, and the recommended
- * pipeline added for each offered field an enabled key references and no
- * transformation yet produces. The addition is derived exactly as the seed derives
- * it ({@link inviterDefaultStandardization} over the metadata's default terms), so
- * an offer turned on cleans its column the way the accepting party -- deriving from
- * the same terms -- cleans its own. */
+ * with the offered cleaning no enabled key references dropped, then the
+ * recommended pipeline seeded for whatever the enabled keys do reference
+ * ({@link seededOptInCleaning}). */
 function optInCleaningForKeys(
   standardization: Standardization,
   metadata: Metadata,
@@ -478,7 +476,36 @@ function optInCleaningForKeys(
       !isOfferedTypeCleaning(transformation, columnByName) ||
       referenced.has(transformation.output),
   );
-  const produced = new Set(kept.map((transformation) => transformation.output));
+  return seededOptInCleaning(kept, metadata, identity, enabledKeys);
+}
+
+/**
+ * `standardization` with the recommended pipeline added for each
+ * {@link OPT_IN_LINKAGE_FIELD_TYPES} field an enabled key references and no
+ * transformation yet produces. The addition is derived exactly as the seed derives
+ * it ({@link inviterDefaultStandardization} over the metadata's default terms), so
+ * a key over one of those types cleans its column the way the accepting party --
+ * deriving from the same terms -- cleans its own.
+ *
+ * Purely additive: it never drops or rewrites a transformation the draft already
+ * holds, so it can run after any edit that may have added a reference without
+ * touching cleaning the operator authored. Two of the three doors into such a key
+ * pass through here -- the guided offer's checkbox ({@link draftWithKeyEnabled})
+ * and the expert key editor ({@link draftWithSeededOptInCleaning}). The third,
+ * an imported document, reaches the same steps through its own reconstruction
+ * ({@link standardizationForImportedTerms}), which binds the document's field
+ * NAMES rather than the type-named field this one seeds.
+ */
+function seededOptInCleaning(
+  standardization: Standardization,
+  metadata: Metadata,
+  identity: string,
+  enabledKeys: ReadonlyArray<LinkageKey>,
+): Standardization {
+  const columnByName = new Map(metadata.map((column) => [column.name, column]));
+  const produced = new Set(
+    standardization.map((transformation) => transformation.output),
+  );
   const additions = inviterDefaultStandardization(
     metadata,
     getDefaultLinkageTerms(identity, metadata),
@@ -488,7 +515,9 @@ function optInCleaningForKeys(
       isOfferedTypeCleaning(transformation, columnByName) &&
       !produced.has(transformation.output),
   );
-  return [...kept, ...additions];
+  return additions.length === 0
+    ? standardization
+    : [...standardization, ...additions];
 }
 
 /**
@@ -720,12 +749,44 @@ export function declarableFieldNames(
   );
 }
 
+/** The steps the recommended per-type pipeline cleans a field of `type` with:
+ * {@link defaultStandardizationForRows} over terms declaring that one field, which
+ * covers an {@link OPT_IN_LINKAGE_FIELD_TYPES} type the default terms declare
+ * nothing for as well as a default one. `undefined` when these columns supply no
+ * `role: linkage` column of the type, since the derivation then binds nothing. The
+ * date-of-birth format is the `MM/DD/YYYY` default: no rows are threaded here, the
+ * same answer {@link reconcileStandardization} gives a newly-typed column. */
+function recommendedStepsForType(
+  metadata: Metadata,
+  identity: string,
+  type: LinkageField["type"],
+): Array<StandardizationStep> | undefined {
+  return defaultStandardizationForRows(
+    metadata,
+    {
+      ...getDefaultLinkageTerms(identity, metadata),
+      linkageFields: [{ name: type, type }],
+    },
+    [],
+  )[0]?.steps;
+}
+
 /**
- * Append a same-typed linkage field bound to the type's first free
- * `role: linkage` column, named uniquely off the type's first field and seeded
- * with its steps -- so the second field starts from the same recommended
- * pipeline. A type with no free column returns the draft unchanged (the
- * add-field affordance is gated on one existing).
+ * Append a linkage field of `type` bound to its first free `role: linkage` column
+ * and carrying the type's cleaning: the steps of the type's first field when the
+ * draft already declares one -- so a SECOND field starts from the pipeline the
+ * first is cleaned with, including any steps the operator edited into it -- and
+ * the recommended pipeline ({@link recommendedStepsForType}) when it is the first.
+ *
+ * The name is the type's own (the name `authoredLinkageFields` declares that
+ * field under, and so the name a key references it by), suffixed `_2`, `_3`, ...
+ * only to step past a name the draft already produces. A first field named `_2`
+ * would read as the second of a pair whose first does not exist, and an empty
+ * pipeline on it would match the column raw against an accepting party that cleans
+ * it.
+ *
+ * A type with no free column returns the draft unchanged (the add-field affordance
+ * is gated on one existing).
  */
 export function draftWithFieldAdded(
   draft: AdvancedInviteDraft,
@@ -747,14 +808,21 @@ export function draftWithFieldAdded(
   );
   const base = sibling?.output ?? type;
   const taken = new Set(draft.standardization.map((t) => t.output));
-  let n = 2;
-  let output = `${base}_${n}`;
-  while (taken.has(output)) output = `${base}_${++n}`;
+  let output = base;
+  for (let n = 2; taken.has(output); n++) output = `${base}_${n}`;
   return {
     ...draft,
     standardization: [
       ...draft.standardization,
-      { output, input: freeColumn, steps: sibling?.steps ?? [] },
+      {
+        output,
+        input: freeColumn,
+        steps:
+          sibling !== undefined
+            ? (sibling.steps ?? [])
+            : (recommendedStepsForType(draft.metadata, draft.identity, type) ??
+              []),
+      },
     ],
   };
 }
@@ -779,20 +847,58 @@ export function keyIsSupplyable(
 // through these is referentially valid by construction; the core schema's
 // referential-integrity refines remain the single validation source.
 
-/** Replace the linkage key at `keyIndex` by applying `fn` to it. The basis for
- * every expert key edit (rename, swap, and -- via {@link updateElementAt} -- the
- * element edits), so the immutable update lives in one place. */
+/**
+ * `draft` with the recommended pipeline seeded for every
+ * {@link OPT_IN_LINKAGE_FIELD_TYPES} field its enabled keys reference and nothing
+ * cleans yet ({@link seededOptInCleaning}), returned by reference when there is
+ * nothing to add.
+ *
+ * The expert editor offers `authoredLinkageFields` over the draft, whose synthetic
+ * branch declares a type-named field for a `role: linkage` column of an opt-in type
+ * the draft carries no transformation for. A key over that field is schema-valid,
+ * satisfiable, and passes the mint -- which asserts that the cleaning names declared
+ * fields, not that a declared field is cleaned -- so without this the party would
+ * match its column RAW while the accepting party, deriving cleaning from the same
+ * terms, matches the cleaned value, and the two agree on nothing.
+ *
+ * Seeding rather than warning keeps the expert door at the guided door's and the
+ * import's behavior, and the operator edits the seeded steps in the workbench
+ * afterward. Only the seeding is shared: an expert edit never WITHDRAWS a pipeline
+ * the way an offer's checkbox does, since the expert workbench owns its own card
+ * list and a key edit must not delete steps authored there. A pipeline the enabled
+ * keys stop referencing is reconciled away where it would otherwise matter, at the
+ * mint (`standardizationForTerms`).
+ */
+function draftWithSeededOptInCleaning(
+  draft: AdvancedInviteDraft,
+): AdvancedInviteDraft {
+  const standardization = seededOptInCleaning(
+    draft.standardization,
+    draft.metadata,
+    draft.identity,
+    enabledLinkageKeys(draft.keys),
+  );
+  return standardization === draft.standardization
+    ? draft
+    : { ...draft, standardization };
+}
+
+/** Replace the linkage key at `keyIndex` by applying `fn` to it, seeding the
+ * cleaning an opt-in type the edit newly references needs
+ * ({@link draftWithSeededOptInCleaning}). The basis for every expert key edit
+ * (rename, swap, and -- via {@link updateElementAt} -- the element edits), so both
+ * the immutable update and that reconciliation live in one place. */
 export function updateKeyAt(
   draft: AdvancedInviteDraft,
   keyIndex: number,
   fn: (key: LinkageKey) => LinkageKey,
 ): AdvancedInviteDraft {
-  return {
+  return draftWithSeededOptInCleaning({
     ...draft,
     keys: draft.keys.map((entry, i) =>
       i === keyIndex ? { ...entry, key: fn(entry.key) } : entry,
     ),
-  };
+  });
 }
 
 /** Drop a key's `swap` when either target no longer names one of its element
@@ -830,7 +936,9 @@ export function updateElementAt(
 
 /** Append a new, enabled linkage key with a unique name and a single element
  * referencing `fieldName` (chosen by the caller from the declared fields, so the
- * key is referentially valid and non-empty by construction). */
+ * key is referentially valid and non-empty by construction). The key arrives
+ * enabled, so a `fieldName` of an opt-in type is cleaned from the moment it is
+ * keyed ({@link draftWithSeededOptInCleaning}). */
 export function addKey(
   draft: AdvancedInviteDraft,
   fieldName: string,
@@ -840,7 +948,10 @@ export function addKey(
     new Set(draft.keys.map((entry) => entry.key.name)),
   );
   const key: LinkageKey = { name, elements: [{ field: fieldName }] };
-  return { ...draft, keys: [...draft.keys, { key, enabled: true }] };
+  return draftWithSeededOptInCleaning({
+    ...draft,
+    keys: [...draft.keys, { key, enabled: true }],
+  });
 }
 
 /** Remove the linkage key at `index`. */

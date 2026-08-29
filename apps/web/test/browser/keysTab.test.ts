@@ -224,6 +224,11 @@ describe("KeysTab: the keys offered outside the default set", () => {
     expect(body).toContain("often a shared one");
     // All three named, so none is offered on quieter terms than the others.
     expect(body).toContain("phone number, email address, or ZIP code");
+    // And that the cleaning goes with the key: an operator who edited an offered
+    // type's steps loses them to a column edit that drops its key, and gets the
+    // recommended steps back rather than their own.
+    expect(body).toContain("Cleaning follows the key");
+    expect(body).toContain("restores the recommended steps");
   });
 
   test("says nothing when the file supplies no column for one", async () => {

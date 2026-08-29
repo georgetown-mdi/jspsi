@@ -762,6 +762,52 @@ describe("turning an offer on and off again", () => {
       canonicalString(buildAdvancedTerms(off)),
     );
   });
+
+  test("cleaning the operator customized is re-derived across a withdraw and a restore", () => {
+    // A BACKBONE column leaving the offered type behind takes the whole offer with
+    // it, custom steps and all, and restoring that column brings the offer back.
+    // What comes back is the RECOMMENDED pipeline: the accepting party derives the
+    // same terms into the same steps, so a step only one side runs matches nothing
+    // and re-deriving is what keeps the two hashing one value.
+    const on = withKeyEnabled(guidedDraft(), ZIP_KEY);
+    const custom: AdvancedInviteDraft = {
+      ...on,
+      standardization: on.standardization.map((transformation) =>
+        transformation.output === "zip_code"
+          ? { ...transformation, steps: [{ function: "trim_whitespace" }] }
+          : transformation,
+      ),
+    };
+
+    const withdrawn = setDraftMetadata(
+      custom,
+      setColumnType(custom.metadata, "dob", "other").metadata,
+      ROWS,
+    );
+    expect(withdrawn.standardization.some((t) => t.output === "zip_code")).toBe(
+      false,
+    );
+
+    const restored = setDraftMetadata(
+      withdrawn,
+      setColumnType(withdrawn.metadata, "dob", "date_of_birth").metadata,
+      ROWS,
+    );
+    // The offer is on the list again; its cleaning follows its key, so this asks
+    // for the key rather than assuming which flag it arrived at.
+    const back = withKeyEnabled(restored, ZIP_KEY);
+    const steps = back.standardization.find(
+      (t) => t.output === "zip_code",
+    )?.steps;
+    expect(steps).toEqual(
+      getDefaultStandardization(
+        inferMetadata(COLUMNS),
+        deriveAcceptedLinkageTerms(buildAdvancedTerms(back), "Acceptor"),
+      ).find((t) => t.output === "zip_code")?.steps,
+    );
+    expect(steps).not.toEqual([{ function: "trim_whitespace" }]);
+    expect(steps).not.toEqual([]);
+  });
 });
 
 describe("what a mint over an offered column hands the surfaces that keep it", () => {
