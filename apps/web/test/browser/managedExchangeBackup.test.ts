@@ -251,9 +251,9 @@ describe("a migration spends the source", () => {
 });
 
 describe("the spend is checked against the stored record in one step", () => {
-  // Against the real store, so the check and the write are the one transaction the
-  // rotation's own cross-store transaction is serialized against: a hand-off is only
-  // ever spent while the record still carries the secret its files carry.
+  // Against the real store: a hand-off is only ever spent while the record still
+  // carries the secret its files carry. These cases pin the check's semantics;
+  // the transaction interleaving itself is not driven here.
   test("a secret the store has rotated past refuses, writing nothing", async () => {
     const record = await createManagedExchange(newExchange());
     const downloadedSecret = record.sharedSecret;

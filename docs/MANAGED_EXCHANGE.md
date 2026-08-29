@@ -688,8 +688,9 @@ Ahead of that refusal, both hand-offs -- and the downloads that start them --
 are withheld while this tab is running the exchange, and while a run in any
 other context holds the [single-writer
 lock](#cross-tab-single-writer-locking-web-locks), which is how a second tab's
-run or a scheduled one reaches them. The surface names the run as the reason and
-offers the hand-offs again once it ends. That wait is the courtesy and the
+run or a scheduled one reaches them. The surface names the run as the reason;
+the hand-offs return when this tab's run ends or, for another context, when its
+lock releases at the rotation persist. That wait is the courtesy and the
 refusal is the guarantee: the lock can be released between the moment the
 surface reads it and the moment the operator clicks, so the confirmation
 re-checks either way.
