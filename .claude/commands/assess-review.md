@@ -266,6 +266,28 @@ Each path is recorded on the checklist line naming both shas:
   path and takes a full round, as does a delta that only a reviewer could judge
   harmless.
 
+A head moved by a BASE SYNC -- a merge commit whose first parent is the attested
+sha and whose second parent is on origin/staging -- is outside all three paths,
+honestly: the attested-to-head diff is dominated by already-merged staging
+content, so the verifier can never HOLD across one, and a conflict resolution is
+branch-authored change no round has read. Its route is a round, not a mechanical
+path: re-run the branch's standing refutation contract in full at the merge head
+(`/light-review --role <role> --claims <file> --target <branch>`). The standing
+contract is the union of the claims the branch's role rounds have run -- each
+ledger row records its claims verbatim, so the union survives a lost claims
+file -- and never the last row's delta subset.
+No verdict is carried across the merge -- a claim's truth is not a function of
+its recorded subject file, the ledger does not record the file set a claim
+ranges over, and the merge composes the branch with content no round has read --
+while re-verifying a claim that held costs little inside the one round that must
+run anyway. The round reads the effective diff at the merge head, so the
+resolution delta is inside what it reads. It counts against the branch's round
+budget like any other round; a spent cap is the owner's to raise, noted in the
+ledger. The checklist line then attests the merge head citing that round. An n/a
+line keeps its own path above -- the enumeration re-runs against the merged
+head's diff the same way -- and a head moved by anything other than that merge
+shape is not a base sync and takes the rules as already written.
+
 ## Step 5 -- Clean up
 
 Delete `PRIMARY/scratch/review-rounds/<key>.findings.md`. Leave the rest of

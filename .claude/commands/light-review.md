@@ -99,6 +99,12 @@ The ledger also sizes a role contract. From round 3 on -- the ledger already hol
 rows of any kind -- CLAIMS covers only the DELTA: a claim whose subject the last fix
 touched, plus one claim per path that fix added. Re-running an unaffected claim the
 ledger already records as HOLDS is forbidden: it re-buys a verdict the branch owns.
+A base sync -- the merge shape assess-review.md's Step 4 defines, a merge of
+origin/staging into the branch -- is not a fix: the branch owns no verdict at the
+merged head, so the delta rule does not apply. The contract is the branch's standing
+contract in full (the union of the claims its role rounds have run, recorded verbatim
+in the ledger's rows), every claim re-run at the merge head; re-running its HOLDS
+claims is required there rather than forbidden.
 Whatever the round, cap the list at `max(5, ceil(<changed lines>/60))` claims and never
 above 12, where `<changed lines>` is the insertions plus deletions in that target's
 `--stat` total above. A contract over that ceiling is trimmed to the claims that carry
