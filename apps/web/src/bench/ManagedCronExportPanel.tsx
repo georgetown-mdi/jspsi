@@ -10,10 +10,9 @@ import {
   dispatchManagedCronExport,
 } from "@psi/managedExchangeExport";
 import {
-  getManagedExchange,
   readRecordAndMarkBackedUp,
+  spendManagedExchangeIfCurrent,
 } from "@psi/managedExchangeStore";
-import { markManagedExchangeSpent } from "@psi/managedLocalState";
 
 import {
   RUN_IN_FLIGHT_HANDOFF_REASON,
@@ -33,14 +32,12 @@ const KEY_FILE_SECURITY_DOC_URL =
 
 /** The platform seams the export drives: the same atomic read-and-mark by id every
  * managed export takes (never this component's mounted record, whose secret a
- * concurrent rotation may already have superseded), the blob download, the fresh
- * read the confirmation measures the operator's attestation against, and the spend
- * write. */
+ * concurrent rotation may already have superseded), the blob download, and the
+ * atomic spend the confirmation measures the operator's attestation against. */
 const cronExportDeps = {
   readAndMark: readRecordAndMarkBackedUp,
   download: triggerBlobDownload,
-  readRecord: getManagedExchange,
-  markSpent: markManagedExchangeSpent,
+  spendIfCurrent: spendManagedExchangeIfCurrent,
   now: () => new Date(),
 };
 

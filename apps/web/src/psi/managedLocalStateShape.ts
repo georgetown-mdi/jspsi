@@ -37,6 +37,13 @@ export interface ManagedSpentState {
   handoff?: ManagedSpentHandoff;
 }
 
+/** How a currency-checked spend ended: `"spent"` when the stored record still
+ * carried the secret the hand-off downloaded, so the spent state was written, and
+ * `"superseded"` when it did not -- a rotation or a re-invite moved the secret past
+ * the downloaded copy, or the record is gone -- in which case nothing was written
+ * and the caller refuses the hand-off. */
+export type ManagedSpendOutcome = "spent" | "superseded";
+
 /** This device's import marker for a record: stamped when the record was installed
  * or revived from a backup artifact. It is the evidence the desync tiering reads to
  * tell an import-since-last-success apart from an unexplained handshake failure: a

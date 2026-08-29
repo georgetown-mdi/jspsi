@@ -14,7 +14,10 @@
  *   artifact either. It is a plain timestamp (the handoff date), no secret material
  *   and no rotation epoch (source invalidation is operator cooperation, not
  *   cryptography; see docs/MANAGED_EXCHANGE.md, "Export/import is migration, not
- *   sync").
+ *   sync"). It is the one sibling marker this module does not write: a spend is
+ *   only ever taken together with the record read that finds the hand-off still
+ *   current, so its single writer is the cross-store step in
+ *   {@link ./managedExchangeStore.ts} (`spendManagedExchangeIfCurrent`).
  *
  * This is the thin IndexedDB layer over the sibling store the records database also
  * holds ({@link MANAGED_EXCHANGE_LOCAL_STORE_NAME}); the state's shape and its
@@ -33,14 +36,12 @@ import {
 } from "./managedExchangeStore";
 import { managedLocalStateSchema } from "./managedLocalStateShape";
 
-import type {
-  ManagedLocalState,
-  ManagedSpentHandoff,
-} from "./managedLocalStateShape";
+import type { ManagedLocalState } from "./managedLocalStateShape";
 
 export type {
   ManagedImportMarker,
   ManagedLocalState,
+  ManagedSpendOutcome,
   ManagedSpentHandoff,
   ManagedSpentState,
 } from "./managedLocalStateShape";
@@ -204,28 +205,6 @@ export async function markManagedExchangeBackedUp(
   await readModifyWriteLocalState(id, (current) => ({
     ...current,
     backup: { backedUpAt },
-  }));
-}
-
-/**
- * Mark a record spent as of `spentAt` -- an export handed this device's copy off.
- * Advances only the spent state, leaving the backup marker untouched.
- *
- * `handoff` records WHICH export spent it, because the two leave the operator with
- * different recoveries and the surfaces reading this state say so: a migration
- * spend (the default, `handoff` omitted) downloaded the artifact that clears it,
- * reviving the record in place (see {@link ./managedExchangeStore.ts},
- * `reviveSpentManagedExchange`), while a `"command-line"` hand-off downloaded the
- * CLI's own two files, which the import flow does not accept.
- */
-export async function markManagedExchangeSpent(
-  id: string,
-  spentAt: string,
-  handoff?: ManagedSpentHandoff,
-): Promise<void> {
-  await readModifyWriteLocalState(id, (current) => ({
-    ...current,
-    spent: { spentAt, ...(handoff !== undefined ? { handoff } : {}) },
   }));
 }
 

@@ -13,13 +13,11 @@ import { SavedExchanges, SavedExchangesHome } from "@bench/SavedExchanges";
 import {
   clearManagedExchanges,
   createManagedExchange,
+  spendManagedExchangeIfCurrent,
 } from "@psi/managedExchangeStore";
-import {
-  markManagedExchangeBackedUp,
-  markManagedExchangeSpent,
-} from "@psi/managedLocalState";
 import { BenchLobby } from "@bench/BenchLobby";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+import { markManagedExchangeBackedUp } from "@psi/managedLocalState";
 import styles from "@bench/bench.module.css";
 
 import { createAppMount } from "./renderApp";
@@ -500,7 +498,11 @@ describe("saved list route: delete is a first-class, always-available action", (
     const created = await createManagedExchange(
       newExchange({ label: "Handed off partnership" }),
     );
-    await markManagedExchangeSpent(created.id, "2026-07-12T09:00:00.000Z");
+    await spendManagedExchangeIfCurrent(
+      created.id,
+      created.sharedSecret,
+      "2026-07-12T09:00:00.000Z",
+    );
 
     app.render(createElement(SavedExchanges));
 
@@ -522,8 +524,9 @@ describe("saved list route: delete is a first-class, always-available action", (
     const created = await createManagedExchange(
       newExchange({ label: "Handed off partnership" }),
     );
-    await markManagedExchangeSpent(
+    await spendManagedExchangeIfCurrent(
       created.id,
+      created.sharedSecret,
       "2026-07-12T09:00:00.000Z",
       "command-line",
     );

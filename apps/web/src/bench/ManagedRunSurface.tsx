@@ -20,12 +20,9 @@ import {
 import {
   getManagedExchange,
   readRecordAndMarkBackedUp,
+  spendManagedExchangeIfCurrent,
   updateManagedExchangeLocalFields,
 } from "@psi/managedExchangeStore";
-import {
-  getManagedLocalState,
-  markManagedExchangeSpent,
-} from "@psi/managedLocalState";
 import {
   readDisclosureAccounting,
   resetDisclosureAccounting,
@@ -33,6 +30,7 @@ import {
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managedExchangeArtifact";
 import { canReinviteFromRecord } from "@psi/managedReinvite";
 import { deriveManagedBackupState } from "@psi/managedBackupState";
+import { getManagedLocalState } from "@psi/managedLocalState";
 import { managedRerunCompletion } from "@psi/managedCompletionSurface";
 import { reinviteManagedExchange } from "@psi/managedReinviteDriver";
 import { runManagedExchangeInBrowser } from "@psi/managedRunDriver";
@@ -441,8 +439,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setMigrationSuperseded(false);
     void dispatchManagedMigration(record.id, {
       ...exportDeps,
-      readRecord: getManagedExchange,
-      markSpent: markManagedExchangeSpent,
+      spendIfCurrent: spendManagedExchangeIfCurrent,
     })
       .then((dispatch) => {
         setBackupMarker({ backedUpAt: dispatch.backedUpAt.toISOString() });

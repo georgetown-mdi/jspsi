@@ -43,6 +43,10 @@ import type {
   ManagedExchangeScheduleAdvance,
   NewManagedExchange,
 } from "./managedExchangeRecord";
+import type {
+  ManagedSpendOutcome,
+  ManagedSpentHandoff,
+} from "./managedLocalStateShape";
 
 /** The IndexedDB database name, under the app's origin. */
 export const MANAGED_EXCHANGE_DB_NAME = "psilink-managed-exchanges";
@@ -602,6 +606,107 @@ export async function readRecordAndMarkBackedUp(
   } finally {
     db.close();
   }
+}
+
+/**
+ * Spend this device's copy as of `spentAt` -- under `handoff`, or as the device
+ * migration when it is omitted -- but ONLY while the stored record still carries
+ * `expectedSharedSecret`, the secret the hand-off's downloaded files carry. The
+ * read, the comparison, and the spent-state write all run inside one transaction
+ * spanning the record and sibling stores, so nothing can land between the check and
+ * the write: a rotation (whose own cross-store transaction advances the secret)
+ * either commits before this transaction, and the check then sees the rotated secret
+ * and refuses, or after it, and the spend it follows was decided against the secret
+ * the operator's files actually carry. Split across two transactions the check would
+ * be advisory -- a rotation landing in the gap would be invisible to it, and the
+ * spend would hand a new owner a copy whose first run meets a partner that has moved
+ * on.
+ *
+ * Resolves `"superseded"` -- having written nothing -- when the stored secret has
+ * moved on or no record exists under `id`, where there is no live copy left to
+ * spend. The secret is the identity that decides: it is what the hand-off files
+ * carry and what a rotation moves, so an edit that leaves it alone (a label, a
+ * max-age policy) leaves the downloaded copy spendable. Any backup marker is left
+ * untouched: a spent source has a current export by construction.
+ *
+ * @throws {ZodError} if the stored record or sibling entry is invalid; the
+ *   transaction aborts and nothing is written.
+ */
+export async function spendManagedExchangeIfCurrent(
+  id: string,
+  expectedSharedSecret: string,
+  spentAt: string,
+  handoff?: ManagedSpentHandoff,
+): Promise<ManagedSpendOutcome> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    return await new Promise<ManagedSpendOutcome>((resolve, reject) => {
+      const transaction = db.transaction(
+        [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
+        "readwrite",
+        { durability: "strict" },
+      );
+      const records = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
+      const local = transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
+      const read = records.get(id);
+      const readLocal = local.get(id);
+      // Refusal is the default, so every way out of the step short of the write --
+      // a missing record, a moved secret -- resolves as the refusal rather than
+      // relying on each to say so.
+      let outcome: ManagedSpendOutcome = "superseded";
+      let failure: unknown;
+      const applyWhenReady = () => {
+        if (read.readyState !== "done" || readLocal.readyState !== "done")
+          return;
+        try {
+          if (read.result === undefined) return;
+          const stored = parseManagedExchangeRecord(read.result);
+          if (stored.sharedSecret !== expectedSharedSecret) return;
+          markSpentOnLocalStore(local, id, readLocal.result, spentAt, handoff);
+          outcome = "spent";
+        } catch (error) {
+          failure = error;
+          transaction.abort();
+        }
+      };
+      read.onsuccess = applyWhenReady;
+      readLocal.onsuccess = applyWhenReady;
+      transaction.oncomplete = () => resolve(outcome);
+      transaction.onerror = () => reject(failure ?? transaction.error);
+      transaction.onabort = () => reject(failure ?? transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Write the spent state onto a record's sibling entry, on an already-open local-state
+ * object store inside a live transaction, preserving any backup and import markers.
+ *
+ * `handoff` records WHICH export spent the copy, because the two leave the operator
+ * with different recoveries and the surfaces reading this state say so: a migration
+ * spend (`handoff` omitted) downloaded the artifact that clears it, reviving the
+ * record in place ({@link reviveSpentManagedExchange}), while a `"command-line"`
+ * hand-off downloaded the CLI's own two files, which the import flow does not accept.
+ * The result is re-validated ({@link parseManagedLocalState}) before the write, so a
+ * malformed spent state aborts the transaction rather than landing.
+ */
+function markSpentOnLocalStore(
+  store: IDBObjectStore,
+  id: string,
+  raw: unknown,
+  spentAt: string,
+  handoff: ManagedSpentHandoff | undefined,
+): void {
+  const current = raw === undefined ? undefined : parseManagedLocalState(raw);
+  store.put(
+    parseManagedLocalState({
+      ...current,
+      spent: { spentAt, ...(handoff !== undefined ? { handoff } : {}) },
+    }),
+    id,
+  );
 }
 
 /**

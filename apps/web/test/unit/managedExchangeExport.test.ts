@@ -27,8 +27,11 @@ import type {
   ManagedExportDeps,
   ManagedMigrationDeps,
 } from "@psi/managedExchangeExport";
+import type {
+  ManagedSpendOutcome,
+  ManagedSpentHandoff,
+} from "@psi/managedLocalState";
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
-import type { ManagedSpentHandoff } from "@psi/managedLocalState";
 
 // The three export intents, tested in Node with injected seams. Every export reads
 // the record fresh, composes what it will download, and marks it in one atomic step
@@ -36,7 +39,9 @@ import type { ManagedSpentHandoff } from "@psi/managedLocalState";
 // that refuses the record leaves no marker behind; a backup leaves the source live;
 // a migration and a command-line export download and return a confirm handle,
 // spending the source only when the operator attests the files are saved (a
-// dismissed save leaves it live).
+// dismissed save leaves it live) and only through the one atomic step
+// (spendIfCurrent) that writes the spend while the stored secret is still the one
+// the download carried.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
@@ -116,12 +121,15 @@ describe("dispatchManagedMigration", () => {
   function migrationDeps(rec: ManagedExchangeRecord): ManagedMigrationDeps & {
     downloaded: Array<{ fileName: string; content: string }>;
     order: Array<string>;
-    markSpent: ReturnType<typeof vi.fn>;
-    /** What a confirm-time read finds in the store; the record itself until a test
+    spendIfCurrent: ReturnType<typeof vi.fn>;
+    /** The spends the atomic step actually wrote; a refused one writes nothing. */
+    spent: Array<string>;
+    /** What the confirm-time step finds in the store; the record itself until a test
      * moves it, as a rotation or a delete in another context would. */
     stored: { record: ManagedExchangeRecord | undefined };
   } {
     const order: Array<string> = [];
+    const spent: Array<string> = [];
     const downloaded: Array<{ fileName: string; content: string }> = [];
     const stored: { record: ManagedExchangeRecord | undefined } = {
       record: rec,
@@ -129,6 +137,7 @@ describe("dispatchManagedMigration", () => {
     return {
       downloaded,
       order,
+      spent,
       stored,
       readAndMark: vi.fn(
         (
@@ -145,14 +154,21 @@ describe("dispatchManagedMigration", () => {
         order.push("download");
         downloaded.push({ fileName, content });
       },
-      readRecord: () => {
-        order.push("readRecord");
-        return Promise.resolve(stored.record);
-      },
-      markSpent: vi.fn((_id: string, _spentAt: string) => {
-        order.push("markSpent");
-        return Promise.resolve();
-      }),
+      // The store's atomic spend, modelled: one step compares the stored secret and
+      // writes the spent state, so a refusal is what leaves nothing written.
+      spendIfCurrent: vi.fn(
+        (_id: string, expectedSharedSecret: string, spentAt: string) => {
+          order.push("spendIfCurrent");
+          const current = stored.record;
+          if (
+            current === undefined ||
+            current.sharedSecret !== expectedSharedSecret
+          )
+            return Promise.resolve<ManagedSpendOutcome>("superseded");
+          spent.push(spentAt);
+          return Promise.resolve<ManagedSpendOutcome>("spent");
+        },
+      ),
       now: () => new Date("2026-07-14T12:00:00.000Z"),
     };
   }
@@ -169,7 +185,7 @@ describe("dispatchManagedMigration", () => {
       expect.any(Function),
     );
     // The spend is operator-attested: not written until confirm() is called.
-    expect(deps.markSpent).not.toHaveBeenCalled();
+    expect(deps.spendIfCurrent).not.toHaveBeenCalled();
     expect(dispatch.record).toBe(rec);
   });
 
@@ -178,10 +194,14 @@ describe("dispatchManagedMigration", () => {
     const deps = migrationDeps(rec);
     const dispatch = await dispatchManagedMigration(rec.id, deps);
     await dispatch.confirm(new Date("2026-07-14T13:30:00.000Z"));
-    expect(deps.markSpent).toHaveBeenCalledWith(
+    // The secret the dispatch serialized is what the step checks against, so the
+    // spend is decided by the artifact in the operator's hands.
+    expect(deps.spendIfCurrent).toHaveBeenCalledWith(
       rec.id,
+      rec.sharedSecret,
       "2026-07-14T13:30:00.000Z",
     );
+    expect(deps.spent).toEqual(["2026-07-14T13:30:00.000Z"]);
   });
 
   test("a never-confirmed dispatch never spends (a dismissed save leaves it live)", async () => {
@@ -189,7 +209,8 @@ describe("dispatchManagedMigration", () => {
     const deps = migrationDeps(rec);
     await dispatchManagedMigration(rec.id, deps);
     // The caller drops the dispatch without calling confirm.
-    expect(deps.markSpent).not.toHaveBeenCalled();
+    expect(deps.spendIfCurrent).not.toHaveBeenCalled();
+    expect(deps.spent).toEqual([]);
   });
 
   test("confirm refuses an artifact a rotation has superseded", async () => {
@@ -204,7 +225,7 @@ describe("dispatchManagedMigration", () => {
     await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
       ManagedHandoffSupersededError,
     );
-    expect(deps.markSpent).not.toHaveBeenCalled();
+    expect(deps.spent).toEqual([]);
   });
 
   test("confirm refuses when the record is gone", async () => {
@@ -216,23 +237,17 @@ describe("dispatchManagedMigration", () => {
     await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
       ManagedHandoffSupersededError,
     );
-    expect(deps.markSpent).not.toHaveBeenCalled();
+    expect(deps.spent).toEqual([]);
   });
 
-  test("confirm reads the store before it spends, never after", async () => {
-    // The read is the precondition, so a spend can never precede it: an
-    // implementation that marked first and checked afterwards would leave a
-    // superseded copy spent.
+  test("confirm spends only through the checked step, and only after the download", async () => {
+    // The check and the write are one step, so there is no second write to order
+    // against: an intent that reached a bare spend would show it here.
     const rec = record();
     const deps = migrationDeps(rec);
     const dispatch = await dispatchManagedMigration(rec.id, deps);
     await dispatch.confirm(new Date("2026-07-14T13:30:00.000Z"));
-    expect(deps.order).toEqual([
-      "readAndMark",
-      "download",
-      "readRecord",
-      "markSpent",
-    ]);
+    expect(deps.order).toEqual(["readAndMark", "download", "spendIfCurrent"]);
   });
 
   test("marks backed-up before it could ever spend", async () => {
@@ -322,13 +337,16 @@ describe("dispatchManagedCronExport", () => {
     downloaded: Array<{ fileName: string; content: string; mimeType: string }>;
     marked: Array<string>;
     order: Array<string>;
-    markSpent: ReturnType<typeof vi.fn>;
-    /** What a confirm-time read finds in the store; the record itself until a test
+    spendIfCurrent: ReturnType<typeof vi.fn>;
+    /** The spends the atomic step actually wrote; a refused one writes nothing. */
+    spent: Array<{ spentAt: string; handoff: ManagedSpentHandoff }>;
+    /** What the confirm-time step finds in the store; the record itself until a test
      * moves it, as a rotation or a delete in another context would. */
     stored: { record: ManagedExchangeRecord | undefined };
   } {
     const order: Array<string> = [];
     const marked: Array<string> = [];
+    const spent: Array<{ spentAt: string; handoff: ManagedSpentHandoff }> = [];
     const downloaded: Array<{
       fileName: string;
       content: string;
@@ -341,8 +359,8 @@ describe("dispatchManagedCronExport", () => {
       downloaded,
       marked,
       order,
+      spent,
       stored,
-      readRecord: () => Promise.resolve(stored.record),
       // The store's atomic step, modelled: the composition runs on the record read
       // and the marker is written only once it returns, so a refusal thrown out of
       // it leaves nothing marked -- the transaction the real store aborts.
@@ -361,9 +379,24 @@ describe("dispatchManagedCronExport", () => {
         order.push("download");
         downloaded.push({ fileName, content, mimeType });
       },
-      markSpent: vi.fn(
-        (_id: string, _spentAt: string, _handoff: ManagedSpentHandoff) =>
-          Promise.resolve(),
+      // The store's atomic spend, modelled as the migration's is: one step compares
+      // the stored secret and writes the spent state under its hand-off.
+      spendIfCurrent: vi.fn(
+        (
+          _id: string,
+          expectedSharedSecret: string,
+          spentAt: string,
+          handoff: ManagedSpentHandoff,
+        ) => {
+          const current = stored.record;
+          if (
+            current === undefined ||
+            current.sharedSecret !== expectedSharedSecret
+          )
+            return Promise.resolve<ManagedSpendOutcome>("superseded");
+          spent.push({ spentAt, handoff });
+          return Promise.resolve<ManagedSpendOutcome>("spent");
+        },
       ),
       now: () => new Date("2026-07-14T12:00:00.000Z"),
     };
@@ -380,7 +413,7 @@ describe("dispatchManagedCronExport", () => {
     ]);
     expect(deps.marked).toEqual(["2026-07-14T12:00:00.000Z"]);
     // The spend is operator-attested: not written until confirm() is called.
-    expect(deps.markSpent).not.toHaveBeenCalled();
+    expect(deps.spendIfCurrent).not.toHaveBeenCalled();
     expect(dispatch.record).toBe(rec);
     expect(dispatch.composed.command).toBe(
       "psilink exchange input.csv results.csv",
@@ -403,11 +436,15 @@ describe("dispatchManagedCronExport", () => {
     const deps = cronDeps(rec);
     const dispatch = await dispatchManagedCronExport(rec.id, deps);
     await dispatch.confirm(new Date("2026-07-14T13:30:00.000Z"));
-    expect(deps.markSpent).toHaveBeenCalledWith(
+    expect(deps.spendIfCurrent).toHaveBeenCalledWith(
       rec.id,
+      rec.sharedSecret,
       "2026-07-14T13:30:00.000Z",
       "command-line",
     );
+    expect(deps.spent).toEqual([
+      { spentAt: "2026-07-14T13:30:00.000Z", handoff: "command-line" },
+    ]);
   });
 
   test("confirm refuses files a rotation has superseded", async () => {
@@ -422,7 +459,7 @@ describe("dispatchManagedCronExport", () => {
     await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
       ManagedHandoffSupersededError,
     );
-    expect(deps.markSpent).not.toHaveBeenCalled();
+    expect(deps.spent).toEqual([]);
   });
 
   test.each(refusedRecords)(
@@ -439,7 +476,7 @@ describe("dispatchManagedCronExport", () => {
       // no spend, and the record the step read still equals its snapshot.
       expect(deps.marked).toEqual([]);
       expect(deps.downloaded).toEqual([]);
-      expect(deps.markSpent).not.toHaveBeenCalled();
+      expect(deps.spendIfCurrent).not.toHaveBeenCalled();
       expect(rec).toEqual(before);
     },
   );
@@ -458,6 +495,6 @@ describe("dispatchManagedCronExport", () => {
       /without composing the export/,
     );
     expect(deps.downloaded).toEqual([]);
-    expect(deps.markSpent).not.toHaveBeenCalled();
+    expect(deps.spendIfCurrent).not.toHaveBeenCalled();
   });
 });
