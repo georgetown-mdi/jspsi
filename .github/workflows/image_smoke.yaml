@@ -1148,8 +1148,8 @@ jobs:
           done
 
           sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -j DROP
-          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p tcp -d "$RESOLVER_ADDR" --dport 53 -j ACCEPT
-          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p udp -d "$RESOLVER_ADDR" --dport 53 -j ACCEPT
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p tcp -d "$RESOLVER_ADDR" --dport 53 -j ACCEPT 2>/dev/null
+          sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p udp -d "$RESOLVER_ADDR" --dport 53 -j ACCEPT 2>/dev/null
           sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -p tcp -d "$ALLOWED_ADDR" --dport "$ALLOWED_PORT" -j ACCEPT
           sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
           sudo iptables -L DOCKER-USER -n --line-numbers
