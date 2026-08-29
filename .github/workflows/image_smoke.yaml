@@ -978,16 +978,20 @@ jobs:
               from.address,
             );
           });
-          socket.bind(53);
+          socket.on("listening", () => {
+            const bound = socket.address();
+            console.log(`resolver bound to ${bound.address}:${bound.port}`);
+          });
+          // Bound to the resolver's own address rather than to every address in
+          // the namespace, so a reply leaves from the address the query was
+          // sent to. A wildcard bind picks its source by route, which here is
+          // the interface's first address -- the SSH endpoint's -- and a reply
+          // from an address the client never asked is one it discards.
+          socket.bind(53, process.env.RESOLVER_ADDRESS);
           RESOLVER
 
           docker run -d --name psilink-endpoints --network none \
             "$ENDPOINT_IMAGE" /usr/sbin/sshd -D -e
-          docker run -d --name psilink-resolver \
-            --network "container:psilink-endpoints" \
-            -v "$RUNNER_TEMP/resolver.mjs:/resolver.mjs:ro" \
-            -e "RESOLVER_RECORDS=$ALLOWED_HOST=$ALLOWED_ADDR,$DENIED_HOST=$DENIED_ADDR" \
-            "$ENDPOINT_IMAGE" node /resolver.mjs
 
           pid=$(docker inspect -f '{{.State.Pid}}' psilink-endpoints)
           sudo mkdir -p /var/run/netns
@@ -1005,6 +1009,14 @@ jobs:
           sudo ip -n "$ENDPOINT_NETNS" link set psi-egress-p up
           sudo ip -n "$ENDPOINT_NETNS" route add default via "$ENDPOINT_GATEWAY"
           sudo ip -n "$ENDPOINT_NETNS" addr show psi-egress-p
+
+          # After the addresses exist, since it binds one of them by name.
+          docker run -d --name psilink-resolver \
+            --network "container:psilink-endpoints" \
+            -v "$RUNNER_TEMP/resolver.mjs:/resolver.mjs:ro" \
+            -e "RESOLVER_ADDRESS=$RESOLVER_ADDR" \
+            -e "RESOLVER_RECORDS=$ALLOWED_HOST=$ALLOWED_ADDR,$DENIED_HOST=$DENIED_ADDR" \
+            "$ENDPOINT_IMAGE" node /resolver.mjs
 
       # Before any rule exists, so a fixture that never came up is diagnosed as
       # that rather than read later as a refusal. Off the restricted network,
