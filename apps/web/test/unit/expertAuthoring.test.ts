@@ -4,25 +4,31 @@ import { describe, expect, test } from "vitest";
 
 import {
   decodeInvitation,
+  deriveAcceptedLinkageTerms,
   getDefaultLinkageTerms,
   inferMetadata,
+  prepareForExchange,
   safeParseLinkageTerms,
+  validateStandardizationAgainstTerms,
 } from "@psilink/core";
 
 import {
   addElement,
   addKey,
   buildAdvancedTerms,
+  draftWithKeyEnabled,
   gatedActiveSettingMessage,
+  inviterExchangeDataSpec,
   removeElement,
   removeKey,
   seedAdvancedInvite,
   updateElementAt,
   updateKeyAt,
+  validateAdvancedInvite,
 } from "../../src/psi/advancedInvite.js";
 import { generateInvitation } from "../../src/psi/invitation.js";
 
-import type { LinkageKeyElement, LinkageTerms } from "@psilink/core";
+import type { CSVRow, LinkageKeyElement, LinkageTerms } from "@psilink/core";
 
 import type { AdvancedInviteDraft } from "../../src/psi/advancedInvite.js";
 import type { InvitationLocation } from "../../src/psi/invitation.js";
@@ -197,6 +203,142 @@ describe("expert authoring round-trips", () => {
     d = addElement(d, d.keys.length - 1, "date_of_birth");
     d = removeKey(d, 0);
     expect(safeParseLinkageTerms(buildAdvancedTerms(d)).success).toBe(true);
+  });
+});
+
+describe("an expert-authored key over a recognized type cleans as its partner does", () => {
+  // The expert editor offers a field for every matchable column, including the
+  // types no built-in key uses (phone_number, email_address, zip_code), which the
+  // authored-field derivation declares under the type's own name whether or not the
+  // draft cleans them. Keying one of those is a complete, schema-valid, mint-passing
+  // way to author a key -- so if the draft carried no pipeline for the column, this
+  // party would hash the raw cell while the accepting party, deriving its cleaning
+  // from these same terms, hashes the cleaned one, and the key would match nothing.
+  const COLUMNS = ["first_name", "last_name", "dob", "zip", "phone", "email"];
+  const ROWS: Array<CSVRow> = [
+    {
+      first_name: "Ada",
+      last_name: "Lovelace",
+      dob: "12/10/1815",
+      zip: "20001-1234",
+      phone: "(202) 555-0143",
+      email: "  Ada@Example.ORG  ",
+    },
+  ];
+
+  /** A compound key over last name and `field`, authored through the expert
+   * editor's own operations on a draft holding no keys -- the "Add a key" button
+   * followed by "Add an element", with the field picked from the declared list. */
+  function expertKeyed(field: string): AdvancedInviteDraft {
+    const { draft } = seedAdvancedInvite("Inviter", COLUMNS, ROWS);
+    return addElement(addKey({ ...draft, keys: [] }, "last_name"), 0, field);
+  }
+
+  /** What each party's own preparation produces for `field` from the same row: the
+   * inviter through the standardization it authored, the acceptor through the one
+   * it derives from the terms alone (it holds none of its own). */
+  function cleanedByBothParties(
+    draft: AdvancedInviteDraft,
+    field: string,
+  ): [unknown, unknown] {
+    const terms = buildAdvancedTerms(draft);
+    const inviter = prepareForExchange(
+      inviterExchangeDataSpec(terms, {
+        metadata: draft.metadata,
+        standardization: draft.standardization,
+      }),
+      "Inviter",
+      ROWS,
+      COLUMNS,
+    );
+    const acceptor = prepareForExchange(
+      { linkageTerms: deriveAcceptedLinkageTerms(terms, "Acceptor") },
+      "Acceptor",
+      ROWS,
+      COLUMNS,
+    );
+    return [
+      inviter.dataset.getField(field)?.get(0),
+      acceptor.dataset.getField(field)?.get(0),
+    ];
+  }
+
+  test.each([
+    ["zip_code", "20001-1234", "20001"],
+    ["phone_number", "(202) 555-0143", "2025550143"],
+    ["email_address", "  Ada@Example.ORG  ", "ada@example.org"],
+  ])("%s matches cleaned on both sides, not raw", (field, raw, cleaned) => {
+    const draft = expertKeyed(field);
+    const [inviterValue, acceptorValue] = cleanedByBothParties(draft, field);
+    expect(inviterValue).toEqual([cleaned]);
+    expect(acceptorValue).toEqual(inviterValue);
+    // The premise: the two would genuinely have disagreed. The raw cell is not the
+    // cleaned value, so a party matching on it matches nothing the other offers.
+    expect(cleaned).not.toEqual(raw);
+  });
+
+  test("the authored key generates and mints carrying its cleaning", async () => {
+    const { seed } = seedAdvancedInvite("Inviter", COLUMNS, ROWS);
+    const draft = expertKeyed("zip_code");
+    const terms = buildAdvancedTerms(draft);
+    expect(safeParseLinkageTerms(terms).success).toBe(true);
+    expect(
+      validateAdvancedInvite(draft, seed, new Date("2026-06-20T00:00:00.000Z"))
+        .errors,
+    ).toEqual({});
+
+    const minted = await generateInvitation({
+      inviterName: draft.identity,
+      profiledColumns: COLUMNS,
+      location,
+      lifetimeSeconds: draft.lifetimeSeconds,
+      linkageTerms: terms,
+      metadata: draft.metadata,
+      standardization: draft.standardization,
+    });
+    // The mint reconciles the cleaning to the terms it embeds, so what an
+    // invitation hands its keeper carries the pipeline rather than dropping it.
+    expect(
+      validateStandardizationAgainstTerms(
+        minted.standardization ?? [],
+        minted.linkageTerms,
+      ),
+    ).toEqual([]);
+    const mintedZip = minted.standardization?.find(
+      (t) => t.output === "zip_code",
+    );
+    expect(mintedZip?.input).toBe("zip");
+    expect(mintedZip?.steps?.length).toBeGreaterThan(0);
+  });
+
+  test("keying a type the guided offer already turned on adds no second pipeline", () => {
+    // The offer's checkbox binds the same type-named field this key references, so
+    // the expert edit must find the cleaning already there and leave it -- including
+    // any steps the operator edited into it -- rather than appending a duplicate
+    // output the built terms could not declare twice.
+    const { draft } = seedAdvancedInvite("Inviter", COLUMNS, ROWS);
+    const offered = draft.keys.findIndex((entry) =>
+      entry.key.elements.some((element) => element.field === "zip_code"),
+    );
+    expect(offered).toBeGreaterThan(-1);
+    const on = draftWithKeyEnabled(draft, offered, true);
+    const edited: AdvancedInviteDraft = {
+      ...on,
+      standardization: on.standardization.map((transformation) =>
+        transformation.output === "zip_code"
+          ? { ...transformation, steps: [{ function: "trim_whitespace" }] }
+          : transformation,
+      ),
+    };
+
+    const keyed = addElement(
+      addKey(edited, "last_name"),
+      edited.keys.length,
+      "zip_code",
+    );
+    const zip = keyed.standardization.filter((t) => t.output === "zip_code");
+    expect(zip).toHaveLength(1);
+    expect(zip[0].steps).toEqual([{ function: "trim_whitespace" }]);
   });
 });
 
