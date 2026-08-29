@@ -352,6 +352,7 @@ async function occupyWindow(
   };
   let attempts = 0;
   let partnerWasAbsent = false;
+  let contactWasProven = false;
   let disposition: ManagedScheduleWindowDisposition | undefined;
   for (;;) {
     // A runtime going away mid-window leaves the window UNRESOLVED, discarding
@@ -378,12 +379,14 @@ async function occupyWindow(
     } catch (error) {
       const verdict = managedScheduleWindowVerdict(error, dataExchangeStarted);
       if (verdict.disposition === "missed") partnerWasAbsent = true;
+      if (verdict.provesContact) contactWasProven = true;
       if (!verdict.retryable)
         return {
           attempts,
           disposition: foldWindowDisposition(
             verdict.disposition,
             partnerWasAbsent,
+            contactWasProven,
           ),
         };
       disposition = verdict.disposition;
@@ -406,21 +409,35 @@ async function occupyWindow(
   return {
     attempts,
     ...(disposition !== undefined
-      ? { disposition: foldWindowDisposition(disposition, partnerWasAbsent) }
+      ? {
+          disposition: foldWindowDisposition(
+            disposition,
+            partnerWasAbsent,
+            contactWasProven,
+          ),
+        }
       : {}),
   };
 }
 
 /**
- * Fold one window's attempts into its disposition.
+ * Fold one window's attempts into its disposition: `"missed"` only when at
+ * least one attempt found the partner absent AND no attempt's failure proved
+ * the partner was met.
  *
- * A window whose attempts found the partner absent is `"missed"` even when a
- * later attempt inside it failed some other way: reading the last attempt alone
- * would let one trailing transient failure -- a dropped channel, a broker fault
- * -- relabel a window of no-show waits `"failed"`, which leaves
- * `consecutiveMisses` untouched and loses the miss entirely. The coordination
- * question the count answers is whether the two runners met at all in the
- * window, and an attempt that spent its whole peer wait already answered it.
+ * Both halves come from docs/spec/MANAGED_EXCHANGE_RECORD.md ("Occupying a due
+ * window", the disposition table, and "The schedule object"'s
+ * `consecutiveMisses` row). The absence half is why the fold reads every
+ * attempt rather than the last: one trailing transient failure -- a dropped
+ * channel, a broker fault -- would otherwise relabel a window of no-show waits
+ * `"failed"`, which leaves `consecutiveMisses` untouched and loses the miss
+ * entirely, though an attempt that spent its whole peer wait already answered
+ * the coordination question the count asks. The contact half is why a met
+ * partnership outranks an earlier absence in the same window: a handshake that
+ * ran and failed means the two runners DID meet, which the spec routes as a
+ * desync/attack question rather than coordination drift, so the window records
+ * `"failed"` and counts nothing ({@link attemptProvesContact} is the
+ * enumeration).
  *
  * A window whose failures are all local keeps `"failed"`, and the lock refusal
  * keeps `"unattempted"`: neither is a claim about the partner. `"succeeded"`
@@ -429,8 +446,11 @@ async function occupyWindow(
 function foldWindowDisposition(
   last: ManagedScheduleWindowDisposition,
   partnerWasAbsent: boolean,
+  contactWasProven: boolean,
 ): ManagedScheduleWindowDisposition {
-  return last === "failed" && partnerWasAbsent ? "missed" : last;
+  return last === "failed" && partnerWasAbsent && !contactWasProven
+    ? "missed"
+    : last;
 }
 
 /** What one failed attempt says about its window: the disposition it would leave
@@ -440,6 +460,40 @@ export interface ManagedScheduleWindowVerdict {
   disposition: ManagedScheduleWindowDisposition;
   /** Whether another attempt inside this window can do better. */
   retryable: boolean;
+  /** Whether this failure establishes that the partner WAS met in this window,
+   * which is what keeps an earlier attempt's absence from folding the window to
+   * `"missed"` (see {@link attemptProvesContact}). */
+  provesContact: boolean;
+}
+
+/**
+ * Whether a failed attempt establishes that the two runners met in this window.
+ *
+ * The enumeration is the run path's own ordering, not a reading of the failure
+ * text. A `security`-kind {@link ConnectionError} comes from the authenticated
+ * key exchange, which this path reaches only over a channel already open to the
+ * partner -- the rendezvous resolves first ({@link ./managedRunDriver.ts}), and
+ * a partner who never arrives raises {@link PartnerNoShowError} instead. A
+ * {@link RotationPersistError} is raised only after that handshake has yielded
+ * the rotated secret ({@link ./managedRunRotate.ts},
+ * `runRotationCriticalSection`). Any failure past the data-exchange phase
+ * boundary postdates both, since the persist-before-success sequence puts the
+ * data exchange after the handshake and the persist.
+ *
+ * Nothing else the mapper classifies says the partner was there: a lapsed
+ * bound, an unusable input, a shortfall against the standing terms and a
+ * refused disclosure are all local and pre-connection, and a failure with no
+ * determinate cause names no phase at all.
+ */
+function attemptProvesContact(
+  error: unknown,
+  dataExchangeStarted: boolean,
+): boolean {
+  return (
+    dataExchangeStarted ||
+    error instanceof RotationPersistError ||
+    (error instanceof ConnectionError && error.kind === "security")
+  );
 }
 
 /**
@@ -469,16 +523,24 @@ export interface ManagedScheduleWindowVerdict {
  * `dataExchangeStarted` overrides all of it: past that boundary this run's
  * payload could already have reached the partner, and a re-attempt would
  * disclose a second time.
+ *
+ * The verdict also carries whether the failure proves the partner was met, for
+ * the window's fold to read (see {@link attemptProvesContact}).
  */
 export function managedScheduleWindowVerdict(
   error: unknown,
   dataExchangeStarted: boolean,
 ): ManagedScheduleWindowVerdict {
   if (error instanceof ManagedExchangeLockUnavailableError)
-    return { disposition: "unattempted", retryable: false };
+    return {
+      disposition: "unattempted",
+      retryable: false,
+      provesContact: false,
+    };
   const retryable = !dataExchangeStarted;
+  const provesContact = attemptProvesContact(error, dataExchangeStarted);
   if (error instanceof PartnerNoShowError)
-    return { disposition: "missed", retryable };
+    return { disposition: "missed", retryable, provesContact };
   if (
     error instanceof ManagedExchangeExpiredError ||
     error instanceof ManagedInputError ||
@@ -487,8 +549,8 @@ export function managedScheduleWindowVerdict(
     error instanceof RotationPersistError ||
     (error instanceof ConnectionError && error.kind === "security")
   )
-    return { disposition: "failed", retryable: false };
-  return { disposition: "failed", retryable };
+    return { disposition: "failed", retryable: false, provesContact };
+  return { disposition: "failed", retryable, provesContact };
 }
 
 /** Whether a catch-up walk moved the stored plan at all. The planned instant is

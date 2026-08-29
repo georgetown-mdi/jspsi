@@ -1,5 +1,9 @@
+import {
+  ConnectionError,
+  generateSharedSecret,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 import { beforeEach, describe, expect, test } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   ATTEMPT_PEER_WAIT_MS,
@@ -23,6 +27,7 @@ import { ManagedExchangeExpiredError } from "@psi/managedExpiry";
 import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeRun";
 import { ManagedInputError } from "@psi/managedInputGuard";
 import { PartnerNoShowError } from "@psi/waitForConnection";
+import { RotationPersistError } from "@psi/managedRunRotate";
 import { managedScheduleWindow } from "@psi/managedSchedule";
 
 import type {
@@ -442,6 +447,80 @@ describe("a window whose attempts do not agree", () => {
     expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
   });
 
+  test("leaves the window failed when a handshake that failed closed trails the no-show waits", async () => {
+    // The partnership MET here: the authenticated key exchange runs only over a
+    // channel already open to the partner, so promoting this window to "missed"
+    // on the earlier waits would count a coordination miss against a window that
+    // raises a desync question instead (docs/spec/MANAGED_EXCHANGE_RECORD.md,
+    // the `consecutiveMisses` row).
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [
+        ...noShowScript(),
+        {
+          kind: "fail",
+          error: new ConnectionError("key exchange failed", "security"),
+        },
+      ],
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry.attempts).toBe(2);
+    expect(entry.disposition).toBe("failed");
+    expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
+  });
+
+  test("leaves the window failed when a rotation persist failure trails the no-show waits", async () => {
+    // The partner arrived late in the window and the handshake completed -- the
+    // persist failure is raised only after it yielded the rotated secret -- so
+    // this window is the benign storage tier's, not the miss count's.
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [
+        ...noShowScript(),
+        {
+          kind: "fail",
+          error: new RotationPersistError(
+            at("2026-01-06T14:20:00.000Z"),
+            new Error("the store refused the write"),
+          ),
+        },
+      ],
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry.attempts).toBe(2);
+    expect(entry.disposition).toBe("failed");
+    expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
+  });
+
+  test("leaves the window failed when a drop past the data exchange trails the no-show waits", async () => {
+    // Past that phase boundary the run had a partner to send payload to, which
+    // settles the question the miss count asks whatever the earlier waits found.
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [
+        ...noShowScript(),
+        {
+          kind: "fail",
+          error: new Error("the channel dropped mid-exchange"),
+          startsDataExchange: true,
+        },
+      ],
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry.attempts).toBe(2);
+    expect(entry.disposition).toBe("failed");
+    expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
+  });
+
   test("takes the success when any attempt completed the exchange", async () => {
     const runner = harness({
       records: [recordWith()],
@@ -520,6 +599,36 @@ describe("a window the single-writer lock was held through", () => {
         nextWindow: "2026-01-13T14:00:00.000Z",
         consecutiveMisses: 0,
       },
+    });
+    expect(runner.advances[0].advance.lastRun).toBeUndefined();
+  });
+
+  test("dominates the no-show waits the same window already took", async () => {
+    // The two findings a window can hold at once: attempts that waited out an
+    // absent partner, then a refusal that says another context is running this
+    // very record. The refusal wins -- the window is that context's to account
+    // for -- so nothing here is counted as a miss.
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [
+        ...noShowScript(),
+        ...noShowScript(),
+        {
+          kind: "fail",
+          error: new ManagedExchangeLockUnavailableError(record.id),
+        },
+      ],
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry.attempts).toBe(3);
+    expect(entry.disposition).toBe("unattempted");
+    expect(runner.advances[0].advance.schedule).toMatchObject({
+      nextWindow: "2026-01-13T14:00:00.000Z",
+      consecutiveMisses: 0,
     });
     expect(runner.advances[0].advance.lastRun).toBeUndefined();
   });

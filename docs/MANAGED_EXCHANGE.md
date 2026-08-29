@@ -338,13 +338,21 @@ persona this feature serves the two failure modes are not symmetric:
   attempting is indistinguishable from a healthy one until the next in-person
   visit -- which may be weeks away. A silently paused schedule is a silently
   dead partnership.
-- **Continuing to attempt costs almost nothing.** Each attempt against a partner
-  who has gone away is one runner waking, reading and column-checking its input
-  file, deriving a rendezvous id, and waiting out a window against a peer that
-  never arrives: no wire traffic to a server, no secret exposure (the secret
-  does not rotate on a miss), and one local file read. The input guard runs
-  ahead of the rendezvous, not after it (see [The second
-  run](#the-second-run-end-to-end)), so a no-show window costs that read.
+- **Continuing to attempt is cheap, and what it costs is bounded.** A
+  window against a partner who has gone away is not one attempt but a bounded
+  series of them -- the window's width divided by the per-attempt wait for the
+  peer, up to a cap (see [Occupying a due
+  window](spec/MANAGED_EXCHANGE_RECORD.md#occupying-a-due-window)). Each attempt
+  re-reads and column-checks the input file through the persisted handle, since
+  the input guard runs ahead of the rendezvous rather than after it (see [The
+  second run](#the-second-run-end-to-end)), and registers a peer at the
+  peer-coordination server under the rendezvous id derived from the record's
+  current secret -- which a miss does not rotate, so a partnership that has
+  stopped meeting re-registers the *same* id at every attempt of every window.
+  The cost is therefore repeated local file reads plus a repeating registration
+  pattern at the server the partnership already rendezvouses through. No payload
+  leaves the device, nothing of the exchange is sent anywhere, and the secret is
+  neither exposed nor rotated.
 
 The honest cost of not pausing is that the miss surface must itself be
 trustworthy: if it read as noise the operator learned to ignore, endless quiet
@@ -620,10 +628,22 @@ Locks API, `navigator.locks`) keyed to the managed record's id, held for the who
 window from "begin this run" through "rotated secret durably persisted". Two tabs
 of the same origin cannot both enter it: the second waits or is refused, so a
 scheduled run and an operator-opened tab -- or two tabs -- on one device cannot
-fork the secret by racing a run. The lock is a
-same-profile **liveness guard**, not a persistent claim: it is auto-released when
-the holding tab or worker is destroyed, and it is taken without `steal: true` --
-a steal would defeat the single-writer property it exists to provide. Web Locks
+fork the secret by racing a run.
+
+On the scheduled path that refusal lasts as long as the run window does. Each
+attempt holds the lock across its whole wait for the partner, and the next
+attempt begins as soon as the last one's wait ends, so a runner occupying a
+window holds the lock essentially continuously from the window's open to its
+close -- hours, at the widths the design intends. An operator who opens the app
+during an occupied window and runs the exchange by hand is told a run is already
+in progress, and keeps being told until a run lands or the window closes. That
+is the single-writer property working as intended rather than a fault, and the
+operator's run is available again the moment the window is over.
+
+The lock is a same-profile **liveness guard**, not a persistent claim: it is
+auto-released when the holding tab or worker is destroyed, and it is taken
+without `steal: true` -- a steal would defeat the single-writer property it
+exists to provide. Web Locks
 is origin-scoped and same-profile, so it guards concurrency **within one browser
 profile on one device** -- exactly the scope where a racing second context is a
 realistic accident. It does **not** and cannot guard against a second physical

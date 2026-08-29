@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import log from "loglevel";
 
+import { isConsoleBuild as consoleBuild } from "@utils/clientConfig";
 import { isInstalledRuntime as installedRuntime } from "@utils/installedRuntime";
 
 import type { ManagedScheduleRuntimeOptions } from "@psi/managedScheduleRuntime";
@@ -12,6 +13,9 @@ export interface ScheduledExchangeRunnerProps {
   /** Whether this page is an installed app runtime. Defaults to
    * {@link isInstalledRuntime}. */
   isInstalledRuntime?: () => boolean;
+  /** Whether this build is the console appliance. Defaults to
+   * {@link isConsoleBuild}. */
+  isConsoleBuild?: () => boolean;
   /** Starts the runner. Defaults to {@link startInstalledRuntimeRunner}. */
   start?: (options: ManagedScheduleRuntimeOptions) => void;
 }
@@ -65,24 +69,32 @@ export function startInstalledRuntimeRunner(
  * component exists only so the runner is bound to the app runtime's lifetime
  * rather than to whichever route happens to be open.
  *
- * THE GATE. The runner starts only in an installed app runtime. An unattended
- * run needs a runtime that is open when the window opens -- an installed copy
- * launched at OS login -- and an ordinary tab is not that: the operator opened
- * it for something and will close it, so firing an exchange under it would start
- * a live two-party session the operator is about to navigate away from, and
- * would do it without their asking. In an ordinary tab a run stays
- * operator-initiated (docs/MANAGED_EXCHANGE.md, "The automation goal and its
- * platform envelope").
+ * THE GATE, in two halves. The runner starts only in an installed app runtime.
+ * An unattended run needs a runtime that is open when the window opens -- an
+ * installed copy launched at OS login -- and an ordinary tab is not that: the
+ * operator opened it for something and will close it, so firing an exchange
+ * under it would start a live two-party session the operator is about to
+ * navigate away from, and would do it without their asking. In an ordinary tab
+ * a run stays operator-initiated (docs/MANAGED_EXCHANGE.md, "The automation
+ * goal and its platform envelope").
+ *
+ * The console appliance shares this app's code but not that capability: it is a
+ * single-exchange, author-and-run surface for one operator, whose recurring
+ * production form is the CLI on the host's own scheduler (docs/DEPLOYMENT.md,
+ * "The web application can run as a console appliance"). Recurrence there is
+ * the host scheduler's, so a console build starts no unattended runner whatever
+ * the runtime reports.
  *
  * The effect runs once, on the client only; the gate is read there rather than
  * during render so a server render never reaches the media query.
  */
 export function ScheduledExchangeRunner({
   isInstalledRuntime = installedRuntime,
+  isConsoleBuild = consoleBuild,
   start = startInstalledRuntimeRunner,
 }: ScheduledExchangeRunnerProps) {
   useEffect(() => {
-    if (!isInstalledRuntime()) return;
+    if (isConsoleBuild() || !isInstalledRuntime()) return;
     const controller = new AbortController();
     start({ signal: controller.signal });
     return () => {

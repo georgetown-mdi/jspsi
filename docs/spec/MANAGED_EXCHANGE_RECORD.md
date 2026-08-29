@@ -414,8 +414,8 @@ rather than once per attempt:
 | Disposition | The window | `consecutiveMisses` | Advance carries a `lastRun` |
 | ----------- | ---------- | ------------------- | --------------------------- |
 | `"succeeded"` | an attempt completed the exchange | reset to 0 | no -- the run recorded its own |
-| `"missed"` | none did, and at least one found the partner absent | incremented | no -- the run recorded its own |
-| `"failed"` | its attempts failed, none of them on an absent partner | unchanged | no -- the run recorded its own |
+| `"missed"` | none did, at least one found the partner absent, and none failed in a way that proves the partner was met | incremented | no -- the run recorded its own |
+| `"failed"` | its attempts failed, none of them on an absent partner -- or one of them proved the partner was met | unchanged | no -- the run recorded its own |
 | `"unattempted"` | its last attempt was refused the single-writer lock, held by another context | unchanged | no -- the window has no bookkeeping |
 
 The `"missed"` row folds rather than reading the last attempt because an attempt
@@ -424,6 +424,16 @@ asks -- whether the two runners met in this window -- and pacing starts the next
 attempt at once after a wait that long. Reading the last verdict alone would
 therefore let one trailing transient failure record a window of no-show waits as
 `"failed"`, which leaves the count untouched and loses the miss entirely.
+
+A failure that **proves the partner was met** settles the same question the
+other way, and outranks any absence the window found earlier: a handshake that
+failed closed ran against a partner on the far end of an open channel, a
+rotation persist fails only after that handshake yielded the rotated secret, and
+any failure past the data-exchange boundary postdates both. Per the
+[`consecutiveMisses`](#the-schedule-object) row, a partnership that met is a
+desync/attack question rather than a coordination-drift one, so such a window
+records `"failed"` and counts nothing. A failure with no determinate cause
+proves nothing either way and leaves the fold to the absence above.
 
 `"unattempted"` is the one disposition that is not an outcome the record can
 hold, and the one that stands whatever the attempts before it found: another

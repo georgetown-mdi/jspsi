@@ -63,6 +63,34 @@ describe("the scheduled runner's mount", () => {
     expect(inThisTab).not.toHaveBeenCalled();
   });
 
+  test("stays out of a console build even in an installed runtime", async () => {
+    const inTheConsole = vi.fn();
+    const inTheHostedApp = vi.fn();
+
+    // Both installed, so the console build is the only difference between them.
+    app.render(
+      createElement(
+        Fragment,
+        null,
+        createElement(ScheduledExchangeRunner, {
+          start: inTheConsole,
+          isInstalledRuntime: () => true,
+          isConsoleBuild: () => true,
+        }),
+        createElement(ScheduledExchangeRunner, {
+          start: inTheHostedApp,
+          isInstalledRuntime: () => true,
+          isConsoleBuild: () => false,
+        }),
+      ),
+    );
+    await vi.waitFor(() => {
+      expect(inTheHostedApp).toHaveBeenCalledTimes(1);
+    });
+
+    expect(inTheConsole).not.toHaveBeenCalled();
+  });
+
   test("binds the runner it starts to the mount's own lifetime", async () => {
     const start = vi.fn();
 
