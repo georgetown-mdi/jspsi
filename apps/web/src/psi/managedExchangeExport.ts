@@ -51,9 +51,9 @@
  * and it is bound to the write for the reason the export's mark is bound to its read
  * -- a check the write can outrun decides nothing.
  *
- * The seams (the fresh read-compose-and-mark, the download, the currency-checked
- * spend) are injected so the intents are testable without a real download or
- * database.
+ * The seams (the marking intents' fresh read-compose-and-mark, the command-line
+ * export's non-marking read by id, the download, the currency-checked spend) are
+ * injected so the intents are testable without a real download or database.
  */
 
 import {

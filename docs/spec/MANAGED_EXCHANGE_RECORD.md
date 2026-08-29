@@ -821,10 +821,13 @@ record, in a separate origin-local store keyed by the record `id`, and are
   still carries the secret that record was spent holding, and the import **refuses
   it**: it neither revives the spent record -- that would run a copy the hand-off gave
   away -- nor installs a fresh one, which would split one secret across a spent husk
-  here and a live row beside it. Nothing is written. The refusal is stated where the
-  operator meets it, at the import affordance: it names the stored record and the
-  recovery that record actually has -- the exchange runs from the files the hand-off
-  saved, and bringing it back to this browser is a re-invite.
+  here and a live row beside it. Nothing is written. A handed-off match settles the
+  import by itself: an artifact whose secret matches a handed-off record is refused
+  even when a migration-spent record holds that secret too, and the refusal names the
+  handed-off record. The refusal is stated where the operator meets it, at the
+  import affordance: it names the stored record and the recovery that record
+  actually has -- the exchange runs from the files the hand-off saved, and bringing
+  it back to this browser is a re-invite.
 
   Reviving a migration spend remains an operator-cooperation property, not a
   cryptographic one: nothing in the protocol prevents a copied artifact or a profile

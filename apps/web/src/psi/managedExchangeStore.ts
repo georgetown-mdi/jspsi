@@ -917,7 +917,7 @@ export async function persistManagedExchangeInputHandle(
  *
  * - `"revived"` -- a MIGRATION-spent record held the artifact's secret and was
  *   revived in place, carrying the revived record.
- * - `"handed-off"` -- the spent record holding the artifact's secret was handed off
+ * - `"handed-off"` -- a spent record holding the artifact's secret was handed off
  *   by a route of its own ({@link ManagedSpentHandoff}), which the artifact cannot
  *   take back. Nothing was written; the caller refuses the import, naming the record
  *   the store still holds.
@@ -949,7 +949,10 @@ export type ManagedReviveOutcome =
  * recovery. The exchange runs from what that hand-off saved, and the artifact -- an
  * export taken before it -- cannot take a copy back without splitting one secret
  * across a spent husk here and a live copy elsewhere, so the outcome names the record
- * for the caller to refuse the import on.
+ * for the caller to refuse the import on. The refusal wins over a revive: when the
+ * artifact's secret matches BOTH a handed-off record and a migration-spent one, the
+ * outcome is the refusal naming the handed-off record, because reviving the migration
+ * copy would put a second live owner beside the one the hand-off already runs.
  *
  * Only a SPENT match is reconciled at all: a live record holding the same secret is a
  * genuine second owner (a re-import onto a device that never spent), so importing over
@@ -1013,15 +1016,15 @@ export async function reviveSpentManagedExchange(
             if (spent.handoff === undefined) match ??= existing;
             else handedOff ??= { record: existing, handoff: spent.handoff };
           }
-          if (match === undefined) {
-            if (handedOff !== undefined)
-              outcome = {
-                kind: "handed-off",
-                handoff: handedOff.handoff,
-                label: handedOff.record.label,
-              };
+          if (handedOff !== undefined) {
+            outcome = {
+              kind: "handed-off",
+              handoff: handedOff.handoff,
+              label: handedOff.record.label,
+            };
             return;
           }
+          if (match === undefined) return;
           const revived = parseManagedExchangeRecord({
             ...reconstructed,
             id: match.id,

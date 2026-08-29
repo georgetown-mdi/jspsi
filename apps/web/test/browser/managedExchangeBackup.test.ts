@@ -515,6 +515,59 @@ describe("importing a spent secret-match revives in place", () => {
     });
   });
 
+  test("a hand-off match refuses even beside a migration-spent match", async () => {
+    // Both spent shapes hold the artifact's secret at once: the migration copy the
+    // artifact would revive, and the copy a command-line hand-off runs from. Reviving
+    // the migration husk would put a second live owner beside that hand-off, so the
+    // refusal wins and names the handed-off record.
+    const migrated = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(migrated),
+    );
+    const handedOff = await createManagedExchange(
+      newExchange({
+        label: "Riverbend quarterly (command line)",
+        sharedSecret: migrated.sharedSecret,
+      }),
+    );
+    await spendManagedExchangeIfCurrent(
+      migrated.id,
+      migrated.sharedSecret,
+      "2026-07-14T13:00:00.000Z",
+    );
+    await spendManagedExchangeIfCurrent(
+      handedOff.id,
+      handedOff.sharedSecret,
+      "2026-07-14T14:00:00.000Z",
+      "command-line",
+    );
+    const before = [
+      await getManagedExchange(migrated.id),
+      await getManagedExchange(handedOff.id),
+    ];
+
+    await expect(importManagedExchange(bytes)).rejects.toMatchObject({
+      name: "ManagedImportHandedOffError",
+      handoff: "command-line",
+      label: handedOff.label,
+    });
+
+    // Nothing was written: no revive of the migration husk, no fresh install, and both
+    // records still carry exactly the spent state they were left with.
+    const all = await listManagedExchanges();
+    expect(all.map((r) => r.id).sort()).toEqual(
+      [migrated.id, handedOff.id].sort(),
+    );
+    expect(await getManagedExchange(migrated.id)).toEqual(before[0]);
+    expect(await getManagedExchange(handedOff.id)).toEqual(before[1]);
+    expect(await getManagedLocalState(migrated.id)).toEqual({
+      spent: { spentAt: "2026-07-14T13:00:00.000Z" },
+    });
+    expect(await getManagedLocalState(handedOff.id)).toEqual({
+      spent: { spentAt: "2026-07-14T14:00:00.000Z", handoff: "command-line" },
+    });
+  });
+
   test("a re-import onto the spending device revives the husk, not a duplicate", async () => {
     const source = await createManagedExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
