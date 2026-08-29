@@ -34,8 +34,10 @@ export interface ManagedRunInFlight {
  * What this gates is presentation. The lock can be taken or released between the poll
  * and the click that follows it, so a hand-off that spends the secret re-checks its
  * own precondition where it writes (see `managedExchangeExport.ts`, the confirm-time
- * currency check); this only keeps the operator from being offered an action that
- * is about to be refused.
+ * currency check); for a rotation that has persisted this only pre-empts a refusal;
+ * while a run is still in flight the currency check cannot refuse yet, so this
+ * reading is the sole cover for that window -- best-effort, and a click that slips
+ * past it is accepted and then superseded by the run's rotation.
  */
 export function useManagedRunInFlight(
   id: string,
@@ -45,8 +47,9 @@ export function useManagedRunInFlight(
 
   const recheckLock = useCallback(async (): Promise<boolean> => {
     // A query this browser will not answer leaves the gate open rather than shut:
-    // the reading is an affordance, and the confirm-time currency check is what
-    // actually refuses a superseded hand-off.
+    // the reading is an affordance for rotations that have persisted, which the
+    // confirm-time currency check refuses; a run still in flight is covered by
+    // this reading alone.
     const held = await managedExchangeRunLockHeld(id).catch(() => false);
     setLockHeld(held);
     return held;

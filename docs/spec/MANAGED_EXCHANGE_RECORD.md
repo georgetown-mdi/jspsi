@@ -786,11 +786,16 @@ record, in a separate origin-local store keyed by the record `id`, and are
   spans the same two stores -- therefore lands either before that step, which then
   reads the rotated secret and refuses, or after a spend that was decided against
   the secret those files carry; it cannot land between the check and the write. So a
-  rotation between the download and the attestation -- a run in any context, or a
-  re-invite -- refuses the spend instead of recording one, since what would be handed
-  over is a copy the partnership has already moved past, and a record gone from the
-  store refuses on the same terms: there is no live copy left to spend. It carries no
-  secret material and no epoch.
+  rotation that persisted between the download and the attestation -- a run in any
+  context, or a re-invite -- refuses the spend instead of recording one, since what
+  would be handed over is a copy the partnership has already moved past, and a record
+  gone from the store refuses on the same terms: there is no live copy left to spend.
+  Stated limit: the second horn is reachable, not hypothetical -- a run still in
+  flight at the attestation has not yet rotated the stored secret, so the check passes
+  and that run's rotation then supersedes the handed-over copy; the surfaces'
+  run-in-flight withholding covers that window as a best-effort reading only, and the
+  structural exclusion of spend and run is follow-on work, not a property this store
+  step provides. The spent state carries no secret material and no epoch.
 
   **Revive by import is the migration spend's recovery, and only its.** The
   migration export downloads the artifact that clears its own spend (a
