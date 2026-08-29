@@ -441,73 +441,26 @@ attempt.
 A window catch-up lands on and finds open is **occupied**, not waited out in one
 call. The runner makes bounded re-attempts across it: each attempt waits for the
 partner's runner up to the human-timescale budget both one-shot roles share,
-clamped to what is left of the window, and between two attempts the runner
-**stands down** for an interval scaled to the window's width, up to a cap on
-attempts per window. One window-long wait would put the whole window on a single
-broker registration surviving that long; the stand-down and the cap are what keep
-an attempt that fails immediately from spending the window in a loop. The
-stand-down is itself bounded by the close, which ends the occupancy in any case.
+clamped to what is left of the window, and the next attempt begins no sooner than
+a fixed pacing interval after the last one started, up to a cap on attempts per
+window. One window-long wait would put the whole window on a single broker
+registration surviving that long; the pacing and the cap are what keep an attempt
+that fails immediately from spending the window in a loop. The pacing interval is
+itself bounded by the close, which ends the occupancy in any case.
 
-The stand-down is also the **lock-yield policy**, which is what fixes its size.
-The [single-writer lock](#the-secret-is-a-linear-resource) is held for the length
-of an attempt, and both the scheduled and the attended path take it fail-fast, so
-back-to-back attempts would refuse an operator's own Run for the whole width of
-the window. That interval is one of the two in which that Run can take the lock:
-the other is the tail of an attempt that got past the rotation persist, which
-runs the data exchange and the success stamp with the lock already released. The
-stand-down is bounded on both sides:
-
-- **Below**, by a floor that keeps a failure reproducing instantly from spinning
-  the window away and keeps the free interval long enough to be caught.
-- **Above**, by half the peer-wait budget. Two runners each listening for that
-  budget out of every (wait + stand-down) overlap for at least (wait - stand-down)
-  of every cycle whatever their relative phase, so a stand-down at or past the
-  wait admits an anti-phase pair that occupies the same window and never meets in
-  it. This ceiling is the rendezvous's requirement, not a tuning preference. The
-  (wait - stand-down) floor models an attempt as pure listening; a real attempt
-  spends input acquisition and rendezvous setup before it listens, so the
-  realized overlap is lower than the model's by that per-attempt overhead, and
-  the margin half the wait leaves is what absorbs it.
-
-Between those, the interval scales with the window's width: a wider window can
-stand down longer and still meet its partner many times over. A window an
-attended run takes the lock in this way records neither an attempt nor a miss --
-it is the `"unattempted"` disposition in the table below, reached by the same
-refusal.
-
-An attended run that **completes** in that free interval satisfies the window
-instead, and the runner **re-reads the record before every re-attempt** to see
-it. A `lastRun` success stamped inside the window ends the occupancy there: no
-attempt, no miss, and no advance of the occupancy's own, since the recorded
-success is exactly what [catch-up](#catch-up-on-wake) credits at the next wake
-and an advance here would account for the window twice. The re-read matters as
-much for a window that is still due: the completed run rotated the shared secret
-the rendezvous address derives from, so a re-attempt carrying the wake's snapshot
-would announce itself where the partner no longer looks, and the window would
-record a miss for an exchange the two parties met in. A re-read that finds the
-record gone, its schedule dropped, or its plan moved off this window ends the
-occupancy with no bookkeeping at all, exactly as the wake's own conditioned write
-does when the plan moves under it, and one that finds it carrying no
-`inputFileHandle` ends it the way a record that never carried one is passed over
-below. The attempt's input is taken from the record the re-read returned for the
-same reason its secret is: a handle re-pointed while the window was being
-occupied is the one that can still be read.
-
-**An attempt made after the occupancy reads a rotation it did not perform writes
-no `lastRun` of its own.** A stored secret that has moved since the occupancy's
-last attempt is another context's completed handshake: the occupancy's own
-attempt that reached the rotation persist is past the data-exchange boundary,
-which ends the occupancy rather than re-attempting. So the re-attempt that
-follows one is re-making an exchange another context is already conducting, and
-what it finds is not evidence about the partnership: the partner it waits for
-has met that run. It is also evidence that would DESTROY that run's:
-`lastRun` is monotonic on `at`, and this attempt's wait ends after the other
-run's data exchange does, so a no-show stamped at the end of it would replace the
-`succeeded` entry that discharges the window -- leaving a completed exchange
-recorded as a miss, counted toward the two-miss escalation, with the evidence of
-the success gone. The suppression is scoped to the occupancy's own window and to
-that observation: a window whose partner simply never arrived, with no foreign
-rotation read, records its no-show exactly as any run does.
+**A limit of the occupancy.** The pacing is measured from an attempt's start and
+an attempt that spends its peer wait has already outlasted it, so the next
+attempt takes the [single-writer lock](#the-secret-is-a-linear-resource) back at
+once: an occupied window holds that lock across its bounded re-attempts, and an
+operator's own Run during such a window is refused for the window's duration
+rather than taking it over (see
+[MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#cross-tab-single-writer-locking-web-locks)).
+Yielding the lock between attempts is deferred rather than designed away, and it
+cannot be added on its own: an interval in which the lock is free is one an
+attended run can complete in, rotating the shared secret and stamping its own
+`lastRun`, so any future yield must arrive with a write-path rule on the shared
+attended path -- a run that fails cannot overwrite a success stamped after that
+run began, `lastRun` being monotonic on `at`.
 
 An occupancy belongs to ONE record. Each wake dispatches every due record that is
 not already occupying its window, so an exchange holding its own window open for
@@ -567,10 +520,7 @@ flight, so its bookkeeping lands in a window already advanced past; a
 `"succeeded"` one is credited at the next wake (see
 [Catch-up on wake](#catch-up-on-wake)), while any other outcome it records leaves
 the window uncounted. Every other disposition's `lastRun` is written by the run
-itself, so the schedule advance carries none and cannot contend with it -- and
-where an attempt withheld its own (the rotation rule above), the entry standing
-is the one written by the run that rotated, which is the account of the window
-worth keeping.
+itself, so the schedule advance carries none and cannot contend with it.
 
 Three records are passed over rather than attempted, each leaving its window
 with no disposition at all -- the wake that finds the window elapsed counts it
@@ -578,8 +528,7 @@ exactly as one this runtime slept through:
 
 - One this device handed off by a migration export (its local `spent` state).
 - One with no persisted `inputFileHandle`, which has no unattended read of the
-  input at all -- read before every attempt, so a handle dropped while the window
-  was being occupied ends the occupancy on the same footing.
+  input at all.
 - One whose runtime stopped while the window was still open.
 
 The rules above are implemented in `apps/web/src/psi/managedScheduleRunner.ts`;

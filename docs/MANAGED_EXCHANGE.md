@@ -281,17 +281,6 @@ that woke late, an app launched a few minutes after login. A missed window
 carries no security meaning (see [A missed window is neither desync nor
 attack](#a-missed-window-is-neither-desync-nor-attack)).
 
-While a window is being occupied, the runner stands down between its attempts
-rather than holding the exchange continuously. That interval is what leaves the
-exchange free for an operator who opens the app and runs it themselves during
-one of its own windows: an attended run started then takes over, and the window
-records neither an attempt nor a miss on the runner's behalf. A run the operator
-completes there meets the window outright: the runner sees it when it next
-looks and ends the window on it, and an attempt it had already started --
-waiting for a partner that has just met the operator's run -- records nothing of
-its own, since re-making a run that already happened says nothing about whether
-the two parties are meeting.
-
 ### Retry and repeated misses
 
 The retry policy is **retry at the next agreed window**, and nothing sooner.

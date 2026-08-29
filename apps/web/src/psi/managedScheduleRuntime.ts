@@ -7,13 +7,10 @@
  *
  * The run seam is {@link runManagedExchangeInBrowser}, the same entry the
  * attended surface calls, so a scheduled run takes the identical single-writer
- * lock, input guard, and persist-before-success critical section. Three things
- * differ, and only these three: the input is read through the persisted handle
+ * lock, input guard, and persist-before-success critical section. Two things
+ * differ, and only these two: the input is read through the persisted handle
  * UNATTENDED (queried, never prompted -- there is nobody to answer a prompt),
- * the peer wait is the window's rather than the flow's default, and an attempt
- * the tick has marked as re-making a run another context is already conducting
- * writes no failure bookkeeping of its own (see
- * {@link ./managedScheduleRunner.ts}).
+ * and the peer wait is the window's rather than the flow's default.
  *
  * The lock is taken fail-fast (`ifAvailable`), matching the attended surface: a
  * run already in progress in another tab is a window this runner defers, not one
@@ -34,7 +31,6 @@ import log from "loglevel";
 import { appendSanitizedRunWarning } from "@bench/runWarnings";
 
 import {
-  getManagedExchange,
   listManagedExchanges,
   persistManagedExchangeScheduleAdvance,
 } from "./managedExchangeStore";
@@ -162,7 +158,6 @@ export function browserScheduleTickSeams(
   return {
     now: () => Date.now(),
     listRecords: listManagedExchanges,
-    readRecord: getManagedExchange,
     listLocalState: listManagedLocalState,
     persistAdvance: persistManagedExchangeScheduleAdvance,
     delay: (ms) => delayUntilAborted(ms, signal),
@@ -198,7 +193,6 @@ async function runUnattendedAttempt(
       options: {
         lock: { ifAvailable: true },
         onDataExchangeStart: attempt.onDataExchangeStart,
-        recordsFailureBookkeeping: attempt.recordsFailureBookkeeping,
       },
       onWarning: (message) => {
         // Two notices reach this sink and are not one thing. The close-outcome

@@ -50,12 +50,11 @@ const SOURCE = {
   attendance: "unattended" as const,
 };
 
-function attempt(onDataExchangeStart = () => undefined, recordsFailure = true) {
+function attempt(onDataExchangeStart = () => undefined) {
   return {
     record: RECORD,
     source: SOURCE,
     peerWaitTimeoutMs: 42_000,
-    recordsFailureBookkeeping: recordsFailure,
     onDataExchangeStart,
   };
 }
@@ -103,26 +102,8 @@ describe("what a scheduled attempt hands the run driver", () => {
     // Fail-fast, exactly as the attended surface: a run already in progress in
     // another tab is a window this runner defers to rather than queues behind.
     expect(config.options?.lock).toEqual({ ifAvailable: true });
-    expect(config.options?.recordsFailureBookkeeping).toBe(true);
     config.options?.onDataExchangeStart?.();
     expect(onDataExchangeStart).toHaveBeenCalledTimes(1);
-  });
-
-  test("carries the tick's refusal to stamp bookkeeping through to the run", async () => {
-    // The tick withholds it from an attempt re-making a run another context is
-    // already conducting; the run path is where that lands, so the wiring has to
-    // pass it rather than decide it.
-    mockedRun.mockResolvedValue(
-      undefined as unknown as Awaited<
-        ReturnType<typeof runManagedExchangeInBrowser>
-      >,
-    );
-
-    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
-      attempt(() => undefined, false),
-    );
-
-    expect(driverConfig().options?.recordsFailureBookkeeping).toBe(false);
   });
 
   test("revokes the object URLs the run's outputs were built into, however it settles", async () => {
