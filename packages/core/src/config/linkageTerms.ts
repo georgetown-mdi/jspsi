@@ -150,17 +150,22 @@ export const MAX_TEXT_LENGTH = 1024;
  *
  * The reason the refusal sits at the schema rather than at each display sink is
  * that the sinks are not the whole reach of these values. A terms document is
- * swapped with the partner at exchange time, folded into the canonical encoding
- * both parties hash, and written verbatim into each party's exchange record,
- * which is kept and read back long after the run; the seams that neutralize a
- * control character (sanitizeErrorForDisplay.ts, compatibilityMessage.ts) do so
- * where psilink itself renders one, not where a later reader of the record opens
- * it. Every seat that parses a LIVE terms document shares this schema -- the
- * operator's own config load and the post-handshake wire re-parse
- * (parseLinkageTerms), the invitation-token decode, and the exchange-file and
- * job-intent schemas that embed {@link LinkageTermsSchema} -- so one refusal at
- * parse covers all of them, rather than each of those consumers carrying a guard
- * of its own.
+ * swapped with the partner at exchange time and folded into the canonical
+ * encoding both parties hash, and three of the four fields are written verbatim
+ * into each party's exchange record, which is kept and read back long after the
+ * run: the two parties' identities, the agreement `purpose`, and a payload
+ * column's `description` (exchangeRecord.ts). A constraint `exclude` value
+ * reaches no record -- the record's account of the matching basis carries a
+ * field's name and semantic type, never a constraint -- so for that one the
+ * partner's copy of the live document is the whole of the reach. The seams that
+ * neutralize a control character (sanitizeErrorForDisplay.ts,
+ * compatibilityMessage.ts) act where psilink itself renders one, not where a
+ * later reader of the record opens it. Every seat that parses a LIVE terms
+ * document shares this schema -- the operator's own config load and the
+ * post-handshake wire re-parse (parseLinkageTerms), the invitation-token decode,
+ * and the exchange-file and job-intent schemas that embed
+ * {@link LinkageTermsSchema} -- so one refusal at parse covers all of them,
+ * rather than each of those consumers carrying a guard of its own.
  *
  * The live document is the whole of the rule's reach, and two readers of values
  * already recorded sit outside it by design: the exchange-record reader
@@ -173,6 +178,12 @@ export const MAX_TEXT_LENGTH = 1024;
  * Letters outside ASCII are untouched: the ranges stop below U+00A0, so a party
  * that writes its name, its purpose, or its denylist in its own script is
  * admissible.
+ *
+ * The web console draws these same ranges over an operator's `--identity` label
+ * (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/psi/identityLabel.ts): the two
+ * must stay identical, since a label the console accepts becomes the `identity`
+ * of a terms document this schema then reads. The console contract is strictly
+ * stricter -- the boundaries that apply it also refuse a leading `-`.
  */
 export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
 
@@ -1745,7 +1756,13 @@ export function safeParseLinkageTerms(raw: unknown) {
  *
  * - `identity` is replaced with the acceptor's own name, so the inviter's
  *   identity does not leak into the acceptor's prepared terms (and from there
- *   into its exchange record).
+ *   into its exchange record). It is the one value this function introduces, and
+ *   it is free text the accepting operator supplies -- a CLI flag or prompt, a
+ *   browser field -- so it is held to the document's own control-character rule
+ *   ({@link TEXT_CONTROL_CHAR_PATTERN}) at entry, under a refusal that names the
+ *   local input. Left to the re-check at the end it would fail the mirrored
+ *   document instead, reporting an invitation psilink cannot accept and sending
+ *   the operator to its partner over a name it typed itself.
  * - `output` is MIRRORED, not copied. {@link validateCompatibility}, run by both
  *   parties, compares output as a mirror: it requires
  *   `local.output.shareWithPartner === partner.output.expectsOutput` and
@@ -1823,11 +1840,14 @@ export function safeParseLinkageTerms(raw: unknown) {
  * CLI config or a crafted invitation token could, and the derived terms are not
  * otherwise re-validated before the run. So the derived terms are re-checked
  * against {@link LinkageTermsSchema} here and an incoherent result throws, aborting
- * acceptance cleanly rather than running an invalid configuration. The thrown
- * message names no partner-controlled value (the only reachable failures are the
- * fixed-message output-coherence refines, since the inviter's terms were already
- * validated at decode and only `identity`, `deduplicate`, `output`, and `payload`
- * are changed here, none of them partner free text).
+ * acceptance cleanly rather than running an invalid configuration. Its message
+ * names no partner-controlled value and accounts for the failure as the
+ * invitation's, which is the account the re-check is left to give: the inviter's
+ * terms were already validated at decode, `deduplicate`, `output`, and `payload`
+ * are derived rather than authored by either party, and `identity` -- the one
+ * free text substituted here, and the accepting operator's own -- carries the
+ * document's control-character rule at entry above, so it is refused there under
+ * a message attributing it locally rather than reaching this one.
  *
  * It also refuses a `psi-c` document outside the count-only shape, before the
  * mirror is built rather than after ({@link assertCountOnlyTermsShape}): the
@@ -1844,9 +1864,9 @@ export function safeParseLinkageTerms(raw: unknown) {
  * from every check between here and the run. Refusing at the accept boundary
  * keeps such an invitation off the consent surfaces and off the wire.
  *
- * @throws {UsageError} when the inviter's terms are `psi-c` outside the
- *   count-only shape, or declare `deduplicate` under a strategy that matches no
- *   deduplicating cardinality.
+ * @throws {UsageError} when `acceptorIdentity` carries a control character, or
+ *   when the inviter's terms are `psi-c` outside the count-only shape or declare
+ *   `deduplicate` under a strategy that matches no deduplicating cardinality.
  * @throws {Error} when the inviter's terms cannot be coherently accepted for the
  *   mirrored output direction.
  */
@@ -1854,6 +1874,15 @@ export function deriveAcceptedLinkageTerms(
   inviterTerms: LinkageTerms,
   acceptorIdentity: string,
 ): LinkageTerms {
+  // This party's own name takes the document's free-text shape rule here, before
+  // it is substituted (see the doc comment): left to the re-check at the end, the
+  // same value is refused as an invitation that cannot be accepted -- an account
+  // of an input the operator supplied itself.
+  if (TEXT_CONTROL_CHAR_PATTERN.test(acceptorIdentity))
+    throw new UsageError(
+      "the identity supplied for this party cannot be used: " +
+        `${TEXT_CONTROL_CHAR_MESSAGE}. Supply one that carries none.`,
+    );
   assertCountOnlyTermsShape(inviterTerms);
   assertDeduplicateImplemented(inviterTerms);
   const derived: LinkageTerms = {

@@ -27,6 +27,7 @@ import {
   assertPresentedDeduplicateMatchesInvitation,
   InvitationTermDivergenceError,
 } from "../src/exchange";
+import { UsageError } from "../src/errors";
 import {
   DISPLAY_TRUNCATION_MARKER,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
@@ -3182,9 +3183,39 @@ test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (pay
     output: { expectsOutput: true, shareWithPartner: false },
     payload: { send: [{ name: "dose" }] },
   };
-  expect(() =>
-    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
-  ).toThrow(/cannot be accepted unchanged/);
+  let thrown: unknown;
+  try {
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org");
+  } catch (e) {
+    thrown = e;
+  }
+  // An acceptor identity the free-text rule admits leaves the mirror as the
+  // thing refused, so the account stays the invitation's.
+  expect((thrown as Error).message).toContain("cannot be accepted unchanged");
+  expect((thrown as Error).message).not.toContain(TEXT_CONTROL_CHAR_MESSAGE);
+});
+
+test("deriveAcceptedLinkageTerms refuses a control character in the ACCEPTOR's own identity", () => {
+  // The acceptor's identity is operator-supplied free text -- the CLI trims a
+  // flag or prompt value, the browser field passes one through -- so a control
+  // character in it reaches the mirror. Substituted unchecked it would fail the
+  // re-check at the end of the derivation, whose account is the invitation's:
+  // the operator would be sent to its partner over a name it typed itself.
+  let thrown: unknown;
+  try {
+    deriveAcceptedLinkageTerms(inviterBase, "Agency\tA of quarantined-county");
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  const { message } = thrown as Error;
+  expect(message).toContain(TEXT_CONTROL_CHAR_MESSAGE);
+  expect(message).not.toContain("cannot be accepted unchanged");
+  // Fixed prose, naming the local input rather than quoting it: no byte of the
+  // submitted identity is echoed back, the discipline the schema's own message
+  // for this rule follows.
+  expect(message).not.toContain("quarantined-county");
+  expect(message).not.toContain("\t");
 });
 
 test("deriveAcceptedLinkageTerms mirrors payload send/receive (asymmetric invite/accept shape)", () => {

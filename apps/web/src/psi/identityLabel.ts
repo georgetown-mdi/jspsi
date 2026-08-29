@@ -29,6 +29,13 @@ export const MAX_IDENTITY_LENGTH = 1024;
  * it is text the operator meant to write. Letters outside ASCII are untouched --
  * the range stops below U+00A0, so a label written in the operator's own script
  * stays admissible.
+ *
+ * Core's terms-document rule (`TEXT_CONTROL_CHAR_PATTERN`,
+ * packages/core/src/config/linkageTerms.ts) draws the same ranges over the four
+ * free-text fields of a linkage-terms document, the party `identity` among them:
+ * the two must stay identical, since a label accepted here becomes that
+ * `identity`. This contract is strictly stricter -- the boundaries that apply it
+ * also refuse a leading `-`.
  */
 export const IDENTITY_CONTROL_CHAR_PATTERN =
   // eslint-disable-next-line no-control-regex
