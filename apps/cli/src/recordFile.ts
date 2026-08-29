@@ -109,17 +109,24 @@ export function recordPathsFor(
  * are not shareable at all: a salt plus the record's commitment can open (and
  * brute-force a low-entropy) committed value, so they stay private.
  *
- * Non-fatal by design: the privacy-sensitive exchange and the results file have
- * already succeeded by the time this runs, so a record-write failure is logged
- * as a warning rather than thrown -- the user is never told to re-run a
- * successful exchange because an audit artifact could not be saved. It is not
- * silent, though: the failure is returned as a message for the caller to put on
- * the machine-readable event stream and to leave a non-zero exit behind, so an
- * unattended run whose stderr is discarded (or whose `--log-level` suppresses a
- * warning) still reports that the exchange produced no audit artifact. The
- * returned message names the destination but not the cause, and is composed RAW
- * for that stream's own escape; the logged line below carries the cause and is
- * escaped where it composes.
+ * Non-fatal by design: the privacy-sensitive exchange has already disclosed by
+ * the time this runs, so a record-write failure is logged as a warning rather
+ * than thrown -- the user is never told to re-run an exchange that already
+ * happened because an audit artifact could not be saved. It is not silent,
+ * though: the failure is returned as a message for the caller to put on the
+ * machine-readable event stream, so an unattended run whose stderr is discarded
+ * (or whose `--log-level` suppresses a warning) still reports that the exchange
+ * produced no audit artifact. The returned message names the destination but not
+ * the cause, and is composed RAW for that stream's own escape; the logged line
+ * below carries the cause and is escaped where it composes.
+ *
+ * Called on two paths, and the record's own `outcome` is what tells them apart in
+ * the prose it writes: a completed run's record, and the record of a run that
+ * disclosed and then terminated in the signed-receipt swap
+ * (docs/spec/PROTOCOL.md, Self-attested record). The files, paths, and
+ * permissions are identical either way -- what a terminated run wrote is a
+ * disclosure-log entry like any other, and it is the record that states it was
+ * one, not its filename.
  *
  * The verification keys are written first (they are the material verification
  * needs; if the process dies between the two writes, the salts are preserved and
@@ -148,6 +155,12 @@ export function writeExchangeRecord(
   // Track the keys write so a partial failure (keys written, record write
   // throws) can tell the user about the orphaned private file below.
   let keysWritten = false;
+  // What this record says became of its run, which is what the operator prose
+  // below turns on: "the exchange succeeded, do not re-run it" is the wrong
+  // instruction for the record of a run that disclosed and then failed. Read off
+  // the record rather than passed in beside it, so the file and the words about
+  // it can never disagree.
+  const terminated = record.outcome === "receipt-swap-terminated";
   try {
     writeFileOwnerOnly(keysFilePath, serializeVerificationKeys(keys));
     keysWritten = true;
@@ -163,14 +176,25 @@ export function writeExchangeRecord(
     );
     log.info(
       "wrote self-attested exchange record (a local audit artifact, NOT a " +
-        `signed or non-repudiable receipt) to ${recordFilePath}`,
+        `signed or non-repudiable receipt) to ${recordFilePath}` +
+        (terminated
+          ? "; it records a disclosure this run made before the signed-receipt " +
+            "swap failed, and states that no receipt accompanies it"
+          : ""),
     );
     return undefined;
   } catch (err) {
     log.warn(
-      "the exchange and results succeeded but the audit record could not be " +
-        `written (${sanitizeErrorForDisplay(err)}); ` +
-        "the results above are unaffected and the exchange need not be re-run",
+      (terminated
+        ? "the exchange disclosed before it failed, but the audit record of " +
+          "that disclosure could not be written"
+        : "the exchange and results succeeded but the audit record could not " +
+          "be written") +
+        ` (${sanitizeErrorForDisplay(err)}); ` +
+        (terminated
+          ? "the disclosure still occurred and now has no local record"
+          : "the results above are unaffected and the exchange need not be " +
+            "re-run"),
     );
     // The keys are written before the record, so a record-write failure leaves
     // the keys file on disk. Name it: though it holds no matched data, it is
@@ -183,10 +207,12 @@ export function writeExchangeRecord(
           "still private -- delete them or keep them private",
       );
     }
-    return (
-      `the audit record could not be written to ${recordFilePath}; the ` +
-      "exchange and its results succeeded and need not be re-run, so this " +
-      "exchange has no record"
-    );
+    return terminated
+      ? `the audit record could not be written to ${recordFilePath}; the ` +
+          "exchange disclosed before it failed, so that disclosure has no " +
+          "record"
+      : `the audit record could not be written to ${recordFilePath}; the ` +
+          "exchange and its results succeeded and need not be re-run, so this " +
+          "exchange has no record";
   }
 }

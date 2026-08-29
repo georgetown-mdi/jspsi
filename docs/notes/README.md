@@ -29,6 +29,7 @@ from a direction still open to a decision taken and built.
 | [psi-c-count-only.md](psi-c-count-only.md) | Decided and built. |
 | [receipt-run-binding.md](receipt-run-binding.md) | Resolved - built. |
 | [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md) | Decided. |
+| [record-durability-point.md](record-durability-point.md) | Resolved - built. |
 | [rule-set-citation-verdict.md](rule-set-citation-verdict.md) | Resolved - built. |
 | [sftp-adapter-state-machine.md](sftp-adapter-state-machine.md) | Shipped. |
 | [shared-consent-summary.md](shared-consent-summary.md) | Shipped. |

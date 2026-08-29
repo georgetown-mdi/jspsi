@@ -6,6 +6,7 @@ import {
   getLogger,
   describeExchangeStages,
   runExchange,
+  exchangeRecordFromFailure,
   countIsPartnerReported,
   buildOutputTable,
   authenticateConnection,
@@ -1961,6 +1962,30 @@ export async function runProtocol(
           "(its signing block, certificate mode) before treating this as a " +
           "transport failure.",
       );
+
+    // The disclosure a terminated run already made outlives the failure that
+    // stopped it: a run reaching the signed-receipt swap has sent and received
+    // its payloads, so core hands the self-attested record of that disclosure
+    // back on the error rather than discarding it (docs/spec/PROTOCOL.md,
+    // Self-attested record). It is written here on the same terms a completed
+    // run's is -- same destination, same owner-only pair -- because it is the
+    // same kind of artifact; what marks it as a terminated run's is the record's
+    // own outcome field, which travels with the file wherever it is copied.
+    // Skipped under --no-record, like every other record write.
+    const disclosedRecord = exchangeRecordFromFailure(err);
+    if (disclosedRecord !== undefined && recordOutput !== undefined) {
+      const failure = writeExchangeRecord(
+        recordOutput,
+        disclosedRecord.record,
+        disclosedRecord.keys,
+        loggerName,
+      );
+      // Reported on the stream but NOT as a persistence loss: that class is a
+      // COMPLETED run's lost local write, and its exit code exists to tell a
+      // supervisor not to re-run. This run failed and keeps its own exit code,
+      // which a persistence-loss stamp would overwrite with the opposite advice.
+      if (failure !== undefined) emit((e) => e.warning(failure));
+    }
 
     // Core tags the rendezvous peer-wait and key-exchange handshake timeouts
     // (see markPeerWaitTimeout), so every fact this inference rests on is local

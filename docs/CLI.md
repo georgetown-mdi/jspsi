@@ -454,6 +454,14 @@ A `certificate`-mode configuration that names no party is refused the same way, 
 
 The run warns before any credential, terms, or data are sent -- naming both consequences and the two ways out, keep the record or drop the signing block -- and then proceeds: which artifacts to keep is your choice. The warning goes to both the operator log and the [machine-readable event stream](#machine-readable-event-stream), so an unattended run that discards stderr on success still reports it.
 
+### When the receipt swap fails
+
+The signature swap is the last step of an exchange, so a run that fails there -- a fingerprint that does not match the pin, a partner that re-keyed, a connection that drops mid-swap -- has already sent and received its data. That disclosure happened and cannot be undone by restarting.
+
+Such a run still writes its **exchange record and verification keys**, to the same path a completed run writes them to, so the disclosure has a log entry. It writes no receipt: a swap that did not complete produces no dual-signed record, and none is written half-finished. The record itself says which kind of run it came from, so a reader of the file -- or an auditor you hand it to -- can see that no receipt accompanies it without being told.
+
+The run still fails, with its own exit code and error: keeping the record is not a rescue of the exchange, and there is nothing to salvage from the run beyond the record of what it disclosed. `--no-record` suppresses that record as it suppresses a completed run's.
+
 ### Sweeping a stale exchange directory
 
 A crashed or mismatched prior run can leave protocol files in an `sftp`/`filedrop` directory that stall the next rendezvous. `--sweep-exchange-files` deletes every protocol file in the directory before the rendezvous -- this party's and the peer's hellos, acks, locks, joining sentinels, and messages -- and starts a fresh exchange. Foreign (non-protocol) files are never touched. It is accepted by `psilink exchange` and the zero-setup form, is CLI-only, and is never persisted to `psilink.yaml`. Confirm that no other session is using the directory before passing it: a sweep during a live exchange destroys that exchange's state.

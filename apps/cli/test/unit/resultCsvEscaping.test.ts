@@ -205,6 +205,7 @@ test("writeOutput: a written result re-supplies its record's commitments", async
   const { record, keys } = await buildExchangeRecord({
     localTerms: terms,
     partnerTerms,
+    outcome: "completed",
     recordsExposed: inputRows.length,
     resultSize: associationTable[0].length,
     associationTable,

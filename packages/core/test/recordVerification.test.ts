@@ -63,6 +63,7 @@ const associationTable: AssociationTable = [
 const baseInputs: ExchangeRecordInputs = {
   localTerms: termsA,
   partnerTerms: termsB,
+  outcome: "completed",
   recordsExposed: 5,
   resultSize: 2,
   associationTable,

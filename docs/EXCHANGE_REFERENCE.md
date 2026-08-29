@@ -76,7 +76,7 @@ A semver string identifying the schema of the linkage aggreement. Two versions a
 *Required:* no, except under [`signing.mode: certificate`](#signingmode)  
 *Consistency:* none
 
-A free-text string identifying the party holding these terms. It is self-asserted: a party writes whatever string it likes and the protocol does nothing to vouch for it (hence `Consistency: none`). It is recorded, alongside the partner's, in the unsigned self-attested exchange record produced after every successful exchange (see [Exchange record format](spec/EXCHANGE_RECORD.md)), where it is an unverified label. Parties may format this however they wish; common contents include name, organization, and contact information.
+A free-text string identifying the party holding these terms. It is self-asserted: a party writes whatever string it likes and the protocol does nothing to vouch for it (hence `Consistency: none`). It is recorded, alongside the partner's, in the unsigned self-attested exchange record produced by every exchange that disclosed (see [Exchange record format](spec/EXCHANGE_RECORD.md)), where it is an unverified label. Parties may format this however they wish; common contents include name, organization, and contact information.
 
 One string is not a label: the placeholder [`psilink init`](CLI.md#initialization) writes into a fresh template. A command that reads a label refuses that exact value -- alone in the field or on `--identity`, whitespace around it or not -- as firmly as it refuses none at all (see [Configuration](CLI.md#configuration)).
 

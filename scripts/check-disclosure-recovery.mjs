@@ -73,7 +73,7 @@ import { fileURLToPath } from "node:url";
 
 /** The exchange-record version the recovery path has been driven against. Moving
  * it here is how the decision this check defers is recorded as taken. */
-export const RECORD_VERSION_PIN = "psilink-exchange-record/v5";
+export const RECORD_VERSION_PIN = "psilink-exchange-record/v6";
 
 /** Where the record version literal is declared. */
 export const RECORD_VERSION_SOURCE = "packages/core/src/exchangeRecord.ts";

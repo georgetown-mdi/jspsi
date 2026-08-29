@@ -90,6 +90,7 @@ async function roundTrip(opts: {
   const { record, keys } = await buildExchangeRecord({
     localTerms: termsA,
     partnerTerms: termsB,
+    outcome: "completed",
     recordsExposed: opts.rawRows.length,
     // The seam's own definition of the attested figure, read here rather than
     // restated, so a change to what a record attests is a failure in these round
@@ -357,6 +358,7 @@ describe("reconstructCommittedData round-trips through the real build path", () 
     const { record, keys } = await buildExchangeRecord({
       localTerms: termsA,
       partnerTerms: termsB,
+      outcome: "completed",
       recordsExposed: idRows.length,
       resultSize: 2,
       associationTable: [

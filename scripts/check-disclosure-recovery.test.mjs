@@ -49,9 +49,9 @@ describe("reading the declared record version", () => {
   it("reads a moved literal as the moved value", () => {
     expect(
       declaredRecordVersion(
-        'export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v6";',
+        'export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v7";',
       ),
-    ).toBe("psilink-exchange-record/v6");
+    ).toBe("psilink-exchange-record/v7");
   });
 
   it("reads none from a declaration that is not a quoted literal", () => {
@@ -75,7 +75,7 @@ describe("the tripwire fires on a version move and on nothing else", () => {
 
   it("fails a simulated move, naming the obligation rather than only the mismatch", () => {
     const violations = bumpViolations(
-      "psilink-exchange-record/v6",
+      "psilink-exchange-record/v7",
       realSources,
     );
 
@@ -83,7 +83,7 @@ describe("the tripwire fires on a version move and on nothing else", () => {
     const [message] = violations;
     // Both versions, so which of the two is wrong is the maintainer's call.
     expect(message).toContain(RECORD_VERSION_PIN);
-    expect(message).toContain("psilink-exchange-record/v6");
+    expect(message).toContain("psilink-exchange-record/v7");
     // The obligation itself: what a move does to a stored accounting, and what
     // has to be re-taken before the new value is recorded.
     expect(message).toContain("accounting of disclosures");

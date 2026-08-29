@@ -53,7 +53,8 @@ afterEach(() => {
 
 // A minimal but schema-valid record + verification-keys pair to write to disk.
 const record: ExchangeRecord = {
-  version: "psilink-exchange-record/v5",
+  version: "psilink-exchange-record/v6",
+  outcome: "completed",
   createdAt: "2026-01-02T03:04:05.000Z",
   termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
   localIdentity: "Party A",
@@ -183,5 +184,52 @@ test("writeExchangeRecord is non-fatal when the destination is unwritable", () =
     logCapture.warnings.some((m) =>
       m.includes("the audit record could not be written"),
     ),
+  ).toBe(true);
+});
+
+// --- A terminated run's record -----------------------------------------------
+
+/** The record a run that disclosed and then failed in the signed-receipt swap
+ * leaves behind: the same shape and the same destination, saying so itself. */
+const terminatedRecord: ExchangeRecord = {
+  ...record,
+  outcome: "receipt-swap-terminated",
+};
+
+test("a terminated run's record is written to the same destination", () => {
+  const recordFilePath = path.join(dir, "rec.json");
+  expect(
+    writeExchangeRecord(
+      { recordFile: recordFilePath },
+      terminatedRecord,
+      keys,
+      "test",
+    ),
+  ).toBeUndefined();
+  expect(
+    parseExchangeRecord(JSON.parse(fs.readFileSync(recordFilePath, "utf8"))),
+  ).toEqual(terminatedRecord);
+  expect(fs.existsSync(keysPathFor(recordFilePath))).toBe(true);
+});
+
+test("a terminated run's lost record is not reported as a completed exchange", () => {
+  // "The exchange and its results succeeded and need not be re-run" is the
+  // completed run's remedy, and it is the wrong thing to tell an operator whose
+  // run failed. The prose turns on the record's own outcome, so the file and the
+  // words about it cannot disagree.
+  const blocker = path.join(dir, "blocker");
+  fs.writeFileSync(blocker, "x");
+  const recordFilePath = path.join(blocker, "rec.json");
+  const failure = writeExchangeRecord(
+    { recordFile: recordFilePath },
+    terminatedRecord,
+    keys,
+    "test",
+  );
+  expect(failure).toContain("the audit record could not be written to");
+  expect(failure).toContain("disclosed before it failed");
+  expect(failure).not.toContain("need not be re-run");
+  expect(
+    logCapture.warnings.some((m) => m.includes("disclosed before it failed")),
   ).toBe(true);
 });
