@@ -518,16 +518,18 @@ backstop, by decision rather than omission: the refusals reach them where the
 terms are authored, at parse, and at accept, which is where a document that
 breaks one is stopped.
 
-That the CLI puts the whole tier in its twice-printed decision block, beside the
-algorithm it prints there, is the same judgment read from the
-other end: under `psi-c` what the run discloses IS the decision, so these are the
-facts an operator answering the prompt has to have in front of them rather than
-the terms they qualify. It costs length -- the block below carries a fixed budget
-of four lines plus the acceptor's own columns, a retain disclosure adds roughly
-eleven wrapped lines to each printing on top of that, and a count-only exchange
-adds its tier to that -- and the trade is taken here and not for the single-pass
-note, because these facts ARE what the count-only decision turns on rather than a
-qualification of a term the block already names.
+That the CLI puts the whole tier in its twice-printed decision block,
+beside the algorithm it prints there, is the same judgment read from
+the other end: under `psi-c` what the run discloses IS the decision, so
+these are the facts an operator answering the prompt has to have in front
+of them rather than the terms they qualify. It costs length -- the block
+below carries a fixed budget of four lines plus the acceptor's own columns,
+a retain disclosure adds roughly two wrapped lines to each printing for the
+repeated fact plus a one-time ten-line caveat printed once in the outline
+after the first printing, and a count-only exchange adds its tier to that --
+and the trade is taken here and not for the single-pass note, because these
+facts ARE what the count-only decision turns on rather than a qualification
+of a term the block already names.
 
 ### Why the own-membership fact names the algorithm too
 
