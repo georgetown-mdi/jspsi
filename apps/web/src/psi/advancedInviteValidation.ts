@@ -774,10 +774,13 @@ function inertCoalesceFieldLabels(
  * The failure it names is silent under-matching: the author declares a default
  * expecting blank-ish records to participate, and at runtime the step is a
  * pass-through, so those records quietly do not match. The verdict is core's own
- * position-aware one (see `pipelineHasInertCoalesce`, over
- * `coalesceSubstitutesConstant`), so the notice appears and clears exactly as the
- * runtime behavior turns -- adding a rule that can drop a value ahead of the
- * step, moving the step after one, or declaring a text default all clear it.
+ * position-aware, name-only one (see `pipelineHasInertCoalesce`, over
+ * `coalesceSubstitutesConstant`): a preceding step is counted by what its
+ * function NAME can do, not its params, so a params-degenerate shape (a
+ * `null_if` with no exclusion list) counts as emptying and leaves its coalesce
+ * unadvised even though the run never substitutes. Adding an emptying-capable
+ * rule ahead of the step, moving the step after one, or declaring a text
+ * default clears it.
  *
  * It speaks for several fields at once, so it names BOTH conditions rather than
  * whichever one a given step fails -- the same choice core's consent-side
