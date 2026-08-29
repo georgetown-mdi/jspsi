@@ -155,11 +155,20 @@ export const MAX_TEXT_LENGTH = 1024;
  * which is kept and read back long after the run; the seams that neutralize a
  * control character (sanitizeErrorForDisplay.ts, compatibilityMessage.ts) do so
  * where psilink itself renders one, not where a later reader of the record opens
- * it. Refusing at parse means every seat that parses the document -- the
+ * it. Every seat that parses a LIVE terms document shares this schema -- the
  * operator's own config load and the post-handshake wire re-parse
  * (parseLinkageTerms), the invitation-token decode, and the exchange-file and
- * job-intent schemas that embed {@link LinkageTermsSchema} -- refuses the same
- * value, rather than each downstream consumer carrying a guard of its own.
+ * job-intent schemas that embed {@link LinkageTermsSchema} -- so one refusal at
+ * parse covers all of them, rather than each of those consumers carrying a guard
+ * of its own.
+ *
+ * The live document is the whole of the rule's reach, and two readers of values
+ * already recorded sit outside it by design: the exchange-record reader
+ * (exchangeRecord.ts) and the wire-certificate schema (signedReceipt.ts)
+ * length-bound their free-text fields and apply no control-character rule. The
+ * record reader is a frozen-log reader whose invariant is to accept what a
+ * possibly-different-version writer recorded, and what either of them carries is
+ * left to the display-escaping seams wherever psilink renders it.
  *
  * Letters outside ASCII are untouched: the ranges stop below U+00A0, so a party
  * that writes its name, its purpose, or its denylist in its own script is
