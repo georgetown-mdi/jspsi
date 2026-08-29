@@ -829,6 +829,19 @@ record, in a separate origin-local store keyed by the record `id`, and are
   actually has -- the exchange runs from the files the hand-off saved, and bringing
   it back to this browser is a re-invite.
 
+  **The refusal is scoped to this store's state at import**, and both of its
+  conditions are the operator's to remove: the handed-off record must still be in
+  this store, and its `sharedSecret` must still equal the artifact's. An artifact
+  exported before a rotation the record then took carries an older secret and
+  matches nothing, so it installs fresh; deleting the handed-off record removes the
+  match on the same terms. Neither is prevented -- the refusal is an
+  operator-cooperation property, not a cryptographic one, exactly as the revive
+  below is. Neither leaves a durable second owner either: an older artifact's
+  secret is already behind the partnership's, and a copy of the current secret
+  diverges from the handed-off one at the first rotation either side makes, so the
+  losing copy's next handshake fails and surfaces through the import/desync tiering
+  (recovery: re-invite).
+
   Reviving a migration spend remains an operator-cooperation property, not a
   cryptographic one: nothing in the protocol prevents a copied artifact or a profile
   snapshot from resurrecting a migrated copy -- the same caveat, with the same

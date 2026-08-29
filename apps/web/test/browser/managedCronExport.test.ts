@@ -315,6 +315,16 @@ describe("the export leaves the backup indicator exactly where it was", () => {
         }),
       )
       .toBeInTheDocument();
+    // The backup it points at is only a way back while the exchange stays here:
+    // an artifact taken before a confirmed hand-off is refused on import.
+    await expect
+      .element(
+        page.getByText(
+          "a backup taken before the hand-off will not bring it back",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
     // And the backup panel above says which file that is.
     await expect
       .element(

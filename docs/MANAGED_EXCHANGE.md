@@ -760,11 +760,28 @@ On every later visit the browser names that hand-off rather than a migration's:
 the recovery a migration has -- import the artifact back -- has nothing to act on
 here, because the two files are the CLI's own, not the artifact. An older browser
 backup does not stand in for them either. Importing an artifact exported before the
-hand-off is **refused**: it would either run a copy this browser gave away or leave
-that copy live beside the spent one, and one owner holds a recurring exchange's
-secret. The refusal names the exchange and what it has instead -- it runs on the
-machine holding those two files from then on, and bringing it back to this browser
-means a fresh invitation.
+hand-off is **refused** while the handed-off exchange is still listed here and the
+artifact carries the secret it was spent holding: importing it would either run a
+copy this browser gave away or leave that copy live beside the spent one, and one
+owner holds a recurring exchange's secret. The refusal names the exchange and what
+it has instead -- it runs on the machine holding those two files from then on, and
+bringing it back to this browser means a fresh invitation.
+
+Those two conditions bound it, and an import outside them installs an ordinary
+fresh exchange:
+
+- **An artifact older than the last rotation** carries a secret no spent record
+  here holds, so nothing matches it.
+- **Deleting the handed-off exchange** takes away the record the match is made
+  against -- the operator's own choice, and the same cooperation every
+  single-owner rule here rests on.
+
+Neither leaves two copies running side by side for long. An older artifact already
+carries a secret the partnership has moved past, and a copy of the current one
+diverges from the handed-off files the moment either side runs and rotates, so the
+losing copy's next run fails its handshake and surfaces through [Desync detection
+and recovery](#desync-detection-and-recovery), whose recovery is a fresh
+invitation.
 
 Two things do not travel with the files:
 

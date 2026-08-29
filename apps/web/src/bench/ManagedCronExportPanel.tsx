@@ -180,7 +180,9 @@ export function ManagedCronExportPanel({
               this browser can restore from -- importing them here does nothing,
               so downloading them leaves the backup state above exactly as it
               is. If you want a file that brings this exchange back to this
-              browser, download a backup up there first.
+              browser, download a backup up there first and keep the exchange
+              here -- once you hand it over, a backup taken before the hand-off
+              will not bring it back.
             </p>
             <ol className={styles.handoffSteps}>
               <li>

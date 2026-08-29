@@ -34,6 +34,7 @@ import { loadSavedExchanges } from "./savedExchangesLoad";
 import { recoveryRows } from "./savedExchangesRecovery";
 import styles from "./bench.module.css";
 
+import type { ManagedSpentHandoff } from "@psi/managedLocalState";
 import type { RecoveryRow } from "./savedExchangesRecovery";
 import type { SavedExchangeRow } from "./savedExchangesModel";
 import type { SavedExchangesLoad } from "./savedExchangesLoad";
@@ -218,6 +219,7 @@ function SavedExchangesList({
                 id={row.id}
                 label={row.label}
                 backedUp={row.backup.kind === "backed-up"}
+                handoff={row.spentHandoff}
                 onDeleted={reload}
               />
             </div>
@@ -321,9 +323,10 @@ function BackupLine({ row }: { row: SavedExchangeRow }) {
 }
 
 /** The always-available per-row delete: a first-class action with one simple confirm.
- * The confirm names the exchange, and -- only when a backup was exported (the row's
- * backed-up state) -- carries the custody note that the exported file remains a
- * credential the operator disposes of; a never-exported exchange needs no such note.
+ * The confirm names the exchange, and carries a custody note for each thing the delete
+ * leaves behind -- an exported backup file (the row's backed-up state), and the files a
+ * hand-off saved elsewhere ({@link handoff}), which keep running the exchange from the
+ * machine that holds them. An exchange with neither needs no such note.
  * Deletion removes everything the browser holds for the exchange in one step
  * ({@link deleteManagedExchange}); it is local and unilateral, so the confirm says the
  * partner is not notified. On success it calls {@link onDeleted} so the list reflects
@@ -333,6 +336,7 @@ export function DeleteExchangeButton({
   id,
   label,
   backedUp,
+  handoff,
   onDeleted,
 }: {
   id: string;
@@ -340,6 +344,11 @@ export function DeleteExchangeButton({
   /** Whether a backup was exported for this exchange (the custody note shows only
    * then; a never-exported exchange has nothing under the operator's custody). */
   backedUp: boolean;
+  /** The hand-off that spent this copy, when the surface knows of one: its own
+   * custody note then names what that hand-off left running elsewhere. Absent for a
+   * live copy, for a migration spend (which records no hand-off), and on the
+   * read-failed listing, whose diagnostic read carries no spent state. */
+  handoff?: ManagedSpentHandoff;
   onDeleted: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -401,6 +410,14 @@ export function DeleteExchangeButton({
             A backup file you exported stays in your custody -- delete it
             yourself if you no longer want it. It remains a credential until the
             partnership rotates past it.
+          </p>
+        )}
+        {handoff === "command-line" && (
+          <p className={`${styles.small} ${styles.sub}`}>
+            The psilink.yaml and .psilink.key you saved still run this exchange.
+            Deleting it here neither retires them nor stops the runs you
+            scheduled -- remove the scheduled command and delete those two files
+            on that machine to end it.
           </p>
         )}
         {deleteFailed && (

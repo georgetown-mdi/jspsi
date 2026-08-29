@@ -37,7 +37,10 @@ import { importManagedExchange } from "@psi/managedExchangeImport";
 import { managedRunFailureFromRecord } from "@bench/managedRunLaunchModel";
 import { savedExchangeRows } from "@bench/savedExchangesModel";
 
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type {
+  ManagedExchangeSchedule,
+  NewManagedExchange,
+} from "@psi/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The store-backed export/import and local sibling state, exercised against real
@@ -54,6 +57,14 @@ const webrtcLocator: WebRTCExchangeLocator = {
   host: "signaling.example.org",
   port: 3000,
   path: "/api/",
+};
+
+const schedule: ManagedExchangeSchedule = {
+  anchor: "2026-01-06T14:00:00.000Z",
+  intervalDays: 7,
+  windowSeconds: 10_800,
+  nextWindow: "2026-01-13T14:00:00.000Z",
+  consecutiveMisses: 2,
 };
 
 function newExchange(
@@ -569,7 +580,7 @@ describe("importing a spent secret-match revives in place", () => {
   });
 
   test("a re-import onto the spending device revives the husk, not a duplicate", async () => {
-    const source = await createManagedExchange(newExchange());
+    const source = await createManagedExchange(newExchange({ schedule }));
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
@@ -585,11 +596,22 @@ describe("importing a spent secret-match revives in place", () => {
     const revived = await importManagedExchange(bytes);
     expect(revived.id).toBe(source.id);
     expect(revived.sharedSecret).toBe(source.sharedSecret);
+    // The revive restores the whole artifact, not just the secret: the unattended
+    // path picks the recurrence back up at the window and miss count the artifact
+    // carries, rather than reviving an attended-only husk.
+    expect(revived.schedule).toEqual(
+      importManagedExchangeArtifact(bytes).schedule,
+    );
+    expect(revived.schedule).toEqual(schedule);
     const all = await listManagedExchanges();
     expect(all.map((r) => r.id)).toEqual([source.id]);
     const local = await getManagedLocalState(source.id);
     expect(local?.spent).toBeUndefined();
     expect(local?.backup).toBeDefined();
+    // A revive is an import event: it stamps the restore evidence the desync
+    // tiering reads, at the same instant as the backup marker it writes with it.
+    expect(local?.imported?.importedAt).toEqual(expect.any(String));
+    expect(local?.imported?.importedAt).toBe(local?.backup?.backedUpAt);
   });
 
   test("importing over a LIVE secret-match installs fresh (never forks a live owner)", async () => {
