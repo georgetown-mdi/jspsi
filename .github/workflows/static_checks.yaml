@@ -255,6 +255,17 @@ jobs:
       # cascade order included: the order is the order the keys are applied in.
       - name: Built-in rule set versions
         run: npm run check:built-in-set-versions
+      # Keyless signing leaves no public key to fetch, so the `cosign verify`
+      # command docs/RELEASES.md publishes pins the release workflow's identity
+      # -- that file's own path plus its tag trigger. A rename or a widened
+      # trigger leaves the published command refusing the signature a real
+      # release produces, and the document says nothing about either. This holds
+      # the published identity to both, holds the workflow's own self-verify
+      # step to the same two `--certificate-` literals a partner runs, and holds
+      # the publish sequence to signing, verifying and attesting each pushed
+      # image before the next build starts.
+      - name: Release signing coupling
+        run: npm run check:release-signing
       # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
       # .mjs with no server or Docker dependency, so a stock runner suffices. This
       # is the repo-wide non-path-filtered gate that guarantees the suite is always

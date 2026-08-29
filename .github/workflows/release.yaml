@@ -321,11 +321,12 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # Each image is pushed, signed and attested as a unit before the next one
-      # is built, so a failure in the variant's build cannot leave the default
-      # image published -- under `latest`, which this push moves -- and unsigned,
-      # which is the state docs/RELEASES.md's verification commands report as a
-      # release that cannot be trusted.
+      # Each image is pushed, signed, verified and attested as a unit before the
+      # next one is built, so a failure in the variant's build cannot leave the
+      # default image published -- under `latest`, which this push moves -- and
+      # unsigned, which is the state docs/RELEASES.md's verification commands
+      # report as a release that cannot be trusted. `npm run check:release-signing`
+      # is what holds that ordering.
       - name: Build and push
         id: build
         uses: docker/build-push-action@v7
@@ -354,6 +355,21 @@ jobs:
         run: |
           set -euo pipefail
           cosign sign --yes \
+            vdorie/psi-link@${{ steps.build.outputs.digest }}
+
+      # The command docs/RELEASES.md publishes, run against the digest just
+      # signed: a signature that command cannot verify fails the release here
+      # instead of reaching a partner as an image whose published check calls it
+      # untrusted. Both `--certificate-` arguments are the literals that document
+      # carries, held to it -- and to this workflow's own path and tag trigger,
+      # which are what the identity is made of -- by
+      # `npm run check:release-signing`.
+      - name: Verify the signature just produced
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             vdorie/psi-link@${{ steps.build.outputs.digest }}
 
       # Answers a different question from the signature above -- what the build
@@ -392,6 +408,14 @@ jobs:
         run: |
           set -euo pipefail
           cosign sign --yes \
+            vdorie/psi-link@${{ steps.build_fips.outputs.digest }}
+
+      - name: Verify the FIPS variant's signature
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             vdorie/psi-link@${{ steps.build_fips.outputs.digest }}
 
       - name: Attest the FIPS variant's build provenance
