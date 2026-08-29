@@ -262,7 +262,13 @@ function StorageUnavailable() {
  * where the recurrence stands right now, quietly, and -- once the record's
  * consecutive-miss count has reached the escalation threshold -- the coordination
  * line, which is the one state here an operator acts on. A row with no schedule
- * renders nothing, so a list of exchanges nobody scheduled is unchanged. */
+ * renders nothing, so a list of exchanges nobody scheduled is unchanged.
+ *
+ * The coordination line takes the caution treatment, matching the yellow Alert the
+ * exchange's own surface renders the same state in: repeated misses are a state to
+ * look into, not a failure, and the failure red would make the miss surface the
+ * standing warning the design keeps it from being (see docs/MANAGED_EXCHANGE.md,
+ * "Repeated misses surface, they do not auto-pause"). */
 function ScheduleLines({ row }: { row: SavedExchangeRow }) {
   if (row.schedule === undefined) return null;
   return (
@@ -272,7 +278,7 @@ function ScheduleLines({ row }: { row: SavedExchangeRow }) {
       </span>
       {row.schedule.missLine !== undefined && (
         <span
-          className={`${styles.small} ${styles.statusLine} ${styles.statusLineDanger}`}
+          className={`${styles.small} ${styles.statusLine} ${styles.statusLineWarn}`}
         >
           {row.schedule.missLine}
         </span>

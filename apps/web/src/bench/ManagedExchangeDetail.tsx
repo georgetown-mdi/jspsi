@@ -12,7 +12,7 @@ import {
 import { Link } from "@tanstack/react-router";
 
 import { DisclosureSection } from "@components/DisclosureSection";
-import { fileSystemAccessSupported } from "@psi/managedInputHandle";
+import { storedInputHandleUsable } from "@psi/managedInputHandle";
 import { triggerBlobDownload } from "@components/blobDownload";
 
 import {
@@ -406,12 +406,9 @@ function LocalFieldsEditor({
  * reading, not a ticking one.
  */
 function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
-  // Whether the input file can be read with nobody present, read exactly as the
-  // run reads it: a stored handle counts only where the platform still has the
-  // API to open it with (see {@link ./ManagedRunSurface.tsx}).
   const view = scheduleView(
     record,
-    record.inputFileHandle !== undefined && fileSystemAccessSupported(),
+    storedInputHandleUsable(record.inputFileHandle),
     Date.now(),
   );
   if (view === undefined) return null;

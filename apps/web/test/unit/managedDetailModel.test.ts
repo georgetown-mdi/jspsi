@@ -13,6 +13,7 @@ import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
+import { managedExchangeLapsed } from "@psi/managedExpiry";
 
 import type {
   ManagedExchangeLastRun,
@@ -372,6 +373,20 @@ describe("scheduleView", () => {
     // It points at the attended path -- choosing the file at the run itself --
     // rather than at a re-pointing control this surface does not have.
     expect(view?.inputReselectionNote).toMatch(/choose it here when you run/i);
+  });
+
+  test("a lapsed stored secret keeps the schedule section standing", () => {
+    // The lapse and the schedule compose: a re-invite recovers the secret and the
+    // partnership goes on meeting at the cadence it agreed, so the section states
+    // where that cadence stands rather than disappearing with the secret.
+    const lapsed = record("inviter", {
+      schedule: daily,
+      expires: "2026-07-01T00:00:00.000Z",
+    });
+    expect(managedExchangeLapsed(lapsed, NOW)).toBe(true);
+    const view = scheduleView(lapsed, true, NOW);
+    expect(view?.dueLine).toMatch(/^Run window open now, until /);
+    expect(view?.cadence).toMatch(/^A run window opens every day/);
   });
 
   test("one miss raises no prompt; the second raises the coordination prompt", () => {

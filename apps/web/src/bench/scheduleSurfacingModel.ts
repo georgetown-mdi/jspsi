@@ -26,6 +26,7 @@
  */
 
 import {
+  MAX_TIME_VALUE,
   managedScheduleWindow,
   managedScheduleWindowStateAt,
   nextManagedScheduleWindowAfter,
@@ -42,13 +43,6 @@ import type { ManagedExchangeSchedule } from "@psi/managedExchangeRecord";
  * docs/MANAGED_EXCHANGE.md, "Retry and repeated misses".
  */
 export const REPEATED_MISS_ESCALATION = 2;
-
-/** The largest instant an ECMAScript `Date` represents. The record's schema puts
- * no ceiling on `intervalDays` or `windowSeconds`, so a hand-edited or imported
- * schedule can place its next window past every calendar there is; `Intl` refuses
- * such a value rather than rendering it, which would take the whole list down over
- * one row. {@link scheduleDueness} reads that as its own state instead. */
-const MAX_TIME_VALUE = 8.64e15;
 
 /** Where the recurrence stands at an instant: a window open right now, the next
  * one ahead, or a lattice whose windows fall on no renderable calendar. The first
@@ -68,8 +62,12 @@ export type ScheduleDueness =
     }
   | { state: "unreadable" };
 
-/** An instant phrased for display, or `undefined` for one no calendar carries
- * (see {@link MAX_TIME_VALUE}). */
+/** An instant phrased for display, or `undefined` for one no calendar carries.
+ * The record's schema puts no ceiling on `intervalDays` or `windowSeconds`, so a
+ * hand-edited or imported schedule can place its next window past every calendar
+ * there is ({@link MAX_TIME_VALUE}); `Intl` refuses such a value rather than
+ * rendering it, which would take the whole list down over one row.
+ * {@link scheduleDueness} reads that as its own state instead. */
 function phraseInstant(ms: number): string | undefined {
   return Number.isFinite(ms) && Math.abs(ms) <= MAX_TIME_VALUE
     ? dateTimeLabel(new Date(ms))

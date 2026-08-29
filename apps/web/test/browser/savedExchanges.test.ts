@@ -20,6 +20,7 @@ import {
 } from "@psi/managedLocalState";
 import { BenchLobby } from "@bench/BenchLobby";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+import styles from "@bench/bench.module.css";
 
 import { createAppMount } from "./renderApp";
 
@@ -381,6 +382,33 @@ describe("saved list route: an agreed schedule surfaces its due-ness", () => {
     await expect
       .element(page.getByText("this device's clock", { exact: false }))
       .toBeInTheDocument();
+  });
+
+  test("the coordination line is styled as caution, never as a failure", async () => {
+    await createManagedExchange(
+      newExchange({
+        label: "Drifting partnership",
+        schedule: schedule(-60 * 60 * 1000, { consecutiveMisses: 2 }),
+      }),
+    );
+
+    app.render(createElement(SavedExchanges));
+
+    await expect
+      .element(
+        page.getByText("2 agreed run windows in a row", { exact: false }),
+      )
+      .toBeInTheDocument();
+    // The escalation is a state to look into, not a failure: it takes the same
+    // caution treatment the exchange's own surface renders it in, and the failure
+    // red would make the miss surface the standing warning the design keeps it
+    // from being (docs/MANAGED_EXCHANGE.md, "Repeated misses surface, they do not
+    // auto-pause").
+    expect(
+      app.container.querySelector(`.${styles.statusLineWarn}`)?.textContent,
+    ).toMatch(/2 agreed run windows in a row/);
+    // The danger class reaches no part of the row, not just not this line.
+    expect(app.container.innerHTML).not.toContain(styles.statusLineDanger);
   });
 });
 

@@ -435,6 +435,13 @@
   color: var(--bench-ok);
 }
 
+/* The caution treatment, for a state that asks the operator to look into
+   something rather than reporting a failure; --bench-danger is reserved for the
+   latter. */
+.statusLineWarn {
+  color: var(--bench-warn);
+}
+
 .dropzone {
   border: 2px dashed var(--bench-field-border);
   border-radius: 8px;

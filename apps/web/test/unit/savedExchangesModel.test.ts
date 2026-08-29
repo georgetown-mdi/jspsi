@@ -307,6 +307,21 @@ describe("savedExchangeRow schedule lines", () => {
     expect(twice.schedule?.missLine).not.toMatch(/attack|tamper|desync/i);
   });
 
+  test("a lapsed secret keeps its window line beside the lapse", () => {
+    // The two states compose rather than one suppressing the other: a lapse is
+    // recovered by a re-invite, which keeps the cadence the partnership agreed, so
+    // the row names the lapse AND where the recurrence stands. Contrast the spent
+    // row below, whose copy this browser no longer runs at all.
+    const row = savedExchangeRow(
+      record({ expires: "2026-07-01T00:00:00.000Z", schedule: daily }),
+      undefined,
+      NOW,
+    );
+    expect(row.expired).toBe(true);
+    expect(row.status).toMatch(/lapsed/);
+    expect(row.schedule?.dueLine).toMatch(/^Run window open now, until /);
+  });
+
   test("a spent row names no window: this browser's copy no longer runs", () => {
     const local: ManagedLocalState = {
       spent: { spentAt: "2026-07-12T09:00:00.000Z", handoff: "command-line" },
