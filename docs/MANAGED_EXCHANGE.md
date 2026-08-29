@@ -763,9 +763,12 @@ backup does not stand in for them either. Importing an artifact exported before 
 hand-off is **refused** while the handed-off exchange is still listed here and the
 artifact carries the secret it was spent holding: importing it would either run a
 copy this browser gave away or leave that copy live beside the spent one, and one
-owner holds a recurring exchange's secret. The refusal names the exchange and what
-it has instead -- it runs on the machine holding those two files from then on, and
-bringing it back to this browser means a fresh invitation.
+owner holds a recurring exchange's secret. Where an import is offered at all --
+the list's empty and could-not-read states are the only surfaces carrying one --
+the refusal names the exchange and what it has instead: it runs on the machine
+holding those two files from then on, and bringing it back to this browser means
+a fresh invitation. Alongside a healthy listing there is no import to refuse, so
+in practice the fresh invitation is the recovery an operator reaches for.
 
 Those two conditions bound it, and an import outside them installs an ordinary
 fresh exchange:

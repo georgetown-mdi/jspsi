@@ -824,10 +824,15 @@ record, in a separate origin-local store keyed by the record `id`, and are
   here and a live row beside it. Nothing is written. A handed-off match settles the
   import by itself: an artifact whose secret matches a handed-off record is refused
   even when a migration-spent record holds that secret too, and the refusal names the
-  handed-off record. The refusal is stated where the operator meets it, at the
-  import affordance: it names the stored record and the recovery that record
-  actually has -- the exchange runs from the files the hand-off saved, and bringing
-  it back to this browser is a re-invite.
+  handed-off record. Where it fires, the refusal names the stored record and the
+  recovery that record actually has -- the exchange runs from the files the
+  hand-off saved, and bringing it back to this browser is a re-invite. A stated
+  limit bounds the surface: the import affordance renders only beside an empty or
+  unreadable listing, a handed-off record keeps the listing non-empty, and an
+  unreadable store fails the revive's own parse before the refusal can be
+  reported -- so the guard binds at the store's import path, and a first-class
+  surface for meeting it (an explicit re-take on the spent record) remains future
+  work.
 
   **The refusal is scoped to this store's state at import**, and both of its
   conditions are the operator's to remove: the handed-off record must still be in

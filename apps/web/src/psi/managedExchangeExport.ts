@@ -51,7 +51,7 @@
  * and it is bound to the write for the reason the export's mark is bound to its read
  * -- a check the write can outrun decides nothing.
  *
- * The seams (the marking intents' fresh read-compose-and-mark, the command-line
+ * The seams (the marking intents' fresh read-serialize-and-mark, the command-line
  * export's non-marking read by id, the download, the currency-checked spend) are
  * injected so the intents are testable without a real download or database.
  */
@@ -239,7 +239,7 @@ export interface ManagedMigrationDispatch {
 /**
  * Dispatch a MIGRATION export ("take over on another device"): read the current
  * record, stamp the backup marker, and download exactly those bytes -- the same
- * atomic read-compose-and-mark as a backup -- then return a dispatch whose {@link
+ * atomic read-serialize-and-mark as a backup -- then return a dispatch whose {@link
  * ManagedMigrationDispatch.confirm} spends the source. The spend is deliberately
  * NOT written here: `anchor.click()` gives no landing signal, so the source stays
  * live until the operator attests the file is saved (a cancelled or failed save
