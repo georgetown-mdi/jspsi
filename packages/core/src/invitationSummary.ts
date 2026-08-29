@@ -2,6 +2,7 @@ import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
   coalesceSubstitutesConstant,
   dateFormatComponents,
+  DEFAULT_DATE_OUTPUT_FORMAT,
   describeTransformCoercions,
   FAN_OUT_FUNCTION_NAMES,
   parseDateInputDropsEveryRecord,
@@ -859,11 +860,11 @@ function summarizeTransform(
   return summary;
 }
 
-// Core's parseDateFactory defaults (standardization.ts): an absent format is the
-// full MM/DD/YYYY -> YYYYMMDD layout, which carries every component, so an absent
-// outputFormat drops nothing.
+// Core's parseDateFactory default input format (standardization.ts): an absent
+// format is the full MM/DD/YYYY layout, which carries every component, so an
+// absent inputFormat drops nothing. The matching output default is
+// DEFAULT_DATE_OUTPUT_FORMAT.
 const DEFAULT_PARSE_DATE_INPUT = "MM/DD/YYYY";
-const DEFAULT_PARSE_DATE_OUTPUT = "YYYYMMDD";
 
 /**
  * The breadth marker a `parse_date` step's output layout earns, or undefined when
@@ -924,7 +925,7 @@ function parseDateBreadth(
   const input =
     typeof rawInput === "string" ? rawInput : DEFAULT_PARSE_DATE_INPUT;
   const output =
-    typeof rawOutput === "string" ? rawOutput : DEFAULT_PARSE_DATE_OUTPUT;
+    typeof rawOutput === "string" ? rawOutput : DEFAULT_DATE_OUTPUT_FORMAT;
   // The output is classified in its OWN context: a `YY` in the output format is an
   // unsubstituted literal (the factory fills only YYYY/MM/DD), so it collapses the
   // year and carries no year component -- an output of "YY" is a total constant

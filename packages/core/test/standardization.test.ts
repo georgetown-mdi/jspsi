@@ -1095,7 +1095,7 @@ describe("substringCollapsesParsedDateToConstant", () => {
       // The plain default layout, which has no literal to land in.
       "YYYYMMDD",
       // Reordered and repeated tokens: the factory substitutes EVERY occurrence,
-      // so the layout carries four component spans around three literals.
+      // so the layout carries five component spans around four literals.
       "MM-MM-YYYY-DD-DD",
       // Tokens the greedy scan must not mis-split: a fifth Y is literal after
       // YYYY, a third M is literal after MM, and a bare YY in an OUTPUT format is

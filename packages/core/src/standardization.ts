@@ -427,8 +427,16 @@ function dateOutputLayout(outputFormat: string): DateOutputLayout {
   return { length: position, componentSpans };
 }
 
-// The layout parseDateFactory emits when a step declares no usable outputFormat.
-const DEFAULT_DATE_OUTPUT_FORMAT = "YYYYMMDD";
+/**
+ * The output layout a `parse_date` step emits when it declares no usable
+ * `outputFormat`. It carries every date component, so the default drops nothing.
+ *
+ * Exported so a terms-level reading of a step -- the breadth markers here, and
+ * the consent header's `parse_date` copy in `invitationSummary.ts` -- resolves an
+ * absent or non-string `outputFormat` to what the runtime actually emits rather
+ * than to a restated literal.
+ */
+export const DEFAULT_DATE_OUTPUT_FORMAT = "YYYYMMDD";
 
 // Parse `input_format` -> YAML camelizes keys but not values, so format
 // string tokens YYYY / YY / MM / DD stay as written; delimiter characters are
@@ -499,38 +507,15 @@ function parseDateFactory(params: Params): StandardizingFn {
 }
 
 function substringFactory(params: Params): StandardizingFn {
-  // Guard both bounds by type, not just presence: the wire params are
-  // z.unknown() and typed by no per-function shape, so a partner can declare
-  // either as a non-integer (a string, float, or other JSON value). An unguarded
-  // non-number `length` turns `startIdx + len` into string concatenation,
-  // silently producing the wrong slice rather than the intended one. A start or
-  // length that is not an integer -- like the always-null `start === 0` no-op --
-  // yields a fn that drops every value, the ignore path this factory already
-  // takes for a degenerate bound (never crashing the partner-reachable key
-  // build).
-  const start = params.start;
-  const len = params.length;
-  if (
-    typeof start !== "number" ||
-    !Number.isInteger(start) ||
-    typeof len !== "number" ||
-    !Number.isInteger(len) ||
-    start === 0
-  )
-    return (_s) => null;
-  if (start > 0) {
-    // SQL SUBSTR convention: 1-indexed positive start -- startIdx is fixed.
-    const startIdx = start - 1;
-    return (s) => {
-      const result = s.slice(startIdx, startIdx + len);
-      return result.length > 0 ? result : null;
-    };
-  }
-  // Negative start counts from the end -- depends on string length at call time.
+  // substringWindow carries the whole convention -- bounds coercion, SQL SUBSTR
+  // indexing, and the clamps -- and needs the length of the value being sliced
+  // to settle either bound, so the window is resolved per value rather than
+  // hoisted out of the returned fn. A window that reads nothing is the drop this
+  // step takes for a degenerate bound.
   return (s) => {
-    const startIdx = Math.max(0, s.length + start);
-    const result = s.slice(startIdx, startIdx + len);
-    return result.length > 0 ? result : null;
+    const window = substringWindow(params, s.length);
+    if (window === undefined) return null;
+    return s.slice(window.start, window.end);
   };
 }
 
@@ -3044,10 +3029,20 @@ export function coalesceSubstitutesConstant(
 }
 
 // The half-open `[start, end)` index range a `substring` step reads out of a
-// value of `valueLength` characters, or undefined where it reads nothing. The
-// bounds coercion mirrors substringFactory exactly -- a non-integer bound or a
-// `start` of 0 compiles to a step that returns null for every value -- and so
-// does the `String.prototype.slice` call it makes, whose two ends clamp by
+// value of `valueLength` characters, or undefined where it reads nothing. This
+// is the single reading of the substring convention: substringFactory slices by
+// it at runtime, and the terms-level breadth verdicts here read it against a
+// rendered layout without any data, so the two cannot drift.
+//
+// Guard both bounds by type, not just presence: the wire params are z.unknown()
+// and typed by no per-function shape, so a partner can declare either as a
+// non-integer (a string, float, or other JSON value). An unguarded non-number
+// `length` turns `startIndex + length` into string concatenation, silently
+// producing the wrong window rather than the intended one. A non-integer bound,
+// or the `start === 0` no-op, reads nothing instead -- the ignore path a
+// degenerate bound takes rather than crashing the partner-reachable key build.
+//
+// The two ends of the `String.prototype.slice` call this describes clamp by
 // different rules: a NEGATIVE `length` drives the end argument below zero, where
 // slice counts back from the end of the value rather than yielding the empty
 // string, so such a step reads a real window running from the start bound to
