@@ -604,14 +604,15 @@ docker run --rm \
   --identity "Agency A, a@agency-a.gov"
 ```
 
-Then mount it read-only for every exchange thereafter, beside the read-write mount the key file needs, with `signing.identity_file: /run/signing/psilink-signing-identity.json` in the mounted `psilink.yaml`:
+Then mount it read-only for every exchange thereafter, beside the read-write mount the key file needs, with `signing.identity_file: /run/signing/psilink-signing-identity.json` and `signing.receipt_output: /run/secrets/psilink-receipt.json` in the mounted `psilink.yaml`. Point the exchange record there too: the image's `WORKDIR` is `/work`, which this example mounts read-only, and a signed run's receipt and record both default to a path under the working directory -- a write that fails there is non-fatal and only warns, so leaving either at its default here would complete the exchange while landing neither.
 
 ```sh
 docker run \
   --mount type=bind,src=/data/config,dst=/work,readonly \
   --mount type=bind,src=/data/secrets,dst=/run/secrets \
   --mount type=bind,src=/data/signing,dst=/run/signing,readonly \
-  vdorie/psi-link exchange input.csv --key-file /run/secrets/.psilink.key
+  vdorie/psi-link exchange input.csv --key-file /run/secrets/.psilink.key \
+  --record-file /run/secrets/psilink-record.json
 ```
 
 ```yaml
