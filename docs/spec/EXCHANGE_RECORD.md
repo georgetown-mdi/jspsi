@@ -14,6 +14,8 @@ A record is owed from the moment this party's **payload exchange completes**. Th
 
 A failure BEFORE that point produces no record, and owes none. The point is the payload exchange's RETURN, not its first frame: the initiator sends its payload before it receives the partner's, so a failure inside the exchange can leave this party's payload already across the wire and still leave no record behind. That residual window is a stated limit of where the durability point sits rather than a claim that nothing flowed -- a run cut off inside the exchange holds no received payload, one of the three values the record commits to -- and the failure itself is reported through the run's error and the [machine-readable event stream](CLI_EVENTS.md). The record's own build is the one exception in the other direction -- it is a secondary artifact, so a build that fails leaves the run's result untouched and reports that no record could be produced.
 
+The asymmetry runs the other way on the responder leg: its payload send is the exchange's terminal frame, fire-and-forget on a buffering transport (`packages/core/src/payloadExchange.ts`), so the return this party observes confirms only its own hand-off of that send, not the partner's receipt of it -- the record attests this party's own disclosure rather than confirmed delivery, which is the conservative direction for an accounting: it can over-report a disclosure whose last frame never arrived, never omit one that did.
+
 **Every record states which of the two it is**, in a mandatory `outcome`:
 
 | Value | What it states |

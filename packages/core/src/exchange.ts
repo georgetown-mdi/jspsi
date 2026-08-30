@@ -1928,12 +1928,17 @@ export async function runExchange(
   );
 
   // The record-owed region opens here. exchangePayloads has returned, so the
-  // disclosure the record attests has provably occurred, and every step that
-  // follows -- the received-payload reconciliation below and the signed-receipt
-  // swap after it -- terminates the run carrying this party's record of that
-  // disclosure rather than discarding it (docs/spec/PROTOCOL.md, Self-attested
-  // record). A holder rather than a bare `unknown`, so a thrown `undefined` still
-  // reads as a failure and cannot pass for a run that got through.
+  // disclosure the record attests has provably occurred. Only the two guarded
+  // steps below -- the received-payload reconciliation and the signed-receipt
+  // swap after it -- fail into this party's owed record rather than discarding
+  // it (docs/spec/PROTOCOL.md, Self-attested record); what runs between those
+  // two windows is uncaught, over locally built values, so a throw there
+  // (unreachable today) would escape with no record and no mark set. A
+  // statement added to this region must join one of the two guarded windows,
+  // or the region must gain a single enclosing guard, or it opens that hole
+  // rather than closing it. A holder rather than a bare `unknown`, so a thrown
+  // `undefined` still reads as a failure and cannot pass for a run that got
+  // through.
   let postDisclosureFailure: { error: unknown } | undefined;
 
   // Received-payload enforcement, fail-closed before the result is returned (so a
