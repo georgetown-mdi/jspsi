@@ -128,8 +128,82 @@ export const MAX_NAME_LENGTH = 256;
  * characters). Larger than {@link MAX_NAME_LENGTH} because these legitimately
  * hold a sentence, a name-plus-contact line, or a long data value rather than a
  * single label; 1 KiB is still comfortably above any real value.
+ *
+ * Those four fields are exactly the document's free-text set, and they carry the
+ * shape rule beside this one as a set too: see
+ * {@link TEXT_CONTROL_CHAR_PATTERN}, which is applied to each of them without
+ * exception.
  */
 export const MAX_TEXT_LENGTH = 1024;
+
+/**
+ * The control characters no free-text field of a terms document may carry: the
+ * C0 range (NUL among them), DEL, and C1. The rule reaches every
+ * {@link MAX_TEXT_LENGTH}-bounded field the document holds -- the party
+ * `identity`, the legal-agreement `purpose`, a payload column `description`, and
+ * each constraint `exclude` entry -- with no field spared and no exception for
+ * tab, line feed, or carriage return. Each of the four is a single-line value: a
+ * party label, a one-sentence statement of the disclosure's purpose, a data-
+ * dictionary line, and a data value a cell is compared against. None of them is
+ * the multi-line note a whitespace-control exception exists for, so no control
+ * byte in any of them is text a party meant to write.
+ *
+ * The reason the refusal sits at the schema rather than at each display sink is
+ * that the sinks are not the whole reach of these values. A terms document is
+ * swapped with the partner at exchange time and folded into the canonical
+ * encoding both parties hash, and three of the four fields are written verbatim
+ * into each party's exchange record, which is kept and read back long after the
+ * run: the two parties' identities, the agreement `purpose`, and a payload
+ * column's `description` (exchangeRecord.ts). A constraint `exclude` value
+ * reaches no exchange record -- the record's account of the matching basis
+ * carries a field's name and semantic type, never a constraint -- but it does
+ * persist past the live document: `psilink accept` provisions a configuration
+ * from the adopted terms, and `saveConfig` serializes the whole of them,
+ * constraints included, into the acceptor's YAML config, which is itself
+ * parsed back through this schema, so a control character still cannot ride
+ * it that way either. The seams that
+ * neutralize a control character (sanitizeErrorForDisplay.ts,
+ * compatibilityMessage.ts) act where psilink itself renders one, not where a
+ * later reader of the record opens it. Every seat that parses a LIVE terms
+ * document shares this schema -- the operator's own config load and the
+ * post-handshake wire re-parse (parseLinkageTerms), the invitation-token decode,
+ * and the exchange-file and job-intent schemas that embed
+ * {@link LinkageTermsSchema} -- so one refusal at parse covers all of them,
+ * rather than each of those consumers carrying a guard of its own.
+ *
+ * The live document is the whole of the rule's reach, and two readers of values
+ * already recorded sit outside it by design: the exchange-record reader
+ * (exchangeRecord.ts) and the wire-certificate schema (signedReceipt.ts)
+ * length-bound their free-text fields and apply no control-character rule. The
+ * record reader is a frozen-log reader whose invariant is to accept what a
+ * possibly-different-version writer recorded, and what either of them carries is
+ * left to the display-escaping seams wherever psilink renders it.
+ *
+ * Letters outside ASCII are untouched: the ranges stop below U+00A0, so a party
+ * that writes its name, its purpose, or its denylist in its own script is
+ * admissible.
+ *
+ * The web console draws these same ranges over an operator's `--identity` label
+ * (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/psi/identityLabel.ts): the two
+ * must stay identical, since a label the console accepts becomes the `identity`
+ * of a terms document this schema then reads. The console contract is strictly
+ * stricter -- the boundaries that apply it also refuse a leading `-`.
+ */
+export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
+
+/**
+ * The one reason all four free-text fields report, so the document says the same
+ * thing about the same class of value wherever it is refused.
+ *
+ * A fixed literal naming no submitted value: the offending field is located by
+ * the issue `path`, which `describeDecodeError` escapes segment by segment. That
+ * is the discipline the referential-integrity, dialect, and length refusals in
+ * this file already follow, and the unsanitized parse-error path (protocolSetup)
+ * depends on it -- a message echoing the value would put the partner's bytes
+ * back in front of the operator, which is the very thing this rule removes.
+ */
+export const TEXT_CONTROL_CHAR_MESSAGE =
+  "a linkage terms free-text value must not contain control characters";
 
 /**
  * Generous upper bound on the COUNT of entries in the `linkageFields` and
@@ -325,14 +399,33 @@ export const MAX_KEY_ELEMENTS = 256;
 export const MAX_PAYLOAD_ENTRIES = 4096;
 
 /**
+ * One free-text value of a terms document, holding the caller's own length floor
+ * to the shared shape rule: no {@link TEXT_CONTROL_CHAR_PATTERN} character. The
+ * caller supplies the string schema so a field that requires a value keeps its
+ * `.min(1)`, and the control-character check is written once so the four
+ * free-text fields cannot drift apart.
+ *
+ * Unlike the `allowedCharacters` refine below, this one needs no pre-length
+ * short-circuit. Zod does not short-circuit chained checks, so the scan runs on a
+ * value the `.max()` already rejected -- but it is a linear regex test rather
+ * than a super-linear regex COMPILE, so an oversized value costs one pass over
+ * bytes the parser has already walked and reports both issues.
+ */
+const freeTextValue = (schema: z.ZodString) =>
+  schema.refine((value) => !TEXT_CONTROL_CHAR_PATTERN.test(value), {
+    message: TEXT_CONTROL_CHAR_MESSAGE,
+  });
+
+/**
  * A constraint `exclude` denylist: partner-controlled free-text values, each
- * length-bounded like every other free-text string, with the entry COUNT bounded
- * at {@link MAX_EXCLUDE_ENTRIES} before per-element validation (see
+ * length-bounded and control-character-refused like every other free-text string
+ * ({@link freeTextValue}), with the entry COUNT bounded at
+ * {@link MAX_EXCLUDE_ENTRIES} before per-element validation (see
  * {@link boundedArray}). Shared by all four constraint schemas so the bound is
  * defined once.
  */
 const ExcludeSchema = boundedArray(
-  z.string().max(MAX_TEXT_LENGTH),
+  freeTextValue(z.string().max(MAX_TEXT_LENGTH)),
   MAX_EXCLUDE_ENTRIES,
   `exclude must not exceed ${MAX_EXCLUDE_ENTRIES} entries`,
 );
@@ -895,7 +988,7 @@ interface PayloadColumn {
 
 const PayloadColumnSchema: z.ZodType<PayloadColumn> = z.object({
   name: z.string().min(1).max(MAX_NAME_LENGTH),
-  description: z.string().max(MAX_TEXT_LENGTH).optional(),
+  description: freeTextValue(z.string().max(MAX_TEXT_LENGTH)).optional(),
 });
 
 /**
@@ -961,7 +1054,7 @@ export interface LegalAgreement {
 
 const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
   reference: z.string().min(1).max(MAX_NAME_LENGTH),
-  purpose: z.string().min(1).max(MAX_TEXT_LENGTH),
+  purpose: freeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH)),
   expirationDate: z.iso.date(),
 });
 
@@ -1194,9 +1287,10 @@ const LinkageTermsBaseSchema = z.object({
     .max(MAX_NAME_LENGTH)
     .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
   // Optional, and bounded where it is present: a party that names itself is held
-  // to a non-empty, length-capped label, and a party that supplies none omits the
-  // field rather than sending an empty string or a placeholder.
-  identity: z.string().min(1).max(MAX_TEXT_LENGTH).optional(),
+  // to a non-empty, length-capped, control-character-free label, and a party that
+  // supplies none omits the field rather than sending an empty string or a
+  // placeholder.
+  identity: freeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH)).optional(),
   date: z.iso.date(),
   algorithm: AlgorithmSchema,
   linkageStrategy: LinkageStrategySchema.default("cascade"),
@@ -1666,7 +1760,13 @@ export function safeParseLinkageTerms(raw: unknown) {
  *
  * - `identity` is replaced with the acceptor's own name, so the inviter's
  *   identity does not leak into the acceptor's prepared terms (and from there
- *   into its exchange record).
+ *   into its exchange record). It is the one value this function introduces, and
+ *   it is free text the accepting operator supplies -- a CLI flag or prompt, a
+ *   browser field -- so it is held to the document's own control-character rule
+ *   ({@link TEXT_CONTROL_CHAR_PATTERN}) at entry, under a refusal that names the
+ *   local input. Left to the re-check at the end it would fail the mirrored
+ *   document instead, reporting an invitation psilink cannot accept and sending
+ *   the operator to its partner over a name it typed itself.
  * - `output` is MIRRORED, not copied. {@link validateCompatibility}, run by both
  *   parties, compares output as a mirror: it requires
  *   `local.output.shareWithPartner === partner.output.expectsOutput` and
@@ -1744,11 +1844,19 @@ export function safeParseLinkageTerms(raw: unknown) {
  * CLI config or a crafted invitation token could, and the derived terms are not
  * otherwise re-validated before the run. So the derived terms are re-checked
  * against {@link LinkageTermsSchema} here and an incoherent result throws, aborting
- * acceptance cleanly rather than running an invalid configuration. The thrown
- * message names no partner-controlled value (the only reachable failures are the
- * fixed-message output-coherence refines, since the inviter's terms were already
- * validated at decode and only `identity`, `deduplicate`, `output`, and `payload`
- * are changed here, none of them partner free text).
+ * acceptance cleanly rather than running an invalid configuration. Its message
+ * names no partner-controlled value and accounts for the failure as the
+ * invitation's, which is the account the re-check is left to give: the inviter's
+ * terms were already validated at decode, `deduplicate`, `output`, and `payload`
+ * are derived rather than authored by either party, and `identity` -- the one
+ * free text substituted here, and the accepting operator's own -- carries the
+ * document's control-character rule at entry above, so it is refused there under
+ * a message attributing it locally rather than reaching this one. That holds only
+ * for a control character: an empty or over-{@link MAX_TEXT_LENGTH} acceptor
+ * identity carries neither check at entry and does reach this re-check under the
+ * invitation-blaming account instead. Neither shipped front end can produce one
+ * (the CLI refuses an empty identity, the web field caps its length), but the
+ * account this re-check gives is not itself scoped to control characters.
  *
  * It also refuses a `psi-c` document outside the count-only shape, before the
  * mirror is built rather than after ({@link assertCountOnlyTermsShape}): the
@@ -1765,9 +1873,9 @@ export function safeParseLinkageTerms(raw: unknown) {
  * from every check between here and the run. Refusing at the accept boundary
  * keeps such an invitation off the consent surfaces and off the wire.
  *
- * @throws {UsageError} when the inviter's terms are `psi-c` outside the
- *   count-only shape, or declare `deduplicate` under a strategy that matches no
- *   deduplicating cardinality.
+ * @throws {UsageError} when `acceptorIdentity` carries a control character, or
+ *   when the inviter's terms are `psi-c` outside the count-only shape or declare
+ *   `deduplicate` under a strategy that matches no deduplicating cardinality.
  * @throws {Error} when the inviter's terms cannot be coherently accepted for the
  *   mirrored output direction.
  */
@@ -1775,6 +1883,15 @@ export function deriveAcceptedLinkageTerms(
   inviterTerms: LinkageTerms,
   acceptorIdentity: string,
 ): LinkageTerms {
+  // This party's own name takes the document's free-text shape rule here, before
+  // it is substituted (see the doc comment): left to the re-check at the end, the
+  // same value is refused as an invitation that cannot be accepted -- an account
+  // of an input the operator supplied itself.
+  if (TEXT_CONTROL_CHAR_PATTERN.test(acceptorIdentity))
+    throw new UsageError(
+      "the identity supplied for this party cannot be used: " +
+        `${TEXT_CONTROL_CHAR_MESSAGE}. Supply one that carries none.`,
+    );
   assertCountOnlyTermsShape(inviterTerms);
   assertDeduplicateImplemented(inviterTerms);
   const derived: LinkageTerms = {

@@ -9,6 +9,7 @@ import {
   validateCompatibility,
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
+  TEXT_CONTROL_CHAR_MESSAGE,
   MAX_LINKAGE_ENTRIES,
   MAX_PARAMS_ENTRIES,
   MAX_PAD_LEFT_LENGTH,
@@ -26,6 +27,7 @@ import {
   assertPresentedDeduplicateMatchesInvitation,
   InvitationTermDivergenceError,
 } from "../src/exchange";
+import { UsageError } from "../src/errors";
 import {
   DISPLAY_TRUNCATION_MARKER,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
@@ -2268,6 +2270,129 @@ test("rejects an over-long constraint exclude value", () => {
   ).toThrow(ZodError);
 });
 
+// --- Free-text control-character rule ----------------------------------------
+// The document's four free-text fields -- the party `identity`, the legal
+// agreement's `purpose`, a payload column's `description`, and each constraint
+// `exclude` value -- carry one rule between them: no C0 control (NUL included),
+// no DEL, no C1, and no exception for tab, line feed, or carriage return. The
+// cases below pin the reach (every one of the four refuses) and the two edges
+// the rule is drawn at: a control character is refused wherever it sits, and a
+// value written in letters outside ASCII is not.
+
+const NUL = "\u0000";
+const ESC = "\u001b";
+const DEL = "\u007f";
+const C1_NEXT_LINE = "\u0085";
+// The first code point above the refused C1 range, so the accepted case pins the
+// upper edge of the rule rather than only sitting well clear of it.
+const NBSP = "\u00a0";
+
+// A denylist entry, a description, and a purpose alongside the identity, so a
+// case that varies one field leaves the other three carrying real values.
+const freeTextTerms = (overrides: {
+  identity?: string;
+  purpose?: string;
+  description?: string;
+  exclude?: string;
+}) => ({
+  ...base,
+  identity: overrides.identity ?? "Agency A",
+  linkageFields: [
+    {
+      name: "ssn",
+      type: "ssn",
+      constraints: { exclude: [overrides.exclude ?? "123456789"] },
+    },
+  ],
+  payload: {
+    send: [
+      {
+        name: "enrollment_date",
+        description: overrides.description ?? "Date of enrollment",
+      },
+    ],
+  },
+  legalAgreement: {
+    reference: "MOU-2025-0042",
+    purpose: overrides.purpose ?? "Audit of the State tutoring program",
+    expirationDate: "2030-12-31",
+  },
+});
+
+test("rejects an identity carrying a NUL", () => {
+  expect(() =>
+    parseLinkageTerms(freeTextTerms({ identity: `Agency${NUL} A` })),
+  ).toThrow(ZodError);
+});
+
+test.each([
+  ["an ESC", ESC],
+  ["a DEL", DEL],
+  ["a C1 control", C1_NEXT_LINE],
+  ["a tab", "\t"],
+  ["a line feed", "\n"],
+  ["a carriage return", "\r"],
+])("rejects an identity carrying %s", (_label, control) => {
+  // Tab, LF, and CR take no exception here, unlike a note authored in a
+  // multi-line field: an identity is a single-line label bound into the
+  // exchange record, so whitespace controls are as unmeant as an ESC is.
+  expect(() =>
+    parseLinkageTerms(freeTextTerms({ identity: `Agency${control}A` })),
+  ).toThrow(ZodError);
+});
+
+test("rejects a legal agreement purpose carrying a control character", () => {
+  expect(() =>
+    parseLinkageTerms(freeTextTerms({ purpose: `Audit${NUL} of the program` })),
+  ).toThrow(ZodError);
+});
+
+test("rejects a payload column description carrying a control character", () => {
+  expect(() =>
+    parseLinkageTerms(freeTextTerms({ description: `Date${ESC}[2J` })),
+  ).toThrow(ZodError);
+});
+
+test("rejects a constraint exclude value carrying a control character", () => {
+  expect(() =>
+    parseLinkageTerms(freeTextTerms({ exclude: `123456789${NUL}` })),
+  ).toThrow(ZodError);
+});
+
+test("accepts free text carrying non-ASCII letters", () => {
+  // The refused ranges stop below U+00A0, so a party writing its name, its
+  // purpose, or its denylist in its own script is admissible -- as is the
+  // no-break space at that first admitted code point, carried in the identity
+  // here so the boundary is pinned from above as well as below.
+  expect(() =>
+    parseLinkageTerms(
+      freeTextTerms({
+        identity: `Ministère de la Santé,${NBSP}Zoë Ångström, 厚生労働省`,
+        purpose: "Évaluation du programme national",
+        description: "Fecha de inscripción",
+        exclude: "señor",
+      }),
+    ),
+  ).not.toThrow();
+});
+
+test("the control-character refusal names the field by path, not the value", () => {
+  // The parse-error path is left unsanitized where the terms exchange relays it
+  // (protocolSetup), so the issue must locate the offender by `path` and say
+  // nothing about the bytes submitted.
+  const result = safeParseLinkageTerms(
+    freeTextTerms({ identity: `Agency A${NUL}unrepeatable-label` }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+    "identity",
+  );
+  const rendered = JSON.stringify(result.error.issues);
+  expect(rendered).toContain(TEXT_CONTROL_CHAR_MESSAGE);
+  expect(rendered).not.toContain("unrepeatable-label");
+});
+
 test("rejects an over-long linkage key swap reference", () => {
   // Declare both element fields so the rest of the fixture is coherent; the
   // rejection is then about the swap entry alone. An over-long swap value trips
@@ -3058,9 +3183,39 @@ test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (pay
     output: { expectsOutput: true, shareWithPartner: false },
     payload: { send: [{ name: "dose" }] },
   };
-  expect(() =>
-    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
-  ).toThrow(/cannot be accepted unchanged/);
+  let thrown: unknown;
+  try {
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org");
+  } catch (e) {
+    thrown = e;
+  }
+  // An acceptor identity the free-text rule admits leaves the mirror as the
+  // thing refused, so the account stays the invitation's.
+  expect((thrown as Error).message).toContain("cannot be accepted unchanged");
+  expect((thrown as Error).message).not.toContain(TEXT_CONTROL_CHAR_MESSAGE);
+});
+
+test("deriveAcceptedLinkageTerms refuses a control character in the ACCEPTOR's own identity", () => {
+  // The acceptor's identity is operator-supplied free text -- the CLI trims a
+  // flag or prompt value, the browser field passes one through -- so a control
+  // character in it reaches the mirror. Substituted unchecked it would fail the
+  // re-check at the end of the derivation, whose account is the invitation's:
+  // the operator would be sent to its partner over a name it typed itself.
+  let thrown: unknown;
+  try {
+    deriveAcceptedLinkageTerms(inviterBase, "Agency\tA of quarantined-county");
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  const { message } = thrown as Error;
+  expect(message).toContain(TEXT_CONTROL_CHAR_MESSAGE);
+  expect(message).not.toContain("cannot be accepted unchanged");
+  // Fixed prose, naming the local input rather than quoting it: no byte of the
+  // submitted identity is echoed back, the discipline the schema's own message
+  // for this rule follows.
+  expect(message).not.toContain("quarantined-county");
+  expect(message).not.toContain("\t");
 });
 
 test("deriveAcceptedLinkageTerms mirrors payload send/receive (asymmetric invite/accept shape)", () => {
